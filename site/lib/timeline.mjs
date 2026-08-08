@@ -123,12 +123,16 @@ export function parseDecisionLog(text) {
   const section = sectionLines(text, "Decision log");
   if (section === null) return { entries, problems };
 
-  // Find the header row: the first non-blank line that is a table row.
+  // Find the header row: the first line that is a *table row*, i.e. begins
+  // with a pipe (the pinned template shape, `| Date | Decision | Reason |`).
+  // Prose before the table — the append-only note — is skipped, and an
+  // incidental pipe *inside* that prose can no longer be mistaken for the
+  // header, since prose does not start with one.
   let h = -1;
   for (let i = 0; i < section.length; i++) {
     const t = section[i].text.trim();
     if (!t) continue;
-    if (t.includes("|")) { h = i; break; }
+    if (t.startsWith("|")) { h = i; break; }
     // Prose (the append-only note) before the table is fine; keep scanning.
   }
   if (h === -1) {
@@ -145,8 +149,11 @@ export function parseDecisionLog(text) {
     );
     return { entries, problems };
   }
-  if (h + 1 >= section.length || !isSeparatorRow(section[h + 1].text)) {
-    problems.push(`line ${section[h].lineno + 1}: decision-log table header is not followed by a |---| separator row`);
+  // The separator row must match the header's three columns — a one-cell
+  // `|---|` under a three-column header is itself drift.
+  const sep = h + 1 < section.length ? section[h + 1] : null;
+  if (!sep || !isSeparatorRow(sep.text) || tableCells(sep.text).length !== 3) {
+    problems.push(`line ${section[h].lineno + 1}: decision-log header must be followed by a 3-column |---|---|---| separator row`);
     return { entries, problems };
   }
 
@@ -296,19 +303,24 @@ export function readTimeline(ctx, sources = SOURCES) {
 }
 
 /**
- * Render the "History of work together" timeline section.
+ * Render the timeline's events as an ordered list — the inner content of the
+ * team page's "History of work together" section (teams.mjs's historySlot
+ * owns the section wrapper and heading, so the history block reads in the
+ * team page's own section-label style rather than introducing a heading of
+ * its own).
  *
  *   events      from readTimeline (already newest-first).
  *   people      the team.mjs people Map (handle -> member), for attribution
  *               monograms; a handle absent from it renders plain.
  *
+ * Returns "" for an empty timeline, leaving the caller to word the honest
+ * empty state in its own context (a design with no committed history yet).
  * Self-contained and theme-aware: every class draws on existing site.css
  * tokens (see the .timeline rules), no external reference, no avatars —
  * initials monograms only, the same convention as the member profile.
- * Returns the whole `<section>`; the team page (#125) drops it into its
- * History slot.
  */
-export function historyTimeline(events, { people = new Map() } = {}) {
+export function timelineEvents(events, { people = new Map() } = {}) {
+  if (!events.length) return "";
   const items = events
     .map((e) => {
       const member = e.handle ? people.get(e.handle) : null;
@@ -332,16 +344,7 @@ export function historyTimeline(events, { people = new Map() } = {}) {
     })
     .join("\n");
 
-  const body = events.length
-    ? `<ol class="timeline">
+  return `<ol class="timeline">
 ${items}
-  </ol>`
-    : `<p class="timeline-empty muted">No shared history recorded yet.</p>`;
-
-  return `<section class="history-timeline">
-  <h2>History of work together</h2>
-  <p class="history-lede muted">This product's shared record, from committed
-  sources only — newest first, attributed where the source names who.</p>
-  ${body}
-</section>`;
+  </ol>`;
 }

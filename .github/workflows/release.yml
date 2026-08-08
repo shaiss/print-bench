@@ -52,6 +52,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # A tag push (push event) builds the tagged commit — that is the whole
+          # point of a release. A manual workflow_dispatch, by contrast, must
+          # build the reviewed default branch, never whatever ref the dispatcher
+          # happened to pick, so a release cannot be cut from unreviewed branch
+          # code (Qodo review on #140; same posture as log-print-result.yml and
+          # docs/actions-security.md, issue #113).
+          ref: >-
+            ${{ github.event_name == 'workflow_dispatch'
+                && github.event.repository.default_branch
+                || github.ref }}
 
       - name: Install xvfb and PrusaSlicer (cached)
         uses: awalsh128/cache-apt-pkgs-action@v1.4.3
@@ -92,9 +103,16 @@ jobs:
             design="${IN_DESIGN:-all}"
             version="${IN_VERSION:-v0.1}"
           fi
-          echo "design=$design" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Releasing '$design' at '$version'."
+          # The commit actually built (the checked-out ref: the tag for a push,
+          # the default branch for a dispatch), so the release targets what was
+          # built and the tag/assets cannot diverge (Qodo review on #140).
+          sha="$(git rev-parse HEAD)"
+          {
+            echo "design=$design"
+            echo "version=$version"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing '$design' at '$version' from $sha."
 
       - name: Gate the parts (only gated geometry ships)
         env:
@@ -127,12 +145,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.cfg.outputs.version }}
+          SHA: ${{ steps.cfg.outputs.sha }}
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # Per-design zips (STLs + manifest) plus the standalone manifests, so
-          # a reader can inspect checksums and print settings without unzipping.
-          assets=(build/release/*.zip build/release/*.manifest.json)
+          # Three asset kinds, so the site (issue #139) can link either the whole
+          # bundle or one part, and read checksums/sizes/print settings without
+          # unzipping: the individual gated STLs (build/release/<name>-<ver>/*.stl,
+          # name-prefixed so basenames are unique), the per-design zips, and the
+          # standalone manifests.
+          assets=(build/release/*/*.stl build/release/*.zip build/release/*.manifest.json)
           if [ ${#assets[@]} -eq 0 ]; then
             echo "::error::no release bundles were produced (an archived design, or nothing matched)"
             exit 1
@@ -141,6 +163,7 @@ jobs:
             gh release upload "$VERSION" "${assets[@]}" --clobber
           else
             gh release create "$VERSION" "${assets[@]}" \
+              --target "$SHA" \
               --title "$VERSION" \
               --notes "Per-design STL bundles with per-part SHA-256 checksums and machine-readable print settings, built from gated exports by .github/workflows/release.yml (issue #102)."
           fi

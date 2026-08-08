@@ -147,6 +147,28 @@ Three things make it consistent with the rest of the site:
   JavaScript the panel's `<noscript>` fallback points at the previews already on
   the page, and nothing else on the page depends on it.
 
+## Release downloads
+
+Every product page can show **per-part download links** — one per gated STL, with
+its size and SHA-256, plus a "download all" zip — pulled from the design's latest
+[GitHub Release](https://github.com/shaiss/print-bench/releases) manifest (the
+build half of [issue #102](https://github.com/shaiss/print-bench/issues/102),
+consumed here for [#139](https://github.com/shaiss/print-bench/issues/139)). Three
+things keep it consistent with the rest of the site:
+
+- **Best-effort, never a broken build.** The manifest is fetched at build time
+  (`lib/releases.mjs`); a design with no release, or an unreachable/rate-limited
+  API, simply renders no Downloads block. The no-404 rule still holds for
+  *committed* references — release links are external and absent when the release
+  is.
+- **Vercel-scoped, so local and CI stay deterministic.** The fetch runs only on
+  the deploy (which has network) or under `SITE_FETCH_RELEASES=1`; a plain
+  `./scripts/site.sh` build performs no network I/O and shows no downloads, so its
+  output is reproducible.
+- **Provenance-true checksums.** The manifest is authored by the CI build that
+  published the release, so the SHA-256 shown is of the exact bytes a visitor
+  downloads — a local re-render never forges them.
+
 ## Layout
 
 - `build.mjs` — the generator; discovery, render, asset copy, link check
@@ -159,6 +181,7 @@ Three things make it consistent with the rest of the site:
 - `lib/teams.mjs` — the Teams page building blocks (issue #125): the switcher card/strip and the product-scoped team page pieces (level-field core roster, reviewed-by reference, history slot for #126); pure functions of the roster data, consuming `profile.mjs` unchanged
 - `lib/timeline.mjs` — the "History of work together" timeline (issue #126): a source-adapter seam plus committed-only sources (the design's `PM.md` decision log, optionally the `NOTES.md` field-test log) → product-scoped, attributed, newest-first events, and the section render the team page drops into its History slot; a drifted decision-log shape fails the build
 - `lib/model.mjs` — the per-design model bundle (entry, source, files, sections, asserts) the configurator and viewer share
+- `lib/releases.mjs` — release download links (issue #139): the pure manifest → per-part download-link mapping, and the best-effort, Vercel-scoped fetch of the latest release's manifests (injectable `fetch`, empty on any failure)
 - `lib/templates.mjs` — the page shells
 - `test/` — `npm --prefix site test`; run by `./scripts/site.sh` and CI
 - `assets/` — `site.css` (the design system), `site.js` (theme toggle),

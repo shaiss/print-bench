@@ -20,12 +20,19 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  existsSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readDesigns, readStyles } from "./lib/content.mjs";
 import { readTeam } from "./lib/team.mjs";
+import {
+  shouldFetchReleases,
+  fetchLatestReleaseManifests,
+  manifestToDownloads,
+} from "./lib/releases.mjs";
+import { readTimeline } from "./lib/timeline.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
 import { buildModel } from "./lib/model.mjs";
 import {
@@ -40,7 +47,9 @@ import {
 
 const SITE_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SITE_DIR, "..");
-const GITHUB_BASE = "https://github.com/shaiss/print-bench/blob/main";
+const OWNER = "shaiss";
+const REPO = "print-bench";
+const GITHUB_BASE = `https://github.com/${OWNER}/${REPO}/blob/main`;
 
 function parseArgs(argv) {
   let out = join(REPO_ROOT, "build", "site");
@@ -152,13 +161,36 @@ this directory.
 `;
 }
 
-function main() {
+async function main() {
   const { out } = parseArgs(process.argv.slice(2));
 
   const designs = readDesigns(REPO_ROOT);
   const styles = readStyles(REPO_ROOT);
 
   if (designs.length === 0) fail("no designs found under designs/");
+
+  // Release download links (issue #139). Best-effort and Vercel-scoped: on the
+  // deploy (which has network) each design's latest-release manifest becomes
+  // per-part download links; locally and in CI the fetch is off, so the build
+  // stays deterministic and simply shows no downloads. Any failure here leaves
+  // the map empty — a missing release is never a broken build.
+  let releaseManifests = new Map();
+  if (shouldFetchReleases()) {
+    try {
+      releaseManifests = await fetchLatestReleaseManifests({
+        owner: OWNER,
+        repo: REPO,
+        token: process.env.GITHUB_TOKEN,
+      });
+      console.log(
+        `      releases: ${releaseManifests.size} manifest(s) fetched for download links`
+      );
+    } catch (err) {
+      console.warn(
+        `      releases: fetch skipped (${err.message}) — product pages show no downloads`
+      );
+    }
+  }
 
   // Documents the site itself publishes, so links between them stay internal
   // instead of bouncing the reader out to GitHub.
@@ -213,13 +245,32 @@ function main() {
     contents: sharedPage(team, { githubBase: GITHUB_BASE }),
   });
 
+  // The "History of work together" timeline (issue #126): assemble each
+  // rostered team's shared record from its own committed files (PM.md
+  // decision log, optional NOTES.md field-test log) here, where the
+  // filesystem is reachable, and hand the events to the team page. Problems
+  // go to the same accumulator as every other structured source, so a
+  // drifted decision-log table fails ./scripts/site.sh rather than rendering
+  // a hole. Product-scoped by construction: each team reads only its own
+  // design's files.
+  const timelines = new Map();
+  for (const [design, roster] of team.rosters) {
+    const pmPath = join(REPO_ROOT, "designs", design, "PM.md");
+    const notesPath = join(REPO_ROOT, "designs", design, "NOTES.md");
+    const pmText = existsSync(pmPath) ? readFileSync(pmPath, "utf8") : null;
+    const notesText = existsSync(notesPath) ? readFileSync(notesPath, "utf8") : null;
+    const { events, problems } = readTimeline({ pmText, notesText, roster });
+    for (const p of problems) onError(`designs/${design}: timeline: ${p}`);
+    timelines.set(design, events);
+  }
+
   // The Teams page (issue #125): the switcher over every rostered product and
   // the product-scoped team page for the worked example. Unconditional, same
   // reasoning as the Shared resources page above — the switcher saying which
   // teams exist is truer than a nav link to a page that does not.
   rendered.push({
     path: "teams/index.html",
-    contents: teamsPage(team, designs, { githubBase: GITHUB_BASE }),
+    contents: teamsPage(team, designs, { githubBase: GITHUB_BASE, timelines }),
   });
 
   for (const design of designs) {
@@ -241,6 +292,10 @@ function main() {
       contents: JSON.stringify(model),
     });
 
+    const downloads = manifestToDownloads(releaseManifests.get(design.name), {
+      owner: OWNER,
+      repo: REPO,
+    });
     rendered.push({
       path: `${design.relDir}/index.html`,
       contents: designPage(design, {
@@ -248,6 +303,7 @@ function main() {
         toc: tocHtml(headings),
         githubBase: GITHUB_BASE,
         model,
+        downloads,
       }),
     });
   }
@@ -372,4 +428,7 @@ function main() {
   );
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
