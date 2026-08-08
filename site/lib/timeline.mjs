@@ -303,19 +303,24 @@ export function readTimeline(ctx, sources = SOURCES) {
 }
 
 /**
- * Render the "History of work together" timeline section.
+ * Render the timeline's events as an ordered list — the inner content of the
+ * team page's "History of work together" section (teams.mjs's historySlot
+ * owns the section wrapper and heading, so the history block reads in the
+ * team page's own section-label style rather than introducing a heading of
+ * its own).
  *
  *   events      from readTimeline (already newest-first).
  *   people      the team.mjs people Map (handle -> member), for attribution
  *               monograms; a handle absent from it renders plain.
  *
+ * Returns "" for an empty timeline, leaving the caller to word the honest
+ * empty state in its own context (a design with no committed history yet).
  * Self-contained and theme-aware: every class draws on existing site.css
  * tokens (see the .timeline rules), no external reference, no avatars —
  * initials monograms only, the same convention as the member profile.
- * Returns the whole `<section>`; the team page (#125) drops it into its
- * History slot.
  */
-export function historyTimeline(events, { people = new Map() } = {}) {
+export function timelineEvents(events, { people = new Map() } = {}) {
+  if (!events.length) return "";
   const items = events
     .map((e) => {
       const member = e.handle ? people.get(e.handle) : null;
@@ -339,16 +344,7 @@ export function historyTimeline(events, { people = new Map() } = {}) {
     })
     .join("\n");
 
-  const body = events.length
-    ? `<ol class="timeline">
+  return `<ol class="timeline">
 ${items}
-  </ol>`
-    : `<p class="timeline-empty muted">No shared history recorded yet.</p>`;
-
-  return `<section class="history-timeline">
-  <h2>History of work together</h2>
-  <p class="history-lede muted">This product's shared record, from committed
-  sources only — newest first, attributed where the source names who.</p>
-  ${body}
-</section>`;
+  </ol>`;
 }

@@ -14,6 +14,7 @@
 
 import { escapeHtml, inlineMarkdown } from "./markdown.mjs";
 import { memberProfile, memberTeams } from "./profile.mjs";
+import { timelineEvents } from "./timeline.mjs";
 
 /**
  * Overlapping kind-coded monograms for a roster's core — the faces on a
@@ -111,15 +112,26 @@ export function reviewedBy(specialists) {
 }
 
 /**
- * The "History of work together" slot. Issue #125 lays the section out; its
- * data is #126 (the PM.md-sourced timeline). Until that lands the slot is an
- * honest empty state — no invented history, per #122's first principle.
+ * The "History of work together" section: the product's shared record, built
+ * from committed sources only (issue #126). Issue #125 laid the section out;
+ * this fills it. The events are assembled in build.mjs (which has filesystem
+ * access to the design's PM.md / NOTES.md) by readTimeline and passed in
+ * already newest-first, attributed where derivable; timelineEvents renders
+ * them. A design with no committed history yet keeps the honest empty state —
+ * no invented history, per #122's first principle.
+ *
+ *   events   the design's timeline events (readTimeline), or [].
+ *   people   the team.mjs people Map, for attribution monograms.
  */
-export function historySlot(design) {
+export function historySlot(design, { events = [], people = new Map() } = {}) {
+  const list = timelineEvents(events, { people });
+  const body =
+    list ||
+    `<p class="history-empty muted">The shared record of work on <code>${escapeHtml(
+      design
+    )}</code> — the team's decisions and field tests over time — lands here as it accumulates.</p>`;
   return `<section class="team-history">
   <p class="eyebrow">History of work together</p>
-  <p class="history-empty muted">The shared record of work on <code>${escapeHtml(
-    design
-  )}</code> — the team's decisions and field tests over time — lands here with the history timeline (issue #126).</p>
+  ${body}
 </section>`;
 }
