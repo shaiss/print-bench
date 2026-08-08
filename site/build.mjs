@@ -35,8 +35,8 @@ import {
   designPage,
   stylesIndexPage,
   stylePage,
-  sharedPage,
-  teamsPage,
+  peoplePage,
+  sharedRedirect,
   FAVICON,
 } from "./lib/templates.mjs";
 
@@ -206,23 +206,15 @@ function main() {
 
   const rendered = [];
 
-  // The Shared resources page (issue #124): the registry's shared
-  // specialists rendered as full member profiles. Unconditional, like the
-  // designs index — the page saying "none registered yet" is truer than the
-  // nav linking a page that does not exist.
-  rendered.push({
-    path: "shared/index.html",
-    contents: sharedPage(team, { githubBase: GITHUB_BASE }),
-  });
-
   // The "History of work together" timeline (issue #126): assemble each
-  // rostered team's shared record from its own committed files (PM.md
-  // decision log, optional NOTES.md field-test log) here, where the
-  // filesystem is reachable, and hand the events to the team page. Problems
-  // go to the same accumulator as every other structured source, so a
-  // drifted decision-log table fails ./scripts/site.sh rather than rendering
-  // a hole. Product-scoped by construction: each team reads only its own
-  // design's files.
+  // rostered team's shared record from its own committed files (PM.md decision
+  // log, optional NOTES.md field-test log) here, where the filesystem is
+  // reachable. Each design's events feed its own product-page contributions
+  // section (designPage, below) — the team is seen from the product now (the
+  // #122 IA, revised). Problems go to the same accumulator as every other
+  // structured source, so a drifted decision-log table fails ./scripts/site.sh
+  // rather than rendering a hole. Product-scoped by construction: each team
+  // reads only its own design's files.
   const timelines = new Map();
   for (const [design, roster] of team.rosters) {
     const pmPath = join(REPO_ROOT, "designs", design, "PM.md");
@@ -234,13 +226,20 @@ function main() {
     timelines.set(design, events);
   }
 
-  // The Teams page (issue #125): the switcher over every rostered product and
-  // the product-scoped team page for the worked example. Unconditional, same
-  // reasoning as the Shared resources page above — the switcher saying which
-  // teams exist is truer than a nav link to a page that does not.
+  // The People page (the #122 IA, revised): the directory of everyone — the
+  // core members and the shared review specialists — each as a full profile.
+  // A product's own team and build history live on its product page's
+  // contributions section, not here. Unconditional, like the designs index.
   rendered.push({
-    path: "teams/index.html",
-    contents: teamsPage(team, designs, { githubBase: GITHUB_BASE, timelines }),
+    path: "people/index.html",
+    contents: peoplePage(team, { githubBase: GITHUB_BASE }),
+  });
+
+  // Shared resources are folded into People; keep a redirect at the old route
+  // so inbound links survive the move.
+  rendered.push({
+    path: "shared/index.html",
+    contents: sharedRedirect(),
   });
 
   for (const design of designs) {
@@ -269,6 +268,12 @@ function main() {
         toc: tocHtml(headings),
         githubBase: GITHUB_BASE,
         model,
+        // The team-contributions section: who built this product and its
+        // build history, product-scoped. Only a rostered design gets one.
+        roster: team.rosters.get(design.name) || null,
+        specialists: team.specialists,
+        events: timelines.get(design.name) ?? [],
+        people: team.people,
       }),
     });
   }

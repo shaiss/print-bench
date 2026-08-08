@@ -814,78 +814,46 @@ pre code { background: none; padding: 0; }
   border-radius: var(--radius);
 }
 
-/* ---------- Teams: switcher + team page (issue #125) ---------- */
+/* ---------- Product page: team contributions (issue #122, revised) ---------- */
 
 /* Net-new layout only; every colour is an existing token, so light/dark and
-   the human/agent coding come from the profile/monogram rules above. */
+   the human/agent coding come from the profile/monogram rules above. The team
+   is seen FROM the product here: who built it (identity, not profile) and the
+   build history. Full profiles live on the People page. */
 
-/* The switcher is a strip of team cards — one per rostered product — that
-   scrolls sideways on a narrow screen rather than reflowing, so it always
-   reads as a row of peers to switch between. */
-.switcher-strip {
-  display: flex;
-  gap: 1rem;
-  overflow-x: auto;
-  margin-top: 0.6rem;
-  padding-bottom: 0.5rem;
+.contributions {
+  margin-top: 2.5rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid var(--rule);
 }
 
-.switcher-card {
-  flex: 0 0 min(20rem, 80vw);
+/* Light identity cards — a monogram, name/handle and role — that link to the
+   full profile on the People page. They reflow to one column on a narrow
+   screen; nothing here marks one contributor above another. */
+.contributor-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.6rem;
+}
+.contributor {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex: 1 1 min(18rem, 100%);
   background: var(--panel);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  padding: 1rem 1.1rem 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
+  padding: 0.7rem 0.9rem;
+  text-decoration: none;
+  color: inherit;
 }
-
-/* The current team is where the reader already is — marked, not linked away. */
-.switcher-card.is-current { border-color: var(--accent); box-shadow: var(--shadow); }
-
-.switcher-name { margin: 0; font-size: 1.05rem; letter-spacing: -0.01em; }
-.switcher-name a { color: var(--ink); }
-.switcher-name a:hover { color: var(--accent); }
-
-.switcher-pitch {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 0.9rem;
-  line-height: 1.5;
-  flex: 1 1 auto;
-}
-
-/* Overlapping faces — kind-coded monograms, smaller than a profile's, each
-   ringed in the panel colour so the stack reads as separate people. */
-.switcher-faces { display: flex; }
-.switcher-faces .monogram {
-  width: 30px;
-  height: 30px;
-  font-size: 0.72rem;
-  box-shadow: 0 0 0 2px var(--panel);
-}
-.switcher-faces .monogram + .monogram { margin-left: -8px; }
-
-/* The team page below the switcher. Its hero is a page heading, not the
-   front-door display heading — deliberately smaller than .hero h1. */
-.team-hero { margin: 2.5rem 0 0; }
-.team-name { margin: 0.2rem 0 0; font-size: clamp(1.5rem, 3vw, 1.9rem); letter-spacing: -0.02em; }
-.team-pitch { margin: 0.5rem 0 0; color: var(--ink-soft); max-width: var(--measure); }
-.team-count { margin: 0.4rem 0 0; font-size: 0.9rem; }
-
-.team-core { margin-top: 2rem; }
-
-/* The level field: equal peer cards, no hierarchy. Same card as a profile,
-   laid out as an even row that reflows to one column. */
-.level-field { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-
-/* Kind coding at the card edge so a human and the PM agent read as different
-   kinds while staying identical in weight — the coding is colour, never size
-   or rank. Same pairing as the monograms: human on the accent, agent neutral. */
-.peer-card { border-top: 3px solid var(--rule); }
-.peer-human { border-top-color: var(--accent); }
-.peer-agent { border-top-color: var(--ink-faint); }
+.contributor:hover { border-color: var(--accent); }
+.contributor .monogram { width: 34px; height: 34px; font-size: 0.8rem; flex: 0 0 auto; }
+.contributor-id { display: flex; flex-direction: column; line-height: 1.35; }
+.contributor-name { color: var(--ink); font-weight: 600; }
+.contributor-name code { font-family: var(--mono); font-size: 0.8rem; font-weight: 400; color: var(--ink-faint); }
+.contributor-role { font-size: 0.85rem; }
 
 /* A light reference, not a roster: the reviewers are a shared resource. */
 .reviewed-by { margin: 1.25rem 0 0; color: var(--ink-soft); font-size: 0.92rem; }
