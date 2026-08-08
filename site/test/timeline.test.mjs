@@ -147,6 +147,36 @@ test("NEGATIVE: a header with no separator row is a problem", () => {
   assert.match(problems[0], /separator row/);
 });
 
+test("prose containing a pipe before the table is not mistaken for the header", () => {
+  // Regression for the #137 review finding: a naive includes('|') header
+  // scan would misread this prose line as the table header and fail.
+  const text = `## Decision log
+
+Append-only. Read it as: date | decision | reason.
+
+| Date | Decision | Reason |
+|---|---|---|
+| 2026-08-08 | Real decision | Real reason |
+`;
+  const { entries, problems } = parseDecisionLog(text);
+  assert.deepEqual(problems, []);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].decision, "Real decision");
+});
+
+test("NEGATIVE: a separator whose width does not match the header is a problem", () => {
+  const text = `## Decision log
+
+| Date | Decision | Reason |
+|---|
+| 2026-08-08 | x | y |
+`;
+  const { entries, problems } = parseDecisionLog(text);
+  assert.deepEqual(entries, []);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /3-column .* separator row/);
+});
+
 // --- parseFieldTestLog (optional source) ----------------------------------
 
 test("parseFieldTestLog reads ### date — printer subheadings", () => {

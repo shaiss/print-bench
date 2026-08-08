@@ -123,12 +123,16 @@ export function parseDecisionLog(text) {
   const section = sectionLines(text, "Decision log");
   if (section === null) return { entries, problems };
 
-  // Find the header row: the first non-blank line that is a table row.
+  // Find the header row: the first line that is a *table row*, i.e. begins
+  // with a pipe (the pinned template shape, `| Date | Decision | Reason |`).
+  // Prose before the table — the append-only note — is skipped, and an
+  // incidental pipe *inside* that prose can no longer be mistaken for the
+  // header, since prose does not start with one.
   let h = -1;
   for (let i = 0; i < section.length; i++) {
     const t = section[i].text.trim();
     if (!t) continue;
-    if (t.includes("|")) { h = i; break; }
+    if (t.startsWith("|")) { h = i; break; }
     // Prose (the append-only note) before the table is fine; keep scanning.
   }
   if (h === -1) {
@@ -145,8 +149,11 @@ export function parseDecisionLog(text) {
     );
     return { entries, problems };
   }
-  if (h + 1 >= section.length || !isSeparatorRow(section[h + 1].text)) {
-    problems.push(`line ${section[h].lineno + 1}: decision-log table header is not followed by a |---| separator row`);
+  // The separator row must match the header's three columns — a one-cell
+  // `|---|` under a three-column header is itself drift.
+  const sep = h + 1 < section.length ? section[h + 1] : null;
+  if (!sep || !isSeparatorRow(sep.text) || tableCells(sep.text).length !== 3) {
+    problems.push(`line ${section[h].lineno + 1}: decision-log header must be followed by a 3-column |---|---|---| separator row`);
     return { entries, problems };
   }
 
