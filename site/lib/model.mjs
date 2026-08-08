@@ -14,8 +14,8 @@
 // nested reference (`BOSL2/std.scad`, `styles/<n>/style.scad`) resolvable if a
 // design ever takes one.
 
-import { readFileSync, statSync } from "node:fs";
-import { join, sep } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, join, resolve as resolvePath, sep } from "node:path";
 
 import { parseParameters, includeClosure } from "./scadparams.mjs";
 
@@ -26,19 +26,32 @@ export function buildModel(repoRoot, design) {
 
   // Same roots the scripts search: OPENSCADPATH="lib:repo-root", plus the
   // design's own directory for a sibling include.
+  //
+  // A resolved file's bytes are embedded verbatim into the publicly served
+  // model.json, so the resolver must never read outside the repo (issue #120):
+  // an absolute ref, or one whose `../` segments normalize past the root
+  // (`include <../../../../etc/passwd>`), is refused rather than resolved.
+  // Containment is checked against the *real* (symlink-resolved) path so a
+  // symlink cannot smuggle the escape past the string check either. Legitimate
+  // nested includes — `BOSL2/std.scad`, `styles/<n>/style.scad` — stay inside
+  // the root and keep resolving.
+  const root = realpathSync(repoRoot);
   const resolve = (ref) => {
+    if (isAbsolute(ref)) return null;
     for (const rel of [join("lib", ref), join(design.relDir, ref), ref]) {
-      const candidate = join(repoRoot, rel);
+      const candidate = resolvePath(root, rel);
+      let real;
       try {
-        if (statSync(candidate).isFile()) {
-          return {
-            path: rel.split(sep).join("/"),
-            contents: readFileSync(candidate, "utf8"),
-          };
-        }
+        real = realpathSync(candidate);
+        if (!statSync(real).isFile()) continue;
       } catch {
-        /* try the next root */
+        continue; // does not exist — try the next root
       }
+      if (real !== root && !real.startsWith(root + sep)) continue; // escapes the repo
+      return {
+        path: rel.split(sep).join("/"),
+        contents: readFileSync(real, "utf8"),
+      };
     }
     return null;
   };
