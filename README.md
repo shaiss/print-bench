@@ -191,6 +191,11 @@ merges. The full workflow and conventions live in [CLAUDE.md](CLAUDE.md).
     one gate run into one JSON record (scores, per-design gate wall time,
     preview budget headroom, what was skipped); `report` renders the
     committed log into `telemetry/REPORT.md`
+  - `release-bundle.sh` — builds a versioned, self-describing release bundle
+    per design (the gated STLs + a `manifest.json` of per-part SHA-256
+    checksums and the README's machine-readable print settings + a zip); the
+    build half of the versioned-download UX (issue #102), driven by the
+    "Release bundles" workflow
 - `site/` — the static product site built from the designs, styles and
   previews already committed here, and deployed on Vercel — see its
   [README](site/README.md)
