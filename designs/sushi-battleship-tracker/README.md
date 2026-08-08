@@ -14,6 +14,10 @@ lose track of called shots — which is everyone eating dinner off it.
 
 *AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render above and the STL for the true shape.*
 
+![AI-styled scene: sushi-battleship-tracker in motion, staged in a real-world setting](previews/lifestyle-product-hero.gif)
+
+*AI-generated motion impression for general illustration only — geometry is approximate and may not exactly match the printed part, and the movement shown is illustrative, not a simulation; see the deterministic previews above and the STL for the true shape.*
+
 ![Close-up: crimson shutter doors with the recessed miss-marker seats](previews/seat-detail.png)
 
 ![Assembled board, shutter D1 open](previews/assembly.png)
