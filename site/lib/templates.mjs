@@ -4,6 +4,7 @@
 import { escapeHtml, inlineMarkdown, plainText } from "./markdown.mjs";
 import { hasConfigurator } from "./model.mjs";
 import { memberProfile, memberTeams } from "./profile.mjs";
+import { switcherStrip, coreRoster, reviewedBy, historySlot } from "./teams.mjs";
 
 const SITE_NAME = "print-bench";
 const TAGLINE = "Parametric 3D-printable designs, gated before they ship.";
@@ -38,6 +39,7 @@ ${extraHead}
     <nav class="site-nav">
       <a href="/"${canonicalPath === "/" ? ' aria-current="page"' : ""}>Designs</a>
       <a href="/styles/"${canonicalPath.startsWith("/styles") ? ' aria-current="page"' : ""}>Styles</a>
+      <a href="/teams/"${canonicalPath.startsWith("/teams") ? ' aria-current="page"' : ""}>Teams</a>
       <a href="/shared/"${canonicalPath.startsWith("/shared") ? ' aria-current="page"' : ""}>Shared resources</a>
       <a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">Source</a>
       <button class="theme-toggle" type="button" aria-label="Switch theme">☾</button>
@@ -432,6 +434,74 @@ ${cards || '<p class="muted">No shared specialists registered yet.</p>'}
     description: "The shared specialists — one persona, one charter, serving every team.",
     body,
     canonicalPath: "/shared/",
+  });
+}
+
+/**
+ * The Teams page (issue #125): the team switcher strip over every rostered
+ * product, then the product-scoped team page for the worked example
+ * (calibration-cube) — hero, level-field core roster, a light reviewed-by
+ * reference, and the history slot (#126). No landing hero: this is a page in
+ * the site, not the front door, so it opens on a section label rather than a
+ * display heading. The member profile (#124) is consumed unchanged, scoped to
+ * this product so recent work reads "on <team>".
+ */
+export function teamsPage(team, designs, { githubBase }) {
+  const byName = new Map(designs.map((d) => [d.name, d]));
+  const pitchFor = (name) => (byName.has(name) ? byName.get(name).pitch : "");
+
+  // The worked example is calibration-cube when it is rostered, else the first
+  // roster — the page always renders a real team rather than assuming one
+  // design exists. v1 publishes exactly one team page (this one); when a
+  // second roster lands, give each its own /teams/<name>/ and point its card
+  // there. Until then every card links here.
+  const rosterNames = [...team.rosters.keys()];
+  const currentDesign = rosterNames.includes("calibration-cube")
+    ? "calibration-cube"
+    : rosterNames[0];
+  const current = currentDesign ? team.rosters.get(currentDesign) : null;
+
+  const switcher = team.rosters.size
+    ? switcherStrip(team.rosters, {
+        pitchFor,
+        teamHref: () => "/teams/",
+        currentDesign,
+      })
+    : '<p class="muted">No teams rostered yet.</p>';
+
+  const teamSection = current
+    ? `<section class="team-page">
+  <header class="team-hero">
+    <p class="eyebrow">Team</p>
+    <h1 class="team-name">${escapeHtml(current.design)}</h1>
+    <p class="team-pitch">${inlineMarkdown(pitchFor(current.design))}</p>
+    <p class="team-count muted">${escapeHtml(String(current.core.length))} ${
+        current.core.length === 1 ? "person" : "people"
+      }</p>
+  </header>
+  <section class="team-core">
+    <p class="eyebrow">Core team</p>
+    ${coreRoster(current, { rosters: team.rosters, githubBase })}
+    ${reviewedBy(team.specialists)}
+  </section>
+  ${historySlot(current.design)}
+</section>`
+    : "";
+
+  const body = `<div class="wrap">
+  <section class="team-switcher">
+    <p class="eyebrow">Teams</p>
+    ${switcher}
+  </section>
+${teamSection}
+</div>`;
+
+  return layout({
+    title: `Teams — ${SITE_NAME}`,
+    description:
+      "The teams behind the products — each product's core roster of humans and its PM agent, and the shared specialists who review them.",
+    body,
+    canonicalPath: "/teams/",
   });
 }
 

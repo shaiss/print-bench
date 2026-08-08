@@ -21,6 +21,7 @@ install and build commands), so a green local build means the deploy builds.
 | `/designs/<name>/` | that design's `README.md`, rendered |
 | `/styles/` | every `styles/<name>/` with a `STYLE.md` |
 | `/styles/<name>/` | that style's `STYLE.md`, rendered |
+| `/teams/` | the switcher over every `designs/<name>/team.conf` roster, plus the product-scoped team page for the worked example (calibration-cube) |
 | `/shared/` | every `people/<handle>.md` the registry marks `shared: true`, rendered as full member profiles |
 
 Adding a design requires no edit here — the generator finds it by the same
@@ -155,6 +156,7 @@ Three things make it consistent with the rest of the site:
 - `lib/scadparams.mjs` — Customizer parameters and include closure from a `.scad`
 - `lib/team.mjs` — the roster layer (issue #123): `people/<handle>.md` + `designs/<name>/team.conf` + the interim `people/work.conf` recent-work manifest (issue #124) → resolved member records, agent mandates read from their charters at build time; an unresolvable handle, mandate source, or cited work artifact fails the build
 - `lib/profile.mjs` — the reusable member profile component (issue #124): identity, cited mandate, team chips, scope-filtered recent work; the Shared resources page renders it today and the team page (#125) consumes it unchanged
+- `lib/teams.mjs` — the Teams page building blocks (issue #125): the switcher card/strip and the product-scoped team page pieces (level-field core roster, reviewed-by reference, history slot for #126); pure functions of the roster data, consuming `profile.mjs` unchanged
 - `lib/model.mjs` — the per-design model bundle (entry, source, files, sections, asserts) the configurator and viewer share
 - `lib/templates.mjs` — the page shells
 - `test/` — `npm --prefix site test`; run by `./scripts/site.sh` and CI
