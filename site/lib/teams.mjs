@@ -1,124 +1,70 @@
-// The Teams page building blocks (issue #125): the team switcher strip and
-// the product-scoped team page. A switcher card per rostered product, and a
-// team page that lays out the hero, the level-field core roster (equal peers,
-// no hierarchy), a light "reviewed by" reference to the shared specialists,
-// and the slot the history timeline (#126) fills.
+// The team/org building blocks. Two surfaces render from this committed data
+// (a roster from team.mjs, the design's timeline from timeline.mjs):
 //
-// These are pure functions of committed data — a roster record from team.mjs,
-// a design's resolved pitch from content.mjs — so they unit-test on hand-built
-// records. The page shell that wraps them lives in templates.mjs, mirroring
-// how sharedPage sits beside the profile component it renders. The member
-// profile itself (#124) is consumed UNCHANGED: coreRoster calls memberProfile
-// with the product's scope, so recent work reads "on <team>" here and the
-// same component reads "across teams" on the Shared resources page.
+//   * the **product page** carries a "team contributions" section — who built
+//     this product (identity only, not their profile) and the build history —
+//     assembled by teamContributions() below. This is the team as seen *from
+//     the product*: what the team did here, product-scoped.
+//   * the **People page** (templates.mjs peoplePage) is the directory of
+//     everyone — humans, PM agents, shared specialists — each rendered as the
+//     full member profile with the product teams they've been part of.
+//
+// The split is deliberate (the #122 IA, revised): a product page answers "who
+// made this and what did they do to it"; a person's profile and their whole
+// story live on the People page. So the product page shows light identity
+// cards that *link* to the profile — never the profile itself.
+//
+// Pure functions of committed data, so they unit-test on hand-built records.
 
-import { escapeHtml, inlineMarkdown } from "./markdown.mjs";
-import { memberProfile, memberTeams } from "./profile.mjs";
+import { escapeHtml } from "./markdown.mjs";
 import { timelineEvents } from "./timeline.mjs";
 
 /**
- * Overlapping kind-coded monograms for a roster's core — the faces on a
- * switcher card. Reuses the profile monogram (initials, no avatars) so a
- * human and an agent read the same colour they do everywhere else.
+ * One light identity card for the product-page contributions row: the
+ * kind-coded initials monogram, the member's name and handle, and their role
+ * — linking to their full profile on the People page. Identity, not profile
+ * (the #122 distinction as it shows up on the product page).
  */
-export function memberFaces(core) {
-  return `<span class="switcher-faces" aria-hidden="true">${core
-    .map(
-      (m) => `<span class="monogram monogram-${m.kind}">${escapeHtml(m.initials)}</span>`
-    )
-    .join("")}</span>`;
+export function contributorCard(member) {
+  return `<a class="contributor" href="/people/#profile-${escapeHtml(member.handle)}">
+  <span class="monogram monogram-${member.kind}" aria-hidden="true">${escapeHtml(member.initials)}</span>
+  <span class="contributor-id">
+    <span class="contributor-name">${escapeHtml(member.name)} <code>${escapeHtml(member.handle)}</code></span>
+    <span class="contributor-role muted">${escapeHtml(member.role)}</span>
+  </span>
+</a>`;
 }
 
-/**
- * One switcher card: the product name (linked to its team page), the "ships"
- * pitch (the gallery rule's one-liner, resolved by the caller and passed in),
- * and the overlapping member faces. The current team is marked so the strip
- * reads as a switcher — the reader is already on it, so it is highlighted,
- * not somewhere to click away to.
- */
-export function switcherCard(roster, { pitch, href, current }) {
-  const cls = current ? "switcher-card is-current" : "switcher-card";
-  const aria = current ? ' aria-current="true"' : "";
-  return `<article class="${cls}"${aria}>
-  <h3 class="switcher-name"><a href="${escapeHtml(href)}">${escapeHtml(roster.design)}</a></h3>
-  <p class="switcher-pitch">${inlineMarkdown(pitch)}</p>
-  ${memberFaces(roster.core)}
-</article>`;
-}
-
-/**
- * The switcher strip: one card per rostered team, current team highlighted.
- * Data-driven off the rosters map, so a product appears here the moment it
- * gets a committed team.conf — the site invents no membership.
- *
- *   pitchFor(design)  the design's one-line "ships" pitch (gallery rule).
- *   teamHref(design)  where a card links (v1 publishes one team page).
- *   currentDesign     the design whose card is highlighted.
- */
-export function switcherStrip(rosters, { pitchFor, teamHref, currentDesign }) {
-  const cards = [...rosters.values()]
-    .map((r) =>
-      switcherCard(r, {
-        pitch: pitchFor(r.design),
-        href: teamHref(r.design),
-        current: r.design === currentDesign,
-      })
-    )
-    .join("\n");
-  return `<div class="switcher-strip">
-${cards}
-</div>`;
-}
-
-/**
- * The level-field core roster: one equal peer card per core member — the
- * human(s) and the PM agent, no hierarchy — each the full member profile,
- * product-scoped so recent work reads "on <design>". The only difference
- * between two cards is the kind colour on the card edge; nothing marks the PM
- * above a human. Reviewers are never here: team.mjs refuses a shared handle
- * in a core, so iterating the core cannot surface one.
- */
-export function coreRoster(roster, { rosters, githubBase }) {
-  const cards = roster.core
-    .map(
-      (m) => `<div class="card profile-card peer-card peer-${m.kind}">
-${memberProfile(m, {
-        scope: roster.design,
-        teams: memberTeams(m, rosters),
-        githubBase,
-      })}
-</div>`
-    )
-    .join("\n");
-  return `<div class="grid level-field">
-${cards}
+/** The core team's identity cards, in roster order (no hierarchy). */
+export function contributorRow(core) {
+  return `<div class="contributor-row">
+${core.map(contributorCard).join("\n")}
 </div>`;
 }
 
 /**
  * The light "Reviewed by →" reference: the shared specialists servicing this
  * product (every team can call on them), named and linked to their profile on
- * the Shared resources page. Deliberately not roster cards — a reviewer is a
- * shared resource, not core team (the #122 distinction).
+ * the People page. Deliberately not roster cards — a reviewer is a shared
+ * resource, not core team (the #122 distinction).
  */
 export function reviewedBy(specialists) {
   if (!specialists.length) return "";
   const names = specialists
     .map(
-      (m) => `<a href="/shared/#profile-${escapeHtml(m.handle)}">${escapeHtml(m.name)}</a>`
+      (m) => `<a href="/people/#profile-${escapeHtml(m.handle)}">${escapeHtml(m.name)}</a>`
     )
     .join(", ");
-  return `<p class="reviewed-by">Reviewed by <span aria-hidden="true">→</span> ${names} <a class="reviewed-all" href="/shared/">Shared resources</a></p>`;
+  return `<p class="reviewed-by">Reviewed by <span aria-hidden="true">→</span> ${names} <a class="reviewed-all" href="/people/">People</a></p>`;
 }
 
 /**
- * The "History of work together" section: the product's shared record, built
- * from committed sources only (issue #126). Issue #125 laid the section out;
- * this fills it. The events are assembled in build.mjs (which has filesystem
- * access to the design's PM.md / NOTES.md) by readTimeline and passed in
- * already newest-first, attributed where derivable; timelineEvents renders
- * them. A design with no committed history yet keeps the honest empty state —
- * no invented history, per #122's first principle.
+ * The "History of work together" block: the product's shared record, built
+ * from committed sources only (issue #126). The events are assembled in
+ * build.mjs (which has filesystem access to the design's PM.md / NOTES.md) by
+ * readTimeline and passed in already newest-first, attributed where derivable;
+ * timelineEvents renders them. A design with no committed history yet keeps the
+ * honest empty state — no invented history, per #122's first principle.
  *
  *   events   the design's timeline events (readTimeline), or [].
  *   people   the team.mjs people Map, for attribution monograms.
@@ -133,5 +79,28 @@ export function historySlot(design, { events = [], people = new Map() } = {}) {
   return `<section class="team-history">
   <p class="eyebrow">History of work together</p>
   ${body}
+</section>`;
+}
+
+/**
+ * The product page's team-contributions section: who built this product
+ * (identity cards), the shared specialists who reviewed it, and the build
+ * history — all product-scoped. Rendered only for a design that has a
+ * committed roster; a rosterless design gets nothing (the site invents no
+ * team).
+ *
+ *   roster       the design's roster record (team.mjs).
+ *   specialists  the shared review specialists (team.specialists).
+ *   events       the design's timeline events (readTimeline), newest-first.
+ *   people       the team.mjs people Map, for attribution monograms.
+ */
+export function teamContributions(roster, { specialists = [], events = [], people = new Map() } = {}) {
+  return `<section class="contributions">
+  <div class="contributions-team">
+    <p class="eyebrow">Built by</p>
+    ${contributorRow(roster.core)}
+    ${reviewedBy(specialists)}
+  </div>
+  ${historySlot(roster.design, { events, people })}
 </section>`;
 }

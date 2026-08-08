@@ -5,7 +5,7 @@ import { escapeHtml, inlineMarkdown, plainText } from "./markdown.mjs";
 import { hasConfigurator } from "./model.mjs";
 import { humanSize } from "./releases.mjs";
 import { memberProfile, memberTeams } from "./profile.mjs";
-import { switcherStrip, coreRoster, reviewedBy, historySlot } from "./teams.mjs";
+import { teamContributions } from "./teams.mjs";
 
 const SITE_NAME = "print-bench";
 const TAGLINE = "Parametric 3D-printable designs, gated before they ship.";
@@ -40,8 +40,7 @@ ${extraHead}
     <nav class="site-nav">
       <a href="/"${canonicalPath === "/" ? ' aria-current="page"' : ""}>Designs</a>
       <a href="/styles/"${canonicalPath.startsWith("/styles") ? ' aria-current="page"' : ""}>Styles</a>
-      <a href="/teams/"${canonicalPath.startsWith("/teams") ? ' aria-current="page"' : ""}>Teams</a>
-      <a href="/shared/"${canonicalPath.startsWith("/shared") ? ' aria-current="page"' : ""}>Shared resources</a>
+      <a href="/people/"${canonicalPath.startsWith("/people") ? ' aria-current="page"' : ""}>People</a>
       <a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">Source</a>
       <button class="theme-toggle" type="button" aria-label="Switch theme">☾</button>
     </nav>
@@ -269,8 +268,15 @@ ${rows}
   </div>`;
 }
 
-export function designPage(design, { html, toc, githubBase, model, downloads = null }) {
+export function designPage(design, { html, toc, githubBase, model, downloads = null, roster = null, specialists = [], events = [], people = new Map() }) {
   const showConfigurator = hasConfigurator(model);
+  // The team-contributions section (the #122 IA, revised): who built this
+  // product and its build history, shown here on the product page. Identity
+  // only — the full profiles live on the People page. Rendered only when the
+  // design has a committed roster; the site invents no team.
+  const contributions = roster
+    ? teamContributions(roster, { specialists, events, people })
+    : "";
   const src = `${githubBase}/${design.relDir}`;
   const rail = `<aside class="rail">
   ${toc ? `<div class="rail-block"><h3>On this page</h3>${toc}</div>` : ""}
@@ -322,6 +328,7 @@ ${showConfigurator ? configuratorPanel(design, model) : ""}
     </article>
 ${rail}
   </div>
+${contributions}
 </div>`;
 
   // The viewer's addons import the bare specifier `three`; an import map on the
@@ -440,14 +447,22 @@ ${rail}
 }
 
 /**
- * The Shared resources page (issue #124): the review specialists as
- * first-class members. Each card IS the full profile component — v1
- * renders profiles inline rather than behind a /people/<handle>/ route —
- * in the cross-team scope, since a shared specialist is by definition the
- * same persona on every design.
+ * The People page (the #122 IA, revised): the directory of everyone who
+ * builds here — the humans and PM agents on the product cores, and the shared
+ * review specialists — each rendered as the full member profile in the
+ * cross-team scope, so a profile shows the person's mandate, the product teams
+ * they've been part of (the team chips), and their recent work across teams.
+ * This is where a person's whole story lives; a *product's* team and build
+ * history live on its product page (designPage's contributions section). The
+ * shared specialists (formerly their own Shared resources page) are folded in
+ * here — their `shared: true` pill still marks them as owned by no one team.
+ * Core folks first, shared specialists last.
  */
-export function sharedPage(team, { githubBase }) {
-  const cards = team.specialists
+export function peoplePage(team, { githubBase }) {
+  const ordered = team.members
+    .slice()
+    .sort((a, b) => Number(a.shared) - Number(b.shared));
+  const cards = ordered
     .map(
       (m) => `<div class="card profile-card">
 ${memberProfile(m, { scope: null, teams: memberTeams(m, team.rosters), githubBase })}
@@ -457,96 +472,47 @@ ${memberProfile(m, { scope: null, teams: memberTeams(m, team.rosters), githubBas
 
   const body = `<div class="wrap">
   <section class="hero">
-    <p class="eyebrow">${escapeHtml(String(team.specialists.length))} shared specialists</p>
-    <h1>Shared resources</h1>
-    <p>A shared specialist is one persona with one charter that serves every
-    team and is owned by none: the same reviewer reads every design the same
-    way, so a gate passed here means the same thing on every product. They
-    sit outside the per-design rosters on purpose — a team lists who builds
-    the product; these are the people every team can call on.</p>
+    <p class="eyebrow">${escapeHtml(String(team.members.length))} people</p>
+    <h1>People</h1>
+    <p>Everyone who builds here — the humans and PM agents on each product's
+    core team, and the shared specialists who review every design. Each profile
+    shows the person's mandate and the product teams they've been part of; a
+    product's own team and build history live on its product page.</p>
   </section>
   <section class="grid profile-grid">
-${cards || '<p class="muted">No shared specialists registered yet.</p>'}
+${cards || '<p class="muted">No one registered yet.</p>'}
   </section>
 </div>`;
 
   return layout({
-    title: `Shared resources — ${SITE_NAME}`,
-    description: "The shared specialists — one persona, one charter, serving every team.",
+    title: `People — ${SITE_NAME}`,
+    description:
+      "Everyone who builds print-bench — the humans and PM agents on each product, and the shared review specialists.",
     body,
-    canonicalPath: "/shared/",
+    canonicalPath: "/people/",
   });
 }
 
 /**
- * The Teams page (issue #125): the team switcher strip over every rostered
- * product, then the product-scoped team page for the worked example
- * (calibration-cube) — hero, level-field core roster, a light reviewed-by
- * reference, and the history slot (#126). No landing hero: this is a page in
- * the site, not the front door, so it opens on a section label rather than a
- * display heading. The member profile (#124) is consumed unchanged, scoped to
- * this product so recent work reads "on <team>".
+ * A tiny redirect page kept at a retired route so inbound links and bookmarks
+ * survive a move. No nav, no chrome — it exists only to forward. Used for both
+ * `/shared/` and `/teams/`, the two routes the revised IA folded into
+ * `/people/`. `to` and `label` are trusted call-site literals.
  */
-export function teamsPage(team, designs, { githubBase, timelines = new Map() }) {
-  const byName = new Map(designs.map((d) => [d.name, d]));
-  const pitchFor = (name) => (byName.has(name) ? byName.get(name).pitch : "");
-
-  // The worked example is calibration-cube when it is rostered, else the first
-  // roster — the page always renders a real team rather than assuming one
-  // design exists. v1 publishes exactly one team page (this one); when a
-  // second roster lands, give each its own /teams/<name>/ and point its card
-  // there. Until then every card links here.
-  const rosterNames = [...team.rosters.keys()];
-  const currentDesign = rosterNames.includes("calibration-cube")
-    ? "calibration-cube"
-    : rosterNames[0];
-  const current = currentDesign ? team.rosters.get(currentDesign) : null;
-
-  const switcher = team.rosters.size
-    ? switcherStrip(team.rosters, {
-        pitchFor,
-        teamHref: () => "/teams/",
-        currentDesign,
-      })
-    : '<p class="muted">No teams rostered yet.</p>';
-
-  const teamSection = current
-    ? `<section class="team-page">
-  <header class="team-hero">
-    <p class="eyebrow">Team</p>
-    <h1 class="team-name">${escapeHtml(current.design)}</h1>
-    <p class="team-pitch">${inlineMarkdown(pitchFor(current.design))}</p>
-    <p class="team-count muted">${escapeHtml(String(current.core.length))} ${
-        current.core.length === 1 ? "person" : "people"
-      }</p>
-  </header>
-  <section class="team-core">
-    <p class="eyebrow">Core team</p>
-    ${coreRoster(current, { rosters: team.rosters, githubBase })}
-    ${reviewedBy(team.specialists)}
-  </section>
-  ${historySlot(current.design, {
-    events: timelines.get(current.design) ?? [],
-    people: team.people,
-  })}
-</section>`
-    : "";
-
-  const body = `<div class="wrap">
-  <section class="team-switcher">
-    <p class="eyebrow">Teams</p>
-    ${switcher}
-  </section>
-${teamSection}
-</div>`;
-
-  return layout({
-    title: `Teams — ${SITE_NAME}`,
-    description:
-      "The teams behind the products — each product's core roster of humans and its PM agent, and the shared specialists who review them.",
-    body,
-    canonicalPath: "/teams/",
-  });
+export function redirectPage(to, label) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=${to}">
+<link rel="canonical" href="${to}">
+<title>Moved to ${label} — ${SITE_NAME}</title>
+</head>
+<body>
+<p>This page has moved to <a href="${to}">${label}</a>.</p>
+</body>
+</html>
+`;
 }
 
 export const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
