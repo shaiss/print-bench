@@ -104,6 +104,12 @@ test("a non-current switcher card carries no current marker", () => {
   assert.doesNotMatch(html, /aria-current/);
 });
 
+test("a switcher card escapes its href at the HTML boundary, like every other href in site/lib", () => {
+  const html = switcherCard(CUBE, { pitch: "x", href: '/teams/"><script>', current: false });
+  assert.doesNotMatch(html, /href="\/teams\/"><script>/, "raw metacharacters must not reach the attribute");
+  assert.match(html, /href="\/teams\/&quot;&gt;&lt;script&gt;"/, "href is HTML-escaped, unsafe-by-default avoided");
+});
+
 test("the switcher strip renders one card per rostered team, using the passed-in pitch, and highlights the current one", () => {
   const html = switcherStrip(ROSTERS, {
     pitchFor: (n) => `pitch-of-${n}`,

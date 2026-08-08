@@ -39,7 +39,7 @@ export function switcherCard(roster, { pitch, href, current }) {
   const cls = current ? "switcher-card is-current" : "switcher-card";
   const aria = current ? ' aria-current="true"' : "";
   return `<article class="${cls}"${aria}>
-  <h3 class="switcher-name"><a href="${href}">${escapeHtml(roster.design)}</a></h3>
+  <h3 class="switcher-name"><a href="${escapeHtml(href)}">${escapeHtml(roster.design)}</a></h3>
   <p class="switcher-pitch">${inlineMarkdown(pitch)}</p>
   ${memberFaces(roster.core)}
 </article>`;
