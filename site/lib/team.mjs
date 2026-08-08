@@ -13,6 +13,12 @@
 //   designs/<name>/team.conf    the design's core roster: `core:` lists
 //                               member handles, `pm:` says which of them
 //                               owns the product charter.
+//   people/work.conf            the interim recent-work manifest (issue
+//                               #124): one pipe-separated line per recorded
+//                               piece of work, each citing a committed
+//                               artifact. Interim on purpose — the team
+//                               timeline (issue #126) becomes the history
+//                               source, and this file retires with it.
 //
 // The one rule that shapes everything else: **mandate text is never
 // re-typed.** An agent's profile carries a `mandate:` path to its charter
@@ -53,6 +59,19 @@ export const PROFILE_KEYS = ["name", "kind", "role", "initials", "mandate", "sha
 export const TEAM_KEYS = ["core", "pm"];
 
 const HANDLE_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * Resolve a repo-relative source path, or null when it escapes the repo.
+ * Containment is checked on the RESOLVED path, not by scanning for '..'
+ * segments — a '..\' would slip past a '/'-split on Windows, where
+ * backslash is also a separator.
+ */
+function containedPath(repoRoot, source) {
+  const abs = resolve(repoRoot, source);
+  const rel = relative(repoRoot, abs);
+  if (isAbsolute(source) || rel.startsWith("..") || isAbsolute(rel)) return null;
+  return abs;
+}
 
 /**
  * House `key: value` line rules over a run of lines, against a key
@@ -149,6 +168,48 @@ export function parseProfile(text) {
   }
 
   return { header, body, problems };
+}
+
+/**
+ * Parse people/work.conf, the interim recent-work manifest:
+ *
+ *   <handle> | <YYYY-MM-DD> | <team or -> | <text> | <artifact path>
+ *
+ * `team` scopes the entry to one design's roster ('-' = repo-wide work,
+ * outside any one team); `artifact` is the committed file the entry cites —
+ * an entry that cannot cite one does not belong in the manifest, because
+ * the site invents no content. Resolution (handle registered, team
+ * published, artifact present) is readTeam's job, like everything else
+ * cross-file. Same collect-don't-throw contract as the parsers above.
+ */
+export function parseWorkConf(text) {
+  const problems = [];
+  const entries = [];
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].split("#", 1)[0].trim();
+    if (!line) continue;
+    const fields = line.split("|").map((f) => f.trim());
+    if (fields.length !== 5) {
+      problems.push(`line ${i + 1}: expected 5 '|'-separated fields (handle | date | team | text | artifact), got ${fields.length}`);
+      continue;
+    }
+    const [handle, date, team, entryText, artifact] = fields;
+    if (!HANDLE_RE.test(handle)) {
+      problems.push(`line ${i + 1}: handle '${handle}' must match ${HANDLE_RE}`);
+      continue;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      problems.push(`line ${i + 1}: date '${date}' must be YYYY-MM-DD`);
+      continue;
+    }
+    if (!entryText || !artifact) {
+      problems.push(`line ${i + 1}: text and artifact must both be non-empty`);
+      continue;
+    }
+    entries.push({ handle, date, team: team === "-" ? null : team, text: entryText, artifact, lineno: i + 1 });
+  }
+  return { entries, problems };
 }
 
 /** Parse one designs/<name>/team.conf. Same collect-don't-throw contract. */
@@ -268,13 +329,9 @@ export function readTeam(repoRoot, { onError = () => {}, designNames } = {}) {
     if (header.kind === "human") {
       mandate = { source: profilePath, summary: null, text: body };
     } else {
-      // Containment is checked on the RESOLVED path, not by scanning for
-      // '..' segments — a '..\' would slip past a '/'-split on Windows,
-      // where backslash is also a separator.
       const source = header.mandate;
-      const abs = resolve(repoRoot, source);
-      const rel = relative(repoRoot, abs);
-      if (isAbsolute(source) || rel.startsWith("..") || isAbsolute(rel)) {
+      const abs = containedPath(repoRoot, source);
+      if (abs === null) {
         onError(`${profilePath}: mandate path '${source}' must be repo-relative with no '..'`);
         continue;
       }
@@ -335,6 +392,50 @@ export function readTeam(repoRoot, { onError = () => {}, designNames } = {}) {
       core: core.map((h) => people.get(h)),
       pm: people.get(pm),
     });
+  }
+
+  // The interim recent-work manifest. Missing is quiet (same reasoning as a
+  // missing people/): pre-#124 checkouts and fixtures stay valid, and the
+  // real-repo test is the backstop. Every cross-file reference an entry
+  // makes is resolved here — handle registered, team published, cited
+  // artifact present in the tree — so a stale citation fails the build
+  // instead of shipping a profile whose evidence link 404s.
+  for (const member of people.values()) member.work = [];
+  const workPath = "people/work.conf";
+  let workText = null;
+  try {
+    workText = readFileSync(join(repoRoot, workPath), "utf8");
+  } catch {
+    workText = null;
+  }
+  if (workText !== null) {
+    const { entries, problems } = parseWorkConf(workText);
+    for (const p of problems) onError(`${workPath}: ${p}`);
+    for (const e of entries) {
+      const member = people.get(e.handle);
+      if (!member) {
+        onError(`${workPath}: line ${e.lineno}: names '${e.handle}', which people/ does not register — add people/${e.handle}.md or fix the handle`);
+        continue;
+      }
+      if (e.team !== null && designNames && !designNames.has(e.team)) {
+        onError(`${workPath}: line ${e.lineno}: team '${e.team}' is not a design the site publishes — use '-' for repo-wide work`);
+        continue;
+      }
+      const abs = containedPath(repoRoot, e.artifact);
+      if (abs === null) {
+        onError(`${workPath}: line ${e.lineno}: artifact path '${e.artifact}' must be repo-relative with no '..'`);
+        continue;
+      }
+      if (!existsSync(abs) || !statSync(abs).isFile()) {
+        onError(`${workPath}: line ${e.lineno}: cites '${e.artifact}', which does not exist — an entry must cite a committed artifact`);
+        continue;
+      }
+      member.work.push({ date: e.date, team: e.team, text: e.text, artifact: e.artifact });
+    }
+    // Newest first; the sort is stable, so same-day entries keep file order.
+    for (const member of people.values()) {
+      member.work.sort((a, b) => b.date.localeCompare(a.date));
+    }
   }
 
   const members = [...people.values()];
