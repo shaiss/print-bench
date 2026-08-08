@@ -813,3 +813,89 @@ pre code { background: none; padding: 0; }
   border: 1px solid var(--rule);
   border-radius: var(--radius);
 }
+
+/* ---------- Teams: switcher + team page (issue #125) ---------- */
+
+/* Net-new layout only; every colour is an existing token, so light/dark and
+   the human/agent coding come from the profile/monogram rules above. */
+
+/* The switcher is a strip of team cards — one per rostered product — that
+   scrolls sideways on a narrow screen rather than reflowing, so it always
+   reads as a row of peers to switch between. */
+.switcher-strip {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  margin-top: 0.6rem;
+  padding-bottom: 0.5rem;
+}
+
+.switcher-card {
+  flex: 0 0 min(20rem, 80vw);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+/* The current team is where the reader already is — marked, not linked away. */
+.switcher-card.is-current { border-color: var(--accent); box-shadow: var(--shadow); }
+
+.switcher-name { margin: 0; font-size: 1.05rem; letter-spacing: -0.01em; }
+.switcher-name a { color: var(--ink); }
+.switcher-name a:hover { color: var(--accent); }
+
+.switcher-pitch {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  flex: 1 1 auto;
+}
+
+/* Overlapping faces — kind-coded monograms, smaller than a profile's, each
+   ringed in the panel colour so the stack reads as separate people. */
+.switcher-faces { display: flex; }
+.switcher-faces .monogram {
+  width: 30px;
+  height: 30px;
+  font-size: 0.72rem;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.switcher-faces .monogram + .monogram { margin-left: -8px; }
+
+/* The team page below the switcher. Its hero is a page heading, not the
+   front-door display heading — deliberately smaller than .hero h1. */
+.team-hero { margin: 2.5rem 0 0; }
+.team-name { margin: 0.2rem 0 0; font-size: clamp(1.5rem, 3vw, 1.9rem); letter-spacing: -0.02em; }
+.team-pitch { margin: 0.5rem 0 0; color: var(--ink-soft); max-width: var(--measure); }
+.team-count { margin: 0.4rem 0 0; font-size: 0.9rem; }
+
+.team-core { margin-top: 2rem; }
+
+/* The level field: equal peer cards, no hierarchy. Same card as a profile,
+   laid out as an even row that reflows to one column. */
+.level-field { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+
+/* Kind coding at the card edge so a human and the PM agent read as different
+   kinds while staying identical in weight — the coding is colour, never size
+   or rank. Same pairing as the monograms: human on the accent, agent neutral. */
+.peer-card { border-top: 3px solid var(--rule); }
+.peer-human { border-top-color: var(--accent); }
+.peer-agent { border-top-color: var(--ink-faint); }
+
+/* A light reference, not a roster: the reviewers are a shared resource. */
+.reviewed-by { margin: 1.25rem 0 0; color: var(--ink-soft); font-size: 0.92rem; }
+.reviewed-by a { color: var(--ink-soft); text-decoration: underline; }
+.reviewed-by a:hover { color: var(--accent); }
+.reviewed-all { margin-left: 0.5rem; font-family: var(--mono); font-size: 0.82rem; }
+
+.team-history {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule-soft);
+}
+.history-empty { margin: 0; max-width: var(--measure); }
