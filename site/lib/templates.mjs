@@ -487,7 +487,7 @@ ${cards || '<p class="muted">No shared specialists registered yet.</p>'}
  * display heading. The member profile (#124) is consumed unchanged, scoped to
  * this product so recent work reads "on <team>".
  */
-export function teamsPage(team, designs, { githubBase }) {
+export function teamsPage(team, designs, { githubBase, timelines = new Map() }) {
   const byName = new Map(designs.map((d) => [d.name, d]));
   const pitchFor = (name) => (byName.has(name) ? byName.get(name).pitch : "");
 
@@ -525,7 +525,10 @@ export function teamsPage(team, designs, { githubBase }) {
     ${coreRoster(current, { rosters: team.rosters, githubBase })}
     ${reviewedBy(team.specialists)}
   </section>
-  ${historySlot(current.design)}
+  ${historySlot(current.design, {
+    events: timelines.get(current.design) ?? [],
+    people: team.people,
+  })}
 </section>`
     : "";
 

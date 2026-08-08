@@ -12,9 +12,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { readDesigns } from "../lib/content.mjs";
 import { readTeam } from "../lib/team.mjs";
+import { readTimeline } from "../lib/timeline.mjs";
 import { teamsPage } from "../lib/templates.mjs";
 import {
   memberFaces,
@@ -164,12 +167,25 @@ test("reviewed-by with no specialists renders nothing", () => {
   assert.equal(reviewedBy([]), "");
 });
 
-test("the history slot is laid out as an honest empty state deferring to the timeline issue", () => {
-  const html = historySlot("calibration-cube");
+test("the history slot renders the timeline when the team has committed events (#126)", () => {
+  const people = new Map([["vera", { handle: "vera", name: "Vera", kind: "agent", initials: "V" }]]);
+  const events = [
+    { date: "2026-08-08", source: "decision-log", sourceTag: "decision · PM.md", text: "A real decision", detail: "the reason", handle: "vera" },
+  ];
+  const html = historySlot("calibration-cube", { events, people });
+  assert.match(html, /class="team-history"/);
+  assert.match(html, /History of work together/);
+  assert.match(html, /<ol class="timeline">/);
+  assert.match(html, /A real decision/);
+  assert.doesNotMatch(html, /class="history-empty/, "with events, no empty state");
+});
+
+test("the history slot falls back to an honest empty state when the team has no committed history", () => {
+  const html = historySlot("calibration-cube", { events: [], people: new Map() });
   assert.match(html, /class="team-history"/);
   assert.match(html, /History of work together/);
   assert.match(html, /class="history-empty/);
-  assert.match(html, /issue #126/, "the section is laid out; its data is #126");
+  assert.doesNotMatch(html, /<ol class="timeline">/);
 });
 
 test("the Teams page builds from the real repo: switcher, product-scoped calibration-cube team, reviewed-by, history — and no front-door hero", () => {
@@ -179,7 +195,19 @@ test("the Teams page builds from the real repo: switcher, product-scoped calibra
     onError: (m) => assert.fail(`real repo roster did not resolve: ${m}`),
     designNames,
   });
-  const html = teamsPage(team, designs, { githubBase: GH });
+  // Assemble the committed timelines the same way build.mjs does, so the
+  // real-repo page renders the real History-of-work-together content.
+  const timelines = new Map();
+  for (const [design, roster] of team.rosters) {
+    const pmPath = join(REPO_ROOT, "designs", design, "PM.md");
+    const notesPath = join(REPO_ROOT, "designs", design, "NOTES.md");
+    const pmText = existsSync(pmPath) ? readFileSync(pmPath, "utf8") : null;
+    const notesText = existsSync(notesPath) ? readFileSync(notesPath, "utf8") : null;
+    const { events, problems } = readTimeline({ pmText, notesText, roster });
+    assert.deepEqual(problems, [], `real ${design} timeline did not parse clean`);
+    timelines.set(design, events);
+  }
+  const html = teamsPage(team, designs, { githubBase: GH, timelines });
 
   // AC3 — a page in the site, not the front door: no landing hero.
   assert.doesNotMatch(html, /<section class="hero">/, "the Teams page must not use the front-door hero");
@@ -213,7 +241,10 @@ test("the Teams page builds from the real repo: switcher, product-scoped calibra
   assert.match(html, /href="\/shared\/#profile-drik"/);
   assert.match(html, /href="\/shared\/#profile-coach"/);
 
-  // AC8 — history slot laid out, data deferred to #126.
+  // AC8/#126 — the history slot renders calibration-cube's real committed
+  // timeline (its PM.md decision log), not the placeholder that deferred it.
   assert.match(html, /History of work together/);
-  assert.match(html, /issue #126/);
+  assert.match(html, /<ol class="timeline">/);
+  assert.match(html, /size-marker/, "a real decision-log entry from PM.md");
+  assert.doesNotMatch(html, /issue #126/, "the deferral placeholder is gone");
 });

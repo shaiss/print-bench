@@ -20,6 +20,7 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  existsSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +32,7 @@ import {
   fetchLatestReleaseManifests,
   manifestToDownloads,
 } from "./lib/releases.mjs";
+import { readTimeline } from "./lib/timeline.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
 import { buildModel } from "./lib/model.mjs";
 import {
@@ -243,13 +245,32 @@ async function main() {
     contents: sharedPage(team, { githubBase: GITHUB_BASE }),
   });
 
+  // The "History of work together" timeline (issue #126): assemble each
+  // rostered team's shared record from its own committed files (PM.md
+  // decision log, optional NOTES.md field-test log) here, where the
+  // filesystem is reachable, and hand the events to the team page. Problems
+  // go to the same accumulator as every other structured source, so a
+  // drifted decision-log table fails ./scripts/site.sh rather than rendering
+  // a hole. Product-scoped by construction: each team reads only its own
+  // design's files.
+  const timelines = new Map();
+  for (const [design, roster] of team.rosters) {
+    const pmPath = join(REPO_ROOT, "designs", design, "PM.md");
+    const notesPath = join(REPO_ROOT, "designs", design, "NOTES.md");
+    const pmText = existsSync(pmPath) ? readFileSync(pmPath, "utf8") : null;
+    const notesText = existsSync(notesPath) ? readFileSync(notesPath, "utf8") : null;
+    const { events, problems } = readTimeline({ pmText, notesText, roster });
+    for (const p of problems) onError(`designs/${design}: timeline: ${p}`);
+    timelines.set(design, events);
+  }
+
   // The Teams page (issue #125): the switcher over every rostered product and
   // the product-scoped team page for the worked example. Unconditional, same
   // reasoning as the Shared resources page above — the switcher saying which
   // teams exist is truer than a nav link to a page that does not.
   rendered.push({
     path: "teams/index.html",
-    contents: teamsPage(team, designs, { githubBase: GITHUB_BASE }),
+    contents: teamsPage(team, designs, { githubBase: GITHUB_BASE, timelines }),
   });
 
   for (const design of designs) {
