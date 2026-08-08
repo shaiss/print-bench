@@ -3,6 +3,7 @@
 
 import { escapeHtml, inlineMarkdown, plainText } from "./markdown.mjs";
 import { hasConfigurator } from "./model.mjs";
+import { humanSize } from "./releases.mjs";
 import { memberProfile, memberTeams } from "./profile.mjs";
 import { switcherStrip, coreRoster, reviewedBy, historySlot } from "./teams.mjs";
 
@@ -229,11 +230,51 @@ function viewerPanel(design) {
 </section>`;
 }
 
-export function designPage(design, { html, toc, githubBase, model }) {
+/**
+ * The Downloads rail-block (issue #139). Built from a release manifest fetched
+ * at build time; null when the design has no release, so the block simply does
+ * not appear (the site's no-404 rule — an absent release is not a broken link).
+ * Each part links to its STL release asset with size and a short SHA-256; the
+ * full checksum rides in the title so a careful downloader can verify.
+ */
+function downloadsBlock(downloads) {
+  if (!downloads) return "";
+  const rows = downloads.parts
+    .map((p) => {
+      const meta = [
+        p.size != null ? humanSize(p.size) : "",
+        p.sha256 ? p.sha256.slice(0, 12) : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      const title = p.sha256 ? ` title="sha256:${escapeHtml(p.sha256)}"` : "";
+      return `      <li><a href="${escapeHtml(p.url)}" rel="noopener noreferrer">${escapeHtml(
+        p.part
+      )}</a>${meta ? ` <span class="dl-meta"${title}>${escapeHtml(meta)}</span>` : ""}</li>`;
+    })
+    .join("\n");
+  return `<div class="rail-block">
+    <h3>Downloads</h3>
+    <p class="rail-note">Release <a href="${escapeHtml(
+      downloads.releaseUrl
+    )}" rel="noopener noreferrer"><code>${escapeHtml(
+      downloads.version
+    )}</code></a> — gated STLs, ready to slice.</p>
+    <ul class="downloads">
+${rows}
+    </ul>
+    <p><a class="btn" href="${escapeHtml(
+      downloads.bundleUrl
+    )}" rel="noopener noreferrer" download>Download all (zip)</a></p>
+  </div>`;
+}
+
+export function designPage(design, { html, toc, githubBase, model, downloads = null }) {
   const showConfigurator = hasConfigurator(model);
   const src = `${githubBase}/${design.relDir}`;
   const rail = `<aside class="rail">
   ${toc ? `<div class="rail-block"><h3>On this page</h3>${toc}</div>` : ""}
+  ${downloadsBlock(downloads)}
   <div class="rail-block">
     <h3>Source</h3>
     <ul>
