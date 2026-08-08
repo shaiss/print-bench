@@ -126,8 +126,9 @@ merges. The full workflow and conventions live in [CLAUDE.md](CLAUDE.md).
 - `build/` — generated STL/PNG outputs (gitignored)
 - `people/` — the team registry: who builds here, humans and agents alike,
   one profile per handle, with per-design core rosters in
-  `designs/<name>/team.conf`; read by the product-site build, which fails
-  on any unresolvable handle or mandate reference
+  `designs/<name>/team.conf` and the interim recent-work manifest in
+  `people/work.conf`; read by the product-site build, which fails on any
+  unresolvable handle, mandate, or work reference
 - `printer.conf` — your printer's measured profile (inert by default);
   designs opt in to pre-fill tuned-fit tolerances. Part of the print-feedback
   loop — see [docs/print-feedback.md](docs/print-feedback.md)

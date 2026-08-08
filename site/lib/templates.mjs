@@ -3,6 +3,7 @@
 
 import { escapeHtml, inlineMarkdown, plainText } from "./markdown.mjs";
 import { hasConfigurator } from "./model.mjs";
+import { memberProfile, memberTeams } from "./profile.mjs";
 
 const SITE_NAME = "print-bench";
 const TAGLINE = "Parametric 3D-printable designs, gated before they ship.";
@@ -37,6 +38,7 @@ ${extraHead}
     <nav class="site-nav">
       <a href="/"${canonicalPath === "/" ? ' aria-current="page"' : ""}>Designs</a>
       <a href="/styles/"${canonicalPath.startsWith("/styles") ? ' aria-current="page"' : ""}>Styles</a>
+      <a href="/shared/"${canonicalPath.startsWith("/shared") ? ' aria-current="page"' : ""}>Shared resources</a>
       <a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">Source</a>
       <button class="theme-toggle" type="button" aria-label="Switch theme">☾</button>
     </nav>
@@ -391,6 +393,45 @@ ${rail}
     description: plainText(style.summary),
     body,
     canonicalPath: `/${style.relDir}/`,
+  });
+}
+
+/**
+ * The Shared resources page (issue #124): the review specialists as
+ * first-class members. Each card IS the full profile component — v1
+ * renders profiles inline rather than behind a /people/<handle>/ route —
+ * in the cross-team scope, since a shared specialist is by definition the
+ * same persona on every design.
+ */
+export function sharedPage(team, { githubBase }) {
+  const cards = team.specialists
+    .map(
+      (m) => `<div class="card profile-card">
+${memberProfile(m, { scope: null, teams: memberTeams(m, team.rosters), githubBase })}
+</div>`
+    )
+    .join("\n");
+
+  const body = `<div class="wrap">
+  <section class="hero">
+    <p class="eyebrow">${escapeHtml(String(team.specialists.length))} shared specialists</p>
+    <h1>Shared resources</h1>
+    <p>A shared specialist is one persona with one charter that serves every
+    team and is owned by none: the same reviewer reads every design the same
+    way, so a gate passed here means the same thing on every product. They
+    sit outside the per-design rosters on purpose — a team lists who builds
+    the product; these are the people every team can call on.</p>
+  </section>
+  <section class="grid profile-grid">
+${cards || '<p class="muted">No shared specialists registered yet.</p>'}
+  </section>
+</div>`;
+
+  return layout({
+    title: `Shared resources — ${SITE_NAME}`,
+    description: "The shared specialists — one persona, one charter, serving every team.",
+    body,
+    canonicalPath: "/shared/",
   });
 }
 
