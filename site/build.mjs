@@ -34,6 +34,7 @@ import {
   stylesIndexPage,
   stylePage,
   sharedPage,
+  teamsPage,
   FAVICON,
 } from "./lib/templates.mjs";
 
@@ -210,6 +211,15 @@ function main() {
   rendered.push({
     path: "shared/index.html",
     contents: sharedPage(team, { githubBase: GITHUB_BASE }),
+  });
+
+  // The Teams page (issue #125): the switcher over every rostered product and
+  // the product-scoped team page for the worked example. Unconditional, same
+  // reasoning as the Shared resources page above — the switcher saying which
+  // teams exist is truer than a nav link to a page that does not.
+  rendered.push({
+    path: "teams/index.html",
+    contents: teamsPage(team, designs, { githubBase: GITHUB_BASE }),
   });
 
   for (const design of designs) {
