@@ -8,6 +8,10 @@ own intended size.
 
 ![Product shot: the printed cube, satin orange PLA on a studio backdrop](previews/product-hero.png)
 
+![AI-styled scene: calibration-cube staged in a real-world setting](previews/lifestyle-bench-calipers.png)
+
+*AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render above and the STL for the true shape.*
+
 ![Product shot: the engraved 20 mm size marker, high three-quarter view, satin orange PLA](previews/size-marker.png)
 
 ![Turntable: chamfered bottom edges and the engraved size marker](previews/turntable.gif)
