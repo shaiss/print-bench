@@ -899,3 +899,45 @@ pre code { background: none; padding: 0; }
   border-top: 1px solid var(--rule-soft);
 }
 .history-empty { margin: 0; max-width: var(--measure); }
+
+/* The History-of-work-together timeline (issue #126): committed events, a
+   ruled rail down the left, newest first. Tokens only, so both themes come
+   from the palette above. */
+.timeline {
+  list-style: none;
+  margin: 1.25rem 0 0;
+  padding: 0 0 0 1.25rem;
+  border-left: 2px solid var(--rule);
+  max-width: var(--measure);
+}
+.timeline-event { position: relative; padding: 0 0 1.5rem 0.5rem; }
+.timeline-event:last-child { padding-bottom: 0; }
+.timeline-event::before {
+  content: "";
+  position: absolute;
+  left: calc(-1.25rem - 1px - 3px);
+  top: 0.3rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.timeline-date { font-family: var(--mono); font-size: 0.82rem; color: var(--ink-faint); }
+.timeline-source { font-size: 0.78rem; }
+.timeline-text { margin: 0.25rem 0 0; color: var(--ink); }
+.timeline-detail { margin: 0.15rem 0 0; font-size: 0.9rem; max-width: var(--measure); }
+.timeline-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.timeline-who .monogram { width: 1.4rem; height: 1.4rem; font-size: 0.7rem; }
+.timeline-who-name { font-size: 0.85rem; color: var(--ink-soft); }
+.timeline-who-name code { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }

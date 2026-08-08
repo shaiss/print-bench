@@ -25,7 +25,7 @@ import {
   fieldTestSource,
   SOURCES,
   readTimeline,
-  historyTimeline,
+  timelineEvents,
 } from "../lib/timeline.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -147,6 +147,36 @@ test("NEGATIVE: a header with no separator row is a problem", () => {
   assert.match(problems[0], /separator row/);
 });
 
+test("prose containing a pipe before the table is not mistaken for the header", () => {
+  // Regression for the #137 review finding: a naive includes('|') header
+  // scan would misread this prose line as the table header and fail.
+  const text = `## Decision log
+
+Append-only. Read it as: date | decision | reason.
+
+| Date | Decision | Reason |
+|---|---|---|
+| 2026-08-08 | Real decision | Real reason |
+`;
+  const { entries, problems } = parseDecisionLog(text);
+  assert.deepEqual(problems, []);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].decision, "Real decision");
+});
+
+test("NEGATIVE: a separator whose width does not match the header is a problem", () => {
+  const text = `## Decision log
+
+| Date | Decision | Reason |
+|---|
+| 2026-08-08 | x | y |
+`;
+  const { entries, problems } = parseDecisionLog(text);
+  assert.deepEqual(entries, []);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /3-column .* separator row/);
+});
+
 // --- parseFieldTestLog (optional source) ----------------------------------
 
 test("parseFieldTestLog reads ### date — printer subheadings", () => {
@@ -257,10 +287,10 @@ test("the seam accepts a custom source set without touching assembly", () => {
 
 const PEOPLE = new Map([["vera", { handle: "vera", name: "Vera", kind: "agent", initials: "V" }]]);
 
-test("historyTimeline renders events newest-first with source tags and attribution", () => {
+test("timelineEvents renders events newest-first with source tags and attribution", () => {
   const { events } = readTimeline({ pmText: DECISION_LOG, notesText: null, roster: ROSTER });
-  const html = historyTimeline(events, { people: PEOPLE });
-  assert.match(html, /History of work together/);
+  const html = timelineEvents(events, { people: PEOPLE });
+  assert.match(html, /<ol class="timeline">/);
   assert.match(html, /decision · PM\.md/);
   assert.match(html, /2026-08-08/);
   // Attribution monogram + name for the resolvable handle.
@@ -270,23 +300,21 @@ test("historyTimeline renders events newest-first with source tags and attributi
   assert.ok(html.indexOf("Second choice") < html.indexOf("First choice"));
 });
 
-test("historyTimeline shows an honest empty state, inventing nothing", () => {
-  const html = historyTimeline([], { people: PEOPLE });
-  assert.match(html, /No shared history recorded yet/);
-  assert.doesNotMatch(html, /<ol class="timeline">/);
+test("timelineEvents returns empty string for no events (caller owns the empty state)", () => {
+  assert.equal(timelineEvents([], { people: PEOPLE }), "");
 });
 
-test("historyTimeline escapes event text (no HTML injection)", () => {
+test("timelineEvents escapes event text (no HTML injection)", () => {
   const events = [{ date: "2026-08-08", source: "x", sourceTag: "x", text: "<script>alert(1)</script>", detail: "a & b", handle: null }];
-  const html = historyTimeline(events, {});
+  const html = timelineEvents(events, {});
   assert.doesNotMatch(html, /<script>alert/);
   assert.match(html, /&lt;script&gt;/);
   assert.match(html, /a &amp; b/);
 });
 
-test("historyTimeline renders an unresolvable handle plainly (no crash)", () => {
+test("timelineEvents renders an unresolvable handle plainly (no crash)", () => {
   const events = [{ date: "2026-08-08", source: "x", sourceTag: "x", text: "t", detail: "", handle: "ghost" }];
-  const html = historyTimeline(events, { people: PEOPLE });
+  const html = timelineEvents(events, { people: PEOPLE });
   assert.match(html, /timeline-event/);
   assert.doesNotMatch(html, /timeline-who-name/);
 });
