@@ -13,7 +13,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { dirname, join, isAbsolute } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -84,6 +84,33 @@ test("an absolute ref is refused", () => {
       new RegExp(SECRET),
       "absolute ref must not embed a file"
     );
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+// AC1 (symlink vector) — a ref that resolves to a symlink *inside* the repo
+// whose real target is *outside* it is refused. Only the real-path
+// (symlink-resolved) containment check catches this: a check on the
+// pre-resolution path would see an in-repo path and let it through. Without
+// this case, swapping the resolver's realpath for a plain path-normalize would
+// keep the traversal/absolute tests green while reopening the escape.
+test("an in-repo symlink whose target escapes the repo root is refused", () => {
+  const { parent, repoRoot, secretAbs } = fixture({
+    "designs/link/link.scad": "include <leak.scad>\ncube(10);\n",
+    "designs/link/README.md": "# Link\n",
+  });
+  symlinkSync(secretAbs, join(repoRoot, "designs/link/leak.scad"));
+  try {
+    const m = model(repoRoot, "link");
+    assert.doesNotMatch(
+      JSON.stringify(m.files),
+      new RegExp(SECRET),
+      "a symlink resolving outside the repo must not embed its target"
+    );
+    for (const key of Object.keys(m.files)) {
+      assert.ok(!key.startsWith(".."), `resolved path escaped the repo: ${key}`);
+    }
   } finally {
     rmSync(parent, { recursive: true, force: true });
   }
