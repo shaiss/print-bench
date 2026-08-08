@@ -252,4 +252,16 @@ if ! ./scripts/ci-classify.sh --selftest; then
   fail=1
 fi
 
+# release-bundle.sh is the build half of the versioned-download UX (issue
+# #102): its --selftest proves the shell glue — the manifest names every part,
+# each recorded SHA-256 recomputes over the bundled STL, the README's print
+# settings reach the manifest, the zip is produced, and an archived design is
+# skipped. No release bundle exists in the tree, so the selftest is the only
+# thing that proves the builder still works. It renders nothing (fixture STLs
+# are pre-seeded), so it is fast and runs here with the other suites.
+echo "-- release-bundle selftest: scripts/release-bundle.sh --selftest"
+if ! ./scripts/release-bundle.sh --selftest; then
+  fail=1
+fi
+
 exit "$fail"

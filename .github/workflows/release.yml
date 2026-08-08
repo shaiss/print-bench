@@ -1,0 +1,146 @@
+name: Release bundles
+
+# The "ship it" half of publishing (issue #102, build side): turn gated STL
+# exports into downloadable, self-describing release bundles and attach them to
+# a tagged GitHub Release, so a stranger can get the file without cloning the
+# repo and rendering.
+#
+# Two triggers:
+#   - push a version tag (v*): release every active design at that version.
+#   - workflow_dispatch: release one design (or all) at a chosen version.
+#
+# The gate runs first (scripts/gate.sh --slice), so a part that does not pass
+# printcheck + the test-slice never reaches a release — only gated geometry
+# ships. Then scripts/release-bundle.sh assembles, per design, a zip of the
+# STLs + a manifest.json (per-part SHA-256 checksums, byte sizes, and the
+# machine-readable print settings from the README). Archived designs are frozen
+# and skipped (they keep their last release). The site consumption of these
+# manifests — per-part download links on product pages — is the deferred
+# follow-up half of #102.
+
+on:
+  workflow_dispatch:
+    inputs:
+      design:
+        description: 'Design name, or "all" for every active design'
+        required: true
+        default: all
+        type: string
+      version:
+        description: 'Version for the bundle, e.g. v0.2 (defaults to v0.1)'
+        required: false
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+# Creating a GitHub Release and uploading assets needs contents:write; the
+# default GITHUB_TOKEN carries it. No commit is pushed back to a branch, so —
+# unlike regen — no PAT is needed: a Release is a terminal artifact, not a
+# change that has to re-trigger CI.
+permissions:
+  contents: write
+
+concurrency:
+  # One release build per ref; never cancel a publish mid-upload.
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build gated STL bundles and publish a GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install xvfb and PrusaSlicer (cached)
+        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
+        with:
+          # Postinst-free packages only (docs-check.sh enforces the allowlist):
+          # a cache restore skips postinst, so alternatives-managed binaries
+          # would come back dangling (issue #85).
+          packages: xvfb prusa-slicer
+          version: "2026-08"
+
+      - name: Install OpenSCAD nightly (cached)
+        # The Manifold backend — the same engine render-gate uses, an order of
+        # magnitude faster than 2021.01's CGAL on these models.
+        uses: ./.github/actions/setup-openscad-nightly
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install printcheck
+        run: pip install -e tools/printcheck
+
+      - name: Resolve target and version
+        id: cfg
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_DESIGN: ${{ github.event.inputs.design }}
+          IN_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = push ]; then
+            # tag push: the tag name is the version, release everything active.
+            design=all
+            version="$REF_NAME"
+          else
+            design="${IN_DESIGN:-all}"
+            version="${IN_VERSION:-v0.1}"
+          fi
+          echo "design=$design" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing '$design' at '$version'."
+
+      - name: Gate the parts (only gated geometry ships)
+        env:
+          OPENSCAD_BIN: openscad-nightly
+          OPENSCAD_ARGS: --backend=manifold
+          DESIGN: ${{ steps.cfg.outputs.design }}
+        run: |
+          set -o pipefail
+          if [ "$DESIGN" = all ]; then
+            ./scripts/gate.sh --slice
+          else
+            ./scripts/gate.sh --slice "$DESIGN"
+          fi
+
+      - name: Assemble the release bundle(s)
+        env:
+          OPENSCAD_BIN: openscad-nightly
+          OPENSCAD_ARGS: --backend=manifold
+          DESIGN: ${{ steps.cfg.outputs.design }}
+          VERSION: ${{ steps.cfg.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$DESIGN" = all ]; then
+            ./scripts/release-bundle.sh --all --version "$VERSION"
+          else
+            ./scripts/release-bundle.sh "$DESIGN" --version "$VERSION"
+          fi
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.cfg.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Per-design zips (STLs + manifest) plus the standalone manifests, so
+          # a reader can inspect checksums and print settings without unzipping.
+          assets=(build/release/*.zip build/release/*.manifest.json)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "::error::no release bundles were produced (an archived design, or nothing matched)"
+            exit 1
+          fi
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" "${assets[@]}" --clobber
+          else
+            gh release create "$VERSION" "${assets[@]}" \
+              --title "$VERSION" \
+              --notes "Per-design STL bundles with per-part SHA-256 checksums and machine-readable print settings, built from gated exports by .github/workflows/release.yml (issue #102)."
+          fi
