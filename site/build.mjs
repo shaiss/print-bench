@@ -26,6 +26,11 @@ import { fileURLToPath } from "node:url";
 
 import { readDesigns, readStyles } from "./lib/content.mjs";
 import { readTeam } from "./lib/team.mjs";
+import {
+  shouldFetchReleases,
+  fetchLatestReleaseManifests,
+  manifestToDownloads,
+} from "./lib/releases.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
 import { buildModel } from "./lib/model.mjs";
 import {
@@ -40,7 +45,9 @@ import {
 
 const SITE_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SITE_DIR, "..");
-const GITHUB_BASE = "https://github.com/shaiss/print-bench/blob/main";
+const OWNER = "shaiss";
+const REPO = "print-bench";
+const GITHUB_BASE = `https://github.com/${OWNER}/${REPO}/blob/main`;
 
 function parseArgs(argv) {
   let out = join(REPO_ROOT, "build", "site");
@@ -152,13 +159,36 @@ this directory.
 `;
 }
 
-function main() {
+async function main() {
   const { out } = parseArgs(process.argv.slice(2));
 
   const designs = readDesigns(REPO_ROOT);
   const styles = readStyles(REPO_ROOT);
 
   if (designs.length === 0) fail("no designs found under designs/");
+
+  // Release download links (issue #139). Best-effort and Vercel-scoped: on the
+  // deploy (which has network) each design's latest-release manifest becomes
+  // per-part download links; locally and in CI the fetch is off, so the build
+  // stays deterministic and simply shows no downloads. Any failure here leaves
+  // the map empty — a missing release is never a broken build.
+  let releaseManifests = new Map();
+  if (shouldFetchReleases()) {
+    try {
+      releaseManifests = await fetchLatestReleaseManifests({
+        owner: OWNER,
+        repo: REPO,
+        token: process.env.GITHUB_TOKEN,
+      });
+      console.log(
+        `      releases: ${releaseManifests.size} manifest(s) fetched for download links`
+      );
+    } catch (err) {
+      console.warn(
+        `      releases: fetch skipped (${err.message}) — product pages show no downloads`
+      );
+    }
+  }
 
   // Documents the site itself publishes, so links between them stay internal
   // instead of bouncing the reader out to GitHub.
@@ -241,6 +271,10 @@ function main() {
       contents: JSON.stringify(model),
     });
 
+    const downloads = manifestToDownloads(releaseManifests.get(design.name), {
+      owner: OWNER,
+      repo: REPO,
+    });
     rendered.push({
       path: `${design.relDir}/index.html`,
       contents: designPage(design, {
@@ -248,6 +282,7 @@ function main() {
         toc: tocHtml(headings),
         githubBase: GITHUB_BASE,
         model,
+        downloads,
       }),
     });
   }
@@ -372,4 +407,7 @@ function main() {
   );
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
