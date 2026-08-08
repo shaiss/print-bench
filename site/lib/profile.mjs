@@ -2,19 +2,18 @@
 // team.mjs rendered as a self-contained block — identity, role, the
 // readable mandate with its source cited, team chips, recent work.
 //
-// Used by the Shared resources page today and consumed unchanged by the
-// team page (#125): the caller passes a `scope` (a design name, or null)
-// and the component both filters the recent-work list to that scope and
-// words the heading accordingly — "on <team>" in a team context, "across
-// teams" on the shared page. That is the product-scoping principle from
-// #122 as it shows up in a member view.
+// Rendered on the People page in the cross-team scope (issue #122's revised
+// IA): the caller passes a `scope` (a design name, or null) and the component
+// both filters the recent-work list to that scope and words the heading
+// accordingly — "on <team>" for a product-scoped view, "across teams"
+// otherwise. That is the product-scoping principle from #122 as it shows up
+// in a member view. (The product page shows only light *identity* that links
+// here — see teams.mjs; the full profile lives on the People page.)
 //
 // Everything rendered is committed data resolved by readTeam: the mandate
 // text was read from the member's charter at build time, and every work
 // entry cites an artifact the reader proved exists. Team chips link to the
-// team's product page — the one page a team resolves to until #125 ships
-// its own; retarget the href there. No avatars: initials monograms only
-// (#122 non-goal).
+// team's product page. No avatars: initials monograms only (#122 non-goal).
 
 import { escapeHtml } from "./markdown.mjs";
 
