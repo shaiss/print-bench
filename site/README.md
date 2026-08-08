@@ -157,6 +157,7 @@ Three things make it consistent with the rest of the site:
 - `lib/team.mjs` — the roster layer (issue #123): `people/<handle>.md` + `designs/<name>/team.conf` + the interim `people/work.conf` recent-work manifest (issue #124) → resolved member records, agent mandates read from their charters at build time; an unresolvable handle, mandate source, or cited work artifact fails the build
 - `lib/profile.mjs` — the reusable member profile component (issue #124): identity, cited mandate, team chips, scope-filtered recent work; the Shared resources page renders it today and the team page (#125) consumes it unchanged
 - `lib/teams.mjs` — the Teams page building blocks (issue #125): the switcher card/strip and the product-scoped team page pieces (level-field core roster, reviewed-by reference, history slot for #126); pure functions of the roster data, consuming `profile.mjs` unchanged
+- `lib/timeline.mjs` — the "History of work together" timeline (issue #126): a source-adapter seam plus committed-only sources (the design's `PM.md` decision log, optionally the `NOTES.md` field-test log) → product-scoped, attributed, newest-first events, and the section render the team page drops into its History slot; a drifted decision-log shape fails the build
 - `lib/model.mjs` — the per-design model bundle (entry, source, files, sections, asserts) the configurator and viewer share
 - `lib/templates.mjs` — the page shells
 - `test/` — `npm --prefix site test`; run by `./scripts/site.sh` and CI
