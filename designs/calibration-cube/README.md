@@ -16,6 +16,10 @@ own intended size.
 
 ![Turntable: chamfered bottom edges and the engraved size marker](previews/turntable.gif)
 
+![AI-styled scene: calibration-cube in motion, staged in a real-world setting](previews/lifestyle-turntable.gif)
+
+*AI-generated motion impression for general illustration only — geometry is approximate and may not exactly match the printed part, and the movement shown is illustrative, not a simulation; see the deterministic previews above and the STL for the true shape.*
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ## What you get
