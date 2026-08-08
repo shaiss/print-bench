@@ -28,6 +28,7 @@ import {
   TEAM_KEYS,
   parseProfile,
   parseTeamConf,
+  parseWorkConf,
   mandateExcerpt,
   readTeam,
 } from "../lib/team.mjs";
@@ -300,6 +301,67 @@ test("a missing people directory is quiet until a roster needs it", () => {
   }
 });
 
+test("work.conf parses its pipe manifest with the house strictness", () => {
+  const ok = parseWorkConf(
+    "# what was done\nada | 2026-08-08 | widget | Shipped the widget | designs/widget/NOTES.md # good day\n" +
+      "ada | 2026-08-07 | - | Repo-wide chore | scripts/check.sh\n"
+  );
+  assert.deepEqual(ok.problems, []);
+  assert.equal(ok.entries.length, 2);
+  assert.equal(ok.entries[0].team, "widget");
+  assert.equal(ok.entries[0].artifact, "designs/widget/NOTES.md");
+  assert.equal(ok.entries[1].team, null, "'-' means repo-wide, outside any one team");
+
+  const bad = (line) => parseWorkConf(line).problems.join("\n");
+  assert.match(bad("ada | 2026-08-08 | widget | Missing artifact\n"), /expected 5 '\|'-separated fields/);
+  assert.match(bad("Ada | 2026-08-08 | widget | Text | a.md\n"), /handle 'Ada' must match/);
+  assert.match(bad("ada | last tuesday | widget | Text | a.md\n"), /must be a real YYYY-MM-DD/);
+  assert.match(bad("ada | 2026-02-30 | widget | Text | a.md\n"), /must be a real YYYY-MM-DD/, "the regex alone would accept a day the calendar doesn't have");
+  assert.match(bad("ada | 2026-08-08 | widget |  | a.md\n"), /text and artifact must both be non-empty/);
+});
+
+test("a work entry resolves or fails the build: unknown handle, unpublished team, and a missing or escaping artifact are each errors", () => {
+  const base = {
+    "people/ada.md": HUMAN,
+    "designs/widget/widget.scad": "cube(1);\n",
+    "designs/widget/NOTES.md": "notes\n",
+  };
+  const good = fixture({
+    ...base,
+    "people/work.conf":
+      "ada | 2026-08-08 | widget | Shipped the widget | designs/widget/NOTES.md\n" +
+      "ada | 2026-08-09 | - | Repo-wide chore | people/ada.md\n",
+  });
+  try {
+    const { team, errors } = collect(good, new Set(["widget"]));
+    assert.deepEqual(errors, []);
+    const work = team.people.get("ada").work;
+    assert.deepEqual(work.map((w) => w.date), ["2026-08-09", "2026-08-08"], "entries come newest first");
+    assert.equal(work[1].team, "widget");
+  } finally {
+    rmSync(good, { recursive: true, force: true });
+  }
+
+  const cases = [
+    ["ghost | 2026-08-08 | widget | Who did this | designs/widget/NOTES.md", /'ghost', which people\/ does not register/],
+    ["ada | 2026-08-08 | retired | On a page that never renders | designs/widget/NOTES.md", /team 'retired' is not a design the site publishes/],
+    ["ada | 2026-08-08 | widget | Cites nothing real | designs/widget/gone.md", /'designs\/widget\/gone\.md', which does not exist/],
+    ["ada | 2026-08-08 | widget | Escapes the repo | ../outside.md", /must be repo-relative with no '\.\.'/],
+  ];
+  for (const [line, want] of cases) {
+    const root = fixture({ ...base, "people/work.conf": line + "\n" });
+    try {
+      const { team, errors } = collect(root, new Set(["widget"]));
+      assert.equal(errors.length, 1, `one error for: ${line}`);
+      assert.match(errors[0], /people\/work\.conf: line 1/);
+      assert.match(errors[0], want);
+      assert.deepEqual(team.people.get("ada").work, [], "a rejected entry never reaches the member");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("the real repo agrees with the team resolver", () => {
   // The same discovery build.mjs uses — not a re-derived predicate, so the
   // test cannot disagree with production about which directories are
@@ -338,4 +400,12 @@ test("the real repo agrees with the team resolver", () => {
   for (const roster of team.rosters.values()) {
     for (const m of roster.core) assert.equal(m.shared, false, "no shared member sits in a core");
   }
+
+  // The interim recent-work manifest (issue #124) resolves in full — every
+  // handle registered, every cited artifact present. Assert shape, not
+  // wording: the entries are authored data that will grow and eventually be
+  // superseded by the team timeline (#126).
+  for (const m of team.members) assert.ok(Array.isArray(m.work), `${m.handle} carries a work list`);
+  const recorded = team.members.reduce((n, m) => n + m.work.length, 0);
+  assert.ok(recorded >= 1, "the committed people/work.conf seeds at least one entry");
 });

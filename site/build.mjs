@@ -33,6 +33,7 @@ import {
   designPage,
   stylesIndexPage,
   stylePage,
+  sharedPage,
   FAVICON,
 } from "./lib/templates.mjs";
 
@@ -202,6 +203,15 @@ function main() {
 
   const rendered = [];
 
+  // The Shared resources page (issue #124): the registry's shared
+  // specialists rendered as full member profiles. Unconditional, like the
+  // designs index — the page saying "none registered yet" is truer than the
+  // nav linking a page that does not exist.
+  rendered.push({
+    path: "shared/index.html",
+    contents: sharedPage(team, { githubBase: GITHUB_BASE }),
+  });
+
   for (const design of designs) {
     const { html, headings } = renderMarkdown(design.readme, {
       repoRoot: REPO_ROOT,
@@ -339,7 +349,8 @@ function main() {
     `      ${designs.length} designs, ${styles.length} styles, every local reference resolved`
   );
   console.log(
-    `      ${team.members.length} people, ${team.rosters.size} team rosters, every handle resolved`
+    `      ${team.members.length} people, ${team.rosters.size} team rosters, ` +
+      `${team.members.reduce((n, m) => n + m.work.length, 0)} work entries, every handle resolved`
   );
   console.log(
     `      ${models} model bundles, OpenSCAD runtime ` +
