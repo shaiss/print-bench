@@ -22,7 +22,7 @@ import { readDesigns } from "../lib/content.mjs";
 import { readTeam } from "../lib/team.mjs";
 import { readTimeline } from "../lib/timeline.mjs";
 import { buildModel } from "../lib/model.mjs";
-import { designPage, peoplePage } from "../lib/templates.mjs";
+import { designPage, peoplePage, redirectPage } from "../lib/templates.mjs";
 import {
   contributorCard,
   contributorRow,
@@ -187,6 +187,13 @@ test("REAL: the People page lists everyone with profiles, shared specialists fol
   assert.match(html, /Mandate/);
   // High-level product involvement: profiles carry team chips to product pages.
   assert.match(html, /href="\/designs\/calibration-cube\/"/);
+});
+
+test("redirectPage forwards a retired route to /people/ (both /shared/ and /teams/)", () => {
+  const html = redirectPage("/people/", "People");
+  assert.match(html, /http-equiv="refresh" content="0; url=\/people\/"/);
+  assert.match(html, /<link rel="canonical" href="\/people\/">/);
+  assert.match(html, /has moved to <a href="\/people\/">People<\/a>/);
 });
 
 test("REAL: nav says People and no longer Teams or Shared resources", () => {

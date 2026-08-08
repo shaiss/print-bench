@@ -41,7 +41,7 @@ import {
   stylesIndexPage,
   stylePage,
   peoplePage,
-  sharedRedirect,
+  redirectPage,
   FAVICON,
 } from "./lib/templates.mjs";
 
@@ -265,11 +265,15 @@ async function main() {
     contents: peoplePage(team, { githubBase: GITHUB_BASE }),
   });
 
-  // Shared resources are folded into People; keep a redirect at the old route
-  // so inbound links survive the move.
+  // Shared resources and the Teams page were both folded into People; keep a
+  // redirect at each old route so inbound links and bookmarks survive the move.
   rendered.push({
     path: "shared/index.html",
-    contents: sharedRedirect(),
+    contents: redirectPage("/people/", "People"),
+  });
+  rendered.push({
+    path: "teams/index.html",
+    contents: redirectPage("/people/", "People"),
   });
 
   for (const design of designs) {

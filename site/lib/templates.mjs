@@ -494,21 +494,22 @@ ${cards || '<p class="muted">No one registered yet.</p>'}
 }
 
 /**
- * A tiny redirect kept at the old /shared/ route so inbound links survive the
- * fold of Shared resources into the People page. No nav, no chrome — it exists
- * only to forward.
+ * A tiny redirect page kept at a retired route so inbound links and bookmarks
+ * survive a move. No nav, no chrome — it exists only to forward. Used for both
+ * `/shared/` and `/teams/`, the two routes the revised IA folded into
+ * `/people/`. `to` and `label` are trusted call-site literals.
  */
-export function sharedRedirect() {
+export function redirectPage(to, label) {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=/people/">
-<link rel="canonical" href="/people/">
-<title>Moved to People — ${SITE_NAME}</title>
+<meta http-equiv="refresh" content="0; url=${to}">
+<link rel="canonical" href="${to}">
+<title>Moved to ${label} — ${SITE_NAME}</title>
 </head>
 <body>
-<p>Shared resources are now part of <a href="/people/">People</a>.</p>
+<p>This page has moved to <a href="${to}">${label}</a>.</p>
 </body>
 </html>
 `;
