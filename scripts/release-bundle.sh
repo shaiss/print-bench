@@ -49,8 +49,22 @@ read -ra OSC_ARGS <<<"${OPENSCAD_ARGS:-}"
 DESIGNS="${RELEASE_BUNDLE_DESIGNS_DIR:-designs}"
 BUILD="${RELEASE_BUNDLE_BUILD_DIR:-build}"
 
+die() { echo "release-bundle: $*" >&2; exit 2; }
+
 usage() {
   sed -n '2,20p' "$SELF" | sed 's/^# \{0,1\}//'
+}
+
+# Path-safety validation before any filesystem op. A design name flows into
+# designs/<name>/ paths and a version into build/release/<name>-<version> —
+# including the `rm -rf` below — and the version is a free-form workflow_dispatch
+# input, so both are validated first (matching field-test.sh's validate_design).
+# Without it a version like "v1/../.." would escape build/release, and one
+# containing "/" would nest the .zip so the workflow's build/release/*.zip glob
+# misses it (Qodo review on #140).
+valid_name() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]*$ ]]; }
+valid_version() {
+  [[ -n "$1" && "$1" != */* && "$1" != *..* ]] && [[ ! "$1" =~ [[:space:]] ]]
 }
 
 render_part() {   # render_part <name> <part-or-empty> <out-stl>
@@ -96,10 +110,18 @@ def parse_print_settings(path):
             break
         if not in_sec:
             continue
-        m = re.match(r"^\s*[-*]\s+\*\*(.+?):\*\*\s*(.*)$", ln)
-        if m:
-            key = re.sub(r"[^a-z0-9]+", "_", m.group(1).strip().lower()).strip("_")
-            settings[key] = m.group(2).strip()
+        # Bold-led bullet whose bold span contains a colon. Tolerates both
+        # `- **Key:** value` (colon just inside the closing **) and
+        # `- **Key: value phrase.** trailing` (READMEs that bold the whole
+        # phrase, e.g. sushi-battleship's `- **Supports: OFF — hard
+        # requirement.**`). The key is the text before the first colon; the
+        # value is whatever follows it, both inside and after the bold span
+        # (Vercel review on #140).
+        m = re.match(r"^\s*[-*]\s+\*\*(.+?)\*\*\s*(.*)$", ln)
+        if m and ":" in m.group(1):
+            head, tail = m.group(1).split(":", 1)
+            key = re.sub(r"[^a-z0-9]+", "_", head.strip().lower()).strip("_")
+            settings[key] = (tail.strip() + " " + m.group(2).strip()).strip()
             cur = key
         elif cur and ln.strip() and not re.match(r"^\s*([-*]|#)", ln):
             settings[cur] = (settings[cur] + " " + ln.strip()).strip()  # wrapped line
@@ -143,6 +165,7 @@ PY
 
 bundle_one() {    # bundle_one <name> <version>
   local name="$1" version="$2"
+  valid_name "$name" || die "invalid design name: '$name' (expected ^[a-z0-9][a-z0-9-]*\$)"
   local ddir="${DESIGNS}/${name}"
   local src="${ddir}/${name}.scad"
   if [[ ! -f "$src" ]]; then
@@ -227,7 +250,10 @@ run_selftest() {
     printf -- '- **Layer height:** 0.2 mm (fixture value that wraps\n'
     printf '  onto a second line)\n'
     printf -- '- **Supports:** none needed\n'
-    printf -- '- **Orientation:** flat face down as modeled\n\n'
+    printf -- '- **Orientation:** flat face down as modeled\n'
+    # Whole-phrase-bold bullet: the colon sits inside the bold span, not just
+    # before the closing ** (Vercel review on #140). Must still be parsed.
+    printf -- '- **Bed adhesion: brim, 5 mm.**\n\n'
     printf '## Parameters\n\n- `wall` — wall thickness (mm)\n'
   } > "$d/gizmo/README.md"
   printf 'solid base\nendsolid base\n' > "$b/gizmo-base.stl"
@@ -279,9 +305,24 @@ if ps.get("orientation") != "flat face down as modeled": bad(f'orientation={ps.g
 # the wrapped bullet must be folded into one value
 if ps.get("layer_height") != "0.2 mm (fixture value that wraps onto a second line)":
     bad(f'layer_height not folded: {ps.get("layer_height")!r}')
+# the whole-phrase-bold bullet (colon inside the bold span) must be parsed
+if ps.get("bed_adhesion") != "brim, 5 mm.":
+    bad(f'whole-phrase-bold bullet dropped: bed_adhesion={ps.get("bed_adhesion")!r}')
 sys.exit(0 if ok else 1)
 PY
   fi
+
+  # Path-safety: a bad version or design name must be refused before any
+  # filesystem op — no output dir, nonzero exit (Qodo review on #140).
+  local rc=0
+  RELEASE_BUNDLE_DESIGNS_DIR="$d" RELEASE_BUNDLE_BUILD_DIR="$b" \
+    bash "$SELF" gizmo --version 'v9/../../etc' >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]] || fail_msg "a version with path separators was accepted"
+  [[ ! -e "$b/release/gizmo-v9" ]] || fail_msg "a bad version wrote an output path"
+  rc=0
+  RELEASE_BUNDLE_DESIGNS_DIR="$d" RELEASE_BUNDLE_BUILD_DIR="$b" \
+    bash "$SELF" '../evil' --version v9.9 >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]] || fail_msg "a design name with traversal was accepted"
 
   # Archive freeze: bundling an archived design writes nothing and skips.
   local out
@@ -293,7 +334,7 @@ PY
   grep -q "archived" <<<"$out" || fail_msg "archived skip printed no notice: $out"
 
   if [[ "$pass" == 1 ]]; then
-    echo "ok    release-bundle --selftest: manifest, checksums, print settings, zip and archive-skip all hold"
+    echo "ok    release-bundle --selftest: manifest, checksums, print settings (incl. whole-phrase-bold), zip, archive-skip and path-safety all hold"
     return 0
   fi
   echo "FAIL  release-bundle --selftest: a mechanism check did not hold"
@@ -319,6 +360,8 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+valid_version "$VERSION" || die "invalid version: '$VERSION' (no '/', '..', or whitespace)"
 
 mkdir -p "${BUILD}/release"
 
