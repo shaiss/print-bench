@@ -315,7 +315,8 @@ test("work.conf parses its pipe manifest with the house strictness", () => {
   const bad = (line) => parseWorkConf(line).problems.join("\n");
   assert.match(bad("ada | 2026-08-08 | widget | Missing artifact\n"), /expected 5 '\|'-separated fields/);
   assert.match(bad("Ada | 2026-08-08 | widget | Text | a.md\n"), /handle 'Ada' must match/);
-  assert.match(bad("ada | last tuesday | widget | Text | a.md\n"), /must be YYYY-MM-DD/);
+  assert.match(bad("ada | last tuesday | widget | Text | a.md\n"), /must be a real YYYY-MM-DD/);
+  assert.match(bad("ada | 2026-02-30 | widget | Text | a.md\n"), /must be a real YYYY-MM-DD/, "the regex alone would accept a day the calendar doesn't have");
   assert.match(bad("ada | 2026-08-08 | widget |  | a.md\n"), /text and artifact must both be non-empty/);
 });
 

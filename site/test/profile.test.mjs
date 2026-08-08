@@ -104,6 +104,18 @@ test("a member with nothing recorded gets an honest empty state, and no teams me
   assert.doesNotMatch(html, /class="profile-teams"/);
 });
 
+test("source paths are segment-encoded in hrefs, so a quote or fragment character cannot break the attribute", () => {
+  const member = {
+    ...SPECIALIST,
+    mandate: { ...SPECIALIST.mandate, source: 'docs/ch"arter.md' },
+    work: [{ date: "2026-08-08", team: null, text: "Odd path", artifact: "audits/a#1/x.png" }],
+  };
+  const html = memberProfile(member, { scope: null, teams: [], githubBase: GH });
+  assert.match(html, new RegExp(`href="${GH}/docs/ch%22arter\\.md"`));
+  assert.match(html, new RegExp(`href="${GH}/audits/a%231/x\\.png"`));
+  assert.doesNotMatch(html, /href="[^"]*ch"arter/);
+});
+
 test("memberTeams reads a member's teams off the rosters, in roster order", () => {
   const rosters = new Map([
     ["widget", { design: "widget", core: [HUMAN, SPECIALIST] }],

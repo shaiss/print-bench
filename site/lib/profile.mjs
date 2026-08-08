@@ -36,6 +36,15 @@ function citeSource(source) {
   return source.endsWith("/SKILL.md") ? source.slice(0, -"/SKILL.md".length) : source;
 }
 
+/**
+ * A repo path dropped into an href, each segment URL-encoded — the same
+ * treatment templates.mjs gives design names, so a quote or fragment
+ * character in a committed filename can never break out of the attribute.
+ */
+function sourceHref(githubBase, source) {
+  return `${githubBase}/${source.split("/").map(encodeURIComponent).join("/")}`;
+}
+
 function workItem(entry, { scoped, githubBase }) {
   // In the across-teams view each entry says which team it happened on; in
   // a team-scoped view that would repeat the heading.
@@ -46,7 +55,7 @@ function workItem(entry, { scoped, githubBase }) {
   return `<li>
       <span class="work-date">${escapeHtml(entry.date)}</span>
       <span class="work-text">${escapeHtml(entry.text)}${teamTag}
-        <a class="work-artifact" href="${githubBase}/${entry.artifact}" rel="noopener noreferrer"><code>${escapeHtml(entry.artifact)}</code></a></span>
+        <a class="work-artifact" href="${sourceHref(githubBase, entry.artifact)}" rel="noopener noreferrer"><code>${escapeHtml(entry.artifact)}</code></a></span>
     </li>`;
 }
 
@@ -107,7 +116,7 @@ ${work.map((w) => workItem(w, { scoped, githubBase })).join("\n")}
     <h4>Mandate &amp; instructions</h4>
     ${mandateSummary}
     <p>${escapeHtml(member.mandate.text)}</p>
-    <p class="mandate-source muted">From <a href="${githubBase}/${member.mandate.source}" rel="noopener noreferrer"><code>${escapeHtml(citeSource(member.mandate.source))}</code></a></p>
+    <p class="mandate-source muted">From <a href="${sourceHref(githubBase, member.mandate.source)}" rel="noopener noreferrer"><code>${escapeHtml(citeSource(member.mandate.source))}</code></a></p>
   </section>
   ${teamChips}
   <section class="profile-work">

@@ -199,8 +199,11 @@ export function parseWorkConf(text) {
       problems.push(`line ${i + 1}: handle '${handle}' must match ${HANDLE_RE}`);
       continue;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      problems.push(`line ${i + 1}: date '${date}' must be YYYY-MM-DD`);
+    // The regex alone would accept 2026-02-30; the UTC round-trip rejects
+    // any date the calendar doesn't have.
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
+    if (!parsed || Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== date) {
+      problems.push(`line ${i + 1}: date '${date}' must be a real YYYY-MM-DD date`);
       continue;
     }
     if (!entryText || !artifact) {
