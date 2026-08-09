@@ -149,6 +149,10 @@ merges. The full workflow and conventions live in [CLAUDE.md](CLAUDE.md).
   - `printer-conf-check.sh` — proves the `printer.conf` mechanism reads the
     generic default when nothing is measured and the profile's value when one
     is, reaching the exported geometry (issue #101)
+  - `chunker-perms-check.sh` — proves the chunker's deny backstop
+    (`.claude/chunker-settings.json`) still neutralizes every dangerous tool
+    allow it would otherwise inherit from `.claude/settings.json`, which
+    claude-code-action loads additively via `settingSources=project`
   - `gate.sh` — render printable parts and gate the STLs with printcheck;
     `--slice` adds a PrusaSlicer test-slice (this is what CI enforces)
   - `gate-summary.py` — turns a gate log into the CI results table
