@@ -28,8 +28,7 @@
       "Bash(python -m pytest:*)",
       "Bash(python3 -m pytest:*)",
       "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)",
-      "Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)",
-      "Write"
+      "Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)"
     ]
   },
   "hooks": {

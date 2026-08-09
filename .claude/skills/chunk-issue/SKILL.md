@@ -37,7 +37,7 @@ This skill runs the same attended (a human invoked it) or unattended (the
    - **Open sub-issues exist but no `🧩 CHUNKED` comment** → a prior run filed
      children and died before finishing. **Do not re-file and do not post
      `🧩 CHUNKED`** (a partial split is not a confirmed one). Remove the label
-     (`remove-label`), post a durable comment (`comment --body-file`) listing the
+     (`remove-label`), post a durable comment (`comment --body`) listing the
      existing children and flagging the partial state for human reconciliation,
      and stop.
    This early-exit and §4 are the paths that must clear the label; together they
@@ -74,23 +74,25 @@ Produce an ordered set of sub-issues where:
 
 **Every GitHub read and write in this skill goes through one committed wrapper,
 `.claude/skills/chunk-issue/chunk-helper.sh`.** The run allow-lists *only* that
-script (plus `Read`/`Grep`/`Glob`/`Write` for local files) — **not** a general
-shell — because it acts on untrusted issue text while the job holds provider-key
-secrets, and a general shell would turn prompt-injection into arbitrary
-commands. Do not call `gh`, `gh api`, `git`, or any other shell directly; those
-are denied. Run `.claude/skills/chunk-issue/chunk-helper.sh --help` for the exact
-verbs: `read-thread`, `list-children`, `create-child`, `comment`, `add-label`,
-`remove-label`, `ensure-label`. Multi-line issue bodies: write them to a temp
-file with the `Write` tool, then pass `--body-file`.
+script plus the **read-only** file tools (`Read`/`Grep`/`Glob`) — **not** a
+general shell, and **not** `Write` — because it acts on untrusted issue text
+while the job holds provider-key secrets: a general shell (or a file-write tool
+that could overwrite this very wrapper and then run it) would turn
+prompt-injection into arbitrary commands. Do not call `gh`, `gh api`, `git`, or
+any other shell directly, and do not try to write files; those are denied. Run
+`.claude/skills/chunk-issue/chunk-helper.sh --help` for the exact verbs:
+`read-thread`, `list-children`, `create-child`, `comment`, `add-label`,
+`remove-label`, `ensure-label`. Issue/comment bodies are passed **inline** via
+`--body` (there is no `--body-file`, by design — no file to author or read).
 
 ## 3. File the sub-issues
 
-For each piece, in dependency order, create-and-link it in one call — write the
-body to a temp file first, then:
+For each piece, in dependency order, create-and-link it in one call, passing the
+body from §2 inline:
 
 ```bash
 .claude/skills/chunk-issue/chunk-helper.sh create-child \
-  --parent <parent-number> --title "<title>" --body-file /tmp/child-1.md \
+  --parent <parent-number> --title "<title>" --body "<the sub-issue body>" \
   --label enhancement
 ```
 
@@ -118,9 +120,9 @@ only re-decline wastes a burn.
   own selector will not pick it again. This is the idempotency latch — do it even
   if you filed nothing, when §5 applies.
 - Post one **`🧩 CHUNKED`** comment on the parent (`chunk-helper.sh comment
-  <parent> --body-file /tmp/chunked.md`) listing every sub-issue you filed (with
-  numbers), which are armed vs. left for a human, and the assertion that together
-  they close the parent. This comment is the durable record.
+  <parent> --body "<summary>"`) listing every sub-issue you filed (with numbers),
+  which are armed vs. left for a human, and the assertion that together they
+  close the parent. This comment is the durable record.
 - **Leave the parent open** as the tracking epic (its sub-issues close it as they
   land). Do not close it yourself — that is a human's call once the children
   merge.

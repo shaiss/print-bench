@@ -214,19 +214,23 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          # Grant ONLY the tools /chunk-issue needs to write, through a single
-          # narrow surface. The skill drives every GitHub write via one committed
+          # Grant ONLY the tools /chunk-issue needs, through a single narrow
+          # surface. The skill drives every GitHub read/write via one committed
           # wrapper, .claude/skills/chunk-issue/chunk-helper.sh (create issue +
           # link native sub-issue, comment, add/remove label, ensure label), so
-          # the allow-list is that wrapper plus file read/write for issue bodies.
-          # It is NOT unrestricted `Bash`: the run reads untrusted issue text
-          # while holding provider-key secrets, so a general shell would turn
-          # prompt-injection into arbitrary commands / key exfiltration (the
-          # wrapper can only do the fixed gh operations it defines). The
-          # quotes protect the `(...)` from the action's arg parser; the
-          # duplicate allow in .claude/settings.json is a parser-independent
-          # backstop. The job's issues:write token still bounds the effect.
-          claude_args: --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob,Write"
+          # the allow-list is that wrapper plus the READ-ONLY file tools. It is
+          # NOT unrestricted `Bash`, and deliberately does NOT grant `Write`: the
+          # run reads untrusted issue text while holding provider-key secrets, so
+          # a general shell — or a file-write tool that could overwrite this very
+          # wrapper and then run it — would turn prompt-injection into arbitrary
+          # commands / key exfiltration. With no Write and only the wrapper as
+          # shell, the agent cannot mutate any file, so the wrapper's fixed gh
+          # operations are the whole surface (issue bodies are passed inline, not
+          # via a file). The quotes protect the `(...)` from the action's arg
+          # parser; the duplicate allow in .claude/settings.json is a
+          # parser-independent backstop. The job's issues:write token still
+          # bounds the effect.
+          claude_args: --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
           prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
 
       - name: Run via Z.AI (GLM)
@@ -255,7 +259,7 @@ jobs:
           github_token: ${{ github.token }}
           # Same narrow tool grant as the Anthropic step (see its comment); the
           # --model flag stays first.
-          claude_args: --model glm-5.2 --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob,Write"
+          claude_args: --model glm-5.2 --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
           prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
 
       - name: Explain a skipped agentic run
