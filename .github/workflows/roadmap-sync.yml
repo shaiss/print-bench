@@ -63,12 +63,12 @@ jobs:
               core.setOutput('act', 'false');
               return;
             }
-            // Set the initial Stage only when the issue is first opened; on a
-            // later `labeled` event just ensure it is on the board, so we never
-            // clobber a Stage a human moved the card to.
+            // Add to the board; `add-item --stage-if-new Backlog` sets the
+            // initial Stage only when the item is newly created, so the Stage is
+            // bound to item creation — not to which of a racing opened/labeled
+            // pair runs — and a re-add never clobbers a card a human moved.
             core.setOutput('act', 'true');
             core.setOutput('url', context.payload.issue.html_url);
-            core.setOutput('stage', context.payload.action === 'opened' ? 'Backlog' : '');
 
       - name: Check out trusted tooling
         if: steps.guard.outputs.act == 'true'
@@ -83,11 +83,8 @@ jobs:
           # then skips `gh auth refresh` and relies on this token's project scope.
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           URL: ${{ steps.guard.outputs.url }}
-          STAGE: ${{ steps.guard.outputs.stage }}
         run: |
           set -euo pipefail
-          if [ -n "$STAGE" ]; then
-            scripts/gh-project.sh add-item "$URL" --stage "$STAGE" | bash
-          else
-            scripts/gh-project.sh add-item "$URL" | bash
-          fi
+          # --stage-if-new: place a first-added issue at Backlog, but never reset
+          # the Stage of a card already on the board (e.g. one a human moved).
+          scripts/gh-project.sh add-item "$URL" --stage-if-new Backlog | bash

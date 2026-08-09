@@ -89,9 +89,10 @@ building block the chunker/intake wiring calls in slice 2 part 2.
 - **Slice 2 part 2 (this):** `.github/workflows/roadmap-sync.yml` — on an
   `issues` event, adds any issue carrying an autonomy-loop label (`autonomy-ok` /
   `design-brief` / `declined-too-big` / `needs-decision`) to the board via
-  `add-item`, at `Stage: Backlog` on first open. Gated on `PROJECT_TOKEN` (no
-  token → logs a notice and does nothing). It sets Stage **only** on `opened`, so
-  it never clobbers a card a human later moved.
+  `add-item --stage-if-new Backlog`. Gated on `PROJECT_TOKEN` (no token → logs a
+  notice and does nothing). The initial `Stage: Backlog` is bound to **item
+  creation**, not to which event won the race, so a re-add or an out-of-order
+  opened/labeled run never clobbers a card a human moved.
 - **Slice 2 part 3+ (follow-ups on #148):** story-point estimation on the board
   (map the chunker's one-PR sizing → points), the HITL `needs-decision` gate as a
   board column, and the Roadmap view + milestones.
