@@ -65,8 +65,16 @@ EOF
   cat <<'EOF'
 
 # 0. `gh project` needs the `project` scope (not granted at login; not covered
-#    by a contents:write PAT). No-op if the token already has it.
-gh auth refresh -s project
+#    by a contents:write PAT). `gh auth refresh` manages STORED credentials and
+#    ERRORS on a token supplied via GH_TOKEN/GITHUB_TOKEN ("environment variable
+#    is being used for authentication") — which under `set -e` would abort this
+#    recipe. So only refresh stored creds; with an env-var token (CI/automation)
+#    the `project` scope must already be on the token itself.
+if [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; then
+  echo "auth: using a token from the environment — ensure it carries the 'project' scope" >&2
+else
+  gh auth refresh -s project
+fi
 
 # 1. Board — create only if one with this title does not already exist.
 NUM=$(gh project list --owner "$OWNER" -L 200 --format json \
@@ -126,6 +134,9 @@ selftest() {
   grep -qF 'Backlog,Ready,In progress,In review,Done' <<<"$out" \
     || die "selftest: stage options missing"
   grep -qF 'gh auth refresh -s project' <<<"$out" || die "selftest: project-scope refresh missing"
+  # The refresh must be guarded so an env-var token (CI/automation) doesn't abort
+  # the recipe under set -e (Vercel agent review on #164).
+  grep -qF 'GH_TOKEN:-' <<<"$out" || die "selftest: env-token auth guard missing"
   # Idempotency guards are present (create-if-absent, not unconditional create).
   grep -qF 'if [ -z "$NUM" ]' <<<"$out" || die "selftest: board create is not guarded (not idempotent)"
   grep -qF 'field_absent' <<<"$out"     || die "selftest: field creates are not guarded (not idempotent)"
