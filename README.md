@@ -239,6 +239,11 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     checksums and the README's machine-readable print settings + a zip); the
     build half of the versioned-download UX (issue #102), driven by the
     "Release bundles" workflow
+  - `gh-project.sh` — emits the repeatable `gh` recipe that provisions the
+    autonomy roadmap board (GitHub Projects v2); the board schema is a spec at
+    the top of the script and the board is created by running the recipe, since
+    the automation can't create a board here (issue #148, see
+    [docs/roadmap-board.md](docs/roadmap-board.md))
 - `site/` — the static product site built from the designs, styles and
   previews already committed here, and deployed on Vercel — see its
   [README](site/README.md)
