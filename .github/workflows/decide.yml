@@ -219,14 +219,23 @@ jobs:
             const want = VERDICT === 'approved' ? 'decision-approved' : 'decision-rejected';
             await ensureLabel('decision-approved', '0e8a16', 'A /decide human decision resolved yes');
             await ensureLabel('decision-rejected', 'b60205', 'A /decide human decision resolved no');
+            // Fail CLOSED: add the verdict label BEFORE removing needs-decision.
+            // The two calls are not atomic, and the selector's durable pause keys
+            // solely on `needs-decision`. If we removed first and the add then
+            // failed (a transient 5xx), the issue would carry NEITHER label and
+            // un-pause with no verdict recorded — the gate failing OPEN. In this
+            // order a failed add leaves needs-decision in place (still paused; a
+            // /decide re-run heals it), and a failed remove leaves BOTH labels
+            // (the selector still excludes on needs-decision) — both keep the
+            // pipeline paused rather than resuming with no decision.
+            await github.rest.issues.addLabels({
+              ...context.repo, issue_number: context.issue.number, labels: [want],
+            });
             try {
               await github.rest.issues.removeLabel({
                 ...context.repo, issue_number: context.issue.number, name: 'needs-decision',
               });
             } catch (e) { if (e.status !== 404) throw e; }
-            await github.rest.issues.addLabels({
-              ...context.repo, issue_number: context.issue.number, labels: [want],
-            });
             await react('+1');
 
             const head = `\`${DECISION_ID}\`: recorded **${VERDICT}** and labelled \`${want}\`.`;

@@ -125,6 +125,11 @@ a mergeable PR are documented in [`actions-security.md`](actions-security.md)
 - **Authorized by real permission**, never `author_association`.
 - **Committed source of truth.** The verdict lives in a label (state) and a
   git-tracked ledger (audit) — reproducible, diffable, carried by a clone.
+- **The label flip fails closed.** `/decide` adds the verdict label *before*
+  removing `needs-decision`. The two calls are not atomic and the selector's
+  durable pause keys only on `needs-decision`, so this order guarantees a
+  partial failure leaves the issue **still paused** (never un-paused with no
+  verdict), which a `/decide` re-run then heals.
 - **GITHUB_TOKEN, not a PAT.** A decision-ledger commit must *not* re-trigger CI
   (the telemetry-commit reason: a re-triggering commit on the default branch
   would gate the whole catalog on every decision); the async selector re-reads
