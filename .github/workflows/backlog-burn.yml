@@ -1,10 +1,10 @@
 name: Backlog burn (scheduled /ship-issue)
 
-# The scheduled heartbeat for /ship-issue (issue #95). Four times a day it
-# picks ONE open issue and runs /ship-issue on it unattended, leaving a draft
-# PR for human review. The skill already runs the same attended or unattended
-# and declines when an issue needs a human's taste — this workflow just gives
-# it a cadence.
+# The scheduled heartbeat for /ship-issue (issue #95). On a fixed cadence (the
+# `cron` literal below — hourly as currently configured) it picks ONE open
+# issue and runs /ship-issue on it unattended, leaving a draft PR for human
+# review. The skill already runs the same attended or unattended and declines
+# when an issue needs a human's taste — this workflow just gives it a cadence.
 #
 # WHERE THE CONFIG LIVES (deliberate split):
 #   * Policy → committed, git-tracked: .github/backlog-burn.conf holds
@@ -37,17 +37,20 @@ name: Backlog burn (scheduled /ship-issue)
 
 on:
   schedule:
-    # 4× per day, every 6 hours at :17 past the hour. An off-peak minute
-    # (not :00) to avoid Actions scheduler congestion. Cron must be a
-    # literal — Actions evaluates no files or variables for on.schedule —
-    # so change the cadence by editing this line in a one-line PR, e.g.:
-    #   daily once:   '17 6 * * *'
+    # Hourly, at :17 past the hour. An off-peak minute (not :00) to avoid
+    # Actions scheduler congestion. Cron must be a literal — Actions evaluates
+    # no files or variables for on.schedule — so change the cadence by editing
+    # this line in a one-line PR, or via `/backlog-burn set cadence <preset>`
+    # which patches it and .github/backlog-burn.conf together. Presets:
+    #   hourly:       '17 * * * *'
+    #   4× per day:   '17 0,6,12,18 * * *'
     #   twice daily:  '17 6,18 * * *'
+    #   daily once:   '17 6 * * *'
     #   weekly:       '17 6 * * 1'
     # The two-key guard (BACKLOG_BURN_ENABLED + committed `enabled: true`)
     # ensures the schedule is harmless until deliberately armed, so firing
     # more often is safe: idle firings cost nothing.
-    - cron: '17 0,6,12,18 * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:

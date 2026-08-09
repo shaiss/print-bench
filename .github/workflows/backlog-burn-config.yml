@@ -12,7 +12,7 @@ name: Backlog-burn config update
 #   /backlog-burn set enabled true|false
 #   /backlog-burn set label <label-name>
 #   /backlog-burn set provider anthropic|zai
-#   /backlog-burn set cadence 4x|2x|daily|weekly|<raw-5-field-cron>
+#   /backlog-burn set cadence hourly|4x|2x|daily|weekly|<raw-5-field-cron>
 #
 # For `cadence`, both .github/backlog-burn.conf and the cron literal in
 # .github/workflows/backlog-burn.yml are patched in one commit so they stay
@@ -131,7 +131,7 @@ jobs:
                   + '/backlog-burn set enabled true|false\n'
                   + '/backlog-burn set label <label-name>\n'
                   + '/backlog-burn set provider anthropic|zai\n'
-                  + '/backlog-burn set cadence 4x|2x|daily|weekly|<cron>\n'
+                  + '/backlog-burn set cadence hourly|4x|2x|daily|weekly|<cron>\n'
                   + '```'
                 );
                 core.setOutput('valid', 'false');
