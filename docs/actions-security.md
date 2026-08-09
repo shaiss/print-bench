@@ -32,6 +32,7 @@ Every workflow in `.github/workflows/` that has a `workflow_dispatch` trigger **
 | `chunker.yml` | schedule, `workflow_dispatch` | issues (only; no contents/pull-requests write) | `ANTHROPIC_API_KEY`, `ZAI_KEY` | `CHUNKER_ENABLED` + committed `enabled:` | pinned to `default_branch` |
 | `lifestyle-shot.yml` | push (`designs/*/lifestyle.conf`), `workflow_dispatch` | contents, pull-requests | `GITHUB_TOKEN`, `ZAI_KEY` | none — gated on `ZAI_KEY` presence | unpinned |
 | `lifestyle-clip.yml` | push (`designs/*/motion.conf`), `workflow_dispatch` | contents, pull-requests (job-level) | `GITHUB_TOKEN`, `ZAI_KEY` | none — gated on `ZAI_KEY` presence | unpinned |
+| `avatar.yml` | `workflow_dispatch` | contents, pull-requests | `GITHUB_TOKEN` | none — inputs shape-validated, draft PR only | unpinned |
 | `backlog-burn-config.yml` | `issue_comment`, `workflow_dispatch` | issues, pull-requests | `REGEN_TOKEN` | none | trusted base-branch tooling only (see note) |
 
 Notes:

@@ -15,7 +15,22 @@
 // entry cites an artifact the reader proved exists. Team chips link to the
 // team's product page. No avatars: initials monograms only (#122 non-goal).
 
+import { avatarConfig } from "./avatars.mjs";
 import { escapeHtml } from "./markdown.mjs";
+
+/**
+ * The member's identity mark: the committed DiceBear avatar where one
+ * exists (readTeam sets `avatar` only after proving the file is there),
+ * the kind-coded initials monogram otherwise. Both live in the same
+ * .monogram box, so every caller (profile, contributor card, timeline
+ * attribution) renders either without caring which.
+ */
+export function identityMark(member) {
+  if (member.avatar) {
+    return `<img class="monogram monogram-${member.kind}" src="${escapeHtml(member.avatar)}" alt="" width="46" height="46">`;
+  }
+  return `<span class="monogram monogram-${member.kind}" aria-hidden="true">${escapeHtml(member.initials)}</span>`;
+}
 
 /** The design names whose roster lists this member, in roster order. */
 export function memberTeams(member, rosters) {
@@ -100,9 +115,22 @@ ${work.map((w) => workItem(w, { scoped, githubBase })).join("\n")}
     </ul>`
     : `<p class="work-empty muted">Nothing recorded yet.</p>`;
 
+  // The avatar studio's hook (People page only): the identity mark wrapped in
+  // a slot carrying the member's effective committed config, plus the re-roll
+  // glyph. The studio is browser-local — a re-roll changes this visitor's
+  // view (localStorage), and the panel shows the header lines whose commit
+  // makes it everyone's. Progressive enhancement: site.js reveals the button.
+  const { style, seed } = avatarConfig(member);
+  const avatarSlot = `<span class="avatar-slot" data-avatar-slot data-handle="${escapeHtml(member.handle)}" data-kind="${escapeHtml(member.kind)}" data-style="${escapeHtml(style)}" data-seed="${escapeHtml(seed)}">
+      ${identityMark(member)}
+      <button class="avatar-reroll" type="button" data-avatar-reroll hidden
+        title="Re-roll this avatar — changes your view only"
+        aria-label="Re-roll ${escapeHtml(member.name)}'s avatar (your view only)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
+    </span>`;
+
   return `<article class="profile" id="profile-${escapeHtml(member.handle)}">
   <header class="profile-head">
-    <span class="monogram monogram-${member.kind}" aria-hidden="true">${escapeHtml(member.initials)}</span>
+    ${avatarSlot}
     <div class="profile-id">
       <h3 class="profile-name">${escapeHtml(member.name)} <code class="profile-handle">${escapeHtml(member.handle)}</code></h3>
       <p class="profile-role">${escapeHtml(member.role)}</p>

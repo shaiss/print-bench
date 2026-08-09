@@ -5,9 +5,23 @@
   "description": "Static product site generator for the designs in this repo",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "avatars": "node avatars.mjs"
   },
   "dependencies": {
+    "@dicebear/adventurer": "9.4.2",
+    "@dicebear/avataaars": "9.4.2",
+    "@dicebear/bottts": "9.4.2",
+    "@dicebear/bottts-neutral": "9.4.2",
+    "@dicebear/core": "9.4.3",
+    "@dicebear/identicon": "9.4.2",
+    "@dicebear/lorelei": "9.4.2",
+    "@dicebear/micah": "9.4.2",
+    "@dicebear/notionists": "9.4.2",
+    "@dicebear/open-peeps": "9.4.2",
+    "@dicebear/rings": "9.4.2",
+    "@dicebear/shapes": "9.4.2",
+    "@dicebear/thumbs": "9.4.2",
     "dejavu-fonts-ttf": "^2.37.3",
     "marked": "^16.4.0",
     "openscad-wasm": "^0.0.4",

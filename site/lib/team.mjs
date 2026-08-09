@@ -52,8 +52,20 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
+import { styleProblem } from "./avatars.mjs";
+
 /** The only keys a profile header may carry. */
-export const PROFILE_KEYS = ["name", "kind", "role", "initials", "mandate", "shared", "github"];
+export const PROFILE_KEYS = [
+  "name",
+  "kind",
+  "role",
+  "initials",
+  "mandate",
+  "shared",
+  "github",
+  "avatar-style",
+  "avatar-seed",
+];
 
 /** A GitHub login: alphanumerics and single hyphens, 1–39 chars. */
 const GITHUB_LOGIN_RE = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
@@ -117,7 +129,7 @@ function parseKeyValueLines(lines, keys, base) {
 export function parseProfile(text) {
   const problems = [];
   const lines = text.split("\n");
-  const header = { name: null, kind: null, role: null, initials: null, mandate: null, shared: false, github: null };
+  const header = { name: null, kind: null, role: null, initials: null, mandate: null, shared: false, github: null, avatarStyle: null, avatarSeed: null };
 
   if (lines[0]?.trim() !== "---") {
     problems.push("does not open with a '---' header fence");
@@ -166,6 +178,19 @@ export function parseProfile(text) {
     if (GITHUB_LOGIN_RE.test(github.value)) header.github = github.value.toLowerCase();
     else problems.push(`github '${github.value}' is not a valid GitHub login`);
   }
+
+  // Optional avatar choice (the site-wireframes avatar studio): the DiceBear
+  // style and seed the member's committed SVG is generated from. The style is
+  // validated against the curated set for the member's kind — an off-list
+  // style is a loud problem, not a silently-defaulted value.
+  const avatarStyle = seen.get("avatar-style");
+  if (avatarStyle) {
+    const problem = header.kind ? styleProblem(avatarStyle.value, header.kind) : null;
+    if (problem) problems.push(problem);
+    else header.avatarStyle = avatarStyle.value;
+  }
+  const avatarSeed = seen.get("avatar-seed");
+  if (avatarSeed) header.avatarSeed = avatarSeed.value;
 
   if (header.kind === "human") {
     if (mandate) problems.push("a human's mandate is the profile body — delete the 'mandate:' key");
@@ -364,6 +389,11 @@ export function readTeam(repoRoot, { onError = () => {}, designNames } = {}) {
       mandate = { source, ...excerpt };
     }
 
+    // A committed DiceBear avatar (site/assets/avatars/<handle>.svg) is
+    // opt-in per member: present → the profile renders it, absent → the
+    // initials monogram. Resolved here, where every other member fact is,
+    // so the templates never guess at a file that would 404.
+    const avatarFile = join(repoRoot, "site", "assets", "avatars", `${handle}.svg`);
     people.set(handle, {
       handle,
       profilePath,
@@ -375,6 +405,9 @@ export function readTeam(repoRoot, { onError = () => {}, designNames } = {}) {
       github: header.github,
       bio: header.kind === "human" ? body : null,
       mandate,
+      avatar: existsSync(avatarFile) ? `/assets/avatars/${handle}.svg` : null,
+      avatarStyle: header.avatarStyle,
+      avatarSeed: header.avatarSeed,
     });
   }
 

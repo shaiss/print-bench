@@ -131,7 +131,17 @@ test("profile parsing is strict: bad fence, no colon, unknown key, duplicate key
   assert.deepEqual(commented.problems, []);
   assert.equal(commented.header.name, "Ada");
 
-  assert.deepEqual(PROFILE_KEYS, ["name", "kind", "role", "initials", "mandate", "shared", "github"]);
+  assert.deepEqual(PROFILE_KEYS, [
+    "name",
+    "kind",
+    "role",
+    "initials",
+    "mandate",
+    "shared",
+    "github",
+    "avatar-style",
+    "avatar-seed",
+  ]);
 });
 
 test("an optional github login parses when valid and is refused when malformed", () => {
