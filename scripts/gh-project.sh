@@ -14,9 +14,11 @@
 # Usage:
 #   scripts/gh-project.sh setup         # print the idempotent board-provisioning recipe
 #   scripts/gh-project.sh setup | bash  # run it (needs gh >= 2.30 + jq + the `project` scope)
-#   scripts/gh-project.sh add-item <issue-or-pr-url> [--stage <name>] [--points <n>]
+#   scripts/gh-project.sh add-item <issue-or-pr-url> [--stage <name> | --stage-if-new <name>] [--points <n>]
 #                                       # print an idempotent recipe that adds ONE issue/PR to the
-#                                       # board and sets its Stage / Story points; pipe to bash to run
+#                                       # board and sets its Stage / Story points; pipe to bash to run.
+#                                       # --stage always sets the Stage; --stage-if-new sets it only when
+#                                       # the item is first added (so a re-add never clobbers a human's move)
 #   scripts/gh-project.sh --selftest    # prove the emitted recipes are valid, well-formed bash (run by check.sh)
 #
 # AUTH: `gh project` requires the `project` token scope, which login does NOT
@@ -123,10 +125,11 @@ EOF
 # Emit an idempotent recipe that adds ONE issue/PR to the board and (optionally)
 # sets its Stage and Story points. Same emit-only design as emit_recipe: it only
 # prints, so it needs no `gh` and is testable. Args: url, stage (may be ""),
-# points (may be ""). The caller validates them (add_item_cli) before they are
-# substituted here.
+# points (may be ""), stage_if_new ("1" = set the stage only when the item is
+# newly created, "0" = always set it). The caller validates them (add_item_cli)
+# before they are substituted here.
 emit_add_item() {
-  local url="$1" stage="$2" points="$3"
+  local url="$1" stage="$2" points="$3" stage_if_new="${4:-0}"
   cat <<EOF
 #!/usr/bin/env bash
 # Add $url to the "$PROJECT_TITLE" board and set its fields. Idempotent — re-run
@@ -138,6 +141,7 @@ TITLE="$PROJECT_TITLE"
 URL="$url"
 STAGE="$stage"
 POINTS="$points"
+STAGE_IF_NEW="$stage_if_new"
 STAGE_FIELD="$STAGE_FIELD"
 POINTS_FIELD="$POINTS_FIELD"
 EOF
@@ -164,12 +168,19 @@ ITEM=$(gh project item-list "$NUM" --owner "$OWNER" -L 500 --format json \
   --jq ".items[] | select(.content.url==\"$URL\") | .id")
 if [ -z "$ITEM" ]; then
   ITEM=$(gh project item-add "$NUM" --owner "$OWNER" --url "$URL" --format json --jq '.id')
+  CREATED=1
+else
+  CREATED=0
 fi
 [ -n "$ITEM" ] || { echo "could not add or find a board item for $URL" >&2; exit 1; }
 echo "item $ITEM  ($URL)"
 
-# Stage (single-select): resolve the field id and the option id for this stage.
-if [ -n "$STAGE" ]; then
+# Stage (single-select). With STAGE_IF_NEW=1 the stage is applied ONLY when we
+# just created the board item, so a re-add — or an out-of-order opened/labeled
+# run — can never clobber a Stage a human moved the card to; the initial Stage is
+# bound to item creation, not to which event won the race. With STAGE_IF_NEW=0
+# (an explicit --stage) it is always applied.
+if [ -n "$STAGE" ] && { [ "$STAGE_IF_NEW" != "1" ] || [ "$CREATED" = "1" ]; }; then
   SF=$(gh project field-list "$NUM" --owner "$OWNER" -L 200 --format json \
     --jq ".fields[] | select(.name==\"$STAGE_FIELD\") | .id")
   OPT=$(gh project field-list "$NUM" --owner "$OWNER" -L 200 --format json \
@@ -177,6 +188,8 @@ if [ -n "$STAGE" ]; then
   [ -n "$OPT" ] || { echo "stage '$STAGE' is not an option of '$STAGE_FIELD'" >&2; exit 1; }
   gh project item-edit --id "$ITEM" --project-id "$PID" --field-id "$SF" --single-select-option-id "$OPT"
   echo "set $STAGE_FIELD = $STAGE"
+elif [ -n "$STAGE" ]; then
+  echo "item already on the board; leaving $STAGE_FIELD unchanged (--stage-if-new)"
 fi
 
 # Story points (number).
@@ -194,10 +207,15 @@ EOF
 # real github issue/PR URL, the stage must be one the board actually has, and
 # points must be numeric.
 add_item_cli() {
-  local url="" stage="" points=""
+  local url="" stage="" points="" stage_if_new="0"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --stage)  [ $# -ge 2 ] || die "--stage requires a value";  stage="$2";  shift 2 ;;
+      --stage)
+        [ -z "$stage" ] || die "add-item: use only one of --stage / --stage-if-new"
+        [ $# -ge 2 ] || die "--stage requires a value"; stage="$2"; stage_if_new="0"; shift 2 ;;
+      --stage-if-new)
+        [ -z "$stage" ] || die "add-item: use only one of --stage / --stage-if-new"
+        [ $# -ge 2 ] || die "--stage-if-new requires a value"; stage="$2"; stage_if_new="1"; shift 2 ;;
       --points) [ $# -ge 2 ] || die "--points requires a value"; points="$2"; shift 2 ;;
       --*)      die "add-item: unknown flag '$1'" ;;
       *)        [ -z "$url" ] || die "add-item: unexpected extra argument '$1'"; url="$1"; shift ;;
@@ -217,7 +235,7 @@ add_item_cli() {
   if [ -n "$points" ]; then
     case "$points" in ''|*[!0-9]*) die "add-item: --points must be a non-negative integer" ;; esac
   fi
-  emit_add_item "$url" "$stage" "$points"
+  emit_add_item "$url" "$stage" "$points" "$stage_if_new"
 }
 
 selftest() {
@@ -264,14 +282,25 @@ selftest() {
   grep -qF 'select(.content.url==' <<<"$add"  || die "selftest: add-item idempotent url lookup missing"
   grep -qFe '--single-select-option-id' <<<"$add" || die "selftest: add-item stage set missing"
   grep -qFe '--number "$POINTS"' <<<"$add"        || die "selftest: add-item points set missing"
-  # Negative controls (validation via the real CLI): a bad URL, an unknown
-  # stage, and non-numeric points must each be refused before anything runs.
+  grep -qF 'STAGE_IF_NEW="0"' <<<"$add"           || die "selftest: --stage should emit STAGE_IF_NEW=0"
+  # --stage-if-new: the stage is applied only when the item is newly created, so
+  # the recipe carries STAGE_IF_NEW="1" and gates the set on $CREATED (the
+  # opened/labeled race CodeRabbit flagged on #167).
+  local addnew
+  addnew="$("$SELF" add-item "https://github.com/shaiss/print-bench/issues/148" --stage-if-new Backlog)"
+  bash -n <(printf '%s\n' "$addnew") || die "selftest: --stage-if-new recipe is not valid bash"
+  grep -qF 'STAGE_IF_NEW="1"' <<<"$addnew"  || die "selftest: --stage-if-new flag not emitted"
+  grep -qF '"$CREATED" = "1"' <<<"$addnew"  || die "selftest: --stage-if-new does not gate the set on item creation"
+  # Negative controls (validation via the real CLI): a bad URL, an unknown stage,
+  # non-numeric points, and both stage flags at once must each be refused.
   "$SELF" add-item "not-a-url" >/dev/null 2>&1 \
     && die "selftest: add-item accepted a non-URL" || true
   "$SELF" add-item "https://github.com/shaiss/print-bench/issues/1" --stage Nope >/dev/null 2>&1 \
     && die "selftest: add-item accepted an unknown stage" || true
   "$SELF" add-item "https://github.com/shaiss/print-bench/issues/1" --points x >/dev/null 2>&1 \
     && die "selftest: add-item accepted non-numeric points" || true
+  "$SELF" add-item "https://github.com/shaiss/print-bench/issues/1" --stage Backlog --stage-if-new Ready >/dev/null 2>&1 \
+    && die "selftest: add-item accepted both --stage and --stage-if-new" || true
 
   echo "ok    gh-project.sh selftest passed"
 }
