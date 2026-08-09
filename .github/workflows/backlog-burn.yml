@@ -200,7 +200,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --model glm-4.6
+          claude_args: --model glm-5.2
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
       - name: Explain a skipped agentic run

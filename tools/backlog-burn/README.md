@@ -136,7 +136,7 @@ by its literal name, so a runtime label can't pick the secret on its own:
 
 - `anthropic` — Claude via `api.anthropic.com`, secret `ANTHROPIC_API_KEY` (default).
 - `zai` — Z.AI GLM via its Anthropic-compatible endpoint
-  (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, `--model glm-4.6`),
+  (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, `--model glm-5.2`),
   secret `ZAI_KEY`.
 
 Switching is this one line in the config. Adding a new provider is a new ship
