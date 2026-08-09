@@ -22,13 +22,13 @@ backlog burn). This gives them one findable place and one authoritative answer.
 
 ## The lifecycle
 
-```
+```text
 agent parks a decision            maintainer resolves it            pipeline resumes
 ──────────────────────            ──────────────────────            ────────────────
 +label  needs-decision     ──►    /decide yes|no <id>        ──►    next scheduled run
-🚦 DECISION NEEDED comment         -label needs-decision              sees the label gone,
-run stops                          +label decision-approved            reads the verdict,
-                                     | decision-rejected               takes the branch
+🚦 DECISION NEEDED comment         +label decision-approved            sees needs-decision
+run stops                            | decision-rejected               gone → issue is
+                                   -label needs-decision              eligible again
                                    append row to the ledger
 ```
 
@@ -83,14 +83,23 @@ The `decide.yml` workflow authorizes the commenter by their **real repository
 permission** (`getCollaboratorPermissionLevel`, one of `admin`/`maintain`/
 `write`), parses the command against an anchored strict pattern, then:
 
-- flips the label: `needs-decision` → `decision-approved` / `decision-rejected`
-  (creating the verdict label on demand). **This label is the authoritative,
-  unspoofable verdict.**
-- appends a row to `.github/decisions/ledger.conf` on the **default branch** —
-  the reproducible audit trail, keyed by id:
-  `<id> | approved|rejected | #<issue> | <login> | <iso8601>`. If the ledger
-  commit is refused (e.g. branch protection), the label still carries the
-  verdict, so the gate degrades safely.
+- flips the labels **label-first (fail closed)**: it adds the verdict label
+  (`decision-approved` / `decision-rejected`, created on demand) and *only then*
+  removes the opposite verdict label and `needs-decision`. **The label is the
+  authoritative, unspoofable current verdict** the pipeline reads. Verdict labels
+  are mutually exclusive — a re-decision swaps them, never leaves both.
+- then best-effort appends a row to the **audit ledger**
+  `.github/decisions/ledger.conf` on the **default branch**, keyed by id:
+  `<id> | approved|rejected | #<issue> | <login> | <iso8601>`. The ledger is
+  history, not the source of truth: if its commit is refused (e.g. branch
+  protection) the label still carries the verdict, so the gate degrades safely
+  and `/decide status` may omit a decision the label already reflects.
+
+`/decide yes|no` only resolves a thread **currently carrying `needs-decision`** —
+it refuses (with a note) a thread that has no pending decision, so a verdict never
+lands on an unrelated issue; re-opening a resolved decision means re-adding the
+label first. `/decide status` is read-only and prints the most recent ledger rows
+(bounded, so a growing ledger never overflows the comment).
 
 ### 3. How the paused pipeline resumes
 
@@ -98,11 +107,14 @@ Nothing is held hostage: the backlog-burn selector reads the label as machine
 state on **every** firing. `backlog_burn.select.exclusion_reason()` excludes any
 issue carrying `needs-decision` — a *durable* block (unlike a SHIP-LOCK it never
 goes stale, because a pending decision does not expire; the guard sits ahead of
-the lock check for exactly this reason). Once `/decide` clears the label, the
-issue is eligible again on the next scheduled run, and the resuming skill reads
-the verdict (the `decision-*` label; the ledger disambiguates by id) and takes
-the chosen branch. This is the same "re-read resolved state next run" pattern the
-one-issue-per-firing cap already relies on.
+every claim check for exactly this reason). Once `/decide` clears the label, the
+issue is simply **eligible again** on the next scheduled run — the same "re-read
+resolved state next run" pattern the one-issue-per-firing cap already relies on.
+
+Having the resuming skill actually **read the verdict** (the `decision-*` label,
+with the ledger disambiguating by id) and take the chosen branch is deferred to
+the agent-skill wiring (see Follow-ups): this slice ships the gate, the durable
+pause, and the selector's respect for it — not the consumption.
 
 ## The blocking variant (when async is wrong)
 
@@ -123,13 +135,17 @@ a mergeable PR are documented in [`actions-security.md`](actions-security.md)
   as data through the Contents API. `contents: write` is safe precisely because
   no untrusted code runs.
 - **Authorized by real permission**, never `author_association`.
-- **Committed source of truth.** The verdict lives in a label (state) and a
-  git-tracked ledger (audit) — reproducible, diffable, carried by a clone.
-- **The label flip fails closed.** `/decide` adds the verdict label *before*
-  removing `needs-decision`. The two calls are not atomic and the selector's
-  durable pause keys only on `needs-decision`, so this order guarantees a
-  partial failure leaves the issue **still paused** (never un-paused with no
-  verdict), which a `/decide` re-run then heals.
+- **Authoritative label + audit ledger — not one "source of truth."** The current
+  verdict is the **label** (unspoofable, what the pipeline reads); the git-tracked
+  **ledger** is best-effort audit history and may omit a decision whose
+  Contents-API write failed. The label is state; the ledger is the log. Don't
+  treat them as interchangeable.
+- **The resolution fails closed, label before ledger.** `/decide` adds the verdict
+  label *before* removing anything and *before* writing the ledger. The label
+  calls aren't atomic and the selector's durable pause keys only on
+  `needs-decision`, so this order guarantees a partial failure leaves the issue
+  **still paused** (never un-paused with no verdict, never a ledger row claiming a
+  decision the label never received); a `/decide` re-run heals it.
 - **GITHUB_TOKEN, not a PAT.** A decision-ledger commit must *not* re-trigger CI
   (the telemetry-commit reason: a re-triggering commit on the default branch
   would gate the whole catalog on every decision); the async selector re-reads
@@ -137,7 +153,11 @@ a mergeable PR are documented in [`actions-security.md`](actions-security.md)
 
 ## Follow-ups (not in this slice)
 
-Wiring the raise-a-decision step into the agent skills; an optional GitHub
-Projects (v2) `Decision` field; an optional read-only queue section on the Vercel
-site (via the deploy-time, best-effort, empty-on-failure fetch seam
-`site/lib/releases.mjs`); custom notification routing.
+- Wiring the raise-a-decision step **and the verdict-consumption** (read the
+  `decision-*` label / ledger and take the chosen branch) into the agent skills
+  (`/ship-issue`, `/design-run`, `/pm`).
+- An optional GitHub Projects (v2) `Decision` field for a board view — already on
+  the roadmap as #148.
+- An optional read-only queue section on the Vercel site, via the deploy-time,
+  best-effort, empty-on-failure fetch seam `site/lib/releases.mjs`.
+- Custom notification routing.
