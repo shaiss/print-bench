@@ -359,6 +359,150 @@ pre code { background: none; padding: 0; }
 
 .tag-warn { background: var(--warn-bg); color: var(--warn-ink); border-color: var(--warn-rule); }
 
+/* ---------- gallery card media (the media rework, PR #159) ---------- */
+
+/* Grayscale at rest per the imagery rule; color (and, when the design ships
+   a turntable GIF, motion — site.js swaps the src) on hover/focus. */
+.card-media { position: relative; }
+.card:hover .card-media img,
+.card:focus-within .card-media img { filter: none; }
+.media-chip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.35em 0.6em;
+}
+.media-chip-spin {
+  bottom: 1.85em;
+  background: var(--accent);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.card:hover .media-chip-spin,
+.card:focus-within .media-chip-spin { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .media-chip-spin { display: none; }
+}
+
+/* ---------- product-page media stage (the media rework, PR #159) ---------- */
+
+.media-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  margin-bottom: 1.6rem;
+}
+.stage-main { border-right: 1px solid var(--rule); min-width: 0; }
+.media-stage-solo { grid-template-columns: 1fr; }
+.media-stage-solo .stage-main { border-right: 0; }
+.stage-frame {
+  background: var(--viewer-bg);
+  display: grid;
+  place-items: center;
+  height: min(56vh, 540px);
+  overflow: hidden;
+}
+/* The stage shows the shot as shipped — in color; the grayscale imagery rule
+   stays on the rail thumbs and gallery cards where media is texture, not the
+   subject. */
+.stage-frame img {
+  max-width: 100%;
+  max-height: min(56vh, 540px);
+  object-fit: contain;
+}
+.stage-cap {
+  border-top: 1px solid var(--rule);
+  padding: 0.7rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.stage-cap p { margin: 0; }
+.stage-cap-row { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.stage-count { color: var(--ink-faint); font-family: var(--mono); font-size: 0.75rem; }
+.stage-alt { color: var(--ink-soft); font-size: 0.85rem; }
+.stage-disclosure {
+  border-left: 3px solid var(--warn-rule);
+  padding: 0.25rem 0 0.25rem 0.6rem;
+  color: var(--warn-ink);
+  font-size: 0.8rem;
+  font-style: italic;
+  max-width: var(--measure);
+}
+.stage-rail {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  max-height: calc(min(56vh, 540px) + 7rem);
+}
+.stage-thumb {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.5rem 0.6rem;
+  border: 0;
+  border-bottom: 1px solid var(--rule-soft);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.stage-thumb:last-child { border-bottom: 0; }
+.stage-thumb img {
+  width: 72px;
+  height: 54px;
+  object-fit: cover;
+  background: var(--viewer-bg);
+  border: 1px solid var(--rule-soft);
+  filter: grayscale(1);
+}
+.stage-thumb.sel {
+  background: color-mix(in srgb, var(--ink) 5%, var(--panel));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.stage-thumb.sel img,
+.stage-thumb:hover img { filter: none; }
+.stage-thumb-label { display: block; font-size: 0.8rem; font-weight: 700; line-height: 1.25; }
+.stage-thumb-kind {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.stage-ai-mark { color: var(--warn-ink); }
+
+@media (max-width: 860px) {
+  .media-stage { grid-template-columns: 1fr; }
+  .stage-main { border-right: 0; }
+  .stage-rail {
+    flex-direction: row;
+    overflow-x: auto;
+    max-height: none;
+    border-top: 1px solid var(--rule);
+  }
+  .stage-thumb {
+    grid-template-columns: 64px;
+    grid-template-rows: auto auto;
+    border-bottom: 0;
+    border-right: 1px solid var(--rule-soft);
+    min-width: 8rem;
+  }
+  .stage-thumb img { width: 64px; height: 48px; }
+  .stage-thumb.sel { box-shadow: inset 0 3px 0 var(--accent); }
+}
+
 /* ---------- derivative cards ---------- */
 
 /* A derivative sits directly after the design it reuses: red inset border,

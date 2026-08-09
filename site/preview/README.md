@@ -34,3 +34,8 @@ What the preview changes, relative to the live site:
 `media-rework.html` is baked output committed for convenience — regenerate it
 with the command above rather than editing it. Nothing in the real site build
 (`site/build.mjs`) or its tests reads this directory.
+
+**Status: the rework this previewed has landed** in the real site
+(`site/lib/media.mjs`, `site/lib/templates.mjs`, `site/build.mjs`,
+`site/assets/site.css`/`site.js` — same PR). This directory stays as the
+design-review harness for future page-design rounds: bake, look, then port.

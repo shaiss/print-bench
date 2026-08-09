@@ -8,6 +8,55 @@ import { humanSize } from "./releases.mjs";
 import { memberProfile, memberTeams } from "./profile.mjs";
 import { contributorRow, reviewedBy, historySlot } from "./teams.mjs";
 
+/**
+ * The product page's media stage (the media rework, PR #159): one large
+ * viewer over a labeled thumbnail rail, replacing the README's stacked
+ * image wall. Each rail entry is labeled with what the media *is* (studio
+ * render / turntable / AI-styled scene / …), and AI media carry their
+ * disclosure as a caption on exactly the media it applies to. Ships inert:
+ * site.js wires the switching; without JavaScript the stage shows the hero
+ * and the rail still shows every preview.
+ */
+function mediaStage(design, media) {
+  // Even a single preview renders as a stage (rail-less): the README's embed
+  // was lifted out of the prose, so the stage is where it now lives — a
+  // design with one image must not lose it.
+  if (!media || media.length === 0) return "";
+  const first = media[0];
+  const src = (m) => `/${design.relDir}/previews/${m.file}`;
+  const thumbs = media
+    .map(
+      (m, i) => `    <button class="stage-thumb${i === 0 ? " sel" : ""}" type="button"
+      data-src="${src(m)}" data-label="${escapeHtml(m.label)}" data-kind="${escapeHtml(m.kind)}"
+      data-alt="${escapeHtml(m.alt)}"${m.disclosure ? ` data-disclosure="${escapeHtml(m.disclosure)}"` : ""}
+      aria-label="${escapeHtml(m.label)} — ${escapeHtml(m.kind)}">
+      <img src="${src(m)}" alt="" loading="lazy">
+      <span class="stage-thumb-text"><span class="stage-thumb-label">${escapeHtml(m.label)}</span>
+        <span class="stage-thumb-kind">${escapeHtml(m.kind)}${m.ai ? ' · <span class="stage-ai-mark">AI</span>' : ""}</span></span>
+    </button>`
+    )
+    .join("\n");
+  const rail =
+    media.length > 1
+      ? `
+  <div class="stage-rail" data-stage-rail>
+${thumbs}
+  </div>`
+      : "";
+  return `<section class="media-stage${media.length > 1 ? "" : " media-stage-solo"}" data-media-stage aria-label="Design media">
+  <div class="stage-main">
+    <div class="stage-frame"><img data-stage-img src="${src(first)}" alt="${escapeHtml(first.alt)}"></div>
+    <div class="stage-cap">
+      <p class="stage-cap-row"><strong data-stage-label>${escapeHtml(first.label)}</strong>
+        <span class="tag tag-plain" data-stage-kind>${escapeHtml(first.kind)}</span>
+        ${media.length > 1 ? `<span class="stage-count" data-stage-count>1 / ${media.length}</span>` : ""}</p>
+      <p class="stage-alt" data-stage-alt>${escapeHtml(first.alt)}</p>
+      <p class="stage-disclosure" data-stage-disclosure${first.disclosure ? "" : " hidden"}>${escapeHtml(first.disclosure || "")}</p>
+    </div>
+  </div>${rail}
+</section>`;
+}
+
 const SITE_NAME = "print-bench";
 const TAGLINE = "Parametric 3D-printable designs, gated before they ship.";
 
@@ -105,8 +154,22 @@ function pairCredit(roster) {
 function card(design, roster = null) {
   const depth = design.depth || 0;
   const derived = depth > 0 && (design.parents || []).length > 0;
-  const thumb = design.thumb
-    ? `<a class="card-media" href="/${design.relDir}/"><img src="/${design.relDir}/previews/${design.thumb}" alt="${escapeHtml(design.name)} preview"></a>`
+  // The card leads with the design's hero shot (the media rework, PR #159):
+  // grayscale at rest per the Modernist imagery rule, color + the turntable
+  // GIF on hover when the design ships one (site.js swaps the src; without
+  // JavaScript the card is simply the still hero). The contact sheet stays
+  // the fallback for a design with no product shot.
+  const previews = design.previews || [];
+  const spin = previews.includes("turntable.gif") ? "turntable.gif" : null;
+  const mediaCount = previews.length;
+  const thumb = design.hero
+    ? `<a class="card-media" href="/${design.relDir}/"${
+        spin
+          ? ` data-spin="/${design.relDir}/previews/${spin}" data-still="/${design.relDir}/previews/${design.hero}"`
+          : ""
+      }><img src="/${design.relDir}/previews/${design.hero}" alt="${escapeHtml(design.name)} preview" loading="lazy">${
+        mediaCount > 1 ? `<span class="media-chip">${mediaCount} media</span>` : ""
+      }${spin ? `<span class="media-chip media-chip-spin">turntable</span>` : ""}</a>`
     : "";
   const tags = [];
   if (design.parts.length) {
@@ -117,7 +180,15 @@ function card(design, roster = null) {
   if (design.hasCoupon) tags.push(`<span class="tag tag-plain">fit coupon</span>`);
   if (design.style) tags.push(`<span class="tag tag-plain">${escapeHtml(design.style)}</span>`);
   if (design.warning) {
-    tags.push(`<span class="tag tag-warn">${escapeHtml(design.warning)}</span>`);
+    // The archived banner is boilerplate — compact it to a badge so it can't
+    // clip mid-word at card width. Any *other* warning ("do not print yet")
+    // is load-bearing content and renders in full, wrapping as needed.
+    const compact = /^Archived at v[\d.]+/.test(design.warning)
+      ? `Archived ${design.warning.match(/v[\d.]+\d/)?.[0] ?? ""}`.trim()
+      : null;
+    tags.push(
+      `<span class="tag tag-warn"${compact ? ` title="${escapeHtml(design.warning)}"` : ""}>${escapeHtml(compact || design.warning)}</span>`
+    );
   }
   // A derivative is marked in three ways that survive a card grid reflowing
   // to one column: the ↳ lead-in, the credit line, and the indent. The credit
@@ -302,7 +373,7 @@ function lineageStrip(design) {
   return `<p class="lineage-strip">${nodes.join("")}<span class="lineage-node lineage-node-current">${escapeHtml(design.name)}</span></p>`;
 }
 
-export function designPage(design, { html, toc, githubBase, model, downloads = null, roster = null, specialists = [], events = [], people = new Map() }) {
+export function designPage(design, { html, toc, githubBase, model, media = [], downloads = null, roster = null, specialists = [], events = [], people = new Map() }) {
   const showConfigurator = hasConfigurator(model);
   const src = `${githubBase}/${design.relDir}`;
   const rail = `<aside class="rail">
@@ -362,7 +433,8 @@ ${design.scads
     {
       id: "overview",
       label: "Overview",
-      body: `<div class="design-layout">
+      body: `${mediaStage(design, media)}
+  <div class="design-layout">
     <article class="prose">
 ${prose}
     </article>

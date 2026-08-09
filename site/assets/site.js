@@ -173,3 +173,61 @@
     select(initial ? initial.id : panels[0].id);
   });
 })();
+
+/* Gallery card hover: swap the hero still for the turntable GIF (the media
+   rework, PR #159). Skipped under prefers-reduced-motion; without JavaScript
+   the card is simply the still hero. */
+(function () {
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".card-media[data-spin]").forEach(function (a) {
+      var img = a.querySelector("img");
+      if (!img) return;
+      var card = a.closest(".card") || a;
+      card.addEventListener("mouseenter", function () { img.src = a.getAttribute("data-spin"); });
+      card.addEventListener("mouseleave", function () { img.src = a.getAttribute("data-still"); });
+    });
+  });
+})();
+
+/* Product-page media stage: thumbnail rail switches the stage image and its
+   caption (label, kind, alt text, AI disclosure), with arrow-key navigation.
+   The stage ships showing the hero, so without JavaScript nothing is broken —
+   the rail is still every preview at thumbnail size. */
+(function () {
+  document.addEventListener("DOMContentLoaded", function () {
+    var stage = document.querySelector("[data-media-stage]");
+    if (!stage) return;
+    var img = stage.querySelector("[data-stage-img]");
+    var label = stage.querySelector("[data-stage-label]");
+    var kind = stage.querySelector("[data-stage-kind]");
+    var count = stage.querySelector("[data-stage-count]");
+    var alt = stage.querySelector("[data-stage-alt]");
+    var disclosure = stage.querySelector("[data-stage-disclosure]");
+    var thumbs = Array.prototype.slice.call(stage.querySelectorAll(".stage-thumb"));
+    if (!thumbs.length) return; // rail-less single-media stage: nothing to switch
+    var cur = 0;
+    function show(i) {
+      cur = (i + thumbs.length) % thumbs.length;
+      var t = thumbs[cur];
+      img.src = t.getAttribute("data-src");
+      img.alt = t.getAttribute("data-alt") || "";
+      label.textContent = t.getAttribute("data-label") || "";
+      kind.textContent = t.getAttribute("data-kind") || "";
+      count.textContent = String(cur + 1) + " / " + thumbs.length;
+      alt.textContent = t.getAttribute("data-alt") || "";
+      var d = t.getAttribute("data-disclosure");
+      disclosure.hidden = !d;
+      disclosure.textContent = d || "";
+      thumbs.forEach(function (b, j) { b.classList.toggle("sel", j === cur); });
+    }
+    thumbs.forEach(function (t, i) {
+      t.addEventListener("click", function () { show(i); });
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.target && /^(input|textarea|select)$/i.test(e.target.tagName)) return;
+      if (e.key === "ArrowRight") show(cur + 1);
+      else if (e.key === "ArrowLeft") show(cur - 1);
+    });
+  });
+})();
