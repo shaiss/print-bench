@@ -37,6 +37,7 @@ import {
   shouldFetchHistory,
   fetchDesignCommits,
   commitsToEvents,
+  loginHandleMap,
 } from "./lib/history.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
 import { buildModel } from "./lib/model.mjs";
@@ -251,11 +252,13 @@ async function main() {
   // rather than rendering a hole. Product-scoped by construction: each team
   // reads only its own design's files.
   // Attribution map for git history: a member's committed `github:` login →
-  // handle. Built from committed data only, so a git commit is attributed to a
-  // member only where this mapping derives it — an author with no committed
-  // login renders unattributed (honest, not guessed).
-  const loginToHandle = new Map();
-  for (const m of team.members) if (m.github) loginToHandle.set(m.github, m.handle);
+  // handle, keyed by canonical lowercase login. Built from committed data only,
+  // so a git commit is attributed to a member only where this mapping derives
+  // it — an author with no committed login renders unattributed (honest, not
+  // guessed). Two members claiming one login is a data error that fails the
+  // build, not a silent overwrite.
+  const { map: loginToHandle, problems: loginProblems } = loginHandleMap(team.members);
+  for (const p of loginProblems) onError(`people: ${p}`);
 
   // Git history is the first deploy-time source folded into the timeline (the
   // #126 seam, now fed): each rostered design's own path-filtered commits over

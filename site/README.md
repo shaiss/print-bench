@@ -63,8 +63,9 @@ makes the site look more locked-down than it is. Kept apart:
 
 - **The build is deterministic and offline.** A plain `./scripts/site.sh`
   performs no network I/O and reproduces byte-for-byte, so a local build and
-  the CI build always agree on what would deploy. This is a property of the
-  *build* — not a ban on fetching (below).
+  the CI build always agree on the **committed baseline** of a deploy — the
+  pages the deploy then augments with live data (below). This is a property of
+  the *build*, not a ban on fetching.
 - **The deploy may fetch live first-party data.** On Vercel the build is
   allowed to pull data it cannot commit — through a deploy-scoped, best-effort
   seam that renders *empty* on any failure and runs only behind a deploy-only

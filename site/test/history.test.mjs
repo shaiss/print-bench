@@ -18,6 +18,7 @@ import {
   commitsToEvents,
   fetchDesignCommits,
   shouldFetchHistory,
+  loginHandleMap,
 } from "../lib/history.mjs";
 
 const OWNER = "shaiss";
@@ -58,6 +59,32 @@ test("commitsToEvents attributes only via the committed login→handle map", () 
   assert.equal(events[0].handle, "shai", "a mapped login attributes");
   assert.equal(events[1].handle, null, "an unmapped login stays unattributed, not guessed");
   assert.equal(events[2].handle, null, "an authorless commit stays unattributed");
+});
+
+test("commitsToEvents attributes case-insensitively (GitHub logins are case-insensitive)", () => {
+  // The committed map is canonical-lowercase; the API can return any casing.
+  const loginToHandle = new Map([["shaiss", "shai"]]);
+  const [e] = commitsToEvents([commit({ date: "2026-08-06T00:00:00Z", message: "x", login: "ShaISS" })], {
+    loginToHandle,
+  });
+  assert.equal(e.handle, "shai");
+});
+
+test("loginHandleMap lowercases keys and rejects a login two members claim", () => {
+  const { map, problems } = loginHandleMap([
+    { handle: "shai", github: "shaiss" },
+    { handle: "vera", github: null }, // no login → skipped, not an error
+  ]);
+  assert.equal(map.get("shaiss"), "shai");
+  assert.deepEqual(problems, []);
+
+  const dup = loginHandleMap([
+    { handle: "ada", github: "dev" },
+    { handle: "bot", github: "dev" }, // same login, different member → a problem
+  ]);
+  assert.equal(dup.problems.length, 1);
+  assert.match(dup.problems[0], /claimed by both 'ada' and 'bot'/);
+  assert.equal(dup.map.get("dev"), "ada", "the first mapping stands; the clash is reported, not silently overwritten");
 });
 
 test("commitsToEvents drops merge commits (branch bookkeeping, not product work)", () => {
@@ -129,6 +156,23 @@ test("fetchDesignCommits degrades to [] on a network error", async () => {
 test("fetchDesignCommits degrades to [] when the body is not an array", async () => {
   const fetchImpl = stubFetch({ [COMMITS_URL]: { message: "API rate limit exceeded" } });
   const got = await fetchDesignCommits({ fetchImpl, owner: OWNER, repo: REPO, design: "calibration-cube" });
+  assert.deepEqual(got, []);
+});
+
+test("fetchDesignCommits aborts a hung request after the timeout and returns []", async () => {
+  // A fetch that never resolves on its own, but honors the abort signal the
+  // way the platform fetch does — the bounded timeout must unstick the build.
+  const hung = (_url, { signal } = {}) =>
+    new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
+  const got = await fetchDesignCommits({
+    fetchImpl: hung,
+    owner: OWNER,
+    repo: REPO,
+    design: "calibration-cube",
+    timeoutMs: 20,
+  });
   assert.deepEqual(got, []);
 });
 

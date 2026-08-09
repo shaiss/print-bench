@@ -71,10 +71,36 @@ export function commitsToEvents(commits, { loginToHandle = new Map() } = {}) {
     if (!text) continue;
     const login =
       c.author && typeof c.author.login === "string" ? c.author.login : null;
-    const handle = (login && loginToHandle.get(login)) || null;
+    // Case-insensitive: loginToHandle is keyed by canonical lowercase login
+    // (loginHandleMap), and author.login can arrive in any casing.
+    const handle = (login && loginToHandle.get(login.toLowerCase())) || null;
     events.push({ date, source: "git", sourceTag: "commit · git", text, detail: "", handle });
   }
   return events;
+}
+
+/**
+ * Build the canonical login→handle attribution map from resolved team members.
+ * Keys are lowercased (GitHub logins are case-insensitive), so a profile's
+ * `github: Shaiss` matches an API `author.login` of `shaiss`. Two members
+ * claiming the same login is a data error, not a silent last-wins overwrite:
+ * it is collected as a problem the caller fails the build on (the resolve-or-
+ * fail contract the rest of the team layer holds). Returns { map, problems }.
+ */
+export function loginHandleMap(members = []) {
+  const map = new Map();
+  const problems = [];
+  for (const m of members) {
+    if (!m || !m.github) continue;
+    const login = m.github.toLowerCase();
+    const existing = map.get(login);
+    if (existing && existing !== m.handle) {
+      problems.push(`github login '${login}' is claimed by both '${existing}' and '${m.handle}'`);
+      continue;
+    }
+    map.set(login, m.handle);
+  }
+  return { map, problems };
 }
 
 /**
@@ -93,6 +119,7 @@ export async function fetchDesignCommits({
   design,
   token,
   perPage = 20,
+  timeoutMs = 10000,
 } = {}) {
   if (typeof fetchImpl !== "function" || !design) return [];
   const headers = { Accept: "application/vnd.github+json" };
@@ -101,12 +128,19 @@ export async function fetchDesignCommits({
   const url = `${GITHUB_API}/repos/${owner}/${repo}/commits?path=${encodeURIComponent(
     path
   )}&per_page=${perPage}`;
+  // Bound the request so a hung connection cannot stall the deploy build: abort
+  // after timeoutMs, and the AbortError lands in the same best-effort catch as
+  // any other failure → [], no git events. The timer is always cleared.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(url, { headers });
+    const res = await fetchImpl(url, { headers, signal: controller.signal });
     if (!res || !res.ok) return []; // no such path / error → no git events
     const body = await res.json();
     return Array.isArray(body) ? body : [];
   } catch {
-    return []; // offline / DNS / rate limit → none
+    return []; // offline / DNS / rate limit / timeout → none
+  } finally {
+    clearTimeout(timer);
   }
 }

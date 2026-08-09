@@ -135,9 +135,9 @@ test("profile parsing is strict: bad fence, no colon, unknown key, duplicate key
 });
 
 test("an optional github login parses when valid and is refused when malformed", () => {
-  const ok = parseProfile("---\nname: Ada\nkind: human\nrole: F\ninitials: A\ngithub: ada-dev\n---\n\nBio.\n");
+  const ok = parseProfile("---\nname: Ada\nkind: human\nrole: F\ninitials: A\ngithub: Ada-Dev\n---\n\nBio.\n");
   assert.deepEqual(ok.problems, []);
-  assert.equal(ok.header.github, "ada-dev");
+  assert.equal(ok.header.github, "ada-dev", "a login is stored canonical-lowercase (GitHub is case-insensitive)");
 
   const bad = parseProfile("---\nname: Ada\nkind: human\nrole: F\ninitials: A\ngithub: not a login\n---\n\nBio.\n");
   assert.match(bad.problems.join("\n"), /not a valid GitHub login/);

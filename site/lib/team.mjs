@@ -160,7 +160,10 @@ export function parseProfile(text) {
   // so a typo'd login is a loud problem, not a silently-never-matching value.
   const github = seen.get("github");
   if (github) {
-    if (GITHUB_LOGIN_RE.test(github.value)) header.github = github.value;
+    // GitHub logins are case-insensitive but case-preserving, so store the
+    // canonical lowercase form — attribution compares against the API's
+    // author.login, which can arrive in any casing.
+    if (GITHUB_LOGIN_RE.test(github.value)) header.github = github.value.toLowerCase();
     else problems.push(`github '${github.value}' is not a valid GitHub login`);
   }
 
