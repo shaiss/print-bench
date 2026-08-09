@@ -2,8 +2,10 @@
 
 Turns what this repo already commits — product pages, previews, product
 shots, style specs — into a browsable site, deployed on Vercel. It invents
-no content: every word and image on the site comes from a file CI already
-gates.
+no content: every word and image traces to a **provenanced source** — a
+committed, CI-gated file, or a first-party record (a GitHub Release manifest,
+this repo's own history) fetched at deploy time — never to the model. ("Static"
+here means static *hosting*, not a flat page: see [Scopes](#scopes--build-deploy-served-output).)
 
 ```bash
 ./scripts/site.sh           # build into build/site
@@ -52,6 +54,40 @@ over the same fixture trees and fails on any disagreement about order or
 parentage. Two surfaces of this repo silently disagreeing about what a design
 *is* was [issue #55](https://github.com/shaiss/print-bench/issues/55); the
 cross-check is what stops it recurring.
+
+## Scopes — build, deploy, served output
+
+Several of this site's guarantees read like one blanket "the site is sealed"
+rule, but they live at three different layers, and conflating them is what
+makes the site look more locked-down than it is. Kept apart:
+
+- **The build is deterministic and offline.** A plain `./scripts/site.sh`
+  performs no network I/O and reproduces byte-for-byte, so a local build and
+  the CI build always agree on what would deploy. This is a property of the
+  *build* — not a ban on fetching (below).
+- **The deploy may fetch live first-party data.** On Vercel the build is
+  allowed to pull data it cannot commit — through a deploy-scoped, best-effort
+  seam that renders *empty* on any failure and runs only behind a deploy-only
+  flag, so it is purely additive and never breaks a build. `lib/releases.mjs`
+  is the reference implementation (`SITE_FETCH_RELEASES=1`, the latest GitHub
+  Release manifest → download links; nothing locally, no broken build when the
+  API is down). Any future deploy-time source — git / PR / review history for
+  the team timeline — follows this shape.
+- **The served output references nothing external.** Every asset the *browser*
+  loads is vendored (three.js, the OpenSCAD-WASM runtime, the `text()` font),
+  resolved by an inline import map, never a CDN. "No external references" is a
+  rule about the bytes we serve, not about what the builder reads at deploy
+  time — a GitHub API or a Release manifest is a *source*, not a served
+  reference.
+
+The principle spanning all three is **invent no content**, and its real test
+is *provenance*, not "committed on disk": a committed, CI-gated file qualifies,
+and so does a first-party authoritative record fetched at deploy time — a
+Release manifest authored by the CI that published it, or this repo's own
+GitHub history. Model-invented text is what the rule forbids. Likewise
+**static** means static *hosting* — build-time output on a CDN, no per-request
+server compute — while the page still runs real client-side compute in the
+visitor's browser (the configurator and 3D viewer below).
 
 The one-line pitch on each gallery card is the same one `scripts/gallery.sh`
 puts in the README gallery — NOTES.md's `## Goal` paragraph, falling back to
