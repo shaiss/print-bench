@@ -39,8 +39,12 @@ def _emit(record: dict[str, Any], args: argparse.Namespace) -> None:
 
     summary_path = args.summary or os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
+        # The heading is caller-supplied so the three routines that share this
+        # selector (backlog burn, design run, chunker) each get a correctly
+        # titled summary block instead of every one reading "## Backlog burn".
+        title = getattr(args, "summary_title", None) or "Backlog burn"
         with open(summary_path, "a", encoding="utf-8") as fh:
-            fh.write("## Backlog burn\n\n")
+            fh.write(f"## {title}\n\n")
             fh.write(render_summary(record))
             fh.write("\n")
 
@@ -129,6 +133,9 @@ def _add_output_flags(p: argparse.ArgumentParser) -> None:
     """Attach the shared ``--gh-output`` / ``--summary`` / ``--label`` flags."""
     p.add_argument("--gh-output", help="path to append `issue=` (defaults to $GITHUB_OUTPUT)")
     p.add_argument("--summary", help="path to append a markdown summary (defaults to $GITHUB_STEP_SUMMARY)")
+    p.add_argument("--summary-title", default="Backlog burn",
+                   help="heading for the job-summary block (default: Backlog burn); "
+                        "pass e.g. 'Chunker' or 'Design run' from the sibling routines")
     p.add_argument("--label", default=DEFAULT_REQUIRED_LABEL,
                    help=f"required opt-in label (default: {DEFAULT_REQUIRED_LABEL})")
 

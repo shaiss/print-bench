@@ -147,10 +147,30 @@ jobs:
           Logged a real print of \`${DESIGN}\` on **${PRINTER}** via the *Log a print result* Action (issue #101).
 
           This appends one FIELD-TEST entry to \`${notes}\` — a docs-only change. Review the entry; if a measured deviation is worth carrying across designs, copy it into \`printer.conf\`.
+
+          **Take this out of draft and merge to land the entry.**
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)
           EOF
-          gh pr create --draft --base "$DEFAULT_BRANCH" --head "$branch" \
+          # Guard the PR creation (it was previously unguarded — a denied create
+          # died on a raw gh error with no hint the branch was pushed). ::error::
+          # matches the failed status; the summary hands the human the PR link.
+          if url="$(gh pr create --draft --base "$DEFAULT_BRANCH" --head "$branch" \
             --title "field-test: ${DESIGN} print result (${PRINTER})" \
-            --body-file pr-body.md
+            --body-file pr-body.md)"; then
+            {
+              echo "## Log a print result — ${DESIGN}"
+              echo ""
+              echo "Opened a draft PR appending a FIELD-TEST entry for **${PRINTER}**:"
+              echo ""
+              echo "**[${url}](${url})**"
+              echo ""
+              echo "_Review the entry, then take the PR out of draft and merge to land it._"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests' (or set REGEN_TOKEN), then open a PR from that branch into ${DEFAULT_BRANCH}."
+            exit 1
+          fi
           if [ "$HAVE_PAT" != "true" ]; then
             echo "::warning::REGEN_TOKEN is not set, so this PR was created with GITHUB_TOKEN and CI will not auto-run on it. Push any commit (or set REGEN_TOKEN — a fine-grained PAT with contents:write) to trigger the required checks."
           fi

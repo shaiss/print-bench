@@ -56,7 +56,11 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: write
+  # Only reads PRs (pulls.get for the head ref); PR/issue comments and reactions
+  # are covered by issues:write, and the config commit uses REGEN_TOKEN via the
+  # Contents API — so GITHUB_TOKEN needs no pull-requests:write (matches the
+  # mirror workflow ci-gate-approve.yml).
+  pull-requests: read
 
 concurrency:
   # Serialize commands so two simultaneous set calls cannot race on the same file.
@@ -76,6 +80,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.comment.body, '/backlog-burn')
     runs-on: ubuntu-latest
+    # A privileged command handler should fail fast, not sit on the 6-hour
+    # default if a GitHub API call hangs.
+    timeout-minutes: 10
     steps:
       - name: Authorize and parse the command
         id: parse

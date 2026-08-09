@@ -38,7 +38,10 @@ on:
       design:
         description: Design directory under designs/ (must ship a lifestyle.conf)
         required: true
-        default: sushi-battleship
+        # Must stay a LIVE (non-archived) design that ships a lifestyle.conf, so
+        # the most obvious "open form → Run with defaults" path succeeds instead
+        # of tripping the archived guard below (sushi-battleship is archived).
+        default: calibration-cube
         type: string
       size:
         description: Image size WxH passed to GLM-Image (override if the API rejects the default)
@@ -46,9 +49,11 @@ on:
         default: 1280x1280
         type: string
 
+# Read-only by default; the write grants live on the one job that pushes a
+# branch and opens the PR — detect only diffs a checkout (mirrors
+# lifestyle-clip.yml, which already scopes it this way).
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   detect:
@@ -135,6 +140,12 @@ jobs:
   generate:
     name: Generate and open a draft PR
     needs: detect
+    # The write grants live here, not top-level: this is the only job that
+    # pushes a branch and opens the PR; detect is read-only (mirrors
+    # lifestyle-clip.yml).
+    permissions:
+      contents: write
+      pull-requests: write
     if: needs.detect.outputs.designs != '[]'
     strategy:
       # One PR per design, and one failure does not cancel the others.
@@ -230,8 +241,20 @@ jobs:
           🤖 Generated with [Claude Code](https://claude.com/claude-code)
           EOF
           )"
-          if ! gh pr create --draft --base "$BASE" --head "$branch" \
-              --title "Add AI lifestyle shot: ${DESIGN}" --body "$body"; then
-            echo "::warning::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests' (or use a PAT), then open a PR from that branch into ${BASE}."
+          if url="$(gh pr create --draft --base "$BASE" --head "$branch" \
+              --title "Add AI lifestyle shot: ${DESIGN}" --body "$body")"; then
+            {
+              echo "## Lifestyle shot — ${DESIGN}"
+              echo ""
+              echo "Opened a draft PR with the generated tier-2 AI lifestyle shot:"
+              echo ""
+              echo "**[${url}](${url})**"
+              echo ""
+              echo "_Review the scene, then take the PR out of draft. It was opened with GITHUB_TOKEN, so CI did not auto-run — push a commit to trigger it._"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            # ::error:: not ::warning:: — the step exits 1, so the annotation
+            # severity should match the failed job.
+            echo "::error::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests' (or use a PAT), then open a PR from that branch into ${BASE}."
             exit 1
           fi
