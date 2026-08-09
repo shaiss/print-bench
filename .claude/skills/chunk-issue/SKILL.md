@@ -69,11 +69,20 @@ Produce an ordered set of sub-issues where:
 
 For each piece, in dependency order:
 
-1. Create it as a normal GitHub issue with the body from §2.
-2. Link it as a **native sub-issue** of the parent (GitHub's sub-issue
-   relationship), so the parent becomes a tracked epic — not just a comment
-   list. Carry over the parent's domain labels (e.g. `enhancement`) where they
-   apply.
+1. Create it as a normal GitHub issue with the body from §2 —
+   `gh issue create --title … --body … --label enhancement` (carry over the
+   parent's domain labels where they apply). Note the new issue number.
+2. Link it as a **native sub-issue** of the parent, so the parent becomes a
+   tracked epic — not just a comment list. `gh` has no sub-issue sub-command;
+   use the REST endpoint, and pass the child's **internal database id** (`.id`),
+   **not** its issue number — the number returns 404/422:
+   ```bash
+   child_id=$(gh api repos/$GITHUB_REPOSITORY/issues/<child-number> --jq .id)
+   gh api --method POST repos/$GITHUB_REPOSITORY/issues/<parent-number>/sub_issues \
+     -F sub_issue_id="$child_id"    # -F sends an integer; -f would send a string
+   ```
+   Then confirm the child actually appears under the parent's sub-issues — a
+   created-but-unlinked issue is not a chunk.
 3. **Auto-arm the genuinely-small ones** with `autonomy-ok` so the backlog burn
    can pick them up with no second human step. This is the operator's chosen
    gate placement: the human curates what gets `declined-too-big` upstream; the
@@ -84,8 +93,11 @@ For each piece, in dependency order:
    `design-brief` when they are designs, so `/design-run` can see them) but
    **not** `autonomy-ok`. Filing a piece that will only re-decline wastes a burn.
 
-Create labels that do not yet exist rather than failing (`gh label create` is
-available in the run environment).
+Every GitHub write in this skill goes through the `gh` CLI / `gh api` (the run
+grants the `Bash` tool and `gh` is pre-authenticated): `gh issue create`,
+`gh issue edit --add-label`/`--remove-label`, `gh issue comment`, the
+`gh api … /sub_issues` link above, and `gh label create` for a label that does
+not yet exist (rather than failing).
 
 ## 4. Close the loop on the parent
 
