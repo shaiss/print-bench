@@ -44,7 +44,7 @@ if [ "$#" -gt 0 ]; then shift; fi
 # Help must not require gh (or a repo), so handle it before resolving anything.
 case "$cmd" in
   ""|-h|--help|help)
-    sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
 esac
@@ -167,13 +167,18 @@ labels: {{range .labels}}{{.name}} {{end}}
         *) die "ensure-label: unexpected argument '$1'" ;;
       esac
     done
+    # Enumerate ALL labels (gh label list defaults to 30; a match past the first
+    # 30 would else fall through to `label create` → 422 → set -e abort).
     # Capture then match (no `| grep -q` SIGPIPE under pipefail).
-    existing="$(gh label list --repo "$repo" --json name --jq '.[].name')"
+    existing="$(gh api --paginate "repos/$repo/labels" --jq '.[].name')"
     if grep -qxF "$name" <<<"$existing"; then
       echo "LABEL exists: $name"
     else
-      create_args=(label create "$name" --repo "$repo" --color "$color")
+      # Flags first, then `--` so a name beginning with '-' can't be read as a
+      # flag (the one caller value that reaches a gh positional slot).
+      create_args=(label create --repo "$repo" --color "$color")
       [ -n "$desc" ] && create_args+=(--description "$desc")
+      create_args+=(-- "$name")
       gh "${create_args[@]}" >/dev/null
       echo "LABEL created: $name"
     fi
