@@ -179,6 +179,17 @@ if ! ./scripts/printer-conf-check.sh; then
   fail=1
 fi
 
+# And this proves the chunker's deny backstop still neutralizes every dangerous
+# tool allow it would otherwise inherit from .claude/settings.json (which
+# claude-code-action loads via settingSources=project). Same family again: the
+# thing being protected is the ABSENCE of a capability, so a demo cannot cover
+# it and a new settings.json allow would silently re-arm the chunker without a
+# check that fails on the drift (docs/actions-security.md, CR-A).
+echo "-- chunker-perms check: scripts/chunker-perms-check.sh"
+if ! ./scripts/chunker-perms-check.sh; then
+  fail=1
+fi
+
 # Lineage check: derives.conf parses, its parents exist, the declared parent
 # order still matches the entry .scad's include order, and every diamond is
 # explicitly asserted. All static, all milliseconds, so it runs unconditionally
