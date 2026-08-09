@@ -1388,6 +1388,7 @@ jobs:
           fi
           echo "changed files:"; sed 's/^/  /' changed.txt
       - name: Select gates
+        id: select
         run: |
           python -m ci_gates select \
             --changed-from changed.txt \
@@ -1402,10 +1403,19 @@ jobs:
           !cancelled() && github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v8
+        env:
+          # 'true' when the selector has something to say (a gate active,
+          # proposed or declined), 'false' when it ran and found nothing, '' if
+          # it never ran (crashed before emitting). Used below to skip the empty
+          # "no gates active" comment that otherwise lands on nearly every PR.
+          HAS_COMMENT: ${{ steps.select.outputs.has_comment }}
         with:
           script: |
             const fs = require('fs');
             const marker = '<!-- smart-ci-gate-selection -->';
+            const val = process.env.HAS_COMMENT;          // 'true' | 'false' | ''
+            const selectRan = val === 'true' || val === 'false';
+            const hasComment = val === 'true';
             let body;
             try {
               body = fs.readFileSync('comment.md', 'utf8');
@@ -1428,6 +1438,23 @@ jobs:
             });
             const prev = comments.find(c => c.body && c.body.startsWith(marker));
             if (!await stillCurrent()) return;
+            // Nothing to propose or report (the selector ran and found no gate
+            // active/proposed/declined): don't post the low-value "no gates
+            // active" comment on the majority of PRs, and delete a stale one
+            // left by an earlier push that did have something to say. When the
+            // selector never ran (val === ''), fall through and post the
+            // failure notice so a broken selector stays visible.
+            if (selectRan && !hasComment) {
+              if (prev) {
+                await github.rest.issues.deleteComment({
+                  ...context.repo, comment_id: prev.id,
+                });
+                core.info('smart-ci: nothing to report — removed the stale selection comment');
+              } else {
+                core.info('smart-ci: nothing to report — no comment posted');
+              }
+              return;
+            }
             if (prev) {
               await github.rest.issues.updateComment({
                 ...context.repo, comment_id: prev.id, body,

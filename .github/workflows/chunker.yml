@@ -116,6 +116,9 @@ jobs:
       vars.CHUNKER_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
+    # Chunking only files issues (light), but a hung /chunk-issue must not hold a
+    # runner for the 6-hour default while holding a secret, unwatched.
+    timeout-minutes: 30
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
@@ -184,7 +187,7 @@ jobs:
           # writes `issue=<n>` (empty when nothing is eligible) to $GITHUB_OUTPUT
           # and a markdown block to $GITHUB_STEP_SUMMARY. Same selector the
           # backlog burn uses, pointed at the declined-too-big label.
-          backlog-burn run --repo "$GITHUB_REPOSITORY" --label "$LABEL"
+          backlog-burn run --repo "$GITHUB_REPOSITORY" --label "$LABEL" --summary-title 'Chunker'
 
       # One explicit run step per provider — a provider is a reviewed,
       # git-tracked step because GitHub Actions can only reference a secret by
@@ -315,6 +318,9 @@ jobs:
           # Only the step matching the configured provider runs; the other is
           # 'skipped'. Report the one that actually ran.
           RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome }}
+          # $GITHUB_STEP_SUMMARY does not auto-link a bare #N — build a real link.
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
         run: |
           {
             echo "## Chunker — run outcome"
@@ -325,8 +331,31 @@ jobs:
             elif [ -z "${ISSUE}" ]; then
               echo "- selected: none (nothing carrying \`declined-too-big\` was eligible)"
             else
-              echo "- selected: #${ISSUE}"
+              echo "- selected: [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE})"
               echo "- provider: ${PROVIDER}"
-              echo "- run step: ${RUN:-skipped} (see issue #${ISSUE} for the /chunk-issue verdict and any filed sub-issues)"
+              echo "- run step: ${RUN:-skipped} (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /chunk-issue verdict and any filed sub-issues)"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    name: Explain a disarmed run
+    # The `chunk` job is gated at job level, so an unset arming variable (the
+    # default clone/fork state) or a dispatch against a non-default ref skips it
+    # silently. This sibling makes that legible. No secrets, no write perms.
+    if: >-
+      vars.CHUNKER_ENABLED != 'true'
+      || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the routine did not run
+        env:
+          ARMED: ${{ vars.CHUNKER_ENABLED }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::notice::the chunker is disarmed — set the CHUNKER_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/chunker.conf; both must agree before it runs."
+          else
+            echo "::notice::the chunker only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
+          fi

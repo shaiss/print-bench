@@ -254,8 +254,20 @@ jobs:
           🤖 Generated with [Claude Code](https://claude.com/claude-code)
           EOF
           )"
-          if ! gh pr create --draft --base "$BASE" --head "$branch" \
-              --title "Add AI motion clip: ${DESIGN}" --body "$body"; then
-            echo "::warning::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests' (or use a PAT), then open a PR from that branch into ${BASE}."
+          if url="$(gh pr create --draft --base "$BASE" --head "$branch" \
+              --title "Add AI motion clip: ${DESIGN}" --body "$body")"; then
+            {
+              echo "## Lifestyle clip — ${DESIGN}"
+              echo ""
+              echo "Opened a draft PR with the generated tier-2 AI motion clip:"
+              echo ""
+              echo "**[${url}](${url})**"
+              echo ""
+              echo "_Watch the clip, then take the PR out of draft. It was opened with GITHUB_TOKEN, so CI did not auto-run — push a commit to trigger it._"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            # ::error:: not ::warning:: — the step exits 1, so the annotation
+            # severity should match the failed job.
+            echo "::error::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests' (or use a PAT), then open a PR from that branch into ${BASE}."
             exit 1
           fi

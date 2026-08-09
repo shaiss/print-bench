@@ -92,6 +92,9 @@ jobs:
       vars.BACKLOG_BURN_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
+    # A hung /ship-issue (model stall, tool loop) must not hold a runner for the
+    # 6-hour default while holding a provider-key secret, unwatched, 4×/day.
+    timeout-minutes: 50
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
@@ -99,6 +102,9 @@ jobs:
       # `key_present` output.
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      # Surfaced the same way so a step can note when the CI-triggering PAT is
+      # absent — see the note on the ship steps below.
+      HAS_GH_TOKEN: ${{ secrets.GH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -165,10 +171,14 @@ jobs:
       # committed `provider:` label picks which one runs; adding a provider is
       # a new step here. Both share the pin, the write permissions, the
       # `github_token` that authenticates the action's own git push / PR
-      # creation, and the same /ship-issue prompt. NOTE for enabling: a PR
-      # opened with the default GITHUB_TOKEN does not itself trigger CI (the
-      # reason regen uses REGEN_TOKEN); pass a PAT as github_token to have the
-      # drafted PR's checks run automatically.
+      # creation, and the same /ship-issue prompt. github_token is wired to the
+      # GH_TOKEN secret (a PAT) with a fallback: a PR opened with the default
+      # GITHUB_TOKEN does not itself trigger CI (the reason regen uses
+      # REGEN_TOKEN), so with GH_TOKEN set the drafted PR's checks run
+      # automatically and the SHIP-LOCK/PR use a token with the needed scopes;
+      # without it the routine falls back to GITHUB_TOKEN exactly as before (the
+      # "Note a checkless draft PR" step below says so). GH_TOKEN is the same
+      # secret design-run.yml uses for this.
       #
       # The pin is the immutable commit behind the v1 tag; a moved tag must not
       # silently change what runs with write perms + a secret. Re-pin
@@ -187,7 +197,7 @@ jobs:
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ github.token }}
+          github_token: ${{ secrets.GH_TOKEN || github.token }}
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
       - name: Ship via Z.AI (GLM)
@@ -213,9 +223,22 @@ jobs:
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
-          github_token: ${{ github.token }}
+          github_token: ${{ secrets.GH_TOKEN || github.token }}
           claude_args: --model glm-5.2
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Note a checkless draft PR (no CI-triggering PAT)
+        # A /ship-issue draft PR opened with the default GITHUB_TOKEN does not
+        # auto-run CI, so a reviewer can't see whether the work passes. Fires
+        # only when we actually shipped and GH_TOKEN was not set.
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && env.HAS_GH_TOKEN != 'true'
+        run: |
+          echo "::notice::the draft PR for #${{ steps.select.outputs.issue }} was opened with GITHUB_TOKEN, so CI will not auto-run on it — push any commit, or set the GH_TOKEN repo secret (a PAT with contents + pull-requests + issues write) so future ships trigger checks automatically."
 
       - name: Explain a skipped agentic run
         if: >-
@@ -253,16 +276,45 @@ jobs:
           # Only the step matching the configured provider runs; the other is
           # 'skipped'. Report the one that actually ran.
           SHIP: ${{ steps.policy.outputs.provider == 'zai' && steps.ship_zai.outcome || steps.ship_anthropic.outcome }}
+          # $GITHUB_STEP_SUMMARY does not auto-link a bare #N, so build a real
+          # link to the issue holding the authoritative verdict.
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
         run: |
           {
             echo "## Backlog burn — run outcome"
             if [ -z "${ISSUE}" ]; then
               echo "- selected: none (nothing eligible)"
             else
-              echo "- selected: #${ISSUE}"
+              echo "- selected: [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE})"
               echo "- provider: ${PROVIDER}"
-              echo "- ship step: ${SHIP:-skipped} (see issue #${ISSUE} for the /ship-issue verdict and any draft PR)"
+              echo "- ship step: ${SHIP:-skipped} (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /ship-issue verdict and any draft PR)"
             fi
             echo ""
             echo "**Steer this routine** — comment \`/backlog-burn set <key> <value>\` (\`enabled\` · \`label\` · \`provider\` · \`cadence\`) on any issue or PR to change policy without a PR (write access required); flip the \`BACKLOG_BURN_ENABLED\` repo variable to arm or disarm it."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    name: Explain a disarmed run
+    # The `burn` job is gated at job level, so when the arming variable is unset
+    # (the default clone/fork state) or a dispatch targets a non-default ref,
+    # that job is skipped silently — no notice, no summary. This tiny sibling
+    # makes the most common "why did nothing happen?" state legible. It holds no
+    # secrets and no write permissions: it only annotates.
+    if: >-
+      vars.BACKLOG_BURN_ENABLED != 'true'
+      || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the routine did not run
+        env:
+          ARMED: ${{ vars.BACKLOG_BURN_ENABLED }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::notice::backlog burn is disarmed — set the BACKLOG_BURN_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/backlog-burn.conf; both must agree before it runs."
+          else
+            echo "::notice::backlog burn only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
+          fi
