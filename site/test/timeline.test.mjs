@@ -23,6 +23,7 @@ import {
   parseFieldTestLog,
   decisionLogSource,
   fieldTestSource,
+  gitHistorySource,
   SOURCES,
   readTimeline,
   timelineEvents,
@@ -268,8 +269,31 @@ test("readTimeline surfaces a bad row's problem", () => {
   assert.match(problems[0], /real YYYY-MM-DD/);
 });
 
-test("SOURCES is the committed-only default set, in declaration order", () => {
-  assert.deepEqual(SOURCES.map((s) => s.id), ["decision-log", "field-test"]);
+test("SOURCES is the default source set, in declaration order", () => {
+  assert.deepEqual(SOURCES.map((s) => s.id), ["decision-log", "field-test", "git"]);
+});
+
+test("gitHistorySource merges pre-fetched git events, and is quiet when absent", () => {
+  const gitEvents = [
+    { date: "2026-08-06", source: "git", sourceTag: "commit · git", text: "Add design", detail: "", handle: "shai" },
+  ];
+  assert.deepEqual(gitHistorySource.read({ gitEvents }).events, gitEvents);
+  // A committed-only build passes no gitEvents; the adapter must stay quiet.
+  assert.deepEqual(gitHistorySource.read({}).events, []);
+});
+
+test("readTimeline sorts git events into the committed ones newest-first", () => {
+  const gitEvents = [
+    { date: "2026-08-05", source: "git", sourceTag: "commit · git", text: "a commit", detail: "", handle: "shai" },
+  ];
+  const notes = "## Field test log\n\n### 2026-08-07 — Prusa MK4\n- ok\n";
+  const { events } = readTimeline({ pmText: DECISION_LOG, notesText: notes, roster: ROSTER, gitEvents });
+  // 08-08 + 08-06 decisions, 08-07 field test, 08-05 git commit — one timeline.
+  assert.deepEqual(
+    events.map((e) => e.date),
+    ["2026-08-08", "2026-08-07", "2026-08-06", "2026-08-05"],
+  );
+  assert.equal(events.at(-1).source, "git");
 });
 
 test("the seam accepts a custom source set without touching assembly", () => {
