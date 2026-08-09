@@ -179,6 +179,18 @@ if ! ./scripts/printer-conf-check.sh; then
   fail=1
 fi
 
+# And this proves the vendored NopSCADlib tree still resolves through
+# OPENSCADPATH and builds a real vitamin. No committed file includes it (no
+# design is wired — stage 4 of #98 — and core first-party tooling is forbidden
+# from including it by the GPL boundary), so nothing else in this check would
+# notice if lib/NopSCADlib/ went missing: an unresolved `include` only WARNs and
+# exits 0, the silent wrong-geometry mode CLAUDE.md documents. This is the one
+# thing that closes it for a vendored tree nothing exercises yet (issue #155).
+echo "-- nopscadlib resolve check: scripts/nopscadlib-check.sh"
+if ! ./scripts/nopscadlib-check.sh; then
+  fail=1
+fi
+
 # And this proves the chunker's deny backstop still neutralizes every dangerous
 # tool allow it would otherwise inherit from .claude/settings.json (which
 # claude-code-action loads via settingSources=project). Same family again: the
