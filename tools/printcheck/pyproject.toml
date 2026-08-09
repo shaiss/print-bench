@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "STL printability analysis: geometric heuristics for FDM 3D printing, with optional AI summary on top"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "CC-BY-4.0" }
+license = { text = "CC-BY-SA-4.0" }
 dependencies = [
     # trimesh 5.0 (2026-08) verified; <6 guards against the next major.
     "trimesh>=4.0,<6",

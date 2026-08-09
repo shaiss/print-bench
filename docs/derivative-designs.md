@@ -226,9 +226,9 @@ parent's page is how the two drift apart. The link is gated (sibling-relative
 HTML anchor) because it is the only durable form the lineage takes for a human
 reader.
 
-Licensing needs no extra ceremony: the whole tree is CC BY 4.0 (see
-[`LICENSE`](../LICENSE)), so a derivative carries the same terms as its parent
-and the README link is the attribution a reader can act on.
+Licensing needs no extra ceremony: the whole tree is CC BY-SA 4.0 (see
+[`LICENSE`](../LICENSE)), so under ShareAlike a derivative must carry the same
+terms as its parent, and the README link is the attribution a reader can act on.
 
 ## Base-safety
 

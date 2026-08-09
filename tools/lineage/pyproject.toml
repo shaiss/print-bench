@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Resolve and validate design lineage: which design derives from which, and what a change to a parent must re-gate"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "CC-BY-4.0" }
+license = { text = "CC-BY-SA-4.0" }
 # Deliberately empty, and it must stay that way: CI's classifier job runs
 # `lineage blast-radius` to decide which designs a push has to gate, before
 # anything is installed. A single third-party import would mean a pip step

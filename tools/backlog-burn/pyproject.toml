@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Pick one unclaimed, autonomy-eligible issue for a scheduled unattended /ship-issue run"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "CC-BY-4.0" }
+license = { text = "CC-BY-SA-4.0" }
 # Deliberately empty, and it must stay that way: the selection tool runs in a
 # scheduled CI job on the system Python, and the live read is plain urllib.
 # A single third-party import would mean a pip-install step in front of the
