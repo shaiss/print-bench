@@ -30,9 +30,16 @@ one** issue, applying, in order:
    §0.3 takeover rule allows, it does **not** block: otherwise a dead run would
    freeze the issue out of the burn forever, since the skill's own takeover
    only runs for an issue this selector actually hands it.
-3. **oldest-first** — among what survives, the oldest issue by creation time
+3. **not awaiting a human decision** — excluded if the issue carries the
+   `needs-decision` label: an agentic run parked it for a human yes/no (the
+   HITL decision gate, issue #161), and it must not be re-selected until
+   `/decide` records the verdict and clears the label. Unlike a SHIP-LOCK this
+   block is *durable* — it never goes stale, because a pending decision does not
+   expire, so the guard sits ahead of the staleness logic. See
+   `../../docs/decision-gate.md`.
+4. **oldest-first** — among what survives, the oldest issue by creation time
    (tie-broken by number, so the pick is deterministic across runs).
-4. **cap of one** — everything past the first eligible issue is deferred to
+5. **cap of one** — everything past the first eligible issue is deferred to
    the next firing, so a bad night costs one PR, not five.
 
 `select` is a **pure function of the snapshot** — no network — which is what
