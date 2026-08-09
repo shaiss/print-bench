@@ -81,7 +81,16 @@ jobs:
     # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
     # anything but 'true' pauses the whole job in seconds without a commit.
     # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
-    if: vars.BACKLOG_BURN_ENABLED == 'true'
+    # Also pin the run to the DEFAULT BRANCH: this job carries write scopes and
+    # a secret, and `workflow_dispatch` can target any in-repo branch — so a
+    # dispatch against a PR branch must not run that branch's skill/selector
+    # code with the secret. On `schedule` github.ref_name is already the default
+    # branch, so this only ever blocks a hand-dispatch against a non-default ref
+    # (matches design-run.yml and chunker.yml, and the mitigation
+    # docs/actions-security.md already credits this workflow with).
+    if: >-
+      vars.BACKLOG_BURN_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
@@ -94,6 +103,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          # Belt-and-braces with the job `if:` above: always check out the
+          # default branch, so the secret-bearing agent runs the reviewed,
+          # merged skill + selector — never a dispatched branch's version
+          # (matches design-run.yml and chunker.yml).
+          ref: ${{ github.event.repository.default_branch }}
 
       - uses: actions/setup-python@v6
         with:
@@ -249,4 +263,6 @@ jobs:
               echo "- provider: ${PROVIDER}"
               echo "- ship step: ${SHIP:-skipped} (see issue #${ISSUE} for the /ship-issue verdict and any draft PR)"
             fi
+            echo ""
+            echo "**Steer this routine** — comment \`/backlog-burn set <key> <value>\` (\`enabled\` · \`label\` · \`provider\` · \`cadence\`) on any issue or PR to change policy without a PR (write access required); flip the \`BACKLOG_BURN_ENABLED\` repo variable to arm or disarm it."
           } >> "$GITHUB_STEP_SUMMARY"

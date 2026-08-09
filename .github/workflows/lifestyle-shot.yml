@@ -39,10 +39,12 @@ on:
         description: Design directory under designs/ (must ship a lifestyle.conf)
         required: true
         default: sushi-battleship
+        type: string
       size:
         description: Image size WxH passed to GLM-Image (override if the API rejects the default)
         required: false
         default: 1280x1280
+        type: string
 
 permissions:
   contents: write
