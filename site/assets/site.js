@@ -173,3 +173,57 @@
     select(initial ? initial.id : panels[0].id);
   });
 })();
+
+/* Product-page media stage (the media rework, PR #159): the thumbnail rail
+   switches which pre-rendered stage view is visible and updates the caption
+   (label, kind, alt text, AI disclosure), with arrow-key navigation. Every
+   view ships in the markup and this only toggles `hidden` and writes
+   textContent — no DOM-read text ever reaches a URL or HTML sink (CodeQL
+   js/xss-through-dom). Without JavaScript the stage shows the hero and the
+   rail is still every preview at thumbnail size. */
+(function () {
+  document.addEventListener("DOMContentLoaded", function () {
+    var stage = document.querySelector("[data-media-stage]");
+    if (!stage) return;
+    var views = Array.prototype.slice.call(stage.querySelectorAll("[data-stage-view]"));
+    var label = stage.querySelector("[data-stage-label]");
+    var kind = stage.querySelector("[data-stage-kind]");
+    var count = stage.querySelector("[data-stage-count]");
+    var alt = stage.querySelector("[data-stage-alt]");
+    var disclosure = stage.querySelector("[data-stage-disclosure]");
+    var thumbs = Array.prototype.slice.call(stage.querySelectorAll(".stage-thumb"));
+    if (!thumbs.length || thumbs.length !== views.length) return;
+    var cur = 0;
+    function show(i) {
+      cur = (i + thumbs.length) % thumbs.length;
+      var t = thumbs[cur];
+      views.forEach(function (v, j) { v.hidden = j !== cur; });
+      label.textContent = t.getAttribute("data-label") || "";
+      kind.textContent = t.getAttribute("data-kind") || "";
+      count.textContent = String(cur + 1) + " / " + thumbs.length;
+      alt.textContent = t.getAttribute("data-alt") || "";
+      var d = t.getAttribute("data-disclosure");
+      disclosure.hidden = !d;
+      disclosure.textContent = d || "";
+      thumbs.forEach(function (b, j) {
+        b.classList.toggle("sel", j === cur);
+        b.setAttribute("aria-current", j === cur ? "true" : "false");
+      });
+    }
+    thumbs.forEach(function (t, i) {
+      t.addEventListener("click", function () { show(i); });
+    });
+    // Arrows work page-wide (a lightbox convention — no focus stealing, no
+    // preventDefault, so scrolling and form fields are untouched); when focus
+    // is already on a rail thumb, the arrow also moves focus with the
+    // selection so keyboard users stay on the control they'll press next.
+    document.addEventListener("keydown", function (e) {
+      if (e.target && /^(input|textarea|select)$/i.test(e.target.tagName)) return;
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      var onThumb = e.target && e.target.closest && e.target.closest(".stage-thumb");
+      if (onThumb) e.preventDefault();
+      show(e.key === "ArrowRight" ? cur + 1 : cur - 1);
+      if (onThumb) thumbs[cur].focus();
+    });
+  });
+})();

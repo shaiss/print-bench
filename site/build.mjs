@@ -41,6 +41,7 @@ import {
   loginHandleMap,
 } from "./lib/history.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
+import { stripReadmeMedia, designMedia, missingMediaRefs } from "./lib/media.mjs";
 import { buildModel } from "./lib/model.mjs";
 import {
   indexPage,
@@ -322,7 +323,25 @@ async function main() {
   });
 
   for (const design of designs) {
-    const { html, headings } = renderMarkdown(design.readme, {
+    // The media rework (PR #159): the README's image embeds and their AI
+    // disclaimers move out of the prose into the media stage; the stage is
+    // built from the same committed previews, hero first. The stage's files
+    // are registered as assets by hand because — like the gallery thumbnails
+    // below — no rendered markdown references them anymore.
+    const { markdown: proseMarkdown, alts } = stripReadmeMedia(design.readme);
+    // The stripper lifts embeds before renderMarkdown's reference checker
+    // sees them, so a lifted embed naming a missing file must fail the build
+    // here — silently dropping it would break the unresolved-local-reference
+    // rule. (Embeds left in the prose still go through the checker.)
+    for (const f of missingMediaRefs(alts, design.previews)) {
+      onError(
+        `${design.readmePath}: embeds previews/${f}, which does not exist in ${design.relDir}/previews/`
+      );
+    }
+    const media = designMedia(design, alts);
+    for (const m of media) assets.add(join(design.dir, "previews", m.file));
+
+    const { html, headings } = renderMarkdown(proseMarkdown, {
       repoRoot: REPO_ROOT,
       sourcePath: design.readmePath,
       onAsset,
@@ -351,6 +370,7 @@ async function main() {
         toc: tocHtml(headings),
         githubBase: GITHUB_BASE,
         model,
+        media,
         downloads,
         // The team-contributions section: who built this product and its
         // build history, product-scoped. Only a rostered design gets one.
@@ -382,10 +402,15 @@ async function main() {
     });
   }
 
-  // The gallery needs its thumbnails even though no rendered markdown
+  // The gallery needs its card media even though no rendered markdown
   // references them: the cards are built from structured data, not prose.
+  // The hero leads the card (the thumb stays the 3D-viewer's noscript
+  // fallback), and the turntable GIF is the card's hover swap.
   for (const design of designs) {
+    if (design.hero) assets.add(join(design.dir, "previews", design.hero));
     if (design.thumb) assets.add(join(design.dir, "previews", design.thumb));
+    if ((design.previews || []).includes("turntable.gif"))
+      assets.add(join(design.dir, "previews", "turntable.gif"));
   }
   for (const style of styles) {
     if (style.swatch) assets.add(join(style.dir, style.swatch));
