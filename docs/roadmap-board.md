@@ -56,11 +56,13 @@ carried by a clone, exactly like the rest of the repo's config.
 - **The Actions `GITHUB_TOKEN` cannot touch Projects v2** at all.
 - **`REGEN_TOKEN` (a `contents:write` fine-grained PAT) does NOT include Projects
   access.** The slice-2 automation that *populates* the board needs a
-  project-scoped token — either a classic PAT with `project`, or a fine-grained
-  PAT with **Account permissions → Projects: Read and write** — stored as a new
-  secret (e.g. `PROJECT_TOKEN`), or the Projects permission added to
-  `REGEN_TOKEN`. (Fine-grained tokens have had a documented gap for *user-owned*
-  projects; a classic `project` PAT is the safe default — verify before wiring.)
+  **project-scoped** token. Prefer **reusing the existing `GH_TOKEN` secret**
+  (already wired into `design-run.yml`) **if it carries the `project` scope** —
+  confirm first, since `project` is a separate scope not implied by `repo`. If it
+  doesn't, add Projects access to it, or use a classic PAT with `project` / a
+  fine-grained PAT with **Account → Projects: Read and write**. (Fine-grained
+  tokens have had a documented gap for *user-owned* projects; a classic `project`
+  PAT is the safe default.)
 
 ## Slices
 
