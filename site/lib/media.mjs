@@ -50,23 +50,50 @@ export function classifyMedia(file) {
  *    (`*AI-generated …*` / an italic line saying "geometry is approximate") —
  *    the stage re-states the disclosure on the media itself.
  * Everything else — headings, the archived blockquote, tables, links — is
- * returned unchanged.
+ * returned unchanged. That the match is anchored to the whole line is policy,
+ * not accident: an embed *inside* prose structure (desiccant-capsule's
+ * labeled comparison table) is content placed in context, stays in the body,
+ * and keeps flowing through the markdown reference checker; only the
+ * standalone image wall moves to the stage.
  */
 export function stripReadmeMedia(markdown) {
   const alts = new Map();
   const kept = [];
+  // A disclaimer is stripped only when the last lifted embed was AI media —
+  // the stage re-states the disclosure there. An italic line that merely
+  // resembles one, standing alone in prose, is content and stays.
+  let lastLiftedAi = false;
   for (const line of markdown.split("\n")) {
     const t = line.trim();
     const img = /^!\[([^\]]*)\]\(previews\/([^)\s]+)\)$/.exec(t);
     if (img) {
       alts.set(img[2], img[1]);
+      lastLiftedAi = /^lifestyle-/.test(img[2]);
       continue;
     }
-    if (/^\*(AI-generated|This is an AI)/.test(t)) continue;
-    if (/^\*.*geometry is approximate.*\*$/.test(t)) continue;
+    if (
+      lastLiftedAi &&
+      (/^\*(AI-generated|This is an AI)/.test(t) ||
+        /^\*.*geometry is approximate.*\*$/.test(t))
+    ) {
+      lastLiftedAi = false;
+      continue;
+    }
+    if (t !== "") lastLiftedAi = false;
     kept.push(line);
   }
   return { markdown: kept.join("\n"), alts };
+}
+
+/**
+ * README preview embeds that name a file the design does not ship. The
+ * stripper lifts embeds before the markdown reference checker sees them, so
+ * without this check a broken embed would vanish silently instead of failing
+ * the build (the site's unresolved-local-reference rule).
+ */
+export function missingMediaRefs(alts, previews) {
+  const have = new Set(previews || []);
+  return [...alts.keys()].filter((f) => !have.has(f));
 }
 
 /**

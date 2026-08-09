@@ -41,7 +41,7 @@ import {
   loginHandleMap,
 } from "./lib/history.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
-import { stripReadmeMedia, designMedia } from "./lib/media.mjs";
+import { stripReadmeMedia, designMedia, missingMediaRefs } from "./lib/media.mjs";
 import { buildModel } from "./lib/model.mjs";
 import {
   indexPage,
@@ -329,6 +329,15 @@ async function main() {
     // are registered as assets by hand because — like the gallery thumbnails
     // below — no rendered markdown references them anymore.
     const { markdown: proseMarkdown, alts } = stripReadmeMedia(design.readme);
+    // The stripper lifts embeds before renderMarkdown's reference checker
+    // sees them, so a lifted embed naming a missing file must fail the build
+    // here — silently dropping it would break the unresolved-local-reference
+    // rule. (Embeds left in the prose still go through the checker.)
+    for (const f of missingMediaRefs(alts, design.previews)) {
+      onError(
+        `${design.readmePath}: embeds previews/${f}, which does not exist in ${design.relDir}/previews/`
+      );
+    }
     const media = designMedia(design, alts);
     for (const m of media) assets.add(join(design.dir, "previews", m.file));
 

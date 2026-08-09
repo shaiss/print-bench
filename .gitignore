@@ -12,3 +12,7 @@ __pycache__/
 
 # setuptools metadata from `pip install -e tools/<tool>`
 *.egg-info/
+
+# Baked design-review previews (site/preview/bake.mjs output) — bake on demand
+site/preview/media-rework.html
+site/preview/media-rework-embedded.html

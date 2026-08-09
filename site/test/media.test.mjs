@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  missingMediaRefs,
   classifyMedia,
   designMedia,
   mediaLabel,
@@ -123,4 +124,47 @@ test("designMedia carries the right disclosure per AI media", () => {
 test("designMedia falls back to a title-derived alt for unembedded previews", () => {
   const media = designMedia({ title: "Widget", previews: ["cutaway.png"] });
   assert.equal(media[0].alt, "Widget — Cutaway");
+});
+
+test("stripReadmeMedia keeps a disclaimer not preceded by an AI embed", () => {
+  const md = [
+    "![Studio shot](previews/product-hero.png)",
+    "",
+    "*AI-generated impression for general illustration only — geometry is approximate.*",
+    "",
+    "Body.",
+  ].join("\n");
+  const { markdown } = stripReadmeMedia(md);
+  assert.ok(
+    markdown.includes("AI-generated"),
+    "a disclaimer after non-AI media is content, not a lifted disclosure"
+  );
+});
+
+test("stripReadmeMedia strips the disclaimer only when an AI embed precedes it", () => {
+  const md = [
+    "![AI scene](previews/lifestyle-x.png)",
+    "",
+    "*AI-generated impression for general illustration only — geometry is approximate.*",
+  ].join("\n");
+  const { markdown, alts } = stripReadmeMedia(md);
+  assert.ok(alts.has("lifestyle-x.png"));
+  assert.ok(!markdown.includes("AI-generated"));
+});
+
+test("stripReadmeMedia policy: an embed inside a table row stays in the prose", () => {
+  const md = [
+    "| Closed assembly | Cutaway |",
+    "|---|---|",
+    "| ![Assembly](previews/assembly.png) | ![Cutaway](previews/cutaway.png) |",
+  ].join("\n");
+  const { markdown, alts } = stripReadmeMedia(md);
+  assert.equal(alts.size, 0, "in-context embeds are not lifted");
+  assert.ok(markdown.includes("previews/assembly.png"), "table structure survives intact");
+});
+
+test("missingMediaRefs flags lifted embeds naming absent previews", () => {
+  const { alts } = stripReadmeMedia("![x](previews/gone.png)\n\n![y](previews/here.png)");
+  assert.deepEqual(missingMediaRefs(alts, ["here.png"]), ["gone.png"]);
+  assert.deepEqual(missingMediaRefs(alts, ["here.png", "gone.png"]), []);
 });

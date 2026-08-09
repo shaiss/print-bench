@@ -113,6 +113,10 @@
     border: 1px solid var(--ink); padding: 8px 16px 8px 8px; min-width: 240px;
   }
   .member img { width: 48px; height: 48px; border: 1px solid var(--hair); background: #fff; filter: grayscale(1); }
+  .member .monogram {
+    width: 48px; height: 48px; border: 1px solid var(--hair); background: #fff;
+    display: grid; place-items: center; font-weight: 800; font-size: 18px; color: var(--muted);
+  }
   .member .mono {
     font: 500 12px/1 ui-monospace, "SFMono-Regular", Menlo, monospace;
     background: #e9e6e4; color: var(--muted); padding: 2px 5px; margin-left: 6px;
@@ -201,7 +205,10 @@
 /*__DATA__*/
 
 const app = document.getElementById("app");
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// esc() guards every attribute/text interpolation below. d.pitch and d.body
+// are the deliberate exceptions: they hold marked-rendered HTML baked from
+// the committed READMEs at build time, so they are inserted raw.
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const AI_STILL = "AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render and the STL for the true shape.";
 const AI_MOTION = "AI-generated motion impression for general illustration only — geometry is approximate, and the movement shown is illustrative, not a simulation; see the deterministic previews and the STL for the true shape.";
@@ -214,10 +221,12 @@ function tags(d) {
   return t.join("");
 }
 
+let galleryAbort = null;
+
 function gallery() {
   document.title = "print-bench — media rework preview";
   const cards = DESIGNS.map((d) => {
-    const hero = d.media[0];
+    const hero = d.media[0] || { src: "", alt: `${d.title} (no previews yet)` };
     const lin = d.depth ? `<span class="lin">↳ </span>` : "";
     const from = d.parents.length
       ? `<span class="from">derived from <span class="plink" data-goto="${esc(d.parents[0])}">${esc(d.parents[0])}</span></span>`
@@ -264,7 +273,10 @@ function gallery() {
     if (rem) for (let i = 0; i < cols - rem; i++) grid.insertAdjacentHTML("beforeend", `<div class="filler"></div>`);
   }
   fillGrid();
-  addEventListener("resize", fillGrid, { once: false });
+  // Tied to this render: route() aborts it, so re-entering the gallery never
+  // stacks stale listeners over detached grids.
+  galleryAbort = new AbortController();
+  addEventListener("resize", fillGrid, { signal: galleryAbort.signal });
 }
 
 const GH = "https://github.com/shaiss/print-bench";
@@ -273,7 +285,7 @@ function team(d) {
   if (!d.team) return "";
   const cards = d.team.core.map((m) => `
     <div class="member">
-      ${m.avatar ? `<img src="${esc(m.avatar)}" alt="">` : ""}
+      ${m.avatar ? `<img src="${esc(m.avatar)}" alt="">` : `<span class="monogram" aria-hidden="true">${esc(m.initials || (m.name || "?")[0])}</span>`}
       <div>
         <span class="nm">${esc(m.name)}</span><span class="mono">${esc(m.handle)}</span>
         <div class="rl">${esc(m.role)}</div>
@@ -295,7 +307,7 @@ function product(name) {
   if (!d) { location.hash = "#/"; return; }
   document.title = `${d.title} — media rework preview`;
   const thumbs = d.media.map((m, i) => `
-    <button class="thumb" data-i="${i}" aria-label="${esc(m.label)}">
+    <button class="thumb" data-i="${i}" aria-label="${esc(m.label)} — ${esc(m.kind)}">
       <img src="${esc(m.src)}" alt="" loading="lazy">
       <span><span class="tl">${esc(m.label)}</span><br>
         <span class="tk">${esc(m.kind)}${m.ai ? ` · <span class="aik">AI</span>` : ""}</span></span>
@@ -325,6 +337,7 @@ function product(name) {
   const rail = document.getElementById("rail");
   let cur = -1;
   function show(i) {
+    if (!d.media.length) return;
     cur = (i + d.media.length) % d.media.length;
     const m = d.media[cur];
     stageImg.src = m.src;
@@ -350,6 +363,7 @@ function product(name) {
 
 function route() {
   document.onkeydown = null;
+  if (galleryAbort) { galleryAbort.abort(); galleryAbort = null; }
   const m = /^#\/d\/([a-z0-9-]+)/.exec(location.hash);
   if (m) product(m[1]);
   else gallery();

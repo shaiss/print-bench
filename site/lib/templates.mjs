@@ -23,10 +23,13 @@ function mediaStage(design, media) {
   // design with one image must not lose it.
   if (!media || media.length === 0) return "";
   const first = media[0];
-  const src = (m) => `/${design.relDir}/previews/${m.file}`;
+  // Filenames come from the committed previews directory, but they are still
+  // interpolated into attributes — escape them like every other repo-derived
+  // string here (the scad list, the alt text) rather than trusting the glob.
+  const src = (m) => escapeHtml(`/${design.relDir}/previews/${m.file}`);
   const thumbs = media
     .map(
-      (m, i) => `    <button class="stage-thumb${i === 0 ? " sel" : ""}" type="button"
+      (m, i) => `    <button class="stage-thumb${i === 0 ? " sel" : ""}" type="button" aria-current="${i === 0 ? "true" : "false"}"
       data-label="${escapeHtml(m.label)}" data-kind="${escapeHtml(m.kind)}"
       data-alt="${escapeHtml(m.alt)}"${m.disclosure ? ` data-disclosure="${escapeHtml(m.disclosure)}"` : ""}
       aria-label="${escapeHtml(m.label)} — ${escapeHtml(m.kind)}">
@@ -178,9 +181,9 @@ function card(design, roster = null) {
   // same rule avatar-studio is structured around). The GIF is lazy and
   // display:none until hover, so it isn't fetched with the page.
   const thumb = design.hero
-    ? `<a class="card-media" href="/${design.relDir}/"><img class="card-hero" src="/${design.relDir}/previews/${design.hero}" alt="${escapeHtml(design.name)} preview" loading="lazy">${
+    ? `<a class="card-media" href="/${design.relDir}/"><img class="card-hero" src="${escapeHtml(`/${design.relDir}/previews/${design.hero}`)}" alt="${escapeHtml(design.name)} preview" loading="lazy">${
         spin
-          ? `<img class="card-spin" src="/${design.relDir}/previews/${spin}" alt="" loading="lazy">`
+          ? `<img class="card-spin" src="${escapeHtml(`/${design.relDir}/previews/${spin}`)}" alt="" loading="lazy">`
           : ""
       }${
         mediaCount > 1 ? `<span class="media-chip">${mediaCount} media</span>` : ""

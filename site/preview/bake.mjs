@@ -155,12 +155,16 @@ const fontSrc = embedDir
   ? `data:font/woff2;base64,${fs.readFileSync(fontPath).toString("base64")}`
   : "../assets/fonts/archivo-latin.woff2";
 
+// Function replacers so `$&`-style sequences in the data are never treated as
+// replacement patterns, and `<` escaped so README content containing
+// "</script" cannot terminate the script element it's baked into.
+const json = (v) => JSON.stringify(v).replace(/</g, "\\u003c");
 const template = fs.readFileSync(path.join(here, "template.html"), "utf8");
 const html = template
-  .replace("__FONT__", fontSrc)
+  .replace("__FONT__", () => fontSrc)
   .replace(
     "/*__DATA__*/",
-    `const DESIGNS = ${JSON.stringify(data)};\nconst REVIEWERS = ${JSON.stringify(reviewers)};`
+    () => `const DESIGNS = ${json(data)};\nconst REVIEWERS = ${json(reviewers)};`
   );
 fs.writeFileSync(outFile, html);
 const size = (fs.statSync(outFile).size / 1024 / 1024).toFixed(2);

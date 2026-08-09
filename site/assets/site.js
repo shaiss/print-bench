@@ -205,15 +205,25 @@
       var d = t.getAttribute("data-disclosure");
       disclosure.hidden = !d;
       disclosure.textContent = d || "";
-      thumbs.forEach(function (b, j) { b.classList.toggle("sel", j === cur); });
+      thumbs.forEach(function (b, j) {
+        b.classList.toggle("sel", j === cur);
+        b.setAttribute("aria-current", j === cur ? "true" : "false");
+      });
     }
     thumbs.forEach(function (t, i) {
       t.addEventListener("click", function () { show(i); });
     });
+    // Arrows work page-wide (a lightbox convention — no focus stealing, no
+    // preventDefault, so scrolling and form fields are untouched); when focus
+    // is already on a rail thumb, the arrow also moves focus with the
+    // selection so keyboard users stay on the control they'll press next.
     document.addEventListener("keydown", function (e) {
       if (e.target && /^(input|textarea|select)$/i.test(e.target.tagName)) return;
-      if (e.key === "ArrowRight") show(cur + 1);
-      else if (e.key === "ArrowLeft") show(cur - 1);
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      var onThumb = e.target && e.target.closest && e.target.closest(".stage-thumb");
+      if (onThumb) e.preventDefault();
+      show(e.key === "ArrowRight" ? cur + 1 : cur - 1);
+      if (onThumb) thumbs[cur].focus();
     });
   });
 })();

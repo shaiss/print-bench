@@ -14,7 +14,7 @@ python3 -m http.server 8000       # from the repo root, then open
 (`site/lib/content.mjs`, the design READMEs, `designs/<name>/previews/`) and
 bakes them into one static page — it invents no content. `EMBED_DIR=<dir>`
 inlines media as data URIs from a pre-downscaled mirror, for a fully
-self-contained file.
+self-contained file; that mode writes `media-rework-embedded.html` instead.
 
 What the preview changes, relative to the live site:
 
@@ -31,9 +31,12 @@ What the preview changes, relative to the live site:
   archived blockquote and the image embeds are lifted out as structured
   pieces (title, banner, media stage).
 
-`media-rework.html` is baked output committed for convenience — regenerate it
-with the command above rather than editing it. Nothing in the real site build
-(`site/build.mjs`) or its tests reads this directory.
+The baked pages are **not committed** (they're gitignored): they embed a full
+copy of every README, so a committed copy would drift silently the moment a
+design changes — the repo's regenerated artifacts stay under CI control, and
+this one has no CI job, so it stays out of git instead. Bake it when you want
+to look. Nothing in the real site build (`site/build.mjs`) or its tests reads
+this directory.
 
 **Status: the rework this previewed has landed** in the real site
 (`site/lib/media.mjs`, `site/lib/templates.mjs`, `site/build.mjs`,
