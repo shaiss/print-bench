@@ -262,6 +262,43 @@ def test_malformed_issue_number_is_not_a_regex():
 
 
 # --------------------------------------------------------------------------
+# Guard: an issue parked for a human decision (needs-decision, issue #161)
+# --------------------------------------------------------------------------
+
+def test_needs_decision_excludes():
+    # An otherwise-eligible issue parked for a human yes/no is skipped...
+    parked = issue(90, "2026-08-01T00:00:00Z", labels=[LABEL, "needs-decision"])
+    r = select_issue(snap([parked]))
+    assert r["selected"] is None
+    assert r["excluded"]["90"].startswith("awaiting a human decision")
+    # ...and once the decision is recorded and the label cleared, it is
+    # selectable again (negative control).
+    resolved = issue(90, "2026-08-01T00:00:00Z", labels=[LABEL])
+    assert select_issue(snap([resolved]))["selected"] == 90
+
+
+def test_needs_decision_blocks_even_when_lock_is_stale():
+    # The durable block: a decision-pending issue must stay excluded even after
+    # a SHIP-LOCK the pausing run left has gone stale — the whole reason the
+    # decision state is a label, not a lock. The guard's placement before the
+    # lock check is what this proves.
+    stale_locked = issue(
+        91, "2026-08-01T00:00:00Z", labels=[LABEL, "needs-decision"],
+        locks=[{"body": "🚢 SHIP-LOCK — shipping.",
+                "createdAt": _iso(NOW - timedelta(hours=9))}],
+    )
+    assert select_issue(snap([stale_locked]), now=NOW)["selected"] is None
+    # Negative control: the SAME stale lock WITHOUT needs-decision is takeable,
+    # so it is the decision label — not the lock — doing the exclusion above.
+    stale_only = issue(
+        91, "2026-08-01T00:00:00Z", labels=[LABEL],
+        locks=[{"body": "🚢 SHIP-LOCK — shipping.",
+                "createdAt": _iso(NOW - timedelta(hours=9))}],
+    )
+    assert select_issue(snap([stale_only]), now=NOW)["selected"] == 91
+
+
+# --------------------------------------------------------------------------
 # The outcome record (AC4)
 # --------------------------------------------------------------------------
 
