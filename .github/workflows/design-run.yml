@@ -112,6 +112,9 @@ jobs:
       vars.DESIGN_RUN_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
+    # A full design run renders, slices and iterates; a hung run must not hold a
+    # runner for the 6-hour default while holding a secret, unwatched.
+    timeout-minutes: 60
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
@@ -119,6 +122,10 @@ jobs:
       # `key_present` output.
       HAS_ANTHROPIC_KEY: ${{ secrets.CLAUDE_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      # The github_token PAT is effectively required here (without it the draft
+      # PR won't trigger CI and readme-gate has no preview) — surfaced so a step
+      # can warn before the agentic run when it is missing.
+      HAS_GH_TOKEN: ${{ secrets.GH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -180,7 +187,7 @@ jobs:
           # writes `issue=<n>` (empty when nothing is eligible) to $GITHUB_OUTPUT
           # and a markdown block to $GITHUB_STEP_SUMMARY. Same selector the
           # backlog burn uses, pointed at the design-brief label.
-          backlog-burn run --repo "$GITHUB_REPOSITORY" --label "$LABEL"
+          backlog-burn run --repo "$GITHUB_REPOSITORY" --label "$LABEL" --summary-title 'Design run'
 
       # One explicit ship step per provider — a provider is a reviewed,
       # git-tracked step because GitHub Actions can only reference a secret by
@@ -206,6 +213,20 @@ jobs:
       # The pin is the immutable commit behind the v1 tag; a moved tag must not
       # silently change what runs with write perms + a secret. Re-pin
       # deliberately to adopt a new release.
+
+      - name: Warn if the CI-triggering PAT is missing
+        # The draft PR must carry CI for the design to reach a mergeable state
+        # (readme-gate needs a CI-regenerated preview), so GH_TOKEN is
+        # effectively required here. Surface it before the run instead of failing
+        # deep in the action with an empty github_token.
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && env.HAS_GH_TOKEN != 'true'
+        run: |
+          echo "::warning::GH_TOKEN (a PAT with contents + pull-requests + issues write) is not set — the /design-run draft PR for #${{ steps.select.outputs.issue }} will not trigger CI, so its product-shot regen won't run and readme-gate will fail. Set the GH_TOKEN repo secret before relying on the unattended run."
 
       - name: Run via Anthropic (Claude)
         id: run_anthropic
@@ -283,17 +304,55 @@ jobs:
         env:
           ISSUE: ${{ steps.select.outputs.issue }}
           PROVIDER: ${{ steps.policy.outputs.provider }}
+          # Distinguish a policy-step failure, a disabled routine and a failed
+          # selection from a genuine empty selection — otherwise all four read
+          # as "nothing eligible" (CodeRabbit review on #165).
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          SELECT_OUTCOME: ${{ steps.select.outcome }}
           # Only the step matching the configured provider runs; the other is
           # 'skipped'. Report the one that actually ran.
           RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome }}
+          # $GITHUB_STEP_SUMMARY does not auto-link a bare #N — build a real link.
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
         run: |
           {
             echo "## Design run — run outcome"
-            if [ -z "${ISSUE}" ]; then
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/design-run.conf \`enabled\` != true) — nothing ran"
+            elif [ "${SELECT_OUTCOME}" != "success" ]; then
+              echo "- selection did not complete (\`${SELECT_OUTCOME:-skipped}\`) — the selector failed; see the log"
+            elif [ -z "${ISSUE}" ]; then
               echo "- selected: none (nothing eligible)"
             else
-              echo "- selected: #${ISSUE}"
+              echo "- selected: [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE})"
               echo "- provider: ${PROVIDER}"
-              echo "- run step: ${RUN:-skipped} (see issue #${ISSUE} for the /design-run verdict and any draft PR)"
+              echo "- run step: ${RUN:-skipped} (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /design-run verdict and any draft PR)"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    name: Explain a disarmed run
+    # The `run` job is gated at job level, so an unset arming variable (the
+    # default clone/fork state) or a dispatch against a non-default ref skips it
+    # silently. This sibling makes that legible. No secrets, no write perms.
+    if: >-
+      vars.DESIGN_RUN_ENABLED != 'true'
+      || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the routine did not run
+        env:
+          ARMED: ${{ vars.DESIGN_RUN_ENABLED }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::notice::design run is disarmed — set the DESIGN_RUN_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/design-run.conf; both must agree before it runs."
+          else
+            echo "::notice::design run only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
+          fi

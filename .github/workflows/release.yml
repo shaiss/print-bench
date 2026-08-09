@@ -146,6 +146,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.cfg.outputs.version }}
           SHA: ${{ steps.cfg.outputs.sha }}
+          DESIGN: ${{ steps.cfg.outputs.design }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -167,3 +168,17 @@ jobs:
               --title "$VERSION" \
               --notes "Per-design STL bundles with per-part SHA-256 checksums and machine-readable print settings, built from gated exports by .github/workflows/release.yml (issue #102)."
           fi
+
+          # Hand a human who dispatched this a one-click link to the Release and
+          # a legible per-run summary, instead of the URL living only in the log.
+          rel_url="$(gh release view "$VERSION" --json url -q .url 2>/dev/null || true)"
+          {
+            echo "## Release bundles — ${VERSION}"
+            echo ""
+            echo "- target: \`${DESIGN}\` at commit \`$(printf '%.8s' "$SHA")\`"
+            echo "- published ${#assets[@]} asset(s): per-part STLs, per-design zips, and standalone manifests"
+            if [ -n "$rel_url" ]; then
+              echo ""
+              echo "**[${rel_url}](${rel_url})**"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
