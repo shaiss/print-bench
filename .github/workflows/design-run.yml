@@ -304,6 +304,12 @@ jobs:
         env:
           ISSUE: ${{ steps.select.outputs.issue }}
           PROVIDER: ${{ steps.policy.outputs.provider }}
+          # Distinguish a policy-step failure, a disabled routine and a failed
+          # selection from a genuine empty selection — otherwise all four read
+          # as "nothing eligible" (CodeRabbit review on #165).
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          SELECT_OUTCOME: ${{ steps.select.outcome }}
           # Only the step matching the configured provider runs; the other is
           # 'skipped'. Report the one that actually ran.
           RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome }}
@@ -313,7 +319,13 @@ jobs:
         run: |
           {
             echo "## Design run — run outcome"
-            if [ -z "${ISSUE}" ]; then
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/design-run.conf \`enabled\` != true) — nothing ran"
+            elif [ "${SELECT_OUTCOME}" != "success" ]; then
+              echo "- selection did not complete (\`${SELECT_OUTCOME:-skipped}\`) — the selector failed; see the log"
+            elif [ -z "${ISSUE}" ]; then
               echo "- selected: none (nothing eligible)"
             else
               echo "- selected: [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE})"

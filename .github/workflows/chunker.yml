@@ -309,9 +309,13 @@ jobs:
           ISSUE: ${{ steps.select.outputs.issue }}
           PROVIDER: ${{ steps.policy.outputs.provider }}
           ENABLED: ${{ steps.policy.outputs.enabled }}
+          # The policy step's own outcome, checked before ENABLED: if it failed
+          # (unknown provider, malformed config), ENABLED is empty and would be
+          # mislabelled "disabled by committed policy" (CodeRabbit review on #165).
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
           # 'success' only when selection actually ran to completion; 'skipped'
-          # when committed policy disabled the routine, 'failure' when the policy
-          # or selector step errored. Distinguishes those from a genuine empty
+          # when committed policy disabled the routine, 'failure' when the
+          # selector step errored. Distinguishes those from a genuine empty
           # selection so the summary can't claim "nothing eligible" for a run
           # that never checked eligibility.
           SELECT_OUTCOME: ${{ steps.select.outcome }}
@@ -324,10 +328,12 @@ jobs:
         run: |
           {
             echo "## Chunker — run outcome"
-            if [ "${ENABLED}" != "true" ]; then
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
               echo "- disabled by committed policy (.github/chunker.conf \`enabled\` != true) — nothing ran"
             elif [ "${SELECT_OUTCOME}" != "success" ]; then
-              echo "- selection did not complete (\`${SELECT_OUTCOME:-skipped}\`) — the policy or selector step failed; see the log"
+              echo "- selection did not complete (\`${SELECT_OUTCOME:-skipped}\`) — the selector failed; see the log"
             elif [ -z "${ISSUE}" ]; then
               echo "- selected: none (nothing carrying \`declined-too-big\` was eligible)"
             else
