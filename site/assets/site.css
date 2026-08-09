@@ -362,10 +362,21 @@ pre code { background: none; padding: 0; }
 /* ---------- gallery card media (the media rework, PR #159) ---------- */
 
 /* Grayscale at rest per the imagery rule; color (and, when the design ships
-   a turntable GIF, motion — site.js swaps the src) on hover/focus. */
+   a turntable GIF, motion) on hover/focus. The GIF frame is pre-rendered
+   markup revealed by CSS — display:none + lazy keeps it unfetched until the
+   first hover, and no script ever writes an image URL. */
 .card-media { position: relative; }
 .card:hover .card-media img,
 .card:focus-within .card-media img { filter: none; }
+.card-media .card-spin {
+  display: none;
+  position: absolute;
+  inset: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .card:hover .card-media .card-spin,
+  .card:focus-within .card-media .card-spin { display: block; }
+}
 .media-chip {
   position: absolute;
   right: 0;
@@ -412,8 +423,9 @@ pre code { background: none; padding: 0; }
 }
 /* The stage shows the shot as shipped — in color; the grayscale imagery rule
    stays on the rail thumbs and gallery cards where media is texture, not the
-   subject. */
+   subject. All views share the frame's grid cell; site.js toggles `hidden`. */
 .stage-frame img {
+  grid-area: 1 / 1;
   max-width: 100%;
   max-height: min(56vh, 540px);
   object-fit: contain;

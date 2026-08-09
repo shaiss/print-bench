@@ -27,7 +27,7 @@ function mediaStage(design, media) {
   const thumbs = media
     .map(
       (m, i) => `    <button class="stage-thumb${i === 0 ? " sel" : ""}" type="button"
-      data-src="${src(m)}" data-label="${escapeHtml(m.label)}" data-kind="${escapeHtml(m.kind)}"
+      data-label="${escapeHtml(m.label)}" data-kind="${escapeHtml(m.kind)}"
       data-alt="${escapeHtml(m.alt)}"${m.disclosure ? ` data-disclosure="${escapeHtml(m.disclosure)}"` : ""}
       aria-label="${escapeHtml(m.label)} — ${escapeHtml(m.kind)}">
       <img src="${src(m)}" alt="" loading="lazy">
@@ -43,9 +43,20 @@ function mediaStage(design, media) {
 ${thumbs}
   </div>`
       : "";
+  // Every view renders server-side, all but the first hidden; site.js only
+  // toggles `hidden` and writes captions via textContent, so no DOM-read
+  // text ever reaches a URL or HTML sink (CodeQL js/xss-through-dom). The
+  // hidden views are lazy — and the rail's thumbs use the same URLs, so a
+  // view is in cache by the time it's unhidden.
+  const views = media
+    .map(
+      (m, i) =>
+        `<img class="stage-view" data-stage-view src="${src(m)}" alt="${escapeHtml(m.alt)}"${i === 0 ? "" : ' hidden loading="lazy"'}>`
+    )
+    .join("");
   return `<section class="media-stage${media.length > 1 ? "" : " media-stage-solo"}" data-media-stage aria-label="Design media">
   <div class="stage-main">
-    <div class="stage-frame"><img data-stage-img src="${src(first)}" alt="${escapeHtml(first.alt)}"></div>
+    <div class="stage-frame">${views}</div>
     <div class="stage-cap">
       <p class="stage-cap-row"><strong data-stage-label>${escapeHtml(first.label)}</strong>
         <span class="tag tag-plain" data-stage-kind>${escapeHtml(first.kind)}</span>
@@ -162,12 +173,16 @@ function card(design, roster = null) {
   const previews = design.previews || [];
   const spin = previews.includes("turntable.gif") ? "turntable.gif" : null;
   const mediaCount = previews.length;
+  // Both frames render server-side and CSS does the hover swap — no script
+  // ever writes a URL it read from the DOM (CodeQL js/xss-through-dom, the
+  // same rule avatar-studio is structured around). The GIF is lazy and
+  // display:none until hover, so it isn't fetched with the page.
   const thumb = design.hero
-    ? `<a class="card-media" href="/${design.relDir}/"${
+    ? `<a class="card-media" href="/${design.relDir}/"><img class="card-hero" src="/${design.relDir}/previews/${design.hero}" alt="${escapeHtml(design.name)} preview" loading="lazy">${
         spin
-          ? ` data-spin="/${design.relDir}/previews/${spin}" data-still="/${design.relDir}/previews/${design.hero}"`
+          ? `<img class="card-spin" src="/${design.relDir}/previews/${spin}" alt="" loading="lazy">`
           : ""
-      }><img src="/${design.relDir}/previews/${design.hero}" alt="${escapeHtml(design.name)} preview" loading="lazy">${
+      }${
         mediaCount > 1 ? `<span class="media-chip">${mediaCount} media</span>` : ""
       }${spin ? `<span class="media-chip media-chip-spin">turntable</span>` : ""}</a>`
     : "";
