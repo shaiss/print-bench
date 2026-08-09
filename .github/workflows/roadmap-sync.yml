@@ -1,0 +1,93 @@
+name: Sync issues onto the roadmap board
+
+# Slice 2 part 2 of the autonomy roadmap board (issue #148): when an issue that
+# carries one of the autonomy-loop labels is filed (by /chunk-issue, /intake, or
+# a human), add it to the "print-bench autonomy" GitHub Project so the board
+# reflects the backlog. It runs the committed, idempotent `add-item` recipe
+# (scripts/gh-project.sh, from slice 2 part 1), so the board's schema stays the
+# git-native source of truth and this workflow is just the trigger.
+#
+# GATED, off by default: GitHub Projects v2 needs a token with the `project`
+# scope, which neither GITHUB_TOKEN nor the repo's REGEN_TOKEN/GH_TOKEN carries.
+# So the board write only happens when a PROJECT_TOKEN secret (a classic PAT with
+# `project`, or a fine-grained PAT with Account -> Projects: read/write) is set;
+# without it the workflow logs a ::notice:: and does nothing. See
+# docs/roadmap-board.md.
+#
+# SECURITY: `issues` events run in the base repo's context from the default
+# branch — there is no PR head to execute, and this job checks out only the
+# trusted default-branch `scripts/`. The board write uses PROJECT_TOKEN (Projects
+# scope only, no repo write); the ambient GITHUB_TOKEN stays contents:read. The
+# issue URL is a GitHub-controlled value and is re-validated by `add-item` before
+# use. Listed in docs/actions-security.md.
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read   # checkout the trusted default-branch scripts/ only
+
+concurrency:
+  # Serialize per issue so a rapid opened+labeled pair can't race the board.
+  group: roadmap-sync-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Add the issue to the board
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether to sync
+        id: guard
+        uses: actions/github-script@v8
+        env:
+          # Secrets aren't readable in a step `if:`, so surface presence here.
+          HAVE_TOKEN: ${{ secrets.PROJECT_TOKEN != '' }}
+        with:
+          script: |
+            // The autonomy-loop labels the board is meant to triage. An issue is
+            // synced only if it carries at least one; everything else is ignored
+            // so the board stays the autonomy backlog, not every issue.
+            const TRACKED = ['autonomy-ok', 'design-brief', 'declined-too-big', 'needs-decision'];
+            const labels = (context.payload.issue.labels || []).map((l) => l.name);
+            const matched = labels.filter((n) => TRACKED.includes(n));
+            if (matched.length === 0) {
+              core.notice(`#${context.issue.number} carries no tracked label (${TRACKED.join(', ')}); not syncing.`);
+              core.setOutput('act', 'false');
+              return;
+            }
+            if (process.env.HAVE_TOKEN !== 'true') {
+              core.notice('PROJECT_TOKEN is not set — roadmap-board sync is off. '
+                + 'Add a classic PAT with the `project` scope as PROJECT_TOKEN to enable (see docs/roadmap-board.md).');
+              core.setOutput('act', 'false');
+              return;
+            }
+            // Set the initial Stage only when the issue is first opened; on a
+            // later `labeled` event just ensure it is on the board, so we never
+            // clobber a Stage a human moved the card to.
+            core.setOutput('act', 'true');
+            core.setOutput('url', context.payload.issue.html_url);
+            core.setOutput('stage', context.payload.action === 'opened' ? 'Backlog' : '');
+
+      - name: Check out trusted tooling
+        if: steps.guard.outputs.act == 'true'
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Add the issue to the board
+        if: steps.guard.outputs.act == 'true'
+        env:
+          # gh authenticates from GH_TOKEN; the add-item recipe's env-token guard
+          # then skips `gh auth refresh` and relies on this token's project scope.
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          URL: ${{ steps.guard.outputs.url }}
+          STAGE: ${{ steps.guard.outputs.stage }}
+        run: |
+          set -euo pipefail
+          if [ -n "$STAGE" ]; then
+            scripts/gh-project.sh add-item "$URL" --stage "$STAGE" | bash
+          else
+            scripts/gh-project.sh add-item "$URL" | bash
+          fi
