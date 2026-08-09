@@ -214,6 +214,18 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          # Grant the tools /chunk-issue needs to WRITE. Without a claude_args
+          # allow-list the action runs in automation mode with a read-only base
+          # tool set and DENIES every gh/Bash write — the run no-ops (the 7
+          # permission denials the first live run showed). The skill does all
+          # GitHub writes through `gh`/`gh api` (create issue, add/remove labels,
+          # comment, and the native sub_issues REST link), so unrestricted `Bash`
+          # is the load-bearing grant: a narrower `Bash(gh:*)` would still deny
+          # the skill's `id=$(gh api …)` command-substitution / assignment forms.
+          # The mcp__github__* reads are belt-and-suspenders. The job's token
+          # scope (issues:write) still bounds what any of these can do; gh is
+          # pre-authenticated from github_token, so no extra env is needed.
+          claude_args: --allowedTools Bash,mcp__github__create_issue,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__get_issue,mcp__github__list_issues,mcp__github__search_issues
           prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
 
       - name: Run via Z.AI (GLM)
@@ -240,7 +252,9 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --model glm-5.2
+          # Same tool grant as the Anthropic step (see its comment for why Bash
+          # is load-bearing); the --model flag stays first.
+          claude_args: --model glm-5.2 --allowedTools Bash,mcp__github__create_issue,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__get_issue,mcp__github__list_issues,mcp__github__search_issues
           prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
 
       - name: Explain a skipped agentic run
