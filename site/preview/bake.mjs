@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { marked } from "marked";
 import { readDesigns } from "../lib/content.mjs";
+import { readTeam } from "../lib/team.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
@@ -93,6 +94,24 @@ function splitReadme(md) {
 }
 
 const designs = readDesigns(repoRoot);
+const team = readTeam(repoRoot, { designNames: new Set(designs.map((d) => d.name)) });
+
+function avatarSrc(handle) {
+  const p = path.join(repoRoot, "site/assets/avatars", `${handle}.svg`);
+  if (!fs.existsSync(p)) return null;
+  if (!embedDir) return `../assets/avatars/${handle}.svg`;
+  return `data:image/svg+xml;base64,${fs.readFileSync(p).toString("base64")}`;
+}
+
+const member = (m) => ({
+  handle: m.handle,
+  name: m.name,
+  role: m.role,
+  kind: m.kind,
+  initials: m.initials,
+  avatar: avatarSrc(m.handle),
+});
+const reviewers = team.specialists.map(member);
 const data = designs.map((d) => {
   const md = fs.readFileSync(path.resolve(repoRoot, d.readmePath), "utf8");
   const { alts, body } = splitReadme(md);
@@ -114,7 +133,9 @@ const data = designs.map((d) => {
     ...classify(f),
   }));
   const spin = media.find((m) => /^turntable\./.test(m.file)) || null;
+  const roster = team.rosters.get(d.name) || null;
   return {
+    team: roster ? { core: roster.core.map(member), pm: roster.pm ? roster.pm.handle : null } : null,
     name: d.name,
     title: d.title,
     pitch: marked.parseInline(d.pitch || ""),
@@ -137,7 +158,10 @@ const fontSrc = embedDir
 const template = fs.readFileSync(path.join(here, "template.html"), "utf8");
 const html = template
   .replace("__FONT__", fontSrc)
-  .replace("/*__DATA__*/", `const DESIGNS = ${JSON.stringify(data)};`);
+  .replace(
+    "/*__DATA__*/",
+    `const DESIGNS = ${JSON.stringify(data)};\nconst REVIEWERS = ${JSON.stringify(reviewers)};`
+  );
 fs.writeFileSync(outFile, html);
 const size = (fs.statSync(outFile).size / 1024 / 1024).toFixed(2);
 console.log(`baked ${outFile} (${size} MB, ${data.length} designs, embed=${!!embedDir})`);

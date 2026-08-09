@@ -104,6 +104,28 @@
     padding: 10px 12px; font-size: 13px; font-weight: 600; max-width: 72ch;
   }
 
+  /* built-by roster */
+  .team { margin-top: 18px; }
+  .team .kicker { color: var(--accent-deep); font-size: 11px; }
+  .team .cards { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  .member {
+    display: flex; align-items: center; gap: 12px; background: var(--surface);
+    border: 1px solid var(--ink); padding: 8px 16px 8px 8px; min-width: 240px;
+  }
+  .member img { width: 48px; height: 48px; border: 1px solid var(--hair); background: #fff; filter: grayscale(1); }
+  .member .mono {
+    font: 500 12px/1 ui-monospace, "SFMono-Regular", Menlo, monospace;
+    background: #e9e6e4; color: var(--muted); padding: 2px 5px; margin-left: 6px;
+  }
+  .member .nm { font-size: 16px; font-weight: 800; }
+  .member .rl { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .reviewed { margin-top: 12px; font-size: 14px; color: var(--muted); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .reviewed a { color: var(--ink); }
+  .reviewed .mono {
+    font: 500 12px/1.2 ui-monospace, "SFMono-Regular", Menlo, monospace;
+    color: var(--muted); text-decoration: underline;
+  }
+
   .stagewrap { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 0; border: 2px solid var(--rule); border-top: 0; background: var(--surface); }
   .stage { border-right: 2px solid var(--rule); min-width: 0; }
   .stage .frame { background: #fff; display: grid; place-items: center; height: min(58vh, 560px); overflow: hidden; }
@@ -245,6 +267,29 @@ function gallery() {
   addEventListener("resize", fillGrid, { once: false });
 }
 
+const GH = "https://github.com/shaiss/print-bench";
+
+function team(d) {
+  if (!d.team) return "";
+  const cards = d.team.core.map((m) => `
+    <div class="member">
+      ${m.avatar ? `<img src="${esc(m.avatar)}" alt="">` : ""}
+      <div>
+        <span class="nm">${esc(m.name)}</span><span class="mono">${esc(m.handle)}</span>
+        <div class="rl">${esc(m.role)}</div>
+      </div>
+    </div>`).join("");
+  const rev = REVIEWERS.map(
+    (r) => `<a href="${GH}/blob/main/people/${r.handle}.md" target="_blank" rel="noopener" title="${esc(r.role)}">${esc(r.name)}</a>`
+  ).join(", ");
+  return `<div class="team">
+    <p class="kicker">Built by</p>
+    <div class="cards">${cards}</div>
+    <p class="reviewed"><span>Reviewed by → ${rev}</span>
+      <a class="mono" href="${GH}/tree/main/people" target="_blank" rel="noopener">People</a></p>
+  </div>`;
+}
+
 function product(name) {
   const d = DESIGNS.find((x) => x.name === name);
   if (!d) { location.hash = "#/"; return; }
@@ -261,6 +306,7 @@ function product(name) {
       <h1>${esc(d.title)}</h1>
       <p class="pitch">${d.pitch}</p>
       ${d.archived ? `<p class="banner">${esc(d.archived)}</p>` : ""}
+      ${team(d)}
     </header>
     <section class="stagewrap">
       <div class="stage">
