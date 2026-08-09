@@ -1,0 +1,287 @@
+name: Chunker (scheduled issue splitter)
+
+# The scheduled heartbeat for /chunk-issue. Once a day it picks ONE open issue
+# carrying the `declined-too-big` label and runs /chunk-issue on it unattended:
+# it files dependency-ordered sub-issues (each closeable by one PR), auto-arms
+# the genuinely-small ones with the backlog burn's `autonomy-ok` label, and
+# drops the parent's `declined-too-big` label so it is not re-chunked. The skill
+# already runs the same attended or unattended and declines rather than forcing
+# a bad split; this workflow just gives it a cadence.
+#
+# WHY THIS EXISTS: /ship-issue declines issues that are bigger than one
+# reviewable PR (its §1) — a permanent property of a healthy backlog, not a bug
+# to fix. The chunker turns those declines back into small, shippable issues the
+# backlog burn can actually attack, closing the loop:
+#   /ship-issue declines (labels `declined-too-big`)
+#     → chunker files small sub-issues (labels `autonomy-ok`)
+#       → backlog burn ships them.
+#
+# This is the SIBLING of backlog-burn.yml and design-run.yml and shares their
+# selector: the selection policy (one issue per firing, oldest-first, skip
+# anything already claimed by a SHIP-LOCK, an open closing PR, or a
+# claude/issue-<N>-* branch) is identical — only the opt-in label differs
+# (`declined-too-big` here). So this reuses `tools/backlog-burn` verbatim,
+# pointed at a different config file and label. One tested selector, three
+# routines.
+#
+# WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
+#   * Policy → committed, git-tracked: .github/chunker.conf holds `enabled`,
+#     the opt-in `label`, the `provider` and the `cadence`. Change it with a
+#     reviewed one-line PR; a clone carries it.
+#   * Live arming / kill switch → the CHUNKER_ENABLED repo variable, a fast
+#     human-only toggle (Settings → Secrets and variables → Actions →
+#     Variables, or `gh variable set`). Not in git on purpose: arming an agent
+#     that files issues should be a conscious act a fresh clone/fork can't
+#     inherit, and flipping it off halts the routine in seconds without a PR.
+#   * Cadence → the `cron` literal below. Actions cannot read a file or variable
+#     for `on.schedule`, so the schedule must be literal here — still
+#     git-tracked, so changing it is a one-line PR. Keep it in sync with the
+#     `cadence:` key in .github/chunker.conf.
+#
+# Safety properties (same as the siblings):
+#   * TWO keys must agree to run: committed `enabled: true` AND
+#     CHUNKER_ENABLED == 'true'. Either off → inert.
+#   * Opt-in per issue: the selector only picks an issue carrying the
+#     `declined-too-big` label, so nothing runs until /ship-issue (or a human)
+#     marks an issue oversized.
+#   * One issue per firing: a hard cap in the selector means a bad day costs one
+#     over-eager split, not five.
+#
+# Auth: the agentic run uses the ANTHROPIC_API_KEY secret (a plain API key is
+# the right fit for an unattended bot — pay-per-token, no subscription seat).
+# With that secret unset the job still selects and logs its pick, then emits a
+# ::notice:: and stops — exactly how ci.yml skips product-page drafting without
+# the key. So this workflow is useful (and testable) before any secret exists.
+
+on:
+  schedule:
+    # Once a day at :29 past the hour — an off-peak minute (not :00) to avoid
+    # Actions scheduler congestion, and offset from backlog-burn's :17 and
+    # design-run's :23 so the three routines don't fire simultaneously. Chunking
+    # only files issues, so it is light; running before the 06:17 backlog burn
+    # means a freshly-chunked issue is available to the next burn. Cron must be
+    # a literal — Actions evaluates no files or variables for on.schedule — so
+    # change the cadence by editing this line in a one-line PR (and the
+    # `cadence:` key in .github/chunker.conf to match), e.g.:
+    #   twice daily:  '29 5,17 * * *'
+    #   weekly:       '29 5 * * 1'
+    # The two-key guard (CHUNKER_ENABLED + committed `enabled: true`) ensures the
+    # schedule is harmless until deliberately armed, so firing daily is safe:
+    # idle firings cost nothing.
+    - cron: '29 5 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Select and log an issue, but do not invoke /chunk-issue'
+        type: boolean
+        default: false
+
+# Scoped to what the unattended /chunk-issue run actually does: it files
+# sub-issues and (re)labels issues (issues:write), and reads the repo to run the
+# skill (contents:read). It pushes no branch and opens no PR, so it needs
+# NEITHER contents:write NOR pull-requests:write — a deliberately tighter grant
+# than the backlog burn / design run, which do push and open PRs. The job is off
+# unless CHUNKER_ENABLED is set AND the committed config says enabled, and the
+# writing step is skipped entirely without the provider's secret, so even these
+# grants sit idle until the routine is deliberately switched on.
+permissions:
+  contents: read
+  issues: write
+
+# Never run two chunkers at once — this group serializes THIS workflow with
+# itself. It deliberately does NOT serialize against the backlog burn or design
+# run: GitHub concurrency is shared across workflows only when the group STRING
+# matches, and the siblings use their own names, so serializing them would queue
+# for no benefit. Do not cancel an in-flight run — it may be mid-file.
+concurrency:
+  group: chunker
+  cancel-in-progress: false
+
+jobs:
+  chunk:
+    name: Pick one declined-too-big issue and run /chunk-issue
+    # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
+    # anything but 'true' pauses the whole job in seconds without a commit.
+    # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
+    # Also pin the run to the DEFAULT BRANCH: this job carries a write scope and
+    # a secret, and `workflow_dispatch` can target any in-repo branch — so a
+    # dispatch against a PR branch must not run that branch's skill/selector code
+    # with the secret. On `schedule` github.ref_name is already the default
+    # branch, so this only ever blocks a hand-dispatch against a non-default ref.
+    if: >-
+      vars.CHUNKER_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    env:
+      # Secrets cannot be read in a step `if:` directly, so surface each
+      # provider's key presence as a plain string and gate on it below. The
+      # "Read policy" step turns these + the configured provider into a single
+      # `key_present` output.
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # Belt-and-braces with the job `if:` above: always check out the
+          # default branch, so the secret-bearing agent runs the reviewed,
+          # merged skill + selector — never a dispatched branch's version.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install the selector
+        # The chunker reuses the backlog burn's selector verbatim — same policy,
+        # different label and config path. No second copy to drift.
+        run: pip install -e tools/backlog-burn
+
+      - name: Read policy (.github/chunker.conf)
+        id: policy
+        # Key 2 of 2: the committed, git-tracked source of truth. A malformed or
+        # typo'd config (bad key, unknown provider) fails this step loudly rather
+        # than running on a policy nobody wrote. It also resolves the configured
+        # provider to whether *that provider's* secret is present, so the run
+        # steps below gate on one `key_present` output.
+        # HAS_ANTHROPIC_KEY / HAS_ZAI_KEY come from the job-level env above.
+        run: |
+          set -euo pipefail
+          conf=.github/chunker.conf
+          enabled="$(backlog-burn config --get enabled --path "$conf")"
+          label="$(backlog-burn config --get label --path "$conf")"
+          provider="$(backlog-burn config --get provider --path "$conf")"
+          case "$provider" in
+            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
+            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          {
+            echo "enabled=$enabled"
+            echo "label=$label"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Note when disabled by committed policy
+        if: steps.policy.outputs.enabled != 'true'
+        run: echo "::notice::.github/chunker.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
+
+      - name: Select one eligible issue
+        id: select
+        if: steps.policy.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LABEL: ${{ steps.policy.outputs.label }}
+        run: |
+          set -euo pipefail
+          # `run` gathers the live snapshot (open issues + their SHIP-LOCK
+          # comments, open PRs, remote branches) and applies the policy. It
+          # writes `issue=<n>` (empty when nothing is eligible) to $GITHUB_OUTPUT
+          # and a markdown block to $GITHUB_STEP_SUMMARY. Same selector the
+          # backlog burn uses, pointed at the declined-too-big label.
+          backlog-burn run --repo "$GITHUB_REPOSITORY" --label "$LABEL"
+
+      # One explicit run step per provider — a provider is a reviewed,
+      # git-tracked step because GitHub Actions can only reference a secret by
+      # its literal name (secrets can't be selected by a runtime variable). The
+      # committed `provider:` label picks which one runs; adding a provider is a
+      # new step here. Both share the pin, the write permission, the
+      # `github_token` that authenticates the action's own GitHub calls, and the
+      # same /chunk-issue prompt. The default GITHUB_TOKEN is fine here: the
+      # chunker opens no PR (issues alone run no CI), so the REGEN_TOKEN/PAT
+      # reasoning that the backlog burn and design run carry does not apply.
+      #
+      # The pin is the immutable commit behind the v1 tag; a moved tag must not
+      # silently change what runs with a write scope + a secret. Re-pin
+      # deliberately to adopt a new release.
+
+      - name: Run via Anthropic (Claude)
+        id: run_anthropic
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
+        # right fit for an unattended bot — no OAuth token / subscription seat.
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Run via Z.AI (GLM)
+        id: run_zai
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
+        # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
+        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the same
+        # ZAI_KEY is also passed as anthropic_api_key to satisfy the action's
+        # credential check (the endpoint uses whichever header it validates).
+        # Best-effort: Anthropic doesn't officially support routing Claude Code
+        # to non-Claude models, and /chunk-issue is a Claude Code skill, so
+        # quality may vary. Change the model on the --model line.
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model glm-5.2
+          prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Explain a skipped agentic run
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && (steps.policy.outputs.key_present != '1'
+              || github.event.inputs.dry_run == 'true')
+        env:
+          ISSUE: ${{ steps.select.outputs.issue }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — selected #${ISSUE} but did not invoke /chunk-issue"
+          else
+            echo "::notice::the configured provider '${PROVIDER}' has no key set (ANTHROPIC_API_KEY for anthropic, ZAI_KEY for zai) — selected #${ISSUE} but skipping the unattended /chunk-issue run"
+          fi
+
+      - name: Explain an empty selection
+        if: steps.policy.outputs.enabled == 'true' && steps.select.outputs.issue == ''
+        env:
+          LABEL: ${{ steps.policy.outputs.label }}
+        run: echo "::notice::no issue is currently eligible (nothing carrying the '${LABEL}' label is unclaimed) — nothing to chunk"
+
+      - name: Record the run outcome
+        # Runs on success, failure or skip so the job summary always shows what
+        # happened. This reports the *run* disposition; the authoritative
+        # chunked/declined verdict and the filed sub-issues are posted by
+        # /chunk-issue onto the issue thread itself, which this summary links to.
+        if: always()
+        env:
+          ISSUE: ${{ steps.select.outputs.issue }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          # Only the step matching the configured provider runs; the other is
+          # 'skipped'. Report the one that actually ran.
+          RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome }}
+        run: |
+          {
+            echo "## Chunker — run outcome"
+            if [ -z "${ISSUE}" ]; then
+              echo "- selected: none (nothing eligible)"
+            else
+              echo "- selected: #${ISSUE}"
+              echo "- provider: ${PROVIDER}"
+              echo "- run step: ${RUN:-skipped} (see issue #${ISSUE} for the /chunk-issue verdict and any filed sub-issues)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
