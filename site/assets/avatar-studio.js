@@ -14,6 +14,13 @@
 
 const KEY = (handle) => `print-bench-avatar:${handle}`;
 
+// Repo constants, deliberately not read from the page: keeping the commit
+// targets as module literals means no DOM-derived text ever reaches an href
+// (CodeQL js/xss-through-dom) — the data block carries only the curated
+// style sets and the background token.
+const EDIT_BASE = "https://github.com/shaiss/print-bench/edit/main/people/";
+const ACTION_URL = "https://github.com/shaiss/print-bench/actions/workflows/avatar.yml";
+
 let data = null;
 let panel = null;
 let active = null; // { slot, handle, kind, committed: {style, seed}, current: {style, seed} }
@@ -87,14 +94,11 @@ function configLines() {
 }
 
 function refreshPanel() {
-  const d = studioData();
   panel.querySelector("[data-studio-style]").value = active.current.style;
   panel.querySelector("[data-studio-config]").textContent = configLines();
-  const edit = panel.querySelector("[data-studio-edit]");
-  edit.href = `${d.editBase}${encodeURIComponent(active.handle)}.md`;
-  const action = panel.querySelector("[data-studio-action]");
-  if (d.actionUrl) action.href = d.actionUrl;
-  else action.hidden = true;
+  panel.querySelector("[data-studio-edit]").href =
+    `${EDIT_BASE}${encodeURIComponent(active.handle)}.md`;
+  panel.querySelector("[data-studio-action]").href = ACTION_URL;
 }
 
 async function reroll(style, seed) {
@@ -177,10 +181,10 @@ export async function open(slot) {
   };
 
   if (!panel) panel = buildPanel();
+  // Options built with the DOM API, never markup: the style names come from
+  // the page's JSON data block, and DOM-read text must not meet innerHTML.
   const select = panel.querySelector("[data-studio-style]");
-  select.innerHTML = (d.styles[kind] || [])
-    .map((s) => `<option value="${s}">${s}</option>`)
-    .join("");
+  select.replaceChildren(...(d.styles[kind] || []).map((s) => new Option(s, s)));
 
   // The glyph's promise is a fresh roll: re-roll immediately, then keep the
   // panel open for style changes and further rolls.

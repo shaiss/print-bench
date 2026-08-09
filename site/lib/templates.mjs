@@ -580,11 +580,12 @@ ${memberProfile(m, { scope: null, teams: memberTeams(m, team.rosters), githubBas
   // Data only — the studio is browser-local, and committing the lines it
   // shows (or dispatching the Regenerate-avatar Action) is what changes the
   // site for everyone.
+  // Styles and the background token only — the GitHub commit-target URLs
+  // live as literals in avatar-studio.js itself, so no DOM-read text ever
+  // reaches an href (CodeQL js/xss-through-dom).
   const studioData = `<script type="application/json" id="avatar-studio-data">${JSON.stringify({
     styles: AVATAR_STYLES,
     background: AVATAR_BACKGROUND,
-    editBase: "https://github.com/shaiss/print-bench/edit/main/people/",
-    actionUrl: "https://github.com/shaiss/print-bench/actions/workflows/avatar.yml",
   })}</script>`;
 
   const body = `<div class="wrap">
