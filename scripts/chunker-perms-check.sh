@@ -34,46 +34,63 @@ cd "$(dirname "$0")/.."
 
 SETTINGS=".claude/settings.json"
 CHUNKER=".claude/chunker-settings.json"
-# The wrapper is the one Bash surface the chunker IS allowed to run; it is
-# identified by this basename and must never be denied.
-WRAPPER_SUBSTR="chunk-helper.sh"
 
 # Core comparison, pure function of two settings files. Prints a diagnosis and
 # returns non-zero on any drift. Kept as a function so --selftest can point it
 # at fixtures.
 check_pair() {
   local settings_path="$1" chunker_path="$2"
-  WRAPPER_SUBSTR="$WRAPPER_SUBSTR" python3 - "$settings_path" "$chunker_path" <<'PY'
-import json, os, sys
+  python3 - "$settings_path" "$chunker_path" <<'PY'
+import fnmatch, json, sys
 
 settings_path, chunker_path = sys.argv[1], sys.argv[2]
-wrapper = os.environ["WRAPPER_SUBSTR"]
+
+# The chunker's ONE approved shell surface, identified by its EXACT allow rule
+# (both the bare and ./-prefixed forms committed in settings.json) — never by a
+# loose "contains chunk-helper.sh" substring. A same-basename rule on a
+# different path (e.g. Bash(/tmp/chunk-helper.sh:*)) is NOT the wrapper and must
+# still be denied, so it must not be exempted here.
+WRAPPER_RULES = {
+    "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)",
+    "Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)",
+}
+# The command paths a deny rule must never match, or the chunker loses its only
+# surface. Matched with wildcard semantics so a *broad* deny pattern can't slip
+# past (e.g. Bash(.claude/skills/chunk-issue/*:*) or Bash(*chunk-helper.sh:*)).
+WRAPPER_CMDS = [
+    ".claude/skills/chunk-issue/chunk-helper.sh",
+    "./.claude/skills/chunk-issue/chunk-helper.sh",
+]
 
 def load(path):
     with open(path) as fh:
         return json.load(fh)
 
+def deny_blocks_wrapper(rule):
+    # A Bash(<cmd>:<args>) deny whose command pattern matches the wrapper path
+    # (wildcards included) would block the wrapper. Non-Bash denies (Write, …)
+    # never do.
+    if not (rule.startswith("Bash(") and rule.endswith(")")):
+        return False
+    cmd_pat = rule[len("Bash("):-1].split(":", 1)[0]
+    return any(fnmatch.fnmatch(cmd, cmd_pat) for cmd in WRAPPER_CMDS)
+
 allow = load(settings_path).get("permissions", {}).get("allow", [])
-deny  = set(load(chunker_path).get("permissions", {}).get("deny", []))
+deny  = load(chunker_path).get("permissions", {}).get("deny", [])
+deny_set = set(deny)
 
-missing = []          # non-wrapper Bash allows the chunker fails to deny
-wrapper_denied = []   # wrapper allows wrongly denied
-
-for rule in allow:
-    if not rule.startswith("Bash("):
-        continue
-    if wrapper in rule:
-        if rule in deny:
-            wrapper_denied.append(rule)
-        continue
-    if rule not in deny:
-        missing.append(rule)
+# Coverage: every non-wrapper Bash allow must be denied verbatim (exact-rule
+# exemption for the wrapper — a rogue same-basename path is not exempt).
+missing = [r for r in allow
+           if r.startswith("Bash(") and r not in WRAPPER_RULES and r not in deny_set]
+# Safety: no deny rule may match the wrapper command, wildcards included.
+wrapper_denied = [d for d in deny if deny_blocks_wrapper(d)]
 
 ok = True
 if wrapper_denied:
     ok = False
     sys.stderr.write(
-        "the wrapper allow is also denied — the chunker would lose its only "
+        "a deny rule would block the wrapper — the chunker would lose its only "
         "shell surface:\n")
     for r in wrapper_denied:
         sys.stderr.write(f"    {r}\n")
@@ -133,6 +150,34 @@ EOF
     echo "FAIL  selftest: a denied wrapper was NOT caught"; return 1
   else
     echo "ok    selftest: denying the wrapper fails the check"
+  fi
+
+  # BAD 3: a rogue allow with the wrapper's BASENAME but a different path is NOT
+  # the wrapper — it must not be exempted, so an undenied one must fail.
+  cat > "$tmp/rogue-settings.json" <<'EOF'
+{"permissions":{"allow":["Bash(/tmp/chunk-helper.sh:*)"]}}
+EOF
+  cat > "$tmp/rogue-chunker.json" <<'EOF'
+{"permissions":{"deny":[]}}
+EOF
+  if check_pair "$tmp/rogue-settings.json" "$tmp/rogue-chunker.json" 2>/dev/null; then
+    echo "FAIL  selftest: a same-basename rogue path was wrongly exempted"; return 1
+  else
+    echo "ok    selftest: a same-basename rogue path is not exempt from deny"
+  fi
+
+  # BAD 4: a BROAD deny pattern that matches the wrapper path (not the verbatim
+  # wrapper rule) still blocks the wrapper → must fail.
+  cat > "$tmp/broad-settings.json" <<'EOF'
+{"permissions":{"allow":["Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)"]}}
+EOF
+  cat > "$tmp/broad-chunker.json" <<'EOF'
+{"permissions":{"deny":["Bash(.claude/skills/chunk-issue/*:*)"]}}
+EOF
+  if check_pair "$tmp/broad-settings.json" "$tmp/broad-chunker.json" 2>/dev/null; then
+    echo "FAIL  selftest: a wildcard deny blocking the wrapper was NOT caught"; return 1
+  else
+    echo "ok    selftest: a wildcard deny blocking the wrapper fails the check"
   fi
 }
 

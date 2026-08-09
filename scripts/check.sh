@@ -185,6 +185,10 @@ fi
 # thing being protected is the ABSENCE of a capability, so a demo cannot cover
 # it and a new settings.json allow would silently re-arm the chunker without a
 # check that fails on the drift (docs/actions-security.md, CR-A).
+echo "-- chunker-perms selftest: scripts/chunker-perms-check.sh --selftest"
+if ! ./scripts/chunker-perms-check.sh --selftest; then
+  fail=1
+fi
 echo "-- chunker-perms check: scripts/chunker-perms-check.sh"
 if ! ./scripts/chunker-perms-check.sh; then
   fail=1
