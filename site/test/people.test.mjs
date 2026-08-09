@@ -28,7 +28,6 @@ import {
   contributorRow,
   reviewedBy,
   historySlot,
-  teamContributions,
 } from "../lib/teams.mjs";
 
 const GH = "https://github.example/blob/main";
@@ -70,36 +69,6 @@ test("reviewedBy with no specialists renders nothing", () => {
   assert.equal(reviewedBy([]), "");
 });
 
-// --- teamContributions (the whole product-page section) --------------------
-
-test("teamContributions shows Built by, reviewers, and the build history", () => {
-  const events = [
-    { date: "2026-08-08", source: "decision-log", sourceTag: "decision · PM.md", text: "Added a size marker", detail: "the reason", handle: "vera" },
-  ];
-  const html = teamContributions(
-    { design: "calibration-cube", core: [SHAI, VERA] },
-    { specialists: [JANE], events, people: new Map([["vera", VERA]]) }
-  );
-  assert.match(html, /class="contributions"/);
-  assert.match(html, /Built by/);
-  assert.match(html, /profile-shai/);
-  assert.match(html, /profile-vera/);
-  assert.match(html, /Reviewed by/);
-  assert.match(html, /History of work together/);
-  assert.match(html, /<ol class="timeline">/);
-  assert.match(html, /Added a size marker/);
-});
-
-test("teamContributions keeps an honest empty state when there is no committed history", () => {
-  const html = teamContributions(
-    { design: "calibration-cube", core: [SHAI, VERA] },
-    { specialists: [], events: [], people: new Map() }
-  );
-  assert.match(html, /Built by/);
-  assert.match(html, /class="history-empty/);
-  assert.doesNotMatch(html, /<ol class="timeline">/);
-});
-
 test("historySlot renders the timeline with events and an empty state without", () => {
   const withEvents = historySlot("x", {
     events: [{ date: "2026-08-08", source: "s", sourceTag: "s", text: "t", detail: "", handle: null }],
@@ -139,8 +108,19 @@ test("REAL: the calibration-cube product page shows its team + build history", (
     people: team.people,
   });
 
-  assert.match(html, /class="contributions"/);
+  // The revised product-page IA (site wireframes, 1d + preview feedback):
+  // the roster renders as the header's Built-by block — below the
+  // description, above the action row — and the build history as the
+  // History tab-panel.
+  assert.match(html, /id="tab-history"/);
+  assert.doesNotMatch(html, /id="tab-team"/);
+  assert.match(html, /class="contributions-team"/);
   assert.match(html, /Built by/);
+  assert.match(
+    html,
+    /contributions-team[\s\S]*btn-row/,
+    "the team block precedes the action row in the header"
+  );
   assert.match(html, /href="\/people\/#profile-vera"/, "core PM linked to their profile");
   assert.match(html, /Reviewed by/);
   assert.match(html, /<ol class="timeline">/);
@@ -161,8 +141,13 @@ test("REAL: a rosterless design's product page carries no contributions section"
     model: buildModel(REPO_ROOT, rosterless),
     roster: null,
   });
-  assert.doesNotMatch(html, /class="contributions"/);
+  assert.doesNotMatch(html, /class="contributions-team"/);
   assert.doesNotMatch(html, /Built by/);
+  // No roster → no header team block and no History tab; Overview and
+  // Workbench remain.
+  assert.doesNotMatch(html, /id="tab-history"/);
+  assert.match(html, /id="tab-overview"/);
+  assert.match(html, /id="tab-workbench"/);
 });
 
 // --- the People page lists everyone, incl. shared specialists (real repo) --

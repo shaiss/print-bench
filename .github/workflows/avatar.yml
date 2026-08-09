@@ -1,0 +1,135 @@
+name: Regenerate avatar
+
+# Re-roll (or restyle) one member's committed DiceBear avatar and open a
+# DRAFT PR with the result for a human to approve. Avatars are member
+# identity, so the committed people/<handle>.md header stays the one
+# authority: this workflow edits that header's `avatar-style:`/`avatar-seed:`
+# keys, regenerates site/assets/avatars/<handle>.svg from them with the
+# pinned DiceBear packages (deterministic — same header, same bytes), and
+# proves the drift gate passes before anyone reviews it.
+#
+# The browser avatar studio on /people/ is the exploratory half: it re-rolls
+# locally (localStorage, your view only) and links here when a member wants a
+# combination made official. See site/lib/avatars.mjs for the curated style
+# sets and site/avatars.mjs for the generator this runs.
+#
+# Prerequisite (one-time, shared with the lifestyle workflows): Settings >
+# Actions > General > Workflow permissions > "Allow GitHub Actions to create
+# and approve pull requests" must be ON, or the final `gh pr create` is
+# denied (the branch is still pushed; open the PR from it manually).
+
+on:
+  workflow_dispatch:
+    inputs:
+      handle:
+        description: Member handle (people/<handle>.md)
+        required: true
+      style:
+        description: >-
+          DiceBear style from the curated set for the member's kind
+          (humans: notionists, adventurer, avataaars, lorelei, open-peeps,
+          micah · agents: bottts, bottts-neutral, shapes, rings, identicon,
+          thumbs). Leave empty to keep the current style.
+        required: false
+      seed:
+        description: Avatar seed. Leave empty for a fresh random roll.
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  regenerate:
+    name: Regenerate and open a draft PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: avatar-${{ github.event.inputs.handle }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate inputs
+        env:
+          HANDLE: ${{ github.event.inputs.handle }}
+          STYLE: ${{ github.event.inputs.style }}
+          SEED: ${{ github.event.inputs.seed }}
+        # Free-form dispatch inputs: pin their SHAPE before anything
+        # interpolates them (same rule as the lifestyle workflows). [[ =~ ]]
+        # matches the whole string, so a smuggled newline cannot pass; the
+        # curated-set and handle-exists checks live in the generator itself.
+        run: |
+          set -euo pipefail
+          if ! [[ "$HANDLE" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "::error::'handle' must be a lowercase handle like the people/*.md filenames"
+            exit 1
+          fi
+          if [ -n "$STYLE" ] && ! [[ "$STYLE" =~ ^[a-z]+(-[a-z]+)*$ ]]; then
+            echo "::error::'style' must be a kebab-case DiceBear style name"
+            exit 1
+          fi
+          if [ -n "$SEED" ] && ! [[ "$SEED" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+            echo "::error::'seed' must be 1-64 characters of [A-Za-z0-9._-]"
+            exit 1
+          fi
+
+      - name: Update the member header and regenerate the SVG
+        env:
+          HANDLE: ${{ github.event.inputs.handle }}
+          STYLE: ${{ github.event.inputs.style }}
+          SEED: ${{ github.event.inputs.seed }}
+        run: |
+          set -euo pipefail
+          npm --prefix site ci
+          args=(--set "$HANDLE")
+          [ -n "$STYLE" ] && args+=(--style "$STYLE")
+          [ -n "$SEED" ] && args+=(--seed "$SEED")
+          node site/avatars.mjs "${args[@]}"
+
+      - name: Prove the drift gate passes
+        # The draft PR is opened with GITHUB_TOKEN, so normal CI will not
+        # auto-run on it — run the site suite here (it contains the
+        # avatar drift test) so the header and SVG are proven in step before
+        # a human ever sees the PR.
+        run: npm --prefix site test
+
+      - name: Open a draft PR with the new avatar
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HANDLE: ${{ github.event.inputs.handle }}
+          RUN_ID: ${{ github.run_id }}
+          BASE: ${{ github.event.repository.default_branch }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          branch="avatar/${HANDLE}-${RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add "people/${HANDLE}.md" "site/assets/avatars/${HANDLE}.svg"
+          if git diff --cached --quiet; then
+            echo "::error::generator produced no changes"
+            exit 1
+          fi
+          git commit -m "Regenerate avatar: ${HANDLE}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$branch"
+          body="$(cat <<EOF
+          Automated avatar re-roll for \`${HANDLE}\`: the \`avatar-style:\` / \`avatar-seed:\` keys in \`people/${HANDLE}.md\` were updated and \`site/assets/avatars/${HANDLE}.svg\` regenerated from them with the pinned DiceBear packages (deterministic — the site's avatar drift test passed in the generating workflow).
+
+          **Review before merging:** open the SVG, confirm the member is happy with the face, then take this out of draft. Re-roll by re-running the *Regenerate avatar* workflow. Because this PR was opened by \`GITHUB_TOKEN\`, the normal CI did not auto-run — push a trivial commit or re-run CI if you want the full suite on it.
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)
+          EOF
+          )"
+          if ! gh pr create --draft --base "$BASE" --head "$branch" \
+              --title "Regenerate avatar: ${HANDLE}" --body "$body"; then
+            echo "::warning::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests', then open a PR from that branch into ${BASE}."
+            exit 1
+          fi

@@ -49,3 +49,127 @@
     });
   });
 })();
+
+// Avatar overrides + the studio hook.
+//
+// A visitor's avatar re-rolls (see avatar-studio.js) persist per-browser in
+// localStorage as {style, seed, svg}; this applies the stored SVG wherever
+// that member's avatar renders — profile, contributor card, timeline — so
+// the personal view is consistent site-wide, while the committed SVG stays
+// what everyone else sees. Also reveals the People page's re-roll glyphs and
+// lazy-loads the studio on first press.
+(function () {
+  function stored(handle) {
+    try {
+      var raw = localStorage.getItem("print-bench-avatar:" + handle);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function src(svg) {
+    return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    // Committed-avatar <img>s anywhere on the page.
+    document.querySelectorAll('img.monogram[src^="/assets/avatars/"]').forEach(function (img) {
+      var m = img.getAttribute("src").match(/\/assets\/avatars\/([a-z0-9-]+)\.svg$/);
+      var o = m && stored(m[1]);
+      if (o && o.svg) img.src = src(o.svg);
+    });
+
+    // People-page slots (which may hold an initials span when no avatar is
+    // committed): swap in the override and reveal the re-roll glyph.
+    document.querySelectorAll("[data-avatar-slot]").forEach(function (slot) {
+      var o = stored(slot.dataset.handle);
+      if (o && o.svg) {
+        var mark = slot.querySelector(".monogram");
+        if (mark && mark.tagName !== "IMG") {
+          var img = document.createElement("img");
+          img.className = "monogram monogram-" + slot.dataset.kind;
+          img.width = 46;
+          img.height = 46;
+          img.alt = "";
+          mark.replaceWith(img);
+          mark = img;
+        }
+        if (mark) mark.src = src(o.svg);
+      }
+      var btn = slot.querySelector("[data-avatar-reroll]");
+      if (btn) {
+        btn.hidden = false;
+        btn.addEventListener("click", function () {
+          import("/assets/avatar-studio.js").then(function (studio) {
+            studio.open(slot);
+          });
+        });
+      }
+    });
+  });
+})();
+
+// Product-page tabs (wireframe 1d: one concern on screen at a time).
+//
+// The page ships as a stacked document: the tab bar is `hidden` and every
+// panel is visible with its own ruled label, so without JavaScript nothing
+// is unreachable. This unhides the bar, adds `tabs-live` (which hides the
+// fallback labels and lets `hidden` bite on panels), and drives selection.
+// A hash naming a panel — from a link on the page or an inbound URL — wins
+// over the default first tab, so "#workbench" deep-links keep working.
+(function () {
+  var bar = document.querySelector("[data-tabs]");
+  if (!bar) return;
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var tabs = Array.prototype.slice.call(bar.querySelectorAll("[role=tab]"));
+    var panels = tabs
+      .map(function (t) {
+        return document.getElementById(t.getAttribute("aria-controls"));
+      })
+      .filter(Boolean);
+    if (!panels.length) return;
+
+    function select(id) {
+      tabs.forEach(function (t) {
+        t.setAttribute("aria-selected", String(t.getAttribute("aria-controls") === id));
+      });
+      panels.forEach(function (p) {
+        p.hidden = p.id !== id;
+      });
+    }
+
+    document.documentElement.classList.add("tabs-live");
+    bar.hidden = false;
+    tabs.forEach(function (t) {
+      t.addEventListener("click", function () {
+        select(t.getAttribute("aria-controls"));
+      });
+    });
+
+    // In-page anchors may target a panel itself ("Open workbench →") or a
+    // heading inside one (the Overview rail's table of contents): activate
+    // the containing panel so the target is on screen, then let the browser
+    // finish the scroll.
+    function panelFor(hash) {
+      if (!hash || hash.length < 2) return null;
+      var el;
+      try {
+        el = document.getElementById(decodeURIComponent(hash.slice(1)));
+      } catch (e) {
+        return null;
+      }
+      if (!el) return null;
+      return el.closest(".tab-panel");
+    }
+
+    window.addEventListener("hashchange", function () {
+      var panel = panelFor(location.hash);
+      if (panel) select(panel.id);
+    });
+
+    var initial = panelFor(location.hash);
+    select(initial ? initial.id : panels[0].id);
+  });
+})();

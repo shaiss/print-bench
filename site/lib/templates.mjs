@@ -1,11 +1,12 @@
 // Page shells. Plain template literals — the whole site is four page types,
 // which is well under the weight where a framework starts paying for itself.
 
+import { AVATAR_STYLES, AVATAR_BACKGROUND } from "./avatars.mjs";
 import { escapeHtml, inlineMarkdown, plainText } from "./markdown.mjs";
 import { hasConfigurator } from "./model.mjs";
 import { humanSize } from "./releases.mjs";
 import { memberProfile, memberTeams } from "./profile.mjs";
-import { teamContributions } from "./teams.mjs";
+import { contributorRow, reviewedBy, historySlot } from "./teams.mjs";
 
 const SITE_NAME = "print-bench";
 const TAGLINE = "Parametric 3D-printable designs, gated before they ship.";
@@ -41,7 +42,7 @@ ${extraHead}
       <a href="/"${canonicalPath === "/" ? ' aria-current="page"' : ""}>Designs</a>
       <a href="/styles/"${canonicalPath.startsWith("/styles") ? ' aria-current="page"' : ""}>Styles</a>
       <a href="/people/"${canonicalPath.startsWith("/people") ? ' aria-current="page"' : ""}>People</a>
-      <a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">Source</a>
+      <a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">Source ↗</a>
       <button class="theme-toggle" type="button" aria-label="Switch theme">☾</button>
     </nav>
   </div>
@@ -83,7 +84,25 @@ function lineageCredit(design) {
   return `derived from ${links[0]}${rest} — last include wins`;
 }
 
-function card(design) {
+/**
+ * The gallery card's pair credit — "Shai with Vera" — from the design's
+ * committed roster (team.conf, resolved by readTeam). First names, humans
+ * before agents; a rosterless design renders no credit (the site invents
+ * no team).
+ */
+function pairCredit(roster) {
+  if (!roster || !roster.core.length) return "";
+  const first = (m) => m.name.split(" ")[0];
+  const humans = roster.core.filter((m) => m.kind === "human").map(first);
+  const agents = roster.core.filter((m) => m.kind !== "human").map(first);
+  const text =
+    humans.length && agents.length
+      ? `${humans.join(" & ")} with ${agents.join(" & ")}`
+      : (humans.length ? humans : agents).join(" & ");
+  return `\n    <p class="card-credit">${escapeHtml(text)}</p>`;
+}
+
+function card(design, roster = null) {
   const depth = design.depth || 0;
   const derived = depth > 0 && (design.parents || []).length > 0;
   const thumb = design.thumb
@@ -91,7 +110,9 @@ function card(design) {
     : "";
   const tags = [];
   if (design.parts.length) {
-    tags.push(`<span class="tag">${design.parts.length} printable parts</span>`);
+    tags.push(
+      `<span class="tag">${design.parts.length} ${design.parts.length === 1 ? "part" : "parts"}</span>`
+    );
   }
   if (design.hasCoupon) tags.push(`<span class="tag tag-plain">fit coupon</span>`);
   if (design.style) tags.push(`<span class="tag tag-plain">${escapeHtml(design.style)}</span>`);
@@ -114,23 +135,22 @@ function card(design) {
   <div class="card-body">
     <h2>${lead}<a href="/${design.relDir}/">${escapeHtml(design.title)}</a></h2>
     <p>${inlineMarkdown(design.pitch)}</p>${credit}
-    <div class="card-foot">${tags.join("\n      ")}</div>
+    <div class="card-foot">${tags.join("\n      ")}</div>${pairCredit(roster)}
   </div>
 </article>`;
 }
 
-export function indexPage(designs) {
+export function indexPage(designs, { rosters = new Map() } = {}) {
   const body = `<div class="wrap">
   <section class="hero">
-    <p class="eyebrow">${escapeHtml(String(designs.length))} designs</p>
-    <h1>${TAGLINE}</h1>
-    <p>Each one is a parametric OpenSCAD model with a product page, previews
-    rendered from its own source, and a printability gate it had to pass —
-    watertightness, overhangs, thin walls and a real PrusaSlicer test-slice —
-    before it was allowed to merge.</p>
+    <p class="eyebrow">${escapeHtml(String(designs.length))} designs · every one gated in CI</p>
+    <h1>Parametric designs,<br>gated before they ship.</h1>
+    <p>OpenSCAD models co-designed by humans and AI reviewers. Previews render
+    from source; a printability gate — watertight, overhang-checked,
+    test-sliced — passes before merge.</p>
   </section>
   <section class="grid">
-${designs.map(card).join("\n")}
+${designs.map((d) => card(d, rosters.get(d.name) || null)).join("\n")}
   </section>
 </div>`;
   return layout({
@@ -268,15 +288,22 @@ ${rows}
   </div>`;
 }
 
+/**
+ * The lineage strip a derivative's page opens with (wireframe 1d): the
+ * parent chain as ruled nodes, current design filled — same include order
+ * as the rail's "Derived from" block, kept there too for the words.
+ */
+function lineageStrip(design) {
+  if (!(design.parents || []).length) return "";
+  const nodes = design.parents.map(
+    (p) =>
+      `<a class="lineage-node" href="/designs/${encodeURIComponent(p)}/">${escapeHtml(p)}</a><span class="lineage-arrow" aria-hidden="true">↳</span>`
+  );
+  return `<p class="lineage-strip">${nodes.join("")}<span class="lineage-node lineage-node-current">${escapeHtml(design.name)}</span></p>`;
+}
+
 export function designPage(design, { html, toc, githubBase, model, downloads = null, roster = null, specialists = [], events = [], people = new Map() }) {
   const showConfigurator = hasConfigurator(model);
-  // The team-contributions section (the #122 IA, revised): who built this
-  // product and its build history, shown here on the product page. Identity
-  // only — the full profiles live on the People page. Rendered only when the
-  // design has a committed roster; the site invents no team.
-  const contributions = roster
-    ? teamContributions(roster, { specialists, events, people })
-    : "";
   const src = `${githubBase}/${design.relDir}`;
   const rail = `<aside class="rail">
   ${toc ? `<div class="rail-block"><h3>On this page</h3>${toc}</div>` : ""}
@@ -319,16 +346,91 @@ ${design.scads
   }
 </aside>`;
 
-  const body = `<div class="wrap">
-  <div class="design-layout">
+  // The product page's own header owns the design's identity (lineage strip,
+  // title, pitch, primary actions), so the README's H1 — the same title —
+  // would repeat directly under it. Drop that one heading; everything else in
+  // the README renders untouched.
+  const prose = html.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\n?/, "");
+
+  // One concern on screen at a time (wireframe 1d): Overview / Workbench /
+  // History / Team. The tab bar ships hidden and every panel visible, each
+  // opening with its own ruled label — site.js unhides the bar and starts
+  // hiding unselected panels, so without JavaScript the page is simply the
+  // stacked document and nothing is unreachable. History and Team exist only
+  // for a design with a committed roster; the site invents no team.
+  const panels = [
+    {
+      id: "overview",
+      label: "Overview",
+      body: `<div class="design-layout">
     <article class="prose">
-${html}
-${viewerPanel(design)}
-${showConfigurator ? configuratorPanel(design, model) : ""}
+${prose}
     </article>
 ${rail}
-  </div>
-${contributions}
+  </div>`,
+    },
+    {
+      id: "workbench",
+      label: "Workbench",
+      body: `${viewerPanel(design)}
+${showConfigurator ? configuratorPanel(design, model) : ""}`,
+    },
+    roster
+      ? {
+          id: "history",
+          label: "History",
+          body: historySlot(roster.design, { events, people }),
+        }
+      : null,
+  ].filter(Boolean);
+
+  const tabBar = `<div class="design-tabs" role="tablist" data-tabs hidden>
+${panels
+  .map(
+    (p, i) =>
+      `    <button class="design-tab" role="tab" type="button" id="tab-${p.id}" aria-controls="${p.id}" aria-selected="${i === 0 ? "true" : "false"}">${p.label}</button>`
+  )
+  .join("\n")}
+  </div>`;
+
+  const panelHtml = panels
+    .map(
+      (p) => `  <section class="tab-panel" id="${p.id}" role="tabpanel" aria-labelledby="tab-${p.id}">
+    <p class="panel-label">${p.label}</p>
+${p.body}
+  </section>`
+    )
+    .join("\n");
+
+  const actions = [
+    downloads
+      ? `<a class="btn btn-primary" href="${escapeHtml(downloads.bundleUrl)}" rel="noopener noreferrer" download>Download STLs</a>`
+      : "",
+    `<a class="btn" href="#workbench">Open workbench →</a>`,
+  ]
+    .filter(Boolean)
+    .join("\n      ");
+
+  const body = `<div class="wrap">
+  <header class="design-head">
+    ${lineageStrip(design)}
+    <h1>${escapeHtml(design.title)}</h1>
+    <p class="design-sub">${inlineMarkdown(design.pitch)}</p>
+    ${
+      roster
+        ? `<div class="contributions-team">
+    <p class="eyebrow">Built by</p>
+    ${contributorRow(roster.core)}
+    ${reviewedBy(specialists)}
+  </div>`
+        : ""
+    }
+    <div class="btn-row">
+      ${actions}
+    </div>
+  </header>
+${tabBar}
+${panelHtml}
 </div>`;
 
   // The viewer's addons import the bare specifier `three`; an import map on the
@@ -371,6 +473,7 @@ export function stylesIndexPage(styles, designs) {
   <div class="card-body">
     <h2><a href="/${s.relDir}/">${escapeHtml(s.title)}</a></h2>
     <p>${inlineMarkdown(s.summary)}</p>
+    <p class="card-credit">STYLE.md · style.json</p>
     <div class="card-foot">${
       users.length
         ? users
@@ -388,8 +491,8 @@ export function stylesIndexPage(styles, designs) {
 
   const body = `<div class="wrap">
   <section class="hero">
-    <p class="eyebrow">Design languages</p>
-    <h1>Styles</h1>
+    <p class="eyebrow">${escapeHtml(String(styles.length))} ${styles.length === 1 ? "style" : "styles"}</p>
+    <h1>How the previews get their look.</h1>
     <p>A style is a look lifted off a reference model and written down as
     measurements — edge softness, the rounding vocabulary, chamfer grammar,
     feature sizes — so a new design can be told what to look like instead of
@@ -470,6 +573,19 @@ ${memberProfile(m, { scope: null, teams: memberTeams(m, team.rosters), githubBas
     )
     .join("\n");
 
+  // The avatar studio's data block: the curated style sets and the commit
+  // paths, read by /assets/avatar-studio.js when a re-roll glyph is pressed.
+  // Data only — the studio is browser-local, and committing the lines it
+  // shows (or dispatching the Regenerate-avatar Action) is what changes the
+  // site for everyone.
+  // Styles and the background token only — the GitHub commit-target URLs
+  // live as literals in avatar-studio.js itself, so no DOM-read text ever
+  // reaches an href (CodeQL js/xss-through-dom).
+  const studioData = `<script type="application/json" id="avatar-studio-data">${JSON.stringify({
+    styles: AVATAR_STYLES,
+    background: AVATAR_BACKGROUND,
+  })}</script>`;
+
   const body = `<div class="wrap">
   <section class="hero">
     <p class="eyebrow">${escapeHtml(String(team.members.length))} people</p>
@@ -484,12 +600,23 @@ ${cards || '<p class="muted">No one registered yet.</p>'}
   </section>
 </div>`;
 
+  // The vendored DiceBear style modules import the bare specifier
+  // "@dicebear/core"; this resolves it to the vendored engine — same
+  // no-external-reference pattern as the product page's `three` map. It must
+  // precede any module load, hence <head>.
+  const importMap =
+    '<script type="importmap">' +
+    JSON.stringify({ imports: { "@dicebear/core": "/assets/dicebear/core/index.js" } }) +
+    "</script>";
+
   return layout({
     title: `People — ${SITE_NAME}`,
     description:
       "Everyone who builds print-bench — the humans and PM agents on each product, and the shared review specialists.",
     body,
     canonicalPath: "/people/",
+    extraHead: importMap,
+    extraScript: studioData,
   });
 }
 
@@ -516,8 +643,8 @@ export function redirectPage(to, label) {
 }
 
 export const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-<rect width="32" height="32" rx="6" fill="#14171a"/>
-<path d="M8 22V10h7a5 5 0 0 1 0 10H8z" fill="none" stroke="#ff9166" stroke-width="2.4" stroke-linejoin="round"/>
-<circle cx="22.5" cy="21" r="2" fill="#ff9166"/>
+<rect width="32" height="32" fill="#201e1d"/>
+<path d="M8 22V10h7a5 5 0 0 1 0 10H8z" fill="none" stroke="#ec3013" stroke-width="2.4" stroke-linejoin="round"/>
+<rect x="20.5" y="19" width="4" height="4" fill="#ec3013"/>
 </svg>
 `;

@@ -30,6 +30,7 @@
 // rather than guessing. An unresolvable or absent handle renders plain.
 
 import { escapeHtml } from "./markdown.mjs";
+import { identityMark } from "./profile.mjs";
 
 /**
  * Real-calendar YYYY-MM-DD check, shared with the rest of site/lib: the
@@ -346,7 +347,7 @@ export function timelineEvents(events, { people = new Map() } = {}) {
       const member = e.handle ? people.get(e.handle) : null;
       const who = member
         ? `<span class="timeline-who">
-        <span class="monogram monogram-${member.kind}" aria-hidden="true">${escapeHtml(member.initials)}</span>
+        ${identityMark(member)}
         <span class="timeline-who-name">${escapeHtml(member.name)} <code>${escapeHtml(member.handle)}</code></span>
       </span>`
         : "";

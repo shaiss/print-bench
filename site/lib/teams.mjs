@@ -1,10 +1,11 @@
 // The team/org building blocks. Two surfaces render from this committed data
 // (a roster from team.mjs, the design's timeline from timeline.mjs):
 //
-//   * the **product page** carries a "team contributions" section — who built
-//     this product (identity only, not their profile) and the build history —
-//     assembled by teamContributions() below. This is the team as seen *from
-//     the product*: what the team did here, product-scoped.
+//   * the **product page** carries the team as two tab-panels (the site
+//     wireframes' 1d IA): Team — who built this product (identity only, not
+//     their profile: contributorRow + reviewedBy) — and History, the build
+//     history (historySlot). The team as seen *from the product*,
+//     product-scoped; templates.mjs designPage composes them.
 //   * the **People page** (templates.mjs peoplePage) is the directory of
 //     everyone — humans, PM agents, shared specialists — each rendered as the
 //     full member profile with the product teams they've been part of.
@@ -17,6 +18,7 @@
 // Pure functions of committed data, so they unit-test on hand-built records.
 
 import { escapeHtml } from "./markdown.mjs";
+import { identityMark } from "./profile.mjs";
 import { timelineEvents } from "./timeline.mjs";
 
 /**
@@ -27,7 +29,7 @@ import { timelineEvents } from "./timeline.mjs";
  */
 export function contributorCard(member) {
   return `<a class="contributor" href="/people/#profile-${escapeHtml(member.handle)}">
-  <span class="monogram monogram-${member.kind}" aria-hidden="true">${escapeHtml(member.initials)}</span>
+  ${identityMark(member)}
   <span class="contributor-id">
     <span class="contributor-name">${escapeHtml(member.name)} <code>${escapeHtml(member.handle)}</code></span>
     <span class="contributor-role muted">${escapeHtml(member.role)}</span>
@@ -82,25 +84,3 @@ export function historySlot(design, { events = [], people = new Map() } = {}) {
 </section>`;
 }
 
-/**
- * The product page's team-contributions section: who built this product
- * (identity cards), the shared specialists who reviewed it, and the build
- * history — all product-scoped. Rendered only for a design that has a
- * committed roster; a rosterless design gets nothing (the site invents no
- * team).
- *
- *   roster       the design's roster record (team.mjs).
- *   specialists  the shared review specialists (team.specialists).
- *   events       the design's timeline events (readTimeline), newest-first.
- *   people       the team.mjs people Map, for attribution monograms.
- */
-export function teamContributions(roster, { specialists = [], events = [], people = new Map() } = {}) {
-  return `<section class="contributions">
-  <div class="contributions-team">
-    <p class="eyebrow">Built by</p>
-    ${contributorRow(roster.core)}
-    ${reviewedBy(specialists)}
-  </div>
-  ${historySlot(roster.design, { events, people })}
-</section>`;
-}

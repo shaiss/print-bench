@@ -212,6 +212,16 @@ things keep it consistent with the rest of the site:
 ## Layout
 
 - `build.mjs` — the generator; discovery, render, asset copy, link check
+- `avatars.mjs` — the member-avatar generator: regenerates each committed
+  `assets/avatars/<handle>.svg` from the member's `people/<handle>.md` header
+  (`npm --prefix site run avatars`); its `--set` mode (updating the
+  `avatar-style:`/`avatar-seed:` keys, then regenerating) is what the
+  *Regenerate avatar* Action runs
+- `lib/avatars.mjs` — the avatar layer's single source of truth: the curated
+  human/agent style sets, the header→config resolution and the DiceBear
+  options; consumed by team.mjs (validation), avatars.mjs (generation),
+  test/avatars.test.mjs (the drift gate: every committed SVG must equal what
+  its member's header derives) and peoplePage (the studio's data block)
 - `lib/content.mjs` — what exists: designs, styles, pitches, parts, previews
 - `lib/lineage.mjs` — `derives.conf` → gallery order and parentage, ported from `tools/lineage`
 - `lib/markdown.mjs` — markdown → HTML, link resolution and rewriting
@@ -225,14 +235,45 @@ things keep it consistent with the rest of the site:
 - `lib/releases.mjs` — release download links (issue #139): the pure manifest → per-part download-link mapping, and the best-effort, Vercel-scoped fetch of the latest release's manifests (injectable `fetch`, empty on any failure)
 - `lib/templates.mjs` — the page shells
 - `test/` — `npm --prefix site test`; run by `./scripts/site.sh` and CI
-- `assets/` — `site.css` (the design system), `site.js` (theme toggle),
-  `configurator.js` (the panel), `viewer.js` (the 3D viewer) and
-  `openscad-worker.js` (the renderer), copied to `/assets/` verbatim; the
-  vendored `three/` build is copied there by `build.mjs`
+- `assets/` — `site.css` (the Modernist design system from the site-wireframes
+  design export: Archivo, ink on a light ground, one red accent, zero radius,
+  2px rules; dark is a derived variant so the toggle survives), `site.js`
+  (theme toggle + the product page's tabs, which fall back to a stacked
+  document without JavaScript), `configurator.js` (the panel), `viewer.js`
+  (the 3D viewer) and `openscad-worker.js` (the renderer), plus two vendored
+  asset dirs — `fonts/` (Archivo variable woff2, OFL 1.1) and `avatars/`
+  (one DiceBear SVG per `people/` member, provenance in its README) — all
+  copied to `/assets/` verbatim; the vendored `three/` build is copied there
+  by `build.mjs`
+
+## Avatars
+
+Member avatars are [DiceBear](https://www.dicebear.com/) SVGs, committed
+under `assets/avatars/` (provenance in that directory's README). Three
+layers, deliberately separated:
+
+- **Committed config is identity.** A member's `people/<handle>.md` header
+  may carry `avatar-style:` (validated against the curated set for their
+  kind — people-like styles for humans, machine-like for agents, so the
+  visual distinction survives any choice) and `avatar-seed:`; absent keys
+  fall back to notionists/bottts seeded by first name. `avatars.mjs`
+  regenerates the SVGs from exactly this, DiceBear is deterministic under
+  the pinned packages, and `test/avatars.test.mjs` fails on any committed
+  SVG that no longer matches its header.
+- **The avatar studio is a personal lens.** Every profile on `/people/`
+  carries a re-roll glyph: it regenerates the avatar in the visitor's
+  browser (vendored DiceBear under `/assets/dicebear/`, lazy-loaded like the
+  OpenSCAD runtime) and persists in localStorage only — site-wide for that
+  visitor, invisible to everyone else. The panel shows the header lines a
+  member commits to make a combination official.
+- **The `Regenerate avatar` Action** (`.github/workflows/avatar.yml`) is the
+  easy commit path: dispatch it with a handle (and optionally a style/seed),
+  and it updates the header, regenerates the SVG, proves the drift test, and
+  opens a draft PR.
 
 ## Dependencies
 
-Four, all pinned in `package-lock.json`:
+All pinned in `package-lock.json`:
 
 | Package | Why | Size |
 |---|---|---|
@@ -240,6 +281,7 @@ Four, all pinned in `package-lock.json`:
 | `openscad-wasm` | the configurator's and viewer's renderer (GPL-2.0) | ~13 MB, lazy-loaded |
 | `dejavu-fonts-ttf` | a font for `text()`, without which glyphs vanish | one 750 KB TTF is shipped |
 | `three` | the 3D viewer's WebGL renderer (MIT) | ~676 KB minified module, vendored + lazy-loaded |
+| `@dicebear/core` + 12 style packages | the avatar generator and studio (MIT; pinned exact for byte-determinism) | ~1.5 MB vendored, lazy-loaded |
 
 Everything else is Node's standard library. There is no framework and no
 bundler.

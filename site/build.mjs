@@ -25,6 +25,7 @@ import {
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ALL_AVATAR_STYLES } from "./lib/avatars.mjs";
 import { readDesigns, readStyles } from "./lib/content.mjs";
 import { readTeam } from "./lib/team.mjs";
 import {
@@ -82,14 +83,14 @@ function write(outDir, relPath, contents) {
   writeFileSync(dest, contents);
 }
 
-function copyTree(from, to) {
+function copyTree(from, to, keep = null) {
   for (const entry of readdirSync(from, { withFileTypes: true })) {
     const src = join(from, entry.name);
     const dest = join(to, entry.name);
     if (entry.isDirectory()) {
       mkdirSync(dest, { recursive: true });
-      copyTree(src, dest);
-    } else if (entry.isFile()) {
+      copyTree(src, dest, keep);
+    } else if (entry.isFile() && (!keep || keep(entry.name))) {
       mkdirSync(dirname(dest), { recursive: true });
       copyFileSync(src, dest);
     }
@@ -117,6 +118,13 @@ const THREE_FILES = [
   ["examples/jsm/controls/OrbitControls.js", "OrbitControls.js"],
   ["LICENSE", "LICENSE.txt"],
 ];
+
+// The avatar studio's DiceBear build (MIT), vendored the same way: the core
+// engine plus every curated style, served from /assets/dicebear/ and only
+// fetched when a visitor presses a re-roll glyph. The packages are plain ESM
+// with relative imports and no runtime dependencies, so a filtered copy of
+// each lib/ tree is the whole "bundle" — no bundler, same as everything else.
+const DICEBEAR_PKGS = ["core", ...ALL_AVATAR_STYLES];
 
 /**
  * GPL-2.0 requires that whoever receives the binary can get its source and
@@ -394,7 +402,7 @@ async function main() {
 
   for (const page of rendered) write(out, page.path, page.contents);
 
-  write(out, "index.html", indexPage(designs));
+  write(out, "index.html", indexPage(designs, { rosters: team.rosters }));
   if (styles.length) write(out, "styles/index.html", stylesIndexPage(styles, designs));
 
   let assetBytes = 0;
@@ -451,6 +459,38 @@ async function main() {
     );
   }
 
+  // The DiceBear engine + curated styles for the avatar studio, lazy-loaded
+  // like the OpenSCAD runtime: nothing fetches until a re-roll glyph is
+  // pressed. Only the runtime .js ships (the packages also carry .d.ts).
+  let dicebearBytes = 0;
+  try {
+    for (const pkg of DICEBEAR_PKGS) {
+      const from = join(SITE_DIR, "node_modules", "@dicebear", pkg, "lib");
+      const to = join(out, "assets", "dicebear", pkg);
+      mkdirSync(to, { recursive: true });
+      copyTree(from, to, (name) => name.endsWith(".js"));
+    }
+    const corePkg = JSON.parse(
+      readFileSync(join(SITE_DIR, "node_modules", "@dicebear", "core", "package.json"), "utf8")
+    );
+    write(
+      out,
+      "assets/dicebear/README.txt",
+      `DiceBear (https://www.dicebear.com) — @dicebear/core ${corePkg.version} plus the\n` +
+        `curated avatar styles (${ALL_AVATAR_STYLES.join(", ")}), MIT-licensed code;\n` +
+        `each style's artwork credits its creator and license in the generated SVG's\n` +
+        `embedded metadata. Exact versions are pinned in site/package-lock.json.\n`
+    );
+    for (const pkg of DICEBEAR_PKGS) {
+      dicebearBytes += treeSize(join(out, "assets", "dicebear", pkg));
+    }
+  } catch (err) {
+    fail(
+      `the DiceBear avatar build is missing (${err.message}).\n` +
+        `Run \`npm --prefix site ci\` first — the avatar studio cannot be built without it.`
+    );
+  }
+
   const models = rendered.filter((p) => p.path.endsWith("model.json")).length;
   const pageCount = rendered.length - models + 1 + (styles.length ? 1 : 0);
   console.log(
@@ -472,6 +512,21 @@ async function main() {
     `      3D viewer: three.js ${(viewerBytes / 1024 / 1024).toFixed(1)} MB ` +
       `(vendored, MIT, lazy-loaded)`
   );
+  console.log(
+    `      avatar studio: DiceBear ${(dicebearBytes / 1024 / 1024).toFixed(1)} MB, ` +
+      `${DICEBEAR_PKGS.length - 1} styles (vendored, MIT, lazy-loaded)`
+  );
+}
+
+/** Total bytes of the files under a directory (recursive). */
+function treeSize(dir) {
+  let n = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) n += treeSize(p);
+    else if (entry.isFile()) n += statSync(p).size;
+  }
+  return n;
 }
 
 main().catch((err) => {
