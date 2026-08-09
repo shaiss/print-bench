@@ -45,14 +45,17 @@ on:
         description: Design directory under designs/ (must ship a motion.conf)
         required: true
         default: calibration-cube
+        type: string
       duration:
         description: Clip duration in seconds passed to Vidu 2 (4 is the documented-safe value)
         required: false
         default: '4'
+        type: string
       size:
         description: Video size WxH passed to Vidu 2 (override if the API rejects the default)
         required: false
         default: 1280x720
+        type: string
 
 # Read-only by default; the write grants live on the one job that pushes a
 # branch and opens the PR — detect only diffs a checkout.

@@ -108,6 +108,45 @@ reviewed after every change, and reviewer personas (printability, and
 fitness-for-purpose) challenge the design over pull requests until it
 merges. The full workflow and conventions live in [CLAUDE.md](CLAUDE.md).
 
+## Operating the automation
+
+Most of this repo's CI drives itself, but a few controls are exposed to
+maintainers directly — no code change required. Every comment-command below is
+authorised by your real repository permission (write access needed).
+
+- **Smart CI gates** — when a PR touches something no gate covers yet, the
+  `smart-ci` job proposes one in a sticky PR comment. Cross it by commenting on
+  the PR:
+  - `/ci-gate approve <id>` — wire the gate in for this and every future run
+  - `/ci-gate decline <id>` — turn it off so it stops being proposed
+  - `/ci-gate list` — show the current selection
+- **Backlog-burn policy** — change the scheduled `/ship-issue` routine's policy
+  without opening a PR by commenting on any issue or PR:
+  - `/backlog-burn set enabled true|false`
+  - `/backlog-burn set label <label-name>`
+  - `/backlog-burn set provider anthropic|zai`
+  - `/backlog-burn set cadence 4x|2x|daily|weekly|<cron>`
+- **Arming the unattended routines** — each scheduled agent is armed by a repo
+  variable (Settings → Secrets and variables → Actions → Variables) kept
+  deliberately *out* of git, so a clone or fork can't inherit it and flipping it
+  off halts the routine in seconds:
+  - `BACKLOG_BURN_ENABLED`, `DESIGN_RUN_ENABLED`, `CHUNKER_ENABLED` — the three
+    scheduled agents (backlog burn, idea→PR design run, issue chunker). Each
+    also needs its committed `enabled: true` in the matching `.github/*.conf`;
+    both keys must agree before it runs.
+  - `PRINT_FEEDBACK_ENABLED` — the *Log a print result* form (single switch).
+- **Manual workflows** — several workflows are `workflow_dispatch` forms in the
+  repository's **Actions** tab: *Log a print result*, *Regenerate avatar*,
+  *Lifestyle shot (tier-2, AI)*, *Lifestyle clip (tier-2, AI motion)*, *Release
+  bundles* and *Backlog-burn config update*. The three scheduled agents can also
+  be dispatched there, each with a `dry_run` option that selects an issue but
+  takes no action.
+
+The design of these controls (the two-key arming, the committed-vs-live config
+split, the comment-command authorisation) is documented in full in
+[CLAUDE.md](CLAUDE.md); the accepted security posture toward manually dispatched,
+write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md).
+
 ## Layout
 
 - `designs/<name>/` — one directory per design: the parametric `.scad`

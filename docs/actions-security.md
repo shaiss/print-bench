@@ -27,7 +27,7 @@ Every workflow in `.github/workflows/` that has a `workflow_dispatch` trigger **
 | Workflow | Triggers | Write grants | Secret(s) | Off-by-default gate | `checkout` ref |
 |---|---|---|---|---|---|
 | `log-print-result.yml` | `workflow_dispatch` | contents, pull-requests | `REGEN_TOKEN` | `PRINT_FEEDBACK_ENABLED` | pinned to `default_branch` |
-| `backlog-burn.yml` | schedule, `workflow_dispatch` | contents, issues, pull-requests | `ANTHROPIC_API_KEY`, `ZAI_KEY` | `BACKLOG_BURN_ENABLED` + committed `enabled:` | unpinned (selected ref); `persist-credentials: false` |
+| `backlog-burn.yml` | schedule, `workflow_dispatch` | contents, issues, pull-requests | `ANTHROPIC_API_KEY`, `ZAI_KEY` | `BACKLOG_BURN_ENABLED` + committed `enabled:` | pinned to `default_branch`; `persist-credentials: false` |
 | `design-run.yml` | schedule, `workflow_dispatch` | contents, issues, pull-requests | `CLAUDE_KEY`, `GH_TOKEN`, `ZAI_KEY` | `DESIGN_RUN_ENABLED` + committed `enabled:` | pinned to `default_branch` |
 | `chunker.yml` | schedule, `workflow_dispatch` | issues (only; no contents/pull-requests write) | `ANTHROPIC_API_KEY`, `ZAI_KEY` | `CHUNKER_ENABLED` + committed `enabled:` | pinned to `default_branch`; agent tools locked to a wrapper + deny backstop (CR-A below) |
 | `lifestyle-shot.yml` | push (`designs/*/lifestyle.conf`), `workflow_dispatch` | contents, pull-requests | `GITHUB_TOKEN`, `ZAI_KEY` | none — gated on `ZAI_KEY` presence | unpinned |
