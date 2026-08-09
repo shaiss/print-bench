@@ -24,16 +24,38 @@ on:
       handle:
         description: Member handle (people/<handle>.md)
         required: true
+        type: string
       style:
         description: >-
-          DiceBear style from the curated set for the member's kind
-          (humans: notionists, adventurer, avataaars, lorelei, open-peeps,
-          micah · agents: bottts, bottts-neutral, shapes, rings, identicon,
-          thumbs). Leave empty to keep the current style.
+          DiceBear style. The list mixes both member kinds; the generator
+          rejects a style that does not match the member's kind (people-like
+          for humans, machine-like for agents). Keep "(unchanged)" to leave
+          the current style as it is.
         required: false
+        default: "(unchanged)"
+        type: choice
+        # The curated union from site/lib/avatars.mjs (ALL_AVATAR_STYLES).
+        # A dropdown beats the old free-text field: no typos, and the valid
+        # set is visible. Kind-specific validity (human vs agent) can't be
+        # expressed in a static choice, so the generator still enforces it.
+        options:
+          - "(unchanged)"
+          - notionists
+          - adventurer
+          - avataaars
+          - lorelei
+          - open-peeps
+          - micah
+          - bottts
+          - bottts-neutral
+          - shapes
+          - rings
+          - identicon
+          - thumbs
       seed:
         description: Avatar seed. Leave empty for a fresh random roll.
         required: false
+        type: string
 
 permissions:
   contents: write
@@ -61,17 +83,21 @@ jobs:
           HANDLE: ${{ github.event.inputs.handle }}
           STYLE: ${{ github.event.inputs.style }}
           SEED: ${{ github.event.inputs.seed }}
-        # Free-form dispatch inputs: pin their SHAPE before anything
-        # interpolates them (same rule as the lifestyle workflows). [[ =~ ]]
-        # matches the whole string, so a smuggled newline cannot pass; the
-        # curated-set and handle-exists checks live in the generator itself.
+        # handle and seed are free-form dispatch inputs: pin their SHAPE before
+        # anything interpolates them (same rule as the lifestyle workflows).
+        # [[ =~ ]] matches the whole string, so a smuggled newline cannot pass.
+        # style is now a choice (GitHub restricts it to the options above), so
+        # it needs no shape check beyond excepting the "(unchanged)" sentinel;
+        # the curated-set-for-kind and handle-exists checks live in the
+        # generator itself.
         run: |
           set -euo pipefail
           if ! [[ "$HANDLE" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
             echo "::error::'handle' must be a lowercase handle like the people/*.md filenames"
             exit 1
           fi
-          if [ -n "$STYLE" ] && ! [[ "$STYLE" =~ ^[a-z]+(-[a-z]+)*$ ]]; then
+          if [ -n "$STYLE" ] && [ "$STYLE" != "(unchanged)" ] \
+             && ! [[ "$STYLE" =~ ^[a-z]+(-[a-z]+)*$ ]]; then
             echo "::error::'style' must be a kebab-case DiceBear style name"
             exit 1
           fi
@@ -89,7 +115,9 @@ jobs:
           set -euo pipefail
           npm --prefix site ci
           args=(--set "$HANDLE")
-          [ -n "$STYLE" ] && args+=(--style "$STYLE")
+          # "(unchanged)" is the choice sentinel for "keep the current style";
+          # only pass --style for a real selection.
+          [ -n "$STYLE" ] && [ "$STYLE" != "(unchanged)" ] && args+=(--style "$STYLE")
           [ -n "$SEED" ] && args+=(--seed "$SEED")
           node site/avatars.mjs "${args[@]}"
 
@@ -120,16 +148,41 @@ jobs:
           fi
           git commit -m "Regenerate avatar: ${HANDLE}"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$branch"
+          # Notify the member whose avatar this is: people/<handle>.md carries an
+          # optional `github:` login and a `kind:`. @-mention humans in the body —
+          # it never fails, unlike --assignee, which needs the login to be an
+          # assignable collaborator. Approval otherwise depends on them happening
+          # to watch the repo.
+          gh_login="$(sed -n 's/^github:[[:space:]]*//p' "people/${HANDLE}.md" | head -1 | tr -d '[:space:]')"
+          kind="$(sed -n 's/^kind:[[:space:]]*//p' "people/${HANDLE}.md" | head -1 | tr -d '[:space:]')"
+          mention=""
+          if [ "$kind" = "human" ] && [ -n "$gh_login" ]; then
+            mention="@${gh_login} — this is your avatar; review the SVG and take it out of draft if you're happy with the face."
+          fi
           body="$(cat <<EOF
           Automated avatar re-roll for \`${HANDLE}\`: the \`avatar-style:\` / \`avatar-seed:\` keys in \`people/${HANDLE}.md\` were updated and \`site/assets/avatars/${HANDLE}.svg\` regenerated from them with the pinned DiceBear packages (deterministic — the site's avatar drift test passed in the generating workflow).
+
+          ${mention}
 
           **Review before merging:** open the SVG, confirm the member is happy with the face, then take this out of draft. Re-roll by re-running the *Regenerate avatar* workflow. Because this PR was opened by \`GITHUB_TOKEN\`, the normal CI did not auto-run — push a trivial commit or re-run CI if you want the full suite on it.
 
           🤖 Generated with [Claude Code](https://claude.com/claude-code)
           EOF
           )"
-          if ! gh pr create --draft --base "$BASE" --head "$branch" \
-              --title "Regenerate avatar: ${HANDLE}" --body "$body"; then
-            echo "::warning::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests', then open a PR from that branch into ${BASE}."
+          if url="$(gh pr create --draft --base "$BASE" --head "$branch" \
+              --title "Regenerate avatar: ${HANDLE}" --body "$body")"; then
+            {
+              echo "## Avatar — ${HANDLE}"
+              echo ""
+              echo "Opened a draft PR with the regenerated avatar:"
+              echo ""
+              echo "**[${url}](${url})**"
+              echo ""
+              echo "_Review the SVG, then take the PR out of draft. It was opened with GITHUB_TOKEN, so CI did not auto-run — push a commit to trigger it._"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            # ::error:: not ::warning:: — the step exits 1, so the annotation
+            # severity should match the failed job.
+            echo "::error::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests', then open a PR from that branch into ${BASE}."
             exit 1
           fi
