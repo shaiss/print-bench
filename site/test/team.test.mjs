@@ -131,7 +131,16 @@ test("profile parsing is strict: bad fence, no colon, unknown key, duplicate key
   assert.deepEqual(commented.problems, []);
   assert.equal(commented.header.name, "Ada");
 
-  assert.deepEqual(PROFILE_KEYS, ["name", "kind", "role", "initials", "mandate", "shared"]);
+  assert.deepEqual(PROFILE_KEYS, ["name", "kind", "role", "initials", "mandate", "shared", "github"]);
+});
+
+test("an optional github login parses when valid and is refused when malformed", () => {
+  const ok = parseProfile("---\nname: Ada\nkind: human\nrole: F\ninitials: A\ngithub: Ada-Dev\n---\n\nBio.\n");
+  assert.deepEqual(ok.problems, []);
+  assert.equal(ok.header.github, "ada-dev", "a login is stored canonical-lowercase (GitHub is case-insensitive)");
+
+  const bad = parseProfile("---\nname: Ada\nkind: human\nrole: F\ninitials: A\ngithub: not a login\n---\n\nBio.\n");
+  assert.match(bad.problems.join("\n"), /not a valid GitHub login/);
 });
 
 test("team.conf parses core and pm with the same strictness as derives.conf", () => {
@@ -376,6 +385,7 @@ test("the real repo agrees with the team resolver", () => {
   const shai = team.people.get("shai");
   assert.equal(shai.kind, "human");
   assert.ok(shai.bio.length > 40, "shai's bio is the mandate text and must not be empty");
+  assert.equal(shai.github, "shaiss", "shai's committed github login drives timeline attribution");
 
   const frieda = team.people.get("frieda");
   assert.equal(frieda.kind, "human");

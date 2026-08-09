@@ -216,19 +216,22 @@ export function parseFieldTestLog(text) {
 // The source adapter interface (the seam).
 //
 // A source is: { id, label, read(ctx) -> { events, problems } }
-//   ctx    = { pmText, notesText, roster }
+//   ctx    = { pmText, notesText, roster, gitEvents }
 //            pmText/notesText are the committed file contents (or null when
 //            the file is absent); roster is the design's team.mjs roster
-//            (or null when rosterless) — used only for attribution.
+//            (or null when rosterless) — used only for attribution. gitEvents
+//            is the deploy-time git history (history.mjs), pre-fetched and
+//            pre-shaped in build.mjs, or absent on a committed-only build.
 //   event  = { date, source, sourceTag, text, detail, handle }
 //            handle is a member handle or null (attribution where derivable).
 //
-// Every seeded source reads only committed inputs. Adding a git/PR/review/
-// telemetry source later means adding an entry here whose read() draws on
-// that source — the assembly (readTimeline) and the render (historyTimeline)
-// do not change. Non-committed sources are deliberately unimplemented: v1
-// is committed-only (#122 non-goal), and the interface is the whole point of
-// laying the seam now.
+// The committed sources read only committed inputs. The git source is the
+// first NON-committed one, and it demonstrates the shape a future PR / review /
+// telemetry source follows: because a pure sync read() cannot do network I/O,
+// build.mjs performs the deploy-scoped fetch (history.mjs) and hands the events
+// in on ctx.gitEvents; the adapter merges them so they sort and render beside
+// the committed events. The assembly (readTimeline) and the render
+// (timelineEvents) never change — adding a source is adding an entry here.
 // ---------------------------------------------------------------------------
 
 /** The design's PM.md decision log — the charter owner's recorded choices. */
@@ -272,13 +275,30 @@ export const fieldTestSource = {
   },
 };
 
-/** The committed-only sources v1 reads, in declaration order. */
-export const SOURCES = [decisionLogSource, fieldTestSource];
+/**
+ * The repo's own git history for this design — the first deploy-time (non-
+ * committed) source, feeding the seam the committed sources were built around
+ * (issue #126). Its events are fetched over the GitHub API and shaped by
+ * history.mjs in build.mjs — a pure sync read() cannot do network I/O — and
+ * reach this adapter pre-built on ctx.gitEvents, so the adapter only merges
+ * them into the timeline. Absent on a committed-only build (local / CI, where
+ * the fetch is off) → nothing, and the timeline stays deterministic.
+ */
+export const gitHistorySource = {
+  id: "git",
+  label: "commit · git",
+  read({ gitEvents }) {
+    return { events: Array.isArray(gitEvents) ? gitEvents : [], problems: [] };
+  },
+};
+
+/** The sources readTimeline runs, in declaration order. */
+export const SOURCES = [decisionLogSource, fieldTestSource, gitHistorySource];
 
 /**
  * Assemble one product's timeline from its committed inputs.
  *
- *   ctx      { pmText, notesText, roster } — see the interface above.
+ *   ctx      { pmText, notesText, roster, gitEvents } — see the interface above.
  *   sources  the adapters to run (defaults to SOURCES); the seam that lets
  *            a caller or a future issue swap the source set without
  *            touching assembly or render.

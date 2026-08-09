@@ -6,6 +6,7 @@ name: Shai Perednik
 kind: human
 role: Founder / human lead
 initials: SP
+github: shaiss
 ---
 
 Runs the bench. Brings the design ideas and the measurements, owns every

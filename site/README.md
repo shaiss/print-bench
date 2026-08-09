@@ -2,8 +2,10 @@
 
 Turns what this repo already commits — product pages, previews, product
 shots, style specs — into a browsable site, deployed on Vercel. It invents
-no content: every word and image on the site comes from a file CI already
-gates.
+no content: every word and image traces to a **provenanced source** — a
+committed, CI-gated file, or a first-party record (a GitHub Release manifest,
+this repo's own history) fetched at deploy time — never to the model. ("Static"
+here means static *hosting*, not a flat page: see [Scopes](#scopes--build-deploy-served-output).)
 
 ```bash
 ./scripts/site.sh           # build into build/site
@@ -22,7 +24,7 @@ install and build commands), so a green local build means the deploy builds.
 | `/styles/` | every `styles/<name>/` with a `STYLE.md` |
 | `/styles/<name>/` | that style's `STYLE.md`, rendered |
 | `/people/` | every `people/<handle>.md` — the product cores and the `shared: true` review specialists — as full member profiles with the product teams each has been on |
-| `/designs/<name>/` (team section) | for a design with a committed `team.conf`, the product page also carries a "team contributions" section: who built it (identity, linking to their `/people/` profile), a light reviewed-by reference, and the `PM.md`-sourced build-history timeline |
+| `/designs/<name>/` (team section) | for a design with a committed `team.conf`, the product page also carries a "team contributions" section: who built it (identity, linking to their `/people/` profile), a light reviewed-by reference, and the build-history timeline (its `PM.md` decision log and `NOTES.md` field tests, plus — on the Vercel deploy — its own git commits) |
 
 Adding a design requires no edit here — the generator finds it by the same
 entry-point rule `gate.sh` and `gallery.sh` use.
@@ -52,6 +54,44 @@ over the same fixture trees and fails on any disagreement about order or
 parentage. Two surfaces of this repo silently disagreeing about what a design
 *is* was [issue #55](https://github.com/shaiss/print-bench/issues/55); the
 cross-check is what stops it recurring.
+
+## Scopes — build, deploy, served output
+
+Several of this site's guarantees read like one blanket "the site is sealed"
+rule, but they live at three different layers, and conflating them is what
+makes the site look more locked-down than it is. Kept apart:
+
+- **The build is deterministic and offline.** A plain `./scripts/site.sh`
+  performs no network I/O and reproduces byte-for-byte, so a local build and
+  the CI build always agree on the **committed baseline** of a deploy — the
+  pages the deploy then augments with live data (below). This is a property of
+  the *build*, not a ban on fetching.
+- **The deploy may fetch live first-party data.** On Vercel the build is
+  allowed to pull data it cannot commit — through a deploy-scoped, best-effort
+  seam that renders *empty* on any failure and runs only behind a deploy-only
+  flag, so it is purely additive and never breaks a build. `lib/releases.mjs`
+  is the reference implementation (`SITE_FETCH_RELEASES=1`, the latest GitHub
+  Release manifest → download links; nothing locally, no broken build when the
+  API is down). `lib/history.mjs` is the second (`SITE_FETCH_HISTORY=1`): a
+  design's own git commits over the GitHub API, folded into the team timeline as
+  `commit · git` events, attributed to a member via their committed `github:`
+  login. Any further deploy-time source — PR / review history — follows the same
+  shape.
+- **The served output references nothing external.** Every asset the *browser*
+  loads is vendored (three.js, the OpenSCAD-WASM runtime, the `text()` font),
+  resolved by an inline import map, never a CDN. "No external references" is a
+  rule about the bytes we serve, not about what the builder reads at deploy
+  time — a GitHub API or a Release manifest is a *source*, not a served
+  reference.
+
+The principle spanning all three is **invent no content**, and its real test
+is *provenance*, not "committed on disk": a committed, CI-gated file qualifies,
+and so does a first-party authoritative record fetched at deploy time — a
+Release manifest authored by the CI that published it, or this repo's own
+GitHub history. Model-invented text is what the rule forbids. Likewise
+**static** means static *hosting* — build-time output on a CDN, no per-request
+server compute — while the page still runs real client-side compute in the
+visitor's browser (the configurator and 3D viewer below).
 
 The one-line pitch on each gallery card is the same one `scripts/gallery.sh`
 puts in the README gallery — NOTES.md's `## Goal` paragraph, falling back to
@@ -179,7 +219,8 @@ things keep it consistent with the rest of the site:
 - `lib/team.mjs` — the roster layer (issue #123): `people/<handle>.md` + `designs/<name>/team.conf` + the interim `people/work.conf` recent-work manifest (issue #124) → resolved member records, agent mandates read from their charters at build time; an unresolvable handle, mandate source, or cited work artifact fails the build
 - `lib/profile.mjs` — the reusable member profile component (issue #124): identity, cited mandate, team chips, scope-filtered recent work; the People page renders it in the cross-team scope
 - `lib/teams.mjs` — the team/org building blocks (issue #122, revised IA): the product page's "team contributions" section (`teamContributions` — light identity cards linking to People, a reviewed-by reference, the build-history timeline) and the shared `historySlot`; pure functions of the roster data
-- `lib/timeline.mjs` — the "History of work together" timeline (issue #126): a source-adapter seam plus committed-only sources (the design's `PM.md` decision log, optionally the `NOTES.md` field-test log) → product-scoped, attributed, newest-first events, and the `timelineEvents` render the product page's contributions section hosts; a drifted decision-log shape fails the build
+- `lib/timeline.mjs` — the "History of work together" timeline (issue #126): a source-adapter seam plus the sources it runs (the committed `PM.md` decision log and `NOTES.md` field-test log, and the deploy-time git history from `history.mjs`) → product-scoped, attributed, newest-first events, and the `timelineEvents` render the product page's contributions section hosts; a drifted decision-log shape fails the build
+- `lib/history.mjs` — the deploy-time git-history source for the team timeline: a design's path-filtered commits over the GitHub API (best-effort and Vercel-scoped, like `releases.mjs`; merge commits dropped) → attributed `commit · git` events, the author mapped to a member by their committed `github:` login. The pure commit→event transform is unit-tested; the fetch boundary is stubbed, never the network
 - `lib/model.mjs` — the per-design model bundle (entry, source, files, sections, asserts) the configurator and viewer share
 - `lib/releases.mjs` — release download links (issue #139): the pure manifest → per-part download-link mapping, and the best-effort, Vercel-scoped fetch of the latest release's manifests (injectable `fetch`, empty on any failure)
 - `lib/templates.mjs` — the page shells
