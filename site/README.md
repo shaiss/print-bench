@@ -24,7 +24,7 @@ install and build commands), so a green local build means the deploy builds.
 | `/styles/` | every `styles/<name>/` with a `STYLE.md` |
 | `/styles/<name>/` | that style's `STYLE.md`, rendered |
 | `/people/` | every `people/<handle>.md` — the product cores and the `shared: true` review specialists — as full member profiles with the product teams each has been on |
-| `/designs/<name>/` (team section) | for a design with a committed `team.conf`, the product page also carries a "team contributions" section: who built it (identity, linking to their `/people/` profile), a light reviewed-by reference, and the `PM.md`-sourced build-history timeline |
+| `/designs/<name>/` (team section) | for a design with a committed `team.conf`, the product page also carries a "team contributions" section: who built it (identity, linking to their `/people/` profile), a light reviewed-by reference, and the build-history timeline (its `PM.md` decision log and `NOTES.md` field tests, plus — on the Vercel deploy — its own git commits) |
 
 Adding a design requires no edit here — the generator finds it by the same
 entry-point rule `gate.sh` and `gallery.sh` use.
@@ -71,8 +71,11 @@ makes the site look more locked-down than it is. Kept apart:
   flag, so it is purely additive and never breaks a build. `lib/releases.mjs`
   is the reference implementation (`SITE_FETCH_RELEASES=1`, the latest GitHub
   Release manifest → download links; nothing locally, no broken build when the
-  API is down). Any future deploy-time source — git / PR / review history for
-  the team timeline — follows this shape.
+  API is down). `lib/history.mjs` is the second (`SITE_FETCH_HISTORY=1`): a
+  design's own git commits over the GitHub API, folded into the team timeline as
+  `commit · git` events, attributed to a member via their committed `github:`
+  login. Any further deploy-time source — PR / review history — follows the same
+  shape.
 - **The served output references nothing external.** Every asset the *browser*
   loads is vendored (three.js, the OpenSCAD-WASM runtime, the `text()` font),
   resolved by an inline import map, never a CDN. "No external references" is a
@@ -215,7 +218,8 @@ things keep it consistent with the rest of the site:
 - `lib/team.mjs` — the roster layer (issue #123): `people/<handle>.md` + `designs/<name>/team.conf` + the interim `people/work.conf` recent-work manifest (issue #124) → resolved member records, agent mandates read from their charters at build time; an unresolvable handle, mandate source, or cited work artifact fails the build
 - `lib/profile.mjs` — the reusable member profile component (issue #124): identity, cited mandate, team chips, scope-filtered recent work; the People page renders it in the cross-team scope
 - `lib/teams.mjs` — the team/org building blocks (issue #122, revised IA): the product page's "team contributions" section (`teamContributions` — light identity cards linking to People, a reviewed-by reference, the build-history timeline) and the shared `historySlot`; pure functions of the roster data
-- `lib/timeline.mjs` — the "History of work together" timeline (issue #126): a source-adapter seam plus committed-only sources (the design's `PM.md` decision log, optionally the `NOTES.md` field-test log) → product-scoped, attributed, newest-first events, and the `timelineEvents` render the product page's contributions section hosts; a drifted decision-log shape fails the build
+- `lib/timeline.mjs` — the "History of work together" timeline (issue #126): a source-adapter seam plus the sources it runs (the committed `PM.md` decision log and `NOTES.md` field-test log, and the deploy-time git history from `history.mjs`) → product-scoped, attributed, newest-first events, and the `timelineEvents` render the product page's contributions section hosts; a drifted decision-log shape fails the build
+- `lib/history.mjs` — the deploy-time git-history source for the team timeline: a design's path-filtered commits over the GitHub API (best-effort and Vercel-scoped, like `releases.mjs`; merge commits dropped) → attributed `commit · git` events, the author mapped to a member by their committed `github:` login. The pure commit→event transform is unit-tested; the fetch boundary is stubbed, never the network
 - `lib/model.mjs` — the per-design model bundle (entry, source, files, sections, asserts) the configurator and viewer share
 - `lib/releases.mjs` — release download links (issue #139): the pure manifest → per-part download-link mapping, and the best-effort, Vercel-scoped fetch of the latest release's manifests (injectable `fetch`, empty on any failure)
 - `lib/templates.mjs` — the page shells

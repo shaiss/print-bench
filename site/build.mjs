@@ -33,6 +33,11 @@ import {
   manifestToDownloads,
 } from "./lib/releases.mjs";
 import { readTimeline } from "./lib/timeline.mjs";
+import {
+  shouldFetchHistory,
+  fetchDesignCommits,
+  commitsToEvents,
+} from "./lib/history.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
 import { buildModel } from "./lib/model.mjs";
 import {
@@ -245,13 +250,42 @@ async function main() {
   // structured source, so a drifted decision-log table fails ./scripts/site.sh
   // rather than rendering a hole. Product-scoped by construction: each team
   // reads only its own design's files.
+  // Attribution map for git history: a member's committed `github:` login →
+  // handle. Built from committed data only, so a git commit is attributed to a
+  // member only where this mapping derives it — an author with no committed
+  // login renders unattributed (honest, not guessed).
+  const loginToHandle = new Map();
+  for (const m of team.members) if (m.github) loginToHandle.set(m.github, m.handle);
+
+  // Git history is the first deploy-time source folded into the timeline (the
+  // #126 seam, now fed): each rostered design's own path-filtered commits over
+  // the GitHub API. Best-effort and Vercel-scoped (shouldFetchHistory) exactly
+  // like release download links — locally and in CI no fetch runs, so the
+  // timeline stays committed-only and the build is byte-for-byte reproducible;
+  // on the deploy real commits appear, labelled `commit · git`.
+  const commitsByDesign = new Map();
+  if (shouldFetchHistory()) {
+    for (const design of team.rosters.keys()) {
+      const commits = await fetchDesignCommits({
+        owner: OWNER,
+        repo: REPO,
+        design,
+        token: process.env.GITHUB_TOKEN,
+      });
+      if (commits.length) commitsByDesign.set(design, commits);
+    }
+    const total = [...commitsByDesign.values()].reduce((n, c) => n + c.length, 0);
+    console.log(`      history: ${total} commit(s) fetched for the team timeline`);
+  }
+
   const timelines = new Map();
   for (const [design, roster] of team.rosters) {
     const pmPath = join(REPO_ROOT, "designs", design, "PM.md");
     const notesPath = join(REPO_ROOT, "designs", design, "NOTES.md");
     const pmText = existsSync(pmPath) ? readFileSync(pmPath, "utf8") : null;
     const notesText = existsSync(notesPath) ? readFileSync(notesPath, "utf8") : null;
-    const { events, problems } = readTimeline({ pmText, notesText, roster });
+    const gitEvents = commitsToEvents(commitsByDesign.get(design) ?? [], { loginToHandle });
+    const { events, problems } = readTimeline({ pmText, notesText, roster, gitEvents });
     for (const p of problems) onError(`designs/${design}: timeline: ${p}`);
     timelines.set(design, events);
   }

@@ -53,7 +53,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 /** The only keys a profile header may carry. */
-export const PROFILE_KEYS = ["name", "kind", "role", "initials", "mandate", "shared"];
+export const PROFILE_KEYS = ["name", "kind", "role", "initials", "mandate", "shared", "github"];
+
+/** A GitHub login: alphanumerics and single hyphens, 1–39 chars. */
+const GITHUB_LOGIN_RE = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
 
 /** The only keys a team.conf may carry. */
 export const TEAM_KEYS = ["core", "pm"];
@@ -114,7 +117,7 @@ function parseKeyValueLines(lines, keys, base) {
 export function parseProfile(text) {
   const problems = [];
   const lines = text.split("\n");
-  const header = { name: null, kind: null, role: null, initials: null, mandate: null, shared: false };
+  const header = { name: null, kind: null, role: null, initials: null, mandate: null, shared: false, github: null };
 
   if (lines[0]?.trim() !== "---") {
     problems.push("does not open with a '---' header fence");
@@ -152,6 +155,14 @@ export function parseProfile(text) {
   }
   const mandate = seen.get("mandate");
   if (mandate) header.mandate = mandate.value;
+  // Optional: a member's GitHub login, the committed key that lets the team
+  // timeline attribute a git commit to them (site/lib/history.mjs). Validated
+  // so a typo'd login is a loud problem, not a silently-never-matching value.
+  const github = seen.get("github");
+  if (github) {
+    if (GITHUB_LOGIN_RE.test(github.value)) header.github = github.value;
+    else problems.push(`github '${github.value}' is not a valid GitHub login`);
+  }
 
   if (header.kind === "human") {
     if (mandate) problems.push("a human's mandate is the profile body — delete the 'mandate:' key");
@@ -358,6 +369,7 @@ export function readTeam(repoRoot, { onError = () => {}, designNames } = {}) {
       role: header.role,
       initials: header.initials,
       shared: header.shared,
+      github: header.github,
       bio: header.kind === "human" ? body : null,
       mandate,
     });
