@@ -64,16 +64,32 @@ carried by a clone, exactly like the rest of the repo's config.
   tokens have had a documented gap for *user-owned* projects; a classic `project`
   PAT is the safe default.)
 
+## Adding an issue to the board
+
+Once the board exists, place an issue/PR on it and set its fields — same
+emit-a-recipe pattern as `setup`:
+
+```bash
+scripts/gh-project.sh add-item https://github.com/shaiss/print-bench/issues/<N> \
+  --stage Backlog --points 3 | bash
+```
+
+It's **idempotent**: it reuses the existing board item for that URL instead of
+duplicating, so re-running reconciles the fields. `--stage` must be one of the
+board's `Stage` options; `--points` is a number; both are optional. This is the
+building block the chunker/intake wiring calls in slice 2 part 2.
+
 ## Slices
 
-- **Slice 1 (this):** the committed spec + `scripts/gh-project.sh` recipe + this
-  doc. You run the recipe once to create the board.
-- **Slice 2+ (follow-ups on #148):** the automation that *populates* the board —
-  add issues on `/chunk-issue` and `/intake`, set `Stage` + `Story points` via
-  the Projects GraphQL API (needs the project-scoped token); estimation in the
-  chunker; the HITL `needs-decision` gate surfaced as a board column; and the
-  Roadmap view + milestones. These need the board to exist and the token scope
-  above, so they follow provisioning.
+- **Slice 1 (done, #164):** the committed spec + `scripts/gh-project.sh setup`
+  recipe + this doc. Run the recipe once to create the board.
+- **Slice 2 part 1 (this):** `scripts/gh-project.sh add-item` — the idempotent
+  add-issue-and-set-fields recipe above (via `gh project item-add` / `item-edit`).
+  Runnable by hand today; a workflow calls it in part 2.
+- **Slice 2 part 2+ (follow-ups on #148):** wire `add-item` into `/chunk-issue`
+  and `/intake` (auto-add on filing, with an estimate) — needs the project-scoped
+  token wired as a workflow secret (see Auth above); surface the HITL
+  `needs-decision` gate as a board column; and add the Roadmap view + milestones.
 
 ## How it maps onto the existing loop
 
