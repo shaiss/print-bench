@@ -279,4 +279,15 @@ if ! ./scripts/release-bundle.sh --selftest; then
   fail=1
 fi
 
+# gh-project.sh emits the idempotent `gh` recipe that provisions the autonomy
+# roadmap board (issue #148). Its --selftest proves the emitted recipe is valid,
+# idempotent bash and that the board spec (title, owner, Stage options, Story
+# points) reaches it — the board itself lives in GitHub, so this is the only
+# thing that proves the provisioning recipe still works. Renders/creates nothing
+# (pure string emit), so it is fast and runs here with the other suites.
+echo "-- gh-project selftest: scripts/gh-project.sh --selftest"
+if ! ./scripts/gh-project.sh --selftest; then
+  fail=1
+fi
+
 exit "$fail"
