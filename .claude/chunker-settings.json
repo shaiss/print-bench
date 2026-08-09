@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(xvfb-run:*)",
+      "Bash(openscad:*)",
+      "Bash(./scripts/render.sh:*)",
+      "Bash(./scripts/check.sh:*)",
+      "Bash(./scripts/gate.sh:*)",
+      "Bash(./scripts/readme-gate.sh:*)",
+      "Bash(./scripts/animate.sh:*)",
+      "Bash(./scripts/style-lift.sh:*)",
+      "Bash(./scripts/style-check.sh:*)",
+      "Bash(scripts/style-lift.sh:*)",
+      "Bash(scripts/style-check.sh:*)",
+      "Bash(scripts/render.sh:*)",
+      "Bash(scripts/check.sh:*)",
+      "Bash(scripts/gate.sh:*)",
+      "Bash(scripts/readme-gate.sh:*)",
+      "Bash(scripts/animate.sh:*)",
+      "Bash(python3 scripts/gate-summary.py:*)",
+      "Bash(printcheck:*)",
+      "Bash(stylelift:*)",
+      "Bash(prusa-slicer:*)",
+      "Bash(montage:*)",
+      "Bash(shellcheck:*)",
+      "Bash(actionlint:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python3 -m pytest:*)",
+      "Write",
+      "Edit",
+      "NotebookEdit"
+    ]
+  }
+}

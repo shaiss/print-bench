@@ -12,6 +12,15 @@
 # this script included, and can run only the fixed GitHub operations below.
 # Issue bodies are therefore passed INLINE (--body), never via a file path (no
 # Write to author one, and no arbitrary-path read to exfiltrate a runner file).
+#
+# That narrow --allowedTools is necessary but NOT sufficient on its own:
+# claude-code-action loads .claude/settings.json (settingSources=project) and
+# allow rules merge ADDITIVELY, so the repo's dev allows (e.g. Bash(xvfb-run:*)
+# — arbitrary command execution) would otherwise leak into the run and defeat
+# the list. The workflow closes that with a deny backstop passed via --settings
+# (.claude/chunker-settings.json); deny beats allow from every source, and
+# scripts/chunker-perms-check.sh keeps the backstop in sync with settings.json.
+# See docs/actions-security.md (CR-A).
 # Keep this script side-effect-narrow: NEVER eval, never run caller input as
 # code, only ever call `gh` with fixed subcommands, and pass every caller value
 # as a quoted argument — never interpolated into a command line.
@@ -38,13 +47,31 @@ die() { echo "chunk-helper: $*" >&2; exit 1; }
 # positional slot or a REST path (no flag-injection, no path traversal).
 need_num() { case "$1" in ''|*[!0-9]*) die "$2: '$1' is not an issue number";; esac; }
 
+# If sub-issue linking fails AFTER the child issue was created, we must not
+# leave an orphaned OPEN issue behind. A later /chunk-issue run keys "already
+# chunked" on the LINKED sub-issue set (SKILL.md §0), not on an issue's mere
+# existence, so an unlinked orphan is invisible to it and would be re-filed as a
+# duplicate. Close the orphan (with a note) so the state is clean and the next
+# run re-files exactly one set. Best-effort: never let cleanup mask the original
+# failure, and never `die` from here (the caller does that).
+orphan_cleanup() {
+  local child="$1" parent="$2" reason="$3"
+  gh issue comment "$child" --repo "$repo" --body \
+"Auto-closing: created as a sub-issue of #$parent but the link could not be established ($reason). The chunker keys idempotency on linked sub-issues, so it will re-file this piece on its next run — this stray issue is safe to delete." \
+    >/dev/null 2>&1 || true
+  gh issue close "$child" --repo "$repo" --reason "not planned" >/dev/null 2>&1 || true
+}
+
 cmd="${1:-}"
 if [ "$#" -gt 0 ]; then shift; fi
 
 # Help must not require gh (or a repo), so handle it before resolving anything.
 case "$cmd" in
   ""|-h|--help|help)
-    sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
+    # Print the whole leading comment block (line 2 through the last `#` line
+    # before the first statement), so --help can never truncate as the header
+    # grows. Skip the shebang; stop at the first non-comment line.
+    awk 'NR==1{next} /^[^#]/{exit} {sub(/^# ?/,""); print}' "$0"
     exit 0
     ;;
 esac
@@ -110,22 +137,30 @@ labels: {{range .labels}}{{.name}} {{end}}
     need_num "$child" "create-child (parsing '$url')"
 
     # Native sub-issue link needs the child's internal DB id (.id), NOT its
-    # number — passing the number 404/422s.
-    child_id="$(gh api "repos/$repo/issues/$child" --jq .id)"
-    [ -n "$child_id" ] || die "create-child: could not resolve DB id for #$child"
-    gh api --method POST \
+    # number — passing the number 404/422s. Every failure past this point leaves
+    # a created-but-unlinked orphan, so each one closes it before dying.
+    if ! child_id="$(gh api "repos/$repo/issues/$child" --jq .id)" || [ -z "$child_id" ]; then
+      orphan_cleanup "$child" "$parent" "could not resolve its database id"
+      die "create-child: could not resolve DB id for #$child (orphan closed)"
+    fi
+    if ! gh api --method POST \
       -H "Accept: application/vnd.github+json" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
       "repos/$repo/issues/$parent/sub_issues" \
-      -F "sub_issue_id=$child_id" >/dev/null
+      -F "sub_issue_id=$child_id" >/dev/null; then
+      orphan_cleanup "$child" "$parent" "sub_issues link request failed"
+      die "create-child: #$child was created but the link request to #$parent failed (orphan closed)"
+    fi
 
     # Verify the link took, failing loudly so the caller does not proceed to
     # parent cleanup on a created-but-unlinked issue. Capture first, then match:
     # piping straight into `grep -q` can SIGPIPE the paginating gh under
     # `set -o pipefail` and report a false failure.
     linked="$(gh api --paginate "repos/$repo/issues/$parent/sub_issues" --jq '.[].number')"
-    grep -qx "$child" <<<"$linked" \
-      || die "create-child: #$child was created but not linked under #$parent"
+    if ! grep -qx "$child" <<<"$linked"; then
+      orphan_cleanup "$child" "$parent" "link did not verify"
+      die "create-child: #$child was created but not linked under #$parent (orphan closed)"
+    fi
     echo "CREATED #$child under #$parent"
     ;;
 
