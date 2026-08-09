@@ -24,13 +24,20 @@ This skill runs the same attended (a human invoked it) or unattended (the
    giving size ("bigger than one reviewable PR", "big bet", staged deliverables)
    as the reason. If neither holds, stop and say so — chunking an issue nobody
    judged too big is scope you were not asked for.
-3. **Not already chunked.** If the thread already has a `🧩 CHUNKED` comment, or
-   the issue already has open sub-issues, **first remove the `declined-too-big`
-   label** (selection reads the label, not the `🧩 CHUNKED` comment — leaving it
-   on burns a scheduled run every day on an already-chunked issue), then stop and
-   report it. Re-chunking double-files. This early-exit and §4 are the two paths
-   that must both clear the label; that is the idempotency latch the daily
-   schedule relies on.
+3. **Not already chunked.** Child creation, sub-issue linking, and parent
+   cleanup are separate writes, so distinguish two already-handled states — and
+   **remove `declined-too-big` in both**, because selection reads the label, not
+   the `🧩 CHUNKED` comment, and leaving it on burns a scheduled run every day on
+   an already-handled issue:
+   - **A `🧩 CHUNKED` comment exists** → a prior run completed. Remove
+     `declined-too-big` (if still present) and stop.
+   - **Open sub-issues exist but no `🧩 CHUNKED` comment** → a prior run filed
+     children and died before finishing. **Do not re-file and do not post
+     `🧩 CHUNKED`** (a partial split is not a confirmed one). Remove
+     `declined-too-big`, post a durable comment listing the existing children and
+     flagging the partial state for human reconciliation, and stop.
+   This early-exit and §4 are the paths that must clear the label; together they
+   are the idempotency latch the daily schedule relies on.
 
 ## 1. Read the whole thread first
 

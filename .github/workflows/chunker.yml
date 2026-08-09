@@ -275,14 +275,25 @@ jobs:
         env:
           ISSUE: ${{ steps.select.outputs.issue }}
           PROVIDER: ${{ steps.policy.outputs.provider }}
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          # 'success' only when selection actually ran to completion; 'skipped'
+          # when committed policy disabled the routine, 'failure' when the policy
+          # or selector step errored. Distinguishes those from a genuine empty
+          # selection so the summary can't claim "nothing eligible" for a run
+          # that never checked eligibility.
+          SELECT_OUTCOME: ${{ steps.select.outcome }}
           # Only the step matching the configured provider runs; the other is
           # 'skipped'. Report the one that actually ran.
           RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome }}
         run: |
           {
             echo "## Chunker — run outcome"
-            if [ -z "${ISSUE}" ]; then
-              echo "- selected: none (nothing eligible)"
+            if [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/chunker.conf \`enabled\` != true) — nothing ran"
+            elif [ "${SELECT_OUTCOME}" != "success" ]; then
+              echo "- selection did not complete (\`${SELECT_OUTCOME:-skipped}\`) — the policy or selector step failed; see the log"
+            elif [ -z "${ISSUE}" ]; then
+              echo "- selected: none (nothing carrying \`declined-too-big\` was eligible)"
             else
               echo "- selected: #${ISSUE}"
               echo "- provider: ${PROVIDER}"
