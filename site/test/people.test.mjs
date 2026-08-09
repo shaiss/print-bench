@@ -108,12 +108,19 @@ test("REAL: the calibration-cube product page shows its team + build history", (
     people: team.people,
   });
 
-  // The revised product-page IA (site wireframes, 1d): the roster renders as
-  // the Team tab-panel, the build history as the History tab-panel.
-  assert.match(html, /id="tab-team"/);
+  // The revised product-page IA (site wireframes, 1d + preview feedback):
+  // the roster renders as the header's Built-by block — below the
+  // description, above the action row — and the build history as the
+  // History tab-panel.
   assert.match(html, /id="tab-history"/);
+  assert.doesNotMatch(html, /id="tab-team"/);
   assert.match(html, /class="contributions-team"/);
   assert.match(html, /Built by/);
+  assert.match(
+    html,
+    /contributions-team[\s\S]*btn-row/,
+    "the team block precedes the action row in the header"
+  );
   assert.match(html, /href="\/people\/#profile-vera"/, "core PM linked to their profile");
   assert.match(html, /Reviewed by/);
   assert.match(html, /<ol class="timeline">/);
@@ -136,8 +143,8 @@ test("REAL: a rosterless design's product page carries no contributions section"
   });
   assert.doesNotMatch(html, /class="contributions-team"/);
   assert.doesNotMatch(html, /Built by/);
-  // No roster → no Team or History tab either; Overview and Workbench remain.
-  assert.doesNotMatch(html, /id="tab-team"/);
+  // No roster → no header team block and no History tab; Overview and
+  // Workbench remain.
   assert.doesNotMatch(html, /id="tab-history"/);
   assert.match(html, /id="tab-overview"/);
   assert.match(html, /id="tab-workbench"/);

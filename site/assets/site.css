@@ -1040,7 +1040,13 @@ img.monogram-human, img.monogram-agent { background: var(--paper); }
 
 /* ---------- product page: team contributions (issue #122, revised) -------- */
 
-.contributions { max-width: none; }
+/* In the design header the block sits between the description and the
+   action row (preview-review feedback on PR #151): compact cards, capped
+   width so the header keeps its column rhythm. */
+.design-head .contributions-team { margin: 1rem 0 0.25rem; max-width: 44rem; }
+.design-head .contributions-team .eyebrow { margin-bottom: 0.35rem; }
+.design-head .contributor { flex: 0 1 auto; padding: 0.5rem 0.8rem; }
+.design-head .reviewed-by { margin-top: 0.75rem; }
 
 .contributor-row {
   display: flex;
