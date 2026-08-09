@@ -16,6 +16,12 @@ Every exclusion here mirrors the ``/ship-issue`` skill's own §0 lock check:
   is one wasted selection the skill then declines, never a wrong ship,
 * an existing remote ``claude/issue-<N>-*`` branch.
 
+One further exclusion does not come from the lock check: an issue carrying the
+``needs-decision`` label is skipped because an agentic run parked it for a human
+yes/no (the HITL decision gate, issue #161) and must not be re-selected until
+the decision is recorded and the label is cleared. Unlike a SHIP-LOCK this block
+is *durable* — it never goes stale, because a pending decision does not expire.
+
 The skill re-verifies all of this before it touches a line of code, so this
 module is a best-effort *pre-filter*. Its only jobs are to never hand the run
 an issue that is plainly already taken, and — the hard cap — to never hand it
@@ -35,6 +41,14 @@ from typing import Any, Optional
 DEFAULT_REQUIRED_LABEL = "autonomy-ok"
 
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
+
+# An issue an agentic run parked for a human yes/no (the HITL decision gate,
+# issue #161) carries this label until the decision is recorded and it is
+# cleared. It excludes the issue from selection the same way a claim does, but is
+# *durable*: unlike a SHIP-LOCK it never goes stale, because a pending decision
+# does not expire. A fixed marker, not configurable — the /decide resolution
+# flips it to decision-approved / decision-rejected.
+DECISION_PENDING_LABEL = "needs-decision"
 
 # A SHIP-LOCK this old, with no corroborating branch or closing PR, is a
 # *stale* claim — a run that died between posting its lock and pushing a
@@ -169,6 +183,7 @@ def exclusion_reason(
     required_label: str = DEFAULT_REQUIRED_LABEL,
     now: Optional[datetime] = None,
     stale_after_hours: float = STALE_LOCK_HOURS,
+    decision_label: str = DECISION_PENDING_LABEL,
 ) -> Optional[str]:
     """Why this issue is *not* eligible, or ``None`` if it is.
 
@@ -177,11 +192,18 @@ def exclusion_reason(
     PR has already been ruled out, so a ``stale`` lock verdict means precisely
     the skill's takeover condition — an old claim with nothing backing it —
     and the issue is left eligible rather than frozen forever.
+
+    The ``needs-decision`` guard sits just after the opt-in label check, ahead
+    of every claim guard: a parked decision is a *durable* block that must hold
+    even after a pausing run's SHIP-LOCK goes stale, so it cannot be gated
+    behind the staleness logic.
     """
     number = issue["number"]
     labels = issue.get("labels", []) or []
     if required_label not in labels:
         return f"not labelled {required_label!r}"
+    if decision_label in labels:
+        return f"awaiting a human decision ({decision_label})"
     if _has_issue_branch(branches, number):
         return f"a claude/issue-{number}-* branch already exists"
     if _open_pr_claims(open_prs, number):
