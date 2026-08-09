@@ -77,7 +77,10 @@ locked", or an owner comment picking between named options.
   decided; take the recommendation and record it in the contract.)
 - **Bigger than one reviewable PR.** Multiple independent deliverables that
   could merge separately → propose the split as a comment listing the
-  sub-issues you'd file, and stop.
+  sub-issues you'd file, apply the `declined-too-big` label (create it with
+  `gh label create` if missing) so the chunker routine
+  (`.github/workflows/chunker.yml` → `/chunk-issue`) can turn it into those
+  sub-issues, and stop.
 
 An issue nobody can close in one PR is a triage result, not a failure.
 Reporting it is the deliverable.
