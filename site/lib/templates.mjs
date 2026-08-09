@@ -411,24 +411,20 @@ ${p.body}
     .filter(Boolean)
     .join("\n      ");
 
-  // The team sits in the header — right below the description, right above
-  // the workbench button (preview-review feedback on PR #151) — so who built
-  // the product is visible before any tab is picked. Rostered designs only;
-  // the site invents no team.
-  const teamBlock = roster
-    ? `<div class="contributions-team">
-      <p class="eyebrow">Built by</p>
-      ${contributorRow(roster.core)}
-      ${reviewedBy(specialists)}
-    </div>`
-    : "";
-
   const body = `<div class="wrap">
   <header class="design-head">
     ${lineageStrip(design)}
     <h1>${escapeHtml(design.title)}</h1>
     <p class="design-sub">${inlineMarkdown(design.pitch)}</p>
-    ${teamBlock}
+    ${
+      roster
+        ? `<div class="contributions-team">
+    <p class="eyebrow">Built by</p>
+    ${contributorRow(roster.core)}
+    ${reviewedBy(specialists)}
+  </div>`
+        : ""
+    }
     <div class="btn-row">
       ${actions}
     </div>
