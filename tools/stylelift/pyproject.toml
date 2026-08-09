@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Translate a reference mesh into a reusable, checkable design-style spec"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "CC-BY-4.0" }
+license = { text = "CC-BY-SA-4.0" }
 dependencies = [
     # Same pins as tools/printcheck: one mesh stack for the whole repo.
     "trimesh>=4.0,<6",

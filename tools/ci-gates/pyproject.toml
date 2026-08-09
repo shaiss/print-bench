@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Smart CI: propose new CI gates from a PR's changed files, run the approved ones, and record the decisions in a reproducible registry"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "CC-BY-4.0" }
+license = { text = "CC-BY-SA-4.0" }
 # Deliberately empty, for the same reason tools/lineage's is: CI's smart-ci job
 # runs the selector to decide what to gate, and that decision must not sit
 # behind a pip install of third-party code. configparser and the rest are

@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Capture one JSON record per gate run and render the committed log into a report"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "CC-BY-4.0" }
+license = { text = "CC-BY-SA-4.0" }
 # Deliberately empty, and it must stay that way: capture runs inside CI's
 # render-gate job before any pip install it does not already need, and the
 # report generator runs wherever check.sh does — the same stdlib-only rule
