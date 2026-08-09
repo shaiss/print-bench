@@ -25,8 +25,12 @@ This skill runs the same attended (a human invoked it) or unattended (the
    as the reason. If neither holds, stop and say so — chunking an issue nobody
    judged too big is scope you were not asked for.
 3. **Not already chunked.** If the thread already has a `🧩 CHUNKED` comment, or
-   the issue already has open sub-issues, stop and report it — re-chunking
-   double-files. (This is the idempotency guard the daily schedule relies on.)
+   the issue already has open sub-issues, **first remove the `declined-too-big`
+   label** (selection reads the label, not the `🧩 CHUNKED` comment — leaving it
+   on burns a scheduled run every day on an already-chunked issue), then stop and
+   report it. Re-chunking double-files. This early-exit and §4 are the two paths
+   that must both clear the label; that is the idempotency latch the daily
+   schedule relies on.
 
 ## 1. Read the whole thread first
 

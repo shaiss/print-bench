@@ -77,16 +77,20 @@ on:
         default: false
 
 # Scoped to what the unattended /chunk-issue run actually does: it files
-# sub-issues and (re)labels issues (issues:write), and reads the repo to run the
-# skill (contents:read). It pushes no branch and opens no PR, so it needs
-# NEITHER contents:write NOR pull-requests:write — a deliberately tighter grant
-# than the backlog burn / design run, which do push and open PRs. The job is off
-# unless CHUNKER_ENABLED is set AND the committed config says enabled, and the
-# writing step is skipped entirely without the provider's secret, so even these
-# grants sit idle until the routine is deliberately switched on.
+# sub-issues and (re)labels issues (issues:write), reads the repo to run the
+# skill (contents:read), and the shared selector lists open PRs to skip issues
+# already claimed by a closing PR (pull-requests:read — the selector's HTTP GET
+# is uncaught, so a missing scope hard-fails the select step, not degrades it).
+# It pushes no branch and opens no PR, so it needs NEITHER contents:write NOR
+# pull-requests:write — still a deliberately tighter grant than the backlog burn
+# / design run, which do push and open PRs. The job is off unless CHUNKER_ENABLED
+# is set AND the committed config says enabled, and the writing step is skipped
+# entirely without the provider's secret, so even these grants sit idle until the
+# routine is deliberately switched on.
 permissions:
   contents: read
   issues: write
+  pull-requests: read
 
 # Never run two chunkers at once — this group serializes THIS workflow with
 # itself. It deliberately does NOT serialize against the backlog burn or design
