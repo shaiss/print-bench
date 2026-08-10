@@ -275,9 +275,11 @@ what #96 promised: react to the previews and merge.
 Same skill, three tightenings — nobody is there to catch a wrong guess:
 
 - **Never guess past an ambiguity, and never approve a shape.** Attended, a
-  judgement call can wait for the human; unattended it is a
-  `🚢 DECLINED — needs a decision` comment naming what's unresolved, and a clean
-  stop. Taste — "is this the right shape?" — is *always* the human's, so
+  judgement call can wait for the human; unattended, if the fork is a binary
+  yes/no a human can settle, raise it through the HITL gate (§9) — a
+  `🚦 DECISION NEEDED` that is machine-resumable — and stop; otherwise it is a
+  `🚢 DECLINED — needs a decision` comment naming what's unresolved, and a
+  clean stop. Taste — "is this the right shape?" — is *always* the human's, so
   unattended you ship only what the gates certify and stop; you never invent a
   design decision the brief didn't make.
 - **Hard stop conditions:** a blocking open question (§1); the geometry not
@@ -291,3 +293,71 @@ Same skill, three tightenings — nobody is there to catch a wrong guess:
 
 A stopped run costs nothing; a confidently wrong design PR costs a review and,
 worse, teaches the human to distrust the pipeline. When unsure, decline.
+
+## 9. Decisions that need a human (the HITL decision gate)
+
+A design run hits forks the brief did not settle — a fit ambiguous between two
+readings, a scope edge the charter is silent on, a choice between two ways to
+realize a *Must fit / hold* row. Section 8's `🚢 DECLINED — needs a decision` is
+the human-readable form of that stop; the repo's HITL gate
+(`docs/decision-gate.md`, issue #161) gives its **binary** form a single
+findable place and an authoritative answer, so a parked decision is
+*machine-resumable* instead of a dead-end comment. Use it for a yes/no a human
+can settle; **not** for taste — "is this the right shape?" is always the
+human's merge decision, never a `/decide` — and not for anything with more than
+two live answers (decline and ask, don't enumerate).
+
+**Raise** — at the fork, before anything else:
+
+1. Pick a stable **kebab-case id** unique on this thread
+   (`[a-z0-9][a-z0-9-]*`, e.g. `bay-width-42-vs-44`). The id is the key the
+   resuming run looks up.
+2. **Ensure + add the `needs-decision` label** with the `ensure-label` idiom
+   (enumerate with `gh api --paginate repos/<repo>/labels`, create only if
+   absent — **not** `gh label list`, which caps at 30 and would fall through to
+   a 422), then add it:
+   ```bash
+   .claude/skills/chunk-issue/chunk-helper.sh ensure-label needs-decision
+   gh issue edit <N> --add-label needs-decision
+   ```
+   The label is unspoofable (write access to set) and is what the backlog-burn
+   selector keys its durable pause on.
+3. Post a **`🚦 DECISION NEEDED — \`<id>\``** comment with **exactly two**
+   options — the yes and the no — each saying what ships if chosen, enough
+   context (what the gates/telemetry say) to answer without scrolling, and the
+   resolve line:
+   ```markdown
+   🚦 DECISION NEEDED — `bay-width-42-vs-44`
+
+   **Question:** <the fork, phrased as a yes/no>
+
+   **yes** → <what ships if yes>
+   **no**  → <what ships if no>
+
+   **Context:** <one or two lines — gates/telemetry, why this is a human call>
+
+   Resolve with `/decide yes bay-width-42-vs-44` or `/decide no bay-width-42-vs-44`.
+   ```
+4. **Halt cleanly.** This is a terminal stop before a branch/PR exists, so
+   **withdraw the claim** per §0.6 (edit the SHIP-LOCK's first line to
+   `🚢 SHIP-LOCK WITHDRAWN`); the `needs-decision` label is the durable pause
+   now. Then stop. Do not push a half-resolved design PR.
+
+**Consume** — a later run that reclaims this brief resumes by reading the
+verdict, not by re-asking:
+
+1. Scan the thread for `🚦 DECISION NEEDED` comments; collect the ids.
+2. For the id you are resuming at, read its verdict. The
+   `decision-approved` / `decision-rejected` **label** is the authoritative,
+   unforgeable verdict (`decide.yml` sets it); the **ledger**
+   (`.github/decisions/ledger.conf` — `<id> | approved|rejected | #<issue> |
+   <login> | <iso8601>`) is how you look up a *specific* id, since the label is
+   per-thread and reflects only the latest:
+   ```bash
+   grep "^<id> |" .github/decisions/ledger.conf
+   ```
+   If label and ledger disagree, the **label wins** — flag it and take that
+   branch.
+3. **Take the chosen branch** and proceed. `rejected` picks the "no" branch
+   (often "leave the default" or "file as backlog item N"), a real outcome the
+   run continues from.
