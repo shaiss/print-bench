@@ -191,6 +191,11 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   - `nopscadlib-check.sh` — proves the vendored `lib/NopSCADlib/` tree resolves
     through `OPENSCADPATH` and builds a real vitamin; no committed file includes
     NopSCADlib yet, so nothing else would notice if it went missing (issue #155)
+  - `license-boundary-check.sh` — enforces the copyleft/GPL core stance
+    (issue #160): no shared `lib/*.scad` may `include` a copyleft-vendored
+    library and no `scripts/`/`site/` code may bundle its vendored source;
+    design-layer opt-ins and invoking unshipped GPL tools stay allowed (see
+    [docs/licensing.md](docs/licensing.md))
   - `assembly.sh` — generates assembly instructions (exploded view + BOM) from a
     per-design `assembly.conf` manifest, using NopSCADlib's BOM/assembly tooling;
     no design ships a manifest yet (issue #156, stage 2 of #98)

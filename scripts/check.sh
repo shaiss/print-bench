@@ -191,6 +191,25 @@ if ! ./scripts/nopscadlib-check.sh; then
   fail=1
 fi
 
+# And this proves the copyleft/GPL boundary decided in issue #160 still holds:
+# no shared first-party lib/*.scad `include`s a copyleft-vendored library (which
+# would make the shared unit a combined work and spread GPL to every design
+# using it), and no core/site code bundles the vendored copyleft source tree.
+# Same silent-failure family as the nopscadlib check above — an `include
+# <NopSCADlib/...>` in a shared lib resolves and renders green while quietly
+# pulling GPL into core — so the boundary is a check, not a remembered rule
+# (docs/licensing.md, LICENSE). The --selftest proves both rules still fire on
+# a planted violation; no committed file trips them, so it is the only thing
+# exercising the positive path.
+echo "-- license-boundary selftest: scripts/license-boundary-check.sh --selftest"
+if ! ./scripts/license-boundary-check.sh --selftest; then
+  fail=1
+fi
+echo "-- license-boundary check: scripts/license-boundary-check.sh"
+if ! ./scripts/license-boundary-check.sh; then
+  fail=1
+fi
+
 # And this proves the chunker's deny backstop still neutralizes every dangerous
 # tool allow it would otherwise inherit from .claude/settings.json (which
 # claude-code-action loads via settingSources=project). Same family again: the
