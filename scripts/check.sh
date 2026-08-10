@@ -302,4 +302,16 @@ if ! ./scripts/gh-project.sh --selftest; then
   fail=1
 fi
 
+# assembly.sh is the generator half of the assembly-instructions feature (#98,
+# stage 2 — issue #156). Its --selftest proves the manifest parser captures
+# every declared part/vitamin/step in the right order, comments are stripped,
+# the title defaults to the design name when absent, and a design with no
+# assembly.conf errors cleanly — all without a render, so it is fast and runs
+# here with the other suites. No design ships an assembly.conf yet (stage 4),
+# so this is the only thing that exercises the parser.
+echo "-- assembly selftest: scripts/assembly.sh --selftest"
+if ! ./scripts/assembly.sh --selftest; then
+  fail=1
+fi
+
 exit "$fail"
