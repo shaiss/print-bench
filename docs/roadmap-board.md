@@ -54,15 +54,15 @@ carried by a clone, exactly like the rest of the repo's config.
 - **Provisioning (slice 1)** runs as *you*: `gh auth refresh -s project` grants it
   to your `gh` login (the recipe does this first).
 - **The Actions `GITHUB_TOKEN` cannot touch Projects v2** at all.
-- **`REGEN_TOKEN` (a `contents:write` fine-grained PAT) does NOT include Projects
-  access.** The slice-2 automation that *populates* the board needs a
-  **project-scoped** token. Prefer **reusing the existing `GH_TOKEN` secret**
-  (already wired into `design-run.yml`) **if it carries the `project` scope** —
-  confirm first, since `project` is a separate scope not implied by `repo`. If it
-  doesn't, add Projects access to it, or use a classic PAT with `project` / a
-  fine-grained PAT with **Account → Projects: Read and write**. (Fine-grained
-  tokens have had a documented gap for *user-owned* projects; a classic `project`
-  PAT is the safe default.)
+- **Projects needs its own token — `PROJECT_TOKEN`.** `GITHUB_TOKEN` can't touch
+  Projects v2; `REGEN_TOKEN` (contents:write) doesn't include it; and the repo's
+  `GH_TOKEN` was checked and carries **no Projects permission** either. So the
+  sync workflow (`roadmap-sync.yml`) reads a dedicated **`PROJECT_TOKEN`** secret
+  — a **classic PAT with only the `project` scope** (the reliable path for a
+  *user-owned* board; fine-grained PATs have a documented gap there). Create it at
+  <https://github.com/settings/tokens/new>, then `gh secret set PROJECT_TOKEN
+  --repo shaiss/print-bench`. Without the secret the workflow logs a `::notice::`
+  and does nothing — it is the on/off switch.
 
 ## Adding an issue to the board
 
@@ -83,13 +83,19 @@ building block the chunker/intake wiring calls in slice 2 part 2.
 
 - **Slice 1 (done, #164):** the committed spec + `scripts/gh-project.sh setup`
   recipe + this doc. Run the recipe once to create the board.
-- **Slice 2 part 1 (this):** `scripts/gh-project.sh add-item` — the idempotent
-  add-issue-and-set-fields recipe above (via `gh project item-add` / `item-edit`).
-  Runnable by hand today; a workflow calls it in part 2.
-- **Slice 2 part 2+ (follow-ups on #148):** wire `add-item` into `/chunk-issue`
-  and `/intake` (auto-add on filing, with an estimate) — needs the project-scoped
-  token wired as a workflow secret (see Auth above); surface the HITL
-  `needs-decision` gate as a board column; and add the Roadmap view + milestones.
+- **Slice 2 part 1 (done, #166):** `scripts/gh-project.sh add-item` — the
+  idempotent add-issue-and-set-fields recipe above (via `gh project item-add` /
+  `item-edit`).
+- **Slice 2 part 2 (this):** `.github/workflows/roadmap-sync.yml` — on an
+  `issues` event, adds any issue carrying an autonomy-loop label (`autonomy-ok` /
+  `design-brief` / `declined-too-big` / `needs-decision`) to the board via
+  `add-item --stage-if-new Backlog`. Gated on `PROJECT_TOKEN` (no token → logs a
+  notice and does nothing). The initial `Stage: Backlog` is bound to **item
+  creation**, not to which event won the race, so a re-add or an out-of-order
+  opened/labeled run never clobbers a card a human moved.
+- **Slice 2 part 3+ (follow-ups on #148):** story-point estimation on the board
+  (map the chunker's one-PR sizing → points), the HITL `needs-decision` gate as a
+  board column, and the Roadmap view + milestones.
 
 ## How it maps onto the existing loop
 
