@@ -21,7 +21,7 @@
 #     failure mode this whole mechanism must not reintroduce).
 #   - the generator scripts themselves, and this file.
 #   - tools/photoshot/ when the design ships a shots.conf; styles/ when it
-#     declares a style.conf.
+#     declares a style.conf; scripts/assembly.sh when it ships an assembly.conf.
 # NOT hashed, deliberately: the OpenSCAD/Blender versions (they change under
 # us and would churn every stamp for pixel wobble the loop guard already
 # tolerates) and README/NOTES prose (the gallery and product-page steps run
@@ -68,6 +68,9 @@ inputs() {
   fi
   if [[ -f "designs/${name}/style.conf" ]]; then
     git ls-files -- styles
+  fi
+  if [[ -f "designs/${name}/assembly.conf" ]]; then
+    git ls-files -- scripts/assembly.sh
   fi
 }
 

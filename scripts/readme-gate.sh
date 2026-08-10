@@ -53,6 +53,13 @@
 #      source. The trigger is the filename, so an AI image committed under
 #      some other name is out of this gate's reach; naming that masquerade is
 #      the /jane-review and /drik-review disclosure rules' job, not bash's.
+#  10. if the design ships an assembly.conf (assembly instructions, rendered by
+#      scripts/assembly.sh, issue #157): the committed previews/exploded.png
+#      must exist, be embedded in the README, and stay within the product-shot
+#      budget. Presence-only, like shots.conf — CI regenerates the artifact,
+#      the gate only checks it is there and visible. No assembly.conf exists
+#      in designs/ yet (stage 4 of #98), so this gate is dormant until one
+#      ships, and the selftest is the only thing that proves it fires.
 #
 # Fenced code blocks and HTML comments are ignored throughout: an example
 # snippet or commented-out line is not page content, so it neither
@@ -342,6 +349,33 @@ check_one() {
         ok=0
       fi
     done <"$shotsconf"
+  fi
+
+  # 10. Assembly instructions: if the design ships an assembly.conf
+  #     (exploded view + BOM, rendered by scripts/assembly.sh), the committed
+  #     previews/exploded.png must exist, be embedded in the README, and stay
+  #     within the product-shot budget. assembly.conf produces exactly one PNG,
+  #     so there is no per-entry loop like animations.conf/shots.conf.
+  #     Presence-only — CI regenerates the artifact, the gate checks it is
+  #     committed and visible (#69 lesson: a gate that judges content is
+  #     fragile; one that checks presence is safe because CI owns the artifact).
+  local asmconf="${dir}/assembly.conf"
+  if [[ -f "$asmconf" ]]; then
+    local apng="previews/exploded.png" abytes
+    if [[ ! -f "${dir}/${apng}" ]]; then
+      err "$name" "assembly.conf is present but ${apng} is missing — run ./scripts/assembly.sh ${name}"
+      ok=0
+    else
+      abytes="$(stat -c %s "${dir}/${apng}")"
+      if (( abytes > MAX_SHOT_BYTES )); then
+        err "$name" "${apng} is $(( (abytes + 1023) / 1024 )) KiB, over the $((MAX_SHOT_BYTES / 1024 / 1024)) MiB budget — use a smaller render"
+        ok=0
+      fi
+      if ! grep -qF "](${apng})" <<<"$cleaned"; then
+        err "$name" "README.md doesn't embed ${apng} — an exploded view nobody sees isn't a product page"
+        ok=0
+      fi
+    fi
   fi
 
   # 8. Lineage credit. A derivative's product page documents the delta and
@@ -651,11 +685,37 @@ run_selftest() {
   _disclosed "$d" previews/lifestyle-turntable.GIF
   _check motion-uppercase-gif-budget 0 ""
 
+  # --- Assembly (previews/exploded.png, issue #157). A design with an
+  # assembly.conf must commit the exploded view, embed it, and stay in budget.
+  # No assembly.conf exists in designs/ yet (stage 4), so without these
+  # fixtures the gate could be weakened and every other check stays green.
+
+  # asm-good: assembly.conf present, exploded.png embedded in budget -> passes
+  d="$(_fixture asm-good)"; : >"$d/previews/exploded.png"
+  : >"$d/assembly.conf"
+  printf '\n![Exploded view](previews/exploded.png)\n' >>"$d/README.md"
+  _check asm-good 0 ""
+
+  # asm-missing-png: assembly.conf present, exploded.png absent -> fails
+  d="$(_fixture asm-missing-png)"; : >"$d/assembly.conf"
+  _check asm-missing-png 1 "is missing"
+
+  # asm-over-budget: embedded, but exploded.png exceeds MAX_SHOT_BYTES
+  d="$(_fixture asm-over-budget)"; : >"$d/assembly.conf"
+  truncate -s "$((MAX_SHOT_BYTES + 1))" "$d/previews/exploded.png"
+  printf '\n![Exploded view](previews/exploded.png)\n' >>"$d/README.md"
+  _check asm-over-budget 1 "over the"
+
+  # asm-unembedded: PNG present and in budget, but not in the README -> fails
+  d="$(_fixture asm-unembedded)"
+  : >"$d/previews/exploded.png"; : >"$d/assembly.conf"
+  _check asm-unembedded 1 "doesn't embed"
+
   if [[ "$pass" == 1 ]]; then
-    echo "ok    readme-gate --selftest: every lifestyle-disclosure guard fires"
+    echo "ok    readme-gate --selftest: every lifestyle-disclosure and assembly guard fires"
     return 0
   fi
-  echo "FAIL  readme-gate --selftest: a lifestyle-disclosure guard did not fire"
+  echo "FAIL  readme-gate --selftest: a guard did not fire"
   return 1
 }
 

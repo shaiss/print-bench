@@ -134,7 +134,8 @@ classify() {
         scripts/render.sh|scripts/animate.sh|\
         scripts/product-shot.sh|scripts/gallery.sh|\
         scripts/product-page.sh|scripts/preview-budget.sh|\
-        scripts/regen-stamp.sh|scripts/lineage.sh)
+        scripts/regen-stamp.sh|scripts/lineage.sh|\
+        scripts/assembly.sh)
           regen_all=true ;;
       esac
       case "$f" in
@@ -416,6 +417,12 @@ selftest() {
   out="$(run "scripts/ci-classify.sh")"
   check "self-is-geo-infra" "$out" \
     "gate=true" "gate_designs=ALL" "printcheck_tests=true" "scad=true"
+
+  # 4c. assembly.sh is a generator producing committed artifacts (exploded
+  #     views + ASSEMBLY.md), so editing it must regen ALL — a stale exploded
+  #     view is the #69 failure mode the stamp exists to prevent.
+  out="$(run "scripts/assembly.sh")"
+  check "assembly-script" "$out" "regen=true" "regen_designs=ALL"
 
   # 5. A design path whose entry point does not exist is dropped — the guard
   #    against gating a deleted/renamed design under the wrong name.

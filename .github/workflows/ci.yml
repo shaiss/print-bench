@@ -390,13 +390,15 @@ jobs:
             if [ "$SHOTS" = "true" ] && [ -f "designs/$n/shots.conf" ]; then
               ./scripts/product-shot.sh "$n"
             fi
+            [ -f "designs/$n/assembly.conf" ]          && ./scripts/assembly.sh "$n"
             # Stamp AFTER the generators, and only for a design that has any
             # manifest at all: the stamp lands in the same commit as the
             # artifacts it fingerprints, so it can never claim a freshness
             # the artifacts don't have.
             if [ -f "designs/$n/previews/cameras.conf" ] \
                || [ -f "designs/$n/animations.conf" ] \
-               || [ -f "designs/$n/shots.conf" ]; then
+               || [ -f "designs/$n/shots.conf" ] \
+               || [ -f "designs/$n/assembly.conf" ]; then
               mkdir -p "designs/$n/previews"
               ./scripts/regen-stamp.sh "$n" > "designs/$n/previews/.regen-stamp"
             fi
@@ -465,7 +467,7 @@ jobs:
             exit 0
           fi
           if [ "$CAN_PUSH" != "true" ]; then
-            echo "::error::Committed artifacts are stale and CI cannot push to a fork. Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh, ./scripts/product-shot.sh, ./scripts/gallery.sh) and commit them, or re-open this PR from a branch in this repository."
+            echo "::error::Committed artifacts are stale and CI cannot push to a fork. Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh <name>, ./scripts/product-shot.sh <name>, ./scripts/assembly.sh <name>, ./scripts/gallery.sh) and commit them, or re-open this PR from a branch in this repository."
             exit 1
           fi
           git config user.name "github-actions[bot]"
