@@ -242,10 +242,10 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
-          # Pin the newest Opus explicitly (1M context is native — no [1m]
-          # suffix needed) and run at maximum reasoning effort: an unattended
-          # design run is exactly the correctness-over-cost case.
-          claude_args: --model claude-opus-5 --effort max
+          # Pin the model explicitly (Opus 4.8, the maintainer's pick — PR #172
+          # review) and run at maximum reasoning effort: an unattended design
+          # run is exactly the correctness-over-cost case.
+          claude_args: --model claude-opus-4-8 --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       - name: Run via Z.AI (GLM)

@@ -243,7 +243,7 @@ jobs:
           # surface is exactly the wrapper + Read/Grep/Glob, regardless of
           # workspace trust. The quotes protect the `(...)` from the action's arg
           # parser. The job's issues:write token still bounds the effect.
-          claude_args: --model claude-opus-5 --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model claude-opus-4-8 --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
           prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
 
       - name: Run via Z.AI (GLM)
