@@ -79,6 +79,55 @@ duplicating, so re-running reconciles the fields. `--stage` must be one of the
 board's `Stage` options; `--points` is a number; both are optional. This is the
 building block the chunker/intake wiring calls in slice 2 part 2.
 
+## Story points (the `points-<n>` label)
+
+`roadmap-sync.yml` mirrors a single `points-<n>` label on an issue to the board's
+**Story points** field, where `<n>` is one of the board's Fibonacci values
+(`1`, `2`, `3`, `5`, `8`). Apply `points-3` to an issue and the sync sets Story
+points to 3 the next time an eligible `issues` event fires for it. Two rules keep
+it predictable:
+
+- **The label is the source of truth, so points *always* set from it** (unlike
+  `Stage`, which is set-if-new because a human drags cards between stages on the
+  board). Re-estimate by changing the `points-<n>` label, not the card — a manual
+  edit to the card's Story points is overwritten on the next sync. This is the
+  deliberate asymmetry: Stage is board-owned workflow position; points is a
+  git-native estimate carried by the label. Because it always re-reads, a
+  `points-<n>` label added *after* the issue first reached the board still lands.
+- **Exactly one `points-<n>` label, or none.** Zero → Story points is left
+  unset; two or more → the sync logs a `::notice::` and leaves it unset until the
+  ambiguity is resolved (a value in `<n>` outside the Fibonacci set is ignored).
+
+Nothing files `points-<n>` automatically yet — a human triaging applies it today;
+wiring a producer (e.g. `/chunk-issue` sizing each one-PR child) is slice 2
+part 4. The label is an opt-in seam: an issue without one simply carries no
+estimate.
+
+## One-time UI steps (views + milestones)
+
+Field *values* are scripted (above); board **views** and **milestones** are not —
+GitHub exposes neither to `gh`. Set these up once in the UI:
+
+1. **Board view grouped by `Stage`.** The default board view groups by the
+   built-in `Status`; change its grouping to **`Stage`** so the columns are our
+   pipeline (Backlog → Ready → In progress → In review → Done). (The recipe adds
+   `Stage` precisely because the CLI can't reshape `Status`.)
+2. **A "Needs decision" saved view.** Add a **Table** (or Board) view filtered by
+   `label:needs-decision` — that surfaces every issue the HITL decision gate
+   ([`decision-gate.md`](decision-gate.md)) has parked for a human, as its own
+   tab. This is why `needs-decision` is a **filter**, not a `Stage` option: the
+   decision gate's `/decide` flips the label, and a filtered view follows the
+   label automatically (a card drops out the moment the decision resolves), with
+   no second write-back to reconcile and no risk of clobbering the card's real
+   Stage. The label stays the source of truth; the view is the lens.
+3. **A "Roadmap" view.** Add a **Roadmap** view to see items on a timeline; it
+   reads GitHub's built-in date/iteration fields and the **Milestone** field.
+4. **Milestones.** Create repo milestones (`gh api repos/shaiss/print-bench/milestones -f title=…`)
+   and assign issues to them (`gh issue edit <N> --milestone …`) to group a
+   chunked epic (parent) with its children on the Roadmap. Milestone assignment
+   *is* scriptable via `gh issue`/`gh api`; only the Roadmap view that visualises
+   it is UI-only.
+
 ## Slices
 
 - **Slice 1 (done, #164):** the committed spec + `scripts/gh-project.sh setup`
@@ -86,16 +135,22 @@ building block the chunker/intake wiring calls in slice 2 part 2.
 - **Slice 2 part 1 (done, #166):** `scripts/gh-project.sh add-item` — the
   idempotent add-issue-and-set-fields recipe above (via `gh project item-add` /
   `item-edit`).
-- **Slice 2 part 2 (this):** `.github/workflows/roadmap-sync.yml` — on an
+- **Slice 2 part 2 (done, #167):** `.github/workflows/roadmap-sync.yml` — on an
   `issues` event, adds any issue carrying an autonomy-loop label (`autonomy-ok` /
   `design-brief` / `declined-too-big` / `needs-decision`) to the board via
   `add-item --stage-if-new Backlog`. Gated on `PROJECT_TOKEN` (no token → logs a
   notice and does nothing). The initial `Stage: Backlog` is bound to **item
   creation**, not to which event won the race, so a re-add or an out-of-order
   opened/labeled run never clobbers a card a human moved.
-- **Slice 2 part 3+ (follow-ups on #148):** story-point estimation on the board
-  (map the chunker's one-PR sizing → points), the HITL `needs-decision` gate as a
-  board column, and the Roadmap view + milestones.
+- **Slice 2 part 3 (this):** story-point sync + the one-time UI steps that finish
+  the board. `roadmap-sync.yml` now also reads a single `points-<n>` label
+  (Fibonacci 1/2/3/5/8) and mirrors it to **Story points** (see below), and this
+  doc documents the **Needs-decision saved view**, the **Roadmap view**, and
+  **milestones** — the pieces the `gh` CLI cannot script (view layout and
+  milestones are UI-only).
+- **Slice 2 part 4+ (follow-ups on #148):** wire a size producer to the
+  `points-<n>` label (e.g. `/chunk-issue` estimating each one-PR child) so points
+  land without hand-labelling.
 
 ## How it maps onto the existing loop
 

@@ -1,11 +1,13 @@
 name: Sync issues onto the roadmap board
 
-# Slice 2 part 2 of the autonomy roadmap board (issue #148): when an issue that
-# carries one of the autonomy-loop labels is filed (by /chunk-issue, /intake, or
-# a human), add it to the "print-bench autonomy" GitHub Project so the board
-# reflects the backlog. It runs the committed, idempotent `add-item` recipe
-# (scripts/gh-project.sh, from slice 2 part 1), so the board's schema stays the
-# git-native source of truth and this workflow is just the trigger.
+# Slice 2 (parts 2-3) of the autonomy roadmap board (issue #148): when an issue
+# that carries one of the autonomy-loop labels is filed (by /chunk-issue,
+# /intake, or a human), add it to the "print-bench autonomy" GitHub Project so
+# the board reflects the backlog. If the issue also carries a single `points-<n>`
+# label (Fibonacci 1/2/3/5/8), its Story points are set from that label too. It
+# runs the committed, idempotent `add-item` recipe (scripts/gh-project.sh, from
+# slice 2 part 1), so the board's schema stays the git-native source of truth and
+# this workflow is just the trigger.
 #
 # GATED, off by default: GitHub Projects v2 needs a token with the `project`
 # scope, which neither GITHUB_TOKEN nor the repo's REGEN_TOKEN/GH_TOKEN carries.
@@ -63,12 +65,28 @@ jobs:
               core.setOutput('act', 'false');
               return;
             }
+            // Story points: a single `points-<n>` label (Fibonacci 1/2/3/5/8,
+            // the board's convention) is mirrored to the Story points field.
+            // The label is the estimate's source of truth — see the run step's
+            // comment for why points always-sets while Stage is set-if-new.
+            const ALLOWED_POINTS = ['1', '2', '3', '5', '8'];
+            const pts = labels
+              .map((n) => (/^points-(\d+)$/.exec(n) || [])[1])
+              .filter((v) => v && ALLOWED_POINTS.includes(v));
+            let points = '';
+            if (pts.length === 1) {
+              points = pts[0];
+            } else if (pts.length > 1) {
+              core.notice(`#${context.issue.number} carries multiple points-* labels `
+                + `(${pts.join(', ')}); leaving Story points unset until it has exactly one.`);
+            }
             // Add to the board; `add-item --stage-if-new Backlog` sets the
             // initial Stage only when the item is newly created, so the Stage is
             // bound to item creation — not to which of a racing opened/labeled
             // pair runs — and a re-add never clobbers a card a human moved.
             core.setOutput('act', 'true');
             core.setOutput('url', context.payload.issue.html_url);
+            core.setOutput('points', points);
 
       - name: Check out trusted tooling
         if: steps.guard.outputs.act == 'true'
@@ -83,8 +101,20 @@ jobs:
           # then skips `gh auth refresh` and relies on this token's project scope.
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           URL: ${{ steps.guard.outputs.url }}
+          POINTS: ${{ steps.guard.outputs.points }}
         run: |
           set -euo pipefail
-          # --stage-if-new: place a first-added issue at Backlog, but never reset
-          # the Stage of a card already on the board (e.g. one a human moved).
-          scripts/gh-project.sh add-item "$URL" --stage-if-new Backlog | bash
+          # Two deliberately-different write policies in one add-item call:
+          #  * --stage-if-new: place a first-added issue at Backlog, but never
+          #    reset the Stage of a card already on the board — Stage is the
+          #    workflow position a human drags on the board, so the board owns it.
+          #  * --points (always): mirror the points-<n> LABEL to Story points.
+          #    The label is the estimate's git-native source of truth, so the card
+          #    follows it — re-estimate by changing the label, not the card. This
+          #    also means a points-<n> label added AFTER the issue first hit the
+          #    board still lands (every eligible event re-reads and re-sets it).
+          if [ -n "$POINTS" ]; then
+            scripts/gh-project.sh add-item "$URL" --stage-if-new Backlog --points "$POINTS" | bash
+          else
+            scripts/gh-project.sh add-item "$URL" --stage-if-new Backlog | bash
+          fi
