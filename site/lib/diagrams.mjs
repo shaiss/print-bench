@@ -110,7 +110,7 @@ export function infographicNonTechnical() {
     {
       icon: iconPart,
       title: "Print it",
-      body: ["Download the ready-to-slice", "file and print. No supports,", "by design."],
+      body: ["Download the ready-to-slice", "file — designed to print", "without supports."],
     },
   ];
   const w = 250;
@@ -138,7 +138,7 @@ export function infographicNonTechnical() {
     })
     .join("\n    ");
 
-  return `<svg class="diagram-svg diagram-mid" viewBox="0 0 1120 300" role="img"
+  return `<svg class="diagram-svg diagram-mid" viewBox="0 0 1180 300" role="img"
     aria-label="From an idea to a printed part in four steps: describe what you need; design it together with an AI, previewing after every change; automatic checks confirm it is printable; then download and print it without supports.">
     ${arrowDefs("ing-arrow", "arrow")}
     ${blocks}
@@ -243,7 +243,7 @@ export function infographicTechnical() {
   const rail = [
     ["smart-ci", "proposes new gates"],
     ["autonomy", "issue → draft PR"],
-    ["telemetry", "records every run"],
+    ["telemetry", "records each gate run"],
   ];
   const lane3 =
     `${laneLabel(l3y - 12, "AND IT RUNS ITSELF")}` +

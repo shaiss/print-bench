@@ -139,6 +139,25 @@ selftest() {
   fresh; : > "$tmp/docs/architecture/README.md"
   expect "index without cross-links fails" 1
 
+  # One control per remaining assertion, so none can be silently weakened.
+  fresh; sed -i 's#how-it-works/index.html#gone.html#' "$tmp/site/build.mjs"
+  expect "page not emitted by build.mjs fails" 1
+
+  fresh; sed -i 's#/how-it-works/#/gone/#g' "$tmp/site/README.md"
+  expect "route missing from site/README.md fails" 1
+
+  fresh; sed -i 's#docs/architecture/#docs/gone/#g' "$tmp/site/lib/templates.mjs"
+  expect "page no longer links the architecture docs fails" 1
+
+  fresh; rm -f "$tmp/site/test/how-it-works.test.mjs"
+  expect "missing the page test fails" 1
+
+  fresh; rm -f "$tmp/site/test/diagrams.test.mjs"
+  expect "missing the diagrams test fails" 1
+
+  fresh; sed -i 's/regenLoop//g' "$tmp/site/lib/templates.mjs"
+  expect "a diagram not embedded by the page fails" 1
+
   if [ "$fails" -ne 0 ]; then
     echo "docs-standards selftest: $fails case(s) failed" >&2
     return 1

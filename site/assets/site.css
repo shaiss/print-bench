@@ -1503,11 +1503,14 @@ img.monogram-human, img.monogram-agent { background: var(--paper); }
 /* Every colour is a token, so the diagrams theme with the page. Dense ones
    carry a min-width and their figure scrolls horizontally rather than shrinking
    labels to nothing on a phone. */
-.diagram { margin: 1.9rem 0; max-width: 60rem; }
+.diagram { margin: 1.9rem 0; max-width: 66rem; }
 .diagram-hold {
   border: 1px solid var(--rule);
   background: var(--panel);
   padding: 1.1rem 1.2rem;
+  /* Any diagram wider than its hold scrolls inside the hold — the page body
+     itself never scrolls sideways, whatever a diagram's min-width is. */
+  overflow-x: auto;
 }
 .diagram-scroll .diagram-hold { overflow-x: auto; }
 .diagram figcaption {
@@ -1517,9 +1520,9 @@ img.monogram-human, img.monogram-agent { background: var(--paper); }
   max-width: var(--measure);
 }
 .diagram-svg { display: block; width: 100%; height: auto; }
-.diagram-mid { min-width: 680px; }
+.diagram-mid { min-width: 720px; }
 .diagram-wide { min-width: 940px; }
-.diagram-narrow { max-width: 440px; margin: 0 auto; min-width: 300px; }
+.diagram-narrow { max-width: 440px; margin: 0 auto; min-width: 260px; }
 
 /* text */
 .diagram-svg text { font: 500 15px var(--sans); fill: var(--ink); }
@@ -1527,12 +1530,12 @@ img.monogram-human, img.monogram-agent { background: var(--paper); }
 .diagram-svg .t-title { font-weight: 800; font-size: 18px; }
 .diagram-svg .t-sub { fill: var(--ink-soft); font-size: 13px; }
 .diagram-svg .t-muted { fill: var(--ink-faint); }
-.diagram-svg .t-mono { font-family: var(--mono); font-size: 12.5px; }
+.diagram-svg .t-mono { font-family: var(--mono); font-size: 13.5px; }
 .diagram-svg .t-accent { fill: var(--accent-deep); }
 .diagram-svg .t-on { fill: #fff; }
 .diagram-svg .t-lane {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   fill: var(--ink-faint);
   font-weight: 700;
   letter-spacing: 0.08em;
