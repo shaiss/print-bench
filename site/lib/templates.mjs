@@ -7,6 +7,12 @@ import { hasConfigurator } from "./model.mjs";
 import { humanSize } from "./releases.mjs";
 import { memberProfile, memberTeams } from "./profile.mjs";
 import { contributorRow, reviewedBy, historySlot } from "./teams.mjs";
+import {
+  journeyMap,
+  infographicNonTechnical,
+  infographicTechnical,
+  regenLoop,
+} from "./diagrams.mjs";
 
 /**
  * The product page's media stage (the media rework, PR #159): one large
@@ -742,6 +748,15 @@ ${inner}
   const chips = (items) =>
     `<ul class="chiprow">${items.map((c) => `<li class="chip">${escapeHtml(c)}</li>`).join("")}</ul>`;
 
+  // A diagram in a captioned figure. `wide` diagrams scroll horizontally on
+  // narrow screens rather than shrinking their labels to nothing; `svg` is
+  // trusted authored markup from diagrams.mjs, `caption` is a literal.
+  const fig = (svg, caption, { wide = false } = {}) =>
+    `<figure class="diagram${wide ? " diagram-scroll" : ""}">
+      <div class="diagram-hold">${svg}</div>
+      <figcaption>${caption}</figcaption>
+    </figure>`;
+
   // ---- Section 1: the two layers, as a stacked architecture diagram --------
   const layers = `<div class="layerstack">
       <div class="layer layer-domain">
@@ -847,6 +862,7 @@ ${steps
     presence-only gates on those images stay honest: the picture beside a model
     cannot depict geometry the model no longer has.</p>
     ${regenCards}
+    ${fig(regenLoop(), "One run gates the source and rebuilds what derives from it; a loop guard stops the commit-back from re-triggering itself forever.")}
     <p>Committing back turns on a quirk worth stating plainly: a push made with
     the default token triggers no workflow. The pipeline uses that fact in both
     directions.</p>
@@ -927,6 +943,40 @@ ${steps
     </div>`
   );
 
+  // The newcomer's map — first thing after the hero, so someone landing here
+  // cold sees the whole path before any detail.
+  const sJourney = section(
+    "journey",
+    "New here?",
+    "The path you'll take",
+    `<p>Bring an idea or claim a queued one, and the repo walks you from a blank
+    directory to a merged, printable design. Every station is one command or one
+    skill; the review round in the middle repeats until the gates pass.</p>
+    ${fig(journeyMap(), "The route from landing on the site to a merged design. Stations 4–6 are the co-design loop, run until /preflight comes back green.", { wide: true })}`
+  );
+
+  // The plain-language framing, for a reader who wants the gist, not the gears.
+  const sPlain = section(
+    "plain",
+    "The short version",
+    "From an idea to a part in your hand",
+    `<p>Strip out the engineering and this is the whole story: you describe what
+    you need, an AI helps you model it, the machine proves it will actually print,
+    and you download a file that's ready to slice.</p>
+    ${fig(infographicNonTechnical(), "No jargon: describe it, design it together, let the checks confirm it prints, then print it.", { wide: true })}`
+  );
+
+  // The technical capstone — the entire pipeline on one canvas, for engineers.
+  const sAnatomy = section(
+    "anatomy",
+    "For engineers",
+    "The whole pipeline, on one canvas",
+    `<p>Everything above, in a single view: how a change moves through the gates
+    to one <code>ci-ok</code>, how derived files regenerate themselves, the rail
+    that lets it run unattended, and the platform/domain split underneath it all.</p>
+    ${fig(infographicTechnical(), "The pipeline end to end — the gate flow, the regenerate-and-commit loop, the self-running rail, and the two-layer foundation.", { wide: true })}`
+  );
+
   const body = `<div class="wrap how">
   <section class="hero how-hero">
     <p class="eyebrow">Behind the scenes</p>
@@ -941,12 +991,15 @@ ${steps
       <div class="stat"><span class="stat-n">0</span><span class="stat-l">derived files committed by hand</span></div>
     </div>
   </section>
+${sJourney}
+${sPlain}
 ${s1}
 ${s2}
 ${s3}
 ${s4}
 ${s5}
 ${s6}
+${sAnatomy}
 ${s7}
 </div>`;
 

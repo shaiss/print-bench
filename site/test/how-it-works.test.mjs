@@ -34,15 +34,31 @@ test("how-it-works: marks itself current in the shared nav", () => {
 test("how-it-works: carries every section", () => {
   const html = howItWorksPage({ designCount: 3, githubBase: GH });
   for (const id of [
+    "journey",
+    "plain",
     "layers",
     "gates",
     "regenerate",
     "selection",
     "autonomy",
     "telemetry",
+    "anatomy",
     "provenance",
   ]) {
     assert.ok(html.includes(`id="${id}"`), `missing section #${id}`);
+  }
+});
+
+test("how-it-works: embeds the four diagrams as inline, labelled SVG", () => {
+  const html = howItWorksPage({ designCount: 3, githubBase: GH });
+  // Four figures, each an inline SVG with an accessible label — not an <img>.
+  const svgs = html.match(/<svg class="diagram-svg/g) || [];
+  assert.equal(svgs.length, 4, `expected 4 inline diagrams, found ${svgs.length}`);
+  assert.equal((html.match(/role="img"/g) || []).length >= 4, true);
+  assert.ok(!html.includes("<img"), "diagrams must be inline SVG, never external images");
+  // Anchor phrases from each diagram, so a silently-empty one is caught.
+  for (const phrase of ["Scaffold", "Describe it", "gate set", "loop guard"]) {
+    assert.ok(html.includes(phrase), `diagram content missing: ${phrase}`);
   }
 });
 

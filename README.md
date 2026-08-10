@@ -213,6 +213,11 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and
     `/preflight` runs it `--local`, so the local mirror can't drift
+  - `docs-standards-check.sh` — the standards gate for the architecture docs
+    (`docs/architecture/`) and the How-it-works site page and its diagrams:
+    presence/wiring only, no OpenSCAD, selected by `ci-classify.sh` only when
+    the docs or the page change (its own light `docs-standards` CI job, with a
+    `--selftest`)
   - `lineage.sh` — who derives from whom: validates the `derives.conf`
     records, answers what a change has to re-gate, and re-proves the
     derivative gate can still fire (`selftest`)

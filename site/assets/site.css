@@ -1497,3 +1497,72 @@ img.monogram-human, img.monogram-agent { background: var(--paper); }
   .how-source-link { border-top: 0; }
   .how-source-link:first-child { border-left: 0; }
 }
+
+/* ---------- inline SVG diagrams (site/lib/diagrams.mjs) ---------- */
+
+/* Every colour is a token, so the diagrams theme with the page. Dense ones
+   carry a min-width and their figure scrolls horizontally rather than shrinking
+   labels to nothing on a phone. */
+.diagram { margin: 1.9rem 0; max-width: 60rem; }
+.diagram-hold {
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  padding: 1.1rem 1.2rem;
+}
+.diagram-scroll .diagram-hold { overflow-x: auto; }
+.diagram figcaption {
+  color: var(--ink-faint);
+  font-size: 0.85rem;
+  margin-top: 0.6rem;
+  max-width: var(--measure);
+}
+.diagram-svg { display: block; width: 100%; height: auto; }
+.diagram-mid { min-width: 680px; }
+.diagram-wide { min-width: 940px; }
+.diagram-narrow { max-width: 440px; margin: 0 auto; min-width: 300px; }
+
+/* text */
+.diagram-svg text { font: 500 15px var(--sans); fill: var(--ink); }
+.diagram-svg .t-bold { font-weight: 700; }
+.diagram-svg .t-title { font-weight: 800; font-size: 18px; }
+.diagram-svg .t-sub { fill: var(--ink-soft); font-size: 13px; }
+.diagram-svg .t-muted { fill: var(--ink-faint); }
+.diagram-svg .t-mono { font-family: var(--mono); font-size: 12.5px; }
+.diagram-svg .t-accent { fill: var(--accent-deep); }
+.diagram-svg .t-on { fill: #fff; }
+.diagram-svg .t-lane {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--ink-faint);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+/* boxes and rules */
+.diagram-svg .box { fill: var(--panel); stroke: var(--rule); stroke-width: 1.6; }
+.diagram-svg .box-soft { fill: var(--panel); stroke: var(--rule-soft); stroke-width: 1.4; }
+.diagram-svg .box-accent { fill: var(--accent); stroke: var(--accent); }
+.diagram-svg .box-accent-line { fill: var(--panel); stroke: var(--accent); stroke-width: 2; }
+.diagram-svg .box-tint { fill: color-mix(in srgb, var(--accent) 9%, var(--panel)); stroke: var(--accent); stroke-width: 1.4; }
+.diagram-svg .node-ring { fill: none; stroke: var(--accent); stroke-width: 1.4; }
+.diagram-svg .rule { stroke: var(--rule); stroke-width: 2; fill: none; }
+.diagram-svg .rule-soft { stroke: var(--rule-soft); stroke-width: 1.3; fill: none; }
+.diagram-svg .seam { stroke: var(--accent); stroke-width: 1.5; }
+.diagram-svg .band-platform { fill: color-mix(in srgb, var(--ink) 6%, var(--panel)); stroke: var(--rule); stroke-width: 1.6; }
+.diagram-svg .band-domain { fill: var(--accent-soft); stroke: var(--rule); stroke-width: 1.6; }
+.diagram-svg .ring { stroke: var(--rule-soft); stroke-width: 1.5; }
+.diagram-svg .loop { stroke: var(--accent); stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; }
+.diagram-svg .loop-arc { stroke: var(--accent); stroke-width: 2; fill: none; }
+
+/* arrowheads */
+.diagram-svg .arrow { fill: var(--rule); }
+.diagram-svg .arrow-soft { fill: var(--ink-faint); }
+.diagram-svg .arrow-accent { fill: var(--accent); }
+
+/* pictographs */
+.diagram-svg .ic rect,
+.diagram-svg .ic line,
+.diagram-svg .ic path { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.diagram-svg .ic .ic-fill { fill: var(--ink); stroke: none; }
+.diagram-svg .ic .ic-accent { fill: var(--accent); stroke: var(--accent); }
+.diagram-svg .ic .ic-check { stroke: var(--accent); stroke-width: 3.4; }
