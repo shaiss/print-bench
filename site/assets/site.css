@@ -1490,7 +1490,7 @@ img.monogram-human, img.monogram-agent { background: var(--paper); }
   font-size: 0.8rem;
   color: var(--ink-soft);
   margin-top: 0.15rem;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 @media (min-width: 620px) {
@@ -1569,3 +1569,93 @@ img.monogram-human, img.monogram-agent { background: var(--paper); }
 .diagram-svg .ic .ic-fill { fill: var(--ink); stroke: none; }
 .diagram-svg .ic .ic-accent { fill: var(--accent); stroke: var(--accent); }
 .diagram-svg .ic .ic-check { stroke: var(--accent); stroke-width: 3.4; }
+
+/* ---------- pipeline carousel (How-it-works "pipeline" tab) ---------- */
+
+.carousel {
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  margin: 1.5rem 0;
+  max-width: 60rem;
+}
+.carousel-track { list-style: none; margin: 0; padding: 0; }
+.carousel-slide {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.1rem;
+  padding: 1.2rem 1.3rem;
+}
+/* Fallback (no JS): slides stack, ruled apart, all reachable. */
+.carousel:not(.carousel-live) .carousel-slide + .carousel-slide {
+  border-top: 2px solid var(--rule);
+}
+@media (min-width: 780px) {
+  .carousel-slide {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+    align-items: center;
+  }
+}
+.carousel-hold {
+  background: var(--viewer-bg);
+  border: 1px solid var(--rule-soft);
+  display: grid;
+  place-items: center;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+}
+.diagram-slide { display: block; width: 100%; height: auto; max-width: 620px; min-width: 440px; }
+.diagram-slide text { font-size: 16px; }
+.diagram-slide .t-title { font-size: 18px; }
+.diagram-slide .t-sub { font-size: 14px; }
+.diagram-slide .t-mono { font-size: 14.5px; }
+.carousel-cap .carousel-step {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+  margin: 0 0 0.35rem;
+}
+.carousel-cap h4 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+.carousel-cap p { margin: 0; color: var(--ink-soft); font-size: 0.95rem; line-height: 1.55; }
+
+.carousel-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0.7rem 1rem 0.9rem;
+  border-top: 1px solid var(--rule-soft);
+}
+.carousel-btn {
+  border: 1px solid var(--ink);
+  background: var(--panel);
+  color: var(--ink);
+  width: 34px;
+  height: 34px;
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+.carousel-btn:hover { color: var(--accent); border-color: var(--accent); }
+.carousel-dots { display: flex; gap: 0.45rem; flex-wrap: wrap; justify-content: center; }
+.carousel-dot {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--ink-faint);
+  background: transparent;
+  cursor: pointer;
+  border-radius: 0;
+}
+.carousel-dot:hover { border-color: var(--accent); }
+.carousel-dot.sel { background: var(--accent); border-color: var(--accent); }
+
+/* The how-sec sections sit inside tab panels here; trim the first one's top gap
+   so it tucks under the tab bar cleanly. */
+.tab-panel > .how-sec:first-of-type { margin-top: 1.75rem; }

@@ -3,8 +3,7 @@
 // Authored markup, like the favicon and the avatars — not fetched, not a
 // runtime. Every colour is a CSS token (see the `.diagram` block in site.css),
 // so the diagrams theme light/dark with the rest of the site, and each sits in
-// a viewBox that scales to its container. Dense ones are wrapped in an
-// overflow-x scroller by the template so they stay legible on a phone.
+// a viewBox that scales to its container.
 //
 // The visual vocabulary is the site's: flat panels, square corners, 2px ink
 // rules, one red accent, mono labels. Marker ids are suffixed per-diagram so
@@ -24,6 +23,15 @@ function lines(x, y, items, cls = "", lh = 15) {
   return items
     .map((t, i) => `<text class="${cls}" x="${x}" y="${y + i * lh}" text-anchor="middle">${t}</text>`)
     .join("");
+}
+
+/** A labelled box with an optional mono sub-label. Shared across the diagrams. */
+function box(x, y, w, h, cls, title, sub) {
+  const ty = sub ? y + h / 2 - 2 : y + h / 2 + 5;
+  return `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}"/>
+    <text class="t-bold" x="${x + w / 2}" y="${ty}" text-anchor="middle">${title}</text>${
+      sub ? `<text class="t-mono t-sub" x="${x + w / 2}" y="${y + h / 2 + 16}" text-anchor="middle">${sub}</text>` : ""
+    }`;
 }
 
 /**
@@ -50,8 +58,6 @@ export function journeyMap() {
 
   const line = `<line class="rule" x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" marker-end="url(#jm-arrow)"/>`;
 
-  // The iterate↔preflight loop: a dashed arc from Preflight (5) back to
-  // Iterate (4), the review round that repeats until the gates pass.
   const a = xs[4];
   const b = xs[5];
   const loop = `<path class="loop" d="M ${b} ${y - 22} C ${b} ${y - 78}, ${a} ${y - 78}, ${a} ${y - 22}" marker-end="url(#jm-arrow-accent)"/>
@@ -65,14 +71,14 @@ export function journeyMap() {
       const ring = last
         ? `<rect class="node-ring" x="${x - 21}" y="${y - 21}" width="42" height="42"/>`
         : "";
-      const box = `<rect class="box-accent" x="${x - 15}" y="${y - 15}" width="30" height="30"/>
+      const b0 = `<rect class="box-accent" x="${x - 15}" y="${y - 15}" width="30" height="30"/>
         <text class="t-on t-bold" x="${x}" y="${y + 5}" text-anchor="middle">${i + 1}</text>`;
       const label = above
         ? `<text class="t-mono t-muted" x="${x}" y="${y - 42}" text-anchor="middle">${sub}</text>
            <text class="t-bold" x="${x}" y="${y - 25}" text-anchor="middle">${title}</text>`
         : `<text class="t-bold" x="${x}" y="${y + 40}" text-anchor="middle">${title}</text>
            <text class="t-mono t-muted" x="${x}" y="${y + 57}" text-anchor="middle">${sub}</text>`;
-      return `${ring}${box}${label}`;
+      return `${ring}${b0}${label}`;
     })
     .join("\n    ");
 
@@ -162,139 +168,92 @@ function iconCheck(cx, cy) {
     <path class="ic-check" d="M ${cx - 13} ${cy + 2} L ${cx - 3} ${cy + 12} L ${cx + 15} ${cy - 12}" fill="none"/></g>`;
 }
 function iconPart(cx, cy) {
-  // A little printed stack — three layers.
   return `<g class="ic"><rect x="${cx - 26}" y="${cy + 6}" width="52" height="10"/>
     <rect x="${cx - 22}" y="${cy - 6}" width="44" height="10"/>
     <rect x="${cx - 16}" y="${cy - 18}" width="32" height="10" class="ic-accent"/></g>`;
 }
 
 /**
- * The technical infographic — the pipeline in one view, in four labelled lanes:
- * the gate flow a change moves through, the regenerate-and-commit loop, the
- * self-running rail, and the platform/domain foundation. Dense on purpose; the
- * template wraps it in a horizontal scroller for small screens.
+ * The pipeline as a step-through carousel: instead of one dense chart, six
+ * focused slides a reader steps through. Each is a small, legible SVG plus a
+ * title and a one-line note. Returned as data so the template can render the
+ * carousel shell (controls, dots) around them.
  */
-export function infographicTechnical() {
-  const box = (x, y, w, h, cls, title, sub) =>
-    `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}"/>
-     <text class="t-bold" x="${x + w / 2}" y="${y + (sub ? h / 2 - 2 : h / 2 + 5)}" text-anchor="middle">${title}</text>${
-       sub ? `<text class="t-mono t-sub" x="${x + w / 2}" y="${y + h / 2 + 16}" text-anchor="middle">${sub}</text>` : ""
-     }`;
-  // Lane titles sit ABOVE their lane, left-aligned with the content, so a
-  // filled box can never paint over them.
-  const laneLabel = (y, t) => `<text class="t-lane" x="56" y="${y}">${t}</text>`;
+export function pipelineSlides() {
+  return [
+    { id: "classify", title: "A change is classified", note: "The pipeline reads your diff and picks only the gates that apply — a docs change never spins up the render stack.", svg: slideClassify() },
+    { id: "gates", title: "It fans out to the gates", note: "Only the checks the change needs run: syntax + geometry, printcheck + a real test-slice, per-tool unit tests, style conformance.", svg: slideGates() },
+    { id: "ci-ok", title: "One gate decides", note: "Every check converges on a single ci-ok. Green means merge — and a skipped check counts as OK, so unrelated PRs never stall.", svg: slideCiOk() },
+    { id: "regenerate", title: "Derived files regenerate themselves", note: "Previews, galleries and pages rebuild and commit themselves in one guarded pass, so a committed image can't be older than its source.", svg: slideRegen() },
+    { id: "runs-itself", title: "It runs itself", note: "Smart CI proposes new gates, an autonomy loop turns issues into draft PRs, and telemetry records every gate run.", svg: slideRuns() },
+    { id: "two-layers", title: "Two layers, three seams", note: "Underneath sits a generic platform you can lift as a template, and the 3D-print layer you'd swap out — joined at classify, regenerate and gate.", svg: slideLayers() },
+  ];
+}
 
-  // Lane 1 — the gate flow. ci-ok is the convergence point.
-  const l1y = 66;
-  const cx = 936, ciY = 262;
-  const gateSet = `<polygon class="box" points="352,${l1y} 404,${l1y + 24} 352,${l1y + 48} 300,${l1y + 24}"/>
-    <text class="t-bold" x="352" y="${l1y + 29}" text-anchor="middle">gate set</text>`;
+function slideWrap(id, aria, defs, inner, extra = "") {
+  return `<svg class="diagram-svg diagram-slide${extra}" viewBox="0 0 620 240" role="img" aria-label="${aria}">
+    ${defs}
+    ${inner}
+  </svg>`;
+}
+
+function slideClassify() {
+  const y = 96;
+  const inner = `${box(40, y, 130, 48, "box-tint", "PR change")}
+    <line class="rule" x1="170" y1="${y + 24}" x2="212" y2="${y + 24}" marker-end="url(#ps1-arrow)"/>
+    ${box(212, y, 120, 48, "box", "classify")}
+    <line class="rule" x1="332" y1="${y + 24}" x2="372" y2="${y + 24}" marker-end="url(#ps1-arrow)"/>
+    <polygon class="box" points="440,${y + 24} 500,${y} 560,${y + 24} 500,${y + 48}"/>
+    <text class="t-bold" x="500" y="${y + 29}" text-anchor="middle">gate set</text>`;
+  return slideWrap("classify", "A PR change goes into a classify step, which selects the gate set that applies to it.", arrowDefs("ps1-arrow", "arrow"), inner);
+}
+
+function slideGates() {
   const gates = [
     ["scad-check", "syntax + geometry"],
     ["render-gate", "printcheck + slice"],
     ["unit tests", "per tool"],
     ["style-gate", "conformance"],
   ];
-  const gy = 150;
-  const gw = 172, ggap = 18, gx0 = 452;
-  const gateBoxes = gates
+  const gw = 288, gh = 54, gx = [16, 316], gy = [96, 168];
+  const set = `<polygon class="box" points="250,44 310,20 370,44 310,68"/>
+    <text class="t-bold" x="310" y="49" text-anchor="middle">gate set</text>`;
+  const boxes = gates
     .map((g, i) => {
-      const x = gx0 + i * (gw + ggap);
-      return `<line class="rule-soft" x1="352" y1="${l1y + 48}" x2="${x + gw / 2}" y2="${gy}" marker-end="url(#tech-arrow-s)"/>
-        ${box(x, gy, gw, 52, "box", g[0], g[1])}
-        <line class="rule-soft" x1="${x + gw / 2}" y1="${gy + 52}" x2="${cx}" y2="${ciY}" marker-end="url(#tech-arrow-s)"/>`;
+      const x = gx[i % 2];
+      const yy = gy[Math.floor(i / 2)];
+      return `<line class="rule-soft" x1="310" y1="68" x2="${x + gw / 2}" y2="${yy}" marker-end="url(#ps2-arrow)"/>
+        ${box(x, yy, gw, gh, "box", g[0], g[1])}`;
     })
     .join("\n    ");
-  const lane1 = `${laneLabel(l1y - 18, "A CHANGE MOVES THROUGH THE GATES")}
-    ${box(56, l1y + 4, 108, 40, "box-tint", "PR change")}
-    <line class="rule" x1="164" y1="${l1y + 24}" x2="222" y2="${l1y + 24}" marker-end="url(#tech-arrow)"/>
-    ${box(222, l1y + 4, 78, 40, "box", "classify")}
-    <line class="rule" x1="300" y1="${l1y + 24}" x2="300" y2="${l1y + 24}"/>
-    ${gateSet}
-    ${gateBoxes}
-    ${box(848, ciY, 176, 44, "box-accent-line", "ci-ok", "one gate to rule them")}
-    <line class="rule" x1="1024" y1="${ciY + 22}" x2="1072" y2="${ciY + 22}" marker-end="url(#tech-arrow)"/>
-    ${box(1072, ciY, 72, 44, "box-tint", "merge")}`;
-
-  // Lane 2 — regenerate + commit, with the loop.
-  const l2y = 372;
-  const rboxes = [
-    ["gate source", 56],
-    ["regenerate", 250],
-    ["commit back", 444],
-  ];
-  const rw = 150;
-  const lane2 =
-    `${laneLabel(l2y - 62, "DERIVED FILES REGENERATE THEMSELVES")}` +
-    `<path class="loop" d="M ${444 + rw / 2} ${l2y} C ${444 + rw / 2} ${l2y - 28}, ${131} ${l2y - 28}, ${131} ${l2y}" marker-end="url(#tech-arrow-accent)"/>
-     <text class="t-mono t-accent" x="${(131 + 444 + rw / 2) / 2}" y="${l2y - 42}" text-anchor="middle">re-trigger (PAT) · loop guard: one push</text>` +
-    rboxes
-      .map(([t, x], i) => {
-        const arrow =
-          i < rboxes.length - 1
-            ? `<line class="rule" x1="${x + rw}" y1="${l2y + 22}" x2="${rboxes[i + 1][1]}" y2="${l2y + 22}" marker-end="url(#tech-arrow)"/>`
-            : "";
-        return `${box(x, l2y + 2, rw, 40, "box", t)}${arrow}`;
-      })
-      .join("\n    ");
-
-  // Lane 3 — the self-running rail.
-  const l3y = 478;
-  const rail = [
-    ["smart-ci", "proposes new gates"],
-    ["autonomy", "issue → draft PR"],
-    ["telemetry", "records each gate run"],
-  ];
-  const lane3 =
-    `${laneLabel(l3y - 12, "AND IT RUNS ITSELF")}` +
-    rail
-      .map((r, i) => {
-        const w = 292, g = 20, x = 56 + i * (w + g);
-        return box(x, l3y + 2, w, 48, "box-soft", r[0], r[1]);
-      })
-      .join("\n    ");
-
-  // Foundation — platform over domain, three seams. Titles are left-aligned so
-  // the seam ticks never cross them.
-  const fy = 566;
-  const band = (y, cls, t) =>
-    `<rect class="${cls}" x="56" y="${y}" width="1088" height="30"/>
-     <text class="t-bold" x="72" y="${y + 20}">${t}</text>`;
-  const foundation = `${band(fy, "band-platform", "PLATFORM — generic (the reusable template)")}
-    ${band(fy + 30, "band-domain", "DOMAIN — 3D-print / OpenSCAD (the part you replace)")}
-    ${[840, 980, 1064]
-      .map((x) => `<line class="seam" x1="${x}" y1="${fy}" x2="${x}" y2="${fy + 60}"/>`)
-      .join("")}
-    <text class="t-mono t-sub" x="1052" y="${fy + 78}" text-anchor="end">three seams: classify · regenerate · gate</text>`;
-
-  return `<svg class="diagram-svg diagram-wide" viewBox="0 0 1240 660" role="img"
-    aria-label="The pipeline in one view. A PR change is classified into a gate set that fans out to scad-check, render-gate (printcheck plus test-slice), per-tool unit tests and style-gate, all converging on a single ci-ok gate before merge. Derived files regenerate and commit themselves in a guarded loop. A rail of smart-ci, autonomy and telemetry lets it run itself. Underneath, a generic platform layer supports the replaceable 3D-print domain layer, joined at three seams.">
-    ${arrowDefs("tech-arrow", "arrow")}
-    ${arrowDefs("tech-arrow-s", "arrow-soft")}
-    ${arrowDefs("tech-arrow-accent", "arrow-accent")}
-    ${lane1}
-    ${lane2}
-    ${lane3}
-    ${foundation}
-  </svg>`;
+  return slideWrap("gates", "The gate set fans out to scad-check, render-gate, unit tests and style-gate.", arrowDefs("ps2-arrow", "arrow-soft"), set + "\n    " + boxes);
 }
 
-/**
- * The regenerate-and-commit loop — a compact cycle for the section that
- * explains why derived files are the pipeline's job.
- */
-export function regenLoop() {
-  const cx = 250, cy = 140, r = 88, g = 17;
+function slideCiOk() {
+  const gates = ["scad-check", "render-gate", "unit tests", "style-gate"];
+  const gy = [24, 68, 112, 156];
+  const ciX = 320, ciY = 66;
+  const list = gates
+    .map((g, i) => `${box(24, gy[i], 168, 32, "box-soft", g)}
+      <line class="rule-soft" x1="192" y1="${gy[i] + 16}" x2="${ciX}" y2="${ciY + 40}" marker-end="url(#ps3-arrow)"/>`)
+    .join("\n    ");
+  const inner = `${list}
+    ${box(ciX, ciY, 170, 52, "box-accent-line", "ci-ok", "one gate to rule them")}
+    <line class="rule" x1="490" y1="${ciY + 26}" x2="524" y2="${ciY + 26}" marker-end="url(#ps3-arrow-k)"/>
+    ${box(524, ciY, 72, 52, "box-tint", "merge")}`;
+  return slideWrap("ci-ok", "The four gates converge on a single ci-ok, which leads to merge.", arrowDefs("ps3-arrow", "arrow-soft") + arrowDefs("ps3-arrow-k", "arrow"), inner);
+}
+
+function slideRegen() {
+  const cx = 310, cy = 120, r = 84, g = 18;
   const pt = (deg) => {
     const a = (deg * Math.PI) / 180;
     return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
   };
-  // Four clockwise arcs (gate→regenerate→commit→verify→gate), each stopping a
-  // few degrees short of the next node so its arrowhead reads.
   const seg = (from, to) => {
     const [x1, y1] = pt(from + g);
     const [x2, y2] = pt(to - g);
-    return `<path class="loop-arc" d="M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" marker-end="url(#rl-arrow-accent)"/>`;
+    return `<path class="loop-arc" d="M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" marker-end="url(#ps4-arrow)"/>`;
   };
   const arcs = [seg(270, 360), seg(0, 90), seg(90, 180), seg(180, 270)].join("\n    ");
   const stations = [
@@ -309,12 +268,34 @@ export function regenLoop() {
         <text class="t-bold" x="${(x + dx).toFixed(1)}" y="${(y + dy).toFixed(1)}" text-anchor="${anchor}">${t}</text>`;
     })
     .join("\n    ");
-  return `<svg class="diagram-svg diagram-narrow" viewBox="80 26 384 244" role="img"
-    aria-label="A four-step clockwise loop: gate the source, regenerate the derived files, commit them back, and verify — bounded by a loop guard so it runs at most once per change.">
-    ${arrowDefs("rl-arrow-accent", "arrow-accent")}
-    ${arcs}
+  const inner = `${arcs}
     ${stations}
     <text class="t-mono t-sub" x="${cx}" y="${cy - 4}" text-anchor="middle">loop guard:</text>
-    <text class="t-mono t-sub" x="${cx}" y="${cy + 12}" text-anchor="middle">at most one push</text>
-  </svg>`;
+    <text class="t-mono t-sub" x="${cx}" y="${cy + 12}" text-anchor="middle">at most one push</text>`;
+  return slideWrap("regenerate", "A four-step loop: gate the source, regenerate the derived files, commit them back, and verify, bounded by a loop guard.", arrowDefs("ps4-arrow", "arrow-accent"), inner);
+}
+
+function slideRuns() {
+  const cards = [
+    ["smart-ci", "proposes new gates"],
+    ["autonomy", "issue → draft PR"],
+    ["telemetry", "records each gate run"],
+  ];
+  const w = 190, gap = 15, x0 = 15, y = 84, h = 72;
+  const inner = cards
+    .map(([t, s], i) => box(x0 + i * (w + gap), y, w, h, "box-soft", t, s))
+    .join("\n    ");
+  return slideWrap("runs-itself", "Three self-running parts: smart-ci proposes new gates, autonomy turns an issue into a draft PR, telemetry records each gate run.", "", inner);
+}
+
+function slideLayers() {
+  const fy = 70, bw = 580, bh = 36;
+  const band = (y, cls, t) =>
+    `<rect class="${cls}" x="20" y="${y}" width="${bw}" height="${bh}"/>
+     <text class="t-bold" x="36" y="${y + 23}">${t}</text>`;
+  const inner = `${band(fy, "band-platform", "PLATFORM — generic (the reusable template)")}
+    ${band(fy + bh, "band-domain", "DOMAIN — 3D-print / OpenSCAD (you replace this)")}
+    ${[300, 420, 510].map((x) => `<line class="seam" x1="${x}" y1="${fy}" x2="${x}" y2="${fy + bh * 2}"/>`).join("")}
+    <text class="t-mono t-sub" x="600" y="${fy + bh * 2 + 24}" text-anchor="end">three seams: classify · regenerate · gate</text>`;
+  return slideWrap("two-layers", "A generic platform layer beneath a replaceable 3D-print domain layer, joined at three seams: classify, regenerate, gate.", "", inner);
 }

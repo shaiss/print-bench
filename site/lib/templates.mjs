@@ -10,8 +10,7 @@ import { contributorRow, reviewedBy, historySlot } from "./teams.mjs";
 import {
   journeyMap,
   infographicNonTechnical,
-  infographicTechnical,
-  regenLoop,
+  pipelineSlides,
 } from "./diagrams.mjs";
 
 /**
@@ -80,6 +79,19 @@ ${thumbs}
 const SITE_NAME = "print-bench";
 const TAGLINE = "Parametric 3D-printable designs, gated before they ship.";
 
+// Cache-busting for the shared CSS/JS. vercel.json caches /assets/* for a day
+// with stable filenames, so without this a returning visitor keeps an old
+// site.css after a deploy — and a page whose new markup (e.g. inline-SVG
+// diagrams) needs new CSS rules renders unstyled. build.mjs sets this to a hash
+// of the current site.css+site.js, so the query changes only when they do.
+let ASSET_VERSION = "";
+export function setAssetVersion(v) {
+  ASSET_VERSION = String(v || "");
+}
+function asset(path) {
+  return ASSET_VERSION ? `${path}?v=${ASSET_VERSION}` : path;
+}
+
 /**
  * Applied before first paint so a stored theme choice never flashes.
  * Kept inline (and tiny) for that reason — site.js only wires the button.
@@ -97,7 +109,7 @@ export function layout({ title, description, body, canonicalPath = "/", extraHea
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description || TAGLINE)}">
 <meta property="og:type" content="website">
-<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="${asset("/assets/site.css")}">
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <script>${THEME_BOOTSTRAP}</script>
 ${extraHead}
@@ -126,7 +138,7 @@ ${body}
     <span><a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">shaiss/print-bench</a></span>
   </div>
 </footer>
-<script src="/assets/site.js" defer></script>
+<script src="${asset("/assets/site.js")}" defer></script>
 ${extraScript}
 </body>
 </html>
@@ -734,9 +746,10 @@ ${cards || '<p class="muted">No one registered yet.</p>'}
  */
 export function howItWorksPage({ designCount, githubBase }) {
   // Link to a file in the repo, rendered as its path in code voice — the shape
-  // used across the rail blocks on other pages.
+  // used across the rail blocks on other pages. githubBase is a caller input,
+  // so escape the whole URL for the attribute, not just the visible label.
   const gh = (path, label) =>
-    `<a href="${githubBase}/${path}" rel="noopener noreferrer"><code>${escapeHtml(label || path)}</code></a>`;
+    `<a href="${escapeHtml(`${githubBase}/${path}`)}" rel="noopener noreferrer"><code>${escapeHtml(label || path)}</code></a>`;
 
   const section = (id, label, heading, inner) =>
     `<section class="how-sec" id="${id}" aria-labelledby="${id}-h">
@@ -756,6 +769,44 @@ ${inner}
       <div class="diagram-hold">${svg}</div>
       <figcaption>${caption}</figcaption>
     </figure>`;
+
+  // An escaped "read the source" link (githubBase is a caller input).
+  const srcLink = (path, k) =>
+    `<a class="how-source-link" href="${escapeHtml(`${githubBase}/${path}`)}" rel="noopener noreferrer"><span class="how-source-k">${escapeHtml(k)}</span><span class="how-source-v">${escapeHtml(path)}</span></a>`;
+
+  // The step-through carousel for the pipeline. It ships as a stacked document
+  // — every slide visible, its step labelled — so without JavaScript nothing is
+  // unreachable; site.js reveals the controls and shows one slide at a time
+  // (the same progressive-enhancement shape as the product-page media stage).
+  const carousel = (slides) => `<div class="carousel" data-carousel aria-roledescription="carousel" aria-label="The pipeline, step by step">
+      <ol class="carousel-track">
+${slides
+  .map(
+    (s, i) =>
+      `        <li class="carousel-slide" role="group" aria-roledescription="slide" aria-label="${escapeHtml(`${i + 1} of ${slides.length}: ${s.title}`)}">
+          <div class="carousel-hold">${s.svg}</div>
+          <div class="carousel-cap">
+            <p class="carousel-step">Step ${i + 1} of ${slides.length}</p>
+            <h4>${escapeHtml(s.title)}</h4>
+            <p>${escapeHtml(s.note)}</p>
+          </div>
+        </li>`
+  )
+  .join("\n")}
+      </ol>
+      <div class="carousel-nav" data-carousel-nav hidden>
+        <button class="carousel-btn" type="button" data-carousel-prev aria-label="Previous step">&larr;</button>
+        <div class="carousel-dots" role="tablist" aria-label="Pipeline steps">
+${slides
+  .map(
+    (s, i) =>
+      `          <button class="carousel-dot${i === 0 ? " sel" : ""}" type="button" role="tab" data-carousel-dot="${i}" aria-selected="${i === 0 ? "true" : "false"}" aria-label="${escapeHtml(`Step ${i + 1}: ${s.title}`)}"></button>`
+  )
+  .join("\n")}
+        </div>
+        <button class="carousel-btn" type="button" data-carousel-next aria-label="Next step">&rarr;</button>
+      </div>
+    </div>`;
 
   // ---- Section 1: the two layers, as a stacked architecture diagram --------
   const layers = `<div class="layerstack">
@@ -862,7 +913,6 @@ ${steps
     presence-only gates on those images stay honest: the picture beside a model
     cannot depict geometry the model no longer has.</p>
     ${regenCards}
-    ${fig(regenLoop(), "One run gates the source and rebuilds what derives from it; a loop guard stops the commit-back from re-triggering itself forever.")}
     <p>Committing back turns on a quirk worth stating plainly: a push made with
     the default token triggers no workflow. The pipeline uses that fact in both
     directions.</p>
@@ -936,10 +986,10 @@ ${steps
     above links to the file that implements it. A local link that doesn't resolve
     fails the build rather than 404ing in production.</p>
     <div class="how-source">
-      <a class="how-source-link" href="${githubBase}/docs/architecture/README.md" rel="noopener noreferrer"><span class="how-source-k">Overview</span><span class="how-source-v">docs/architecture/README.md</span></a>
-      <a class="how-source-link" href="${githubBase}/docs/architecture/ci-platform.md" rel="noopener noreferrer"><span class="how-source-k">CI platform</span><span class="how-source-v">docs/architecture/ci-platform.md</span></a>
-      <a class="how-source-link" href="${githubBase}/docs/architecture/design-workflow.md" rel="noopener noreferrer"><span class="how-source-k">Design layer</span><span class="how-source-v">docs/architecture/design-workflow.md</span></a>
-      <a class="how-source-link" href="${githubBase}/.github/workflows/ci.yml" rel="noopener noreferrer"><span class="how-source-k">The pipeline</span><span class="how-source-v">.github/workflows/ci.yml</span></a>
+      ${srcLink("docs/architecture/README.md", "Overview")}
+      ${srcLink("docs/architecture/ci-platform.md", "CI platform")}
+      ${srcLink("docs/architecture/design-workflow.md", "Design layer")}
+      ${srcLink(".github/workflows/ci.yml", "The pipeline")}
     </div>`
   );
 
@@ -966,16 +1016,46 @@ ${steps
     ${fig(infographicNonTechnical(), "No jargon: describe it, design it together, let the checks confirm it prints, then print it.", { wide: true })}`
   );
 
-  // The technical capstone — the entire pipeline on one canvas, for engineers.
-  const sAnatomy = section(
-    "anatomy",
-    "For engineers",
-    "The whole pipeline, on one canvas",
-    `<p>Everything above, in a single view: how a change moves through the gates
-    to one <code>ci-ok</code>, how derived files regenerate themselves, the rail
-    that lets it run unattended, and the platform/domain split underneath it all.</p>
-    ${fig(infographicTechnical(), "The pipeline end to end — the gate flow, the regenerate-and-commit loop, the self-running rail, and the two-layer foundation.", { wide: true })}`
+  // The pipeline as a step-through carousel (replacing the one dense chart):
+  // the reader walks the flow a slide at a time.
+  const sFlow = section(
+    "flow",
+    "Step through it",
+    "Follow a change through the machine",
+    `<p>The same pipeline, one step at a time — from the diff you push to the
+    single gate that lets it merge, then how the machine regenerates and runs
+    itself. Step through with the arrows or the dots.</p>
+    ${carousel(pipelineSlides())}`
   );
+
+  // Three tabs — one concern on screen at a time, the same pattern the product
+  // pages use. Grounding first (what it is, the plain story, your path), then
+  // the mechanics, then how it runs itself. Ships as a stacked document: the
+  // tab bar is hidden and every panel visible until site.js takes over, so
+  // nothing is unreachable without JavaScript.
+  const tabs = [
+    { id: "overview", label: "Overview", body: `${s1}\n${sPlain}\n${sJourney}` },
+    { id: "pipeline", label: "The pipeline", body: `${sFlow}\n${s2}\n${s3}\n${s4}` },
+    { id: "runs", label: "Runs itself", body: `${s5}\n${s6}\n${s7}` },
+  ];
+
+  const tabBar = `<div class="design-tabs" role="tablist" data-tabs hidden>
+${tabs
+  .map(
+    (t, i) =>
+      `    <button class="design-tab" role="tab" type="button" id="howtab-${t.id}" aria-controls="${t.id}" aria-selected="${i === 0 ? "true" : "false"}">${escapeHtml(t.label)}</button>`
+  )
+  .join("\n")}
+  </div>`;
+
+  const panels = tabs
+    .map(
+      (t) => `  <section class="tab-panel" id="${t.id}" role="tabpanel" aria-labelledby="howtab-${t.id}">
+    <p class="panel-label">${escapeHtml(t.label)}</p>
+${t.body}
+  </section>`
+    )
+    .join("\n");
 
   const body = `<div class="wrap how">
   <section class="hero how-hero">
@@ -991,16 +1071,8 @@ ${steps
       <div class="stat"><span class="stat-n">0</span><span class="stat-l">derived files committed by hand</span></div>
     </div>
   </section>
-${sJourney}
-${sPlain}
-${s1}
-${s2}
-${s3}
-${s4}
-${s5}
-${s6}
-${sAnatomy}
-${s7}
+${tabBar}
+${panels}
 </div>`;
 
   return layout({

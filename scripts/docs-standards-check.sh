@@ -26,8 +26,9 @@ ARCH_DOCS=(
   docs/architecture/ci-platform.md
   docs/architecture/design-workflow.md
 )
-# The four inline SVG diagrams the page must embed.
-DIAGRAMS=(journeyMap infographicNonTechnical infographicTechnical regenLoop)
+# The inline SVG diagrams the page must embed (journeyMap + the plain-language
+# infographic as static figures; pipelineSlides as the step-through carousel).
+DIAGRAMS=(journeyMap infographicNonTechnical pipelineSlides)
 
 # run_checks <root> — every check is relative to <root>, so the selftest can
 # point it at a mutated fixture tree and watch it fail.
@@ -77,6 +78,13 @@ run_checks() {
   done
   have site/test/diagrams.test.mjs
 
+  # D. The page structure: content grouped into tabs, the pipeline as a
+  #    step-through carousel.
+  contains site/lib/templates.mjs "data-tabs" \
+    "the page must group content into tabs (data-tabs)"
+  contains site/lib/templates.mjs "data-carousel" \
+    "the pipeline must be a step-through carousel (data-carousel)"
+
   return "$fail"
 }
 
@@ -115,6 +123,12 @@ selftest() {
       fails=$((fails + 1))
     fi
   }
+  # Portable in-place edit: GNU and BSD sed disagree on `sed -i`, and the repo
+  # holds locally-run scripts to that floor — so edit via a temp file and mv.
+  subst() { # file sed-expression
+    local t; t="$(mktemp)"
+    sed "$2" "$1" > "$t" && mv "$t" "$1"
+  }
 
   # Positive control: the real files, as committed, pass.
   fresh
@@ -127,26 +141,26 @@ selftest() {
   fresh; rm -f "$tmp/site/lib/diagrams.mjs"
   expect "missing the diagrams module fails" 1
 
-  fresh; sed -i 's/export function howItWorksPage/function howItWorksPage_DISABLED/' "$tmp/site/lib/templates.mjs"
+  fresh; subst "$tmp/site/lib/templates.mjs" 's/export function howItWorksPage/function howItWorksPage_DISABLED/'
   expect "howItWorksPage not exported fails" 1
 
-  fresh; sed -i 's#/how-it-works/#/gone/#g' "$tmp/site/lib/templates.mjs"
+  fresh; subst "$tmp/site/lib/templates.mjs" 's#/how-it-works/#/gone/#g'
   expect "page dropped from the nav fails" 1
 
-  fresh; sed -i 's/export function journeyMap/export function journeyMap_GONE/' "$tmp/site/lib/diagrams.mjs"
+  fresh; subst "$tmp/site/lib/diagrams.mjs" 's/export function journeyMap/export function journeyMap_GONE/'
   expect "a diagram removed fails" 1
 
   fresh; : > "$tmp/docs/architecture/README.md"
   expect "index without cross-links fails" 1
 
   # One control per remaining assertion, so none can be silently weakened.
-  fresh; sed -i 's#how-it-works/index.html#gone.html#' "$tmp/site/build.mjs"
+  fresh; subst "$tmp/site/build.mjs" 's#how-it-works/index.html#gone.html#'
   expect "page not emitted by build.mjs fails" 1
 
-  fresh; sed -i 's#/how-it-works/#/gone/#g' "$tmp/site/README.md"
+  fresh; subst "$tmp/site/README.md" 's#/how-it-works/#/gone/#g'
   expect "route missing from site/README.md fails" 1
 
-  fresh; sed -i 's#docs/architecture/#docs/gone/#g' "$tmp/site/lib/templates.mjs"
+  fresh; subst "$tmp/site/lib/templates.mjs" 's#docs/architecture/#docs/gone/#g'
   expect "page no longer links the architecture docs fails" 1
 
   fresh; rm -f "$tmp/site/test/how-it-works.test.mjs"
@@ -155,8 +169,14 @@ selftest() {
   fresh; rm -f "$tmp/site/test/diagrams.test.mjs"
   expect "missing the diagrams test fails" 1
 
-  fresh; sed -i 's/regenLoop//g' "$tmp/site/lib/templates.mjs"
+  fresh; subst "$tmp/site/lib/templates.mjs" 's/pipelineSlides//g'
   expect "a diagram not embedded by the page fails" 1
+
+  fresh; subst "$tmp/site/lib/templates.mjs" 's/data-carousel//g'
+  expect "pipeline carousel removed fails" 1
+
+  fresh; subst "$tmp/site/lib/templates.mjs" 's/data-tabs//g'
+  expect "tabs removed fails" 1
 
   if [ "$fails" -ne 0 ]; then
     echo "docs-standards selftest: $fails case(s) failed" >&2

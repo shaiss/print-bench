@@ -51,8 +51,10 @@ import {
   peoplePage,
   howItWorksPage,
   redirectPage,
+  setAssetVersion,
   FAVICON,
 } from "./lib/templates.mjs";
+import { createHash } from "node:crypto";
 
 const SITE_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SITE_DIR, "..");
@@ -179,6 +181,18 @@ this directory.
 
 async function main() {
   const { out } = parseArgs(process.argv.slice(2));
+
+  // Cache-bust the shared CSS/JS: vercel.json caches /assets/* for a day with
+  // stable filenames, so a returning visitor keeps an old site.css after a
+  // deploy — enough to render a page whose new markup needs new CSS rules
+  // unstyled. Stamp the <link>/<script> with a hash of the current files so the
+  // URL changes only when they do. Computed before any page renders.
+  const assetHash = createHash("sha256")
+    .update(readFileSync(join(SITE_DIR, "assets", "site.css")))
+    .update(readFileSync(join(SITE_DIR, "assets", "site.js")))
+    .digest("hex")
+    .slice(0, 10);
+  setAssetVersion(assetHash);
 
   const designs = readDesigns(REPO_ROOT);
   const styles = readStyles(REPO_ROOT);

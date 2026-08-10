@@ -46,6 +46,7 @@ flowchart TD
     regen --> site[site-build]
     lint[lint: shell + workflow + syntax] --> ok
     changes --> smart[smart-ci: propose new gates]
+    changes --> docsstd[docs-standards: docs + page]
     scad --> ok[ci-ok: aggregate]
     render --> ok
     unit --> ok
@@ -54,6 +55,7 @@ flowchart TD
     site --> ok
     smart --> ok
     regen --> ok
+    docsstd --> ok
 ```
 
 **Gate selection is deterministic.** `scripts/ci-classify.sh` takes the
