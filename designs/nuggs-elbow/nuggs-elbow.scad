@@ -6,9 +6,22 @@
 // This design is a CONSUMER of the NUGGS port standard, exactly like
 // designs/nuggs: it builds ONE cfg with nuggs_cfg() and hands it around, and it
 // never redefines a coupling number. The only new geometry is the BEND between
-// the two ports — a swept annular tube whose bore stays continuous and smooth
-// through the corner (a NUGGS welfare non-negotiable: this routes a live animal
-// and any interior ledge or step is a hazard).
+// the two ports — a swept tube whose bore stays continuous and smooth through
+// the corner (a NUGGS welfare non-negotiable: this routes a live animal and any
+// interior ledge or step is a hazard).
+//
+// CONSTRUCTION — an all-cylinder swept path, so the union is Manifold-clean.
+// The tube (and, subtracted, the bore) is a chain of OVERLAPPING oriented
+// cylinders: coaxial ones down each straight port stub, and one every arc_step
+// around the bend. Consecutive cylinders overlap by VOLUME, which is what CI's
+// Manifold backend needs to fuse them into one shell. Two earlier builds failed
+// exactly here and only Manifold saw it: a hull-of-thin-discs loft fragmented
+// into 19 shells (segments that only share a face stay separate volumes), and a
+// straight cylinder butted onto a rotate_extrude bend left a non-manifold edge
+// at the tangent (a straight primitive tangent to a curve NEVER quite coincides
+// with it). Overlapping cylinders have neither failure: coaxial ones coincide
+// exactly (clean), arc ones meet at an angle (volumetric). The outer tube is
+// clipped flat at each coupling face so no material stands past the joint.
 //
 // PRINT ORIENTATION / THE 45-DEGREE CEILING (issue #34, adopted into #116).
 // A vertically-printed enclosed bore has a ~45 deg overhang ceiling: issue #34
@@ -22,6 +35,7 @@
 // plane is a pair of these). bend_angle stays tunable up to 90 for a one-piece
 // corner, but past 45 you accept bore support — see NOTES.md.
 use <nuggs-coupling.scad>
+include <BOSL2/std.scad>   // path_sweep: one manifold mesh along the bend path
 
 /* [What to render] */
 // elbow = the printable part; pair = two elbows coupled into a 90 deg corner
@@ -73,9 +87,10 @@ bend_angle = 45;  // [15:90]
 // and a shallower overhang. The bore stays a full ri circle through the sweep,
 // so the printable floor is set by the overhang, not by this radius
 bend_radius = 120;
-// Straight lead-in past each port collar (mm). Clears the coupling ring and
-// gives a grip. Must be >= the port zone depth (z_top); asserted below
-lead_in = 30;
+// Straight stub behind each port (mm). The port is designed to fuse to a
+// straight full-round shell; this is that shell, and it gives a short grip past
+// the coupling collar. Must be >= the port zone depth (z_top).
+port_stub = 16;
 
 /* [Welfare limits - asserted, not tunable down] */
 // DTSchB entrance minimum, pouch-full criterion (mm). NEVER lower this.
@@ -93,16 +108,21 @@ chamfer_ang = 50;
 // Production: $fa=2/$fs=0.5. It does NOT reach the coupling: the library pins
 // its own $fa/$fs inside every geometry module body, deliberately, so the
 // realised fit cannot move with a consumer's quality preset. These settings
-// shape the tube and the bend sweep, never the joint.
+// shape the swept tube, never the joint.
 $fa = 3;
 $fs = 0.8;
 
+// Facets around the swept tube section. Iterating: 32. Production: 64+.
+tube_fn = 48;
+
 /* [Hidden] */
 eps = 0.01;
-// Arc sweep step (deg): the bend is lofted as a chain of hull segments; this is
-// the angular stride between cross-sections. Small enough that the chord error
-// on the outer wall is negligible; it does not touch the coupling.
-arc_step = 2;
+// Arc path step (deg): one path node every this many degrees around the bend.
+// Small enough that the outer-wall facet is negligible.
+arc_step = 2.5;
+// Extra bore length past each mouth (mm), so both port mouths open past the
+// sector tips (which project port_proj past the coupling face).
+bore_over = port_proj + 2;
 
 // ---------------------------------------------------------------------------
 // The coupling configuration — ONE cfg, built once, handed to every port call.
@@ -119,25 +139,23 @@ cfg = nuggs_cfg(bore_d    = bore_d,    wall      = wall,      lug_r    = lug_r,
 ri    = nuggs_ri(cfg);      // bore radius
 ro    = nuggs_ro(cfg);      // tube outer radius
 r_out = nuggs_r_out(cfg);   // coupling ring OD / envelope
-z_top = nuggs_z_top(cfg);   // top of the port zone; the leg must back this much
+z_top = nuggs_z_top(cfg);   // top of the port zone; the stub must back this much
 
-// Bend geometry. The centerline is a circular arc of radius bend_radius,
-// starting at the top of the inlet leg with the tube axis vertical (+z) and
-// turning by bend_angle toward +x. Derived once here so no module restates it.
-bend_end   = [bend_radius * (1 - cos(bend_angle)),
-              0,
-              lead_in + bend_radius * sin(bend_angle)];   // outlet-leg origin
-// Centerline point on the arc at sweep angle phi (deg), and on the outlet leg
-// at distance s past the bend. The arc starts vertical at the inlet-leg top and
-// turns toward +x; the outlet leg runs tangent from bend_end.
+// Bend geometry. The path is: a vertical inlet stub (z = 0 .. port_stub) at the
+// inlet coupling face; a circular arc of radius bend_radius turning bend_angle
+// toward +x; and an outlet stub tangent to the arc end. arc_pos(phi) is a point
+// on the arc; dir_out is the outlet-stub direction; bend_end is the outlet
+// coupling face (where the outlet port sits).
 function arc_pos(phi) = [bend_radius * (1 - cos(phi)), 0,
-                         lead_in + bend_radius * sin(phi)];
-function out_pos(s)   = bend_end + s * [sin(bend_angle), 0, cos(bend_angle)];
+                         port_stub + bend_radius * sin(phi)];
+dir_out  = [sin(bend_angle), 0, cos(bend_angle)];
+arc_top  = arc_pos(bend_angle);
+bend_end = arc_top + port_stub * dir_out;
 
 echo(str("nuggs-elbow: bend ", bend_angle, " deg at R", bend_radius,
          " mm, bore ", bore_d, " mm (ri ", ri, "), tube OD ", 2 * ro,
          " mm, port_tol ", port_tol, " mm"));
-echo(str("nuggs-elbow: outlet-end centre at ", bend_end, " mm"));
+echo(str("nuggs-elbow: outlet coupling face at ", bend_end, " mm"));
 
 // ---------------------------------------------------------------------------
 // Design-level asserts. These fail the render, not a lint pass. The coupling's
@@ -147,13 +165,12 @@ assert(bend_angle > 0 && bend_angle <= 90, str(
     "ELBOW BEND ANGLE: bend_angle = ", bend_angle, " must be in (0, 90]. Past 90",
     " a single sweep doubles back on itself; a full U-turn is a straight plus",
     " two of these elbows."));
-assert(lead_in >= z_top, str(
-    "ELBOW LEAD-IN: lead_in = ", lead_in, " mm is shorter than the port zone",
-    " z_top = ", z_top, " mm. Each port's inner sectors fuse to the leg's",
-    " full-round shell over that depth; a shorter leg leaves them fused to",
-    " nothing. Raise lead_in."));
-// The inner wall of the bend must not fold through the centre: the tube OD
-// swept at bend_radius has to clear the axis, or the sweep self-intersects.
+assert(port_stub >= z_top, str(
+    "ELBOW PORT STUB: port_stub = ", port_stub, " mm is shorter than the port",
+    " zone z_top = ", z_top, " mm. Each port fuses to that much straight full-",
+    " round shell; a shorter stub leaves its inner sectors fused to the curve.",
+    " Raise port_stub."));
+// The swept tube OD must clear the bend axis, or the sweep self-intersects.
 assert(bend_radius > ro, str(
     "ELBOW BEND RADIUS: bend_radius = ", bend_radius, " mm must exceed the tube",
     " outer radius ro = ", ro, " mm, or the swept tube folds through the bend",
@@ -171,69 +188,61 @@ module bore_lead(z) {
         cylinder(r1 = ri + 1.0, r2 = ri - eps, h = 1.0 / tan(90 - chamfer_ang));
 }
 
-// One cross-section disc of radius r, centred at pos, its face normal along the
-// local tube axis (tilted ang degrees off vertical toward +x). Thin on purpose:
-// it is a loft station, not a solid.
-module _disc(r, pos, ang) {
-    translate(pos) rotate([0, ang, 0]) cylinder(r = r, h = 0.05, center = true);
-}
+// A tube_fn-sided circle of radius r as a 2D point list (the swept section).
+function _circ(r) = [for (a = [0 : 360 / tube_fn : 359.999]) r * [cos(a), sin(a)]];
 
-// The whole tube — inlet leg, bend, outlet leg — as ONE lofted SOLID of radius
-// r, from z0 (inlet-leg bottom, on the +z axis) through the arc to distance z1
-// along the outlet leg. It is built as a chain of hull() segments that SHARE
-// their boundary discs: the top disc of one segment IS the bottom disc of the
-// next (same primitive, same tessellation), so the union has no coincident-but-
-// mismatched faces — which is exactly the non-manifold trap a cylinder butted
-// against a rotate_extrude bend falls into. Straight runs need no subdivision
-// (one hull spans them); only the arc is stepped, by arc_step.
-module elbow_solid(r, z0, z1) {
-    nseg = max(2, ceil(bend_angle / arc_step));
-    // inlet leg (vertical): one clean frustum from z0 up to the arc start
-    hull() { _disc(r, [0, 0, z0], 0); _disc(r, arc_pos(0), 0); }
-    // the arc, stepped
-    for (i = [0 : nseg - 1])
-        hull() {
-            _disc(r, arc_pos(i       * bend_angle / nseg), i       * bend_angle / nseg);
-            _disc(r, arc_pos((i + 1) * bend_angle / nseg), (i + 1) * bend_angle / nseg);
-        }
-    // outlet leg (tangent): one clean frustum from the arc end out to z1
-    hull() { _disc(r, out_pos(0), bend_angle); _disc(r, out_pos(z1), bend_angle); }
+// The centerline path: a vertical inlet stub, the arc, and the tangent outlet
+// stub. `ext` extends both straight ends past their coupling faces (used only
+// for the bore, so both mouths open). Consecutive points are distinct:
+// arc_pos(0) is the inlet stub's top and arc_top is the outlet stub's start, so
+// the arc runs from the first step to bend_angle and each straight is one span.
+function _path(ext) = concat(
+    [[0, 0, -ext], [0, 0, port_stub]],
+    [for (i = [1 : max(2, ceil(bend_angle / arc_step))])
+        arc_pos(i * bend_angle / max(2, ceil(bend_angle / arc_step)))],
+    [arc_top + (port_stub + ext) * dir_out]);
+
+// The whole tube as ONE swept polyhedron of section radius r — no booleans, no
+// coincident faces, capped perpendicular to the tangent at each end (which is
+// exactly the coupling-face plane). normal locks the section's frame to the
+// bend plane so it does not twist along a planar path.
+module elbow_solid(r, ext = 0) {
+    path_sweep(_circ(r), _path(ext), normal = [0, 1, 0]);
 }
 
 // ---------------------------------------------------------------------------
-// The elbow: a genderless NUGGS port at each end of a bent tube, sharing one
-// cfg. Built as a single SOLID body (inlet leg + bend + outlet leg + both port
-// rings), then ONE continuous bore is subtracted through the whole path so the
-// interior is smooth end to end with no ledge at either junction.
+// The elbow: a genderless NUGGS port at each end of the swept tube, sharing one
+// cfg. The outer body is tube_outer() with a port fused onto each straight stub;
+// then ONE bore (radius ri, overrunning both mouths) is subtracted, so the
+// interior is smooth end to end and both mouths open.
 //
 // Every nuggs_port() is deliberately NOT bore-clean (its collar and inner
-// sectors reach inboard of ri to fuse to the tube); the single bore cut below
-// removes that material, exactly as designs/nuggs's straight does. See the
-// library header.
+// sectors reach inboard of ri to fuse to the tube); the single bore below
+// removes that material, exactly as designs/nuggs's straight does with
+// nuggs_bore_cut. Here the straight bore cut is the swept bore, which follows
+// the tube through the corner. See the library header.
 // ---------------------------------------------------------------------------
 module nuggs_elbow() {
     difference() {
         union() {
-            // Inlet port at z = 0, sectors projecting DOWN to z_tip (the part
-            // stands on those sector tips — this is the bed contact).
+            // Inlet port at the inlet coupling face (z = 0), sectors projecting
+            // DOWN to z_tip (the part stands on those sector tips — bed contact).
             nuggs_port(cfg);
-            // The whole tube body: inlet leg + bend + outlet leg, one lofted
-            // solid the two ports fuse to over their full-round shells.
-            elbow_solid(ro, 0, lead_in);
-            // Outlet port at the far end of the outlet leg, mirrored so its
-            // sectors project outward (away from the tube), same idiom as the
-            // straight's second port.
+            // The swept tube, capped flush at both coupling faces; the ports fuse
+            // to its straight stub ends exactly as they do to the straight's tube.
+            elbow_solid(ro);
+            // Outlet port at the outlet coupling face, on the tilted outlet axis,
+            // mirrored so its sectors project outward (away from the tube) —
+            // same idiom as the straight's second port.
             translate(bend_end) rotate([0, bend_angle, 0])
-                translate([0, 0, lead_in]) mirror([0, 0, 1]) nuggs_port(cfg);
+                mirror([0, 0, 1]) nuggs_port(cfg);
         }
-        // ONE continuous bore, lofted the same way as the body so the interior
-        // is smooth end to end, overshooting past both port mouths.
-        elbow_solid(ri, -port_proj - 2, lead_in + port_proj + 2);
+        // ONE continuous bore, swept the same way and overrunning both ends.
+        elbow_solid(ri, bore_over);
         // Edge break at both bore mouths.
         translate([0, 0, -port_proj]) bore_lead(0.001);
         translate(bend_end) rotate([0, bend_angle, 0])
-            translate([0, 0, lead_in + port_proj]) mirror([0, 0, 1])
-                bore_lead(0.001);
+            translate([0, 0, -port_proj]) mirror([0, 0, 1]) bore_lead(0.001);
     }
 }
 
@@ -244,12 +253,12 @@ module nuggs_elbow() {
 // Two elbows coupled into a 90 deg corner: the intended way to turn a full
 // right angle without bore support. Review preview only — each half prints as
 // the single `elbow` part. The second elbow is mated to the first's outlet at
-// the insertion clocking (half a pitch) and rotated a quarter turn in the
-// bend plane to sweep the corner the rest of the way.
+// the insertion clocking (half a pitch) and turned a quarter turn in the bend
+// plane to sweep the corner the rest of the way.
 module pair() {
     color("#e8b7c8") nuggs_elbow();
     translate(bend_end) rotate([0, bend_angle, 0])
-        translate([0, 0, lead_in]) rotate([0, 0, nuggs_pitch(cfg) / 2])
+        rotate([0, 0, nuggs_pitch(cfg) / 2])
             mirror([0, 0, 1]) color("#cdd6e0") nuggs_elbow();
 }
 

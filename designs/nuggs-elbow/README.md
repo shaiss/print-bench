@@ -24,7 +24,7 @@ any 0–90° turn in any plane.
 One printable part: a bent tube with a NUGGS port at each end, printed as a
 single piece.
 
-- `elbow` — the 45° elbow (approx. 144 × 95 × 185 mm envelope; ~148 g at the
+- `elbow` — the 45° elbow (approx. 134 × 95 × 161 mm envelope; ~126 g at the
   slicer defaults below). Inherits every coupling dimension from the NUGGS
   standard (`lib/nuggs-coupling.scad`): 80 mm bore, 84.8 mm tube OD, 96.8 mm
   coupling-ring OD.
@@ -66,7 +66,7 @@ sections; override on the command line with `-D 'bend_angle=60'`.
 |---|---|---|
 | `bend_angle` | 45° | Turn angle of the elbow. 45° is the supportless maximum; up to 90° is allowed but needs bore support. |
 | `bend_radius` | 120 mm | Centerline radius of the bend (~1.5× bore). Gentler = shallower overhang; the bore stays a full circle regardless. |
-| `lead_in` | 30 mm | Straight run past each port collar — clears the coupling ring and gives a grip. |
+| `port_stub` | 16 mm | Straight full-round shell each port fuses to, past the coupling collar (also a short grip). |
 | `bore_d` | 80 mm | Internal bore, the headline number. A NUGGS-standard value; asserted ≥ 70 mm (welfare floor). |
 | `wall` | 2.4 mm | Tube shell thickness (6 perimeters at a 0.4 mm nozzle). |
 | `port_tol` | 0.30 mm | The coupling fit clearance — owned by the NUGGS standard, tuned on the `nuggs` coupon, not here. |

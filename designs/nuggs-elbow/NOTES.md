@@ -21,7 +21,10 @@ lug_deg 40, rib_h 1.0, rib_w 2.4, rib_deg 12, twist_deg 14, bite 0.8,
 port_tol 0.30, nozzle 0.4 (mm/deg). Derived: tube OD 84.8, coupling-ring OD 96.8.
 
 Bend (from the intake decision, parameterized): `bend_angle` default **45°**,
-`bend_radius` 120 mm (~1.5× bore), `lead_in` 30 mm per end.
+`bend_radius` 120 mm (~1.5× bore). The brief's assumed ~30 mm straight lead-in
+per end was dropped to a `port_stub` = 16 mm (just the straight shell each port
+fuses to, plus a short grip) — see the construction note and the #116 amendment
+comment; it is non-blocking and non-material (the deliverable is unchanged).
 
 ## Key decision — the 45° default (the brief's flagged printability crux)
 
@@ -44,35 +47,39 @@ adopted into the #116 contract, not a new decision.
 No split-variant was needed: the ~144 × 95 mm footprint fits both target beds
 (Bambu P2S 256², H2C 335 × 325), per the owner's bed-size note on #116.
 
-## Key decision — construction (one lofted body, not primitives butted)
+## Key decision — construction (one BOSL2 path_sweep, the Manifold saga)
 
-First attempt built the outer body as `cylinder` legs + a `rotate_extrude` bend
-unioned with a small tangent overlap (`jov`). Two failures, each caught by a
-gate, not by eye:
+The tube (and, subtracted, the bore) is **one BOSL2 `path_sweep`** of the round
+section along the centerline path (inlet stub → arc → outlet stub). It is a
+single stitched polyhedron — no booleans inside the sweep, no coincident faces —
+capped perpendicular to the tangent at each end, which is exactly the coupling-
+face plane. The two ports fuse onto the straight `port_stub` ends exactly as
+they fuse to `designs/nuggs`'s straight `tube()`.
 
-1. **Disconnected pieces (Volumes: 4).** The bend's sweep-centre offset
-   (`+bend_radius` in x) was dropped, landing the bend 120 mm off in −x,
-   detached from both legs. CGAL still reported `Simple: yes` — the render gate
-   (`Volumes`) and the contact-sheet preview caught it, the syntax check would
-   not have.
-2. **Non-manifold edges (printcheck CRITICAL, score 43, not watertight).** Where
-   a straight `cylinder` leg meets the `rotate_extrude` bend they are *coaxial
-   and tangent* at the junction, so the overlap produced coincident-but-
-   mismatched faces on export — the classic trap this repo's libraries warn
-   about. The slice still succeeded (slicers repair it), so only printcheck's
-   watertightness check flagged it.
+Getting here took four constructions, and the important lesson is that **only
+CI's Manifold backend told the truth** — every failed build passed the local
+CGAL render:
 
-Fix: build the **whole tube — inlet leg, bend, outlet leg — as one lofted solid**
-(`elbow_solid`), a chain of `hull()` segments that *share* their boundary discs
-(the top disc of one segment IS the bottom disc of the next, same primitive,
-same tessellation). Straights need no subdivision (one hull spans them); only
-the arc is stepped, by `arc_step` (2°). The bore is lofted the same way and
-subtracted once, so the interior is smooth end to end with no junction ledge.
-Result: `Simple: yes`, `Volumes: 2`, watertight, one body, **76/100**.
+1. **hull-of-discs loft → 19 shells (Manifold), 1 body (CGAL).** Segments that
+   only *share a face* stay separate volumes for Manifold; CGAL's exact kernel
+   merges them. CGAL said watertight/76; Manifold said 51/100, CRITICAL,
+   19 disconnected shells. (This is the exact divergence `nuggs-yard`'s curve
+   construction documents.)
+2. **`cylinder` stub butted onto a `rotate_extrude` bend → non-manifold edge at
+   the tangent.** A straight primitive tangent to a curve never quite coincides
+   with it; the near-coincident band exports non-manifold. 1 edge with the port
+   fused straight to the curve, *more* with an explicit stub.
+3. **overlapping oriented cylinders → non-manifold on export.** The many
+   cylinder-intersection curves tessellate into edges shared by >2 triangles.
+4. **BOSL2 `path_sweep` → clean.** One polyhedron, no junction to go wrong.
+   watertight, one body, **76/100** under CGAL — and, by construction (a single
+   stitched mesh + the same port-on-straight-stub union nuggs's straight uses),
+   expected clean under Manifold. The `normal = [0,1,0]` argument locks the
+   section frame to the bend plane so the sweep does not twist.
 
-The loft's thin cross-section discs were bumped from `h = 0.01` to `h = 0.05` to
-drop zero-area export triangles from 13 → 3 (a mesh-cleanliness WARNING, not a
-gate failure).
+Takeaway for the next curved design here: **verify on the Manifold backend, not
+just CGAL** (`OPENSCAD_BIN=openscad-nightly OPENSCAD_ARGS=--backend=manifold`, or
+push and read CI), and reach for `path_sweep` before hand-rolled unions.
 
 ## Print orientation
 
@@ -82,16 +89,17 @@ orientation is as good as any axis-aligned alternative." Small bed-contact
 patch (~530 mm²) → print with a brim. Bend-belly overhang tops out at the
 designed 45° (2 % of surface, WARNING only).
 
-## Verification (measured off the exported production mesh, $fa=2/$fs=0.5)
+## Verification (measured off the exported mesh)
 
-- Worst-point **bore ø = 79.99 mm** along the whole path (floor 70, target 80) —
+- Worst-point **bore ø = 79.83 mm** along the whole path (floor 70, target 80) —
   the bore never pinches through the bend. Measured as the minimum distance from
-  any mesh vertex to the centerline polyline.
-- **Tube OD = 85.10 mm** (target 84.8; 0.3 mm faceting, sub-nozzle).
+  any mesh vertex to the centerline polyline (rises toward 80 at production
+  `tube_fn`).
+- **Tube OD = 85.10 mm** (target 84.8; sub-nozzle faceting).
 - **Coupling-ring OD = 96.80 mm** — exactly `nuggs_r_out(cfg) × 2`, i.e. the
   standard, so it mates with every NUGGS module by construction.
 - `gate.sh --slice nuggs-elbow` exits 0 (watertight, no CRITICAL, PrusaSlicer
-  test-slice ~148 g).
+  test-slice ~126 g). Envelope 134 × 95 × 161 mm — fits both target beds.
 
 ## Coupling fit — not re-tuned here
 

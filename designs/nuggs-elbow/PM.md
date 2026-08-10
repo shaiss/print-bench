@@ -77,5 +77,6 @@ currently ships the deterministic OpenSCAD previews (`hero`, `bore`,
 | Date | Decision | Reason |
 |---|---|---|
 | 2026-08-10 | `bend_angle` default 45°, 90° = two coupled elbows | Supportless enclosed-bore ceiling (#34); protects N2/N3 |
-| 2026-08-10 | One lofted body (`elbow_solid`), not cylinder+rotate_extrude butted | Tangent junction of mismatched primitives was non-manifold (printcheck CRITICAL); shared-disc loft is watertight |
+| 2026-08-10 | Tube built as one BOSL2 `path_sweep`; ports fuse to a 16 mm `port_stub` | Three hand-rolled builds (hull loft, cylinder+rotate_extrude, overlapping cylinders) passed CGAL but failed CI's Manifold backend (19 shells / non-manifold). A single swept polyhedron has no junction to fail. |
+| 2026-08-10 | Brief's ~30 mm lead-in dropped to a 16 mm port stub | Non-material, non-blocking assumption; the Manifold-clean single-sweep construction has no straight leg fused to the bend. Amended on #116. |
 | 2026-08-10 | No new coupon | No new mating clearance; the port fit is the standard's, gated by the lib |
