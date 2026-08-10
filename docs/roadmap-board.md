@@ -98,10 +98,12 @@ it predictable:
   unset; two or more → the sync logs a `::notice::` and leaves it unset until the
   ambiguity is resolved (a value in `<n>` outside the Fibonacci set is ignored).
 
-Nothing files `points-<n>` automatically yet — a human triaging applies it today;
-wiring a producer (e.g. `/chunk-issue` sizing each one-PR child) is slice 2
-part 4. The label is an opt-in seam: an issue without one simply carries no
-estimate.
+There are two producers of the `points-<n>` label. **`/chunk-issue`** estimates
+each genuinely-small (auto-armed) one-PR child it files with one of `points-1`,
+`points-2`, or `points-3` (slice 2 part 4), so a chunked epic's children land on the board already
+sized — an estimate of 5+ is its signal to split the piece further, not to file
+it. And a **human triaging** applies the label by hand to anything else. Either
+way the label is an opt-in seam: an issue without one simply carries no estimate.
 
 ## One-time UI steps (views + milestones)
 
@@ -142,15 +144,18 @@ GitHub exposes neither to `gh`. Set these up once in the UI:
   notice and does nothing). The initial `Stage: Backlog` is bound to **item
   creation**, not to which event won the race, so a re-add or an out-of-order
   opened/labeled run never clobbers a card a human moved.
-- **Slice 2 part 3 (this):** story-point sync + the one-time UI steps that finish
-  the board. `roadmap-sync.yml` now also reads a single `points-<n>` label
-  (Fibonacci 1/2/3/5/8) and mirrors it to **Story points** (see below), and this
+- **Slice 2 part 3 (done, #170):** story-point sync + the one-time UI steps that
+  finish the board. `roadmap-sync.yml` reads a single `points-<n>` label
+  (Fibonacci 1/2/3/5/8) and mirrors it to **Story points** (see above), and this
   doc documents the **Needs-decision saved view**, the **Roadmap view**, and
   **milestones** — the pieces the `gh` CLI cannot script (view layout and
   milestones are UI-only).
-- **Slice 2 part 4+ (follow-ups on #148):** wire a size producer to the
-  `points-<n>` label (e.g. `/chunk-issue` estimating each one-PR child) so points
-  land without hand-labelling.
+- **Slice 2 part 4 (this):** the `points-<n>` label's first automatic producer.
+  `/chunk-issue` now estimates each genuinely-small (auto-armed) one-PR child it
+  files with a `points-<n>` label (`<n>` = 1, 2, or 3), so a chunked epic's children reach the board
+  already sized — closing the loop end to end: `/ship-issue` declines an oversized
+  issue → `/chunk-issue` splits it into estimated, armed children → the backlog
+  burn ships them → the board reflects size and status throughout.
 
 ## How it maps onto the existing loop
 
