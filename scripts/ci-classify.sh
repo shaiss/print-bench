@@ -9,11 +9,11 @@
 # time the classifier moved. Now the workflow and the local mirror share this
 # implementation — they cannot disagree.
 #
-#   Emits, one `key=value` per line on STDOUT (the 12 outputs ci.yml's
+#   Emits, one `key=value` per line on STDOUT (the 13 outputs ci.yml's
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests,
 #     backlog_burn_tests, telemetry_tests, ci_gates_tests, styles, gate,
-#     gate_designs, regen, regen_designs
+#     gate_designs, regen, regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
 # Usage:
@@ -43,11 +43,11 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 
 # --- classify: the shared decision -------------------------------------------
 # Reads the changed-file list from stdin (one path per line), reads the working
-# tree for existence/ARCHIVED/style.conf facts, and prints the 12 outputs.
+# tree for existence/ARCHIVED/style.conf facts, and prints the 13 outputs.
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
-  local bbtests=false tmtests=false cgtests=false
+  local bbtests=false tmtests=false cgtests=false docs_standards=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -55,7 +55,7 @@ classify() {
     # Default-branch push (or any non-PR trigger): run everything, gate and
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
-    bbtests=true; tmtests=true; cgtests=true
+    bbtests=true; tmtests=true; cgtests=true; docs_standards=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -185,6 +185,17 @@ classify() {
         .github/workflows/ci.yml) cgtests=true ;;
       esac
       case "$f" in
+        # The docs/page standards gate (scripts/docs-standards-check.sh): the
+        # architecture docs, the How-it-works site page and its diagrams. A pure
+        # presence/wiring check — no OpenSCAD, no toolchain — so a docs-only PR
+        # runs THIS and nothing heavy. Selected only when the docs, the page's
+        # own source, or the gate itself move.
+        docs/*|site/lib/templates.mjs|site/lib/diagrams.mjs|site/build.mjs|\
+        site/README.md|site/test/how-it-works.test.mjs|site/test/diagrams.test.mjs|\
+        scripts/docs-standards-check.sh|.github/workflows/ci.yml)
+          docs_standards=true ;;
+      esac
+      case "$f" in
         # tools/lineage is here and tools/printcheck is not: check.sh RUNS the
         # lineage resolver and fails on what it reports, while printcheck only
         # reads exported STLs after the fact. site/, vercel.json and
@@ -292,6 +303,7 @@ classify() {
   echo "gate_designs=$designs"
   echo "regen=$regen"
   echo "regen_designs=$regen_designs"
+  echo "docs_standards=$docs_standards"
 }
 
 # --- --local: compute the changed-file list the way /preflight scopes --------
@@ -350,11 +362,23 @@ selftest() {
   }
 
   local out
-  # 1. Docs/skills only — matches no case, so nothing runs or gates.
-  out="$(run "docs/derivative-designs.md" ".claude/skills/preflight/SKILL.md")"
+  # 1. Docs only — no render, no gate, no OpenSCAD (scad=false), but the
+  #    lightweight docs/page standards gate is selected (docs_standards=true).
+  #    Skills-only still matches nothing.
+  out="$(run "docs/derivative-designs.md")"
   check "docs-only" "$out" \
     "scad=false" "gate=false" "gate_designs=" "regen=false" "styles=false" \
-    "printcheck_tests=false"
+    "printcheck_tests=false" "docs_standards=true"
+  out="$(run ".claude/skills/preflight/SKILL.md")"
+  check "skills-only" "$out" \
+    "scad=false" "gate=false" "docs_standards=false" "printcheck_tests=false"
+
+  # 1a. The How-it-works page's own source selects the docs/page standards gate
+  #     (and, being under site/, the soft-infra "run but gate nothing" set) —
+  #     without OpenSCAD gating any design.
+  out="$(run "site/lib/diagrams.mjs")"
+  check "page-source" "$out" \
+    "docs_standards=true" "scad=true" "gate=true" "gate_designs=" "regen=false"
 
   # 2. printcheck is geo-infra (it judges every STL), so a printcheck change
   #    gates ALL designs and forces its own tests — but moves no pixels
@@ -362,7 +386,7 @@ selftest() {
   out="$(run "tools/printcheck/src/printcheck/foo.py")"
   check "printcheck-only" "$out" \
     "printcheck_tests=true" "gate=true" "gate_designs=ALL" "scad=false" \
-    "regen=false" "stylelift_tests=false"
+    "regen=false" "stylelift_tests=false" "docs_standards=false"
 
   # 3. geo-infra (a lib change) — gates ALL, forces printcheck tests, is
   #    regen-ALL and a style-gate trigger.

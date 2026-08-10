@@ -108,6 +108,10 @@ reviewed after every change, and reviewer personas (printability, and
 fitness-for-purpose) challenge the design over pull requests until it
 merges. The full workflow and conventions live in [CLAUDE.md](CLAUDE.md).
 
+For how the system is put together — the generic CI/automation platform
+separated from the 3D-print design layer, written as the basis for a reusable
+template — see [docs/architecture/](docs/architecture/README.md).
+
 ## Operating the automation
 
 Most of this repo's CI drives itself, but a few controls are exposed to
@@ -209,6 +213,11 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and
     `/preflight` runs it `--local`, so the local mirror can't drift
+  - `docs-standards-check.sh` — the standards gate for the architecture docs
+    (`docs/architecture/`) and the How-it-works site page and its diagrams:
+    presence/wiring only, no OpenSCAD, selected by `ci-classify.sh` when a
+    change touches `docs/`, the page's source, this gate script, or the CI
+    workflow (its own light `docs-standards` CI job, with a `--selftest`)
   - `lineage.sh` — who derives from whom: validates the `derives.conf`
     records, answers what a change has to re-gate, and re-proves the
     derivative gate can still fire (`selftest`)

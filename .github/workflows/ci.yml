@@ -69,6 +69,7 @@ jobs:
       gate_designs: ${{ steps.filter.outputs.gate_designs }}
       regen: ${{ steps.filter.outputs.regen }}
       regen_designs: ${{ steps.filter.outputs.regen_designs }}
+      docs_standards: ${{ steps.filter.outputs.docs_standards }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -659,6 +660,32 @@ jobs:
         run: pip install -e 'tools/ci-gates[test]'
       - name: Run tests
         run: python -m pytest tools/ci-gates/tests -q
+
+  docs-standards:
+    # The standards gate for the architecture docs and the How-it-works site
+    # page (scripts/docs-standards-check.sh): the three architecture docs exist
+    # and cross-link, the page is exported/emitted/in the nav and traces back to
+    # the docs, and its four diagrams are authored inline and used. Pure
+    # presence/wiring — grep and test, no OpenSCAD, no toolchain — so a docs-only
+    # PR runs THIS and nothing heavy. Selected by ci-classify.sh's
+    # docs_standards output only when the docs, the page's source, or the gate
+    # itself change; skipped otherwise (ci-ok treats a classifier-skip as OK,
+    # the same as every other selective job here).
+    name: Docs and page standards
+    needs: changes
+    if: needs.changes.outputs.docs_standards == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Prove the gate still fires, then run it
+        # --selftest first: the gate is presence-only, so a weakened assertion
+        # would pass everything silently. The selftest plants each failure and
+        # requires the gate to catch it, then the real check gates the tree.
+        run: |
+          ./scripts/docs-standards-check.sh --selftest
+          ./scripts/docs-standards-check.sh
 
   style-gate:
     # Every style pack must stay internally consistent (style.scad and
@@ -1505,6 +1532,7 @@ jobs:
       - backlog-burn-tests
       - telemetry-tests
       - ci-gates-tests
+      - docs-standards
       - style-gate
       - design-docs
       - site-build

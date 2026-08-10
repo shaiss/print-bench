@@ -7,6 +7,11 @@ import { hasConfigurator } from "./model.mjs";
 import { humanSize } from "./releases.mjs";
 import { memberProfile, memberTeams } from "./profile.mjs";
 import { contributorRow, reviewedBy, historySlot } from "./teams.mjs";
+import {
+  journeyMap,
+  infographicNonTechnical,
+  pipelineSlides,
+} from "./diagrams.mjs";
 
 /**
  * The product page's media stage (the media rework, PR #159): one large
@@ -74,6 +79,19 @@ ${thumbs}
 const SITE_NAME = "print-bench";
 const TAGLINE = "Parametric 3D-printable designs, gated before they ship.";
 
+// Cache-busting for the shared CSS/JS. vercel.json caches /assets/* for a day
+// with stable filenames, so without this a returning visitor keeps an old
+// site.css after a deploy — and a page whose new markup (e.g. inline-SVG
+// diagrams) needs new CSS rules renders unstyled. build.mjs sets this to a hash
+// of the current site.css+site.js, so the query changes only when they do.
+let ASSET_VERSION = "";
+export function setAssetVersion(v) {
+  ASSET_VERSION = String(v || "");
+}
+function asset(path) {
+  return ASSET_VERSION ? `${path}?v=${ASSET_VERSION}` : path;
+}
+
 /**
  * Applied before first paint so a stored theme choice never flashes.
  * Kept inline (and tiny) for that reason — site.js only wires the button.
@@ -91,7 +109,7 @@ export function layout({ title, description, body, canonicalPath = "/", extraHea
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description || TAGLINE)}">
 <meta property="og:type" content="website">
-<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="${asset("/assets/site.css")}">
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <script>${THEME_BOOTSTRAP}</script>
 ${extraHead}
@@ -105,6 +123,7 @@ ${extraHead}
       <a href="/"${canonicalPath === "/" ? ' aria-current="page"' : ""}>Designs</a>
       <a href="/styles/"${canonicalPath.startsWith("/styles") ? ' aria-current="page"' : ""}>Styles</a>
       <a href="/people/"${canonicalPath.startsWith("/people") ? ' aria-current="page"' : ""}>People</a>
+      <a href="/how-it-works/"${canonicalPath.startsWith("/how-it-works") ? ' aria-current="page"' : ""}>How it works</a>
       <a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">Source ↗</a>
       <button class="theme-toggle" type="button" aria-label="Switch theme">☾</button>
     </nav>
@@ -119,7 +138,7 @@ ${body}
     <span><a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">shaiss/print-bench</a></span>
   </div>
 </footer>
-<script src="/assets/site.js" defer></script>
+<script src="${asset("/assets/site.js")}" defer></script>
 ${extraScript}
 </body>
 </html>
@@ -707,6 +726,361 @@ ${cards || '<p class="muted">No one registered yet.</p>'}
     canonicalPath: "/people/",
     extraHead: importMap,
     extraScript: studioData,
+  });
+}
+
+/**
+ * The "How it works" page (behind-the-scenes of the pipeline).
+ *
+ * Consistent with the site's provenance rule: this page invents no facts. Its
+ * copy is a presentation of the committed, CI-gated architecture docs
+ * (`docs/architecture/*.md`), and every mechanism it names links to the real
+ * file that implements it — the same way the index/styles/people heroes are
+ * hand-authored prose over committed data. Static markup, no scripts of its
+ * own; the diagrams are CSS/HTML boxes-and-rules so they theme and reflow with
+ * the rest of the site rather than shipping an external diagram runtime.
+ *
+ * `designCount` is the real number of published designs (build.mjs passes
+ * designs.length); `githubBase` is the same blob/main base every source link
+ * on the site uses.
+ */
+export function howItWorksPage({ designCount, githubBase }) {
+  // Link to a file in the repo, rendered as its path in code voice — the shape
+  // used across the rail blocks on other pages. githubBase is a caller input,
+  // so escape the whole URL for the attribute, not just the visible label.
+  const gh = (path, label) =>
+    `<a href="${escapeHtml(`${githubBase}/${path}`)}" rel="noopener noreferrer"><code>${escapeHtml(label || path)}</code></a>`;
+
+  const section = (id, label, heading, inner) =>
+    `<section class="how-sec" id="${id}" aria-labelledby="${id}-h">
+    <p class="panel-label">${escapeHtml(label)}</p>
+    <h2 id="${id}-h">${escapeHtml(heading)}</h2>
+${inner}
+  </section>`;
+
+  const chips = (items) =>
+    `<ul class="chiprow">${items.map((c) => `<li class="chip">${escapeHtml(c)}</li>`).join("")}</ul>`;
+
+  // A diagram in a captioned figure. `wide` diagrams scroll horizontally on
+  // narrow screens rather than shrinking their labels to nothing; `svg` is
+  // trusted authored markup from diagrams.mjs, `caption` is a literal.
+  const fig = (svg, caption, { wide = false } = {}) =>
+    `<figure class="diagram${wide ? " diagram-scroll" : ""}">
+      <div class="diagram-hold">${svg}</div>
+      <figcaption>${caption}</figcaption>
+    </figure>`;
+
+  // An escaped "read the source" link (githubBase is a caller input).
+  const srcLink = (path, k) =>
+    `<a class="how-source-link" href="${escapeHtml(`${githubBase}/${path}`)}" rel="noopener noreferrer"><span class="how-source-k">${escapeHtml(k)}</span><span class="how-source-v">${escapeHtml(path)}</span></a>`;
+
+  // The step-through carousel for the pipeline. It ships as a stacked document
+  // — every slide visible, its step labelled — so without JavaScript nothing is
+  // unreachable; site.js reveals the controls and shows one slide at a time
+  // (the same progressive-enhancement shape as the product-page media stage).
+  const carousel = (slides) => `<div class="carousel" data-carousel aria-roledescription="carousel" aria-label="The pipeline, step by step">
+      <ol class="carousel-track">
+${slides
+  .map(
+    (s, i) =>
+      `        <li class="carousel-slide" role="group" aria-roledescription="slide" aria-label="${escapeHtml(`${i + 1} of ${slides.length}: ${s.title}`)}">
+          <div class="carousel-hold">${s.svg}</div>
+          <div class="carousel-cap">
+            <p class="carousel-step">Step ${i + 1} of ${slides.length}</p>
+            <h4>${escapeHtml(s.title)}</h4>
+            <p>${escapeHtml(s.note)}</p>
+          </div>
+        </li>`
+  )
+  .join("\n")}
+      </ol>
+      <div class="carousel-nav" data-carousel-nav hidden>
+        <button class="carousel-btn" type="button" data-carousel-prev aria-label="Previous step">&larr;</button>
+        <div class="carousel-dots" role="tablist" aria-label="Pipeline steps">
+${slides
+  .map(
+    (s, i) =>
+      `          <button class="carousel-dot${i === 0 ? " sel" : ""}" type="button" role="tab" data-carousel-dot="${i}" aria-selected="${i === 0 ? "true" : "false"}" aria-label="${escapeHtml(`Step ${i + 1}: ${s.title}`)}"></button>`
+  )
+  .join("\n")}
+        </div>
+        <button class="carousel-btn" type="button" data-carousel-next aria-label="Next step">&rarr;</button>
+      </div>
+    </div>`;
+
+  // ---- Section 1: the two layers, as a stacked architecture diagram --------
+  const layers = `<div class="layerstack">
+      <div class="layer layer-domain">
+        <p class="layer-tag">Domain layer — the part you replace</p>
+        <h3>3D-print / OpenSCAD design</h3>
+        <p>The geometry, the printability gates, the co-design loop. Nothing here
+        is generic — swap it and the same machine builds something else.</p>
+        ${chips(["design unit", "gate stack", "shared libraries", "styles & lineage", "co-design loop"])}
+      </div>
+      <div class="seams">
+        <span class="seams-tag">3 seams</span>
+        <div class="seam"><b>Classify</b><span>which gates run for this diff</span></div>
+        <div class="seam"><b>Regenerate</b><span>rebuild derived files, commit them back</span></div>
+        <div class="seam"><b>Gate</b><span>run whatever was selected</span></div>
+      </div>
+      <div class="layer layer-platform">
+        <p class="layer-tag">Platform layer — generic, the template</p>
+        <h3>CI &amp; automation</h3>
+        <p>Selects its own checks, keeps derived files honest, proposes new gates,
+        and turns issues into draft PRs on its own. It never mentions millimetres.</p>
+        ${chips(["gate selection", "regenerate-and-commit", "smart CI", "autonomy engine", "telemetry"])}
+      </div>
+    </div>`;
+
+  const seamTable = `<div class="prose how-table">
+      <div class="table-scroll"><table>
+        <thead><tr><th>Seam</th><th>Platform side</th><th>Domain side</th></tr></thead>
+        <tbody>
+          <tr><td><b>Classification</b></td><td>a CI job asks "what runs for this diff?"</td><td>${gh("scripts/ci-classify.sh", "ci-classify.sh")} maps changed paths → gates</td></tr>
+          <tr><td><b>Regeneration</b></td><td>a job commits derived artifacts back</td><td>${gh("scripts/render.sh", "render.sh")}, ${gh("scripts/gallery.sh", "gallery.sh")} produce them</td></tr>
+          <tr><td><b>Gating</b></td><td>the gate job runs the selected checks</td><td>${gh("scripts/gate.sh", "gate.sh")}, ${gh("scripts/check.sh", "check.sh")} are the gates</td></tr>
+        </tbody>
+      </table></div>
+    </div>`;
+
+  const s1 = section(
+    "layers",
+    "The shape of it",
+    "Two machines in one repo",
+    `<p class="how-lede">print-bench is a generic pipeline with a 3D-print workshop
+    bolted on. The whole design is drawn so those two halves come apart — which
+    is what makes the CI half reusable as a template. They meet at exactly three
+    seams.</p>
+    ${layers}
+    ${seamTable}
+    <p class="how-more">Full write-up: ${gh("docs/architecture/README.md", "docs/architecture/README.md")}.</p>`
+  );
+
+  // ---- Section 2: the gate stack a change goes through ---------------------
+  const steps = [
+    ["render.sh", "Renders the STL and a 4-view contact sheet (including a bottom view, to catch overhangs and bed contact)."],
+    ["check.sh", "Fast pass: syntax-checks every model, CGAL-renders the library demos, and fires the guard / mate negative tests — the checks a render alone can't make."],
+    ["gate.sh --slice", "The real bar. Runs the printcheck analyzer (watertight, thin walls, overhangs) on each printable part, then test-slices it in PrusaSlicer."],
+    ["readme-gate.sh", "Every design ships a complete product page — pitch, embedded preview, print settings, tunable parameters."],
+    ["style-check.sh", "If the design declares a style, its geometry is held to that style's measured rules."],
+  ];
+  const stepList = `<ol class="steplist">
+${steps
+  .map(
+    ([name, desc], i) =>
+      `      <li class="step"><span class="step-n">${i + 1}</span><div class="step-body"><h4><code>${escapeHtml(name)}</code></h4><p>${escapeHtml(desc)}</p></div></li>`
+  )
+  .join("\n")}
+    </ol>`;
+  const s2 = section(
+    "gates",
+    "What a change goes through",
+    "A design is done when it survives the gate — not when it renders",
+    `<p>Push a change to a model and the pipeline gates only the designs it
+    touches (plus anything derived from them). The check that actually decides is
+    <code>gate.sh --slice</code>: a model that renders cleanly can still fail to
+    be watertight, or fail to slice.</p>
+    ${stepList}
+    <div class="notice"><strong>One local command mirrors all of it.</strong>
+    ${gh(".claude/skills/preflight/SKILL.md", "/preflight")} runs this exact set,
+    scoped the way CI scopes it, and answers "would CI pass?" before you push.</div>
+    <p class="how-more">The domain layer in full: ${gh("docs/architecture/design-workflow.md", "docs/architecture/design-workflow.md")}.</p>`
+  );
+
+  // ---- Section 3: derived files are CI's job -------------------------------
+  const regenCards = `<div class="how-cards">
+      <article class="how-card"><h4>Input fingerprint</h4><p>A design re-renders only when its inputs actually changed; the stamp is written in the same commit as the artifacts, so it can't claim a freshness they don't have.</p></article>
+      <article class="how-card"><h4>Loop guard</h4><p>The commit-back re-triggers CI, so a non-reproducible renderer could push forever. The job recognises its own last commit and refuses a second push.</p></article>
+      <article class="how-card"><h4>Fork fallback</h4><p>CI can't push to a fork, so there it fails with the exact list of files to regenerate by hand — never a silent skip.</p></article>
+    </div>`;
+  const tokenTable = `<div class="prose how-table">
+      <div class="table-scroll"><table>
+        <thead><tr><th>Push</th><th>Token</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>regenerated artifacts → a PR</td><td><b>PAT</b></td><td>must re-trigger CI so the required checks attach to the commit that ships</td></tr>
+          <tr><td>a newly-approved gate</td><td><b>PAT</b></td><td>same — the enabled gate has to run</td></tr>
+          <tr><td>the telemetry roll-up</td><td><b>default token</b></td><td>must <em>not</em> re-trigger, or it would gate, record itself, and commit forever</td></tr>
+        </tbody>
+      </table></div>
+    </div>`;
+  const s3 = section(
+    "regenerate",
+    "Derived files are the pipeline's job",
+    "A committed image can never be older than its source",
+    `<p>Previews, animation GIFs, studio product shots, the gallery — anything
+    <em>derived</em> from a model — are not hand-committed. CI regenerates them in
+    the same run that gates the source and commits them back to the branch. So the
+    presence-only gates on those images stay honest: the picture beside a model
+    cannot depict geometry the model no longer has.</p>
+    ${regenCards}
+    <p>Committing back turns on a quirk worth stating plainly: a push made with
+    the default token triggers no workflow. The pipeline uses that fact in both
+    directions.</p>
+    ${tokenTable}
+    <p class="how-more">The platform layer in full: ${gh("docs/architecture/ci-platform.md", "docs/architecture/ci-platform.md")}.</p>`
+  );
+
+  // ---- Section 4: it decides what to run -----------------------------------
+  const s4 = section(
+    "selection",
+    "It decides what to run",
+    "Deterministic gate selection, one source of truth",
+    `<p>The <code>changes</code> job classifies a diff and every other job keys
+    off it — a docs-only change skips the render jobs, a one-design change gates
+    one design, an infra change gates everything. That decision lives in one
+    script, ${gh("scripts/ci-classify.sh", "ci-classify.sh")}, that both CI and
+    the local pre-push check run — so "would CI pass?" locally can't drift from
+    what CI does.</p>
+    <p>Above it sits <b>smart CI</b> (${gh("tools/ci-gates", "tools/ci-gates")}):
+    it detects checks that don't exist yet — a shell script with no shellcheck
+    gate, a new top-level directory the classifier doesn't cover — and proposes
+    them in a sticky PR comment a maintainer crosses with one command.</p>
+    <div class="notice"><strong>Skipped is not the same as passed.</strong>
+    GitHub treats a skipped required check as still-pending, so a single
+    aggregating <code>ci-ok</code> job gates the branch: it passes only when every
+    other job is green or was deliberately skipped. New blocking checks stay
+    proposals until a human opts in — nothing lands unannounced.</div>`
+  );
+
+  // ---- Section 5: it runs itself -------------------------------------------
+  const s5 = section(
+    "autonomy",
+    "It runs itself",
+    "From an idea in an issue to a draft PR",
+    `<p>A scheduled routine picks one opted-in issue and runs it to a draft PR for
+    a human to review. The reusable core is a <b>pure, tested selector</b>
+    (${gh("tools/backlog-burn", "tools/backlog-burn")}) that chooses at most one
+    issue per firing and excludes anything already claimed by a lock, an open PR,
+    or a human-decision hold. Three routines share that one selector, each pointed
+    at a different label:</p>
+    ${chips(["ship an issue", "run a design brief", "chunk an oversized issue"])}
+    <p>Two safety properties are load-bearing. <b>Arming takes two keys</b> — a
+    committed config <em>and</em> a live repo switch must agree, so a clone can't
+    silently arm it and a human can disarm it in seconds. And when an agentic run
+    hits a yes/no question only a human should answer, it <b>parks the issue</b>
+    with a label and stops, rather than guessing.</p>`
+  );
+
+  // ---- Section 6: it measures itself ---------------------------------------
+  const s6 = section(
+    "telemetry",
+    "It measures itself",
+    "Every gate run leaves a record",
+    `<p>Each gate run writes one JSON record — printcheck scores, per-design wall
+    time, preview-budget headroom, what was skipped and why — and default-branch
+    runs append it to a committed log
+    (${gh("telemetry/log.ndjson", "telemetry/log.ndjson")} →
+    ${gh("telemetry/REPORT.md", "telemetry/REPORT.md")}). The self-running
+    features read that log, so their decisions rest on measured history rather
+    than a guess.</p>`
+  );
+
+  // ---- Closer: provenance, including this very page ------------------------
+  const s7 = section(
+    "provenance",
+    "One more thing",
+    "This page is built the same way everything here is",
+    `<p>The site invents no content: every word and image traces to a committed,
+    CI-gated file or a first-party record. That holds for this page too — its copy
+    is a presentation of the architecture docs in the repo, and each mechanism
+    above links to the file that implements it. A local link that doesn't resolve
+    fails the build rather than 404ing in production.</p>
+    <div class="how-source">
+      ${srcLink("docs/architecture/README.md", "Overview")}
+      ${srcLink("docs/architecture/ci-platform.md", "CI platform")}
+      ${srcLink("docs/architecture/design-workflow.md", "Design layer")}
+      ${srcLink(".github/workflows/ci.yml", "The pipeline")}
+    </div>`
+  );
+
+  // The newcomer's map — first thing after the hero, so someone landing here
+  // cold sees the whole path before any detail.
+  const sJourney = section(
+    "journey",
+    "New here?",
+    "The path you'll take",
+    `<p>Bring an idea or claim a queued one, and the repo walks you from a blank
+    directory to a merged, printable design. Every station is one command or one
+    skill; the review round in the middle repeats until the gates pass.</p>
+    ${fig(journeyMap(), "The route from landing on the site to a merged design. Stations 4–6 are the co-design loop, run until /preflight comes back green.", { wide: true })}`
+  );
+
+  // The plain-language framing, for a reader who wants the gist, not the gears.
+  const sPlain = section(
+    "plain",
+    "The short version",
+    "From an idea to a part in your hand",
+    `<p>Strip out the engineering and this is the whole story: you describe what
+    you need, an AI helps you model it, the machine proves it will actually print,
+    and you download a file that's ready to slice.</p>
+    ${fig(infographicNonTechnical(), "No jargon: describe it, design it together, let the checks confirm it prints, then print it.", { wide: true })}`
+  );
+
+  // The pipeline as a step-through carousel (replacing the one dense chart):
+  // the reader walks the flow a slide at a time.
+  const sFlow = section(
+    "flow",
+    "Step through it",
+    "Follow a change through the machine",
+    `<p>The same pipeline, one step at a time — from the diff you push to the
+    single gate that lets it merge, then how the machine regenerates and runs
+    itself. Step through with the arrows or the dots.</p>
+    ${carousel(pipelineSlides())}`
+  );
+
+  // Three tabs — one concern on screen at a time, the same pattern the product
+  // pages use. Grounding first (what it is, the plain story, your path), then
+  // the mechanics, then how it runs itself. Ships as a stacked document: the
+  // tab bar is hidden and every panel visible until site.js takes over, so
+  // nothing is unreachable without JavaScript.
+  const tabs = [
+    { id: "overview", label: "Overview", body: `${s1}\n${sPlain}\n${sJourney}` },
+    { id: "pipeline", label: "The pipeline", body: `${sFlow}\n${s2}\n${s3}\n${s4}` },
+    { id: "runs", label: "Runs itself", body: `${s5}\n${s6}\n${s7}` },
+  ];
+
+  const tabBar = `<div class="design-tabs" role="tablist" data-tabs hidden>
+${tabs
+  .map(
+    (t, i) =>
+      `    <button class="design-tab" role="tab" type="button" id="howtab-${t.id}" aria-controls="${t.id}" aria-selected="${i === 0 ? "true" : "false"}">${escapeHtml(t.label)}</button>`
+  )
+  .join("\n")}
+  </div>`;
+
+  const panels = tabs
+    .map(
+      (t) => `  <section class="tab-panel" id="${t.id}" role="tabpanel" aria-labelledby="howtab-${t.id}">
+    <p class="panel-label">${escapeHtml(t.label)}</p>
+${t.body}
+  </section>`
+    )
+    .join("\n");
+
+  const body = `<div class="wrap how">
+  <section class="hero how-hero">
+    <p class="eyebrow">Behind the scenes</p>
+    <h1>How the machine works.</h1>
+    <p>Between a one-line idea and a merged, printable design sits a pipeline that
+    gates every change, regenerates its own artifacts, and runs itself. Here is
+    what it does under the hood — and where the generic half ends and the
+    3D-printing half begins.</p>
+    <div class="statrow">
+      <div class="stat"><span class="stat-n">${escapeHtml(String(designCount))}</span><span class="stat-l">designs, every one gated in CI</span></div>
+      <div class="stat"><span class="stat-n">3</span><span class="stat-l">seams join the platform to the design layer</span></div>
+      <div class="stat"><span class="stat-n">0</span><span class="stat-l">derived files committed by hand</span></div>
+    </div>
+  </section>
+${tabBar}
+${panels}
+</div>`;
+
+  return layout({
+    title: `How it works — ${SITE_NAME}`,
+    description:
+      "Behind the scenes of print-bench: the generic CI and automation platform, and the 3D-print design layer bolted onto it.",
+    body,
+    canonicalPath: "/how-it-works/",
   });
 }
 

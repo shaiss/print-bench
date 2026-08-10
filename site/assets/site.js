@@ -227,3 +227,47 @@
     });
   });
 })();
+
+/* Step-through carousel (the How-it-works "pipeline" tab). The page ships as a
+   stacked document — every slide visible, its step labelled — so without
+   JavaScript nothing is unreachable. This reveals the controls, adds
+   `carousel-live` (which lets `hidden` bite on slides), and shows one slide at
+   a time with prev/next, dots and arrow keys. Only `hidden` is toggled and only
+   trusted class names are written — no DOM-read text reaches any sink. */
+(function () {
+  document.addEventListener("DOMContentLoaded", function () {
+    var root = document.querySelector("[data-carousel]");
+    if (!root) return;
+    var slides = Array.prototype.slice.call(root.querySelectorAll(".carousel-slide"));
+    var dots = Array.prototype.slice.call(root.querySelectorAll("[data-carousel-dot]"));
+    var nav = root.querySelector("[data-carousel-nav]");
+    var prev = root.querySelector("[data-carousel-prev]");
+    var next = root.querySelector("[data-carousel-next]");
+    if (slides.length < 2 || !nav) return;
+    var cur = 0;
+    function show(i) {
+      cur = (i + slides.length) % slides.length;
+      slides.forEach(function (s, j) {
+        s.hidden = j !== cur;
+      });
+      dots.forEach(function (d, j) {
+        d.classList.toggle("sel", j === cur);
+        d.setAttribute("aria-selected", j === cur ? "true" : "false");
+      });
+    }
+    root.classList.add("carousel-live");
+    nav.hidden = false;
+    if (prev) prev.addEventListener("click", function () { show(cur - 1); });
+    if (next) next.addEventListener("click", function () { show(cur + 1); });
+    dots.forEach(function (d, i) {
+      d.addEventListener("click", function () { show(i); });
+    });
+    // Arrow keys step the carousel when focus is inside it, without stealing
+    // page scrolling elsewhere.
+    root.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight") { e.preventDefault(); show(cur + 1); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); show(cur - 1); }
+    });
+    show(0);
+  });
+})();
