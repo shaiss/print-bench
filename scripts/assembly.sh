@@ -87,7 +87,7 @@ generate_scad() {
   ASSEMBLY_TITLE=""
   ASSEMBLY_STEPS=()
   ASSEMBLY_USES_NOPSCADLIB=0
-  local parts=() vitamins=() raw_explode=""
+  local parts=() vitamins=() raw_explode="" has_explode=0
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"                           # strip comments
@@ -98,7 +98,7 @@ generate_scad() {
     case "$key" in
       title)   ASSEMBLY_TITLE="$val" ;;
       step)    ASSEMBLY_STEPS+=("$val") ;;
-      explode) raw_explode="$val" ;;
+      explode) raw_explode="$val"; has_explode=1 ;;
       part|vitamin)
         # split val on '|' into call | qty | description
         local call qty desc
@@ -125,9 +125,15 @@ generate_scad() {
   # Per-step separation (mm) for the exploded view. Default is deliberately
   # larger than the old hardcoded 20mm, which vanished against a large part;
   # a design tunes it to its own scale with `explode:`.
-  local step="${raw_explode:-30}"
-  [[ "$step" =~ ^[0-9]+$ ]] \
-    || die "explode: must be a non-negative integer (mm), got: '$raw_explode'"
+  # Default applies only when explode: is absent — a declared-but-empty value
+  # is an error, not a silent fallback. Normalise with 10# so a leading zero
+  # (e.g. 08) is base-10, not an invalid octal that would abort under set -e.
+  local step=30
+  if (( has_explode )); then
+    [[ "$raw_explode" =~ ^[0-9]+$ ]] \
+      || die "explode: must be a non-negative integer (mm), got: '$raw_explode'"
+    step=$((10#$raw_explode))
+  fi
 
   # ── Emit the SCAD ──
   # The design's own parts are modules in designs/<name>/<name>.scad, which we
@@ -445,6 +451,33 @@ CONF
     echo "SELFTEST FAIL: [bad-explode] non-integer explode: should be rejected"; sed 's/^/    /' <<<"$out"; pass=0
   else
     echo "selftest ok    [bad-explode] (non-integer explode: rejected)"
+  fi
+
+  # Test 12 — a declared-but-empty explode: is an error, not a silent default.
+  mkdir -p "$root/emptyexplode"
+  printf 'explode:\npart: p() | 1 | p\n' > "$root/emptyexplode/assembly.conf"
+  : > "$root/emptyexplode/emptyexplode.scad"
+  out="$( ROOT="$root" generate_scad "emptyexplode" "$tmp/ee.scad" 2>&1 )" || true
+  if ! grep -qF "explode: must be" <<<"$out"; then
+    echo "SELFTEST FAIL: [empty-explode] a declared-but-empty explode: should be rejected, not defaulted"; sed 's/^/    /' <<<"$out"; pass=0
+  else
+    echo "selftest ok    [empty-explode] (declared-but-empty explode: rejected)"
+  fi
+
+  # Test 13 — a leading-zero explode: is read base-10 (not octal), so it does
+  # not abort arithmetic under set -e; 010 must mean 10mm, not 8.
+  mkdir -p "$root/leadzero"
+  cat > "$root/leadzero/assembly.conf" <<'CONF'
+explode: 010
+part: base()  | 1 | base
+part: cover() | 1 | cover
+CONF
+  : > "$root/leadzero/leadzero.scad"
+  ROOT="$root" generate_scad "leadzero" "$tmp/lz.scad"
+  if ! grep -qF 'translate([0,0,10]) cover();' "$tmp/lz.scad"; then
+    echo "SELFTEST FAIL: [leading-zero] explode: 010 should be base-10 (want 'translate([0,0,10]) cover();')"; sed 's/^/    /' "$tmp/lz.scad"; pass=0
+  else
+    echo "selftest ok    [leading-zero] (explode: 010 read base-10, no octal abort)"
   fi
 
   if (( pass )); then
