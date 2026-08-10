@@ -191,6 +191,9 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   - `nopscadlib-check.sh` — proves the vendored `lib/NopSCADlib/` tree resolves
     through `OPENSCADPATH` and builds a real vitamin; no committed file includes
     NopSCADlib yet, so nothing else would notice if it went missing (issue #155)
+  - `assembly.sh` — generates assembly instructions (exploded view + BOM) from a
+    per-design `assembly.conf` manifest, using NopSCADlib's BOM/assembly tooling;
+    no design ships a manifest yet (issue #156, stage 2 of #98)
   - `chunker-perms-check.sh` — proves the chunker's deny backstop
     (`.claude/chunker-settings.json`) still neutralizes every dangerous tool
     allow it would otherwise inherit from `.claude/settings.json`, which
