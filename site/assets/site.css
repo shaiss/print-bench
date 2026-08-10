@@ -1277,3 +1277,223 @@ img.monogram-human, img.monogram-agent { background: var(--paper); }
 .timeline-who .monogram { width: 1.4rem; height: 1.4rem; font-size: 0.7rem; }
 .timeline-who-name { font-size: 0.85rem; color: var(--ink-soft); }
 .timeline-who-name code { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
+
+/* ---------- how it works (behind-the-scenes page) ---------- */
+
+/* Same Modernist vocabulary as the rest of the site — flat panels, 2px rules,
+   square corners, one red accent, mono uppercase labels — reusing the shared
+   tokens so it themes light/dark with everything else. */
+
+.how-hero .statrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-top: 1.75rem;
+  border: 2px solid var(--rule);
+  max-width: 52rem;
+}
+.how-hero .stat {
+  flex: 1 1 12rem;
+  padding: 0.9rem 1.1rem;
+  border-left: 1px solid var(--rule-soft);
+}
+.how-hero .stat:first-child { border-left: 0; }
+.how-hero .stat-n {
+  display: block;
+  font-size: 1.9rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--accent);
+}
+.how-hero .stat-l {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.how-sec { margin: 3rem 0; scroll-margin-top: 80px; }
+
+.how-sec > .panel-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-top: 2px solid var(--rule);
+  padding-top: 0.5rem;
+  margin: 0 0 0.7rem;
+}
+.how-sec > h2 {
+  font-size: clamp(1.35rem, 3vw, 1.7rem);
+  letter-spacing: -0.015em;
+  margin: 0 0 1rem;
+  max-width: 34ch;
+}
+.how-sec > p { max-width: var(--measure); color: var(--ink-soft); }
+.how-sec > p code, .how-card p code, .how-lede code { color: var(--ink); }
+.how-lede {
+  font-size: 1.05rem;
+  color: var(--ink-soft) !important;
+  max-width: var(--measure);
+  margin: 0 0 1.5rem;
+}
+.how-more { font-size: 0.9rem; color: var(--ink-faint) !important; margin-top: 1.4rem; }
+
+/* The two-layer stack diagram. */
+.layerstack { display: flex; flex-direction: column; margin: 1.5rem 0; max-width: 52rem; }
+.layer {
+  border: 2px solid var(--rule);
+  background: var(--panel);
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+.layer h3 { margin: 0.15rem 0 0.5rem; font-size: 1.2rem; }
+.layer > p { margin: 0 0 0.9rem; color: var(--ink-soft); font-size: 0.95rem; max-width: 60ch; }
+.layer-platform { border-left: 4px solid var(--accent); }
+.layer-tag {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--ink-faint);
+}
+.layer-platform .layer-tag { color: var(--accent-deep); }
+
+/* The seams connector between the two layers. */
+.seams {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  border-left: 2px solid var(--rule);
+  border-right: 2px solid var(--rule);
+  background: color-mix(in srgb, var(--ink) 4%, var(--panel));
+}
+.seams-tag {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.seam {
+  flex: 1 1 10rem;
+  border: 1px solid var(--rule-soft);
+  border-left: 3px solid var(--accent);
+  padding: 0.45rem 0.7rem;
+  background: var(--panel);
+}
+.seam b { display: block; font-size: 0.85rem; }
+.seam span { display: block; font-size: 0.78rem; color: var(--ink-soft); line-height: 1.35; }
+
+/* Chip rows — reused for the layer contents and the routine list. */
+.chiprow { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chip {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.2em 0.6em;
+  border: 1px solid var(--ink-faint);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* The gate-stack stepper. */
+.steplist { list-style: none; margin: 1.5rem 0; padding: 0; max-width: var(--measure); }
+.step {
+  display: flex;
+  gap: 0.9rem;
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--rule-soft);
+}
+.step:first-child { border-top: 0; }
+.step-n {
+  flex: 0 0 auto;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-grid;
+  place-items: center;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.step-body { min-width: 0; }
+.step-body h4 { margin: 0.1rem 0 0.25rem; font-size: 0.98rem; }
+.step-body h4 code { background: none; padding: 0; font-size: 1em; }
+.step-body p { margin: 0; color: var(--ink-soft); font-size: 0.92rem; }
+
+/* Three-up explainer cards (regenerate section). */
+.how-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+.how-card {
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  padding: 0.9rem 1.05rem 1.05rem;
+}
+.how-card h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-top: 2px solid var(--rule);
+  padding-top: 0.45rem;
+}
+.how-card p { margin: 0; font-size: 0.9rem; color: var(--ink-soft); line-height: 1.5; }
+
+/* Tables reuse the .prose table styling; just trim the wrapper margins. */
+.how-table { margin: 1.5rem 0; max-width: 52rem; }
+.how-table .table-scroll { margin: 0; }
+
+/* The closing "read the source" links. */
+.how-source {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0;
+  border: 2px solid var(--rule);
+  margin-top: 1.5rem;
+  max-width: 52rem;
+}
+.how-source-link {
+  display: block;
+  padding: 0.8rem 1rem;
+  border-left: 1px solid var(--rule-soft);
+  border-top: 1px solid var(--rule-soft);
+  text-decoration: none;
+  color: var(--ink);
+}
+.how-source-link:first-child { border-top: 0; }
+.how-source-link:hover { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); color: var(--ink); }
+.how-source-k {
+  display: block;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--accent);
+}
+.how-source-v {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin-top: 0.15rem;
+  word-break: break-word;
+}
+
+@media (min-width: 620px) {
+  .how-source-link { border-top: 0; }
+  .how-source-link:first-child { border-left: 0; }
+}

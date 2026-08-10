@@ -24,6 +24,7 @@ install and build commands), so a green local build means the deploy builds.
 | `/styles/` | every `styles/<name>/` with a `STYLE.md` |
 | `/styles/<name>/` | that style's `STYLE.md`, rendered |
 | `/people/` | every `people/<handle>.md` — the product cores and the `shared: true` review specialists — as full member profiles with the product teams each has been on |
+| `/how-it-works/` | a behind-the-scenes of the pipeline, presented from the committed architecture docs (`docs/architecture/*.md`); every mechanism links to the file that implements it |
 | `/designs/<name>/` (team section) | for a design with a committed `team.conf`, the product page also carries a "team contributions" section: who built it (identity, linking to their `/people/` profile), a light reviewed-by reference, and the build-history timeline (its `PM.md` decision log and `NOTES.md` field tests, plus — on the Vercel deploy — its own git commits) |
 
 Adding a design requires no edit here — the generator finds it by the same

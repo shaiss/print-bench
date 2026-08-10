@@ -49,6 +49,7 @@ import {
   stylesIndexPage,
   stylePage,
   peoplePage,
+  howItWorksPage,
   redirectPage,
   FAVICON,
 } from "./lib/templates.mjs";
@@ -309,6 +310,13 @@ async function main() {
   rendered.push({
     path: "people/index.html",
     contents: peoplePage(team, { githubBase: GITHUB_BASE }),
+  });
+
+  // The "How it works" page: a behind-the-scenes of the pipeline, drawn from the
+  // committed architecture docs (docs/architecture/*.md). Static, unconditional.
+  rendered.push({
+    path: "how-it-works/index.html",
+    contents: howItWorksPage({ designCount: designs.length, githubBase: GITHUB_BASE }),
   });
 
   // Shared resources and the Teams page were both folded into People; keep a
