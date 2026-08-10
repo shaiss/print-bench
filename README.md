@@ -108,6 +108,10 @@ reviewed after every change, and reviewer personas (printability, and
 fitness-for-purpose) challenge the design over pull requests until it
 merges. The full workflow and conventions live in [CLAUDE.md](CLAUDE.md).
 
+For how the system is put together — the generic CI/automation platform
+separated from the 3D-print design layer, written as the basis for a reusable
+template — see [docs/architecture/](docs/architecture/README.md).
+
 ## Operating the automation
 
 Most of this repo's CI drives itself, but a few controls are exposed to
@@ -191,6 +195,11 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   - `nopscadlib-check.sh` — proves the vendored `lib/NopSCADlib/` tree resolves
     through `OPENSCADPATH` and builds a real vitamin; no committed file includes
     NopSCADlib yet, so nothing else would notice if it went missing (issue #155)
+  - `license-boundary-check.sh` — enforces the copyleft/GPL core stance
+    (issue #160): no shared `lib/*.scad` may `include` a copyleft-vendored
+    library and no `scripts/`/`site/` code may bundle its vendored source;
+    design-layer opt-ins and invoking unshipped GPL tools stay allowed (see
+    [docs/licensing.md](docs/licensing.md))
   - `assembly.sh` — generates assembly instructions (exploded view + BOM) from a
     per-design `assembly.conf` manifest, using NopSCADlib's BOM/assembly tooling;
     no design ships a manifest yet (issue #156, stage 2 of #98)
@@ -204,6 +213,11 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and
     `/preflight` runs it `--local`, so the local mirror can't drift
+  - `docs-standards-check.sh` — the standards gate for the architecture docs
+    (`docs/architecture/`) and the How-it-works site page and its diagrams:
+    presence/wiring only, no OpenSCAD, selected by `ci-classify.sh` when a
+    change touches `docs/`, the page's source, this gate script, or the CI
+    workflow (its own light `docs-standards` CI job, with a `--selftest`)
   - `lineage.sh` — who derives from whom: validates the `derives.conf`
     records, answers what a change has to re-gate, and re-proves the
     derivative gate can still fire (`selftest`)
