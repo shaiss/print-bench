@@ -89,6 +89,9 @@ generate_scad() {
         local call qty desc
         IFS='|' read -r call qty desc <<<"$val"
         call="$(trim "$call")"; qty="$(trim "$qty")"; desc="$(trim "$desc")"
+        # Reject malformed lines: every part/vitamin needs all three fields.
+        [[ -n "$call" && -n "$qty" && -n "$desc" ]] \
+          || die "malformed ${key}: line (need 'call | qty | description'): $line"
         if [[ "$key" == part ]]; then
           parts+=("$call|$qty|$desc")
         else
@@ -108,9 +111,10 @@ generate_scad() {
   # along Z so the exploded view separates them.
   {
     echo 'include <NopSCADlib/core.scad>'
-    # Include the design so its part modules resolve; tolerate a missing file
-    # (the selftest fixture may not ship one).
-    echo "use <designs/${design}/${design}.scad>"
+    # Include the design so its part modules resolve. The path mirrors ROOT
+    # (defaults to designs/, overridable via ASSEMBLY_DESIGNS_DIR for the
+    # selftest fixture). OPENSCADPATH includes the repo root so this resolves.
+    echo "use <${ROOT}/${design}/${design}.scad>"
     echo 'module __assembly_root() assembly("main") {'
     local idx=0
     for entry in "${parts[@]}"; do
@@ -144,19 +148,39 @@ assembly_one() {
   generate_scad "$design" "$scad"
 
   # Pass 1 — exploded-view render ($explode=1 displaces parts via explode()).
+  # Capture the log and fail on non-zero exit or on an ERROR line (OpenSCAD can
+  # exit 0 while reporting CGAL/geometry errors — product-shot.sh's pattern).
   echo "  render: exploded.png"
-  xvfb-run -a "$OPENSCAD_BIN" \
+  local rc=0 log
+  log="$(xvfb-run -a "$OPENSCAD_BIN" \
     ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
     -D'$explode=1' \
-    -o "$outdir/exploded.png" "$scad" 2>&1 | grep -iE "error|warning" || true
+    -o "$outdir/exploded.png" "$scad" 2>&1)" || rc=$?
+  if (( rc != 0 )); then
+    echo "error: exploded-view render failed (exit $rc)" >&2
+    sed 's/^/      /' <<<"$log" | tail -20 >&2
+    rm -f "$scad"; return 1
+  fi
+  if grep -qE '^ERROR' <<<"$log"; then
+    echo "error: exploded-view render emitted ERROR" >&2
+    grep '^ERROR' <<<"$log" | sed 's/^/      /' >&2
+    rm -f "$scad"; return 1
+  fi
 
   # Pass 2 — BOM collection ($bom=2 emits vitamin/part echo lines).
   echo "  collect: BOM"
   local bom_out="build/.assembly-${design}.bom"
-  xvfb-run -a "$OPENSCAD_BIN" \
+  rc=0
+  log="$(xvfb-run -a "$OPENSCAD_BIN" \
     ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
     -D'$bom=2' \
-    -o /dev/null --export-format echo "$scad" >"$bom_out" 2>&1 || true
+    -o /dev/null --export-format echo "$scad" 2>&1)" || rc=$?
+  printf '%s' "$log" >"$bom_out"
+  if (( rc != 0 )); then
+    echo "error: BOM collection failed (exit $rc)" >&2
+    sed 's/^/      /' <<<"$log" | tail -20 >&2
+    rm -f "$scad" "$bom_out"; return 1
+  fi
 
   # ── Write ASSEMBLY.md ──
   local md="$ROOT/$design/ASSEMBLY.md"
@@ -314,6 +338,27 @@ CONF
     echo "selftest ok    [comments] (comment lines and indented comments stripped)"
   fi
 
+  # Test 7 — malformed part/vitamin line (missing fields) is rejected.
+  mkdir -p "$root/bad"
+  printf 'part: only_call()\n' > "$root/bad/assembly.conf"
+  : > "$root/bad/bad.scad"
+  out="$( ROOT="$root" generate_scad "bad" "$tmp/bad.scad" 2>&1 )" || true
+  if ! grep -qF "malformed" <<<"$out"; then
+    echo "SELFTEST FAIL: malformed part line should be rejected"; sed 's/^/    /' <<<"$out"; pass=0
+  else
+    echo "selftest ok    [malformed] (missing fields rejected)"
+  fi
+
+  # Test 8 — no-arg sweep over a tree with no manifests is a clean no-op.
+  local empty_root; empty_root="$(mktemp -d)"
+  out="$( ASSEMBLY_DESIGNS_DIR="$empty_root" "$SELF" 2>&1 )" || true
+  if ! grep -qF "no designs with assembly.conf found" <<<"$out"; then
+    echo "SELFTEST FAIL: no-arg sweep with no manifests should report cleanly"; sed 's/^/    /' <<<"$out"; pass=0
+  else
+    echo "selftest ok    [no-arg-noop] (no manifests → clean no-op)"
+  fi
+  rm -rf "$empty_root"
+
   if (( pass )); then
     echo "ok    assembly.sh --selftest: manifest parsing and generator contract hold"
     return 0
@@ -322,11 +367,29 @@ CONF
   return 1
 }
 
+# ── Sweep: regenerate every design with an assembly.conf ──
+assembly_all() {
+  local found=0
+  for conf in "$ROOT"/*/assembly.conf; do
+    [[ -f "$conf" ]] || continue
+    found=1
+    assembly_one "$(basename "$(dirname "$conf")")"
+  done
+  if [[ "$found" -eq 0 ]]; then
+    echo "no designs with assembly.conf found under $ROOT/"
+  fi
+}
+
 # ── Dispatch ──
 case "${1:-}" in
   --selftest) run_selftest ;;
-  ""|-h|--help)
+  -h|--help)
     sed -n '2,42p' "$SELF" | sed 's/^# \{0,1\}//'
+    ;;
+  "")
+    # No arg = sweep every design with an assembly.conf (regen-family contract).
+    # A tree with no manifests is a clean no-op, not an error.
+    assembly_all
     ;;
   -*)
     die "unknown option '$1' — try: $0 --help"
