@@ -134,6 +134,27 @@ bigger than one PR. Those are filed (add `--label design-brief` for designs, so
 `/design-run` can see them) but **not** `autonomy-ok`. Filing a piece that will
 only re-decline wastes a burn.
 
+**Estimate each auto-armed child** with a single `points-<n>` label, where `<n>`
+is the autonomy roadmap board's Fibonacci size — and a one-PR sub-issue is **1, 2,
+or 3** by construction. This is not a new judgement: §2 already required each
+piece to be closeable by one reviewable PR, and the point value is just how big
+*within* that bound. If the honest estimate is 5 or more, the piece is **not**
+actually one-PR-sized — go back to §2 and split it further rather than filing
+`points-5`. The roadmap board's sync (`.github/workflows/roadmap-sync.yml`,
+issue #148) mirrors this label to the board's **Story points** field, so an armed
+child lands on the board already estimated, with no hand-labelling. Only estimate
+the auto-armed one-PR children: a piece you did **not** arm (a `design-brief`, an
+open decision, or one still too big) carries no honest one-PR estimate, so leave
+its points off. `create-child` applies labels but does not create missing ones,
+so `ensure-label` the points label first:
+
+```bash
+.claude/skills/chunk-issue/chunk-helper.sh ensure-label points-2
+.claude/skills/chunk-issue/chunk-helper.sh create-child \
+  --parent <parent-number> --title "<title>" --body "<the sub-issue body>" \
+  --label enhancement --label autonomy-ok --label points-2
+```
+
 ## 4. Close the loop on the parent
 
 - **Remove the `declined-too-big` label** from the parent
