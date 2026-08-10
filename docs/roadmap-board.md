@@ -99,8 +99,8 @@ it predictable:
   ambiguity is resolved (a value in `<n>` outside the Fibonacci set is ignored).
 
 There are two producers of the `points-<n>` label. **`/chunk-issue`** estimates
-each genuinely-small (auto-armed) one-PR child it files with a `points-1|2|3`
-label (slice 2 part 4), so a chunked epic's children land on the board already
+each genuinely-small (auto-armed) one-PR child it files with one of `points-1`,
+`points-2`, or `points-3` (slice 2 part 4), so a chunked epic's children land on the board already
 sized — an estimate of 5+ is its signal to split the piece further, not to file
 it. And a **human triaging** applies the label by hand to anything else. Either
 way the label is an opt-in seam: an issue without one simply carries no estimate.
@@ -152,7 +152,7 @@ GitHub exposes neither to `gh`. Set these up once in the UI:
   milestones are UI-only).
 - **Slice 2 part 4 (this):** the `points-<n>` label's first automatic producer.
   `/chunk-issue` now estimates each genuinely-small (auto-armed) one-PR child it
-  files with a `points-1|2|3` label, so a chunked epic's children reach the board
+  files with a `points-<n>` label (`<n>` = 1, 2, or 3), so a chunked epic's children reach the board
   already sized — closing the loop end to end: `/ship-issue` declines an oversized
   issue → `/chunk-issue` splits it into estimated, armed children → the backlog
   burn ships them → the board reflects size and status throughout.
