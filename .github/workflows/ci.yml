@@ -467,7 +467,7 @@ jobs:
             exit 0
           fi
           if [ "$CAN_PUSH" != "true" ]; then
-            echo "::error::Committed artifacts are stale and CI cannot push to a fork. Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh, ./scripts/product-shot.sh, ./scripts/assembly.sh, ./scripts/gallery.sh) and commit them, or re-open this PR from a branch in this repository."
+            echo "::error::Committed artifacts are stale and CI cannot push to a fork. Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh <name>, ./scripts/product-shot.sh <name>, ./scripts/assembly.sh <name>, ./scripts/gallery.sh) and commit them, or re-open this PR from a branch in this repository."
             exit 1
           fi
           git config user.name "github-actions[bot]"
