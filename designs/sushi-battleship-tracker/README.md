@@ -88,6 +88,12 @@ Override on the command line with `-D 'marker_d=6'`.
 
 ## Assembly & use
 
+![Exploded view](previews/exploded.png)
+
+Two printed halves, no hardware: the lid drops onto the tray and
+self-aligns to the grid. The full bill of materials and step-by-step
+assembly are in [`ASSEMBLY.md`](ASSEMBLY.md).
+
 Play exactly as the parent describes. The one new rule: when a shot is
 called and misses, the *defender* parks a marker in the called door's seat.
 An open door is a hit, a marked door is a spent miss, an unmarked closed
