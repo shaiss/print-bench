@@ -248,7 +248,42 @@ function card(design, roster = null) {
 </article>`;
 }
 
-export function indexPage(designs, { rosters = new Map() } = {}) {
+/**
+ * The read-only "Decisions awaiting a human" queue (issue #181, the surfacing
+ * follow-up to the #161 HITL decision gate). Built from the open needs-decision
+ * issues/PRs fetched at deploy time; null (or an empty rows list) when the
+ * queue is empty or the fetch was skipped (local/CI) — so the section simply
+ * does not appear, the same no-empty-heading rule the Downloads rail holds (an
+ * absent queue is never a broken anything). Each row links to the issue it
+ * surfaces; resolving still goes through /decide (docs/decision-gate.md).
+ * Surfacing only — this section never decides.
+ */
+function decisionsSection(queue) {
+  if (!queue || !Array.isArray(queue.rows) || queue.rows.length === 0) return "";
+  const rows = queue.rows
+    .map((d) => {
+      const kind = d.kind === "pull" ? "PR" : "issue";
+      return `      <li><a href="${escapeHtml(d.url)}" rel="noopener noreferrer"><span class="dec-num">#${escapeHtml(
+        String(d.number)
+      )}</span>${escapeHtml(d.title)}</a> <span class="dec-kind">${kind}</span></li>`;
+    })
+    .join("\n");
+  return `<section class="decisions" aria-labelledby="decisions-h">
+    <p class="eyebrow">Decision queue</p>
+    <h2 id="decisions-h">Decisions awaiting a human</h2>
+    <p>Open issues the autonomy pipeline parked for a yes/no a person owns.
+    Resolve one with <code>/decide</code> on its thread — this section surfaces
+    them, it does not decide them.</p>
+    <ul class="dec-list">
+${rows}
+    </ul>
+    <p class="dec-search"><a href="${escapeHtml(
+      queue.searchUrl
+    )}" rel="noopener noreferrer">Every open decision →</a></p>
+  </section>`;
+}
+
+export function indexPage(designs, { rosters = new Map(), decisions = null } = {}) {
   const body = `<div class="wrap">
   <section class="hero">
     <p class="eyebrow">${escapeHtml(String(designs.length))} designs · every one gated in CI</p>
@@ -257,7 +292,7 @@ export function indexPage(designs, { rosters = new Map() } = {}) {
     from source; a printability gate — watertight, overhang-checked,
     test-sliced — passes before merge.</p>
   </section>
-  <section class="grid">
+  ${decisionsSection(decisions)}<section class="grid">
 ${designs.map((d) => card(d, rosters.get(d.name) || null)).join("\n")}
   </section>
 </div>`;

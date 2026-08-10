@@ -40,6 +40,10 @@ import {
   commitsToEvents,
   loginHandleMap,
 } from "./lib/history.mjs";
+import {
+  shouldFetchDecisions,
+  fetchOpenDecisions,
+} from "./lib/decisions.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
 import { stripReadmeMedia, designMedia, missingMediaRefs } from "./lib/media.mjs";
 import { buildModel } from "./lib/model.mjs";
@@ -305,6 +309,40 @@ async function main() {
     console.log(`      history: ${total} commit(s) fetched for the team timeline`);
   }
 
+  // The read-only "Decisions awaiting a human" queue (issue #181, the surfacing
+  // follow-up to the #161 HITL decision gate). Best-effort and Vercel-scoped
+  // exactly like release download links and git history — on the deploy (which
+  // has network) the open needs-decision queue becomes a section on the index
+  // page; locally and in CI the fetch is off, so the build stays deterministic
+  // and simply shows no section. Any failure here leaves the queue empty, so a
+  // rate-limited or offline deploy is never a broken build. Surfacing only:
+  // the section links out to the issues; resolving still goes through /decide.
+  let decisionQueue = null;
+  if (shouldFetchDecisions()) {
+    try {
+      const rows = await fetchOpenDecisions({
+        owner: OWNER,
+        repo: REPO,
+        token: process.env.GITHUB_TOKEN,
+      });
+      if (rows.length) {
+        decisionQueue = {
+          rows,
+          searchUrl: `https://github.com/${OWNER}/${REPO}/issues?q=${encodeURIComponent(
+            "is:open label:needs-decision"
+          )}`,
+        };
+        console.log(`      decisions: ${rows.length} open decision(s) fetched for the queue`);
+      } else {
+        console.log(`      decisions: queue empty — index shows no decision section`);
+      }
+    } catch (err) {
+      console.warn(
+        `      decisions: fetch skipped (${err.message}) — index shows no decision queue`
+      );
+    }
+  }
+
   const timelines = new Map();
   for (const [design, roster] of team.rosters) {
     const pmPath = join(REPO_ROOT, "designs", design, "PM.md");
@@ -449,7 +487,7 @@ async function main() {
 
   for (const page of rendered) write(out, page.path, page.contents);
 
-  write(out, "index.html", indexPage(designs, { rosters: team.rosters }));
+  write(out, "index.html", indexPage(designs, { rosters: team.rosters, decisions: decisionQueue }));
   if (styles.length) write(out, "styles/index.html", stylesIndexPage(styles, designs));
 
   let assetBytes = 0;
