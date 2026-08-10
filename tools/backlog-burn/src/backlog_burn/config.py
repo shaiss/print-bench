@@ -37,7 +37,11 @@ KNOWN_PROVIDERS = ("anthropic", "zai")
 # Named cadence presets → cron expression.  A maintainer can use the short name
 # or pass a raw 5-field cron literal directly (e.g. '17 0,6,12,18 * * *').
 # The preset name is stored in the conf; the cron is what lands in backlog-burn.yml.
+# Every preset fires at :17 past the hour — an off-peak minute (not :00) to
+# avoid GitHub Actions scheduler congestion, the same convention the workflow
+# documents.
 CADENCE_PRESETS: dict[str, str] = {
+    "hourly": "17 * * * *",           # every hour
     "4x":     "17 0,6,12,18 * * *",   # every 6 hours
     "2x":     "17 6,18 * * *",         # twice daily
     "daily":  "17 6 * * *",            # once a day

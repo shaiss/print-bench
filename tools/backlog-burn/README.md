@@ -74,7 +74,7 @@ backlog-burn config --get cadence      # -> 4x  (preset name)
 # Update a config key (what the backlog-burn-config workflow calls)
 backlog-burn config set enabled false
 backlog-burn config set label my-label
-backlog-burn config set cadence weekly   # preset names: 4x, 2x, daily, weekly
+backlog-burn config set cadence weekly   # preset names: hourly, 4x, 2x, daily, weekly
 backlog-burn config set cadence '17 0,6,12,18 * * *'  # raw cron also accepted
 ```
 
@@ -86,7 +86,7 @@ same operations without a full PR:
 /backlog-burn set enabled true|false
 /backlog-burn set label <label-name>
 /backlog-burn set provider anthropic|zai
-/backlog-burn set cadence 4x|2x|daily|weekly|<raw-cron>
+/backlog-burn set cadence hourly|4x|2x|daily|weekly|<raw-cron>
 ```
 
 Post the comment (with the leading `/`) on any PR or issue to which you have
@@ -110,7 +110,7 @@ routine's policy — the same idea as `.github/ci-gates/registry.conf`:
 enabled: true
 label:   autonomy-ok
 provider: anthropic   # or: zai
-cadence: 4x           # preset: 4x | 2x | daily | weekly, or a raw 5-field cron
+cadence: 4x           # preset: hourly | 4x | 2x | daily | weekly, or a raw 5-field cron
 ```
 
 `config.py` parses it strictly (a typo'd key, bad value, or unknown provider
@@ -124,7 +124,8 @@ command keeps both in sync.  Preset names:
 
 | Preset | Cron | Fires |
 |--------|------|-------|
-| `4x` | `17 0,6,12,18 * * *` | Every 6 hours (default) |
+| `hourly` | `17 * * * *` | Every hour, at :17 |
+| `4x` | `17 0,6,12,18 * * *` | Every 6 hours |
 | `2x` | `17 6,18 * * *` | Twice daily |
 | `daily` | `17 6 * * *` | Once a day |
 | `weekly` | `17 6 * * 1` | Mondays 06:17 UTC |
