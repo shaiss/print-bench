@@ -286,6 +286,81 @@ pre code { background: none; padding: 0; }
   margin: 0 0 0.9rem;
 }
 
+/* ---------- decision queue (index) ---------- */
+
+/* A maintainer-facing alert: the autonomy pipeline parked these for a human.
+   Accent-tinted with an accent left rule so it reads as "needs you" without
+   abandoning the flat, 2px-rule Modernist discipline. Absent entirely (no DOM)
+   when the queue is empty or the fetch was skipped — so this never renders a
+   hollow panel on a local/CI build. */
+.decisions {
+  border: 2px solid var(--rule);
+  border-left: 6px solid var(--accent);
+  background: var(--accent-soft);
+  padding: clamp(1.25rem, 3vw, 1.75rem);
+  margin: 0 0 2rem;
+}
+
+.decisions h2 {
+  font-size: 1.35rem;
+  margin: 0 0 0.5rem;
+}
+
+.decisions > p {
+  max-width: 60ch;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+  margin: 0 0 0.85rem;
+}
+
+.dec-list {
+  list-style: none;
+  margin: 0 0 0.85rem;
+  padding: 0;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.dec-list li {
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.dec-list li a {
+  display: block;
+  padding: 0.5rem 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.dec-list li a:hover {
+  color: var(--accent);
+}
+
+.dec-num {
+  font-family: var(--mono);
+  color: var(--ink-faint);
+  margin-right: 0.45rem;
+}
+
+.dec-kind {
+  display: inline-block;
+  margin-left: 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.dec-search {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.dec-search a {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 /* ---------- gallery ---------- */
 
 .grid {
