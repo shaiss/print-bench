@@ -132,6 +132,13 @@ def test_cadence_raw_cron_accepted(tmp_path):
     assert c.cadence == "17 0,6,12,18 * * *"
 
 
+def test_cadence_hourly_preset_maps_to_hourly_cron():
+    # 'hourly' is a first-class preset, firing at :17 past every hour like the
+    # other presets (an off-peak minute, not :00). It exists so a maintainer can
+    # type `hourly` instead of hand-writing the raw cron.
+    assert cfg.CADENCE_PRESETS["hourly"] == "17 * * * *"
+
+
 def test_cadence_bad_value_fails(tmp_path):
     path = write(tmp_path, "cadence: everyhour\n")
     with pytest.raises(ValueError, match="'cadence' must be a preset"):
@@ -199,10 +206,18 @@ def test_set_value_cadence_raw_cron(tmp_path):
     assert cfg.load(path).cadence == raw
 
 
+def test_set_value_cadence_hourly(tmp_path):
+    path = write(tmp_path, "cadence: 4x\n")
+    cron = cfg.set_value("cadence", "hourly", path=path)
+    assert cron == "17 * * * *"
+    assert cfg.load(path).cadence == "hourly"
+
+
 def test_set_value_bad_cadence_rejected(tmp_path):
     path = write(tmp_path, "cadence: daily\n")
+    # 'biweekly' is not a preset and not a 5-field cron — must be refused.
     with pytest.raises(ValueError, match="'cadence' must be a preset"):
-        cfg.set_value("cadence", "hourly", path=path)
+        cfg.set_value("cadence", "biweekly", path=path)
 
 
 def test_set_value_preserves_comments(tmp_path):
