@@ -131,7 +131,7 @@ scan_core_source() {
 }
 
 selftest() {
-  local tmp rc
+  local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
   local ok=1
