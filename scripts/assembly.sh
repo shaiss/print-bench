@@ -14,18 +14,31 @@
 #   part: <openscad-module-call> | <qty> | <description>
 #   vitamin: <openscad-module-call> | <qty> | <description>
 #   step: <step text — the order of step: lines is the assembly order>
+#   explode: <mm>
 #
 #   title         optional display title for ASSEMBLY.md (defaults to the
-#                 design name, title-cased)
-#   part          a printed part: the module call that produces its geometry
-#                 (called with $bom=1 so it self-registers), a quantity, and a
-#                 human description. These are the design's own parts.
+#                 design name verbatim).
+#   part          a printed part: the module call that produces its geometry,
+#                 a quantity, and a human description. These are the design's
+#                 own part modules, defined in designs/<name>/<name>.scad.
 #   vitamin       a bought-in part (screw, bearing, insert, magnet …): the
 #                 NopSCADlib module call (e.g. screw(M3_cap_screw,16)) that
 #                 draws it and self-registers on the BOM, a quantity, and a
 #                 human description.
 #   step          one line of step-by-step assembly text; multiple step: lines
 #                 become an ordered list in ASSEMBLY.md.
+#   explode       optional per-step separation distance (mm) between stacked
+#                 parts in the exploded view; a non-negative integer. Tune it
+#                 to the part size — a ~250 mm part reads well around 150, a
+#                 ~20 mm part around 15. Defaults to 30 when absent; the old
+#                 hardcoded value was far too small for large parts.
+#
+# NopSCADlib is pulled in ONLY when the manifest declares at least one
+# vitamin: — a vitamin's geometry comes from NopSCADlib. A parts-only
+# manifest renders with pure first-party OpenSCAD (parts stacked by a plain
+# translate), so a vitamin-free design does NOT become a GPL-3.0 combined
+# work and needs no license disclosure. Declaring a vitamin: is the opt-in
+# into NopSCADlib at the design layer (see docs/licensing.md).
 #
 # Lines starting with # are comments; blank lines are ignored.
 # The manifest is FIXED across review rounds — add a new entry rather than
@@ -73,7 +86,8 @@ generate_scad() {
   local conf="$ROOT/$design/assembly.conf"
   ASSEMBLY_TITLE=""
   ASSEMBLY_STEPS=()
-  local parts=() vitamins=()
+  ASSEMBLY_USES_NOPSCADLIB=0
+  local parts=() vitamins=() raw_explode="" has_explode=0
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"                           # strip comments
@@ -82,8 +96,9 @@ generate_scad() {
     key="$(trim "${line%%:*}")"
     val="$(trim "${line#*:}")"
     case "$key" in
-      title) ASSEMBLY_TITLE="$val" ;;
-      step)  ASSEMBLY_STEPS+=("$val") ;;
+      title)   ASSEMBLY_TITLE="$val" ;;
+      step)    ASSEMBLY_STEPS+=("$val") ;;
+      explode) raw_explode="$val"; has_explode=1 ;;
       part|vitamin)
         # split val on '|' into call | qty | description
         local call qty desc
@@ -103,35 +118,64 @@ generate_scad() {
 
   [[ -n "$ASSEMBLY_TITLE" ]] || ASSEMBLY_TITLE="$design"
 
+  # A manifest that declares nothing to render is a mistake, not an empty view.
+  (( ${#parts[@]} + ${#vitamins[@]} > 0 )) \
+    || die "assembly.conf for '$design' declares no part: or vitamin: entries"
+
+  # Per-step separation (mm) for the exploded view. Default is deliberately
+  # larger than the old hardcoded 20mm, which vanished against a large part;
+  # a design tunes it to its own scale with `explode:`.
+  # Default applies only when explode: is absent — a declared-but-empty value
+  # is an error, not a silent fallback. Normalise with 10# so a leading zero
+  # (e.g. 08) is base-10, not an invalid octal that would abort under set -e.
+  local step=30
+  if (( has_explode )); then
+    [[ "$raw_explode" =~ ^[0-9]+$ ]] \
+      || die "explode: must be a non-negative integer (mm), got: '$raw_explode'"
+    step=$((10#$raw_explode))
+  fi
+
   # ── Emit the SCAD ──
-  # The design's own parts are expected to be modules in designs/<name>/<name>.scad.
-  # We include that file so the part module calls resolve. Vitamins come from
-  # NopSCADlib's core.scad (screws, nuts, washers, bearings). Each item sits
-  # inside assembly("…") for BOM hierarchy, with explode() offsets stacking
-  # along Z so the exploded view separates them.
+  # The design's own parts are modules in designs/<name>/<name>.scad, which we
+  # `use` so the calls resolve (path mirrors ROOT — overridable via
+  # ASSEMBLY_DESIGNS_DIR for the selftest; OPENSCADPATH includes the repo root).
+  #
+  # NopSCADlib is included ONLY when the manifest declares a vitamin: whose
+  # geometry it supplies. A parts-only manifest stays pure first-party OpenSCAD
+  # — parts stacked by a plain translate — so a vitamin-free design does not
+  # become a GPL-3.0 combined work (see docs/licensing.md). Declaring a vitamin
+  # is the design-layer opt-in into NopSCADlib.
   {
-    echo 'include <NopSCADlib/core.scad>'
-    # Include the design so its part modules resolve. The path mirrors ROOT
-    # (defaults to designs/, overridable via ASSEMBLY_DESIGNS_DIR for the
-    # selftest fixture). OPENSCADPATH includes the repo root so this resolves.
     echo "use <${ROOT}/${design}/${design}.scad>"
-    echo 'module __assembly_root() assembly("main") {'
-    local idx=0
-    for entry in "${parts[@]}"; do
-      local call qty desc
-      IFS='|' read -r call qty desc <<<"$entry"
-      # Stack parts along Z; each offset by idx*20mm in the exploded view.
-      echo "  explode($((idx * 20))) translate([0,0,$((idx*5))]) $call;"
-      idx=$((idx + 1))
-    done
-    for entry in "${vitamins[@]}"; do
-      local call qty desc
-      IFS='|' read -r call qty desc <<<"$entry"
-      echo "  explode($((idx * 20))) translate([100,$((idx*5)),0]) $call;"
-      idx=$((idx + 1))
-    done
-    echo '}'
-    echo '__assembly_root();'
+    if (( ${#vitamins[@]} )); then
+      ASSEMBLY_USES_NOPSCADLIB=1
+      # Vitamins need NopSCADlib; wrap in assembly() for BOM hierarchy and use
+      # explode() so $explode (set by the render pass) displaces each item.
+      echo 'include <NopSCADlib/core.scad>'
+      echo 'module __assembly_root() assembly("main") {'
+      local idx=0 call qty desc
+      for entry in "${parts[@]}"; do
+        IFS='|' read -r call qty desc <<<"$entry"
+        echo "  explode($((idx * step))) translate([0,0,$((idx*5))]) $call;"
+        idx=$((idx + 1))
+      done
+      for entry in "${vitamins[@]}"; do
+        IFS='|' read -r call qty desc <<<"$entry"
+        echo "  explode($((idx * step))) translate([100,$((idx*5)),0]) $call;"
+        idx=$((idx + 1))
+      done
+      echo '}'
+      echo '__assembly_root();'
+    else
+      # Parts only: no NopSCADlib, no assembly()/explode() — stack the parts
+      # along Z by `step` mm each so the exploded view separates them.
+      local idx=0 call qty desc
+      for entry in "${parts[@]}"; do
+        IFS='|' read -r call qty desc <<<"$entry"
+        echo "translate([0,0,$((idx * step))]) $call;"
+        idx=$((idx + 1))
+      done
+    fi
   } >"$out_scad"
 }
 
@@ -167,19 +211,24 @@ assembly_one() {
     rm -f "$scad"; return 1
   fi
 
-  # Pass 2 — BOM collection ($bom=2 emits vitamin/part echo lines).
-  echo "  collect: BOM"
+  # Pass 2 — BOM collection ($bom=2 emits vitamin echo lines). Only meaningful
+  # when NopSCADlib is in play (vitamins declared); a parts-only design has no
+  # NopSCADlib BOM to collect, and the table is re-read from the manifest
+  # regardless, so skip the extra render entirely.
   local bom_out="build/.assembly-${design}.bom"
-  rc=0
-  log="$(xvfb-run -a "$OPENSCAD_BIN" \
-    ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
-    -D'$bom=2' \
-    -o /dev/null --export-format echo "$scad" 2>&1)" || rc=$?
-  printf '%s' "$log" >"$bom_out"
-  if (( rc != 0 )); then
-    echo "error: BOM collection failed (exit $rc)" >&2
-    sed 's/^/      /' <<<"$log" | tail -20 >&2
-    rm -f "$scad" "$bom_out"; return 1
+  if (( ASSEMBLY_USES_NOPSCADLIB )); then
+    echo "  collect: BOM"
+    rc=0
+    log="$(xvfb-run -a "$OPENSCAD_BIN" \
+      ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
+      -D'$bom=2' \
+      -o /dev/null --export-format echo "$scad" 2>&1)" || rc=$?
+    printf '%s' "$log" >"$bom_out"
+    if (( rc != 0 )); then
+      echo "error: BOM collection failed (exit $rc)" >&2
+      sed 's/^/      /' <<<"$log" | tail -20 >&2
+      rm -f "$scad" "$bom_out"; return 1
+    fi
   fi
 
   # ── Write ASSEMBLY.md ──
@@ -263,14 +312,14 @@ SCAD
   local test_scad="$tmp/parse-test.scad"
   ASSEMBLY_TITLE="" ASSEMBLY_STEPS=()
   ROOT="$root" generate_scad "widget" "$test_scad"
-  local needles=("widget_body()" "widget_lid()" "screw(M3_cap_screw,16)" "insert(F1BM3)" 'assembly("main")' "explode(")
+  local needles=("include <NopSCADlib/core.scad>" "widget_body()" "widget_lid()" "screw(M3_cap_screw,16)" "insert(F1BM3)" 'assembly("main")' "explode(")
   for needle in "${needles[@]}"; do
     if ! grep -qF "$needle" "$test_scad"; then
       echo "SELFTEST FAIL: generated SCAD missing '$needle'"; sed 's/^/    /' "$test_scad"; pass=0
     fi
   done
   if [[ "$pass" == "1" ]]; then
-    echo "selftest ok    [parse] (all parts, vitamins, assembly() and explode() emitted)"
+    echo "selftest ok    [parse] (parts, vitamins, NopSCADlib, assembly() and explode() emitted)"
   fi
 
   # Test 2 — ASSEMBLY_STEPS captured in the right order (order matters: the
@@ -358,6 +407,78 @@ CONF
     echo "selftest ok    [no-arg-noop] (no manifests → clean no-op)"
   fi
   rm -rf "$empty_root"
+
+  # Test 9 — a parts-only manifest stays NopSCADlib-free (no GPL combination
+  # for a vitamin-free design) and applies the explode: step.
+  mkdir -p "$root/pure"
+  cat > "$root/pure/assembly.conf" <<'CONF'
+explode: 150
+part: base()  | 1 | base
+part: cover() | 1 | cover
+CONF
+  : > "$root/pure/pure.scad"
+  ASSEMBLY_USES_NOPSCADLIB=x
+  ROOT="$root" generate_scad "pure" "$tmp/pure.scad"
+  if grep -qF 'NopSCADlib' "$tmp/pure.scad"; then
+    echo "SELFTEST FAIL: [pure] parts-only manifest pulled in NopSCADlib"; sed 's/^/    /' "$tmp/pure.scad"; pass=0
+  elif grep -qF 'assembly(' "$tmp/pure.scad"; then
+    echo "SELFTEST FAIL: [pure] parts-only manifest emitted an assembly() wrapper"; pass=0
+  elif ! grep -qF 'translate([0,0,150]) cover();' "$tmp/pure.scad"; then
+    echo "SELFTEST FAIL: [pure] explode: step not applied (want 'translate([0,0,150]) cover();')"; sed 's/^/    /' "$tmp/pure.scad"; pass=0
+  elif [[ "$ASSEMBLY_USES_NOPSCADLIB" != "0" ]]; then
+    echo "SELFTEST FAIL: [pure] ASSEMBLY_USES_NOPSCADLIB should be 0 for a parts-only manifest, got '$ASSEMBLY_USES_NOPSCADLIB'"; pass=0
+  else
+    echo "selftest ok    [pure] (parts-only → no NopSCADlib, explode: step applied)"
+  fi
+
+  # Test 10 — a manifest that declares nothing to render is rejected.
+  mkdir -p "$root/empty"
+  printf 'title: nothing here\n' > "$root/empty/assembly.conf"
+  : > "$root/empty/empty.scad"
+  out="$( ROOT="$root" generate_scad "empty" "$tmp/empty.scad" 2>&1 )" || true
+  if ! grep -qF "declares no part" <<<"$out"; then
+    echo "SELFTEST FAIL: [empty] manifest with no parts/vitamins should be rejected"; sed 's/^/    /' <<<"$out"; pass=0
+  else
+    echo "selftest ok    [empty] (manifest with no parts/vitamins rejected)"
+  fi
+
+  # Test 11 — a non-integer explode: value is rejected.
+  mkdir -p "$root/badexplode"
+  printf 'explode: lots\npart: p() | 1 | p\n' > "$root/badexplode/assembly.conf"
+  : > "$root/badexplode/badexplode.scad"
+  out="$( ROOT="$root" generate_scad "badexplode" "$tmp/be.scad" 2>&1 )" || true
+  if ! grep -qF "explode: must be" <<<"$out"; then
+    echo "SELFTEST FAIL: [bad-explode] non-integer explode: should be rejected"; sed 's/^/    /' <<<"$out"; pass=0
+  else
+    echo "selftest ok    [bad-explode] (non-integer explode: rejected)"
+  fi
+
+  # Test 12 — a declared-but-empty explode: is an error, not a silent default.
+  mkdir -p "$root/emptyexplode"
+  printf 'explode:\npart: p() | 1 | p\n' > "$root/emptyexplode/assembly.conf"
+  : > "$root/emptyexplode/emptyexplode.scad"
+  out="$( ROOT="$root" generate_scad "emptyexplode" "$tmp/ee.scad" 2>&1 )" || true
+  if ! grep -qF "explode: must be" <<<"$out"; then
+    echo "SELFTEST FAIL: [empty-explode] a declared-but-empty explode: should be rejected, not defaulted"; sed 's/^/    /' <<<"$out"; pass=0
+  else
+    echo "selftest ok    [empty-explode] (declared-but-empty explode: rejected)"
+  fi
+
+  # Test 13 — a leading-zero explode: is read base-10 (not octal), so it does
+  # not abort arithmetic under set -e; 010 must mean 10mm, not 8.
+  mkdir -p "$root/leadzero"
+  cat > "$root/leadzero/assembly.conf" <<'CONF'
+explode: 010
+part: base()  | 1 | base
+part: cover() | 1 | cover
+CONF
+  : > "$root/leadzero/leadzero.scad"
+  ROOT="$root" generate_scad "leadzero" "$tmp/lz.scad"
+  if ! grep -qF 'translate([0,0,10]) cover();' "$tmp/lz.scad"; then
+    echo "SELFTEST FAIL: [leading-zero] explode: 010 should be base-10 (want 'translate([0,0,10]) cover();')"; sed 's/^/    /' "$tmp/lz.scad"; pass=0
+  else
+    echo "selftest ok    [leading-zero] (explode: 010 read base-10, no octal abort)"
+  fi
 
   if (( pass )); then
     echo "ok    assembly.sh --selftest: manifest parsing and generator contract hold"

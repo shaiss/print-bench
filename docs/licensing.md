@@ -73,13 +73,15 @@ The line for core tooling is **distributed source**, not tool use:
   user or CI installs them. Running a separate GPL program, or using a library
   the repo does not distribute, conveys no GPL. This is fine.
 - **Allowed: a generator that emits a per-design opt-in.** `scripts/assembly.sh`
-  writes a `.scad` that `include`s NopSCADlib to render a design's exploded view
-  and BOM — but only for a design that ships an `assembly.conf`, i.e. a design
-  that has already opted into NopSCADlib at the design layer ([#156](https://github.com/shaiss/print-bench/issues/156)).
-  The generator is the mechanism that realises that one design's opt-in; the
-  combined work it produces is scoped to that design, not to core. The tool
-  itself is first-party CC-BY-SA-4.0 code that emits an include *string*; it does
-  not itself combine with GPL.
+  writes a `.scad` to render a design's exploded view and BOM. It `include`s
+  NopSCADlib **only when that design's `assembly.conf` declares a `vitamin:`** —
+  a bought-in part whose geometry NopSCADlib supplies ([#156](https://github.com/shaiss/print-bench/issues/156)).
+  Declaring a vitamin is the design-layer opt-in; a parts-only manifest renders
+  with pure first-party OpenSCAD and pulls in no GPL at all. When NopSCADlib is
+  included, the generator is the mechanism that realises that one design's
+  opt-in; the combined work it produces is scoped to that design, not to core.
+  The tool itself is first-party CC-BY-SA-4.0 code that emits an include
+  *string*; it does not itself combine with GPL.
 - **Forbidden: bundling vendored copyleft source into distributed first-party
   code.** A script may not copy `lib/NopSCADlib/` into a first-party distributed
   artifact, nor make a shared first-party module combine with it.
