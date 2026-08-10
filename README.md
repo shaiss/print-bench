@@ -108,6 +108,10 @@ reviewed after every change, and reviewer personas (printability, and
 fitness-for-purpose) challenge the design over pull requests until it
 merges. The full workflow and conventions live in [CLAUDE.md](CLAUDE.md).
 
+For how the system is put together — the generic CI/automation platform
+separated from the 3D-print design layer, written as the basis for a reusable
+template — see [docs/architecture/](docs/architecture/README.md).
+
 ## Operating the automation
 
 Most of this repo's CI drives itself, but a few controls are exposed to
