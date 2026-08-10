@@ -90,6 +90,18 @@ ALLOW_BUNDLE=(
 # Pipe-joined alternation of the roots, e.g. "NopSCADlib" or "NopSCADlib|Foo".
 roots_alt() { local IFS='|'; printf '%s' "${COPYLEFT_ROOTS[*]}"; }
 
+# Membership test for the Rule B allowlist. A plain loop, not a `declare -A`
+# associative array: the repo holds every locally-run script to the stock-macOS
+# Bash 3.2 floor (scripts/check.sh runs this one — see scripts/ci-classify.sh),
+# and 3.2 has no associative arrays.
+_in_allow_bundle() {
+  local x="$1" a
+  for a in "${ALLOW_BUNDLE[@]}"; do
+    [[ "$x" == "$a" ]] && return 0
+  done
+  return 1
+}
+
 # Rule A: a first-party .scad that `use`/`include`s a copyleft root at statement
 # position. Prints every violation; returns 1 if any, 0 if clean.
 scan_scad() {
@@ -125,7 +137,13 @@ scan_core_source() {
       echo "        ${stripped}"
       echo "      → do not copy or ship lib/${COPYLEFT_ROOTS[0]}/ from core/site; it stays vendored aggregation only (docs/licensing.md)."
       hits=1
-    done < <(grep -nE "(^|[^A-Za-z0-9_./-])lib/(${alt})(/|[^A-Za-z0-9_-]|\$)" "$f" || true)
+      # Leading boundary [^A-Za-z0-9_-] deliberately ALLOWS `/` and `.` so a
+      # path-prefixed reference (./lib/<root>, ../lib/<root>, sub/lib/<root>) is
+      # still caught; excluding them let those slip past. It still rejects a
+      # longer dir name (zlib/<root>). Trailing group anchors on `/`, a
+      # non-word char, or end-of-line (the bare `$` — bash turns "\$" into the
+      # anchor `$`, verified against an EOL fixture in --selftest).
+    done < <(grep -nE "(^|[^A-Za-z0-9_-])lib/(${alt})(/|[^A-Za-z0-9_-]|\$)" "$f" || true)
   done
   return "$hits"
 }
@@ -173,6 +191,34 @@ EOF
     echo "ok    selftest: bundling the vendored source tree fails Rule B"
   fi
 
+  # POSITIVE: path-prefixed refs (./, ../, sub/dir) and an END-OF-LINE ref must
+  # ALSO be caught — the leading boundary must allow `/` and `.`, and the
+  # trailing `$` must anchor EOL. Regression: an earlier leading class excluded
+  # `/`+`.` and silently missed ./lib and ../lib entirely, and no fixture
+  # covered an EOL-terminated reference.
+  cat > "$tmp/bad-paths.sh" <<'EOF'
+cp -r ./lib/NopSCADlib "$dest"
+VENDOR=../lib/NopSCADlib
+tar cf x.tar src/lib/NopSCADlib
+EOF
+  if scan_core_source "$tmp/bad-paths.sh" >/dev/null 2>&1; then
+    echo "FAIL  selftest: path-prefixed (./ ../ sub/) or EOL vendored refs were NOT caught"; ok=0
+  else
+    echo "ok    selftest: path-prefixed (./ ../ sub/) and EOL vendored refs fail Rule B"
+  fi
+
+  # NEGATIVE 0: a different directory whose name merely ends in "lib", or a
+  # longer library name under lib/, is not the vendored lib/<root> — no match.
+  cat > "$tmp/lookalike.sh" <<'EOF'
+cp zlib/NopSCADlib d
+use lib/NopSCADlibExtra/foo
+EOF
+  if scan_core_source "$tmp/lookalike.sh" >/dev/null 2>&1; then
+    echo "ok    selftest: zlib/ and NopSCADlibExtra look-alikes do not match Rule B"
+  else
+    echo "FAIL  selftest: a look-alike path wrongly matched Rule B"; ok=0
+  fi
+
   # NEGATIVE 1: a COMMENT naming the vendored path is documentation, not a bundle.
   cat > "$tmp/comment.sh" <<'EOF'
 # nothing here includes lib/NopSCADlib/ — see docs/licensing.md
@@ -200,26 +246,28 @@ fi
 
 fail=0
 
-# Rule A file set: first-party lib/*.scad (top-level only — the single-level
-# glob excludes vendored lib/BOSL2 and lib/NopSCADlib subtrees) plus any .scad
-# committed under scripts/ or site/ (none today; future-proofed).
-shopt -s nullglob globstar
-scad_files=(lib/*.scad)
-for f in scripts/**/*.scad site/**/*.scad; do
-  scad_files+=("$f")
-done
+# nullglob (Bash 3.0+) so an empty lib/*.scad vanishes; globstar (Bash 4) is
+# deliberately NOT used — see the ci-classify.sh Bash 3.2 note.
+shopt -s nullglob
 
-# Rule B file set: committed scripts/ and site/ files, minus the .scad already
-# covered by Rule A and minus the boundary-naming allowlist.
-declare -A allow=()
-for a in "${ALLOW_BUNDLE[@]}"; do allow["$a"]=1; done
+# Rule A file set: first-party lib/*.scad (top-level only — the single-level
+# glob excludes the vendored lib/BOSL2 and lib/NopSCADlib subtrees), plus any
+# .scad committed under scripts/ or site/ (none today; future-proofed). The
+# latter come from `git ls-files`, not a `**` globstar glob, to stay on the
+# stock-macOS Bash 3.2 floor. Rule B file set is built in the same pass:
+# committed scripts/ and site/ files, minus the .scad routed to Rule A and
+# minus the boundary-naming allowlist.
+scad_files=(lib/*.scad)
 core_src=()
 while IFS= read -r f; do
-  [[ "$f" == *.scad ]] && continue
-  [[ -n "${allow[$f]:-}" ]] && continue
   [[ -f "$f" ]] || continue
+  if [[ "$f" == *.scad ]]; then
+    scad_files+=("$f")
+    continue
+  fi
+  _in_allow_bundle "$f" && continue
   core_src+=("$f")
-done < <(git ls-files scripts/ site/)
+done < <(git ls-files -- scripts/ site/)
 
 echo "-- license-boundary: Rule A (shared .scad must not include a copyleft library)"
 if ((${#scad_files[@]})) && ! scan_scad "${scad_files[@]}"; then
