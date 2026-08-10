@@ -17,7 +17,26 @@ pack, so a per-directory patchwork would leave every exported mesh with a
 license question to answer before anyone could print or share it.
 
 Vendored third-party code keeps its own terms and is not covered by the
-above. lib/BOSL2/ is BSD-2-Clause; see lib/BOSL2/LICENSE.
+above. lib/BOSL2/ is BSD-2-Clause; see lib/BOSL2/LICENSE. lib/NopSCADlib/ is
+GPL-3.0; see lib/NopSCADlib/COPYING. The two vendored libraries are kept as
+mere aggregation (upstream terms intact, never edited) so neither license
+reaches the CC-BY-SA-4.0 first-party tree by being vendored.
+
+The GPL-3.0 boundary is the one that needs a line beyond mere aggregation: a
+design that includes NopSCADlib and exports geometry (an STL, an assembly) is a
+GPL-3.0 combined work, not aggregated code. That is acceptable AT THE DESIGN
+LAYER and nothing else -- such a design discloses on its product page that it
+incorporates a GPL-3.0-licensed part, and the repo's derivative/lineage system
+(derives.conf, docs/derivative-designs.md) keeps it an isolated, attributed
+unit so the obligation does not silently spread to designs that do not use
+NopSCADlib. The design-layer GPL path is opt-in per design: a design that does
+not include NopSCADlib is unaffected by it.
+
+GPL must NOT reach the first-party core -- scripts/, the site, the lib/*.scad
+first-party modules -- until a separate system-level license decision is made.
+Core tooling may vendor NopSCADlib (mere aggregation) but must not include it;
+keeping GPL out of shared first-party code is the point of deferring that
+decision. See lib/NopSCADlib/VENDORED.md for the per-design disclosure rule.
 
 YOU MUST ATTRIBUTE.
     Print the designs, sell the prints, remix the .scad, publish a

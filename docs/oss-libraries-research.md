@@ -13,7 +13,7 @@ winners implemented in the same PR that adds this document.
 | OpenSCAD nightly + Manifold backend | Confirmed, biggest win | **✅ Implemented** — render-gate + a new check job run `openscad-nightly --backend=manifold` (OBS repo); stable 2021.01 job kept as compatibility baseline |
 | SCA2D linter | Confirmed, project revived (v0.4.0, Jun 2026) | **✅ Implemented** — `scripts/lint-scad.sh`, report-only CI step (0 errors / 18 structural warnings baseline) |
 | Tweaker-3 auto-orientation | Still OSS state of the art (active Mar 2026), but printcheck's native `orientation.py` covers the gate's needs | **Superseded natively** — revisit only if scored support-volume orientation is wanted |
-| NopSCADlib | Solid, but no current design needs vitamins/BOM | **Deferred** — adopt when an assembly needs hardware or exploded views |
+| NopSCADlib | Solid, but no current design needs vitamins/BOM | **✅ Vendored** — `lib/NopSCADlib/` (GPL-3.0, issue #155); the first stage of the assembly-docs feature (#98). Vendored as mere aggregation like BOSL2, with the GPL-3.0 vs BSD-2-Clause vs CC-BY-SA-4.0 boundary documented in `LICENSE`, `CLAUDE.md`, and `lib/NopSCADlib/VENDORED.md`. No design includes it yet; `scripts/nopscadlib-check.sh` proves the include resolves. |
 | Round-Anything | Fine, no current pain point (BOSL2 covers rounding) | **Deferred** — adopt per-design |
 | openscad_docsgen | Fine, `lib/` is still two files | **Deferred** |
 | PrusaSlicer upgrade (pass 2 idea) | **Refuted in verification**: upstream stopped shipping Linux binaries after 2.9.0 — 2.9.4/2.9.5/2.9.6 are Windows/macOS/source only, Linux is Flatpak-only (too heavy for CI) | **Dropped** — apt 2.7.x stays; noted in `ci.yml` |
@@ -151,8 +151,9 @@ holes are design problems it deliberately won't paper over.
    comment-only.
 2. **f3d artifact previews** — render gated STLs to PNG in CI, attach to
    the sticky comment.
-3. **NopSCADlib / Round-Anything / openscad_docsgen** — first design that
-   needs vitamins, polyRound profiles, or lib docs pulls it in.
+3. **Round-Anything / openscad_docsgen** — adopt per-design when a design
+   needs polyRound profiles or generated lib docs. (NopSCADlib, formerly in
+   this backlog item, was vendored in issue #155.)
 4. **Topiary format check** — only if formatting drift appears.
 5. **`--summary-file` gating** — once CI is proven on nightly, printcheck
    could cross-check its numbers against OpenSCAD's own JSON summary.

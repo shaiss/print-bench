@@ -188,6 +188,9 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   - `printer-conf-check.sh` — proves the `printer.conf` mechanism reads the
     generic default when nothing is measured and the profile's value when one
     is, reaching the exported geometry (issue #101)
+  - `nopscadlib-check.sh` — proves the vendored `lib/NopSCADlib/` tree resolves
+    through `OPENSCADPATH` and builds a real vitamin; no committed file includes
+    NopSCADlib yet, so nothing else would notice if it went missing (issue #155)
   - `chunker-perms-check.sh` — proves the chunker's deny backstop
     (`.claude/chunker-settings.json`) still neutralizes every dangerous tool
     allow it would otherwise inherit from `.claude/settings.json`, which
