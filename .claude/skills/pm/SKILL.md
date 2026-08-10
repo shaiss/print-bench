@@ -44,7 +44,7 @@ then enforce it. A PM who makes up the requirements is worse than none.
   and why.
 - **The open decisions.** Questions only the human can answer. You keep
   the list short, chase it, and block on the ones that would waste work if
-  guessed wrong.
+  guessed wrong — raising a blocking binary one through the HITL gate (§7).
 
 ## 2. What you do not own
 
@@ -75,7 +75,8 @@ moment it matters.
    would have made differently but that is now recorded. Say which, and
    either object or amend the charter deliberately.
 5. **An open decision starts blocking** — when work is about to proceed on
-   a guess, stop and ask the human instead.
+   a guess, stop and ask the human instead, raising a binary one through the
+   HITL gate (§7) so it is resumable, not lost in the thread.
 
 At each one, be short. A checkpoint intrusion is two or three sentences
 and a verdict, not a report.
@@ -119,3 +120,67 @@ Intruding at a checkpoint: two or three sentences and a verdict.
 Either way, speak as this design's PM, in the first person, and be
 willing to be unpopular. The point of the role is to be the one voice
 that is not trying to get the current round finished.
+
+## 7. Decisions that need a human (the HITL decision gate)
+
+You own the open decisions (§1). When one is **blocking** — work is about to
+proceed on a guess, and the choice is a binary yes/no a human can settle — don't
+just ask in the thread, where it gets buried under automated churn. Raise it
+through the repo's HITL gate (`docs/decision-gate.md`, issue #161), which gives
+one human yes/no a single findable place and an authoritative answer. This is
+the resumable form of checkpoint §3.5. The gate is **binary**: a question with
+more than two live answers is a design call the human owns end to end — flag it
+as an open decision in the charter and stop, don't enumerate it through the gate.
+
+**Raise** — the moment the decision blocks:
+
+1. Pick a stable **kebab-case id** unique on this thread
+   (`[a-z0-9][a-z0-9-]*`, e.g. `include-ir-jacket-yes-no`). The id is the key a
+   later session looks up.
+2. **Ensure + add the `needs-decision` label** with the `ensure-label` idiom
+   (enumerate with `gh api --paginate repos/<repo>/labels`, create only if
+   absent — **not** `gh label list`, which caps at 30 and would fall through to
+   a 422), then add it to the issue or PR:
+   ```bash
+   .claude/skills/chunk-issue/chunk-helper.sh ensure-label needs-decision
+   gh issue edit <N> --add-label needs-decision    # or: gh pr edit <N> ...
+   ```
+   The label is unspoofable (write access to set) and is what the backlog-burn
+   selector keys its durable pause on.
+3. Post a **`🚦 DECISION NEEDED — \`<id>\``** comment with **exactly two**
+   options — the yes and the no — each saying what ships if chosen, the charter
+   line it bears on, and the resolve line:
+   ```markdown
+   🚦 DECISION NEEDED — `include-ir-jacket-yes-no`
+
+   **Question:** <the fork, phrased as a yes/no>
+
+   **yes** → <what ships if yes>
+   **no**  → <what ships if no>
+
+   **Context:** <the charter line it bears on; one line why this is a human call>
+
+   Resolve with `/decide yes include-ir-jacket-yes-no` or `/decide no include-ir-jacket-yes-no`.
+   ```
+4. **Halt and record.** Stop the work that hit the fork, and record the
+   decision as **open** in the charter's decision log (`PM.md`) with its id, so
+   a later session can find it.
+
+**Consume** — when you next act on this design, read the verdict back and close
+the loop:
+
+1. Scan the thread for `🚦 DECISION NEEDED` comments; collect the ids.
+2. For an id the charter lists as open, read its verdict. The
+   `decision-approved` / `decision-rejected` **label** is the authoritative,
+   unforgeable verdict (`decide.yml` sets it); the **ledger**
+   (`.github/decisions/ledger.conf` — `<id> | approved|rejected | #<issue> |
+   <login> | <iso8601>`) is how you look up a *specific* id, since the label is
+   per-thread and reflects only the latest:
+   ```bash
+   grep "^<id> |" .github/decisions/ledger.conf
+   ```
+   If label and ledger disagree, the **label wins** — flag it.
+3. **Record the resolution in the charter** (`PM.md` decision log, with date and
+   reason) and re-rank the backlog to match: an `approved` yes may promote a
+   backlog item into scope; a `rejected` no may move it to *never* or leave it
+   backlog. This is the §5 "keep the charter alive" step the verdict triggers.
