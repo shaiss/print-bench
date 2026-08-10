@@ -135,7 +135,6 @@ generate_scad() {
 assembly_one() {
   local design="$1"
   local conf="$ROOT/$design/assembly.conf"
-  local src="$ROOT/$design/${design}.scad"
   local outdir="$ROOT/$design/previews"
 
   [[ -f "$conf" ]] || { echo "error: $conf not found" >&2; return 1; }
@@ -157,7 +156,7 @@ assembly_one() {
   xvfb-run -a "$OPENSCAD_BIN" \
     ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
     -D'$bom=2' \
-    -o /dev/null --export-format echo "$scad" 2>&1 >"$bom_out" || true
+    -o /dev/null --export-format echo "$scad" >"$bom_out" 2>&1 || true
 
   # ── Write ASSEMBLY.md ──
   local md="$ROOT/$design/ASSEMBLY.md"
