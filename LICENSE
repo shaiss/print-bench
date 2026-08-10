@@ -30,13 +30,24 @@ incorporates a GPL-3.0-licensed part, and the repo's derivative/lineage system
 (derives.conf, docs/derivative-designs.md) keeps it an isolated, attributed
 unit so the obligation does not silently spread to designs that do not use
 NopSCADlib. The design-layer GPL path is opt-in per design: a design that does
-not include NopSCADlib is unaffected by it.
+not include NopSCADlib is unaffected by it. When this repository DISTRIBUTES
+such a design's artifacts (a release bundle, a download on the site), that one
+design's distribution carries the GPL notice and a link to its corresponding
+source (the design plus the vendored library); core and every other design are
+untouched.
 
-GPL must NOT reach the first-party core -- scripts/, the site, the lib/*.scad
-first-party modules -- until a separate system-level license decision is made.
-Core tooling may vendor NopSCADlib (mere aggregation) but must not include it;
-keeping GPL out of shared first-party code is the point of deferring that
-decision. See lib/NopSCADlib/VENDORED.md for the per-design disclosure rule.
+GPL/copyleft must NOT reach the first-party CORE -- the shared lib/*.scad
+modules, scripts/, and the site. This is a STANDING DECISION, not a deferral
+(issue #160): the core stays permissive-compatible -- CC-BY-SA-4.0 plus
+BSD-2-Clause-style dependencies such as lib/BOSL2/ -- and copyleft is confined
+to the opt-in design layer above. Core tooling MAY vendor NopSCADlib as mere
+aggregation, and MAY invoke GPL tools it does not ship (OpenSCAD, PrusaSlicer,
+Blender); it MUST NOT make a shared first-party module combine with a copyleft
+library, nor bundle vendored copyleft source into distributed first-party code.
+scripts/license-boundary-check.sh enforces this boundary; docs/licensing.md
+states the policy in full; lib/NopSCADlib/VENDORED.md carries the per-design
+disclosure rule. The policy is general -- it governs GPL/copyleft libraries as a
+class, with NopSCADlib as today's only case.
 
 YOU MUST ATTRIBUTE.
     Print the designs, sell the prints, remix the .scad, publish a
