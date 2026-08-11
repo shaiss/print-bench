@@ -1,7 +1,7 @@
 name: Design run (scheduled idea→PR pipeline)
 
 # The scheduled heartbeat for /design-run (issue #96, Stage 3 — the flagship
-# idea→PR pipeline). Once a day it picks ONE open `design-brief` issue and runs
+# idea→PR pipeline). On each firing it picks ONE open `design-brief` issue and runs
 # /design-run on it unattended: scaffold → iterate-to-gates-green → gated draft
 # PR, with the same decline discipline /ship-issue uses when a design needs a
 # human's taste. The skill already runs the same attended or unattended; this
@@ -46,20 +46,23 @@ name: Design run (scheduled idea→PR pipeline)
 
 on:
   schedule:
-    # Once a day at :23 past the hour (an off-peak minute, not :00, to avoid
+    # Hourly, at :23 past the hour (an off-peak minute, not :00, to avoid
     # Actions scheduler congestion — and offset from backlog-burn's :17 so the
     # two routines don't fire simultaneously). A full design run renders,
-    # slices and iterates, so it is heavier than a /ship-issue burn and wants a
-    # gentler cadence than backlog-burn's 4×/day. Cron must be a literal —
-    # Actions evaluates no files or variables for on.schedule — so change the
-    # cadence by editing this line in a one-line PR (and the `cadence:` key in
+    # slices and iterates, so it is heavier than a /ship-issue burn — but the
+    # two-key arming guard plus the `design-run` concurrency group (no
+    # cancel-in-progress) keep hourly safe: a run still in progress just queues
+    # the next firing rather than overlapping it, and an idle firing (no
+    # eligible brief) costs nothing. Cron must be a literal — Actions evaluates
+    # no files or variables for on.schedule — so change the cadence by editing
+    # this line in a one-line PR (and the `cadence:` key in
     # .github/design-run.conf to match), e.g.:
-    #   twice daily:  '23 6,18 * * *'
+    #   4× per day:   '23 0,6,12,18 * * *'
+    #   once a day:   '23 6 * * *'
     #   weekly:       '23 6 * * 1'
-    # The two-key guard (DESIGN_RUN_ENABLED + committed `enabled: true`) ensures
-    # the schedule is harmless until deliberately armed, so firing daily is
-    # safe: idle firings cost nothing.
-    - cron: '23 6 * * *'
+    # The two-key guard (DESIGN_RUN_ENABLED + committed `enabled: true`) still
+    # keeps the schedule inert until deliberately armed.
+    - cron: '23 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -84,7 +87,7 @@ permissions:
 # itself. It deliberately does NOT serialize against the backlog burn: GitHub
 # concurrency is shared across workflows only when the group STRING matches, and
 # backlog-burn uses `group: backlog-burn`, so the names differ on purpose —
-# serializing a heavy daily design run with a 4×/day burn (cancel-in-progress
+# serializing a heavy design run with the /ship-issue burn (cancel-in-progress
 # off) would queue burns behind a long design run for no benefit here. The one
 # case where the two could collide is an issue carrying BOTH opt-in labels
 # (`design-brief` and `autonomy-ok`), which both selectors read from a snapshot.
