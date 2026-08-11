@@ -22,15 +22,15 @@ name: Auto design review (Jane / Drik / coach)
 #     many times this workflow fires.
 #
 # Safety properties mirror backlog-burn.yml:
-#   * Off without the CLAUDE_CODE_OAUTH_TOKEN secret — the jobs degrade to a
+#   * Off without the ANTHROPIC_API_KEY secret — the jobs degrade to a
 #     ::notice:: log and exit 0 so the PR is not blocked.
 #   * The `no-auto-review` label is the human escape hatch; add it to any PR
 #     that should not be auto-reviewed.
 #
 # Required secrets:
-#   CLAUDE_CODE_OAUTH_TOKEN — the same OAuth token used by backlog-burn and
-#   ship-issue.  Without it the review sessions are skipped (graceful
-#   degradation), never fail-hard.
+#   ANTHROPIC_API_KEY — the same plain API key (pay-per-token) used by
+#   backlog-burn and ship-issue.  Without it the review sessions are skipped
+#   (graceful degradation), never fail-hard.
 
 on:
   pull_request:
@@ -152,7 +152,7 @@ jobs:
       && needs.design-changes.outputs.is_new_round == 'true'
     runs-on: ubuntu-latest
     env:
-      HAS_CLAUDE_SECRET: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+      HAS_CLAUDE_SECRET: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -162,7 +162,7 @@ jobs:
         if: env.HAS_CLAUDE_SECRET == 'true'
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
@@ -170,7 +170,7 @@ jobs:
       - name: Explain skipped run
         if: env.HAS_CLAUDE_SECRET != 'true'
         run: |
-          echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not set — skipping /jane-review for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::ANTHROPIC_API_KEY is not set — skipping /jane-review for PR #${{ github.event.pull_request.number }}"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 3. Drik review (fitness-for-purpose / customer)
@@ -183,7 +183,7 @@ jobs:
       && needs.design-changes.outputs.is_new_round == 'true'
     runs-on: ubuntu-latest
     env:
-      HAS_CLAUDE_SECRET: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+      HAS_CLAUDE_SECRET: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -193,7 +193,7 @@ jobs:
         if: env.HAS_CLAUDE_SECRET == 'true'
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
@@ -201,7 +201,7 @@ jobs:
       - name: Explain skipped run
         if: env.HAS_CLAUDE_SECRET != 'true'
         run: |
-          echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not set — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::ANTHROPIC_API_KEY is not set — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 4. Design coach (verification-first rounds until merge)
@@ -219,7 +219,7 @@ jobs:
           || github.event.action == 'reopened')
     runs-on: ubuntu-latest
     env:
-      HAS_CLAUDE_SECRET: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+      HAS_CLAUDE_SECRET: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -229,7 +229,7 @@ jobs:
         if: env.HAS_CLAUDE_SECRET == 'true'
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
@@ -237,7 +237,7 @@ jobs:
       - name: Explain skipped run
         if: env.HAS_CLAUDE_SECRET != 'true'
         run: |
-          echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not set — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::ANTHROPIC_API_KEY is not set — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 5. Stamp this review round so future synchronize events can tell
@@ -268,7 +268,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
-          HAS_SECRET: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          HAS_SECRET: ${{ secrets.ANTHROPIC_API_KEY != '' }}
           JANE: ${{ needs.jane-review.result }}
           DRIK: ${{ needs.drik-review.result }}
           COACH: ${{ needs.design-coach.result }}
@@ -287,11 +287,11 @@ jobs:
             # Nothing actually ran — do NOT advance the reviewed-SHA.
             body="$(printf '%s\n' \
               "<!-- AUTO_REVIEW_STAMP -->" \
-              "⏭️ **Auto-review skipped** — \`CLAUDE_CODE_OAUTH_TOKEN\` is not set, so no reviewer ran for \`${short}\` (designs: \`${DESIGNS}\`)." \
+              "⏭️ **Auto-review skipped** — \`ANTHROPIC_API_KEY\` is not set, so no reviewer ran for \`${short}\` (designs: \`${DESIGNS}\`)." \
               "This round is **not** marked reviewed; it retries on the next push that changes a \`designs/\` file (or once the secret is set)." \
               "Add the \`no-auto-review\` label to suppress future rounds." \
               "" "---" "$gen")"
-            echo "::notice::auto-review skipped — CLAUDE_CODE_OAUTH_TOKEN not set; reviewed-SHA not advanced so the round will retry"
+            echo "::notice::auto-review skipped — ANTHROPIC_API_KEY not set; reviewed-SHA not advanced so the round will retry"
           elif [ "$JANE" = "success" ] && [ "$DRIK" = "success" ] && [ "$coach_ok" = "true" ]; then
             # A real review ran clean — mark the commit reviewed.
             body="$(printf '%s\n' \
