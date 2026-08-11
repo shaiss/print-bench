@@ -46,20 +46,23 @@ name: Design run (scheduled idea→PR pipeline)
 
 on:
   schedule:
-    # Once a day at :23 past the hour (an off-peak minute, not :00, to avoid
+    # Hourly, at :23 past the hour (an off-peak minute, not :00, to avoid
     # Actions scheduler congestion — and offset from backlog-burn's :17 so the
     # two routines don't fire simultaneously). A full design run renders,
-    # slices and iterates, so it is heavier than a /ship-issue burn and wants a
-    # gentler cadence than backlog-burn's 4×/day. Cron must be a literal —
-    # Actions evaluates no files or variables for on.schedule — so change the
-    # cadence by editing this line in a one-line PR (and the `cadence:` key in
+    # slices and iterates, so it is heavier than a /ship-issue burn — but the
+    # two-key arming guard plus the `design-run` concurrency group (no
+    # cancel-in-progress) keep hourly safe: a run still in progress just queues
+    # the next firing rather than overlapping it, and an idle firing (no
+    # eligible brief) costs nothing. Cron must be a literal — Actions evaluates
+    # no files or variables for on.schedule — so change the cadence by editing
+    # this line in a one-line PR (and the `cadence:` key in
     # .github/design-run.conf to match), e.g.:
-    #   twice daily:  '23 6,18 * * *'
+    #   4× per day:   '23 0,6,12,18 * * *'
+    #   once a day:   '23 6 * * *'
     #   weekly:       '23 6 * * 1'
-    # The two-key guard (DESIGN_RUN_ENABLED + committed `enabled: true`) ensures
-    # the schedule is harmless until deliberately armed, so firing daily is
-    # safe: idle firings cost nothing.
-    - cron: '23 6 * * *'
+    # The two-key guard (DESIGN_RUN_ENABLED + committed `enabled: true`) still
+    # keeps the schedule inert until deliberately armed.
+    - cron: '23 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
