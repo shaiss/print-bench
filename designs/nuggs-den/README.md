@@ -8,6 +8,10 @@ way round. Not a tube, not an elbow — the one module you *stop* at.
 
 ![Studio product shot of the den](previews/product-hero.png)
 
+![AI-styled scene: nuggs-den in motion, staged in a real-world setting](previews/lifestyle-product-hero.gif)
+
+*AI-generated motion impression for general illustration only — geometry is approximate and may not exactly match the printed part, and the movement shown is illustrative, not a simulation; see the deterministic previews above and the STL for the true shape.*
+
 ![Turntable of the den](previews/turntable.gif)
 
 ![4-view contact sheet](previews/contact-sheet.png)
