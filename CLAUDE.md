@@ -126,7 +126,10 @@ All commands run from the repo root.
 ./scripts/lint-scad.sh
 
 # Render printable parts (designs/<name>/ci.parts, if present) and gate the
-# STLs with tools/printcheck; --slice adds a PrusaSlicer test-slice. CI runs this.
+# STLs with tools/printcheck; --slice adds a PrusaSlicer test-slice. A
+# designs/<name>/ci.fitchecks manifest additionally gates boolean fit parts:
+# `<part> empty` must render zero facets, `<part> interferes` is the mandatory
+# negative control proving the check can fail. CI runs this.
 ./scripts/gate.sh [--slice] [<name>...]
 
 # Lineage of derivative designs (designs/<name>/derives.conf): `check`
