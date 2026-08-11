@@ -205,7 +205,7 @@ jobs:
           # Pin the model explicitly (Opus 4.8, the maintainer's pick — PR #172
           # review) and run at maximum reasoning effort: an unattended ship run
           # is exactly the correctness-over-cost case.
-          claude_args: --dangerously-skip-permissions --model claude-opus-4-8 --effort max
+          claude_args: --permission-mode bypassPermissions --model claude-opus-4-8 --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
       - name: Ship via Z.AI (GLM)
@@ -232,7 +232,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
-          claude_args: --dangerously-skip-permissions --model glm-5.2 --effort max
+          claude_args: --permission-mode bypassPermissions --model glm-5.2 --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
       - name: Note a checkless draft PR (no CI-triggering PAT)
