@@ -1,0 +1,334 @@
+{
+  "schema": "stylelift/style@1",
+  "name": "orrery",
+  "title": "Orrery",
+  "summary": "Twisted-blade vortex cages carrying captive floating rings on 50-degree conical seats — kinetic, dual-material, supportless by construction",
+  "provenance": {
+    "reference": [
+      {
+        "file": "nuggs-orrery-kinetic.stl",
+        "sha256": "84385a5b72a3705ea2704bd8af9082ae75ce1e0530ba72d3a261fb6f207ff8bd",
+        "source": "first-party: designs/nuggs-orrery in this repository (part=kinetic render)",
+        "license": "CC BY-SA 4.0 (this repository's own license)"
+      }
+    ],
+    "lifted_by": "stylelift",
+    "primary": "nuggs-orrery-kinetic.stl"
+  },
+  "tokens": {
+    "fn": 128,
+    "ramp_deg": 50,
+    "blade_th": 2.4,
+    "blade_twist_rate": 0.51,
+    "ring_h": 3.6,
+    "seat_gap": 0.1
+  },
+  "asserted": {
+    "kinetic": "every piece carries at least one captive free-moving element, trapped by geometry (its hole is smaller than the cage it circles) — printed in place, never assembled",
+    "dual_material": "the moving elements print in a second, non-welding material (PETG body + PLA accents); the anti-bond interface that supports them during the print is the bearing they run on afterwards",
+    "supportless": "every downward face sits at ramp_deg from horizontal, is a designed micro-bridge, or rests on the other material; the style never generates slicer supports",
+    "palette": "dark, low-sheen body; saturated high-contrast accent rings — the second material is meant to be seen moving"
+  },
+  "rules": [
+    {
+      "id": "curve-smoothness",
+      "metric": "edges.rounding.implied_fn",
+      "op": "min",
+      "value": 89,
+      "severity": "required",
+      "when": {
+        "metric": "edges.rounding.dominant_r_mm",
+        "op": "min",
+        "value": 10
+      },
+      "why": "large visible curves in this family are drawn at about $fn=128; visibly faceted barrels and rings break the family look. Scoped to parts whose dominant rounding is >= 10 mm: on a small accent piece the estimator reads the deliberately faceted ring cross-section as a coarse sub-3 mm circle (measured on the reference's own orbit STL), and that is section grammar, not a curve"
+    },
+    {
+      "id": "soft-edges",
+      "metric": "edges.softness",
+      "op": "min",
+      "value": 0.49,
+      "severity": "advisory",
+      "why": "this is a soft family: most of its edge length curves rather than turning a corner (falls as a part grows, so advisory)"
+    },
+    {
+      "id": "grammar-sharp",
+      "metric": "edges.grammar.sharp_share",
+      "op": "min",
+      "value": 0.4,
+      "severity": "advisory",
+      "why": "the blades are knife-clean: the reference treats 67% of its shaped edge length as sharp, and softening the blades reads as a different family"
+    },
+    {
+      "id": "ramp-grammar",
+      "metric": "orientation.sloped_share",
+      "op": "min",
+      "value": 0.15,
+      "severity": "required",
+      "why": "the family's one chamfer is the ramp_deg cone: lead-ins, groove roofs and ring seats are all the same 50-degree cut, which is what makes the style supportless. Required because it is the one signature every family part carries (reference body 0.36, its orbit rings 0.24, the swatch 0.36)"
+    },
+    {
+      "id": "massing",
+      "metric": "massing.bbox_fill",
+      "op": "max",
+      "value": 0.3,
+      "severity": "advisory",
+      "why": "the form is carved away, never blocky — a vortex cage fills well under a third of its bounding box (the reference fills 8%, the swatch 15%)"
+    }
+  ],
+  "measured": {
+    "source": "/home/user/print-bench/build/nuggs-orrery-kinetic.stl",
+    "mesh": {
+      "faces": 30172,
+      "vertices": 15086,
+      "watertight": true,
+      "bodies": 4
+    },
+    "massing": {
+      "extents_mm": [
+        115.2,
+        115.2,
+        166.0
+      ],
+      "aspect": [
+        1.0,
+        0.694,
+        0.694
+      ],
+      "volume_mm3": 171619.419,
+      "bbox_fill": 0.0779,
+      "convexity": 0.1123,
+      "surface_area_mm2": 166166.628
+    },
+    "edges": {
+      "folds": 45258,
+      "soft_length_mm": 82696.601,
+      "hard_length_mm": 18498.779,
+      "softness": 0.8172,
+      "tessellation": "strip",
+      "strip_share": 0.9316,
+      "rounding": {
+        "convex": [
+          {
+            "r_mm": 42.4329,
+            "share": 0.527,
+            "length_mm": 6030.81,
+            "implied_fn": 120.0,
+            "sweep_deg": 78.0
+          },
+          {
+            "r_mm": 48.393,
+            "share": 0.1888,
+            "length_mm": 2160.0,
+            "implied_fn": 117.1,
+            "sweep_deg": 46.6
+          },
+          {
+            "r_mm": 2.8981,
+            "share": 0.1857,
+            "length_mm": 2125.033,
+            "implied_fn": 9.0,
+            "sweep_deg": 359.9
+          },
+          {
+            "r_mm": 57.5966,
+            "share": 0.0758,
+            "length_mm": 866.952,
+            "implied_fn": 120.0
+          }
+        ],
+        "concave": [
+          {
+            "r_mm": 45.5303,
+            "share": 0.5845,
+            "length_mm": 1948.8,
+            "implied_fn": 117.0,
+            "sweep_deg": 25.1
+          },
+          {
+            "r_mm": 54.8007,
+            "share": 0.26,
+            "length_mm": 866.952,
+            "implied_fn": 120.0
+          },
+          {
+            "r_mm": 32.9892,
+            "share": 0.0519,
+            "length_mm": 173.145,
+            "implied_fn": 9.0,
+            "sweep_deg": 80.0
+          }
+        ],
+        "dominant_r_mm": 42.4329,
+        "dominant_share": 0.527,
+        "implied_fn": 120.0
+      },
+      "form": {
+        "convex": [
+          {
+            "r_mm": 57.1933,
+            "share": 1.0,
+            "length_mm": 684.036,
+            "implied_fn": 120.0,
+            "sweep_deg": 360.0
+          }
+        ],
+        "concave": [
+          {
+            "r_mm": 39.9973,
+            "share": 1.0,
+            "length_mm": 17520.0,
+            "implied_fn": 120.0,
+            "sweep_deg": 360.0
+          }
+        ],
+        "dominant_r_mm": 57.1933
+      },
+      "chamfers": {
+        "bands": [
+          {
+            "leg_mm": 3.8591,
+            "width_mm": 2.3455,
+            "turn_deg": 144.62,
+            "length_mm": 4.182,
+            "convex": true
+          },
+          {
+            "leg_mm": 3.8591,
+            "width_mm": 2.3455,
+            "turn_deg": 144.62,
+            "length_mm": 4.182,
+            "convex": true
+          },
+          {
+            "leg_mm": 3.7455,
+            "width_mm": 2.3344,
+            "turn_deg": 143.69,
+            "length_mm": 4.152,
+            "convex": true
+          },
+          {
+            "leg_mm": 3.7455,
+            "width_mm": 2.3344,
+            "turn_deg": 143.69,
+            "length_mm": 4.152,
+            "convex": true
+          },
+          {
+            "leg_mm": 3.8071,
+            "width_mm": 2.3488,
+            "turn_deg": 144.06,
+            "length_mm": 4.099,
+            "convex": true
+          },
+          {
+            "leg_mm": 3.8071,
+            "width_mm": 2.3488,
+            "turn_deg": 144.06,
+            "length_mm": 4.099,
+            "convex": true
+          },
+          {
+            "leg_mm": 6.7109,
+            "width_mm": 3.602,
+            "turn_deg": 148.87,
+            "length_mm": 4.033,
+            "convex": false
+          },
+          {
+            "leg_mm": 6.7095,
+            "width_mm": 3.6019,
+            "turn_deg": 148.86,
+            "length_mm": 4.033,
+            "convex": false
+          }
+        ],
+        "count": 63,
+        "length_mm": 807.249,
+        "dominant_leg_mm": 3.8532
+      },
+      "grammar": {
+        "rounded_share": 0.3259,
+        "chamfered_share": 0.008,
+        "sharp_share": 0.6661
+      }
+    },
+    "features": {
+      "cylinders": [
+        {
+          "d_mm": 114.4,
+          "kind": "boss",
+          "axis": "z",
+          "count": 3,
+          "implied_fn": 120.0
+        },
+        {
+          "d_mm": 80.0,
+          "kind": "hole",
+          "axis": "z",
+          "count": 1,
+          "implied_fn": 120.0
+        }
+      ],
+      "count": 4,
+      "hole_count": 1,
+      "dominant_hole_d_mm": 80.0
+    },
+    "orientation": {
+      "assumes_z_up": true,
+      "up_share": 0.0401,
+      "down_share": 0.0266,
+      "vertical_share": 0.578,
+      "sloped_share": 0.3554,
+      "unsupported_share": 0.0235,
+      "overhang_limit_deg": 45.0,
+      "dominant_slopes": [
+        {
+          "angle_deg": 39.99,
+          "share": 0.2736
+        },
+        {
+          "angle_deg": 27.06,
+          "share": 0.0808
+        }
+      ]
+    },
+    "walls": {
+      "measured": true,
+      "shelled": false,
+      "samples": 2000,
+      "p05_mm": 1.221,
+      "median_mm": 2.399,
+      "mode_mm": 1.221,
+      "min_mm": 0.149
+    },
+    "symmetry": {
+      "x": 0.8793,
+      "y": 0.858,
+      "z": 0.6707
+    },
+    "ratios": {
+      "radius_to_size": 0.2556
+    },
+    "config": {
+      "flat_deg": 0.5,
+      "soft_max_deg": 40.0,
+      "band_max_deg": 75.0,
+      "chamfer_min_deg": 15.0,
+      "min_chamfer_mm": 0.3,
+      "noise_radius_multiple": 5.0,
+      "width_ratio": 3.0,
+      "chamfer_width_ratio": 1.6,
+      "taper_tol": 1.15,
+      "turn_consistency": 0.7,
+      "mode_tol": 0.12,
+      "mode_min_share": 0.05,
+      "closed_turn_deg": 350.0,
+      "thickness_samples": 2000,
+      "symmetry_samples": 1500,
+      "vertical_tol_deg": 5.0,
+      "overhang_limit_deg": 45.0,
+      "bed_tol_mm": 0.01
+    }
+  }
+}
