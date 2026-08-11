@@ -77,7 +77,7 @@ clocking, twist either way.
   `lib/nuggs-coupling-mates.conf`, never yet tuned in plastic).
 - Caliper the bore: under 79.0 mm means your printer is shrinking.
 
-## Print settings this design assumes
+## Print settings
 
 - **Orientation:** upright, bore axis vertical, standing on one port's
   sector tips — exactly as it renders. Both cage skirts are 50° cones and

@@ -195,9 +195,18 @@ function _adv_mm(ch) =
 
 function _vsum(v, n) = n <= 0 ? 0 : v[n - 1] + _vsum(v, n - 1);
 
+assert(len(name) >= 1, "CAGE NAME: name must carry at least one capital.");
+// A wrong-length kern list must REFUSE, not degrade: zero-filling it would
+// silently drop the welds a renamed cage needs (F's and E's arms print as
+// cantilevers with no diagnostic), which is exactly the silent-failure class
+// this repo's guards exist to kill (CodeRabbit review, PR #192).
+assert(len(letter_kern) == len(name) - 1, str(
+    "CAGE KERN: letter_kern has ", len(letter_kern), " entries for a ",
+    len(name), "-glyph name; it needs exactly ", len(name) - 1,
+    " (one per gap). Any glyph with free-ended arms (E, F, L, T) wants a",
+    " weld into its right-hand neighbour — see NOTES.md F3."));
 advs   = [for (i = [0 : len(name) - 1]) _adv_mm(name[i])];
-kerns  = len(letter_kern) == len(name) - 1 ? letter_kern
-         : [for (i = [1 : len(name) - 1]) 0];
+kerns  = letter_kern;
 word_w = _vsum(advs, len(advs)) - _vsum(kerns, len(kerns));
 // Centre angle of glyph i. Viewed from +X, +Y is screen-right and the
 // rotate([90,0,90]) glyph frame maps text-x to +Y, so later letters advance

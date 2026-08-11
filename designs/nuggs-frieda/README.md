@@ -9,7 +9,7 @@ revision, same defaults), so it couples with any of them, either way round,
 and works as a drop-in replacement for the plain straight. Print it for the
 hamster whose bridge should say whose it is.
 
-![Product shot](previews/product-hero.png)
+![nuggs-frieda name bridge in pink satin PETG — studio render of the FRIEDA letter cage around the tube](previews/product-hero.png)
 
 ![Turntable — the word wraps the tube](previews/turntable.gif)
 
