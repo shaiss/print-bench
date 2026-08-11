@@ -1,7 +1,7 @@
 name: Design run (scheduled idea→PR pipeline)
 
 # The scheduled heartbeat for /design-run (issue #96, Stage 3 — the flagship
-# idea→PR pipeline). Once a day it picks ONE open `design-brief` issue and runs
+# idea→PR pipeline). On each firing it picks ONE open `design-brief` issue and runs
 # /design-run on it unattended: scaffold → iterate-to-gates-green → gated draft
 # PR, with the same decline discipline /ship-issue uses when a design needs a
 # human's taste. The skill already runs the same attended or unattended; this
@@ -87,7 +87,7 @@ permissions:
 # itself. It deliberately does NOT serialize against the backlog burn: GitHub
 # concurrency is shared across workflows only when the group STRING matches, and
 # backlog-burn uses `group: backlog-burn`, so the names differ on purpose —
-# serializing a heavy daily design run with a 4×/day burn (cancel-in-progress
+# serializing a heavy design run with the /ship-issue burn (cancel-in-progress
 # off) would queue burns behind a long design run for no benefit here. The one
 # case where the two could collide is an issue carrying BOTH opt-in labels
 # (`design-brief` and `autonomy-ok`), which both selectors read from a snapshot.
