@@ -11,6 +11,10 @@ hamster whose bridge should say whose it is.
 
 ![nuggs-frieda name bridge in pink satin PETG — studio render of the FRIEDA letter cage around the tube](previews/product-hero.png)
 
+![AI-styled scene: nuggs-frieda staged in a real-world setting](previews/lifestyle-bridge-in-use.png)
+
+*AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render above and the STL for the true shape.*
+
 ![Turntable — the word wraps the tube](previews/turntable.gif)
 
 ![4-view contact sheet](previews/contact-sheet.png)
