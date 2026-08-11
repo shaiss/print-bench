@@ -60,6 +60,25 @@
 #      the gate only checks it is there and visible. No assembly.conf exists
 #      in designs/ yet (stage 4 of #98), so this gate is dormant until one
 #      ships, and the selftest is the only thing that proves it fires.
+#  11. GPL/copyleft disclosure (issue #184). A design that opts into a
+#      GPL/copyleft library — today NopSCADlib (GPL-3.0), the one vendored
+#      copyleft tree — is a GPL-3.0 combined work when it exports geometry
+#      (LICENSE, docs/licensing.md), and must disclose that on its product page
+#      — the design-layer obligation the licensing docs promise this gate
+#      enforces. Two opt-in signals, both real: (a) the entry .scad pulls
+#      NopSCADlib in directly (`include`/`use <NopSCADlib/...>`); or (b) the
+#      design's assembly.conf declares a `vitamin:` — a bought-in part whose
+#      geometry NopSCADlib supplies (scripts/assembly.sh emits the include only
+#      then; a parts-only manifest stays GPL-free). Either makes the design
+#      GPL-opted, and its README.md must then name the license — "GPL-3.0" — in
+#      its content (the noise-stripper already dropped HTML comments, so a
+#      comment can't satisfy it; the disclosure has to render). Presence-only,
+#      the fixed-visible-marker idiom requirement 9 uses for lifestyle
+#      disclosure: judging whether the note is HONEST is /jane-review and
+#      /drik-review's job, not bash's — this gate closes the forgot-to-disclose
+#      failure; the reviewers close the deceptive one. No design opts in yet, so
+#      this is dormant until one does, and the selftest is the only thing that
+#      proves it fires.
 #
 # Fenced code blocks and HTML comments are ignored throughout: an example
 # snippet or commented-out line is not page content, so it neither
@@ -376,6 +395,37 @@ check_one() {
         ok=0
       fi
     fi
+  fi
+
+  # 11. GPL/copyleft disclosure (issue #184) — see the header comment for the
+  #     full rationale. A design opts into NopSCADlib (GPL-3.0) either by
+  #     including it in its entry .scad or by declaring a `vitamin:` in its
+  #     assembly.conf; either way the page must name "GPL-3.0". Parts-only
+  #     manifests and designs that never touch NopSCADlib are unaffected.
+  local gpl_opted=0 entry_scad="${dir}/${name}.scad"
+  # (a) direct include/use of NopSCADlib in the entry .scad. `//` line comments
+  #     are stripped first so a noted-but-unused include (a TODO in a comment)
+  #     does not force a disclosure; <NopSCADlib/ is the OPENSCADPATH include
+  #     path, the only form that resolves the vendored tree.
+  if [[ -f "$entry_scad" ]] \
+    && sed 's://.*$::' "$entry_scad" 2>/dev/null | grep -qF '<NopSCADlib/'; then
+    gpl_opted=1
+  fi
+  # (b) a `vitamin:` in assembly.conf — the scripts/assembly.sh opt-in, which
+  #     emits `include <NopSCADlib/...>` only when a vitamin is declared.
+  #     Comment-stripped and case-sensitive to mirror assembly.sh's own parser
+  #     exactly, so a parts-only manifest whose comments merely mention vitamins
+  #     (sushi-battleship-tracker) does not opt in.
+  if [[ -f "$asmconf" ]] && awk '
+    { sub(/#.*/, "") }
+    /^[[:space:]]*vitamin[[:space:]]*:/ { found = 1 }
+    END { exit !found }
+  ' "$asmconf"; then
+    gpl_opted=1
+  fi
+  if [[ "$gpl_opted" == 1 ]] && ! grep -qF 'GPL-3.0' <<<"$cleaned"; then
+    err "$name" "incorporates a GPL-3.0 part (NopSCADlib) but README.md doesn't disclose it — add a product-page note naming the GPL-3.0-licensed part (see docs/licensing.md)"
+    ok=0
   fi
 
   # 8. Lineage credit. A derivative's product page documents the delta and
@@ -711,8 +761,73 @@ run_selftest() {
   : >"$d/previews/exploded.png"; : >"$d/assembly.conf"
   _check asm-unembedded 1 "doesn't embed"
 
+  # --- GPL/copyleft disclosure (issue #184). A design opts into NopSCADlib
+  # (GPL-3.0) — becoming a GPL-3.0 combined work that must name "GPL-3.0" on its
+  # product page — either by including NopSCADlib in its entry .scad or by
+  # declaring a `vitamin:` in assembly.conf. No design opts in yet, so without
+  # these fixtures the whole check could be weakened/deleted and every gate in
+  # the repo stays green.
+
+  # _opted_scad <dir> — entry .scad that pulls NopSCADlib in directly.
+  _opted_scad() {
+    local n; n="$(basename "$1")"
+    printf 'include <NopSCADlib/core.scad>\nmodule body() cube([10,10,10]);\nbody();\n' >"$1/${n}.scad"
+  }
+  # _opted_asm <dir> — assembly.conf declaring a vitamin (the assembly.sh opt-in).
+  _opted_asm() {
+    printf 'part: body() | 1 | the body\nvitamin: screw(M3_cap_screw,16) | 4 | M3 cap screw\n' >"$1/assembly.conf"
+  }
+  # _asm_compliant <dir> — satisfy requirement 10 (exploded view committed +
+  # embedded, in budget) so a vitamin fixture fails ONLY on the GPL check, not
+  # on the assembly requirement as well.
+  _asm_compliant() {
+    : >"$1/previews/exploded.png"
+    printf '\n![Exploded view](previews/exploded.png)\n' >>"$1/README.md"
+  }
+  # _disclose_gpl <dir> — append the canonical GPL-3.0 disclosure to the README.
+  _disclose_gpl() {
+    printf '\n## Licensing\n\nThis design incorporates NopSCADlib, a GPL-3.0-licensed part.\n' >>"$1/README.md"
+  }
+
+  # scad-good: .scad includes NopSCADlib, README discloses -> passes
+  d="$(_fixture gpl-scad-good)"; _opted_scad "$d"; _disclose_gpl "$d"
+  _check gpl-scad-good 0 ""
+
+  # scad-missing: .scad includes NopSCADlib, no disclosure -> fails (GPL only)
+  d="$(_fixture gpl-scad-missing)"; _opted_scad "$d"
+  _check gpl-scad-missing 1 "doesn't disclose"
+
+  # vitamin-good: vitamin declared, assembly satisfied, GPL disclosed -> passes
+  d="$(_fixture gpl-vitamin-good)"; _opted_asm "$d"; _asm_compliant "$d"; _disclose_gpl "$d"
+  _check gpl-vitamin-good 0 ""
+
+  # vitamin-missing: vitamin declared, assembly satisfied, NO disclosure ->
+  # fails on the GPL check only (requirement 10 passes).
+  d="$(_fixture gpl-vitamin-missing)"; _opted_asm "$d"; _asm_compliant "$d"
+  _check gpl-vitamin-missing 1 "doesn't disclose"
+
+  # vitamin-comment-only: `vitamin:` appears ONLY in a comment (mirrors the real
+  # parts-only sushi-battleship-tracker manifest) -> NOT opted, passes with no
+  # disclosure. Regression for comment-stripping: a parts-only manifest whose
+  # comments mention vitamins must not be forced to disclose.
+  d="$(_fixture gpl-vitamin-comment)"; _asm_compliant "$d"
+  printf '# vitamin: commented_out() | 1 | not a real vitamin\npart: body() | 1 | body\n' >"$d/assembly.conf"
+  _check gpl-vitamin-comment 0 ""
+
+  # scad-commented-include: the NopSCADlib include is commented out (//) so it
+  # is not an active combination -> NOT opted, passes with no disclosure.
+  # Regression for the // strip that keeps a noted-but-unused include from
+  # forcing a disclosure.
+  d="$(_fixture gpl-scad-commented)"
+  printf '// TODO maybe: include <NopSCADlib/core.scad>\nmodule body() cube([10,10,10]);\nbody();\n' >"$d/$(basename "$d").scad"
+  _check gpl-scad-commented 0 ""
+
+  # not-opted: no NopSCADlib anywhere, no disclosure -> unaffected, passes
+  d="$(_fixture gpl-not-opted)"
+  _check gpl-not-opted 0 ""
+
   if [[ "$pass" == 1 ]]; then
-    echo "ok    readme-gate --selftest: every lifestyle-disclosure and assembly guard fires"
+    echo "ok    readme-gate --selftest: every lifestyle-disclosure, assembly and GPL-disclosure guard fires"
     return 0
   fi
   echo "FAIL  readme-gate --selftest: a guard did not fire"
