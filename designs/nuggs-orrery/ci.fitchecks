@@ -1,0 +1,4 @@
+# Boolean non-interference gate between the two co-printed material STLs
+# (rendered by scripts/gate.sh; format: <part> empty|interferes).
+fitcheck      empty
+fitcheck_neg  interferes

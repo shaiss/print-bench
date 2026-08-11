@@ -20,6 +20,12 @@
 #   designs/<name>/<name>-coupon.scad  "print this first" coupon wrapper;
 #                                  rendered as build/<name>-coupon.stl and
 #                                  gated like any other part
+#   designs/<name>/ci.fitchecks    boolean fit checks between the design's
+#                                  parts: `<part> empty` must render zero
+#                                  facets, `<part> interferes` is the
+#                                  mandatory negative control that must not
+#                                  (proves the check can fail). Never
+#                                  printchecked or sliced
 #   designs/<name>/derives.conf    lineage of a derivative design: the
 #                                  parent(s) it includes, the parent parts it
 #                                  claims to replace, and any diamond-ok:
@@ -366,6 +372,82 @@ gate_one() {
       fail=1
     else
       stls+=("$coupon_stl")
+    fi
+  fi
+
+  # Boolean fit checks (designs/<name>/ci.fitchecks): each line names a part
+  # value that renders a boolean between the design's other parts, plus the
+  # verdict its mesh must deliver — `empty` (zero facets: the parts clear) or
+  # `interferes` (a deliberately broken pose that must produce facets). The
+  # pair is mandatory: an empty render alone is a check that cannot fail
+  # (designs/nuggs round 6.1 — the Nef crash made every "empty difference"
+  # proof vacuous), so a manifest with no `interferes` control fails. These
+  # parts are never printchecked or sliced: empty IS their success state.
+  local fchecks="designs/${name}/ci.fitchecks"
+  if [[ -f "$fchecks" ]]; then
+    local fline fpart fexpect frest ffacets fstl n_controls=0 n_empty=0
+    while IFS= read -r fline || [[ -n "$fline" ]]; do
+      fline="${fline%%#*}"
+      fpart="" fexpect="" frest=""
+      read -r fpart fexpect frest <<<"$fline" || true
+      [[ -z "$fpart" ]] && continue
+      # Exactly two fields: a stray third word means the line is not saying
+      # what its author thought, and a half-parsed check is worse than none.
+      if [[ -z "$fexpect" || -n "$frest" ]]; then
+        echo "FAIL  fitcheck ${name}: malformed line \"${fline}\" — expected exactly '<part> empty|interferes'"
+        fail=1
+        continue
+      fi
+      # The part must be a real DISPATCH selector in the entry .scad, not
+      # merely a quoted string anywhere in it ("deepskyblue" is a quoted
+      # string): a part value with no dispatch branch renders as nothing,
+      # which `empty` would wave through forever — the typo IS a pass.
+      if ! [[ "$fpart" =~ ^[A-Za-z0-9_-]+$ ]] \
+         || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${fpart}\"" "$src"; then
+        echo "FAIL  fitcheck ${name}: no 'part == \"${fpart}\"' dispatch branch in ${src} — a part with no branch renders empty and passes vacuously"
+        fail=1
+        continue
+      fi
+      fstl="build/${name}-${fpart}.stl"
+      echo "== ${name} (fitcheck=${fpart}, expect ${fexpect}): render =="
+      # lineage_render_binstl: binary STL (what lineage_facet_count parses),
+      # clears stale output, and treats a cleanly-empty render as success
+      # with no file — which facet-counts as 0. A real error still fails.
+      if ! lineage_render_binstl "$src" "$fstl" -D "part=\"${fpart}\""; then
+        echo "FAIL  ${name}: fitcheck ${fpart} render failed"
+        fail=1
+        continue
+      fi
+      ffacets="$(lineage_facet_count "$fstl")"
+      case "$fexpect" in
+        empty)
+          n_empty=$((n_empty + 1))
+          if [[ "$ffacets" -eq 0 ]]; then
+            echo "ok    fitcheck ${name}: ${fpart} is empty — the parts clear"
+          else
+            echo "FAIL  fitcheck ${name}: ${fpart} produced ${ffacets} facets of interference"
+            fail=1
+          fi ;;
+        interferes)
+          n_controls=$((n_controls + 1))
+          if [[ "$ffacets" -gt 0 ]]; then
+            echo "ok    fitcheck ${name}: ${fpart} interferes as expected (${ffacets} facets) — the check can fail"
+          else
+            echo "FAIL  fitcheck ${name}: negative control ${fpart} came out empty — the fitcheck can no longer fail"
+            fail=1
+          fi ;;
+        *)
+          echo "FAIL  fitcheck ${name}: unknown expectation \"${fexpect}\" for ${fpart} (use empty | interferes)"
+          fail=1 ;;
+      esac
+    done < "$fchecks"
+    if [[ "$n_controls" -eq 0 ]]; then
+      echo "FAIL  fitcheck ${name}: ci.fitchecks carries no \"interferes\" negative control — without one the empty checks are unfalsifiable"
+      fail=1
+    fi
+    if [[ "$n_empty" -eq 0 ]]; then
+      echo "FAIL  fitcheck ${name}: ci.fitchecks carries no \"empty\" check — a manifest of controls alone proves nothing about the fit it exists to gate"
+      fail=1
     fi
   fi
 

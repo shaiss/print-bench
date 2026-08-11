@@ -19,6 +19,7 @@ The point is choice. "Make me a cable clip" leaves the look to chance;
 |---|---|
 | [`workshop-utility`](workshop-utility/STYLE.md) | Generously rounded utility parts with 45° bed chamfers and an M3 fastener vocabulary. |
 | [`ribbed-industrial`](ribbed-industrial/STYLE.md) | Finned housings on a 1 mm module: 5 mm ribs, a 1 mm break on every edge, nothing that needs support. |
+| [`orrery`](orrery/STYLE.md) | Twisted-blade vortex cages carrying captive free-spinning rings in a second, non-welding material, every seat and lead-in the same 50° self-supporting cone. |
 
 `./scripts/style-lift.sh --list` prints the same list from the packs
 themselves.
