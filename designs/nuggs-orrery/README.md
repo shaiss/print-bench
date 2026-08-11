@@ -25,15 +25,18 @@ module hangs between enclosures, out of the animal's reach.
 
 ## What you get
 
-Two STLs that share one coordinate frame — import both into your slicer as a
-single object with two parts and assign one extruder to each:
+Two co-print STLs share one coordinate frame — import both into your slicer
+as a single object with two parts and assign one extruder to each:
 
 - `nuggs-orrery-body` — the module: tube, both NUGGS ports, fin vortex and
   the three conical bearing races (≈ 114 × 114 × 166 mm, ~193 g). PETG.
 - `nuggs-orrery-orbit` — the three captive rings plus their break-away sprue
   frame (≈ 115 × 117 × 52 mm as printed, ~12 g). PLA, any color you like.
-- `nuggs-orrery-coupon` — a single-station fit coupon. **Print this first**
-  to tune `race_gap` for your material pairing (see below).
+
+Plus one separate print — do not import it with the pair:
+
+- `nuggs-orrery-coupon` — a single-station fit coupon. **Print this first**,
+  on its own plate, to tune `race_gap` for your material pairing (see below).
 
 After the print: snap the nine sprue tabs (flush cutters), lift the three
 spars away, and each ring drops ~0.1 mm onto its conical race and spins

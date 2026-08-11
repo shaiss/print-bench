@@ -31,8 +31,8 @@ use <nuggs-coupling.scad>
 include <styles/orrery/style.scad>
 
 /* [Part selection] */
-// assembled = co-print preview (body + orbit, print state); body / orbit = the two material STLs CI gates; kinetic = display state (rings seated, sprues snapped); coupon = one-station fit coupon; fitcheck = body∩orbit, must be empty
-part = "assembled"; // [assembled, body, orbit, kinetic, coupon, fitcheck]
+// assembled = co-print preview (body + orbit, print state); body / orbit = the two material STLs CI gates; kinetic = display state (rings seated, sprues snapped); coupon = one-station fit coupon; fitcheck = body∩orbit, must be empty; fitcheck_neg = the gate's negative control, must interfere
+part = "assembled"; // [assembled, body, orbit, kinetic, coupon, fitcheck, fitcheck_neg]
 
 /* [Module] */
 // Tube length, port face to port face (mm). One enclosed-run contribution — couplings do not reset the run rule.
@@ -47,8 +47,9 @@ fin_n = 6;
 fin_th = style_blade_th;
 // Fin outer radius (mm) — the cage every ring is trapped inside
 fin_r = 57;
-// Total helical twist over tube_len (deg)
-fin_twist = 75;
+// Total helical twist over tube_len (deg) — the style's rate × the length,
+// so the one number the style calls a family rule is never retyped here
+fin_twist = style_blade_twist_rate * tube_len;
 // Clock of fin 0 at z = 0 (deg) — sets where the wall engraving's clear gap falls
 fin_phase = 15;
 // Fin zone inset from each tube face (mm)
@@ -92,6 +93,9 @@ sprue_r1 = 59.3;
 sprue_arc = 4;
 // Clock of sprue 0 (deg)
 sprue_a0 = 30;
+// Snap-tab band above each ring seat (mm): the breakaway neck's z extent
+tab_z0 = 1.5;
+tab_z1 = 2.5;
 
 /* [Wall marks] */
 // Engrave depth into the tube wall (mm); wall left = wall - mark_d, asserted >= 3 perimeters
@@ -111,6 +115,7 @@ twist_slices = 96;
 // ---------------------------------------------------------------------------
 // NUGGS standard + derived values
 // ---------------------------------------------------------------------------
+/* [Hidden] */
 
 cfg = nuggs_cfg();                       // the standard: bore 80, every default
 RI    = nuggs_ri(cfg);
@@ -127,8 +132,15 @@ fin_full_z0 = fin_z0 + fin_rise;              // full-radius fin zone
 fin_full_z1 = fin_z1 - fin_rise;
 
 // Ring cross-section, local z from the seat. Bottom land [land_r0, land_r1] is
-// horizontal (the first printed layers and the printcheck plate face); both
-// lower faces climb at ramp_ang so the ring is self-supporting above its race.
+// horizontal (the first printed layers and the printcheck plate face) and is a
+// SHORT CANTILEVER, not a supported span: the race slopes away inward, so the
+// land contacts it only along its outer edge circle — the inner edge floats
+// ring_land * tan(ramp_ang) - race_gap (~1.05 mm) above the race, and race_gap
+// tunes the OUTER contact line only. 0.8 mm anchored at one edge prints as a
+// micro-cantilever; whether it droops onto the (non-welding) race below is a
+// coupon question, recorded in NOTES.md. Above the land, the lower-outer face
+// climbs at ramp_ang parallel to the race and the lower-inner face climbs at
+// ramp_ang on the ring's own layers.
 land_r1 = (ring_r_in + ring_r_out) / 2 + ring_land / 2;
 land_r0 = land_r1 - ring_land;
 lower_h = (ring_r_out - land_r1) * ramp;      // outer/inner lower-face height
@@ -270,7 +282,10 @@ module race(seat) {
 // has a sagitta of mm; per character it is hundredths — designs/nuggs round
 // 4). Each line is centred on the fin gap at its own height: the gap tracks
 // the twist, so the centre angle is a function of z.
-mark_lines = ["NUGGS PORT R1", "MAX RUN 360MM"];
+// The run-limit line is derived from body_len_mm, never typed: an engraving
+// is permanent welfare guidance, and a hard-coded 360 would desynchronise
+// from the assert the moment a user changes body_len_mm.
+mark_lines = ["NUGGS PORT R1", str("MAX RUN ", 2 * body_len_mm, "MM")];
 function gap_center(z) = fin_phase + 180 / fin_n + fin_twist * z / tube_len;
 module marks() {
     adv = mark_size * 0.95;                       // char pitch, mm of arc
@@ -328,19 +343,25 @@ module ring_at(seat) {
 // piece, and after the print the tabs snap and the spars fall away — they
 // are captive to nothing.
 module sprues() {
-    b = seat_lo + 0.5;
+    // The spar's bottom face is coplanar with the FIRST TAB's bottom — derived
+    // from tab_z0, never a free number — so its first printed layer is one
+    // connected region: ring, tab, spar. Any lower start puts the spar's first
+    // millimetre in mid-air: nothing exists at this radius below the tab. The
+    // 0.8 mm of spar outboard of the tab prints as the same anchored
+    // micro-cantilever grammar as the ring's bottom land.
+    b = seat_lo + tab_z0;
     t = seat_hi + ring_h - 0.2;
     for (k = [0 : sprue_n - 1]) rotate([0, 0, sprue_a0 + k * 360 / sprue_n]) {
         rotate_extrude(angle = sprue_arc, convexity = 4)     // the spar
-            polygon([[sprue_r0, b + (sprue_r1 - sprue_r0) * ramp],
-                     [sprue_r1, b], [sprue_r1, t], [sprue_r0, t]]);
+            polygon([[sprue_r0, b], [sprue_r1, b],
+                     [sprue_r1, t], [sprue_r0, t]]);
         for (s = ring_seats)                                  // the tabs
             rotate([0, 0, (sprue_arc - 3) / 2])
                 rotate_extrude(angle = 3, convexity = 4)
-                    polygon([[ring_r_out - 0.3, s + 1.5],
-                             [sprue_r0 + 0.2, s + 1.5],
-                             [sprue_r0 + 0.2, s + 2.5],
-                             [ring_r_out - 0.3, s + 2.5]]);
+                    polygon([[ring_r_out - 0.3, s + tab_z0],
+                             [sprue_r0 + 0.2, s + tab_z0],
+                             [sprue_r0 + 0.2, s + tab_z1],
+                             [ring_r_out - 0.3, s + tab_z1]]);
     }
 }
 
@@ -400,6 +421,11 @@ if (part == "assembled") {
         body();
         translate([0, 0, -1]) orbit();
     }
+} else {
+    // A typo'd part renders nothing, exits 0, and writes a watertight empty
+    // STL — indistinguishable from the deliberately-empty fitcheck. Refuse.
+    assert(false, str("unknown part: \"", part, "\" (expected assembled,",
+        " body, orbit, kinetic, coupon, fitcheck or fitcheck_neg)"));
 }
 
 echo(str("orrery: ring cage fin_r = ", fin_r, ", ring hole r = ", ring_r_in,

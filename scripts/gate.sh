@@ -385,15 +385,26 @@ gate_one() {
   # parts are never printchecked or sliced: empty IS their success state.
   local fchecks="designs/${name}/ci.fitchecks"
   if [[ -f "$fchecks" ]]; then
-    local fline fpart fexpect ffacets fstl n_controls=0
+    local fline fpart fexpect frest ffacets fstl n_controls=0 n_empty=0
     while IFS= read -r fline || [[ -n "$fline" ]]; do
       fline="${fline%%#*}"
-      read -r fpart fexpect _ <<<"$fline" || true
+      fpart="" fexpect="" frest=""
+      read -r fpart fexpect frest <<<"$fline" || true
       [[ -z "$fpart" ]] && continue
-      # A part value the entry .scad never mentions renders as nothing,
+      # Exactly two fields: a stray third word means the line is not saying
+      # what its author thought, and a half-parsed check is worse than none.
+      if [[ -z "$fexpect" || -n "$frest" ]]; then
+        echo "FAIL  fitcheck ${name}: malformed line \"${fline}\" — expected exactly '<part> empty|interferes'"
+        fail=1
+        continue
+      fi
+      # The part must be a real DISPATCH selector in the entry .scad, not
+      # merely a quoted string anywhere in it ("deepskyblue" is a quoted
+      # string): a part value with no dispatch branch renders as nothing,
       # which `empty` would wave through forever — the typo IS a pass.
-      if ! grep -qF "\"${fpart}\"" "$src"; then
-        echo "FAIL  fitcheck ${name}: part \"${fpart}\" does not appear in ${src} — a typo'd part renders empty and passes vacuously"
+      if ! [[ "$fpart" =~ ^[A-Za-z0-9_-]+$ ]] \
+         || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${fpart}\"" "$src"; then
+        echo "FAIL  fitcheck ${name}: no 'part == \"${fpart}\"' dispatch branch in ${src} — a part with no branch renders empty and passes vacuously"
         fail=1
         continue
       fi
@@ -410,6 +421,7 @@ gate_one() {
       ffacets="$(lineage_facet_count "$fstl")"
       case "$fexpect" in
         empty)
+          n_empty=$((n_empty + 1))
           if [[ "$ffacets" -eq 0 ]]; then
             echo "ok    fitcheck ${name}: ${fpart} is empty — the parts clear"
           else
@@ -431,6 +443,10 @@ gate_one() {
     done < "$fchecks"
     if [[ "$n_controls" -eq 0 ]]; then
       echo "FAIL  fitcheck ${name}: ci.fitchecks carries no \"interferes\" negative control — without one the empty checks are unfalsifiable"
+      fail=1
+    fi
+    if [[ "$n_empty" -eq 0 ]]; then
+      echo "FAIL  fitcheck ${name}: ci.fitchecks carries no \"empty\" check — a manifest of controls alone proves nothing about the fit it exists to gate"
       fail=1
     fi
   fi

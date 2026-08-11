@@ -26,6 +26,7 @@ seat    = 22;               // ring seat height (mm)
 floor_r = 16.8;             // blade cutback radius around the ring
 head    = 5;                // straight groove above the seat (mm)
 
+/* [Hidden] */
 ramp    = tan(style_ramp_deg);
 bore_r  = hub_r - style_blade_th;             // hub wall = one blade thickness
 twist   = style_blade_twist_rate * H;         // deg over the swatch height

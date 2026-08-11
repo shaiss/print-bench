@@ -6,7 +6,6 @@
 // Use from a design (OPENSCADPATH includes the repo root):
 //     include <styles/orrery/style.scad>
 //     $fn = style_fn;
-//     rounded_box([w, d, h], r = style_corner_r);
 
 style_name = "orrery";
 style_fn = 128;  // segments — curve resolution ($fn) the family draws at

@@ -55,7 +55,11 @@ def render_tokens(spec: StyleSpec) -> str:
         "// Use from a design (OPENSCADPATH includes the repo root):",
         f"//     include <styles/{spec.name}/style.scad>",
         "//     $fn = style_fn;",
-        "//     rounded_box([w, d, h], r = style_corner_r);",
+        # The third example line must only reference a token this pack
+        # actually defines: a copied `style_corner_r` in a pack without one
+        # resolves to undef and renders nothing, with only a warning.
+        *(["//     rounded_box([w, d, h], r = style_corner_r);"]
+          if "corner_r" in spec.tokens else []),
         "",
         f'style_name = "{spec.name}";',
     ]

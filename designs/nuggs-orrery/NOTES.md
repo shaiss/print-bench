@@ -70,6 +70,14 @@ exterior is fair game (owner's brief, this session).
   lowest ring — a knife-edge vertex scored `Almost no bed contact`
   CRITICAL in a dry run of the check logic), then 50° lower faces both
   sides, vertical walls, flat top. 2.8 mm radial × 3.6 mm tall.
+  **The land is a cantilever, not a supported span** (review round 2): the
+  race slopes away inward, so the land contacts it only along its outer
+  edge circle — the inner edge floats `ring_land·tan(50°) − race_gap`
+  ≈ 1.05 mm above the race, and `race_gap` tunes the outer contact line
+  only. 0.8 mm anchored at one edge prints as a micro-cantilever; if it
+  droops, it lands on the non-welding race below. Confirm on the coupon
+  (look for a drooped first-layer ring line on the race after release)
+  before trusting the full module.
 - **Grooves (fin cutbacks) make the airspace; fins make the cage.** Fins
   are cleared to `groove_floor_r = 53` from 1 mm below each seat to
   `groove_head = 6.5` above, with a 50° roof. Free lift ≈ 5.0 mm (echoed
