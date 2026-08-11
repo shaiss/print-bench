@@ -77,7 +77,7 @@
     }
   ],
   "measured": {
-    "source": "/home/user/print-bench/build/nuggs-orrery-kinetic.stl",
+    "source": "build/nuggs-orrery-kinetic.stl",
     "mesh": {
       "faces": 30172,
       "vertices": 15086,

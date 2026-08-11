@@ -54,7 +54,11 @@ exterior is fair game (owner's brief, this session).
   yields 939.727 mm³ of interference (negative control, this session).
   The two-way-empty lesson from designs/nuggs round 6.1 is why the
   control exists: an empty boolean proves nothing until it is shown able
-  to be non-empty.
+  to be non-empty. **CI-gated since review round 1** (Qodo finding):
+  `ci.fitchecks` makes every gate run render `fitcheck` (must be empty)
+  and `fitcheck_neg` (the −1 mm pose, must interfere) via the new
+  fitcheck support in `scripts/gate.sh` — so an interference regression
+  or a vacuous-check regression both fail CI, not just this session.
 - **The race is the support, the bearing, and the lower travel stop.** A
   50° conical shell grown from inside the tube wall (`race_root_r = 41.5`,
   0.9 mm bite into the wall, never through it — the bore cut at `ri = 40`

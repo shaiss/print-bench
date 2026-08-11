@@ -23,8 +23,9 @@ compromising one millimetre of the welfare standard the system is built on.
   hole must underlap the fin cage by ≥ 1.5 mm (asserted). A ring that can
   come off is a swallowable part near an animal enclosure.
 - **N5 — both material STLs gate individually and never intersect.**
-  `ci.parts` gates each; `part="fitcheck"` must render empty, and its
-  negative control must not.
+  `ci.parts` gates each; `ci.fitchecks` makes CI render `part="fitcheck"`
+  (must be empty) and the `fitcheck_neg` negative control (must interfere)
+  on every gate run.
 
 ## Out of scope — never
 
@@ -52,7 +53,7 @@ compromising one millimetre of the welfare standard the system is built on.
   break-away brims (rejected by designs/nuggs round 3 precedent). Sprue
   frame added for slicer layer-continuity, not print necessity.
 
-## Art direction (product page)
+## Product page & shots (art direction)
 
 **Page promise:** "the module that can only exist printed."
 Tier-1 shots: `product-hero` — the kinetic state, three-quarter view, rings

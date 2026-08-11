@@ -385,10 +385,20 @@ if (part == "assembled") {
     coupon();
 } else if (part == "fitcheck") {
     // Must render EMPTY (zero facets, no STL written). Non-empty = the two
-    // material STLs interfere and the co-print welds or collides.
+    // material STLs interfere and the co-print welds or collides. Gated by
+    // ci.fitchecks together with fitcheck_neg below.
     intersection() {
         body();
         orbit();
+    }
+} else if (part == "fitcheck_neg") {
+    // The gate's negative control: the orbit dropped 1 mm MUST interfere
+    // (rings into their races), proving the fitcheck pipeline still detects
+    // interference at all — an empty boolean alone is unfalsifiable
+    // (designs/nuggs round 6.1). Measured 939.7 mm3 at extraction.
+    intersection() {
+        body();
+        translate([0, 0, -1]) orbit();
     }
 }
 
