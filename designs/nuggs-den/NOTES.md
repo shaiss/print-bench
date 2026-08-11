@@ -79,11 +79,21 @@ watched a round hole's roof droop.
 A hamster arriving with **both cheek pouches full** is dramatically wider at
 the face than at the body. The coupling bore is already at the 70 mm entrance
 floor for exactly this reason, but a square lip at the very mouth is still a
-scrape hazard for a loaded arrival. `pouch_relief()` flares the bore from `ri`
-to `ri + mouth_flare` over the first `mouth_len` of travel, so the entry is a
-funnel. It only ever **opens** the bore (welfare-positive), and it is asserted
-to stay below the tube `wall` so it can never eat into the coupling that has to
-seat against the mate's tube.
+scrape hazard for a loaded arrival. `pouch_relief()` flares the bore from
+`ri + mouth_flare` at the tube end face down to `ri` by `mouth_len` inboard, so
+the entry is a funnel. It only ever **opens** the bore (welfare-positive), and
+`mouth_flare` is asserted to leave `wall - mouth_flare >= 1.2` mm of tube shell
+at the mouth, so the funnel never thins the wall below a printable three
+perimeters.
+
+> **The mouth is `z = 0`, not `z_tip`.** The coupling library puts the tube end
+> face at `z = 0` and the sector tips at `z_tip = -port_proj`, 10 mm below it,
+> in the region the *mate's* tube occupies. The first cut of this feature was
+> anchored at `z_tip`, where the den has no bore wall — so it removed nothing
+> and the "pouch-relief mouth" was silently absent from the print while every
+> gate stayed green. Three independent PR-#189 reviewers caught it; the flare is
+> now anchored at `z = 0` where the wall actually is. A no-op feature that
+> passes every gate is exactly the failure mode this repo watches for.
 
 ## Geometry, and the traps avoided
 
@@ -161,8 +171,9 @@ does **not** buy length. Do not chain a long run into one on the theory that
 
 `nuggs-den-coupon.scad` renders a bore-clean port stub (`nuggs_neck()`). The
 fit is the shared library standard, so this is the same coupon `designs/nuggs`
-tunes: mate two of them (or one to any NUGGS module) and step `port_tol` in
-±0.05 until the quarter-turn seats without forcing, then set that value here.
+tunes: mate two of them (or one to any NUGGS module) and adjust `port_tol` by
+0.05 mm per iteration (e.g. 0.25, 0.30, 0.35) until the quarter-turn seats
+without forcing, then set that value here.
 Nothing in this system has been printed yet — `port_tol = 0.30` is a guess.
 
 ## Parameters worth knowing

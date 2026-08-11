@@ -6,7 +6,9 @@ place to hide and hoard instead of a flat wall. It carries the same genderless
 quarter-turn port every NUGGS module shares, so it clicks onto any face either
 way round. Not a tube, not an elbow — the one module you *stop* at.
 
-![Studio view of the den turret](previews/hero.png)
+![Studio product shot of the den](previews/product-hero.png)
+
+![Turntable of the den](previews/turntable.gif)
 
 ![4-view contact sheet](previews/contact-sheet.png)
 

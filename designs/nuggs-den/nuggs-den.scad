@@ -115,9 +115,11 @@ rail_h = 4.0;
 rail_z = 6.0;
 
 /* [Pouch-relief mouth] */
-// Radial flare of the entry funnel at the mouth (mm). Opens the bore, so it is
-// always welfare-positive; kept below `wall` so it never touches the coupling.
-mouth_flare = 2.0;
+// Radial flare of the entry funnel at the mouth (mm). Opens the bore at the
+// tube face, so it is always welfare-positive; capped so it leaves >= 1.2 mm of
+// tube wall behind it (the funnel eats into the wall it flares, unlike the
+// coupling, which lives further out).
+mouth_flare = 1.0;
 // Axial depth the funnel runs back from the mouth (mm)
 mouth_len = 6.0;
 
@@ -203,12 +205,14 @@ assert(rail_z - rail_h > 0 && rail_z + rail_h < eq_h, str(
     "DEN RAIL: the rail at rail_z = ", rail_z, " +/- rail_h = ", rail_h,
     " mm falls off the ", eq_h, " mm equator band. Move rail_z inward."));
 
-// The pouch-relief funnel OPENS the bore (welfare-positive), but if it flared
-// past the tube wall it would start eating the coupling instead of the bore.
-assert(mouth_flare > 0 && mouth_flare < wall, str(
-    "DEN MOUTH: mouth_flare = ", mouth_flare, " mm must stay below the tube ",
-    "wall (", wall, " mm) so the funnel only ever opens the bore, never the ",
-    "port that has to seat against the mate's tube."));
+// The pouch-relief funnel OPENS the bore (welfare-positive), but it cuts into
+// the tube wall at the mouth (z = 0), so it must leave a printable wall behind.
+// wall - mouth_flare is the shell left at the face; keep it >= 1.2 mm (three
+// perimeters at a 0.4 mm nozzle).
+assert(mouth_flare > 0 && wall - mouth_flare >= 1.2, str(
+    "DEN MOUTH: mouth_flare = ", mouth_flare, " mm leaves ", wall - mouth_flare,
+    " mm of tube wall at the mouth (wall - mouth_flare), under the 1.2 mm ",
+    "three-perimeter floor. Cut mouth_flare or thicken wall."));
 
 // Bed. Printed upright on the sector tips; the tallest point is the crown apex.
 assert(apex_o - z_tip <= 250, str(
@@ -274,11 +278,17 @@ module chimney_vents() {
                     teardrop_hole(d = vent_d, l = bulb_wall * 4 + 4);
 }
 
-// The pouch-relief funnel at the mouth: a cone that opens the bore from ri to
-// ri + mouth_flare over the first mouth_len of travel from the sector tips.
+// The pouch-relief funnel at the mouth. The mouth is the tube END FACE at
+// z = 0, NOT the sector tips at z_tip: the tips sit port_proj below the face,
+// in the region the MATE's tube occupies, where the den has no bore wall to
+// flare. So the cone is anchored at z = 0 — widest (ri + mouth_flare) at the
+// face, narrowing back to ri by z = mouth_len — opening the bore exactly where a
+// pouch-full arrival would otherwise catch the square lip. (An earlier revision
+// anchored it at z_tip, where it removed nothing and the feature was silently
+// absent from the print — caught in PR #189 review.)
 module pouch_relief() {
-    translate([0, 0, z_tip - eps])
-        cylinder(r1 = ri + mouth_flare, r2 = ri, h = mouth_len);
+    translate([0, 0, -eps])
+        cylinder(r1 = ri + mouth_flare, r2 = ri, h = mouth_len + eps);
 }
 
 // ---------------------------------------------------------------------------
