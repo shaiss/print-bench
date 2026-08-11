@@ -10,18 +10,24 @@
 // the corner (a NUGGS welfare non-negotiable: this routes a live animal and any
 // interior ledge or step is a hazard).
 //
-// CONSTRUCTION — an all-cylinder swept path, so the union is Manifold-clean.
-// The tube (and, subtracted, the bore) is a chain of OVERLAPPING oriented
-// cylinders: coaxial ones down each straight port stub, and one every arc_step
-// around the bend. Consecutive cylinders overlap by VOLUME, which is what CI's
-// Manifold backend needs to fuse them into one shell. Two earlier builds failed
-// exactly here and only Manifold saw it: a hull-of-thin-discs loft fragmented
-// into 19 shells (segments that only share a face stay separate volumes), and a
-// straight cylinder butted onto a rotate_extrude bend left a non-manifold edge
-// at the tangent (a straight primitive tangent to a curve NEVER quite coincides
-// with it). Overlapping cylinders have neither failure: coaxial ones coincide
-// exactly (clean), arc ones meet at an angle (volumetric). The outer tube is
-// clipped flat at each coupling face so no material stands past the joint.
+// CONSTRUCTION — ONE BOSL2 path_sweep, so the tube is a single Manifold-clean
+// polyhedron. The tube (and, subtracted, the bore) is one path_sweep() of the
+// round section along the centerline path (inlet stub -> arc -> outlet stub): a
+// single stitched mesh with no booleans and no coincident faces inside it,
+// capped perpendicular to the tangent at each end — which is exactly the
+// coupling-face plane, so no material stands past the joint and no clip is
+// needed. The two ports fuse onto the straight port_stub ends just as they fuse
+// to designs/nuggs's straight tube(). `normal = [0,1,0]` locks the section
+// frame to the bend plane so the sweep does not twist.
+// Getting here took four builds and only CI's Manifold backend told the truth —
+// every failed one passed the local CGAL render (full story in NOTES.md): a
+// hull-of-thin-discs loft fragmented into 19 shells (segments that only share a
+// face stay separate volumes for Manifold); a straight cylinder butted onto a
+// rotate_extrude bend left a non-manifold edge at the tangent (a straight
+// primitive tangent to a curve never quite coincides with it); a chain of
+// overlapping oriented cylinders exported non-manifold (the many intersection
+// curves tessellate into edges shared by >2 triangles). The single path_sweep
+// has no such junction to go wrong.
 //
 // PRINT ORIENTATION / THE 45-DEGREE CEILING (issue #34, adopted into #116).
 // A vertically-printed enclosed bore has a ~45 deg overhang ceiling: issue #34
@@ -239,10 +245,14 @@ module nuggs_elbow() {
         }
         // ONE continuous bore, swept the same way and overrunning both ends.
         elbow_solid(ri, bore_over);
-        // Edge break at both bore mouths.
+        // Edge break at both bore mouths. The inlet mouth is at z = -port_proj
+        // (sectors project to z_tip); the outlet port is MIRRORED, so its mouth
+        // is at +port_proj in the outlet frame — the same +port_proj offset the
+        // straight uses for its mirrored end (nuggs.scad: `l + port_proj`). A
+        // -port_proj here would chamfer the tube side and leave the mouth sharp.
         translate([0, 0, -port_proj]) bore_lead(0.001);
         translate(bend_end) rotate([0, bend_angle, 0])
-            translate([0, 0, -port_proj]) mirror([0, 0, 1]) bore_lead(0.001);
+            translate([0, 0, port_proj]) mirror([0, 0, 1]) bore_lead(0.001);
     }
 }
 
