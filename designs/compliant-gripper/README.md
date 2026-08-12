@@ -6,6 +6,8 @@ around them and cams them shut as it slides up (grip a rod in the bore); release
 and the flexures spring back. One of the "advanced" reference parts because it
 fuses all three domains of `docs/advanced-techniques.md` in a single print.
 
+![Product shot](previews/hero.png)
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ## What you get

@@ -6,6 +6,8 @@ independent compliant sub-mechanisms: a **living hinge** joins the two trays and
 **compliant snap latch** holds them closed (`docs/advanced-techniques.md`, Domain
 1 flexures + Domain 2 orientation).
 
+![Product shot](previews/hero.png)
+
 ![4-view contact sheet (printed flat)](previews/contact-sheet.png)
 
 Closed and latched (preview pose):

@@ -6,6 +6,8 @@ zero clearance, zero assembly and no rattle. LET joints are the best flexure
 match for FDM because they print dead flat (`docs/advanced-techniques.md`,
 Domain 1, lamina-emergent family).
 
+![Product shot](previews/hero.png)
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 Folded to ~90° (preview pose — the printed part is always flat):

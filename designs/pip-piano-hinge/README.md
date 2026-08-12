@@ -6,6 +6,8 @@ no supports, no assembly. It's built on the repo's `lib/print-in-place.scad`
 hinge primitive and adds the piano-hinge-specific defenses against tolerance
 stacking (`docs/advanced-techniques.md`, Domain 3).
 
+![Product shot](previews/hero.png)
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 Folded (preview pose):

@@ -6,6 +6,8 @@ slot. It's the capstone reference part: it fuses the hardest compliant idea in
 `docs/advanced-techniques.md` (constant force from a negative spring in parallel
 with a positive one) with a print-in-place slide.
 
+![Product shot](previews/hero.png)
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 The QZS spring (ortho top): a pre-buckled arch (negative stiffness, bowing left)

@@ -5,6 +5,8 @@ screws — designed so it prints with **zero support material**. It's a worked
 example of *designing around supports*: every feature that would normally need
 support has been reshaped so it doesn't (`docs/advanced-techniques.md`, Domain 2).
 
+![Product shot](previews/hero.png)
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ## What you get

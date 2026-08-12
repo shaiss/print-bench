@@ -6,6 +6,8 @@ nub through flat and it snaps to the other state and *stays* there — power is 
 needed to switch, never to hold. A worked example of the bistable / constant-force
 family (`docs/advanced-techniques.md`, Domain 1).
 
+![Product shot](previews/hero.png)
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ## What you get

@@ -6,6 +6,8 @@ spinning — no supports, no assembly. A rotor is captured on a fixed post under
 then it runs free. A worked example of print-in-place kinematics
 (`docs/advanced-techniques.md`, Domain 3).
 
+![Product shot](previews/hero.png)
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ## What you get

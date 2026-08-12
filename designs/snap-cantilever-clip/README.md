@@ -5,6 +5,8 @@ push a ~6 mm cable into the mouth, the lips spread over the snap interference,
 the cable seats, and the lips spring back to hold it. The simplest compliant
 mechanism — a snap — done right (`docs/advanced-techniques.md`, Domain 1).
 
+![Product shot](previews/hero.png)
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ## What you get
