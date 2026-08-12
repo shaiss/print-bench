@@ -99,11 +99,15 @@ nozzle = 0.4;
 chamfer_ang = 45;
 
 /* [Quality] */
-// This design's own preset. Iterating: $fa=6/$fs=1.5. Production: $fa=2/$fs=0.5.
-// It does NOT reach the coupling: the library pins its own $fa/$fs inside every
-// geometry module body, so the realised fit cannot move with this preset.
-$fa = 6;
-$fs = 1.5;
+// Production preset. NOTE this is NOT cosmetic here: nuggs_port pins its own
+// fine $fa/$fs internally, so a COARSE tube ($fa=6/$fs=1.5) fuses fine port
+// sectors to a coarse shell — a facet mismatch at the fusion interface that
+// CGAL merges but the OpenSCAD Manifold backend splits into ~20 shells
+// (issue #99 / PR #200, the render-gate failure). Matching the shell to the
+// port's resolution keeps the export a single watertight body. Drop to
+// $fa=6/$fs=1.5 only for quick local iteration, never for a gated render.
+$fa = 2;
+$fs = 0.5;
 
 /* [Hidden] */
 eps = 0.01;
