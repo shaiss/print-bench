@@ -92,22 +92,26 @@ module shuttle_2d() {
 }
 
 // ---------- QZS spring: V-beam (positive) ∥ buckled arch (negative) ----------
+// beams overlap their anchors by `ov` so unions are solid (no kissing edges,
+// which export as naked edges / non-watertight).
+ov = 1.2;
 module beam(p0, p1, t) { hull() { translate(p0) circle(d=t); translate(p1) circle(d=t); } }
 
 module vbeam_2d() {
-    y0 = sh_top + push_y;
-    apex = [vbeam_apex, (y0 + bar_y) / 2];
+    y0 = sh_top + push_y - ov;                 // start inside the shuttle
+    apex = [vbeam_apex, (sh_top + push_y + bar_y) / 2];
     beam([ shuttle_w/2 - vbeam_t/2, y0], apex, vbeam_t);   // right leg from shuttle top
     beam([-shuttle_w/2 + vbeam_t/2, y0], apex, vbeam_t);   // left leg  from shuttle top
-    beam(apex, [0, bar_y], vbeam_t);                        // apex to the fixed top bar
+    beam(apex, [0, bar_y + ov], vbeam_t);                   // apex into the fixed top bar
 }
 
 module arch_2d() {
-    y0 = sh_top + push_y;
+    y0 = sh_top + push_y - ov;                 // clamp inside the shuttle
+    y1 = bar_y + ov;                            // clamp inside the top bar
     NS = 32;
-    // shallow buckled arch bowing −X, clamped at shuttle top (y0) and top bar
-    left  = [for (i=[0:NS]) let(t=i/NS) [ -arch_rise*sin(180*t) - arch_t/2, y0 + t*(bar_y - y0)]];
-    right = [for (i=[NS:-1:0]) let(t=i/NS) [ -arch_rise*sin(180*t) + arch_t/2, y0 + t*(bar_y - y0)]];
+    // shallow buckled arch bowing −X, clamped at shuttle top and top bar
+    left  = [for (i=[0:NS]) let(t=i/NS) [ -arch_rise*sin(180*t) - arch_t/2, y0 + t*(y1 - y0)]];
+    right = [for (i=[NS:-1:0]) let(t=i/NS) [ -arch_rise*sin(180*t) + arch_t/2, y0 + t*(y1 - y0)]];
     polygon(concat(left, right));
 }
 

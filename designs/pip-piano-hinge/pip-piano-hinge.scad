@@ -61,26 +61,27 @@ barrel_len = slot - axial_gap;                     // actual barrel length
 plate_edge = R + leaf_gap;                          // plate stops leaf_gap out
 function y_c(k) = (k + 0.5) * slot;
 
-// One leaf: a plate on its X side + its knuckles + a web fusing each knuckle to
-// the plate. `sx` = +1 for leaf B (plate at +X), -1 for leaf A (plate at -X).
-// `parity` selects which knuckle slots this leaf owns.
+// Print seating: leaves lie ON the bed (z = 0..leaf_t); barrels sit on top with
+// their axis at z = R, so the barrel bottoms rest on the bed too. Nothing floats
+// — the leaves' big flat undersides are bed contact, not overhang.
+barrel_z = R;
+// web reach INTO the barrel from its outer edge — must stay OUTSIDE the bore
+// (bore reaches x ≈ pin_d/2 + clear from centre) or the web grips the pin and
+// LOCKS the hinge. This is the bug the first version had.
+web_reach = 2;
+
+// One leaf: a plate on the bed + its knuckles + a side web fusing each knuckle
+// to the plate at the barrel's OUTER wall only. `sx` = +1 leaf B (+X), −1 leaf A.
 module leaf(sx, parity) {
-    // plate
-    if (sx < 0)
-        translate([-(plate_edge + leaf_w), 0, -leaf_t/2]) cube([leaf_w, hinge_len, leaf_t]);
-    else
-        translate([plate_edge, 0, -leaf_t/2]) cube([leaf_w, hinge_len, leaf_t]);
+    px = sx < 0 ? -(plate_edge + leaf_w) : plate_edge;
+    translate([px, 0, 0]) cube([leaf_w, hinge_len, leaf_t]);
     for (k = [0 : knuckles - 1])
         if (k % 2 == parity) {
-            // knuckle barrel (with the offset-teardrop bore)
-            translate([0, y_c(k), 0]) pip_hinge(pin_d, clear, knuckle_wall, barrel_len);
-            // web fusing plate → barrel, only at this leaf's slots
-            if (sx < 0)
-                translate([-(plate_edge) - 0.01, y_c(k) - barrel_len/2, -leaf_t/2])
-                    cube([plate_edge + 0.11, barrel_len, leaf_t]);
-            else
-                translate([-0.1, y_c(k) - barrel_len/2, -leaf_t/2])
-                    cube([plate_edge + 0.11, barrel_len, leaf_t]);
+            translate([0, y_c(k), barrel_z]) pip_hinge(pin_d, clear, knuckle_wall, barrel_len);
+            // side web: plate → barrel outer wall, never into the bore
+            wx = sx < 0 ? -(plate_edge) - 0.01 : plate_edge - leaf_gap - web_reach;
+            translate([wx, y_c(k) - barrel_len/2, 0])
+                cube([leaf_gap + web_reach + 0.01, barrel_len, barrel_z]);
         }
 }
 
@@ -88,13 +89,16 @@ module main() {
     assert(knuckles >= 3, "a piano hinge needs >= 3 knuckles");
     assert(leaf_gap >= 0.3, "leaf_gap too small — a swinging leaf would rub the opposing barrels");
     assert(axial_gap >= 0.4, "axial_gap under one extrusion width — adjacent knuckles weld");
+    assert(web_reach < R - (pin_d/2 + clear),
+           "web reaches into the bore — it would grip the pin and lock the hinge");
 
     // leaf A (even knuckles), fixed
     leaf(-1, 0);
-    // leaf B (odd knuckles), folds for the preview only
-    rotate([demo_fold, 0, 0]) leaf(1, 1);
-    // one free pin through all knuckles (teardrop solid, matches the offset bore)
-    translate([0, hinge_len/2, 0]) pip_hinge_pin(pin_d, hinge_len - 0.6);
+    // leaf B (odd knuckles), folds about the pin (z = R) for the preview only
+    translate([0, 0, barrel_z]) rotate([demo_fold, 0, 0]) translate([0, 0, -barrel_z])
+        leaf(1, 1);
+    // one FREE pin through all knuckles (teardrop solid, matches the offset bore)
+    translate([0, hinge_len/2, barrel_z]) pip_hinge_pin(pin_d, hinge_len - 0.6);
 }
 
 main();
