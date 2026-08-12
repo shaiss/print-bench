@@ -164,6 +164,12 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          # Pin the model — without this the action falls back to its built-in
+          # default (currently claude-opus-5[1m]), which the review sessions'
+          # API key can't use, so the run errors at startup (is_error, $0, 1
+          # turn) before any review happens. Match the other agentic workflows
+          # (backlog-burn / design-run / chunker), which all pin claude-opus-4-8.
+          claude_args: --model claude-opus-4-8
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -195,6 +201,9 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          # See the jane-review step: pin the model so the run doesn't fall back
+          # to an unusable default and error at startup.
+          claude_args: --model claude-opus-4-8
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -231,6 +240,9 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          # See the jane-review step: pin the model so the run doesn't fall back
+          # to an unusable default and error at startup.
+          claude_args: --model claude-opus-4-8
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
