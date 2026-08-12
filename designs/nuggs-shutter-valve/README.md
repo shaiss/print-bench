@@ -30,7 +30,7 @@ trivial 0.6 mm bridge onto solid material. Snap it closed after printing.
 ## Print settings
 
 - **Print this first:** `nuggs-shutter-valve-coupon.scad` — a small fixture
-  (~100 × 50 × 9 mm, minutes to print) that reproduces the slide fit. Tune the
+  (100 × 46 × 9 mm, minutes to print) that reproduces the slide fit. Tune the
   gate until it slides **freely but without rattling** before committing to the
   full valve. See `NOTES.md → Print this first`.
 - **Orientation:** as modelled — tube vertical, standing on the bottom port's

@@ -53,7 +53,7 @@ NUGGS port standard (`lib/nuggs-coupling.scad`), redefining neither.
    sideways makes a wide flat drawer. Printed tube-up, that drawer's underside
    faces the bed with only the narrow tube beneath it — printcheck read the
    first cut at **26 % overhang, CRITICAL**. Two additions bring it to a passing
-   **12 % (WARNING), 84/100 PRINTABLE WITH CAVEATS**:
+   **13 % (WARNING), 84/100 PRINTABLE WITH CAVEATS**:
    - a **45° self-supporting skirt** under the bore housing, down to the tube
      (bottoming out above the port zone so the coupling stays free to mate);
    - a **solid pedestal** under the +Y drawer, reaching the true bed plane
@@ -130,7 +130,7 @@ scrutinise (bottom-iso): the 45° skirt and the pedestal contact.
 ## Print this first
 
 Print **`nuggs-shutter-valve-coupon.scad`** before committing to the full valve
-(it is a ~100 × 50 × 9 mm fixture, minutes to print, straight from the same
+(it is a 100 × 46 × 9 mm fixture, minutes to print, straight from the same
 rail/lip/tab modules — nothing copied):
 
 1. Print the coupon at `door_fit = 0`.
@@ -153,7 +153,7 @@ rail/lip/tab modules — nothing copied):
 - **Asymmetric footprint.** The retract drawer sticks out one side (module
   ~114 × 195 mm). Acceptable per the brief ("a wider module is acceptable if it
   keeps the slide supportless"); confirm it clears whatever the run sits on.
-- **8 zero-area triangles** (printcheck WARNING) — harmless degenerate faces
+- **9 zero-area triangles** (printcheck WARNING) — harmless degenerate faces
   from the boolean stack; not yet chased down.
 - **Not yet printed.** All clearances are the library defaults / the NUGGS
   standard; nothing here has touched a bed. The coupon exists to close that gap.

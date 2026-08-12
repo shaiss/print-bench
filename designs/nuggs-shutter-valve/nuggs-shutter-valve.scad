@@ -127,7 +127,7 @@ cfg = nuggs_cfg(bore_d    = bore_d,    wall      = wall,      lug_r    = lug_r,
 
 ri    = nuggs_ri(cfg);      // bore radius (40)
 ro    = nuggs_ro(cfg);      // tube outer radius (42.4)
-r_out = nuggs_r_out(cfg);   // coupling ring OD (46.4)
+r_out = nuggs_r_out(cfg);   // coupling ring OD (48.4)
 z_top = nuggs_z_top(cfg);   // top of the port zone; lead_in must back this much
 
 // ---------------------------------------------------------------------------
