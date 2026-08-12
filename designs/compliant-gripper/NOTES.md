@@ -46,6 +46,13 @@ uniformly (`slope · travel`). That IS the actuator; no threads, no ramp part.
   interference facets, with an interfering negative control (`xy_tol → 0`).
 - Live flexure → PETG/nylon/PP, not PLA.
 
+## Print this first
+
+`compliant-gripper-coupon.scad` — a short collet (include + override, no copied
+geometry). Print it and slide the collar; if it's fused, raise `xy_tol` by
+0.05 mm and reprint; if it's sloppy, lower it. Tune `xy_tol` here before a
+full-height print. Gated like any part.
+
 ## Status
 
 - Renders clean; half-section confirms the captive collar clearance.

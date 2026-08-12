@@ -40,6 +40,13 @@ Printed in place, the rotor micro-fuses to base and cap across the gaps. First
 spin shears that fusion — expected, not a defect. Designed for a low-torque
 break-in (small contact annuli), never a seized part.
 
+## Print this first
+
+`captive-spinner-coupon.scad` — a small spinner (include + override, no copied
+geometry). Print it and give the rotor a firm spin; if it's fused, raise `xy_tol`
+by 0.05 mm and reprint; if it rattles, lower it. Tune `xy_tol` here before a
+full-size print. Gated like any part.
+
 ## Status
 
 - Renders clean; preview reviewed (rotor + scallops + capture cone).

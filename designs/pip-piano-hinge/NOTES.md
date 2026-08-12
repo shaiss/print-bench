@@ -42,6 +42,13 @@ Flat, axis horizontal, teardrop roofs up → no supports. `pin $fn ≥ 64` (the 
 is $fn-sensitive; set to 96). `clear = 0.4` is an acoustic-class clearance — 0.25
 is the weld floor (`pip_hinge` guards it), tuning far up buys a rattly hinge.
 
+## Print this first
+
+`pip-piano-hinge-coupon.scad` — a fast 3-knuckle stub (include + override, no
+copied geometry). Print it and work the knuckles free; if any binds, raise
+`clear` by 0.05 mm and reprint. Tune `clear` on the coupon before committing to a
+full-length hinge. Gated like any part (printcheck + test-slice).
+
 ## Status
 
 - Renders clean, folds correctly.
