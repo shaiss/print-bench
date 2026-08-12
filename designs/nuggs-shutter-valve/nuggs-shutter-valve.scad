@@ -100,14 +100,17 @@ chamfer_ang = 45;
 
 /* [Quality] */
 // Production preset. NOTE this is NOT cosmetic here: nuggs_port pins its own
-// fine $fa/$fs internally, so a COARSE tube ($fa=6/$fs=1.5) fuses fine port
-// sectors to a coarse shell — a facet mismatch at the fusion interface that
-// CGAL merges but the OpenSCAD Manifold backend splits into ~20 shells
-// (issue #99 / PR #200, the render-gate failure). Matching the shell to the
-// port's resolution keeps the export a single watertight body. Drop to
-// $fa=6/$fs=1.5 only for quick local iteration, never for a gated render.
-$fa = 2;
-$fs = 0.5;
+// $fa/$fs internally (the library's _NUGGS_FA=3 / _NUGGS_FS=0.8) and ignores
+// the caller, so the tube must be drawn at the SAME values or its curved
+// surface fuses to the port sectors across a facet mismatch — an interface CGAL
+// merges but the OpenSCAD Manifold backend splits into ~20 shells (issue #99 /
+// PR #200, the render-gate failure). A FINER tube ($fa=2/$fs=0.5) does not
+// "match" the port, it mismatches it in the other direction — that was the
+// earlier failed fix. Match the library exactly: $fa=3 / $fs=0.8. Combined with
+// the solid-tube-and-single-bore-cut construction in valve() (below), every
+// curved surface in the part shares one resolution and one bore cylinder.
+$fa = 3;
+$fs = 0.8;
 
 /* [Hidden] */
 eps = 0.01;
@@ -214,11 +217,15 @@ assert(wall_in > gate_r, "SHUTTER rail wall must sit outboard of the plate edge.
 // ---------------------------------------------------------------------------
 // Primitives
 // ---------------------------------------------------------------------------
-module shell(z0, z1) {
-    translate([0, 0, z0]) difference() {
-        cylinder(r = ro, h = z1 - z0);
-        translate([0, 0, -eps]) cylinder(r = ri, h = z1 - z0 + 2 * eps);
-    }
+// A SOLID full-round tube ri..ro is not what this emits — it emits the outer
+// cylinder only, and lets the single nuggs_bore_cut() below open the bore, the
+// way lib's nuggs_neck() does (solid cylinder + port, then ONE bore cut). A
+// hollow shell would cut its own ri cylinder here, coincident with
+// nuggs_bore_cut()'s ri cylinder but at a different facet count — the two
+// near-coincident bore walls are exactly what OpenSCAD-Manifold shatters into
+// separate shells. One bore surface, cut once. (issue #99 / PR #200.)
+module tube(z0, z1) {
+    translate([0, 0, z0]) cylinder(r = ro, h = z1 - z0);
 }
 
 // Internal edge break at a bore mouth. Cut only; only ever widens the bore.
@@ -320,7 +327,7 @@ module valve() {
             union() {
                 nuggs_port(cfg);                                  // bottom port
                 translate([0, 0, z_total]) mirror([0, 0, 1]) nuggs_port(cfg);
-                shell(0, z_total);                                // ONE full-height tube (housing wraps it)
+                tube(0, z_total);                                 // ONE solid full-height tube; nuggs_bore_cut opens the single bore
                 housing_core();
                 pedestal();
             }
