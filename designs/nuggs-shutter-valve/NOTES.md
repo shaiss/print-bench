@@ -99,6 +99,27 @@ NUGGS port standard (`lib/nuggs-coupling.scad`), redefining neither.
    (decision 6). Lesson for this repo's designs: never cut a flat plane so it
    lands tangent to a coupling's round shell — bound the cut clear of `ro`.
 
+   **The residual cluster (top-port fusion) — the resolution trap.** Deleting
+   the grazing cut did not clear a smaller cluster at the top port. Root cause:
+   `nuggs_port()` pins its own `$fa=3 / $fs=0.8` (`_NUGGS_FA` / `_NUGGS_FS`)
+   internally and **ignores the caller**, while the design's tube was drawn at
+   the design's `$fa`. An earlier "match the resolution" pass set the design to
+   `$fa=2 / $fs=0.5` — but that is *finer* than the port, so it **widened** the
+   facet mismatch at the port↔tube fusion rather than closing it, which is why
+   the cluster never moved across five attempts. Compounding it, the tube was a
+   **hollow `shell()`** that cut its own `ri` bore cylinder, coincident with
+   `nuggs_bore_cut()`'s `ri` cylinder but at a different facet count — two
+   near-coincident bore walls, exactly what OpenSCAD-Manifold shatters into
+   separate shells (CGAL and manifold3d fuse them). Fix, mirroring the library's
+   own `nuggs_neck()` recipe (solid cylinder + port, then **one** bore cut):
+   (a) set the design to `$fa=3 / $fs=0.8` so the tube truly matches the port,
+   and (b) emit a **solid** tube and let the single `nuggs_bore_cut()` open the
+   bore, so the part has exactly one bore surface at one resolution. The final
+   solid is geometrically identical (CGAL still watertight, valve 84/100 +
+   test-slices). Lesson: when fusing to a library body that pins its own
+   `$fa/$fs`, match *that* value exactly — finer is a mismatch too — and never
+   define one bore with two coincident cutting cylinders.
+
 ## Print orientation
 
 Tube axis vertical, standing on the bottom port's sector tips + the pedestal
