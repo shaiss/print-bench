@@ -132,9 +132,14 @@ z_top = nuggs_z_top(cfg);   // top of the port zone; lead_in must back this much
 // pip_*() defaults, named here so the geometry reads and so the design cannot
 // silently drift from the library's derivation.
 // ---------------------------------------------------------------------------
-gap_z    = 0.6;                 // tab ride gap above the deck (slide_tab default)
-tab_t    = 1.2;                 // tab slab thickness (slide_tab default)
+// These mirror slide_tab()'s defaults, but the design SIZES the rail/lip/chamber
+// (wall_in, lz, rh) from them AND passes them back INTO every slide_tab() call
+// below — one source of truth, so the tabs can never desync from the geometry
+// built to capture them (a real drift risk the file exists to prevent).
+gap_z    = 0.6;                 // tab ride gap above the deck
+tab_t    = 1.2;                 // tab slab thickness
 tab_w    = 3.5;                 // tab reach sideways under the lip
+tab_len  = 5.5;                 // tab length along the slide
 lip_d    = 3.2;                 // lip overhang / engagement depth
 lip_drop = 0.4;                 // lip-top mesh-hygiene drop
 lz       = pip_lip_z(gap_z, tab_t);            // lip root height above deck (1.7)
@@ -285,7 +290,7 @@ module rail_wall_solid(side, y0 = -hy_closed, y1 = hy_open) {
 // edge rides over, seating it at closed (y=0) and open (y=travel).
 module detent_bump(y) {
     translate([0, y, z_deck]) rotate([0, 90, 0])
-        cylinder(r = detent_h, h = gate_w * 0.7, center = true, $fn = 16);
+        cylinder(r = detent_h, h = gate_w * 0.7, center = true, $fn = 64);
 }
 
 // The shutter plate + tabs + handle, in its current (open-fraction) position.
@@ -294,8 +299,12 @@ module shutter() {
     translate([0, open_y, 0]) {
         // sealing plate (fit-shrunk so door_fit tunes the slide, not the seal)
         translate([-dw / 2, -gate_r, gate_z0]) cube([dw, gate_w, gate_t]);
-        // door-side tabs riding under the continuous lip
-        translate([0, 0, gate_z0]) slide_tab(gate_w, tab_c = [0], fit = door_fit, gap_z = 0);
+        // door-side tabs riding under the continuous lip. The tab dimensions are
+        // passed explicitly (not left to slide_tab's defaults) so they stay the
+        // SAME values the rail/lip/chamber were sized from above.
+        translate([0, 0, gate_z0])
+            slide_tab(gate_w, tab_c = [0], tab_w = tab_w, tab_len = tab_len,
+                      tab_t = tab_t, fit = door_fit, gap_z = 0);
         // handle: a pull-tab off the +Y (outboard) edge
         translate([-handle_w / 2, gate_r, gate_z0])
             cube([handle_w, handle_reach, gate_t + handle_t]);
@@ -358,7 +367,9 @@ module coupon() {
         gy = cglen / 2 + 3;
         translate([0, gy, 0]) {                                    // captive gate
             translate([-dw / 2, -cglen / 2, gate_z0]) cube([dw, cglen, gate_t]);
-            translate([0, 0, gate_z0]) slide_tab(gate_w, tab_c = [0], fit = door_fit, gap_z = 0);
+            translate([0, 0, gate_z0])
+                slide_tab(gate_w, tab_c = [0], tab_w = tab_w, tab_len = tab_len,
+                          tab_t = tab_t, fit = door_fit, gap_z = 0);
         }
         detent_bump(gy);   // the closed-position click, so the coupon tests feel too
     }
