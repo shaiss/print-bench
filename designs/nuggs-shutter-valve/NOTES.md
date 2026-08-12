@@ -78,19 +78,26 @@ NUGGS port standard (`lib/nuggs-coupling.scad`), redefining neither.
    coupon keeps a deck detent (it prints over a solid base) so the feel is still
    testable.
 
-7. **Manifold coincident-face fix (the "only Manifold tells the truth" trap).**
-   The first push gated clean on the local CGAL backend (watertight, 84/100) but
-   CI's Manifold backend reported the valve as **19 bodies, non-watertight** — a
-   CRITICAL. Cause: solids that only *kissed* on shared planes (the two tube
-   segments butting the housing at z_deck/z_slotT; the separate rail wall whose
-   face coincided with the slide-chamber cut; the lip biting its wall by only an
-   `eps`), which CGAL fuses but Manifold keeps as separate shells. Fix, all
-   geometry-neutral to the mechanism: one **full-height tube** the housing wraps
-   (no butt joints); the slot ceiling raised to the rail height so the housing
-   pillar backs the whole lip and the **separate rail wall is gone**; the lips
-   **rooted deep (`lip_bury`) into the pillar and unioned after the cuts** so
-   they interpenetrate and are never clipped; the skirt overlapping the housing
-   by a real `weld`; and the fragile detent/end-stop bits (decision 6) removed.
+7. **Manifold fragmentation fix (the "only Manifold tells the truth" trap).**
+   The design gated clean on the local CGAL backend (watertight, 84/100) but
+   CI's OpenSCAD **Manifold** backend reported the valve as **~20 bodies,
+   non-watertight** — a CRITICAL. Root cause, found by exporting every leaf
+   solid and re-running the boolean under **manifold3d** locally (which returned
+   a single clean body — proof the *geometry* was correct and the fault was an
+   OpenSCAD-Manifold tessellation artifact): a **grazing tangential cut**. An
+   earlier "open the pocket roof" cut ran a flat box through `z > z_slotT,
+   y > ri-1`, which sliced *tangentially into the round upper tube and the top
+   port's +Y sectors*. CGAL and manifold3d absorb such a graze; OpenSCAD-Manifold
+   shatters the port's ~10 sub-solids (×2 ports ≈ 20 shells) along it. The cut
+   was also useless — nothing is built above the slot ceiling over the drawer,
+   so the pocket is *already* open-topped — so it was simply deleted. A prior
+   pass had also hardened the joins (one full-height tube the housing wraps
+   instead of two segments butting it; the slot ceiling raised to the rail
+   height so the housing pillar backs the whole lip, deleting the separate rail
+   wall; lips rooted deep with `lip_bury` and unioned after the cuts; skirt
+   overlapping by a real `weld`) and removed the fragile detent/end-stop bits
+   (decision 6). Lesson for this repo's designs: never cut a flat plane so it
+   lands tangent to a coupling's round shell — bound the cut clear of `ro`.
 
 ## Print orientation
 

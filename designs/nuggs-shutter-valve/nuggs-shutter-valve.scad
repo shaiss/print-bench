@@ -189,14 +189,6 @@ z_upper  = z_slotT;                       // upper tube resumes here
 z_total  = z_upper + lead_in;             // top tube end face (top port sits here)
 assert(z_slotT >= gate_z1 + 0.4, "SHUTTER: slot ceiling must clear the plate top.");
 
-// the pocket is open-topped over Y beyond the bore, so the gate never needs a
-// wide flat roof bridged over it; only the ~gate_over rings over the bore do.
-// Held 1 mm INSIDE ri (not exactly at it): a cut face tangent to the bore
-// cylinder produces the near-coincident sliver / 2-manifold warning the
-// nuggs_window comment documents; 1 mm in removes nothing extra (that region is
-// bore void) and clears the tangent.
-pocket_y0 = ri - 1;                        // roof stops here on +Y; pocket is open past it
-
 echo(str("nuggs-shutter-valve: bore ", bore_d, " (ri ", ri, "), gate ", gate_w,
          " x ", gate_w, " x ", gate_t, " mm, travel ", travel, " mm, rail_h ",
          rh, " mm, module ", 2 * hx, " x ", hy_closed + hy_open, " x ", z_total, " mm"));
@@ -323,9 +315,12 @@ module valve() {
             translate([0, 0, -port_proj]) bore_lead(0.001, 1);
             translate([0, 0, z_total + port_proj]) mirror([0, 0, 1]) bore_lead(0.001, 1);
             slide_chamber();
-            // open the pocket roof (+Y beyond the bore) so no wide flat bridge
-            translate([-wall_in - eps, pocket_y0, z_slotT - eps])
-                cube([2 * wall_in + 2 * eps, hy_open - pocket_y0 + eps, rh + 2]);
+            // (No pocket-roof cut: nothing is built above the slot ceiling over
+            // the drawer, so the pocket is already open-topped. An earlier cut
+            // here sliced tangentially into the round upper tube and the top
+            // port's +Y sectors — a grazing cut that shatters the OpenSCAD
+            // Manifold export into 20 shells while CGAL/manifold3d paper over it.
+            // Issue #99 / PR #200: this is the "only Manifold tells the truth" bug.)
         }
         // The capture lips are added AFTER the cuts: they root deep into the
         // surviving housing pillars (a real `lip_bury` overlap Manifold fuses,
