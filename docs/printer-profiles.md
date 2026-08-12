@@ -8,15 +8,16 @@ instead of a generic default.
 
 This file is **reference data** — a shareable catalog, like `styles/`. It does not
 change the mechanism and adds no dependency. Your *active* profile still lives in
-the repo-root `printer.conf`, which stays **local and uncommitted** (personal to
-whatever machine+material you're printing right now).
+the repo-root `printer.conf` — which is **committed as an inert stub** (so
+`include <printer.conf>` always resolves); fill it in for whatever machine+material
+you're printing right now and **keep that local edit uncommitted** (it's personal).
 
 ## How it feeds `printer.conf`
 
 `printer.conf` carries a single scalar, and `lib/printer-conf.scad` exposes it as:
 
 ```scad
-printer_fit(nominal) = nominal + printer_xy_tol;   // grow a nominal dim by the clearance
+function printer_fit(nominal) = nominal + printer_xy_tol;   // grow a nominal dim by the clearance
 ```
 
 So a machine's profile sets `printer_xy_tol` to that material's **free-slide**
@@ -85,7 +86,7 @@ measured row** — an assumed number that looks measured is the trap.
 
 ## Ready-to-copy `printer.conf` snippets
 
-Paste one into the repo-root `printer.conf` (keep that file local/uncommitted):
+Paste one into the repo-root `printer.conf` and **keep your edit uncommitted** (the file itself is committed inert):
 
 ```scad
 // H2C · PLA · 0.4 nozzle — measured free-slide (gauge 2026-08-12: loose 0.45→0.15,
