@@ -102,12 +102,12 @@ module finger_cone() {
 }
 
 // The captive collar: a scalloped ring floating around the finger roots.
-module collar() {
+module collar(ir = collar_ir) {
     translate([0, 0, collar_z0])
         difference() {
             cylinder(r = collar_or, h = collar_h);
             translate([0, 0, -0.01])
-                cylinder(r = collar_ir, h = collar_h + 0.02);
+                cylinder(r = ir, h = collar_h + 0.02);
             for (i = [0 : collar_scallops - 1])
                 rotate([0, 0, i * 360 / collar_scallops])
                     translate([collar_or, 0, -0.01])
@@ -115,15 +115,28 @@ module collar() {
         }
 }
 
+module fixed() { base_disc(); finger_cone(); }
+
+// "" = the gripper. "fitcheck" = collar ∩ fixed (must be EMPTY — the collar is a
+// free captive body). "fitcheck_neg" = the collar bore shrunk onto the fingers
+// (must be NON-EMPTY — proves the check can fail). See ci.fitchecks.
+part = "";
+
 module main() {
     assert(ro_tip > collar_ir,
            "cone top not wider than the collar bore — the collar would slide off (not captive)");
     assert(ri_tip > 1.5, "grip bore collapses at the tips");
     assert(collar_z0 + collar_h < base_t + finger_h,
            "collar taller than the finger zone");
-    base_disc();
-    finger_cone();
-    collar();
+
+    if (part == "fitcheck")
+        intersection() { collar(); fixed(); }
+    else if (part == "fitcheck_neg")
+        intersection() { collar(ir = ro_base - 0.4); fixed(); }   // bore bites the fingers
+    else {
+        fixed();
+        collar();
+    }
 }
 
 main();

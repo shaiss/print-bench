@@ -82,13 +82,13 @@ module post_and_cap() {
         cylinder(r1 = post_r, r2 = r_cap, h = cone_h);
 }
 
-module rotor() {
+module rotor(ir = rotor_ir) {
     translate([0, 0, z0])
         difference() {
             cylinder(r = rotor_or, h = rotor_h);
             // bore (radial gap around the post)
             translate([0, 0, -0.01])
-                cylinder(r = rotor_ir, h = rotor_h + 0.02);
+                cylinder(r = ir, h = rotor_h + 0.02);
             // finger scallops around the rim
             for (i = [0 : scallops - 1])
                 rotate([0, 0, i * 360 / scallops])
@@ -97,13 +97,26 @@ module rotor() {
         }
 }
 
+module fixed() { base(); post_and_cap(); }
+
+// "" = the spinner. "fitcheck" = rotor ∩ fixed (must be EMPTY — the rotor is a
+// free captive body). "fitcheck_neg" = the rotor with its bore shrunk onto the
+// post (must be NON-EMPTY — proves the check can fail). See ci.fitchecks.
+part = "";
+
 module main() {
     assert(xy_tol >= 0.15, "radial gap below a printable line width");
     assert(cap_lip >= 1.5, "capture lip too small — the rotor could pop off");
     assert(r_cap < rotor_or, "cap wider than the rotor — nothing to grip");
-    base();
-    post_and_cap();
-    rotor();
+
+    if (part == "fitcheck")
+        intersection() { rotor(); fixed(); }
+    else if (part == "fitcheck_neg")
+        intersection() { rotor(ir = post_r - 0.4); fixed(); }   // bore bites the post
+    else {
+        fixed();
+        rotor();
+    }
 }
 
 main();

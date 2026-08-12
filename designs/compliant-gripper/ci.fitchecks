@@ -1,0 +1,6 @@
+# Print-in-place fit proof: the collar must be a free captive body clearing the
+# fingers at rest. `fitcheck` renders collar ∩ fixed (base+fingers) and must be
+# EMPTY. `fitcheck_neg` shrinks the collar bore onto the fingers so it MUST
+# overlap, proving the check can fail.
+fitcheck      empty
+fitcheck_neg  interferes

@@ -50,6 +50,13 @@ leaf_gap = 0.4;
 // Fold leaf B up about the pin for the preview pose (deg). PRINT AT 0.
 demo_fold = 0; // [0:5:170]
 
+/* [CI fit-check — not a print parameter] */
+// "" = the hinge. "fitcheck" = the boolean interference between the three
+// print-in-place bodies (must render EMPTY — they clear). "fitcheck_neg" = the
+// same with an oversized pin (must render NON-EMPTY — proves the check can
+// fail). Wired by designs/pip-piano-hinge/ci.fitchecks.
+part = "";
+
 /* [Quality] */
 // A captive teardrop bore is $fn-sensitive — keep high.
 $fn = 96;
@@ -85,6 +92,12 @@ module leaf(sx, parity) {
         }
 }
 
+module leaf_A() { leaf(-1, 0); }
+module leaf_B() { leaf(1, 1); }               // unfolded (printed position)
+module pin_body(d = pin_d) {
+    translate([0, hinge_len/2, barrel_z]) pip_hinge_pin(d, hinge_len - 0.6);
+}
+
 module main() {
     assert(knuckles >= 3, "a piano hinge needs >= 3 knuckles");
     assert(leaf_gap >= 0.3, "leaf_gap too small — a swinging leaf would rub the opposing barrels");
@@ -92,13 +105,22 @@ module main() {
     assert(web_reach < R - (pin_d/2 + clear),
            "web reaches into the bore — it would grip the pin and lock the hinge");
 
-    // leaf A (even knuckles), fixed
-    leaf(-1, 0);
-    // leaf B (odd knuckles), folds about the pin (z = R) for the preview only
-    translate([0, 0, barrel_z]) rotate([demo_fold, 0, 0]) translate([0, 0, -barrel_z])
-        leaf(1, 1);
-    // one FREE pin through all knuckles (teardrop solid, matches the offset bore)
-    translate([0, hinge_len/2, barrel_z]) pip_hinge_pin(pin_d, hinge_len - 0.6);
+    if (part == "fitcheck") {
+        // every pairwise overlap of the three bodies must be empty — if the pin
+        // is gripped (the locked-hinge bug) or a leaf rubs the other, facets appear
+        intersection() { pin_body(); leaf_A(); }
+        intersection() { pin_body(); leaf_B(); }
+        intersection() { leaf_A(); leaf_B(); }
+    } else if (part == "fitcheck_neg") {
+        // oversized pin MUST overlap the bores — proves the check can fail
+        intersection() { pin_body(pin_d + 2*clear + 1); union() { leaf_A(); leaf_B(); } }
+    } else {
+        leaf_A();
+        // leaf B folds about the pin (z = R) for the preview only
+        translate([0, 0, barrel_z]) rotate([demo_fold, 0, 0]) translate([0, 0, -barrel_z])
+            leaf(1, 1);
+        pin_body();   // one FREE pin through all knuckles
+    }
 }
 
 main();
