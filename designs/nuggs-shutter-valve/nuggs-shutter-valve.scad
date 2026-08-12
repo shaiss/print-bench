@@ -135,6 +135,11 @@ lip_d    = 3.2;                 // lip overhang / engagement depth
 lip_drop = 0.4;                 // lip-top mesh-hygiene drop
 lz       = pip_lip_z(gap_z, tab_t);            // lip root height above deck (1.7)
 rh       = pip_rail_h(gap_z, tab_t, 0.4, 0.5, lip_d);  // rail wall height (5.7)
+// How deep the continuous lip roots into its backing wall/pillar. A real
+// overlap, NOT an eps kiss: Manifold keeps face-coincident solids as separate
+// shells (CGAL fuses them), so every join here interpenetrates by this weld.
+lip_bury = 0.6;
+weld     = 0.6;                                 // generic union overlap
 
 // ---------------------------------------------------------------------------
 // Gate + chamber geometry (all derived; NOTES.md has the picture).
@@ -146,14 +151,20 @@ rh       = pip_rail_h(gap_z, tab_t, 0.4, 0.5, lip_d);  // rail wall height (5.7)
 // ---------------------------------------------------------------------------
 gate_r  = ri + gate_over;                 // plate half-extent covering the bore (43)
 gate_w  = 2 * gate_r;                     // plate width in X and closed length in Y
-travel  = gate_w;                         // slide to fully clear the bore
-// The PRINTABLE part renders the gate in its OPEN position — parked over the
-// solid pedestal. There it prints as a trivial gap_z (0.6 mm) bridge onto solid
-// material; modelled closed it would have to bridge the whole open bore. Print-
-// in-place parts print in the pose that prints best; the operator slides it
-// closed after. Previews (assembled/cutaway) honour the `open` param.
+// Gate travel runs between the two housing walls, which ARE the travel stops
+// (so no separate end-stop ridges): CLOSED = the plate's -Y edge resting on the
+// closed-side wall (it covers the bore there); OPEN = the plate slid until its
+// -Y edge is clear past +ri, entirely out of the bore.
+y_closed = -(ri + 2) + gate_r;            // gate centre, closed (against the -Y wall)
+y_open   = ri + gate_r + 2;               // gate centre, open (fully clear of the bore)
+travel   = y_open - y_closed;
+// The PRINTABLE part renders the gate OPEN — parked over the solid pedestal,
+// where it prints as a trivial gap_z (0.6 mm) bridge onto solid material;
+// modelled closed it would bridge the whole open bore. Print-in-place parts
+// print in the pose that prints best; the operator slides it closed after.
+// Previews (assembled/cutaway) honour the `open` param.
 open_eff = (part == "valve") ? 1 : open;
-open_y   = travel * open_eff;             // gate offset in +Y
+open_y   = y_closed + (y_open - y_closed) * open_eff;   // gate centre in +Y
 
 // rails just outboard of the plate; pillars carry flow past them
 rail_wall = 3.0;
@@ -162,7 +173,7 @@ wall_in   = gate_r + tab_w + 0.4;         // rail wall cell-side face
 hx        = wall_in + rail_wall + pillar; // housing X half-extent
 
 hy_closed = ri + 5;                       // -Y wall: caps the closed side
-hy_open   = gate_r + travel + handle_reach + 4;  // +Y end of the retract pocket
+hy_open   = y_open + gate_r + handle_reach + 4;  // +Y end of the retract pocket (clears the open gate + handle)
 core_y1   = r_out + 6;                     // bore-housing +Y extent
 ped_y0    = r_out + 2;                     // drawer pedestal starts (clears the bottom port ring)
 
@@ -170,9 +181,13 @@ ped_y0    = r_out + 2;                     // drawer pedestal starts (clears the
 z_deck   = lead_in;                       // deck top = slide origin plane (= lower tube top)
 gate_z0  = z_deck + gap_z;                // plate underside
 gate_z1  = gate_z0 + gate_t;              // plate top
-z_slotT  = gate_z1 + 0.6;                 // slot ceiling (clearance over the plate)
-z_upper  = z_slotT;                       // upper tube starts here
+// slot ceiling = rail height above the deck, so the housing pillar backs the
+// FULL lip (no separate rail wall to create a coincident face) and the gate
+// still keeps rh - (gap_z + gate_t) of headroom under the ceiling.
+z_slotT  = z_deck + rh;
+z_upper  = z_slotT;                       // upper tube resumes here
 z_total  = z_upper + lead_in;             // top tube end face (top port sits here)
+assert(z_slotT >= gate_z1 + 0.4, "SHUTTER: slot ceiling must clear the plate top.");
 
 // the pocket is open-topped over Y beyond the bore, so the gate never needs a
 // wide flat roof bridged over it; only the ~gate_over rings over the bore do.
@@ -222,7 +237,8 @@ module housing_core() {
     // footprint ~ (hx - ro) below it, i.e. a 45-degree underside on the ±X sides.
     skirt_drop = hx - (ro + 2);
     hull() {
-        translate([-hx, -hy_closed, z_deck]) cube([2 * hx, hy_closed + core_y1, eps]);
+        // top slab overlaps the housing block by `weld` (not an eps kiss)
+        translate([-hx, -hy_closed, z_deck]) cube([2 * hx, hy_closed + core_y1, weld]);
         translate([-(ro + 2), -(ro + 2), z_deck - skirt_drop])
             cube([2 * (ro + 2), (ro + 2) + core_y1, eps]);
     }
@@ -260,7 +276,7 @@ module cont_lip(side, y0 = -hy_closed, y1 = hy_open) {
     translate([side * wall_in, y1, z_deck])
         rotate([90, 0, 0])
             linear_extrude(y1 - y0)
-                polygon(pip_lip_profile(side, lz, rh, lip_d, lip_drop, eps));
+                polygon(pip_lip_profile(side, lz, rh, lip_d, lip_drop, lip_bury));
 }
 
 // The caller-owned rail wall the lip lives on (pip_rail_h tall, eps into deck).
@@ -299,12 +315,9 @@ module valve() {
             union() {
                 nuggs_port(cfg);                                  // bottom port
                 translate([0, 0, z_total]) mirror([0, 0, 1]) nuggs_port(cfg);
-                shell(0, z_deck);                                 // lower tube
-                shell(z_upper, z_total);                          // upper tube
+                shell(0, z_total);                                // ONE full-height tube (housing wraps it)
                 housing_core();
                 pedestal();
-                for (s = [-1, 1]) { rail_wall_solid(s); cont_lip(s); }
-                detent_bump(0); detent_bump(travel);              // closed / open clicks
             }
             nuggs_bore_cut(cfg, -port_proj - 2, z_total + port_proj + 2);
             translate([0, 0, -port_proj]) bore_lead(0.001, 1);
@@ -314,10 +327,16 @@ module valve() {
             translate([-wall_in - eps, pocket_y0, z_slotT - eps])
                 cube([2 * wall_in + 2 * eps, hy_open - pocket_y0 + eps, rh + 2]);
         }
+        // The capture lips are added AFTER the cuts: they root deep into the
+        // surviving housing pillars (a real `lip_bury` overlap Manifold fuses,
+        // not a coincident-face kiss) and their overhang reaches into the
+        // just-cut chamber without being clipped. Travel is bounded by the
+        // housing walls themselves — the -Y wall is the closed stop, the +Y
+        // pocket end the open stop — so there are no separate end-stop ridges,
+        // and no deck detent (the closed position sits over the open bore, which
+        // has no deck to carry a bump; friction + the wall stops hold it).
+        for (s = [-1, 1]) cont_lip(s);
         shutter();
-        // travel stops at closed and fully-open
-        translate([0, -gate_r - 0.5, z_deck]) end_stop(gate_w, gap = 0.5);
-        translate([0, gate_r + travel + 0.5, z_deck]) mirror([0, 1, 0]) end_stop(gate_w, gap = 0.5);
     }
 }
 

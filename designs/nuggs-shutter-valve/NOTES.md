@@ -67,10 +67,30 @@ NUGGS port standard (`lib/nuggs-coupling.scad`), redefining neither.
    captive) but a slicer would fuse the plate to the seat solid. The valve now
    exports as two bodies with a real 0.6 mm gap.
 
-6. **Detent + end handle** (co-design choice): a light print-in-place detent
-   bump at the closed and open positions; the handle is a pull-tab off the
-   drawer's outboard edge (not a knob through a roof slot, which would open the
-   enclosure over the bore).
+6. **End handle; detent deferred** (co-design choice was a light detent). The
+   handle is a pull-tab off the drawer's outboard edge (not a knob through a
+   roof slot, which would breach the enclosure over the bore). The detent turned
+   out not to be feasible where the brief imagined it: the CLOSED position sits
+   over the *open bore*, so there is no deck under the plate there to carry a
+   detent bump. Travel is bounded by the housing walls themselves (the -Y wall
+   is the closed stop, the +Y pocket end the open stop) and friction holds the
+   gate; a detent, if wanted, would go on the rail/tab pair as a follow-up. The
+   coupon keeps a deck detent (it prints over a solid base) so the feel is still
+   testable.
+
+7. **Manifold coincident-face fix (the "only Manifold tells the truth" trap).**
+   The first push gated clean on the local CGAL backend (watertight, 84/100) but
+   CI's Manifold backend reported the valve as **19 bodies, non-watertight** — a
+   CRITICAL. Cause: solids that only *kissed* on shared planes (the two tube
+   segments butting the housing at z_deck/z_slotT; the separate rail wall whose
+   face coincided with the slide-chamber cut; the lip biting its wall by only an
+   `eps`), which CGAL fuses but Manifold keeps as separate shells. Fix, all
+   geometry-neutral to the mechanism: one **full-height tube** the housing wraps
+   (no butt joints); the slot ceiling raised to the rail height so the housing
+   pillar backs the whole lip and the **separate rail wall is gone**; the lips
+   **rooted deep (`lip_bury`) into the pillar and unioned after the cuts** so
+   they interpenetrate and are never clipped; the skirt overlapping the housing
+   by a real `weld`; and the fragile detent/end-stop bits (decision 6) removed.
 
 ## Print orientation
 

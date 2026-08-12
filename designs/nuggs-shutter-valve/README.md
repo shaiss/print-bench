@@ -57,7 +57,7 @@ other NUGGS modules. The tunable parameters:
 | `gate_t` | 3.0 mm | Shutter plate thickness. |
 | `gate_over` | 3.0 mm | How far the plate overreaches the bore edge, so it seals with margin. |
 | `lead_in` | 30 mm | Straight full-round shell behind each port (grip + port backing). |
-| `detent_h` | 0.4 mm | Height of the light click that holds the gate open/closed. |
+| `detent_h` | 0.4 mm | Detent bump height on the *coupon* (the valve's closed position sits over the open bore, so it has no deck for a detent; the housing walls bound travel and friction holds it — see NOTES §6). |
 | `port_tol` | 0.30 mm | NUGGS coupling clearance — owned by the standard; tuned on the base `nuggs` coupon, not here. |
 | `open` | 0 | Preview only: gate position, 0 = closed, 1 = open. The printable part always renders open. |
 
