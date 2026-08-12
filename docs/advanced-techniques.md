@@ -3,7 +3,7 @@
 This is a **design-expertise reference** — the *why* beneath the design rules, and
 the advanced techniques that let you design **around** a constraint instead of
 merely obeying it. It is deliberately not a rules list: `lib/print-in-place.scad`,
-`lib/threads-fdm.scad`, `lib/printability.scad` and `printer-conf.scad` already
+`lib/threads-fdm.scad`, `lib/printability.scad` and `lib/printer-conf.scad` already
 encode the rules and gate them. This doc captures the *technique* layer so a
 design session (human or agent) can reach for a maneuver by name.
 
@@ -35,7 +35,7 @@ reshaping the geometry so the process stops mattering:
   and wear, rattle, assembly and backlash all evaporate.
 
 Hold the process and the number becomes a *derivation*, not folklore — the same
-instinct as `printer-conf.scad`'s `printer_fit(nominal)`, generalized to every
+instinct as `lib/printer-conf.scad`'s `printer_fit(nominal)`, generalized to every
 mechanism family.
 
 ---
@@ -343,7 +343,7 @@ primitives yet. Ranked:
    breakaway support (`z_gap = layer_h`, break-notch, tunable contact/scar),
    self-supporting cone ceiling, chamfer-down-edge. Extends `printability.scad`'s
    existing `teardrop_hole()` rather than duplicating it.
-3. **Anisotropy-aware clearance in `printer-conf.scad` (small, high-value).** Split
+3. **Anisotropy-aware clearance in `lib/printer-conf.scad` (small, high-value).** Split
    `printer_fit()` into `printer_fit_xy()` / `printer_fit_z()` with the
    integer-layer snap.
 
