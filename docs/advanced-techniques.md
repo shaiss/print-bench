@@ -56,7 +56,7 @@ These recur across every domain below; they are the transferable moves.
    idea: a deliberate weak feature that serves the print, then yields. A design
    primitive, not a workaround.
 3. **Derive clearance from process constants, never hardcode.**
-   `xy_gap = max(clear, line_width)`; `z_gap = ceil(clear / layer_h) · layer_h`
+   `xy_gap = clear_xy` (spread-limited, ~0.15–0.25 mm); `z_gap = ceil(clear / layer_h) · layer_h`
    (snap to integer layers so the gap's floor and roof land on real layer
    boundaries). **Anisotropy is the key insight: separate `xy_tol` from `z_tol`**
    — they are governed by different physics (spread vs sag). A single global `tol`
@@ -131,9 +131,14 @@ force-limited contact.
 
 Where the digital gate lies and the physical coupon rules.
 
-- **Material ranking for cyclic flex:** TPU ≈ PP > Nylon > PETG ≫ **PLA**. PLA's
-  crystalline chains can't slide; it fatigues in a handful of cycles — **never use
-  PLA for a live flexure.**
+- **Material ranking for cyclic flex** (a default heuristic, not a universal law —
+  real fatigue life shifts with material grade, print orientation, stress range,
+  temperature and geometry): TPU ≈ PP > Nylon > PETG ≫ **PLA**. PLA's crystalline
+  chains resist the repeated straining, so it is a **poor default** for a live
+  flexure — treat it as unsuitable unless a coupon proves otherwise. Whatever the
+  material, qualify a flexure against its **intended cycle target with a coupon**
+  before release; published FDM fatigue figures hold only for their specific
+  process and loading conditions.
 - **Orientation (the #1 rule):** layers **parallel** to the flex axis, so bending
   stress acts across roads within a layer, not between layer bonds. An
   upright-printed beam delaminates on the first cycle.
@@ -164,12 +169,16 @@ Eliminate support material by reshaping geometry, not by obeying "no overhang pa
 
 ### The physics
 
-Each layer is offset outward by `layer_h / tan(angle_from_vertical)`. At 45° the
-new bead overlaps the previous by ~50% — enough to anchor the strand before
-gravity droops it. At 60° overlap is ~29%, at 70° ~18% (the strand curls from
-differential cooling). The rule is **geometric, not a material limit**: aggressive
-cooling (PLA freezes fast, T_g ≈ 60 °C) reaches clean **60–70°**; thinner layers
-help (smaller outward step); slower/cooler perimeters reduce droop time.
+Measuring the overhang angle **from vertical** (0° = a straight wall, 90° = a flat
+roof), each layer steps outward from the one below by `outward_step = layer_h ·
+tan(angle)`, and successive beads overlap by `overlap = 1 − outward_step /
+line_width`. At 45° with a typical `line_width ≈ 2·layer_h` the overlap is ~50% —
+enough to anchor the strand before gravity droops it — and it falls off steeply
+past 45° as the step grows toward a full bead (the strand also curls from
+differential cooling). The limit is **geometric, not a material limit**: aggressive
+cooling (PLA freezes fast, T_g ≈ 60 °C) pushes the *achievable* angle to a clean
+**60–70°**, but the conservative *design* bound stays **45°**; thinner layers help
+(smaller outward step); slower/cooler perimeters reduce droop time.
 
 A **bridge** is different: a strand anchored at *both* ends, printed in one pass,
 held straight by longitudinal **tension** as it cools — so ~flat spans up to
@@ -180,8 +189,11 @@ is to convert overhangs into bridges by design.**
 
 - **Sacrificial layer:** to print a horizontal counterbore/recess without support,
   close the large opening with *one* bridged layer, print the feature on that
-  fresh flat bridge, cut the skin out after. OrcaSlicer/PrusaSlicer expose this as
-  "Bridge Counterbore Holes" (None / Partially-bridged / Sacrificial-layer).
+  fresh flat bridge, cut the skin out after. OrcaSlicer (and Orca-derived slicers
+  such as Bambu Studio) expose this directly as "Bridge Counterbore Holes" (None /
+  Partially-bridged / Sacrificial-layer); **PrusaSlicer — the repo's CI slicer —
+  has no such setting, so there you model the sacrificial layer into the geometry
+  (or fall back to supports).**
 - **Horizontal holes print undersized** (the slicer samples at each layer's
   mid-height; the top/bottom step into the bore and bridged strands droop). Fixes:
   (a) offset — the printable profile is the **hull of the circle shifted up ½ layer
@@ -219,10 +231,13 @@ or snaps. Also dodges build-volume limits.
 
 Depositing along 3-D curves removes stair-stepping and support that planar slicing
 forces. **3-axis non-planar** (QuickCurve, CurviSlicer) mainly kills stair-stepping
-on gently-sloped top surfaces, bounded by **nozzle gouging**. **Conical / 4-axis**
-(RotBot / Slicer4RTN) tilts the build so cone-shaped layers give a ±90° overhang
-window in all directions — genuinely support-free on a modified 3-axis machine.
-**5-axis conformal** (Open5x, S3-Slicer) inclines the nozzle to follow slopes.
+on gently-sloped top surfaces, bounded by **nozzle gouging**. **Conical** (RotBot /
+Slicer4RTN) tilts the nozzle ~45° and slices in cones on a standard 3-axis motion
+system (a coordinate transform, no extra motors), so surfaces facing *outward* on
+the cone can reach ~90° overhang support-free — but the benefit is **directional**
+(outward cone faces only), bounded by nozzle-clearance and by whether the part can
+be cone-segmented; inward-facing overhangs still need another strategy. **5-axis
+conformal** (Open5x, S3-Slicer) inclines the nozzle to follow slopes.
 Tooling is still experimental; relevance here is directional (curved lids/domes are
 candidates, most parts stay planar).
 
@@ -243,18 +258,21 @@ geometry across it so it is captive but free.
 
 Three physical mechanisms shrink the design gap, each controlled differently:
 
-- **Bead spread (XY):** a wall's true edge lands ~0.05–0.10 mm proud of nominal;
-  two facing walls each encroach. Controlled by flow calibration; keep the gap
-  ≥ **one line width**.
+- **Bead spread (XY):** a wall's true edge lands ~0.05–0.10 mm proud of nominal,
+  and two facing walls each encroach — so the spread-limited floor is a modeled XY
+  gap of **~0.15–0.25 mm** on a tuned machine (not a full line width; the floor is
+  set by that ~0.05–0.10 mm growth, not by fitting a whole bead of air). Controlled
+  by flow calibration.
 - **Overhang sag into the gap (Z-roof):** the dominant fuser when the gap's roof
-  is unsupported. Controlled by bridge/cooling settings; keep the Z gap ≥ **one
-  layer height**.
+  is unsupported. Controlled by bridge/cooling settings; keep the Z gap at **≥ one
+  layer height, in practice 1–2 layers (~0.20–0.40 mm at a 0.2 mm layer)**, snapped
+  to whole layers.
 - **Ooze / stringing bridge:** a travel string bonds both walls. Controlled by
   retraction/temperature.
 
 **Anisotropy is the key insight:** a vertical wall-to-wall gap is spread-limited
-(tight, ~0.15–0.20 mm); a horizontal roof-over-part gap is sag-limited (~0.25–0.40
-mm, or angle the roof to dodge sag). **Orientation is therefore a clearance
+(tight, ~0.15–0.25 mm); a horizontal roof-over-part gap is sag-limited (~0.20–0.40
+mm, one-to-two layers, or angle the roof to dodge sag). **Orientation is therefore a clearance
 decision** — printing an axle pointing up converts a sag-limited interface into a
 spread-limited one. **Integer-layer quantization:** snap the Z gap to `n·layer_h`
 so its floor and roof land on real boundaries.
@@ -289,11 +307,12 @@ the rail clearance**, which carries the acoustic property.
 
 ### Gears & rotary
 
-**Backlash** is set by center distance / tooth-thickness allowance, **not** profile
-shift (open center 0.2–0.4 mm or thin the tooth — no reprint of the mate).
-**Module** is the master printability knob (too small → sub-line-width teeth).
-**Profile shift** (+0.08–0.15 on ≤15-tooth pinions, negative on the mate) removes
-undercut without adding backlash. **Herringbone** self-centers axially and retains
+**Backlash** is adjusted through center distance and tooth-thickness allowance
+(open center 0.2–0.4 mm or thin the tooth — no reprint of the mate). **Module** is
+the master printability knob (too small → sub-line-width teeth). **Profile shift**
+(+0.08–0.15 on ≤15-tooth pinions, negative on the mate) is used primarily to remove
+undercut — but note it *also* changes tooth thickness and operating geometry, so
+account for its effect on the pair's backlash. **Herringbone** self-centers axially and retains
 print-in-place planets. **Orientation:** print bore-axis vertical so layers run
 around the tooth, not across the root (Z strength is only 25–40% of XY); 3–4
 perimeters beat high infill for root strength.
@@ -306,9 +325,10 @@ seized part. **Sacrificial membranes/rafts** inside cavities catch droop: a
 one-layer film spanning a roofless internal void gives the overhang something to
 print onto (its raised start *is* the membrane).
 
-**Parameterization:** `clear_xy = k_xy · line_w`, `clear_z` snapped to integer
-layers; `line_w ≈ 1.1–1.2 × nozzle_d`. **Never one global `tol`** — separate
-`xy_tol` (spread) from `z_tol` (sag). A mate coupon measures the *assembled* result
+**Parameterization:** `clear_xy = k_xy · line_w` (`k_xy ≈ 0.4–0.6`, i.e.
+~0.15–0.25 mm), `clear_z = ceil(max(req, sag_min) / layer_h) · layer_h` (whole
+layers, ~0.20–0.40 mm); `line_w ≈ 1.1–1.2 × nozzle_d`. **Never one global `tol`**
+— separate `xy_tol` (spread) from `z_tol` (sag). A mate coupon measures the *assembled* result
 (interference facets == 0) with a deliberately-interfering negative control.
 
 ---
@@ -319,12 +339,12 @@ layers; `line_w ≈ 1.1–1.2 × nozzle_d`. **Never one global `tol`** — separ
 |---|---|
 | Flexure stiffness (small-length pivot) | `K = E·I / L`, `I = w·t³/12` |
 | Flexure root stress | `σ ≈ E·t·θ / (2L)`; fillet `r ≥ 0.5t` |
-| Bistable arch switch force | `f_s · l³ / (E·I·h) = 1486.57` |
-| Bistable arch travel | `u_tr / h = 1.98` |
-| Overhang overlap step | `layer_h / tan(angle_from_vertical)` (45°≈50%, 70°≈18%) |
-| Print-in-place XY gap | `≥ one line width` (spread-limited) |
-| Print-in-place Z gap | `≥ one layer height`, snapped to `n·layer_h` (sag-limited) |
-| Gear backlash | center-distance / tooth-thickness allowance (not profile shift) |
+| Bistable arch switch force | `f_s · l³ / (E·I·h_mid) = 1486.57` (fixed–fixed shallow arch; `h_mid` = mid-span rise) |
+| Bistable arch travel | `u_tr / h_mid = 1.98` |
+| Overhang step & overlap (angle from vertical) | `outward_step = layer_h · tan(angle)`; `overlap = 1 − outward_step/line_width` (≈50% at 45° when line_width ≈ 2·layer_h) |
+| Print-in-place XY gap | `k_xy·line_w` ≈ 0.15–0.25 mm (spread-limited) |
+| Print-in-place Z gap | `ceil(clear/layer_h)·layer_h`, 1–2 layers ≈ 0.20–0.40 mm (sag-limited) |
+| Gear backlash | center-distance + tooth-thickness allowance (profile shift also changes it) |
 
 ---
 
@@ -357,7 +377,9 @@ Metamaterials / 4D: parked in [#201](https://github.com/shaiss/print-bench/issue
 
 Research was primary-source-first (arXiv via the alphaXiv connector, slicer
 manuals, empirical testers), with vendor blogs used only for the FDM-practical
-layer and flagged as such.
+layer and flagged as such. Entries tagged *found by title* / *found* below were
+located by search but **not independently retrieved** — treat them as research
+leads to verify, not confirmed citations.
 
 **Compliant mechanisms**
 - Srivastava et al., "Design of an engaging-disengaging compliant mechanism by
