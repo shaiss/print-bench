@@ -8,6 +8,10 @@ family (`docs/advanced-techniques.md`, Domain 1).
 
 ![Product shot](previews/hero.png)
 
+![AI-styled scene: bistable-toggle staged in a real-world setting](previews/lifestyle-scene.png)
+
+*AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render above and the STL for the true shape.*
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ## What you get
