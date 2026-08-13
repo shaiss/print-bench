@@ -6,7 +6,7 @@ spinning — no supports, no assembly. A rotor is captured on a fixed post under
 then it runs free. A worked example of print-in-place kinematics
 (`docs/advanced-techniques.md`, Domain 3).
 
-![Product shot](previews/hero.png)
+![Studio product shot of the purple 3D-printed captive-spinner](previews/hero.png)
 
 ![AI-styled scene: captive-spinner staged in a real-world setting](previews/lifestyle-scene.png)
 

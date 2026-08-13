@@ -5,7 +5,7 @@ push a ~6 mm cable into the mouth, the lips spread over the snap interference,
 the cable seats, and the lips spring back to hold it. The simplest compliant
 mechanism — a snap — done right (`docs/advanced-techniques.md`, Domain 1).
 
-![Product shot](previews/hero.png)
+![Studio product shot of the orange 3D-printed snap-cantilever-clip](previews/hero.png)
 
 ![AI-styled scene: snap-cantilever-clip staged in a real-world setting](previews/lifestyle-scene.png)
 

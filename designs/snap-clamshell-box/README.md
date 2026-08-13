@@ -6,7 +6,7 @@ independent compliant sub-mechanisms: a **living hinge** joins the two trays and
 **compliant snap latch** holds them closed (`docs/advanced-techniques.md`, Domain
 1 flexures + Domain 2 orientation).
 
-![Product shot](previews/hero.png)
+![Studio product shot of the amber 3D-printed snap-clamshell-box](previews/hero.png)
 
 ![AI-styled scene: snap-clamshell-box staged in a real-world setting](previews/lifestyle-scene.png)
 

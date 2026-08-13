@@ -3,7 +3,7 @@
 **Advanced (Tier-3) reference design.** Fuses two independent compliant
 sub-mechanisms in one support-free flat print.
 
-## What it is
+## Goal
 
 A clamshell box: two trays joined at a spine by a **living hinge**, closed by a
 **compliant snap latch** (tab-in-window). Prints flat and open, folds 180° so the

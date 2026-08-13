@@ -5,7 +5,7 @@ screws — designed so it prints with **zero support material**. It's a worked
 example of *designing around supports*: every feature that would normally need
 support has been reshaped so it doesn't (`docs/advanced-techniques.md`, Domain 2).
 
-![Product shot](previews/hero.png)
+![Studio product shot of the blue 3D-printed support-free-bracket](previews/hero.png)
 
 ![AI-styled scene: support-free-bracket staged in a real-world setting](previews/lifestyle-scene.png)
 

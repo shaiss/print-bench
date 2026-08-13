@@ -6,7 +6,7 @@ around them and cams them shut as it slides up (grip a rod in the bore); release
 and the flexures spring back. One of the "advanced" reference parts because it
 fuses all three domains of `docs/advanced-techniques.md` in a single print.
 
-![Product shot](previews/hero.png)
+![Studio product shot of the green 3D-printed compliant-gripper](previews/hero.png)
 
 ![AI-styled scene: compliant-gripper staged in a real-world setting](previews/lifestyle-scene.png)
 

@@ -116,8 +116,10 @@ module main() {
         intersection() { pin_body(pin_d + 2*clear + 1); union() { leaf_A(); leaf_B(); } }
     } else {
         leaf_A();
-        // leaf B folds about the pin (z = R) for the preview only
-        translate([0, 0, barrel_z]) rotate([demo_fold, 0, 0]) translate([0, 0, -barrel_z])
+        // leaf B folds about the PIN for the preview only. The pin/knuckle axis
+        // runs along Y at (x=0, z=barrel_z), so the fold is a Y-axis rotation —
+        // rotating about X would lift the knuckles off the pin.
+        translate([0, 0, barrel_z]) rotate([0, demo_fold, 0]) translate([0, 0, -barrel_z])
             leaf(1, 1);
         pin_body();   // one FREE pin through all knuckles
     }

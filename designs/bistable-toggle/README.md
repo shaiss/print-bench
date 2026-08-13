@@ -6,7 +6,7 @@ nub through flat and it snaps to the other state and *stays* there — power is 
 needed to switch, never to hold. A worked example of the bistable / constant-force
 family (`docs/advanced-techniques.md`, Domain 1).
 
-![Product shot](previews/hero.png)
+![Studio product shot of the red 3D-printed bistable-toggle](previews/hero.png)
 
 ![AI-styled scene: bistable-toggle staged in a real-world setting](previews/lifestyle-scene.png)
 

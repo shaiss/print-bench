@@ -3,7 +3,7 @@
 **Advanced (Tier-3) reference design — fuses all three domains** of
 `docs/advanced-techniques.md` into one part that prints assembled and working.
 
-## What it is
+## Goal
 
 A print-in-place collet grabber. Slotted flexure fingers form an outward cone; a
 captive collar rides around them. Slide the collar up and the cone cams the

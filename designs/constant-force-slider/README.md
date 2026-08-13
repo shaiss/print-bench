@@ -6,7 +6,7 @@ slot. It's the capstone reference part: it fuses the hardest compliant idea in
 `docs/advanced-techniques.md` (constant force from a negative spring in parallel
 with a positive one) with a print-in-place slide.
 
-![Product shot](previews/hero.png)
+![Studio product shot of the slate-blue 3D-printed constant-force-slider](previews/hero.png)
 
 ![AI-styled scene: constant-force-slider staged in a real-world setting](previews/lifestyle-scene.png)
 

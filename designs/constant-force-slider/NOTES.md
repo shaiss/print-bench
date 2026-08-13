@@ -3,7 +3,7 @@
 **Advanced (Tier-3) capstone reference design.** Fuses the doc's hardest
 compliant idea (quasi-zero-stiffness constant force) with a print-in-place slide.
 
-## What it is
+## Goal
 
 A linear shuttle that moves under ~constant force over its stroke. It rides a
 guide slot (print-in-place sliding fit) and is returned by a QZS spring built
