@@ -8,6 +8,10 @@ with a positive one) with a print-in-place slide.
 
 ![Product shot](previews/hero.png)
 
+![AI-styled scene: constant-force-slider staged in a real-world setting](previews/lifestyle-scene.png)
+
+*AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render above and the STL for the true shape.*
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 The QZS spring (ortho top): a pre-buckled arch (negative stiffness, bowing left)
