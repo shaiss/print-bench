@@ -8,6 +8,10 @@ independent compliant sub-mechanisms: a **living hinge** joins the two trays and
 
 ![Product shot](previews/hero.png)
 
+![AI-styled scene: snap-clamshell-box staged in a real-world setting](previews/lifestyle-scene.png)
+
+*AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render above and the STL for the true shape.*
+
 ![4-view contact sheet (printed flat)](previews/contact-sheet.png)
 
 Closed and latched (preview pose):
