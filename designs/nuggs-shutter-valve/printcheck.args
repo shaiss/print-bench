@@ -1,0 +1,2 @@
+# Bambu P2S (256) / H2C (bigger) — gate against the smaller P2S bed.
+--build-volume 256x256x256
