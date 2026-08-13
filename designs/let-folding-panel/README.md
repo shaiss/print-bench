@@ -8,6 +8,10 @@ Domain 1, lamina-emergent family).
 
 ![Product shot](previews/hero.png)
 
+![AI-styled scene: let-folding-panel staged in a real-world setting](previews/lifestyle-scene.png)
+
+*AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render above and the STL for the true shape.*
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 Folded to ~90° (preview pose — the printed part is always flat):
