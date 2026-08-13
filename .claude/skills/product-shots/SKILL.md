@@ -117,16 +117,21 @@ Two ways to generate one, both landing the same disclosed
 `previews/lifestyle-<shot>.png`:
 
 - **In CI (the wired path).** Write `designs/<name>/lifestyle.conf` (one
-  `<shot> | <prompt>` line — describe the *scene*, not fake detail) and land
-  it on main. That is the whole trigger: the **Lifestyle shot (tier-2, AI)**
-  workflow (`.github/workflows/lifestyle-shot.yml`,
+  `<shot> | <prompt>` line, or `<shot> | seed=<ref> | <prompt>` — describe the
+  *scene*, not fake detail) and land it on main. That is the whole trigger: the
+  **Lifestyle shot (tier-2, AI)** workflow (`.github/workflows/lifestyle-shot.yml`,
   `scripts/lifestyle-shot.sh`) fires on the manifest itself, so writing the
   prompt *is* the request — no button to press. It calls the Z.AI GLM-Image
-  API with the `ZAI_KEY` secret, sizes the result to budget, embeds it with
-  the disclosure below, runs `readme-gate.sh`, and opens a **draft PR** to
-  approve — GLM-Image is text-to-image, so the scene is generated from the
-  prompt, and the image is cosmetic by construction. Dispatch the workflow
-  by hand only to re-roll a shot you don't like, or to override the size.
+  API with the `ZAI_KEY` secret in **image-to-image** mode, **seeded from a
+  committed geometry-true render** (`seed=<ref>` → `previews/<ref>.png`,
+  defaulting to the shot's own name), sizes the result to budget, embeds it
+  with the disclosure below, runs `readme-gate.sh`, and opens a **draft PR** to
+  approve. The seed pins the part's shape to the real mesh, so the scene,
+  lighting and materials are AI but the geometry is not hallucinated the way
+  blind text-to-image did. It stays disclosed as approximate — the model still
+  repaints — but it is a faithful restyle, not an invention. Dispatch the
+  workflow by hand only to re-roll a shot you don't like, or to override the
+  size.
 - **In-session**, only when the session actually has an image-generation tool
   (check your available tools; do not shell out to external image APIs that
   aren't configured). If none is available, skip this tier silently — tier 1
@@ -136,12 +141,15 @@ Two ways to generate one, both landing the same disclosed
 - **Prompt for the scene.** Describe the same object in a real setting
   relevant to the design's use (the battleship board on a dinner table set
   with sushi; the desiccant capsule beside a filament dry-box), natural
-  lighting, shallow depth of field. The CI path's GLM-Image is *text-to-image*
-  — there is no reference image, so the geometry comes from your words, which
-  is exactly why it's disclosed as approximate. **In-session only**, if your
-  image tool accepts an input image, you can additionally seed it with the
-  committed tier-1 raytrace so it at least begins from the real part (the
-  reference-conditioned CI path is a tabled backlog item — see #66).
+  lighting, shallow depth of field. The CI path is now **image-to-image seeded
+  from the committed tier-1 raytrace** (issue #66, previously a tabled backlog
+  item), so the part begins from the real mesh — you are restyling a true shape
+  into a scene, not summoning geometry from words. The seed defaults to the
+  shot's own name (`previews/<shot>.png`); add `seed=<ref>` to start from a
+  different geometry-true render — a hero shot, a frozen `cameras.conf` view, or
+  a custom-angle tier-1 render you add — so you can choose the angle that sells
+  the scene. It is still disclosed as approximate (the model repaints), but the
+  fidelity is far higher than the old text-to-image path.
 - **It is cosmetic, so assume it is geometrically off.** Image generators
   add, drop, and reshape features, and we do **not** reject a lifestyle shot
   for that — chasing pixel-faithful geometry out of a restyle is a losing

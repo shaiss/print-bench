@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
-# Generate a tier-2 AI-restyled *lifestyle* shot for a design from a text
-# prompt via the Z.AI GLM-Image API, size it to the product-shot budget, and
-# embed it in the design's README with the canonical disclosure readme-gate
-# requirement 9 demands (an "AI-styled scene" alt label and a "geometry is
-# approximate" caption). The shot is COSMETIC and geometrically approximate —
-# GLM-Image is text-to-image, so it renders an impression of the scene, not the
-# real mesh; the studio product shot (tier 1) stays the geometry-true image.
-# See .claude/skills/product-shots/SKILL.md (tier 2) and issue #66.
+# Generate a tier-2 AI-restyled *lifestyle* shot for a design via the Z.AI
+# GLM-Image API in IMAGE-TO-IMAGE mode — seeded from a committed, geometry-true
+# tier-1 render — size it to the product-shot budget, and embed it in the
+# design's README with the canonical disclosure readme-gate requirement 9
+# demands (an "AI-styled scene" alt label and a "geometry is approximate"
+# caption). The shot stays COSMETIC and geometrically approximate — the model
+# repaints the scene, lighting and materials around the part — but because the
+# request carries a real render of the mesh as its seed (image_urls), the shape
+# is PINNED to the true geometry instead of hallucinated the way blind
+# text-to-image did (which is why a 4x4 grid used to come back as 5x5). The
+# studio product shot (tier 1) is still the geometry-true image; this restyles
+# it. See .claude/skills/product-shots/SKILL.md (tier 2) and issue #66.
 #
 #   ZAI_KEY=... ./scripts/lifestyle-shot.sh <design>
 #   ./scripts/lifestyle-shot.sh <design> --mock   # offline placeholder, no API
 #
-# Reads designs/<design>/lifestyle.conf ("<shot> | <prompt>" per line) and
-# writes designs/<design>/previews/lifestyle-<shot>.png. Re-running is safe:
+# Reads designs/<design>/lifestyle.conf. Each line is "<shot> | <prompt>" or
+# "<shot> | seed=<ref> | <prompt>": the seed names the committed geometry-true
+# render (previews/<ref>.png) the image-to-image starts from, and defaults to
+# the shot's own name (previews/<shot>.png) when omitted — same-name seeding
+# like motion.conf. Writes designs/<design>/previews/lifestyle-<shot>.png.
+# Re-running is safe:
 # the README embed is inserted only if it isn't there already. Meant to run in
 # CI (.github/workflows/lifestyle-shot.yml) where ZAI_KEY is a repo secret;
 # --mock lets the whole pipeline be exercised locally without a key.
@@ -22,6 +30,10 @@ cd "$(dirname "$0")/.."
 # shellcheck source=scripts/preview-budget.sh
 . scripts/preview-budget.sh          # MAX_SHOT_BYTES
 
+# glm-image is a unified model: the same model and endpoint serve text-to-image
+# and image-to-image — supplying image_urls in the body is what selects the
+# latter. All three stay env-overridable so a field-name/endpoint change is a
+# one-liner, not an edit here.
 ZAI_MODEL="${ZAI_MODEL:-glm-image}"
 ZAI_ENDPOINT="${ZAI_ENDPOINT:-https://api.z.ai/api/paas/v4/images/generations}"
 ZAI_SIZE="${ZAI_SIZE:-1280x1280}"   # a size the GLM-Image docs show in examples
@@ -131,9 +143,29 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   trimmed="$(trim "$line")"
   [[ -z "$trimmed" || "$trimmed" == '#'* ]] && continue
   shot="$(trim "${line%%|*}")"
-  prompt="$(trim "${line#*|}")"
-  if [[ -z "$shot" || -z "$prompt" || "$line" != *"|"* ]]; then
-    echo "malformed lifestyle.conf line (want '<shot> | <prompt>'): $line" >&2
+  rest="${line#*|}"
+  if [[ -z "$shot" || "$line" != *"|"* ]]; then
+    echo "malformed lifestyle.conf line (want '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>'): $line" >&2
+    exit 1
+  fi
+  # Optional middle field "seed=<ref>" names the geometry-true render this shot
+  # seeds image-to-image from (a committed previews/<ref>.png — a hero shot, a
+  # frozen cameras.conf view, or a custom-angle render). Omitted, the seed
+  # defaults to the shot's own name (previews/<shot>.png), same-name seeding
+  # like motion.conf. Only a middle field that literally begins with "seed="
+  # is treated as one, so a prompt that happens to contain "|" parses exactly
+  # as it did before this field existed.
+  seed=""
+  rest_trim="$(trim "$rest")"
+  if [[ "$rest_trim" == seed=* && "$rest" == *"|"* ]]; then
+    seed="$(trim "${rest%%|*}")"; seed="${seed#seed=}"; seed="$(trim "$seed")"
+    prompt="$(trim "${rest#*|}")"
+  else
+    prompt="$rest_trim"
+  fi
+  [[ -z "$seed" ]] && seed="$shot"
+  if [[ -z "$prompt" ]]; then
+    echo "malformed lifestyle.conf line (empty prompt): $line" >&2
     exit 1
   fi
   # <shot> becomes the filename stem (lifestyle-<shot>.png) and part of the
@@ -141,6 +173,24 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   # produce a broken markdown link.
   if [[ ! "$shot" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
     echo "invalid shot name '${shot}' in ${conf} — must be kebab-case ([a-z0-9-])" >&2
+    exit 1
+  fi
+  # The seed resolves to a committed render in the SAME design's previews/:
+  # kebab-case only (so it can't escape the directory), never another
+  # lifestyle-* image (seeding from an AI repaint defeats the geometry pinning),
+  # and it must already exist — that render is precisely what makes the shot
+  # geometry-accurate.
+  if [[ ! "$seed" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+    echo "invalid seed name '${seed}' in ${conf} — must be kebab-case ([a-z0-9-])" >&2
+    exit 1
+  fi
+  if [[ "$seed" == lifestyle-* ]]; then
+    echo "invalid seed '${seed}' in ${conf} — a lifestyle shot must seed from a geometry-true render, not another AI (lifestyle-*) image" >&2
+    exit 1
+  fi
+  seed_path="designs/${design}/previews/${seed}.png"
+  if [[ ! -f "$seed_path" ]]; then
+    echo "seed render ${seed_path} not found — a lifestyle shot seeds image-to-image from a committed geometry-true render; add the tier-1 shots.conf/cameras.conf entry that produces it (or point seed= at an existing one)" >&2
     exit 1
   fi
 
@@ -153,26 +203,46 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     # testable without the API or a key. Never commit a --mock image.
     convert -size "$ZAI_SIZE" gradient:'#2b3a4a'-'#c98f5a' \
       -gravity center -pointsize 42 -fill white \
-      -annotate 0 "MOCK lifestyle shot\n${design} / ${shot}\n(placeholder, not for commit)" \
+      -annotate 0 "MOCK lifestyle shot\n${design} / ${shot}\nseed: ${seed}\n(placeholder, not for commit)" \
       "$tmp/gen.png"
   else
     if [[ -z "${ZAI_KEY:-}" ]]; then
       echo "ZAI_KEY is not set — export it (CI: repo secret) or pass --mock" >&2
       exit 1
     fi
-    req_body="$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"prompt":sys.argv[2],"size":sys.argv[3]}))' \
-      "$ZAI_MODEL" "$prompt" "$ZAI_SIZE")"
+    # Build the request body in a temp file. It carries the base64-encoded seed
+    # render (the geometry-true tier-1 image) in image_urls, which is what
+    # switches glm-image into image-to-image and pins the output to the real
+    # shape — so the body is far too large to pass as a shell argument (ARG_MAX).
+    # Python reads the seed straight off disk and writes the JSON; nothing large
+    # ever transits argv or a shell variable.
+    ZAI_MODEL="$ZAI_MODEL" PROMPT="$prompt" ZAI_SIZE="$ZAI_SIZE" SEED_PATH="$seed_path" \
+      python3 - "$tmp/req.json" <<'PY'
+import base64, json, os, sys
+with open(os.environ["SEED_PATH"], "rb") as fh:
+    b64 = base64.b64encode(fh.read()).decode("ascii")
+body = {
+    "model": os.environ["ZAI_MODEL"],
+    "prompt": os.environ["PROMPT"],
+    "size": os.environ["ZAI_SIZE"],
+    "image_urls": ["data:image/png;base64," + b64],
+}
+with open(sys.argv[1], "w", encoding="utf-8") as out:
+    json.dump(body, out)
+PY
     # Capture body AND status (no -f): a 4xx body carries the real reason — a
     # rejected size, an invalid key, a content-filter block — which we must
     # surface, not swallow, on the first live run. The Authorization header goes
     # in via -K - (stdin config) so the key never lands in curl's argv (readable
-    # from /proc); the printf is a bash builtin, so it doesn't fork either.
-    # --connect-timeout/--max-time bound a stalled third-party call.
+    # from /proc); the printf is a bash builtin, so it doesn't fork either. The
+    # body goes in via --data-binary @file (not -d) for the same ARG_MAX reason.
+    # --connect-timeout/--max-time bound a stalled third-party call; hd-quality
+    # image-to-image is slower than text-to-image, hence the larger max-time.
     http="$(printf 'header = "Authorization: Bearer %s"\n' "$ZAI_KEY" \
-      | curl -sS -K - --connect-timeout 15 --max-time 120 -w $'\n%{http_code}' \
+      | curl -sS -K - --connect-timeout 15 --max-time 180 -w $'\n%{http_code}' \
         -X POST "$ZAI_ENDPOINT" \
         -H "Content-Type: application/json" \
-        -d "$req_body")" || { echo "GLM-Image request failed (curl transport error)" >&2; exit 1; }
+        --data-binary @"$tmp/req.json")" || { echo "GLM-Image request failed (curl transport error)" >&2; exit 1; }
     code="${http##*$'\n'}"
     resp="${http%$'\n'*}"
     if [[ "$code" != 2?? ]]; then
