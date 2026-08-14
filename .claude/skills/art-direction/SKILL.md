@@ -18,18 +18,22 @@ of the way of the tooling that renders them.
 ## 0. Load the brief — it is the PM's, not yours
 
 Read **`designs/<name>/PM.md`**, the "Product page & shots (art direction)"
-section: the page promise, the tier-1 shot list, and any tier-2 lifestyle
-scenes. That brief is the product; this skill is only the method. Also skim the
-design's README (what the page shows today) and `shots.conf` / `lifestyle.conf`
+section: the page promise, the tier-1 shot list, the tier-1.5 product stills, and
+any tier-2 lifestyle scenes and motion clips. That brief is the product; this
+skill is only the method. Also skim the design's README (what the page shows
+today) and `shots.conf` / `product-still.conf` / `lifestyle.conf` / `motion.conf`
 (what already exists).
 
 If `PM.md` has no art-direction section, offer to draft one from
 `templates/PM.md` with the human — do not invent a creative brief and then
 execute it. If there is no PM.md at all, that is `/pm`'s job first.
 
-## 1. The two tiers, and why the freedom splits
+## 1. The tiers, and why the freedom splits
 
-This is the one thing to hold onto, because it decides which verb you reach for:
+This is the one thing to hold onto, because it decides which verb you reach for.
+There are four rungs, and they form **one seed chain** — each AI rung is
+image-to-image (or -video) from the render before it, so the part's shape stays
+pinned to the real mesh even as the scene turns cosmetic:
 
 - **Tier 1 — the studio render (`shots.conf`).** Geometry-true, deterministic,
   CI-rendered. The scene is **fixed** (white cyclorama, three-point light,
@@ -37,17 +41,35 @@ This is the one thing to hold onto, because it decides which verb you reach for:
   pixel-for-pixel. Its creative levers are therefore only: **pose** (a `-D`
   define — assembled/exploded, `part=`, `show=`), **color**, **finish**
   (satin/gloss/matte), and **framing** (a named view or a custom camera).
-- **Tier 2 — the AI lifestyle shot (`lifestyle.conf`).** This is where
+- **Tier 1.5 — the AI product still (`product-still.conf`).** The **bare part**,
+  no scene, photoreal, *shown on the page* and gated like the others. It is
+  image-to-image seeded from a tier-1 render, so it has **no camera of its own**:
+  the *angle of a still is which tier-1 shot seeds it*. Want a new angle? Add a
+  tier-1 `shots.conf` row for that view, then a still that seeds it. Reach for it
+  to sell finish and form in isolation — a cleaner, more photographic bare-part
+  image than the studio raytrace, still honest about shape because it begins from
+  the real mesh. Disclosed as approximate (the model repaints).
+- **Tier 2 — the AI lifestyle scene (`lifestyle.conf`).** This is where
   **scenery and staging** live: a workbench, a dinner table, a drybox. It is
-  cosmetic and text-to-image, so the geometry is only an impression — which is
-  exactly why it always ships the "geometry is approximate" disclosure and is
-  never the hero or the only image.
+  cosmetic and **image-to-image** — seeded from a tier-1 render *or a tier-1.5
+  product still* (`seed=product-still-<x>`), so the geometry is a faithful
+  restyle rather than an invention — which is exactly why it still ships the
+  "geometry is approximate" disclosure and is never the hero or the only image.
+- **Tier-2 motion clip (`motion.conf`).** The moving sibling of the lifestyle
+  scene: image-to-video seeded from a tier-1 shot or a lifestyle still (an
+  explicit `seed=<ref>` field). Doubly cosmetic — geometry approximate *and* the
+  motion illustrative — so it only ever augments the deterministic
+  `animations.conf` GIF.
 
-So: a request about *the part itself* (angle, pose, color, finish) is tier 1.
-A request about *the world around the part* (a setting, a mood, props) is
-tier 2. If someone asks for "the part on a workbench" as a real render, explain
-that tier 1's scene is fixed by design and offer the tier-2 lifestyle shot for
-the staging plus a tier-1 view for the geometry-true image.
+So the request tells you the rung: about **the bare part's angle or finish in
+isolation** → tier 1.5 (a product still, seeded from the tier-1 view of that
+angle); about **the world around the part** (a setting, a mood, props) → tier 2
+lifestyle; about **motion** → a motion clip. A request for a genuinely new
+*angle* is a tier-1 job first — add the `shots.conf` row — because a still and a
+scene inherit their viewpoint from the render they seed. If someone asks for "the
+part on a workbench" as a real render, explain that tier 1's scene is fixed by
+design and offer the tier-2 lifestyle shot for the staging plus a tier-1 view for
+the geometry-true image.
 
 ## 2. What the tool does for you
 
@@ -96,9 +118,11 @@ line with `--dry-run` before you commit to it.
 - **Budgets.** Product shots and GIFs have a byte budget
   (`scripts/preview-budget.sh`); a smaller `--size` is the lever if a shot lands
   over.
-- **Disclosure.** Every lifestyle shot carries the "AI-styled scene" label and
-  the "geometry is approximate" caption. Non-negotiable — it is what keeps a
-  cosmetic image off the page passing as a photo of the print.
+- **Disclosure.** Every AI shot — the tier-1.5 product still as much as the
+  tier-2 lifestyle scene and motion clip — carries the "AI-styled scene" label
+  and the "geometry is approximate" caption. Non-negotiable — it is what keeps a
+  cosmetic image off the page passing as a photo of the print, and it is the same
+  canonical block across all AI tiers (paste it from `/product-shots`).
 - **Geometry-true tier 1.** Never reach for the AI shot to hide a geometry
   problem; the studio render and the STL are the honest artifacts. If the part
   looks bad in an honest render, that is a finding for `/jane-review` or the
@@ -106,10 +130,13 @@ line with `--dry-run` before you commit to it.
 
 ## 5. Keep the brief alive
 
-When you add, drop, or restyle a shot, update the PM.md art-direction table in
-the same change, and mark a shot **frozen** once a reviewer has compared against
-it. A brief that disagrees with `shots.conf` is a staleness bug — reconcile it,
-the same way `/pm` keeps the rest of the charter honest.
+When you add, drop, or restyle a shot, update the matching PM.md art-direction
+table in the same change — the tier-1 shot list, the **tier-1.5 product-still
+table**, or the **Seed column** on the tier-2 lifestyle and motion tables — and
+mark a shot **frozen** once a reviewer has compared against it. A brief that
+disagrees with `shots.conf` / `product-still.conf` / `lifestyle.conf` /
+`motion.conf` is a staleness bug — reconcile it, the same way `/pm` keeps the
+rest of the charter honest.
 
 ## 6. Output
 

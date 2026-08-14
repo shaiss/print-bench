@@ -195,3 +195,11 @@ Nothing in this system has been printed yet — `port_tol = 0.30` is a guess.
 3. **Print weight/time** — ~127 g / ~10 h at defaults is a lot; the bulb is
    large because a refuge is large. A smaller `bulb_r` is the lever if that
    matters, at the cost of room.
+
+## Product-shot provenance
+
+The committed `previews/lifestyle-den-in-use.png` and `lifestyle-product-hero.gif`
+were generated **blind (text-to-image)**, before the pipeline gained image-to-image
+seeding. The `seed=product-hero` field now in `lifestyle.conf` pins the shape to the
+real mesh only from the **next re-roll** onward — it does not retroactively describe
+the currently committed image.
