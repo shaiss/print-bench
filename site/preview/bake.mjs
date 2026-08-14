@@ -83,7 +83,12 @@ function splitReadme(md) {
       if (t === "" || t.startsWith(">")) continue;
       state = "body";
     }
-    const img = /^!\[([^\]]*)\]\(previews\/([^)\s]+)\)$/.exec(t);
+    // Allow an optional Markdown title after the path (`](previews/x "Title")`),
+    // the same form readme-gate.sh accepts and site/lib/media.mjs lifts —
+    // otherwise a titled AI embed isn't recognized and its disclosure line is
+    // left in the served SPA prose.
+    const img =
+      /^!\[([^\]]*)\]\(previews\/([^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)$/.exec(t);
     if (img) {
       alts.set(img[2], img[1]);
       continue;
