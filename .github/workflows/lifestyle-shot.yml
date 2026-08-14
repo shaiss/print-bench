@@ -18,6 +18,14 @@ name: Lifestyle shot (tier-2, AI)
 #      default. Without it the final `gh pr create` is denied even with the
 #      pull-requests: write permission below, and the run fails AFTER spending
 #      an API call (the branch is still pushed; open the PR from it manually).
+#   3. (Recommended) Add the REGEN_TOKEN repository secret — a fine-grained
+#      PAT with contents + pull-requests write. Without it the draft PR is
+#      opened with GITHUB_TOKEN, and a GITHUB_TOKEN-opened PR triggers no
+#      workflow, so the normal CI never auto-runs and the required "CI OK"
+#      check never appears — the PR then cannot satisfy branch protection
+#      until someone pushes a commit. With REGEN_TOKEN set, opening the PR
+#      triggers CI automatically (the documented REGEN_TOKEN reason, shared
+#      with the regen job and log-print-result.yml).
 # Without ZAI_KEY an auto-triggered run skips with a notice rather than failing —
 # the shot is supplemental, so its absence must not redden every design change.
 # A manual dispatch still fails loudly: someone pressed the button and is owed
@@ -197,16 +205,22 @@ jobs:
         if: env.SKIPPED != '1'
         env:
           DESIGN: ${{ matrix.design }}
-        # The generated PR is opened with GITHUB_TOKEN, so it will NOT trigger
-        # the normal CI. Run the product-page gate here so the disclosure
+        # Run the product-page gate here as a fast pre-check so the disclosure
         # (AI-styled scene label + "geometry is approximate" caption) is
-        # verified before a human ever sees the PR.
+        # verified before the PR is even opened. When REGEN_TOKEN is set the
+        # full CI also runs on the opened PR (see the token below); this early
+        # gate fails the run before any PR exists if the disclosure is wrong.
         run: ./scripts/readme-gate.sh "$DESIGN"
 
       - name: Open a draft PR with the generated shot
         if: env.SKIPPED != '1'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT if present so the opened PR triggers CI (a GITHUB_TOKEN-opened
+          # PR runs no workflow — the documented REGEN_TOKEN reason); else the
+          # ambient token, and the HAVE_PAT warning below flags that CI won't
+          # auto-run. Used for both the branch push and `gh pr create`.
+          GH_TOKEN: ${{ secrets.REGEN_TOKEN || github.token }}
+          HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' }}
           DESIGN: ${{ matrix.design }}
           RUN_ID: ${{ github.run_id }}
           BASE: ${{ github.event.repository.default_branch }}
@@ -237,7 +251,7 @@ jobs:
 
           This image is **purely supplemental and cosmetic** — GLM-Image runs in image-to-image mode, seeded from a committed geometry-true render (the part's shape is pinned to the real mesh; only the scene is AI), so its geometry is still an approximation, not the real mesh. The studio product shot (tier 1) and the STL remain the geometry-true artifacts. The README embed carries the required disclosure (an \`AI-styled scene\` alt label and a \`geometry is approximate\` caption), and \`readme-gate.sh\` passed in the generating workflow.
 
-          **Review before merging:** confirm the generated scene is presentable and not misleading, then take this out of draft. Regenerate by re-running the *Lifestyle shot (tier-2, AI)* workflow. Note: because this PR was opened by \`GITHUB_TOKEN\`, the normal CI did not auto-run — push a trivial commit or re-run CI if you want the full suite on it.
+          **Review before merging:** confirm the generated scene is presentable and not misleading, then take this out of draft. Regenerate by re-running the *Lifestyle shot (tier-2, AI)* workflow.
 
           🤖 Generated with [Claude Code](https://claude.com/claude-code)
           EOF
@@ -251,11 +265,17 @@ jobs:
               echo ""
               echo "**[${url}](${url})**"
               echo ""
-              echo "_Review the scene, then take the PR out of draft. It was opened with GITHUB_TOKEN, so CI did not auto-run — push a commit to trigger it._"
+              echo "_Review the scene, then take the PR out of draft._"
             } >> "$GITHUB_STEP_SUMMARY"
           else
             # ::error:: not ::warning:: — the step exits 1, so the annotation
             # severity should match the failed job.
             echo "::error::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests' (or use a PAT), then open a PR from that branch into ${BASE}."
             exit 1
+          fi
+          # A GITHUB_TOKEN-opened PR triggers no workflow, so without the PAT
+          # the required checks never run and the PR can't satisfy branch
+          # protection. Say so loudly (mirrors log-print-result.yml).
+          if [ "$HAVE_PAT" != "true" ]; then
+            echo "::warning::REGEN_TOKEN is not set, so this PR was created with GITHUB_TOKEN and CI will not auto-run on it. Push any commit (or set REGEN_TOKEN — a fine-grained PAT with contents + pull-requests write) to trigger the required checks."
           fi
