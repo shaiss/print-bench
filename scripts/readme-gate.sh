@@ -462,10 +462,14 @@ check_one() {
     done <<<"$parents"
   fi
 
-  # 9. Lifestyle (AI-styled) shots and motion clips. Manifest-less on purpose:
-  #    the presence of a committed previews/lifestyle-*.png (still) or
-  #    previews/lifestyle-*.gif (motion clip, issue #75) IS the trigger,
-  #    because an AI restyle cannot be regenerated from source. Both are
+  # 9. AI-styled images: lifestyle shots, motion clips, and product stills.
+  #    Manifest-less on purpose: the presence of a committed
+  #    previews/lifestyle-*.png (tier-2 scene still), previews/lifestyle-*.gif
+  #    (tier-2 motion clip, issue #75), or previews/product-still-*.png
+  #    (tier-1.5 bare-part still) IS the trigger, because an AI restyle cannot
+  #    be regenerated from source. A product still is image-to-image seeded from
+  #    the true mesh so its shape is close, but it is still an AI repaint, so it
+  #    carries the identical disclosure. All are
   #    cosmetic and assumed geometrically approximate, so the gate never
   #    checks geometry — it checks the DISCLOSURE, in canonical form, that
   #    keeps a cosmetic image off the page passing as a photo (or a working
@@ -516,7 +520,8 @@ check_one() {
         ok=0 ;;
     esac
   done < <(find "${dir}/previews" -maxdepth 1 -type f \
-             \( -iname 'lifestyle-*.png' -o -iname 'lifestyle-*.gif' \) 2>/dev/null | sort)
+             \( -iname 'lifestyle-*.png' -o -iname 'lifestyle-*.gif' \
+                -o -iname 'product-still-*.png' \) 2>/dev/null | sort)
 
   if [[ "$ok" == 1 ]]; then
     echo "ok    ${name}"
@@ -734,6 +739,74 @@ run_selftest() {
   truncate -s "$((MAX_SHOT_BYTES + 1))" "$d/previews/lifestyle-turntable.GIF"
   _disclosed "$d" previews/lifestyle-turntable.GIF
   _check motion-uppercase-gif-budget 0 ""
+
+  # --- Product stills (previews/product-still-*.png, tier 1.5). A bare-part AI
+  # still is image-to-image seeded from the true mesh, but still an AI repaint,
+  # so it carries the IDENTICAL disclosure and reuses lifestyle_disclosure()
+  # verbatim. No product-still-*.png exists in designs/ yet, so these fixtures
+  # are the ONLY proof the product-still- trigger fires — without them the glob
+  # branch could be dropped and every gate in the repo would stay green.
+
+  # still-good: a disclosed product still -> passes
+  d="$(_fixture still-good)"; : >"$d/previews/product-still-hero.png"
+  _disclosed "$d" previews/product-still-hero.png
+  _check still-good 0 ""
+
+  # still-missing-embed: committed still, never referenced -> MISSING_EMBED
+  d="$(_fixture still-missing-embed)"; : >"$d/previews/product-still-hero.png"
+  _check still-missing-embed 1 "never shows it"
+
+  # still-over-budget: disclosed, but the PNG exceeds MAX_SHOT_BYTES (product
+  # stills take the product-shot budget, like lifestyle stills)
+  d="$(_fixture still-over-budget)"
+  truncate -s "$((MAX_SHOT_BYTES + 1))" "$d/previews/product-still-hero.png"
+  _disclosed "$d" previews/product-still-hero.png
+  _check still-over-budget 1 "over the"
+
+  # still-missing-label: canonical caption present, no "AI-styled scene" label
+  d="$(_fixture still-missing-label)"; : >"$d/previews/product-still-hero.png"
+  {
+    printf '\n![The bare part on a white sweep](previews/product-still-hero.png)\n\n'
+    printf '*AI-generated — geometry is approximate and may not match the print.*\n'
+  } >>"$d/README.md"
+  _check still-missing-label 1 "AI-styled scene"
+
+  # still-missing-note: labeled still, caption lacks the canonical phrase
+  d="$(_fixture still-missing-note)"; : >"$d/previews/product-still-hero.png"
+  {
+    printf '\n![AI-styled scene: the bare part](previews/product-still-hero.png)\n\n'
+    printf 'Just the part, nothing else around it.\n'
+  } >>"$d/README.md"
+  _check still-missing-note 1 "geometry is approximate"
+
+  # still-decoy: one undisclosed and one disclosed embed of the SAME still ->
+  # every embed must be disclosed -> MISSING_LABEL
+  d="$(_fixture still-decoy)"; : >"$d/previews/product-still-hero.png"
+  {
+    printf '\n![Hero product still](previews/product-still-hero.png)\n\n'
+    printf 'Straight off the print farm.\n\n'
+    printf '## Reference\n\n![AI-styled scene: the bare part](previews/product-still-hero.png)\n\n'
+    printf '*AI-generated — geometry is approximate and may not match the print.*\n'
+  } >>"$d/README.md"
+  _check still-decoy 1 "AI-styled scene"
+
+  # still-html-hero: an <img> still beside a compliant markdown decoy -> EXTRA_REF
+  d="$(_fixture still-html-hero)"; : >"$d/previews/product-still-hero.png"
+  {
+    printf '\n<img src="previews/product-still-hero.png" width="900" alt="bare part">\n\n'
+    printf 'The finished part.\n\n'
+    printf '## Details\n\n![AI-styled scene: the bare part](previews/product-still-hero.png)\n\n'
+    printf '*AI-generated — geometry is approximate and may not match the print.*\n'
+  } >>"$d/README.md"
+  _check still-html-hero 1 "referenced outside an inline markdown image"
+
+  # still-uppercase-ext: an undisclosed .PNG must still be caught (case-insensitive)
+  d="$(_fixture still-uppercase-ext)"; : >"$d/previews/product-still-hero.PNG"
+  {
+    printf '\n![The bare part](previews/product-still-hero.PNG)\n\n'
+    printf 'Ready to print.\n'
+  } >>"$d/README.md"
+  _check still-uppercase-ext 1 "AI-styled scene"
 
   # --- Assembly (previews/exploded.png, issue #157). A design with an
   # assembly.conf must commit the exploded view, embed it, and stay in budget.
