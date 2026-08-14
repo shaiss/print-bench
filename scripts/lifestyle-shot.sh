@@ -217,7 +217,27 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   else
     prompt="$rest_trim"
   fi
-  [[ -z "$seed" ]] && seed="$shot"
+  if [[ -z "$seed" ]]; then
+    # Implicit default: same-name seeding (previews/<shot>.png). When that
+    # render is absent, fall back to the first shots.conf shot — a shot name and
+    # its tier-1 render legitimately differ (a `scene` lifestyle shot anchored on
+    # the `hero` render), and without this the documented re-roll of every such
+    # design is a hard error. Mirrors lifestyle-clip.sh's seed_url_for fallback,
+    # and applies ONLY to the implicit seed: an explicit seed=<ref> (which leaves
+    # $seed non-empty here) names a specific render and must still error below if
+    # it is missing, never silently animate a different image.
+    seed="$shot"
+    if [[ ! -f "designs/${design}/previews/${seed}.png" && -f "designs/${design}/shots.conf" ]]; then
+      first_shot=""
+      while IFS= read -r sline || [[ -n "$sline" ]]; do
+        strimmed="$(trim "$sline")"
+        [[ -z "$strimmed" || "$strimmed" == '#'* ]] && continue
+        first_shot="$(trim "${sline%%|*}")"
+        break
+      done <"designs/${design}/shots.conf"
+      [[ -n "$first_shot" ]] && seed="$first_shot"
+    fi
+  fi
   if [[ -z "$prompt" ]]; then
     echo "malformed ${conf} line (empty prompt): $line" >&2
     exit 1
