@@ -279,8 +279,21 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   rest_trim="$(trim "$rest")"
   if [[ "$rest_trim" == seed=* && "$rest" == *"|"* ]]; then
     seed="$(trim "${rest%%|*}")"; seed="${seed#seed=}"; seed="$(trim "$seed")"
-    explicit_seed=1
     prompt="$(trim "${rest#*|}")"
+    # An empty value ("seed= | prompt") must NOT set explicit_seed=1: that would
+    # suppress seed_url_for()'s fallback to the first shots.conf shot and can
+    # fail generation. A blank Seed column reaching the manifest as bare "seed="
+    # is malformed — reject it rather than silently changing seeding behavior.
+    if [[ -z "$seed" ]]; then
+      echo "malformed motion.conf line (empty 'seed=' — give a ref or drop the field): $line" >&2
+      exit 1
+    fi
+    explicit_seed=1
+  elif [[ "$rest_trim" == seed=* ]]; then
+    # "shot | seed=ref" with no trailing "| prompt": without this guard the
+    # literal "seed=ref" becomes the prompt and a paid call is spent on nonsense.
+    echo "malformed motion.conf line ('seed=' without a following '| <prompt>'): $line" >&2
+    exit 1
   else
     prompt="$rest_trim"
   fi

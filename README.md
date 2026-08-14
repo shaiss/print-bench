@@ -241,9 +241,10 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     `shots.conf`, path-traced from the design's own STL export
   - `lifestyle-shot.sh` — tier-2 AI lifestyle shots from `lifestyle.conf`,
     and tier-1.5 AI product stills (the bare part) from `product-still.conf`
-    via `--kind product-still` — both image-to-image seeded from a committed
-    tier-1 render through the Z.AI GLM-Image API (cosmetic, geometry-approximate,
-    disclosed)
+    via `--kind product-still` — each image-to-image seeded from a committed
+    render through the Z.AI GLM-Image API: a product still seeds only from a
+    tier-1 render, a lifestyle scene from a tier-1 render or a product still
+    (cosmetic, geometry-approximate, disclosed)
   - `shot-spec.sh` — authors `shots.conf`/`lifestyle.conf` from a PM's
     art-direction brief (named views/colors, freeze and disclosure enforced);
     the mechanics behind the `/art-direction` skill

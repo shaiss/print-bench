@@ -54,7 +54,8 @@ pose, color, finish and framing; **tier 1.5** an AI *product still* of the bare
 part (`product-still.conf`), photoreal and in isolation, seeded from a tier-1
 render; **tier 2** the AI *lifestyle scene* (`lifestyle.conf`) that stages a
 world around the part, seeded from a tier-1 or tier-1.5 render; and the **tier-2
-motion clip** (`motion.conf`), seeded from a scene. Every AI tier is disclosed as
+motion clip** (`motion.conf`), seeded from a tier-1 shot or a lifestyle still.
+Every AI tier is disclosed as
 approximate (the model repaints even a seeded shape) and ships the "geometry is
 approximate" caption. Run `./scripts/shot-spec.sh views` and `… palette` for the
 named framing and color vocabularies (or give a hex / a raw `rotz,elev,zoom`).

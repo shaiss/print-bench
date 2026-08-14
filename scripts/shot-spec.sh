@@ -104,19 +104,52 @@ is_ai_prefix() { case "$1" in lifestyle-*|product-still-*) return 0 ;; *) return
 # in lifestyle-shot.sh / lifestyle-clip.sh — only a middle field that literally
 # starts with 'seed=' is a seed, so a '|' inside a prompt still parses.
 # Bash-3.2-safe (no namerefs).
-PSL_name=""; PSL_seed=""; PSL_prompt=""
-parse_seedable_line() {  # <line>  -> sets PSL_name / PSL_seed / PSL_prompt
+PSL_name=""; PSL_seed=""; PSL_prompt=""; PSL_has_seed=0
+parse_seedable_line() {  # <line>  -> sets PSL_name / PSL_seed / PSL_prompt / PSL_has_seed
   local line="$1" rest rtrim
   PSL_name="${line%%|*}"; PSL_name="${PSL_name//[[:space:]]/}"
   rest="${line#*|}"
   rtrim="${rest#"${rest%%[![:space:]]*}"}"; rtrim="${rtrim%"${rtrim##*[![:space:]]}"}"
   PSL_seed=""
+  # PSL_has_seed flags that a middle field starting with 'seed=' is PRESENT, so a
+  # validator can tell a genuine no-seed line from a malformed one: an empty
+  # value ("seed= | prompt") or a bare "seed=ref" with no trailing "| prompt"
+  # (which lands whole in PSL_prompt) must be rejected, not silently accepted.
+  [[ "$rtrim" == seed=* ]] && PSL_has_seed=1 || PSL_has_seed=0
   if [[ "$rtrim" == seed=* && "$rest" == *"|"* ]]; then
     PSL_seed="${rest%%|*}"; PSL_seed="${PSL_seed//[[:space:]]/}"; PSL_seed="${PSL_seed#seed=}"
     PSL_prompt="${rest#*|}"; PSL_prompt="${PSL_prompt#"${PSL_prompt%%[![:space:]]*}"}"; PSL_prompt="${PSL_prompt%"${PSL_prompt##*[![:space:]]}"}"
   else
     PSL_prompt="$rtrim"
   fi
+}
+
+# Validate the parsed seed field for a tier. <loc> is "conf:n" for messages;
+# <tier> is lifestyle|still|motion and governs the allowed seed prefixes. Sets
+# `bad=1` (dynamic scope from cmd_check) on any problem. Catches the malformed
+# forms the generators reject at runtime — empty 'seed=' and 'seed=' with no
+# prompt — so `shot-spec check` fails BEFORE a paid CI generation does.
+check_seed_field() {  # <loc> <tier>
+  local loc="$1" tier="$2"
+  [[ "$PSL_has_seed" == 1 ]] || return 0
+  if [[ "$PSL_prompt" == seed=* ]]; then
+    echo "  FAIL $loc — 'seed=' without a following '| <prompt>'"; bad=1; return 0
+  fi
+  if [[ -z "$PSL_seed" ]]; then
+    echo "  FAIL $loc — empty 'seed=' (give a ref or drop the field)"; bad=1; return 0
+  fi
+  is_kebab "$PSL_seed" || { echo "  FAIL $loc — seed '$PSL_seed' not kebab-case"; bad=1; return 0; }
+  case "$tier" in
+    still)
+      if is_ai_prefix "$PSL_seed"; then
+        echo "  FAIL $loc — seed '$PSL_seed' is an AI image; a product still must seed from a geometry-true tier-1 render"; bad=1
+      fi ;;
+    lifestyle)
+      case "$PSL_seed" in
+        lifestyle-*) echo "  FAIL $loc — seed '$PSL_seed' is a lifestyle-* scene; seed from a geometry-true render or a product-still-* still"; bad=1 ;;
+      esac ;;
+    motion) : ;;   # a clip may seed from any kebab ref (incl. an AI still)
+  esac
 }
 
 # Every subcommand interpolates <design> into paths ("$ROOT/$design/..."), so a
@@ -553,14 +586,9 @@ check_lifestyle() {  # <conf>
     local trimmed="${line#"${line%%[![:space:]]*}"}"
     [[ -z "$trimmed" || "$trimmed" == '#'* ]] && continue
     [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>'"; bad=1; continue; }
-    parse_seedable_line "$line"; name="$PSL_name"; seed="$PSL_seed"; prompt="$PSL_prompt"
+    parse_seedable_line "$line"; name="$PSL_name"; prompt="$PSL_prompt"
     is_kebab "$name" || { echo "  FAIL $conf:$n — scene name '$name' not kebab-case"; bad=1; }
-    if [[ -n "$seed" ]]; then
-      is_kebab "$seed" || { echo "  FAIL $conf:$n — seed '$seed' not kebab-case"; bad=1; }
-      case "$seed" in
-        lifestyle-*) echo "  FAIL $conf:$n — seed '$seed' is a lifestyle-* scene; seed from a geometry-true render or a product-still-* still"; bad=1 ;;
-      esac
-    fi
+    check_seed_field "$conf:$n" lifestyle
     [[ -n "$prompt" ]] || { echo "  FAIL $conf:$n — empty scene prompt"; bad=1; }
   done <"$conf"
 }
@@ -574,14 +602,9 @@ check_stills() {  # <conf>
     local trimmed="${line#"${line%%[![:space:]]*}"}"
     [[ -z "$trimmed" || "$trimmed" == '#'* ]] && continue
     [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<still> | seed=<ref> | <prompt>'"; bad=1; continue; }
-    parse_seedable_line "$line"; name="$PSL_name"; seed="$PSL_seed"; prompt="$PSL_prompt"
+    parse_seedable_line "$line"; name="$PSL_name"; prompt="$PSL_prompt"
     is_kebab "$name" || { echo "  FAIL $conf:$n — still name '$name' not kebab-case"; bad=1; }
-    if [[ -n "$seed" ]]; then
-      is_kebab "$seed" || { echo "  FAIL $conf:$n — seed '$seed' not kebab-case"; bad=1; }
-      if is_ai_prefix "$seed"; then
-        echo "  FAIL $conf:$n — seed '$seed' is an AI image; a product still must seed from a geometry-true tier-1 render"; bad=1
-      fi
-    fi
+    check_seed_field "$conf:$n" still
     [[ -n "$prompt" ]] || { echo "  FAIL $conf:$n — empty still prompt"; bad=1; }
   done <"$conf"
 }
@@ -595,12 +618,9 @@ check_motion() {  # <conf>
     local trimmed="${line#"${line%%[![:space:]]*}"}"
     [[ -z "$trimmed" || "$trimmed" == '#'* ]] && continue
     [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>'"; bad=1; continue; }
-    parse_seedable_line "$line"; name="$PSL_name"; seed="$PSL_seed"; prompt="$PSL_prompt"
+    parse_seedable_line "$line"; name="$PSL_name"; prompt="$PSL_prompt"
     is_kebab "$name" || { echo "  FAIL $conf:$n — clip name '$name' not kebab-case"; bad=1; }
-    # A clip may seed from an AI image, so only kebab is required here.
-    if [[ -n "$seed" ]]; then
-      is_kebab "$seed" || { echo "  FAIL $conf:$n — seed '$seed' not kebab-case"; bad=1; }
-    fi
+    check_seed_field "$conf:$n" motion
     [[ -n "$prompt" ]] || { echo "  FAIL $conf:$n — empty motion prompt"; bad=1; }
   done <"$conf"
 }
@@ -754,6 +774,23 @@ run_selftest() {
   # a motion clip seeding from an AI still is FINE (the still->clip hop) -> passes
   printf 'clip | seed=lifestyle-x | a motion\n' >"$root/still-check/motion.conf"
   _run 0 "well-formed" -- check still-check
+
+  # malformed seed= forms are rejected before a paid CI generation (matching the
+  # generators' runtime guards): an empty 'seed=' value, and a 'seed=ref' with no
+  # trailing '| <prompt>'. One per tier so each validator's check_seed_field fires.
+  rm -f "$root/still-check/motion.conf"
+  printf 'hero | seed= | a bare part\n' >"$root/still-check/product-still.conf"
+  _run 1 "empty 'seed='" -- check still-check
+  printf 'hero | seed=product-hero\n' >"$root/still-check/product-still.conf"
+  _run 1 "without a following" -- check still-check
+  printf 'good | seed=product-hero | a bare part\n' >"$root/still-check/product-still.conf"
+  printf 'scene | seed= | a scene\n' >"$root/still-check/lifestyle.conf"
+  _run 1 "empty 'seed='" -- check still-check
+  printf 'scene | seed=product-hero\n' >"$root/still-check/lifestyle.conf"
+  _run 1 "without a following" -- check still-check
+  rm -f "$root/still-check/lifestyle.conf"
+  printf 'clip | seed= | a motion\n' >"$root/still-check/motion.conf"
+  _run 1 "empty 'seed='" -- check still-check
 
   if (( pass )); then echo "ok    shot-spec --selftest: every validator and the freeze guard fire"; return 0; fi
   echo "FAIL  shot-spec --selftest"; return 1

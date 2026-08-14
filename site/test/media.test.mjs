@@ -84,6 +84,23 @@ test("stripReadmeMedia negative control: ordinary italics survive", () => {
   assert.ok(markdown.includes("deliberately ugly"));
 });
 
+test("stripReadmeMedia lifts a product-still embed carrying a Markdown title", () => {
+  // readme-gate.sh accepts a title attribute on an AI embed; the strip regex
+  // must too, or the disclosure line is left in the served prose.
+  const md = [
+    '![AI-styled scene: bare part](previews/product-still-hero.png "Studio look")',
+    "",
+    "*AI-generated impression for general illustration only — geometry is approximate; see the STL.*",
+    "",
+    "Body.",
+  ].join("\n");
+  const { markdown, alts } = stripReadmeMedia(md);
+  assert.equal(alts.get("product-still-hero.png"), "AI-styled scene: bare part");
+  assert.ok(!markdown.includes("!["), "titled embed removed");
+  assert.ok(!markdown.includes("AI-generated"), "disclaimer after titled embed removed");
+  assert.ok(markdown.includes("Body."), "prose kept");
+});
+
 test("designMedia orders hero first, contact sheet last, embeds in between", () => {
   const design = {
     title: "calibration-cube",

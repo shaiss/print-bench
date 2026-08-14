@@ -70,7 +70,11 @@ export function stripReadmeMedia(markdown) {
   let lastLiftedAi = false;
   for (const line of markdown.split("\n")) {
     const t = line.trim();
-    const img = /^!\[([^\]]*)\]\(previews\/([^)\s]+)\)$/.exec(t);
+    // Allow an optional Markdown title after the path (`](previews/x "Title")`),
+    // the same form readme-gate.sh accepts — otherwise a titled AI embed isn't
+    // recognized and its disclosure line is left in the served prose.
+    const img =
+      /^!\[([^\]]*)\]\(previews\/([^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)$/.exec(t);
     if (img) {
       alts.set(img[2], img[1]);
       lastLiftedAi = /^(lifestyle|product-still)-/.test(img[2]);

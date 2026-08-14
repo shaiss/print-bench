@@ -42,6 +42,16 @@ cd "$(dirname "$0")/.."
 ZAI_MODEL="${ZAI_MODEL:-glm-image}"
 ZAI_ENDPOINT="${ZAI_ENDPOINT:-https://api.z.ai/api/paas/v4/images/generations}"
 ZAI_SIZE="${ZAI_SIZE:-1280x1280}"   # a size the GLM-Image docs show in examples
+# ZAI_SIZE may arrive from a workflow_dispatch 'size' input, so validate it
+# before it reaches the API request or ImageMagick: WxH, each side within a sane
+# ceiling. Rejects a fat-finger 99999x99999 that would waste API quota and
+# stress the runner (same spirit as shot-spec.sh's MAX_DIM).
+if [[ ! "$ZAI_SIZE" =~ ^[0-9]+x[0-9]+$ ]]; then
+  echo "invalid ZAI_SIZE '${ZAI_SIZE}' — want WxH (e.g. 1280x1280)" >&2; exit 2
+fi
+if (( ${ZAI_SIZE%x*} < 256 || ${ZAI_SIZE#*x} < 256 || ${ZAI_SIZE%x*} > 4096 || ${ZAI_SIZE#*x} > 4096 )); then
+  echo "ZAI_SIZE '${ZAI_SIZE}' out of range — each side must be 256..4096 px" >&2; exit 2
+fi
 
 # Flags in any order around the one positional <design>, so both
 # "lifestyle-shot.sh <design> --mock" and "lifestyle-shot.sh --kind product-still
@@ -52,7 +62,7 @@ kind="lifestyle"     # 'lifestyle' (tier-2 scene) or 'product-still' (tier-1.5 b
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mock)   mock=1; shift ;;
-    --kind)   kind="${2:-}"; shift 2 ;;
+    --kind)   [[ $# -ge 2 ]] || { echo "--kind requires a value ('lifestyle' or 'product-still')" >&2; exit 2; }; kind="$2"; shift 2 ;;
     --kind=*) kind="${1#--kind=}"; shift ;;
     --)       shift; break ;;
     -*)       echo "unknown flag '$1'" >&2; exit 2 ;;
@@ -191,12 +201,25 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   if [[ "$rest_trim" == seed=* && "$rest" == *"|"* ]]; then
     seed="$(trim "${rest%%|*}")"; seed="${seed#seed=}"; seed="$(trim "$seed")"
     prompt="$(trim "${rest#*|}")"
+    # An empty value ("seed= | prompt") is malformed: a blank Seed column that
+    # reached the manifest as a bare "seed=" must not silently fall back to the
+    # shot name — reject it so a paid API call isn't spent on a mis-seeded shot.
+    if [[ -z "$seed" ]]; then
+      echo "malformed ${conf} line (empty 'seed=' — give a ref or drop the field): $line" >&2
+      exit 1
+    fi
+  elif [[ "$rest_trim" == seed=* ]]; then
+    # "shot | seed=ref" with no trailing "| prompt": the branch above needs a
+    # second '|', so without this guard the literal "seed=ref" becomes the
+    # prompt and a paid call is spent on nonsense. Reject it.
+    echo "malformed ${conf} line ('seed=' without a following '| <prompt>'): $line" >&2
+    exit 1
   else
     prompt="$rest_trim"
   fi
   [[ -z "$seed" ]] && seed="$shot"
   if [[ -z "$prompt" ]]; then
-    echo "malformed lifestyle.conf line (empty prompt): $line" >&2
+    echo "malformed ${conf} line (empty prompt): $line" >&2
     exit 1
   fi
   # <shot> becomes the filename stem (lifestyle-<shot>.png) and part of the
@@ -314,9 +337,14 @@ try:
         raise KeyError("data[0] has neither url nor b64_json")
 except Exception:
     sys.stderr.write("unexpected GLM-Image response shape: %s\n" % raw[:800]); raise')"
-    kind="${parsed%%$'\t'*}"
+    # NB: 'resp_kind', NOT 'kind' — 'kind' is the artifact-kind global
+    # (lifestyle|product-still) set from --kind and read again by the README
+    # embed loop and the per-kind seed guard. Reusing 'kind' here clobbered it on
+    # the live path, so product-still embeds got lifestyle alt text and the
+    # product-still seed guard stopped firing after the first shot.
+    resp_kind="${parsed%%$'\t'*}"
     value="${parsed#*$'\t'}"
-    if [[ "$kind" == "url" ]]; then
+    if [[ "$resp_kind" == "url" ]]; then
       # SSRF guard: require https, extract the host correctly (dropping any
       # userinfo so https://x@169.254.169.254/ can't spoof it), then RESOLVE it
       # and refuse if any resolved address is non-public. Resolving — rather
