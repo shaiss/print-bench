@@ -1,14 +1,14 @@
-name: Lifestyle shot (tier-2, AI)
+name: Product still (tier-1.5, AI)
 
-# Generate a tier-2 AI-restyled lifestyle shot for a design and open a
-# DRAFT PR with it for a human to approve. Fires automatically when a
-# designs/*/lifestyle.conf lands on the default branch — writing the manifest
-# is the request — and can also be dispatched by hand to re-roll a shot or
-# override the size. The image is cosmetic and geometrically approximate
-# (GLM-Image runs image-to-image, seeded from a committed geometry-true render —
-# the part's shape is pinned, only the scene is AI), so it never merges itself —
-# a person reviews the generation and the disclosure before it lands.
-# See scripts/lifestyle-shot.sh and #66.
+# Generate a tier-1.5 AI product still (a bare-part AI render) for a design and
+# open a DRAFT PR with it for a human to approve. Fires automatically when a
+# designs/*/product-still.conf lands on the default branch — writing the manifest
+# is the request — and can also be dispatched by hand to re-roll a still or
+# override the size. The image is GLM-Image image-to-image, seeded from a
+# committed geometry-true tier-1 render (the part's shape is pinned to the real
+# mesh; only the scene is AI), so it never merges itself — a person reviews the
+# generation and the disclosure before it lands. See scripts/lifestyle-shot.sh
+# (run with --kind product-still) and #66.
 #
 # Prerequisites (one-time):
 #   1. Add the ZAI_KEY repository secret (Settings > Secrets and variables >
@@ -19,29 +19,29 @@ name: Lifestyle shot (tier-2, AI)
 #      pull-requests: write permission below, and the run fails AFTER spending
 #      an API call (the branch is still pushed; open the PR from it manually).
 # Without ZAI_KEY an auto-triggered run skips with a notice rather than failing —
-# the shot is supplemental, so its absence must not redden every design change.
+# the still is supplemental, so its absence must not redden every design change.
 # A manual dispatch still fails loudly: someone pressed the button and is owed
 # a reason. Dispatch from the default branch so the generated branch forks cleanly.
 
 on:
-  # Auto: writing or editing a design's lifestyle.conf IS the request for a
-  # shot, so landing one on the default branch generates it. Scoped to that
+  # Auto: writing or editing a design's product-still.conf IS the request for a
+  # still, so landing one on the default branch generates it. Scoped to that
   # one path — the draft PR this workflow opens only touches README.md and
   # previews/, so merging it cannot re-trigger the workflow.
   push:
     branches: [main]
     paths:
-      - 'designs/*/lifestyle.conf'
-  # Manual: regenerate an existing shot (an image-to-image result is not
+      - 'designs/*/product-still.conf'
+  # Manual: regenerate an existing still (an image-to-image result is not
   # reproducible, so re-rolling is a normal thing to want) or override the size.
   workflow_dispatch:
     inputs:
       design:
-        description: Design directory under designs/ (must ship a lifestyle.conf)
+        description: Design directory under designs/ (must ship a product-still.conf)
         required: true
-        # Must stay a LIVE (non-archived) design that ships a lifestyle.conf, so
-        # the most obvious "open form → Run with defaults" path succeeds instead
-        # of tripping the archived guard below (sushi-battleship is archived).
+        # Must stay a LIVE (non-archived) design that ships a product-still.conf,
+        # so the most obvious "open form → Run with defaults" path succeeds
+        # instead of tripping the archived guard below (sushi-battleship is archived).
         default: calibration-cube
         type: string
       size:
@@ -52,7 +52,7 @@ on:
 
 # Read-only by default; the write grants live on the one job that pushes a
 # branch and opens the PR — detect only diffs a checkout (mirrors
-# lifestyle-clip.yml, which already scopes it this way).
+# lifestyle-shot.yml, which already scopes it this way).
 permissions:
   contents: read
 
@@ -69,7 +69,7 @@ jobs:
           # Full history: a push can carry many commits, and the range below
           # has to reach whichever one touched the manifest.
           fetch-depth: 0
-      - name: List the designs whose lifestyle.conf this run is about
+      - name: List the designs whose product-still.conf this run is about
         id: pick
         env:
           EVENT: ${{ github.event_name }}
@@ -92,12 +92,12 @@ jobs:
             fi
             # An archived design (designs/<n>/ARCHIVED) is frozen at v0.1 and
             # retired from active CI — see CLAUDE.md, "Archived designs
-            # (v0.1 freeze)". Generating a new AI shot for one would spend an
+            # (v0.1 freeze)". Generating a new AI still for one would spend an
             # API call restyling a design nobody maintains. A dispatch fails
             # loudly rather than skipping: someone pressed the button and is
             # owed a reason (same rule as the missing-key case below).
             if [ -f "designs/$INPUT_DESIGN/ARCHIVED" ]; then
-              echo "::error::designs/$INPUT_DESIGN is archived at v0.1 and retired from active CI — lift the ARCHIVED marker (or revive the design as a derivative) before generating new shots for it."
+              echo "::error::designs/$INPUT_DESIGN is archived at v0.1 and retired from active CI — lift the ARCHIVED marker (or revive the design as a derivative) before generating new stills for it."
               exit 1
             fi
             names="$INPUT_DESIGN"
@@ -108,23 +108,23 @@ jobs:
             # manifest added by any earlier commit in a multi-commit push, and
             # the workflow would then report success having generated nothing.
             # Erring wide is the right way round — the path filter means this
-            # only fires when a lifestyle.conf actually moved.
+            # only fires when a product-still.conf actually moved.
             range="${BEFORE}..${GITHUB_SHA}"
             if ! git rev-parse --quiet --verify "${BEFORE}^{commit}" >/dev/null 2>&1; then
               range="$(git hash-object -t tree /dev/null)..${GITHUB_SHA}"
             fi
             while IFS= read -r f; do
               case "$f" in
-                designs/*/lifestyle.conf)
+                designs/*/product-still.conf)
                   n=${f#designs/}; n=${n%%/*}
                   # A deleted manifest still shows up in the diff; only render
                   # designs whose manifest exists at this commit. Archived
                   # designs are skipped like every other CI path skips them
                   # (CLAUDE.md, "Archived designs (v0.1 freeze)") — their
                   # committed pages stay as they are.
-                  [ -f "designs/$n/lifestyle.conf" ] || continue
+                  [ -f "designs/$n/product-still.conf" ] || continue
                   if [ -f "designs/$n/ARCHIVED" ]; then
-                    echo "skip $n: archived at v0.1, not regenerating shots"
+                    echo "skip $n: archived at v0.1, not regenerating stills"
                     continue
                   fi
                   names="$names $n" ;;
@@ -143,7 +143,7 @@ jobs:
     needs: detect
     # The write grants live here, not top-level: this is the only job that
     # pushes a branch and opens the PR; detect is read-only (mirrors
-    # lifestyle-clip.yml).
+    # lifestyle-shot.yml).
     permissions:
       contents: write
       pull-requests: write
@@ -154,7 +154,7 @@ jobs:
       matrix:
         design: ${{ fromJSON(needs.detect.outputs.designs) }}
     concurrency:
-      group: lifestyle-shot-${{ matrix.design }}
+      group: product-still-${{ matrix.design }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 20   # backstop: a stalled API call can't hold the runner
@@ -171,7 +171,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y imagemagick || { sleep 5; sudo apt-get install -y imagemagick; }
 
-      - name: Generate the lifestyle shot and embed its disclosure
+      - name: Generate the product still and embed its disclosure
         env:
           ZAI_KEY: ${{ secrets.ZAI_KEY }}
           DESIGN: ${{ matrix.design }}
@@ -180,18 +180,18 @@ jobs:
           set -euo pipefail
           if [ -z "${ZAI_KEY:-}" ]; then
             if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-              # Someone pressed the button and expects a shot: say why not.
+              # Someone pressed the button and expects a still: say why not.
               echo "::error::ZAI_KEY secret is not set for this repository"
               exit 1
             fi
-            # Auto-triggered. The shot is supplemental and cosmetic, so a repo
+            # Auto-triggered. The still is supplemental and cosmetic, so a repo
             # without the key should not get a red X on every design change —
             # tier 1 is the deliverable and it is gated elsewhere.
-            echo "::notice::ZAI_KEY is not set — skipping the tier-2 lifestyle shot for ${DESIGN}"
+            echo "::notice::ZAI_KEY is not set — skipping the tier-1.5 product still for ${DESIGN}"
             echo "SKIPPED=1" >> "$GITHUB_ENV"
             exit 0
           fi
-          ./scripts/lifestyle-shot.sh "$DESIGN"
+          ./scripts/lifestyle-shot.sh --kind product-still "$DESIGN"
 
       - name: Prove the disclosure gate passes
         if: env.SKIPPED != '1'
@@ -203,7 +203,7 @@ jobs:
         # verified before a human ever sees the PR.
         run: ./scripts/readme-gate.sh "$DESIGN"
 
-      - name: Open a draft PR with the generated shot
+      - name: Open a draft PR with the generated product still
         if: env.SKIPPED != '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -213,41 +213,41 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          branch="lifestyle/${DESIGN}-${RUN_ID}"
+          branch="product-still/${DESIGN}-${RUN_ID}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
-          # Stage exactly the generated lifestyle PNG(s) and the README — a
+          # Stage exactly the generated product-still PNG(s) and the README — a
           # precise add (not the whole previews/ dir) so no unrelated
           # working-tree change rides along, and via -print0 so it never
           # word-splits or fails on a literal glob.
           git add "designs/${DESIGN}/README.md"
-          find "designs/${DESIGN}/previews" -maxdepth 1 -type f -name 'lifestyle-*.png' -print0 \
+          find "designs/${DESIGN}/previews" -maxdepth 1 -type f -name 'product-still-*.png' -print0 \
             | xargs -0 --no-run-if-empty git add
           if git diff --cached --quiet; then
             echo "::error::generator produced no changes"
             exit 1
           fi
-          git commit -m "Add AI lifestyle shot: ${DESIGN}"
+          git commit -m "Add AI product still: ${DESIGN}"
           # persist-credentials:false above means no stored remote auth — supply
           # the token explicitly for this one push (masked in logs by Actions).
           git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$branch"
           body="$(cat <<EOF
-          Automated **tier-2 AI lifestyle shot** for \`${DESIGN}\`, generated by Z.AI GLM-Image from the prompt in \`designs/${DESIGN}/lifestyle.conf\`.
+          Automated **tier-1.5 AI product still** for \`${DESIGN}\`, generated by Z.AI GLM-Image in **image-to-image** mode from the prompt in \`designs/${DESIGN}/product-still.conf\`.
 
-          This image is **purely supplemental and cosmetic** — GLM-Image runs in image-to-image mode, seeded from a committed geometry-true render (the part's shape is pinned to the real mesh; only the scene is AI), so its geometry is still an approximation, not the real mesh. The studio product shot (tier 1) and the STL remain the geometry-true artifacts. The README embed carries the required disclosure (an \`AI-styled scene\` alt label and a \`geometry is approximate\` caption), and \`readme-gate.sh\` passed in the generating workflow.
+          This image is a **bare-part AI render**, seeded from a committed geometry-true tier-1 render — the part's shape is pinned to the real mesh and only the scene, lighting and materials are AI, so its geometry is an approximation, not the real mesh. The studio product shot (tier 1) and the STL remain the geometry-true artifacts. The README embed carries the required disclosure (an \`AI-styled scene\` alt label and a \`geometry is approximate\` caption), and \`readme-gate.sh\` passed in the generating workflow.
 
-          **Review before merging:** confirm the generated scene is presentable and not misleading, then take this out of draft. Regenerate by re-running the *Lifestyle shot (tier-2, AI)* workflow. Note: because this PR was opened by \`GITHUB_TOKEN\`, the normal CI did not auto-run — push a trivial commit or re-run CI if you want the full suite on it.
+          **Review before merging:** confirm the generated scene is presentable and not misleading, then take this out of draft. Regenerate by re-running the *Product still (tier-1.5, AI)* workflow. Note: because this PR was opened by \`GITHUB_TOKEN\`, the normal CI did not auto-run — push a trivial commit or re-run CI if you want the full suite on it.
 
           🤖 Generated with [Claude Code](https://claude.com/claude-code)
           EOF
           )"
           if url="$(gh pr create --draft --base "$BASE" --head "$branch" \
-              --title "Add AI lifestyle shot: ${DESIGN}" --body "$body")"; then
+              --title "Add AI product still: ${DESIGN}" --body "$body")"; then
             {
-              echo "## Lifestyle shot — ${DESIGN}"
+              echo "## Product still — ${DESIGN}"
               echo ""
-              echo "Opened a draft PR with the generated tier-2 AI lifestyle shot:"
+              echo "Opened a draft PR with the generated tier-1.5 AI product still:"
               echo ""
               echo "**[${url}](${url})**"
               echo ""

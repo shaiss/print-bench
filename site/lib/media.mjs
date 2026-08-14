@@ -19,7 +19,7 @@ export const AI_MOTION_DISCLOSURE =
 export function mediaLabel(file) {
   return file
     .replace(/\.[a-z0-9]+$/i, "")
-    .replace(/^lifestyle-/, "")
+    .replace(/^(lifestyle|product-still)-/, "")
     .replace(/-/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -33,6 +33,11 @@ export function classifyMedia(file) {
   const gif = /\.gif$/i.test(file);
   if (/^lifestyle-/.test(file))
     return { kind: gif ? "AI motion clip" : "AI-styled scene", ai: true, motion: gif };
+  // A product still is a bare-part AI render, image-to-image from a
+  // geometry-true seed — always a still, so it mirrors the lifestyle PNG
+  // branch (ai: true, motion: false) and carries the AI still disclosure.
+  if (/^product-still-/.test(file))
+    return { kind: "AI-styled scene", ai: true, motion: false };
   if (/^product-hero\./.test(file)) return { kind: "Studio render", ai: false, motion: false };
   if (/^turntable\./.test(file)) return { kind: "Turntable", ai: false, motion: true };
   if (/^contact-sheet\./.test(file))
@@ -68,7 +73,7 @@ export function stripReadmeMedia(markdown) {
     const img = /^!\[([^\]]*)\]\(previews\/([^)\s]+)\)$/.exec(t);
     if (img) {
       alts.set(img[2], img[1]);
-      lastLiftedAi = /^lifestyle-/.test(img[2]);
+      lastLiftedAi = /^(lifestyle|product-still)-/.test(img[2]);
       continue;
     }
     if (

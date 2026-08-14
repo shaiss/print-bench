@@ -196,13 +196,17 @@ fit_gif() {
 # would silently repoint. Fails BEFORE spending a generation if the seed
 # isn't committed and reachable; ZAI_SEED_URL overrides everything.
 seed_url_for() {
-  local shot="$1"
+  local basename="$1" explicit="${2:-0}"
   if [[ -n "$ZAI_SEED_URL" ]]; then
     printf '%s' "$ZAI_SEED_URL"
     return 0
   fi
-  local seed="designs/${design}/previews/${shot}.png"
-  if [[ ! -f "$seed" ]]; then
+  local seed="designs/${design}/previews/${basename}.png"
+  # Fallback to the first shots.conf shot applies ONLY to the default seed (the
+  # shot's own name). An explicit seed=<ref> names a specific render — if it
+  # isn't there, that's an error to surface, not a reason to silently animate a
+  # different image.
+  if [[ ! -f "$seed" && "$explicit" != 1 ]]; then
     local first_shot=""
     if [[ -f "designs/${design}/shots.conf" ]]; then
       local sline strimmed
@@ -216,7 +220,11 @@ seed_url_for() {
     [[ -n "$first_shot" ]] && seed="designs/${design}/previews/${first_shot}.png"
   fi
   if [[ ! -f "$seed" ]]; then
-    echo "no tier-1 shot to anchor the clip to (looked for previews/${shot}.png and the first shots.conf shot) — Vidu 2 is image-to-video; add a shots.conf shot or set ZAI_SEED_URL" >&2
+    if [[ "$explicit" == 1 ]]; then
+      echo "seed render previews/${basename}.png not found — a motion clip seeds image-to-video from a committed render (a tier-1 shot, a lifestyle still, or a product still); commit it or fix seed=" >&2
+    else
+      echo "no tier-1 shot to anchor the clip to (looked for previews/${basename}.png and the first shots.conf shot) — Vidu 2 is image-to-video; add a shots.conf shot or set ZAI_SEED_URL" >&2
+    fi
     return 1
   fi
   local sha slug origin_url
@@ -254,9 +262,30 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   trimmed="$(trim "$line")"
   [[ -z "$trimmed" || "$trimmed" == '#'* ]] && continue
   shot="$(trim "${line%%|*}")"
-  prompt="$(trim "${line#*|}")"
-  if [[ -z "$shot" || -z "$prompt" || "$line" != *"|"* ]]; then
-    echo "malformed motion.conf line (want '<shot> | <prompt>'): $line" >&2
+  rest="${line#*|}"
+  if [[ -z "$shot" || "$line" != *"|"* ]]; then
+    echo "malformed motion.conf line (want '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>'): $line" >&2
+    exit 1
+  fi
+  # Optional middle field "seed=<ref>" names the committed render this clip
+  # animates (previews/<ref>.png). Unlike a lifestyle still, a motion clip MAY
+  # seed from an AI image — animating a lifestyle scene (seed=lifestyle-<x>) or a
+  # product still is exactly the still→clip hop the pipeline wants — so there is
+  # no not-AI guard here. Omitted, the seed defaults to the shot's own name and
+  # falls back to the first shots.conf shot (the long-standing behavior). Only a
+  # middle field literally starting with "seed=" is treated as one, so a '|' in
+  # a prompt still parses as before.
+  seed=""; explicit_seed=0
+  rest_trim="$(trim "$rest")"
+  if [[ "$rest_trim" == seed=* && "$rest" == *"|"* ]]; then
+    seed="$(trim "${rest%%|*}")"; seed="${seed#seed=}"; seed="$(trim "$seed")"
+    explicit_seed=1
+    prompt="$(trim "${rest#*|}")"
+  else
+    prompt="$rest_trim"
+  fi
+  if [[ -z "$prompt" ]]; then
+    echo "malformed motion.conf line (empty prompt): $line" >&2
     exit 1
   fi
   # <shot> becomes the filename stem (lifestyle-<shot>.gif) and part of the
@@ -264,6 +293,14 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   # produce a broken markdown link.
   if [[ ! "$shot" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
     echo "invalid shot name '${shot}' in ${conf} — must be kebab-case ([a-z0-9-])" >&2
+    exit 1
+  fi
+  # The seed likewise resolves to previews/<seedname>.png; kebab-case only so it
+  # can't escape the directory. lifestyle-<x> and product-still-<x> are legal
+  # (and kebab), so no prefix is excluded here.
+  seedname="${seed:-$shot}"
+  if [[ ! "$seedname" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+    echo "invalid seed name '${seedname}' in ${conf} — must be kebab-case ([a-z0-9-])" >&2
     exit 1
   fi
 
@@ -288,7 +325,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
       echo "ZAI_KEY is not set — export it (CI: repo secret) or pass --mock" >&2
       exit 1
     fi
-    seed_url="$(seed_url_for "$shot")" || exit 1
+    seed_url="$(seed_url_for "$seedname" "$explicit_seed")" || exit 1
     req_body="$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"prompt":sys.argv[2],"image_url":sys.argv[3],"duration":int(sys.argv[4]),"size":sys.argv[5],"movement_amplitude":sys.argv[6]}))' \
       "$ZAI_VIDEO_MODEL" "$prompt" "$seed_url" "$ZAI_VIDEO_DURATION" "$ZAI_VIDEO_SIZE" "$ZAI_MOVEMENT")"
     # Capture body AND status (no -f): a 4xx body carries the real reason — a

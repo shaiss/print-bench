@@ -10,19 +10,17 @@ the **product shot** is what makes a stranger want the thing: the part as
 it would look printed, sitting under studio light. Every design's README
 should lead with one.
 
-Two tiers, in order:
-
-**CI renders and commits both tiers.** What you own is the *manifest* and
+**CI renders and commits every tier.** What you own is the *manifest* and
 the *embed*: `shots.conf` says which shot exists and how it is framed,
 README.md places it. The `regen` job in `.github/workflows/ci.yml` runs
 `product-shot.sh` for every design a PR touches and pushes the PNGs to the
-branch; the lifestyle workflows fire on a `lifestyle.conf` (still) or
-`motion.conf` (clip) landing on main.
+branch; the AI workflows fire on a `product-still.conf` (bare-part still),
+`lifestyle.conf` (staged still) or `motion.conf` (clip) landing on main.
 So you can write a manifest and push without `bpy` installed at all. Render
 locally when you want to *judge* framing before pushing — that is a real
 reason, and §"Judge the framing" below is about exactly that.
 
-Two tiers, in order:
+Three tiers, in order:
 
 1. **Studio render (always — this is the geometry-true deliverable).**
    `./scripts/product-shot.sh <name>` exports the geometry-true STL with
@@ -36,7 +34,14 @@ Two tiers, in order:
    byte-level comparison across machines: Cycles dispatches an SSE4.2 or
    AVX2 CPU kernel by what the host supports, and their rounding differs,
    so compare renders from different hardware perceptually, not byte-wise.
-2. **AI-restyled lifestyle shot (optional — only when the session has an
+2. **AI product still (tier 1.5 — optional, CI-wired).** The **bare part**,
+   photoreal, in isolation — no scene — image-to-image seeded from a tier-1
+   render (`product-still.conf`). It sits between the deterministic raytrace
+   and the staged lifestyle scene: more photographic than the raytrace but
+   still about the part alone. Unlike the lifestyle shot it **is shown as a
+   primary product image** and is gated like any preview — but it is AI, so it
+   ships the same disclosure. See "Tier 1.5" below.
+3. **AI-restyled lifestyle shot (optional — only when the session has an
    image-generation tool), and optionally an AI motion clip via CI.**
    Restyle the committed raytrace into a real-world scene — or animate it
    with the motion-clip pipeline (see the subsection at the end of Tier 2).
@@ -111,6 +116,56 @@ geometry per shot, so compose multi-STL shots manually and name the output
 to match a manifest entry only if it is reproducible from source noted in
 NOTES.md.
 
+## Tier 1.5: AI product still
+
+The bare part, photoreal, in isolation — no scene, no props, just the piece
+under studio-clean light from whatever angle sells its form. It sits between
+the deterministic studio raytrace (tier 1) and the staged lifestyle scene
+(tier 2): more photographic than the raytrace, but still about *the part
+alone*, not a world around it. Unlike the lifestyle shot it **is shown as a
+primary product image**, and it is gated like any preview.
+
+It is CI-wired exactly like the lifestyle shot. Write
+`designs/<name>/product-still.conf`, one line per still:
+
+```text
+hero | seed=product-hero | matte black PLA, front three-quarter, seamless studio sweep
+```
+
+- `<still>` is the filename stem: the line above writes
+  `previews/product-still-hero.png`.
+- `seed=<ref>` names the committed **tier-1** render it starts from
+  (`previews/<ref>.png`). This is the crux: an image-to-image still has **no
+  camera of its own**, so its angle *is* the tier-1 shot it seeds. To add a new
+  angle, add a `shots.conf` row for that view first, then a still that seeds it.
+- The prompt describes the finish, material and lighting of the *part*, not a
+  setting.
+
+Landing a `product-still.conf` on main fires the **AI product still** workflow
+(`.github/workflows/product-still.yml`), which runs
+`scripts/lifestyle-shot.sh --kind product-still` — the *same* generator as the
+lifestyle shot, parameterized by `--kind` (default `lifestyle`), so no new
+script. It generates the image image-to-image from the seed via the Z.AI
+GLM-Image API (`ZAI_KEY`), sizes it to budget, embeds it with the disclosure
+below, runs `readme-gate.sh`, and opens a **draft PR** to approve — writing the
+manifest *is* the request. Dispatch the workflow by hand only to re-roll.
+
+Because it is AI, it carries the **same canonical disclosure as every AI tier**
+— and this section is the single place to copy that block from (lifestyle shots
+and motion clips reuse it verbatim, only the filename changing). Commit as
+`previews/product-still-<still>.png`, embed it **only as an inline markdown
+image** (never an `<img>` tag or reference-style link), put the label
+`AI-styled scene` in the alt text, and directly below it a **visible caption**
+carrying the verbatim phrase `geometry is approximate`:
+
+```markdown
+![AI-styled scene: the bare part, front three-quarter](previews/product-still-hero.png)
+
+*AI-generated impression for general illustration only — geometry is
+approximate and may not exactly match the printed part; see the studio
+render above and the STL for the true shape.*
+```
+
 ## Tier 2: AI-restyled lifestyle shot
 
 Two ways to generate one, both landing the same disclosed
@@ -146,10 +201,12 @@ Two ways to generate one, both landing the same disclosed
   item), so the part begins from the real mesh — you are restyling a true shape
   into a scene, not summoning geometry from words. The seed defaults to the
   shot's own name (`previews/<shot>.png`); add `seed=<ref>` to start from a
-  different geometry-true render — a hero shot, a frozen `cameras.conf` view, or
-  a custom-angle tier-1 render you add — so you can choose the angle that sells
-  the scene. It is still disclosed as approximate (the model repaints), but the
-  fidelity is far higher than the old text-to-image path.
+  different render — a hero shot, a frozen `cameras.conf` view, a custom-angle
+  tier-1 render you add, or a **tier-1.5 product still**
+  (`seed=product-still-<x>`, itself already pinned to the mesh) — so you can
+  choose the angle that sells the scene. It is still disclosed as approximate
+  (the model repaints), but the fidelity is far higher than the old
+  text-to-image path.
 - **It is cosmetic, so assume it is geometrically off.** Image generators
   add, drop, and reshape features, and we do **not** reject a lifestyle shot
   for that — chasing pixel-faithful geometry out of a restyle is a losing
@@ -185,13 +242,14 @@ Two ways to generate one, both landing the same disclosed
 ### Motion clips (tier-2 video)
 
 The motion sibling of the lifestyle shot, and CI-wired the same way: write
-`designs/<name>/motion.conf` (one `<shot> | <prompt>` line) and land it on
-main — the **Lifestyle clip (tier-2, AI motion)** workflow
-(`.github/workflows/lifestyle-clip.yml`, `scripts/lifestyle-clip.sh`) fires
-on the manifest, animates the design's committed tier-1 shot with the Z.AI
-Vidu 2 image-to-video API, transcodes the result to a GIF within the
-animation budget, embeds it with the disclosure, runs `readme-gate.sh`, and
-opens a draft PR to approve.
+`designs/<name>/motion.conf` (one `<shot> | <prompt>` line, or `<shot> |
+seed=<ref> | <prompt>`) and land it on main — the **Lifestyle clip (tier-2,
+AI motion)** workflow (`.github/workflows/lifestyle-clip.yml`,
+`scripts/lifestyle-clip.sh`) fires on the manifest, animates the seeded shot
+image-to-video with the Z.AI Vidu 2 API — a committed tier-1 shot by default, or
+a lifestyle still via the explicit `seed=<ref>` field — transcodes the result to
+a GIF within the animation budget, embeds it with the disclosure, runs
+`readme-gate.sh`, and opens a draft PR to approve.
 
 - **Name `<shot>` after the exact `animations.conf` or `shots.conf` entry it
   restyles** (so `turntable` becomes `previews/lifestyle-turntable.gif`) —

@@ -1,28 +1,33 @@
 #!/usr/bin/env bash
-# Generate a tier-2 AI-restyled *lifestyle* shot for a design via the Z.AI
-# GLM-Image API in IMAGE-TO-IMAGE mode — seeded from a committed, geometry-true
-# tier-1 render — size it to the product-shot budget, and embed it in the
-# design's README with the canonical disclosure readme-gate requirement 9
-# demands (an "AI-styled scene" alt label and a "geometry is approximate"
-# caption). The shot stays COSMETIC and geometrically approximate — the model
-# repaints the scene, lighting and materials around the part — but because the
-# request carries a real render of the mesh as its seed (image_urls), the shape
-# is PINNED to the true geometry instead of hallucinated the way blind
-# text-to-image did (which is why a 4x4 grid used to come back as 5x5). The
-# studio product shot (tier 1) is still the geometry-true image; this restyles
-# it. See .claude/skills/product-shots/SKILL.md (tier 2) and issue #66.
+# Generate an AI-restyled image for a design via the Z.AI GLM-Image API in
+# IMAGE-TO-IMAGE mode — seeded from a committed, geometry-true render — size it
+# to the product-shot budget, and embed it in the design's README with the
+# canonical disclosure readme-gate requirement 9 demands (an "AI-styled scene"
+# alt label and a "geometry is approximate" caption). The image stays COSMETIC
+# and geometrically approximate — the model repaints scene, lighting and
+# materials — but because the request carries a real render of the mesh as its
+# seed (image_urls), the shape is PINNED to the true geometry instead of
+# hallucinated the way blind text-to-image did (which is why a 4x4 grid used to
+# come back as 5x5). See .claude/skills/product-shots/SKILL.md and issue #66.
+#
+# One hardened generator, two artifact KINDs (see --kind):
+#   lifestyle      (default) tier-2 SCENE — the part staged in a real-world
+#                  setting. Reads lifestyle.conf, writes previews/lifestyle-<shot>.png.
+#   product-still  tier-1.5 BARE PART — the part alone, no scene, at a chosen
+#                  angle. Reads product-still.conf, writes previews/product-still-<shot>.png.
+# A product still is itself a legal seed for a lifestyle scene, so the PM can
+# chain raytrace -> product still -> lifestyle scene.
 #
 #   ZAI_KEY=... ./scripts/lifestyle-shot.sh <design>
+#   ZAI_KEY=... ./scripts/lifestyle-shot.sh --kind product-still <design>
 #   ./scripts/lifestyle-shot.sh <design> --mock   # offline placeholder, no API
 #
-# Reads designs/<design>/lifestyle.conf. Each line is "<shot> | <prompt>" or
-# "<shot> | seed=<ref> | <prompt>": the seed names the committed geometry-true
-# render (previews/<ref>.png) the image-to-image starts from, and defaults to
-# the shot's own name (previews/<shot>.png) when omitted — same-name seeding
-# like motion.conf. Writes designs/<design>/previews/lifestyle-<shot>.png.
-# Re-running is safe:
+# Reads designs/<design>/<kind-manifest>. Each line is "<shot> | <prompt>" or
+# "<shot> | seed=<ref> | <prompt>": the seed names the committed render
+# (previews/<ref>.png) the image-to-image starts from, and defaults to the
+# shot's own name (previews/<shot>.png) when omitted. Re-running is safe:
 # the README embed is inserted only if it isn't there already. Meant to run in
-# CI (.github/workflows/lifestyle-shot.yml) where ZAI_KEY is a repo secret;
+# CI (lifestyle-shot.yml / product-still.yml) where ZAI_KEY is a repo secret;
 # --mock lets the whole pipeline be exercised locally without a key.
 set -euo pipefail
 
@@ -38,11 +43,24 @@ ZAI_MODEL="${ZAI_MODEL:-glm-image}"
 ZAI_ENDPOINT="${ZAI_ENDPOINT:-https://api.z.ai/api/paas/v4/images/generations}"
 ZAI_SIZE="${ZAI_SIZE:-1280x1280}"   # a size the GLM-Image docs show in examples
 
-design="${1:-}"
+# Flags in any order around the one positional <design>, so both
+# "lifestyle-shot.sh <design> --mock" and "lifestyle-shot.sh --kind product-still
+# <design>" (the form product-still.yml uses) parse identically.
+design=""
 mock=0
-[[ "${2:-}" == "--mock" ]] && mock=1
+kind="lifestyle"     # 'lifestyle' (tier-2 scene) or 'product-still' (tier-1.5 bare part)
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mock)   mock=1; shift ;;
+    --kind)   kind="${2:-}"; shift 2 ;;
+    --kind=*) kind="${1#--kind=}"; shift ;;
+    --)       shift; break ;;
+    -*)       echo "unknown flag '$1'" >&2; exit 2 ;;
+    *)        if [[ -z "$design" ]]; then design="$1"; shift; else echo "unexpected extra argument '$1'" >&2; exit 2; fi ;;
+  esac
+done
 if [[ -z "$design" ]]; then
-  echo "usage: ZAI_KEY=... $0 <design> [--mock]" >&2
+  echo "usage: ZAI_KEY=... $0 [--kind lifestyle|product-still] <design> [--mock]" >&2
   exit 2
 fi
 # The design name is interpolated into paths (designs/<design>/...); pin it to
@@ -56,7 +74,19 @@ if [[ ! "$design" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
   exit 2
 fi
 
-conf="designs/${design}/lifestyle.conf"
+# Two artifact kinds share this one hardened generator — the identical
+# GLM-Image image-to-image call, SSRF/download hardening and budget fit — and
+# differ only in the manifest read, the output prefix, the README alt text and
+# which seeds they accept:
+#   lifestyle      tier-2 SCENE:        previews/lifestyle-<shot>.png     (lifestyle.conf)
+#   product-still  tier-1.5 BARE PART:  previews/product-still-<shot>.png (product-still.conf)
+case "$kind" in
+  lifestyle)     conf_name="lifestyle.conf";     out_prefix="lifestyle";     kind_label="lifestyle scene" ;;
+  product-still) conf_name="product-still.conf"; out_prefix="product-still"; kind_label="product still" ;;
+  *) echo "invalid --kind '${kind}' — must be 'lifestyle' or 'product-still'" >&2; exit 2 ;;
+esac
+
+conf="designs/${design}/${conf_name}"
 if [[ ! -f "$conf" ]]; then
   echo "no ${conf} — nothing to generate" >&2
   exit 1
@@ -137,6 +167,7 @@ fit_budget() {
 }
 
 generated=()
+generated_seed=()   # parallel to generated[]: the seed each shot derived from
 while IFS= read -r line || [[ -n "$line" ]]; do
   # Full-line comments and blank lines only — a '#' inside a prompt is content
   # (a scene may legitimately say "buoy #3"), so do not strip inline.
@@ -184,26 +215,38 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     echo "invalid seed name '${seed}' in ${conf} — must be kebab-case ([a-z0-9-])" >&2
     exit 1
   fi
+  # Seed integrity, bounded per kind. A lifestyle SCENE may seed from a
+  # geometry-true tier-1 render OR a tier-1.5 product still (both pin the shape),
+  # but never another lifestyle-* scene — seeding a repaint from a repaint drifts
+  # with nothing left anchoring it. A PRODUCT STILL is the geometry-pinning hop,
+  # so it may seed ONLY from a geometry-true render — never any AI image
+  # (neither a lifestyle-* scene nor another product-still-*). The break of the
+  # old "a seed is always geometry-true" invariant is deliberate and made
+  # explicit here rather than silently.
   if [[ "$seed" == lifestyle-* ]]; then
-    echo "invalid seed '${seed}' in ${conf} — a lifestyle shot must seed from a geometry-true render, not another AI (lifestyle-*) image" >&2
+    echo "invalid seed '${seed}' in ${conf} — a ${kind_label} must not seed from a lifestyle-* scene (an AI repaint); seed from a geometry-true tier-1 render (or, for a lifestyle scene, a product-still-* render)" >&2
+    exit 1
+  fi
+  if [[ "$kind" == "product-still" && "$seed" == product-still-* ]]; then
+    echo "invalid seed '${seed}' in ${conf} — a product still must seed from a geometry-true tier-1 render, not another AI product still" >&2
     exit 1
   fi
   seed_path="designs/${design}/previews/${seed}.png"
   if [[ ! -f "$seed_path" ]]; then
-    echo "seed render ${seed_path} not found — a lifestyle shot seeds image-to-image from a committed geometry-true render; add the tier-1 shots.conf/cameras.conf entry that produces it (or point seed= at an existing one)" >&2
+    echo "seed render ${seed_path} not found — a ${kind_label} seeds image-to-image from a committed geometry-true render; add the tier-1 shots.conf/cameras.conf entry that produces it (or point seed= at an existing one)" >&2
     exit 1
   fi
 
   outdir="designs/${design}/previews"
   mkdir -p "$outdir"
-  out="${outdir}/lifestyle-${shot}.png"
+  out="${outdir}/${out_prefix}-${shot}.png"
 
   if (( mock )); then
     # Offline placeholder so the fit-to-budget, README-embed and gate steps are
     # testable without the API or a key. Never commit a --mock image.
     convert -size "$ZAI_SIZE" gradient:'#2b3a4a'-'#c98f5a' \
       -gravity center -pointsize 42 -fill white \
-      -annotate 0 "MOCK lifestyle shot\n${design} / ${shot}\nseed: ${seed}\n(placeholder, not for commit)" \
+      -annotate 0 "MOCK ${kind_label}\n${design} / ${shot}\nseed: ${seed}\n(placeholder, not for commit)" \
       "$tmp/gen.png"
   else
     if [[ -z "${ZAI_KEY:-}" ]]; then
@@ -442,21 +485,34 @@ PY
   fit_budget "$tmp/gen.png" "$out"
   echo "wrote ${out} ($(( ($(stat -c %s "$out") + 1023) / 1024 )) KiB)"
   generated+=("$shot")
+  generated_seed+=("$seed")
 done <"$conf"
 
 # Insert the canonical disclosure embed into the README for each shot (only if
-# it isn't already embedded), directly after the tier-1 hero image so the
-# lifestyle shot sits beside the geometry-true one it augments.
+# it isn't already embedded), directly after the geometry-true render it was
+# seeded from, so the AI image sits beside the real shape it derives from.
 readme="designs/${design}/README.md"
-(( ${#generated[@]} )) || { echo "no shots generated (empty lifestyle.conf?)" >&2; exit 1; }
-for shot in "${generated[@]}"; do
-  DESIGN="$design" SHOT="$shot" README="$readme" python3 - <<'PY'
+(( ${#generated[@]} )) || { echo "no shots generated (empty ${conf}?)" >&2; exit 1; }
+for i in "${!generated[@]}"; do
+  shot="${generated[$i]}"
+  seed="${generated_seed[$i]}"
+  DESIGN="$design" SHOT="$shot" SEED="$seed" README="$readme" \
+    OUT_PREFIX="$out_prefix" KIND="$kind" python3 - <<'PY'
 import os
 design, shot, readme = os.environ["DESIGN"], os.environ["SHOT"], os.environ["README"]
-rel = f"previews/lifestyle-{shot}.png"
-hero = f"previews/{shot}.png"
+seed, out_prefix, kind = os.environ["SEED"], os.environ["OUT_PREFIX"], os.environ["KIND"]
+rel = f"previews/{out_prefix}-{shot}.png"
+hero = f"previews/{seed}.png"
+# Alt text differs by kind for the reader, but BOTH kinds carry the canonical
+# "AI-styled scene" token (readme-gate requirement 9 keys on it) and the
+# identical "geometry is approximate" caption — one disclosure vocabulary,
+# reused verbatim, because a product still is still an AI repaint.
+if kind == "product-still":
+    alt = f"AI-styled scene: {design} bare-part product still"
+else:
+    alt = f"AI-styled scene: {design} staged in a real-world setting"
 block = (
-    f"\n![AI-styled scene: {design} staged in a real-world setting]({rel})\n\n"
+    f"\n![{alt}]({rel})\n\n"
     "*AI-generated impression for general illustration only — geometry is "
     "approximate and may not exactly match the printed part; see the studio "
     "render above and the STL for the true shape.*\n"

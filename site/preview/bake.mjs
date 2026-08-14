@@ -32,7 +32,7 @@ const MEDIA_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 function prettify(file) {
   return file
     .replace(/\.[a-z0-9]+$/i, "")
-    .replace(/^lifestyle-/, "")
+    .replace(/^(lifestyle|product-still)-/, "")
     .replace(/-/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -41,6 +41,8 @@ function classify(file) {
   const gif = /\.gif$/i.test(file);
   if (/^lifestyle-/.test(file))
     return { kind: gif ? "AI motion clip" : "AI-styled scene", ai: true, motion: gif };
+  if (/^product-still-/.test(file))
+    return { kind: "AI-styled scene", ai: true, motion: false };
   if (/^product-hero\./.test(file)) return { kind: "Studio render", ai: false, motion: false };
   if (/^turntable\./.test(file)) return { kind: "Turntable", ai: false, motion: true };
   if (/^contact-sheet\./.test(file)) return { kind: "4-view contact sheet", ai: false, motion: false };

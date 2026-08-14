@@ -32,6 +32,11 @@ test("classifyMedia knows the repo's filename conventions", () => {
     ai: true,
     motion: true,
   });
+  assert.deepEqual(classifyMedia("product-still-hero.png"), {
+    kind: "AI-styled scene",
+    ai: true,
+    motion: false,
+  });
   assert.deepEqual(classifyMedia("contact-sheet.png"), {
     kind: "4-view contact sheet",
     ai: false,
@@ -44,6 +49,7 @@ test("classifyMedia knows the repo's filename conventions", () => {
 test("mediaLabel prettifies filenames and drops the lifestyle prefix", () => {
   assert.equal(mediaLabel("product-hero.png"), "Product Hero");
   assert.equal(mediaLabel("lifestyle-bench-calipers.png"), "Bench Calipers");
+  assert.equal(mediaLabel("product-still-hero.png"), "Hero");
 });
 
 test("stripReadmeMedia lifts embeds and disclaimers, keeps everything else", () => {
@@ -121,6 +127,16 @@ test("designMedia carries the right disclosure per AI media", () => {
   assert.equal(byFile.get("product-hero.png").disclosure, null);
 });
 
+test("designMedia carries the AI still disclosure for a product still", () => {
+  const media = designMedia({
+    title: "x",
+    previews: ["product-still-hero.png"],
+  });
+  assert.equal(media[0].ai, true);
+  assert.equal(media[0].motion, false);
+  assert.equal(media[0].disclosure, AI_STILL_DISCLOSURE);
+});
+
 test("designMedia falls back to a title-derived alt for unembedded previews", () => {
   const media = designMedia({ title: "Widget", previews: ["cutaway.png"] });
   assert.equal(media[0].alt, "Widget — Cutaway");
@@ -149,6 +165,17 @@ test("stripReadmeMedia strips the disclaimer only when an AI embed precedes it",
   ].join("\n");
   const { markdown, alts } = stripReadmeMedia(md);
   assert.ok(alts.has("lifestyle-x.png"));
+  assert.ok(!markdown.includes("AI-generated"));
+});
+
+test("stripReadmeMedia strips the disclaimer after a product-still embed too", () => {
+  const md = [
+    "![AI product still](previews/product-still-hero.png)",
+    "",
+    "*AI-generated impression for general illustration only — geometry is approximate.*",
+  ].join("\n");
+  const { markdown, alts } = stripReadmeMedia(md);
+  assert.ok(alts.has("product-still-hero.png"));
   assert.ok(!markdown.includes("AI-generated"));
 });
 

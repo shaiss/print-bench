@@ -43,14 +43,21 @@ necessary, not sufficient).
 
 How the product page should sell this design — the PM's creative brief, in
 plain language. The `/art-direction` skill turns this into the shot manifests
-(`shots.conf`, `lifestyle.conf`) and README embeds via `scripts/shot-spec.sh`,
-so write *intent* here, not manifest syntax. Two standards bound the freedom,
-and they are why the two tables are separate: the studio shot (tier 1) is
-geometry-true with a **fixed** studio scene, so its only levers are pose, color,
-finish and framing; **scenery and staging live in the AI lifestyle shot
-(tier 2)**, which is cosmetic and always ships the "geometry is approximate"
-disclosure. Run `./scripts/shot-spec.sh views` and `… palette` for the named
-framing and color vocabularies (or give a hex / a raw `rotz,elev,zoom`).
+(`shots.conf` and its AI siblings `product-still.conf`, `lifestyle.conf`,
+`motion.conf`) and README embeds via `scripts/shot-spec.sh`, so write *intent*
+here, not manifest syntax. The tables are separate because the page has a
+**tiered image pipeline** and each tier's freedom differs — but they form one
+**seed chain**, each AI hop image-to-image (or -video) from the render before it,
+so the part's shape stays pinned to the real mesh even as the scene turns
+cosmetic: **tier 1** the geometry-true studio render (`shots.conf`), its levers
+pose, color, finish and framing; **tier 1.5** an AI *product still* of the bare
+part (`product-still.conf`), photoreal and in isolation, seeded from a tier-1
+render; **tier 2** the AI *lifestyle scene* (`lifestyle.conf`) that stages a
+world around the part, seeded from a tier-1 or tier-1.5 render; and the **tier-2
+motion clip** (`motion.conf`), seeded from a scene. Every AI tier is disclosed as
+approximate (the model repaints even a seeded shape) and ships the "geometry is
+approximate" caption. Run `./scripts/shot-spec.sh views` and `… palette` for the
+named framing and color vocabularies (or give a hex / a raw `rotz,elev,zoom`).
 
 **Page promise.** The one thing a stranger must take away from the page.
 
@@ -61,11 +68,29 @@ Shots are frozen once reviewed — add a row, never repurpose one.
 |---|---|---|---|---|
 | product-hero | | hero | | |
 
-**Lifestyle scenes — tier 2 (AI, cosmetic, disclosed).** Optional. Describe the
-*setting*, not fake detail; the geometry is only an impression.
+**AI product stills — tier 1.5 (AI, bare product, disclosed).** Optional. The
+bare part, no scene, photoreal, and *shown on the page* — one row per angle,
+where the angle **is** which tier-1 shot seeds it (an image-to-image still has no
+camera of its own). A new angle means adding a tier-1 row above, then a still
+that seeds it. Every still ships the "geometry is approximate" disclosure.
 
-| Shot | Scene |
-|---|---|
+| Still | Seeds from (tier-1 shot) | Prompt/notes |
+|---|---|---|
+
+**Lifestyle scenes — tier 2 (AI, cosmetic, disclosed).** Optional. Describe the
+*setting*, not fake detail; the scene is AI but seeded image-to-image from a real
+render, so the shape stays pinned — name the tier-1 or tier-1.5 render each
+scene seeds from.
+
+| Shot | Seed | Scene |
+|---|---|---|
+
+**Motion clips — tier 2 (AI, cosmetic, disclosed).** Optional; only motion the
+print really performs. Seeded image-to-video from a tier-1 shot or a lifestyle
+still — geometry approximate, and the motion itself illustrative.
+
+| Shot | Seed | Scene/Motion |
+|---|---|---|
 
 ## Backlog, ranked by user value
 
