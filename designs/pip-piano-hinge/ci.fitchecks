@@ -1,0 +1,8 @@
+# Print-in-place fit proof: the three bodies (leaf A, leaf B, free pin) must be
+# geometrically separate. `fitcheck` renders every pairwise overlap and must be
+# EMPTY (they clear — the pin is free, leaves don't rub). `fitcheck_neg` renders
+# an oversized pin that MUST overlap the bores, proving the check can fail.
+# This is the guard that catches the locked-hinge bug (a fused hinge scores
+# 100/100 watertight; only this interference check sees it).
+fitcheck      empty
+fitcheck_neg  interferes

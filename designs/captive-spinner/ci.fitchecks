@@ -1,0 +1,6 @@
+# Print-in-place fit proof: the rotor must be a free captive body, clearing the
+# fixed post+cap on every surface. `fitcheck` renders rotor ∩ fixed and must be
+# EMPTY (radial bore gap + axial cap/base gaps all clear). `fitcheck_neg` shrinks
+# the bore onto the post so it MUST overlap, proving the check can fail.
+fitcheck      empty
+fitcheck_neg  interferes
