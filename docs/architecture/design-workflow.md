@@ -138,9 +138,14 @@ because approving a shape is the human's merge decision.
   the off state is the default. See [`print-feedback.md`](../print-feedback.md).
 - **Product shots, tiered** — tier-1 is a geometry-true studio render
   (path-traced from the same STL export the part uses; deterministic, CI-gated).
-  Tier-2 is AI-generated lifestyle imagery/motion — cosmetic, geometry
-  approximate, gated for presence *and* an honest disclosure label, never for
-  pixels.
+  Tier-1.5 is an AI **product still** — the bare part in isolation, photoreal,
+  image-to-image seeded from a tier-1 render (so its angle *is* the tier-1 shot
+  it seeds); it is shown on the page and gated like any preview. Tier-2 is
+  AI-generated lifestyle imagery/motion — a world around the part, or its
+  movement — each AI hop image-to-image/-video seeded from the render before it
+  (raytrace → product still → lifestyle scene → motion clip). Every AI tier is
+  cosmetic and geometry-approximate, gated for presence *and* an honest
+  disclosure label, never for pixels.
 - **Archiving** — an `ARCHIVED` marker freezes a design at v0.1 and retires it
   from every full-catalog CI run, so it stops spending render/slice cycles. It's
   still gated by a PR that edits its own files, and still appears on the site.

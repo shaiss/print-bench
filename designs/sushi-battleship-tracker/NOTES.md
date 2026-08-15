@@ -101,6 +101,14 @@ marker seat (~30–45 min print). Before committing to the full board:
    the field-test entry. If your markers are smaller than 8 mm, set
    `marker_d` to match and reprint the coupon.
 
+## Product-shot provenance
+
+The committed `previews/lifestyle-product-hero.png` and `lifestyle-product-hero.gif`
+were generated **blind (text-to-image)**, before the pipeline gained image-to-image
+seeding. The `seed` now resolving to `product-hero` in `lifestyle.conf` pins the
+shape to the real mesh only from the **next re-roll** onward — it does not
+retroactively describe the currently committed image.
+
 ## Field test log
 
 (None yet — B1 on the PM backlog. Append entries per
