@@ -52,19 +52,30 @@ feature — the marker seat — and understand nothing else moved.
 | product-hero | the full assembled board, one shutter open — same promise as the parent, new colorway so the pages don't blur together | three-quarter | crimson / satin | `part="assembled"` |
 | seat-detail | the delta itself: door tops with the dished seats, close enough to read the coordinate engraving | detail | crimson / satin | `part="top"` |
 
-**Lifestyle scenes — tier 2 (AI, cosmetic, disclosed).** Optional.
+**AI product stills — tier 1.5 (AI, bare product, disclosed).** The bare part,
+no scene, image-to-image seeded from a tier-1 render — the angle is whichever
+tier-1 shot each still seeds. Shown on the page beside the studio render; a
+lifestyle scene may later seed from one of these.
 
-| Shot | Scene |
-|---|---|
-| product-hero | the board mid-game on a dinner table, soybeans parked on a few closed shutters, sushi and soy dishes around it |
+| Still | Seeds from (tier-1 shot) | Prompt/notes |
+|---|---|---|
+| hero | product-hero | the full assembled board, bare on a seamless studio sweep — the clean "here's the object" shot |
+| seat | seat-detail | close on the dished marker seats and shutters, bare, raking light for the FDM texture |
+
+**Lifestyle scenes — tier 2 (AI, cosmetic, disclosed).** Optional. `Seed` names
+the render each scene starts from (a tier-1 shot or a tier-1.5 product still).
+
+| Shot | Seed | Scene |
+|---|---|---|
+| product-hero | product-hero | the board mid-game on a dinner table, soybeans parked on a few closed shutters, sushi and soy dishes around it |
 
 **Motion clips — tier 2 (AI, cosmetic, disclosed).** Optional; only motion
 the print really performs — shutters slide along their rails, markers settle
 into seats. Nothing that would leak hidden information (N2).
 
-| Shot | Scene/Motion |
-|---|---|
-| product-hero | mid-game on the dinner table: one shutter slides open along its rail, a soybean settles into a closed shutter's seat |
+| Shot | Seed | Scene/Motion |
+|---|---|---|
+| product-hero | product-hero | mid-game on the dinner table: one shutter slides open along its rail, a soybean settles into a closed shutter's seat |
 
 ## Backlog, ranked by user value
 

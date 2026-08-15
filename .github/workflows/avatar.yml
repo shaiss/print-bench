@@ -17,6 +17,11 @@ name: Regenerate avatar
 # Actions > General > Workflow permissions > "Allow GitHub Actions to create
 # and approve pull requests" must be ON, or the final `gh pr create` is
 # denied (the branch is still pushed; open the PR from it manually).
+# Also recommended (shared with the lifestyle workflows and log-print-result):
+# set the REGEN_TOKEN secret — a fine-grained PAT with contents + pull-requests
+# write. Without it the draft PR is opened with GITHUB_TOKEN, which triggers no
+# workflow, so the normal CI never auto-runs on it and its required checks never
+# appear; with REGEN_TOKEN set, opening the PR triggers CI automatically.
 
 on:
   workflow_dispatch:
@@ -122,15 +127,20 @@ jobs:
           node site/avatars.mjs "${args[@]}"
 
       - name: Prove the drift gate passes
-        # The draft PR is opened with GITHUB_TOKEN, so normal CI will not
-        # auto-run on it — run the site suite here (it contains the
-        # avatar drift test) so the header and SVG are proven in step before
-        # a human ever sees the PR.
+        # Run the site suite here as a fast pre-check (it contains the avatar
+        # drift test) so the header and SVG are proven before the PR is even
+        # opened. When REGEN_TOKEN is set the full CI also runs on the opened
+        # PR (see the token below); this early gate still fails the run first.
         run: npm --prefix site test
 
       - name: Open a draft PR with the new avatar
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT if present so the opened PR triggers CI (a GITHUB_TOKEN-opened
+          # PR runs no workflow — the documented REGEN_TOKEN reason); else the
+          # ambient token, and the HAVE_PAT warning below flags that CI won't
+          # auto-run. Used for both the branch push and `gh pr create`.
+          GH_TOKEN: ${{ secrets.REGEN_TOKEN || github.token }}
+          HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' }}
           HANDLE: ${{ github.event.inputs.handle }}
           RUN_ID: ${{ github.run_id }}
           BASE: ${{ github.event.repository.default_branch }}
@@ -164,7 +174,7 @@ jobs:
 
           ${mention}
 
-          **Review before merging:** open the SVG, confirm the member is happy with the face, then take this out of draft. Re-roll by re-running the *Regenerate avatar* workflow. Because this PR was opened by \`GITHUB_TOKEN\`, the normal CI did not auto-run — push a trivial commit or re-run CI if you want the full suite on it.
+          **Review before merging:** open the SVG, confirm the member is happy with the face, then take this out of draft. Re-roll by re-running the *Regenerate avatar* workflow.
 
           🤖 Generated with [Claude Code](https://claude.com/claude-code)
           EOF
@@ -178,11 +188,17 @@ jobs:
               echo ""
               echo "**[${url}](${url})**"
               echo ""
-              echo "_Review the SVG, then take the PR out of draft. It was opened with GITHUB_TOKEN, so CI did not auto-run — push a commit to trigger it._"
+              echo "_Review the SVG, then take the PR out of draft._"
             } >> "$GITHUB_STEP_SUMMARY"
           else
             # ::error:: not ::warning:: — the step exits 1, so the annotation
             # severity should match the failed job.
             echo "::error::Could not open the PR automatically. The branch '${branch}' IS pushed — enable Settings > Actions > General > Workflow permissions > 'Allow GitHub Actions to create and approve pull requests', then open a PR from that branch into ${BASE}."
             exit 1
+          fi
+          # A GITHUB_TOKEN-opened PR triggers no workflow, so without the PAT
+          # the required checks never run and the PR can't satisfy branch
+          # protection. Say so loudly (mirrors log-print-result.yml).
+          if [ "$HAVE_PAT" != "true" ]; then
+            echo "::warning::REGEN_TOKEN is not set, so this PR was created with GITHUB_TOKEN and CI will not auto-run on it. Push any commit (or set REGEN_TOKEN — a fine-grained PAT with contents + pull-requests write) to trigger the required checks."
           fi
