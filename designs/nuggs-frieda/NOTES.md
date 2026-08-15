@@ -99,3 +99,11 @@ clocking, twist either way.
 | F1 | Print the coupon and tune `port_tol` | Inherited standing item from the standard: the fit is proven in geometry, not yet in plastic |
 | F2 | Print the bridge and inspect the F→R / E→D weld bridges at 0.2 mm layers | The weld turns cantilevers into bridges; bridge quality over ~8-15 mm spans at 2.4 mm thickness is printer-dependent |
 | F3 | Other names | `name` + the A–Z advance table make any capital name renderable; the wrap assert bounds length (~7-8 caps at `letter_size = 80`, more at smaller sizes). A per-name kern review is manual: any glyph with free-ended horizontal arms (E, F, and to a lesser degree L, T) wants a weld to its right neighbour |
+
+## Product-shot provenance
+
+The committed `previews/lifestyle-bridge-in-use.png` and `lifestyle-product-hero.gif`
+were generated **blind (text-to-image)**, before the pipeline gained image-to-image
+seeding. The `seed=product-hero` field now in `lifestyle.conf` pins the shape to the
+real mesh only from the **next re-roll** onward — it does not retroactively describe
+the currently committed image.

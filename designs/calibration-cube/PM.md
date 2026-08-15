@@ -47,19 +47,28 @@ Frozen once reviewed — add a row, never repurpose one.
 | product-hero | the printed part, at a glance | hero (low ¾) | orange / satin | — |
 | size-marker | the self-labeling top face — the whole point | high ¾, elevated (`18,58,0.92`) | orange / satin | — |
 
-**Lifestyle scenes — tier 2 (AI, cosmetic, disclosed).** Describe the setting.
+**AI product stills — tier 1.5 (AI, bare product, disclosed).** The bare cube,
+no scene, image-to-image seeded from a tier-1 render — angle = which render it
+seeds. Shown on the page; a lifestyle scene may later seed from it.
 
-| Shot | Scene |
-|---|---|
-| bench-calipers | the cube on a heated printer bed beside digital calipers, workshop light |
+| Still | Seeds from (tier-1 shot) | Prompt/notes |
+|---|---|---|
+| hero | product-hero | the bare orange cube on a seamless studio sweep, chamfered edges legible — the clean object shot |
+
+**Lifestyle scenes — tier 2 (AI, cosmetic, disclosed).** Describe the setting.
+`Seed` names the render each scene starts from (a tier-1 shot or a product still).
+
+| Shot | Seed | Scene |
+|---|---|---|
+| bench-calipers | product-hero | the cube on a heated printer bed beside digital calipers, workshop light |
 
 **Motion clips — tier 2 (AI, cosmetic, disclosed).** Only motion the print can
 plausibly perform — for a static part, that means the camera moves, not the
 cube; the deterministic turntable GIF stays the motion-true artifact.
 
-| Shot | Scene/Motion |
-|---|---|
-| turntable | slow camera orbit around the cube on a heated printer bed, light sweeping over the engraved size marker |
+| Shot | Seed | Scene/Motion |
+|---|---|---|
+| turntable | product-hero | slow camera orbit around the cube on a heated printer bed, light sweeping over the engraved size marker |
 
 ## v1 — definition of done
 
