@@ -109,6 +109,11 @@ class Registry:
             delimiters=("=",),               # '=' only: values carry ':' (base_url)
             comment_prefixes=("#",),
             inline_comment_prefixes=None,     # '#' starts a whole-line comment only
+            interpolation=None,               # values are literal — a '%' in a
+                                              # `notes` string must not trigger
+                                              # ConfigParser's %-interpolation (it
+                                              # would raise deep in parser.items(),
+                                              # past the read_file guard below).
         )
         parser.optionxform = str             # preserve key case
         # Fail loud on a genuinely malformed file rather than silently empty.

@@ -35,8 +35,11 @@ loudly with the offending stanza's id — a registry no one wrote never runs.
 # Validate the whole registry (fail loud) — run in CI and before a change.
 python3 -m model_registry check                 # or: model-registry check
 
-# Resolve a chain: JSON to stdout, and link<N>_model/_provider/_secret/_base_url
-# + link_count lines to $GITHUB_OUTPUT for a workflow to read into its ship steps.
+# Resolve a chain: JSON to stdout (position/model/provider/base_url, no secret),
+# and link_count + link<N>_model/link<N>_provider lines to $GITHUB_OUTPUT for a
+# workflow to read into its ship steps. The secret name and base_url are NOT
+# emitted to $GITHUB_OUTPUT (a secret can't be dereferenced by a runtime name, and
+# echoing a secret name to a step-output sink trips secret-logging scanners).
 python3 -m model_registry resolve review --gh-output "$GITHUB_OUTPUT"
 
 # The ordered model ids, one per line (drift-guard / humans).

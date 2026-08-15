@@ -175,3 +175,13 @@ def test_resolve_unknown_chain_raises(tmp_path):
     reg = load(tmp_path, GOOD)
     with pytest.raises(KeyError, match="unknown chain 'nope'"):
         reg.resolve("nope")
+
+
+def test_percent_in_notes_is_literal_not_interpolated(tmp_path):
+    # `notes` is required free text; a '%' must be a literal character, not a
+    # ConfigParser interpolation token (which would raise InterpolationError deep
+    # in parser.items(), past the read guard, and escape as a traceback). The
+    # loader disables interpolation, so this loads and keeps the '%' verbatim.
+    reg = load(tmp_path, GOOD.replace(
+        "notes = older glm fallback", "notes = ~50% cheaper than opus"))
+    assert reg.models["glm-4.6"].notes == "~50% cheaper than opus"

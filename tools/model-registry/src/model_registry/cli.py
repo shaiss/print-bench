@@ -5,16 +5,21 @@
     model-registry chain <chain>         # the ordered model ids, one per line
     model-registry show                  # human summary of providers/models/chains
 
-``resolve`` is what a workflow calls: it appends ``link<N>_model`` /
-``link<N>_provider`` / ``link<N>_secret`` / ``link<N>_base_url`` and ``link_count``
-lines to ``$GITHUB_OUTPUT`` (the same plain key=value shape ``backlog-burn`` uses),
-so a job reads the chain's model ids into its ship steps without a JSON parse or a
-matrix.  The full resolution is also dumped as JSON to stdout for pipes/humans.
+``resolve`` is what a workflow calls: it appends ``link_count`` plus
+``link<N>_model`` / ``link<N>_provider`` lines to ``$GITHUB_OUTPUT`` (the same
+plain key=value shape ``backlog-burn`` uses), so a job reads the chain's model ids
+and providers into its ship steps without a JSON parse or a matrix.  The secret
+*name* and ``base_url`` are deliberately NOT emitted to ``$GITHUB_OUTPUT`` — a
+workflow cannot dereference a secret by a runtime name (each provider keeps a
+literal-secret ship step), and echoing a secret name to a step-output sink trips
+secret-logging scanners.  The resolution is also dumped as JSON to stdout for
+pipes/humans, carrying position/model/provider/base_url but never the secret name.
 """
 
 from __future__ import annotations
 
 import argparse
+import configparser
 import json
 import os
 import sys
@@ -66,8 +71,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # a runtime name (secrets must be referenced literally, which is exactly
         # why each provider keeps an explicit literal-secret ship step), so
         # emitting them here would be unusable, and echoing a secret *name* to a
-        # step-output sink trips secret-logging scanners for no benefit. The full
-        # record (secret name + base_url included) is in the JSON on stdout above.
+        # step-output sink trips secret-logging scanners for no benefit. The JSON
+        # on stdout above carries position/model/provider/base_url (the secret
+        # name is stripped there too) for a human or a pipe.
         with open(gh_output, "a", encoding="utf-8") as fh:
             fh.write(f"link_count={len(links)}\n")
             for link in links:
@@ -129,13 +135,16 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     A malformed registry (ValueError) or an unknown chain (KeyError) prints a
     one-line ``error:`` to stderr and returns 1 — never a traceback, so a
-    workflow step's log stays legible.
+    workflow step's log stays legible. ``configparser.Error`` is caught too as a
+    last line of defense: ``Registry.load`` disables interpolation and wraps the
+    read, but a future parser change must still degrade to the legible ``error:``
+    rather than a traceback in the auto-review resolve step.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (ValueError, KeyError, FileNotFoundError) as exc:
+    except (ValueError, KeyError, FileNotFoundError, configparser.Error) as exc:
         sys.stderr.write(f"error: {exc}\n")
         return 1
 
