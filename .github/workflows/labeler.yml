@@ -1,0 +1,334 @@
+name: Labeler (scheduled issue triage)
+
+# The scheduled heartbeat for /label-issues. Once a day it reads the OPEN issues
+# that carry none of the routing labels and applies the one that routes each —
+# chiefly `autonomy-ok`, which arms the backlog burn. It is the front door of
+# the autonomy loop: /ship-issue, the chunker and the design run all wait on a
+# routed issue, so the burn ships nothing until an issue is armed. The skill
+# already runs the same attended or unattended and is conservative by
+# construction (arms only confident single-PR work); this workflow just gives it
+# a cadence.
+#
+# WHY THIS EXISTS: the backlog burn only picks issues labeled `autonomy-ok`. A
+# backlog with zero armed issues leaves the burn firing hourly and shipping
+# nothing (an empty selection every run). This routine keeps the queue armed
+# without a human hand-labelling each issue, closing the gap AHEAD of the loop
+# the chunker closes behind it:
+#   labeler arms `autonomy-ok`      → backlog burn ships it.
+#   labeler marks `declined-too-big`→ chunker splits it → burn ships the pieces.
+#   labeler marks `design-brief`    → design run designs it.
+#   labeler marks `needs-decision`  → parked for a human (autonomy blocked).
+#
+# This is the SIBLING of backlog-burn.yml, design-run.yml and chunker.yml. It
+# shares their config parser and their two-key safety model, but NOT their
+# selector: those pick ONE issue carrying an opt-in label; the labeler sweeps
+# issues carrying NONE of the routing labels (the `-label:` search in the Select
+# step below).
+#
+# WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
+#   * Policy → committed, git-tracked: .github/labeler.conf holds `enabled`, the
+#     `provider` and the `cadence`. Change it with a reviewed one-line PR; a
+#     clone carries it.
+#   * Live arming / kill switch → the LABELER_ENABLED repo variable, a fast
+#     human-only toggle (Settings → Secrets and variables → Actions →
+#     Variables, or `gh variable set`). Not in git on purpose: arming an agent
+#     that writes to issues should be a conscious act a fresh clone/fork can't
+#     inherit, and flipping it off halts the routine in seconds without a PR.
+#   * Cadence → the `cron` literal below. Actions cannot read a file or variable
+#     for `on.schedule`, so the schedule must be literal here — still
+#     git-tracked, so changing it is a one-line PR. Keep it in sync with the
+#     `cadence:` key in .github/labeler.conf.
+#
+# Safety properties (same as the siblings):
+#   * TWO keys must agree to run: committed `enabled: true` AND
+#     LABELER_ENABLED == 'true'. Either off → inert.
+#   * Non-destructive: the routine only ADDS labels (never removes) and only to
+#     issues that carry no routing label yet, so a re-run cannot re-route, and a
+#     wrong label is one click for a human to remove.
+#   * Bounded: the Select step caps the untriaged list, so a bad day costs a
+#     capful of labels, not the whole backlog.
+
+on:
+  schedule:
+    # Once a day at :11 past the hour — an off-peak minute (not :00) to avoid
+    # Actions scheduler congestion, and offset from backlog-burn's :17,
+    # design-run's :23 and chunker's :29 so the routines don't fire
+    # simultaneously. 05:11 runs BEFORE the 05:29 chunker and the 06:17 backlog
+    # burn, so an issue armed this morning is available to the same morning's
+    # chunk-and-ship. Cron must be a literal — Actions evaluates no files or
+    # variables for on.schedule — so change the cadence by editing this line in
+    # a one-line PR (and the `cadence:` key in .github/labeler.conf to match),
+    # e.g.:
+    #   twice daily:  '11 5,17 * * *'
+    #   weekly:       '11 5 * * 1'
+    # The two-key guard (LABELER_ENABLED + committed `enabled: true`) ensures the
+    # schedule is harmless until deliberately armed, so firing daily is safe:
+    # idle firings cost nothing.
+    - cron: '11 5 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Select and log the untriaged issues, but do not invoke /label-issues'
+        type: boolean
+        default: false
+
+# Scoped to what the unattended /label-issues run actually does: it reads the
+# repo to run the skill (contents:read) and adds labels + audit comments to
+# issues (issues:write). It pushes no branch and opens no PR, so it needs
+# NEITHER contents:write NOR pull-requests:write — the same deliberately tight
+# grant as the chunker. The job is off unless LABELER_ENABLED is set AND the
+# committed config says enabled, and the writing step is skipped entirely
+# without the provider's secret, so even these grants sit idle until the routine
+# is deliberately switched on.
+permissions:
+  contents: read
+  issues: write
+
+# Never run two labelers at once — this group serializes THIS workflow with
+# itself. It deliberately does NOT serialize against the siblings: GitHub
+# concurrency is shared across workflows only when the group STRING matches, and
+# the siblings use their own names. Do not cancel an in-flight run.
+concurrency:
+  group: labeler
+  cancel-in-progress: false
+
+jobs:
+  label:
+    name: Triage untriaged issues with /label-issues
+    # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
+    # anything but 'true' pauses the whole job in seconds without a commit.
+    # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
+    # Also pin the run to the DEFAULT BRANCH: this job carries a write scope and
+    # a secret, and `workflow_dispatch` can target any in-repo branch — so a
+    # dispatch against a PR branch must not run that branch's skill/selector code
+    # with the secret. On `schedule` github.ref_name is already the default
+    # branch, so this only ever blocks a hand-dispatch against a non-default ref.
+    if: >-
+      vars.LABELER_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    # Labelling is light, but a hung /label-issues must not hold a runner for the
+    # 6-hour default while holding a secret, unwatched.
+    timeout-minutes: 30
+    env:
+      # Secrets cannot be read in a step `if:` directly, so surface each
+      # provider's key presence as a plain string and gate on it below. The
+      # "Read policy" step turns these + the configured provider into a single
+      # `key_present` output.
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # Belt-and-braces with the job `if:` above: always check out the
+          # default branch, so the secret-bearing agent runs the reviewed,
+          # merged skill — never a dispatched branch's version.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install the config parser
+        # The labeler reuses the backlog burn's config parser verbatim (only the
+        # `enabled`/`provider`/`cadence` keys — it does not use the selector).
+        run: pip install -e tools/backlog-burn
+
+      - name: Read policy (.github/labeler.conf)
+        id: policy
+        # Key 2 of 2: the committed, git-tracked source of truth. A malformed or
+        # typo'd config (bad key, unknown provider) fails this step loudly rather
+        # than running on a policy nobody wrote. It also resolves the configured
+        # provider to whether *that provider's* secret is present, so the run
+        # steps below gate on one `key_present` output.
+        run: |
+          set -euo pipefail
+          conf=.github/labeler.conf
+          enabled="$(backlog-burn config --get enabled --path "$conf")"
+          provider="$(backlog-burn config --get provider --path "$conf")"
+          case "$provider" in
+            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
+            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          {
+            echo "enabled=$enabled"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Note when disabled by committed policy
+        if: steps.policy.outputs.enabled != 'true'
+        run: echo "::notice::.github/labeler.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
+
+      - name: Select untriaged issues
+        id: select
+        if: steps.policy.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Cap the daily discovery list so a bad run touches a bounded set.
+          LIMIT: '15'
+        run: |
+          set -euo pipefail
+          # The helper's list-untriaged verb excludes every routing label with a
+          # `-label:` search, so only issues carrying NONE of them come back.
+          # This runs in the TRUSTED workflow context (github.token), not the
+          # agent — the agent is handed only the resulting numbers.
+          list="$(.claude/skills/label-issues/label-helper.sh list-untriaged --limit "$LIMIT")"
+          # Extract the issue numbers into a single space-separated string, e.g.
+          # "#204 Foo\n#206 Bar" -> "204 206".
+          nums="$(printf '%s\n' "$list" | sed -n 's/^#\([0-9]\+\).*/\1/p' | tr '\n' ' ' | sed 's/ *$//')"
+          echo "issues=$nums" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Labeler — selection"
+            if [ -z "$nums" ]; then
+              echo "- no untriaged open issues (every open issue already carries a routing label)"
+            else
+              echo "- untriaged issues to triage: $(echo "$nums" | sed 's/\([0-9]\+\)/#\1/g')"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One explicit run step per provider — a provider is a reviewed,
+      # git-tracked step because GitHub Actions can only reference a secret by
+      # its literal name (secrets can't be selected by a runtime variable). The
+      # committed `provider:` label picks which one runs; adding a provider is a
+      # new step here. Both share the pin, the write permission, the
+      # `github_token` that authenticates the action's own GitHub calls, and the
+      # same /label-issues prompt. The default GITHUB_TOKEN is fine: the labeler
+      # opens no PR (issue writes run no CI), so the REGEN_TOKEN/PAT reasoning the
+      # backlog burn and design run carry does not apply.
+      #
+      # Tool surface: the skill drives every GitHub write through ONE committed
+      # wrapper, .claude/skills/label-issues/label-helper.sh (list/read/add-label
+      # /ensure-label/comment), so the CLI allow-list is that wrapper plus the
+      # READ-ONLY file tools. It is NOT unrestricted `Bash`, and NOT `Write`: the
+      # run reads untrusted issue text while holding a provider key, so a general
+      # shell — or a file-write that could overwrite the wrapper and run it —
+      # would turn prompt-injection into arbitrary commands / key exfiltration.
+      # But --allowedTools only ADDS allows; claude-code-action loads
+      # .claude/settings.json (settingSources=project) whose dev allows (e.g.
+      # Bash(xvfb-run:*)) would leak in. --settings closes that with the SAME
+      # deny backstop the chunker uses (.claude/chunker-settings.json): deny
+      # beats allow from every source, and scripts/chunker-perms-check.sh keeps
+      # it in sync with settings.json. Reusing that gated file — rather than a
+      # second, ungated copy that could drift — is deliberate; the labeler's
+      # wrapper is simply not on settings.json's allow-list, so the check never
+      # has to exempt it. The pin is the immutable commit behind the v1 tag.
+
+      - name: Run via Z.AI (GLM)
+        id: run_zai
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
+        # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
+        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the same
+        # ZAI_KEY is also passed as anthropic_api_key to satisfy the action's
+        # credential check. Labelling is light and every label a human can
+        # remove, so the cheap GLM tier is the right default here. Change the
+        # model on the --model line to trade cost for quality.
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model glm-5.2 --effort low --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          prompt: "/label-issues ${{ steps.select.outputs.issues }}"
+
+      - name: Run via Anthropic (Claude)
+        id: run_anthropic
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
+        # right fit for an unattended bot — no OAuth token / subscription seat.
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          # Same narrow tool grant + shared deny backstop as the Z.AI step.
+          claude_args: --model claude-opus-4-8 --effort low --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          prompt: "/label-issues ${{ steps.select.outputs.issues }}"
+
+      - name: Explain a skipped agentic run
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && (steps.policy.outputs.key_present != '1'
+              || github.event.inputs.dry_run == 'true')
+        env:
+          ISSUES: ${{ steps.select.outputs.issues }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — selected untriaged issues (${ISSUES}) but did not invoke /label-issues"
+          else
+            echo "::notice::the configured provider '${PROVIDER}' has no key set (ZAI_KEY for zai, ANTHROPIC_API_KEY for anthropic) — selected (${ISSUES}) but skipping the unattended /label-issues run"
+          fi
+
+      - name: Explain an empty selection
+        if: steps.policy.outputs.enabled == 'true' && steps.select.outputs.issues == ''
+        run: echo "::notice::no untriaged open issues — every open issue already carries a routing label; nothing to triage"
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          ISSUES: ${{ steps.select.outputs.issues }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          SELECT_OUTCOME: ${{ steps.select.outcome }}
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "## Labeler — run outcome"
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/labeler.conf \`enabled\` != true) — nothing ran"
+            elif [ "${SELECT_OUTCOME}" != "success" ]; then
+              echo "- selection did not complete (\`${SELECT_OUTCOME:-skipped}\`) — the select step failed; see the log"
+            elif [ -z "${ISSUES}" ]; then
+              echo "- selected: none (every open issue already carries a routing label)"
+            else
+              echo "- selected untriaged issues: $(echo "${ISSUES}" | sed 's/\([0-9]\+\)/#\1/g')"
+              echo "- provider: ${PROVIDER}"
+              echo "- run step: ${RUN:-skipped} (the applied labels and one-line rationales are on each issue thread)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    name: Explain a disarmed run
+    # The `label` job is gated at job level, so an unset arming variable (the
+    # default clone/fork state) or a dispatch against a non-default ref skips it
+    # silently. This sibling makes that legible. No secrets, no write perms.
+    if: >-
+      vars.LABELER_ENABLED != 'true'
+      || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the routine did not run
+        env:
+          ARMED: ${{ vars.LABELER_ENABLED }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::notice::the labeler is disarmed — set the LABELER_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/labeler.conf; both must agree before it runs."
+          else
+            echo "::notice::the labeler only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
+          fi
