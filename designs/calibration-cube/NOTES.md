@@ -18,3 +18,11 @@ design demonstrating the parameter conventions.
 ## Print orientation
 As modeled: flat face down, no supports. Print at 100% infill if using it
 to check dimensional accuracy under load.
+
+## Product-shot provenance
+
+The committed `previews/lifestyle-bench-calipers.png` and `lifestyle-turntable.gif`
+were generated **blind (text-to-image)**, before the pipeline gained image-to-image
+seeding. The `seed=product-hero` field now in `lifestyle.conf` pins the shape to the
+real mesh only from the **next re-roll** onward — it does not retroactively describe
+the currently committed image.
