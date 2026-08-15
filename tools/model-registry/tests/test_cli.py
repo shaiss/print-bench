@@ -55,20 +55,30 @@ def test_resolve_writes_gh_output_links(tmp_path):
     assert "link_count=2" in lines
     assert "link1_model=glm-5.2" in lines
     assert "link1_provider=zai" in lines
-    assert "link1_secret=ZAI_KEY" in lines
-    assert "link1_base_url=https://api.z.ai/api/anthropic" in lines
     assert "link2_model=claude-opus-4-8" in lines
     assert "link2_provider=anthropic" in lines
-    assert "link2_secret=ANTHROPIC_API_KEY" in lines
-    assert "link2_base_url=" in lines  # native endpoint = empty
 
 
-def test_resolve_stdout_is_json(tmp_path, capsys):
+def test_secret_name_never_reaches_gh_output(tmp_path):
+    # The provider's secret *name* is not usable in a step output (secrets are
+    # referenced literally) and trips secret-logging scanners — it must not appear.
+    gh = tmp_path / "out.txt"
+    main(["--path", conf(tmp_path), "resolve", "review", "--gh-output", str(gh)])
+    body = gh.read_text(encoding="utf-8")
+    assert "ZAI_KEY" not in body and "ANTHROPIC_API_KEY" not in body
+    assert "_secret=" not in body and "_base_url=" not in body
+
+
+def test_resolve_stdout_is_json_without_secret(tmp_path, capsys):
     main(["--path", conf(tmp_path), "resolve", "review", "--gh-output", str(tmp_path / "o")])
     import json
-    out = json.loads(capsys.readouterr().out)
+    raw = capsys.readouterr().out
+    out = json.loads(raw)
     assert out["chain"] == "review"
     assert [l["model"] for l in out["links"]] == ["glm-5.2", "claude-opus-4-8"]
+    # No secret name anywhere in the JSON either.
+    assert "secret" not in out["links"][0]
+    assert "ZAI_KEY" not in raw and "ANTHROPIC_API_KEY" not in raw
 
 
 def test_chain_prints_ordered_model_ids(tmp_path, capsys):
@@ -82,8 +92,9 @@ def test_resolve_unknown_chain_exits_1(tmp_path, capsys):
     assert "unknown chain 'nope'" in capsys.readouterr().err
 
 
-def test_show_summarizes(tmp_path, capsys):
+def test_show_summarizes_without_secret_names(tmp_path, capsys):
     assert main(["--path", conf(tmp_path), "show"]) == 0
     out = capsys.readouterr().out
-    assert "provider zai: secret=ZAI_KEY" in out
+    assert "provider zai: url=https://api.z.ai/api/anthropic" in out
     assert "chain review: glm-5.2 -> claude-opus-4-8" in out
+    assert "ZAI_KEY" not in out and "ANTHROPIC_API_KEY" not in out

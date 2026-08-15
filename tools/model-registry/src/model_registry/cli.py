@@ -45,20 +45,34 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     reg = _load(args)
     links = reg.resolve(args.chain)
 
-    # JSON to stdout — pipeable, human-readable, the full record.
-    json.dump({"chain": args.chain, "links": [asdict(l) for l in links]},
+    # JSON to stdout — pipeable, human-readable. The provider's secret *name*
+    # (e.g. ZAI_KEY) is deliberately excluded from every output sink: it is a
+    # public identifier, not a value, but echoing a `secret`-named field to
+    # stdout trips secret-logging scanners for no benefit, and nothing consumes
+    # it (secrets are referenced literally in the workflow, never resolved here).
+    def _public(link):
+        d = asdict(link)
+        d.pop("secret", None)
+        return d
+    json.dump({"chain": args.chain, "links": [_public(l) for l in links]},
               sys.stdout, indent=2)
     sys.stdout.write("\n")
 
     gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
     if gh_output:
+        # Only the model id and provider go to $GITHUB_OUTPUT — those are what a
+        # workflow branches on. The provider's secret name and base_url stay out
+        # of the step output on purpose: a workflow cannot dereference a secret by
+        # a runtime name (secrets must be referenced literally, which is exactly
+        # why each provider keeps an explicit literal-secret ship step), so
+        # emitting them here would be unusable, and echoing a secret *name* to a
+        # step-output sink trips secret-logging scanners for no benefit. The full
+        # record (secret name + base_url included) is in the JSON on stdout above.
         with open(gh_output, "a", encoding="utf-8") as fh:
             fh.write(f"link_count={len(links)}\n")
             for link in links:
                 fh.write(f"link{link.position}_model={link.model}\n")
                 fh.write(f"link{link.position}_provider={link.provider}\n")
-                fh.write(f"link{link.position}_secret={link.secret}\n")
-                fh.write(f"link{link.position}_base_url={link.base_url}\n")
     return 0
 
 
@@ -75,7 +89,9 @@ def cmd_show(args: argparse.Namespace) -> int:
     reg = _load(args)
     for pid, p in sorted(reg.providers.items()):
         endpoint = p.base_url or "(native endpoint)"
-        sys.stdout.write(f"provider {pid}: secret={p.secret} url={endpoint}\n")
+        # The secret name is intentionally not printed (see cmd_resolve) — it's in
+        # the committed registry.conf if a human needs it.
+        sys.stdout.write(f"provider {pid}: url={endpoint}\n")
     for mid, m in sorted(reg.models.items()):
         sys.stdout.write(f"model {mid}: provider={m.provider}\n")
     for cid, c in sorted(reg.chains.items()):
