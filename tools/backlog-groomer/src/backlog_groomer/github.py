@@ -29,6 +29,10 @@ API_ROOT = "https://api.github.com"
 # wrong snapshot must not quietly become a confident report.
 _MAX_PAGES = 100
 
+# Per-request timeout: the workflow bounds a hung *job* at 10 minutes, but a
+# stalled socket should fail in seconds, not eat that whole budget.
+_TIMEOUT_S = 30
+
 _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 
 
@@ -43,7 +47,7 @@ def _get(url: str, token: str) -> tuple[Any, str]:
             **({"Authorization": f"Bearer {token}"} if token else {}),
         },
     )
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:
         return json.load(resp), resp.headers.get("Link", "")
 
 
@@ -60,6 +64,13 @@ def _paged(url: str, token: str) -> list[Any]:
                 "a silently-truncated snapshot"
             )
         body, link = _get(next_url, token)
+        if not isinstance(body, list):
+            # An error payload is an object, not a list; extending with one
+            # would iterate its keys and fail confusingly far downstream.
+            raise RuntimeError(
+                f"unexpected non-list response from {next_url} "
+                f"(got {type(body).__name__}) — refusing to build a snapshot from it"
+            )
         items.extend(body)
         match = _LINK_NEXT_RE.search(link)
         next_url = match.group(1) if match else None

@@ -92,3 +92,13 @@ def test_pagination_cap_raises_instead_of_truncating(monkeypatch):
     monkeypatch.setattr(github, "_MAX_PAGES", 3)
     with pytest.raises(RuntimeError, match="more than 3 pages"):
         github.gather_snapshot("o/r", "tok", now=NOW)
+
+
+def test_non_list_page_raises_instead_of_extending(monkeypatch):
+    # An error payload is an object; extending with it would iterate its
+    # keys and crash confusingly far downstream — fail loud at the seam.
+    monkeypatch.setattr(
+        github, "_get", lambda url, token: ({"message": "API rate limit exceeded"}, "")
+    )
+    with pytest.raises(RuntimeError, match="non-list response"):
+        github.gather_snapshot("o/r", "tok", now=NOW)

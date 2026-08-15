@@ -142,12 +142,19 @@ jobs:
                 name: LABEL, color: '0e8a16',
                 description: 'The backlog groomer\'s sticky report issue (issue #244)',
               });
-            } catch (e) { /* already exists */ }
+            } catch (e) {
+              // 422 = already exists (the idempotent path); anything else —
+              // 403, rate limit — is a real failure and must stay loud.
+              if (e.status !== 422) throw e;
+            }
             const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner, repo: context.repo.repo,
               state: 'open', labels: LABEL, per_page: 100,
             });
-            const prev = issues.find(i => i.body && i.body.startsWith(MARKER));
+            // The issues listing interleaves PRs — never select (and then
+            // overwrite!) a PR, the same defensive filter the gather layer
+            // and the burn's snapshot both apply.
+            const prev = issues.find(i => !i.pull_request && i.body && i.body.startsWith(MARKER));
             if (prev) {
               await github.rest.issues.update({
                 owner: context.repo.owner, repo: context.repo.repo,
