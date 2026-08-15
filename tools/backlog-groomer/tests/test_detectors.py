@@ -99,13 +99,15 @@ def test_stale_sorted_oldest_first():
 # Detector: armed-stuck (and the closing-keyword matcher under it)
 # ---------------------------------------------------------------------------
 
-def _armed(number=20, created=10.0):
-    return issue(number, labels=[detectors.ARMED_LABEL], created=created)
+def _armed(number=20, quiet=10.0):
+    # `quiet` drives updatedAt — the label-age proxy the detector measures.
+    return issue(number, labels=[detectors.ARMED_LABEL], created=quiet, updated=quiet)
 
 
 def test_armed_stuck_fires_without_closing_pr():
     found = detectors.armed_stuck([_armed()], [], NOW, CFG.armed_stuck_days)
     assert [f["number"] for f in found] == [20]
+    assert found[0]["days"] == 10
 
 
 def test_armed_stuck_silent_with_closing_pr():
@@ -114,12 +116,20 @@ def test_armed_stuck_silent_with_closing_pr():
     assert detectors.armed_stuck([_armed()], prs, NOW, CFG.armed_stuck_days) == []
 
 
-def test_armed_stuck_silent_when_young():
-    assert detectors.armed_stuck([_armed(created=6)], [], NOW, CFG.armed_stuck_days) == []
+def test_armed_stuck_silent_when_recently_active():
+    assert detectors.armed_stuck([_armed(quiet=6)], [], NOW, CFG.armed_stuck_days) == []
+
+
+def test_armed_stuck_measures_quiet_not_issue_age():
+    # The review's false-positive scenario: a month-old issue armed an hour
+    # ago (labeling bumps updatedAt). Age must not read as stuckness — the
+    # burn's next firing hasn't even had a chance yet.
+    fresh_armed = issue(300, labels=[detectors.ARMED_LABEL], created=30, updated=0.04)
+    assert detectors.armed_stuck([fresh_armed], [], NOW, CFG.armed_stuck_days) == []
 
 
 def test_armed_stuck_silent_without_label():
-    plain = issue(20, created=10)
+    plain = issue(20, created=10, updated=10)
     assert detectors.armed_stuck([plain], [], NOW, CFG.armed_stuck_days) == []
 
 
@@ -255,8 +265,24 @@ def test_dup_cap_returns_top_and_discloses_total():
     found, total = detectors.dup_candidates(crowd, CFG.dup_threshold, 10)
     assert total == 15  # C(6,2)
     assert len(found) == 10
-    # Highest scores first, ties broken by the lower pair numbers.
-    assert found[0]["score"] >= found[-1]["score"]
+
+
+def test_dup_ordered_by_score_then_pair_numbers():
+    # Two 1.0 pairs and four 0.6 pairs, fed in scrambled input order so a
+    # stable sort preserving insertion order cannot fake the tie-break —
+    # dropping either half of the (-score, a, b) key must fail this.
+    crowd = [
+        issue(63, title="Widget mount bracket beta"),
+        issue(60, title="Widget mount bracket alpha"),
+        issue(62, title="Widget mount bracket beta"),
+        issue(61, title="Widget mount bracket alpha"),
+    ]
+    found, total = detectors.dup_candidates(crowd, CFG.dup_threshold, 10)
+    assert total == 6
+    assert [(f["a"], f["b"]) for f in found] == [
+        (60, 61), (62, 63),                    # score 1.0, (a, b) tie-break
+        (60, 62), (60, 63), (61, 62), (61, 63) # score 0.6, (a, b) tie-break
+    ]
 
 
 def test_dup_skips_all_stopword_titles():

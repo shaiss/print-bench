@@ -22,9 +22,9 @@ Config: staleness_days=14, armed_stuck_days=7, oversized_stuck_days=7, dup_thres
 - #10 Ancient bug in render pipeline — last update 2026-07-16 (30 days)
 - #20 Armed task waiting forever — last update 2026-07-26 (20 days)
 
-## Armed but stuck — `autonomy-ok` for >7 days with no open closing PR
+## Armed but stuck — `autonomy-ok`, quiet for >7 days, no open closing PR
 
-- #20 Armed task waiting forever — armed 20 days, no open closing PR
+- #20 Armed task waiting forever — quiet 20 days, no open closing PR
 
 ## Armed but unsized — `autonomy-ok` without a `points-<n>` label
 

@@ -309,8 +309,8 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
 - `tools/backlog-groomer/` — the deterministic backlog-health reporter behind
   the scheduled groomer (`.github/workflows/backlog-groomer.yml`): seven
   detectors over the open-issue queue (stale, armed-but-stuck, unsized,
-  resolved-but-parked decisions, unchunked epics, duplicate candidates,
-  completed epics), advisory-only into one sticky report issue — see its
+  resolved-but-parked decisions, unchunked oversized issues, duplicate
+  candidates, completed epics), advisory-only into one sticky report issue — see its
   [README](tools/backlog-groomer/README.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log

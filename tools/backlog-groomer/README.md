@@ -16,10 +16,12 @@ silent (`tests/test_detectors.py` keeps a positive case and a negative
 control per detector — delete a detector's condition and one half fails):
 
 1. **stale** — open issue with no update in > `staleness_days`.
-2. **armed-stuck** — `autonomy-ok` older than `armed_stuck_days` with no
+2. **armed-stuck** — `autonomy-ok`, quiet for > `armed_stuck_days`, with no
    open PR closing it (nine GitHub keywords, number compared as an int so
    `fixes #24` never half-matches #244): the burn is disarmed, failing, or
-   perpetually re-declining it.
+   stuck on it. `updatedAt` is the label-age proxy (labeling bumps it), so
+   a month-old issue armed today reads as fresh; like `unchunked-oversized`
+   it errs quiet — activity resets the clock.
 3. **unsized-armed** — `autonomy-ok` without a `points-<n>` label, which the
    roadmap board (#148) needs.
 4. **decision-resolved-parked** — `needs-decision` plus a

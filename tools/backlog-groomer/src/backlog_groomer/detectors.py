@@ -100,24 +100,31 @@ def has_open_closing_pr(number: int, open_prs: list[dict]) -> bool:
 def armed_stuck(
     issues: list[dict], open_prs: list[dict], now: datetime, armed_stuck_days: int
 ) -> list[dict]:
-    """``autonomy-ok`` issues older than the threshold with no open closing PR.
+    """``autonomy-ok`` issues quiet past the threshold with no open closing PR.
 
     The burn should have shipped these; their sitting here means the burn is
-    disarmed, failing, or perpetually re-declining them.
+    disarmed, failing, or stuck on them.  ``updatedAt`` is the label-age
+    proxy (same as :func:`unchunked_oversized` — labeling bumps it, and
+    label-event timestamps aren't in the snapshot), so a month-old issue
+    armed an hour ago reads as fresh, not as a month of stuckness.  Like its
+    sibling it errs quiet: any activity resets the clock, so a burn that
+    posts a decline comment each firing keeps the issue out of the report
+    until it stops commenting — an accepted limitation of a snapshot without
+    label events, stated here rather than implied.
     """
     found = [
         {
             "number": i["number"],
             "title": i["title"],
-            "days": _days_since(now, i["createdAt"]),
-            "createdAt": i["createdAt"],
+            "days": _days_since(now, i["updatedAt"]),
+            "updatedAt": i["updatedAt"],
         }
         for i in issues
         if ARMED_LABEL in _labels(i)
-        and _days_since(now, i["createdAt"]) > armed_stuck_days
+        and _days_since(now, i["updatedAt"]) > armed_stuck_days
         and not has_open_closing_pr(i["number"], open_prs)
     ]
-    return sorted(found, key=lambda f: (f["createdAt"], f["number"]))
+    return sorted(found, key=lambda f: (f["updatedAt"], f["number"]))
 
 
 def unsized_armed(issues: list[dict]) -> list[dict]:

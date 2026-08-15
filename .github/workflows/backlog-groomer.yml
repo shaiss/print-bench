@@ -88,8 +88,13 @@ jobs:
 
       - name: Paused in git
         if: steps.policy.outputs.armed != 'true'
+        env:
+          # Env indirection rather than inline ${{ }} in run: — the sibling
+          # workflows' template-injection discipline, kept even for values
+          # the tool constrains to true/false.
+          CONF_ENABLED: ${{ steps.policy.outputs.enabled }}
         run: |
-          echo "::notice::Backlog groomer is armed (BACKLOG_GROOMER_ENABLED=true) but .github/backlog-groomer.conf says 'enabled: ${{ steps.policy.outputs.enabled }}' — doing nothing. Flip the conf in a reviewed PR to resume."
+          echo "::notice::Backlog groomer is armed (BACKLOG_GROOMER_ENABLED=true) but .github/backlog-groomer.conf says 'enabled: ${CONF_ENABLED}' — doing nothing. Flip the conf in a reviewed PR to resume."
 
       - name: Build the report
         if: steps.policy.outputs.armed == 'true'
@@ -111,6 +116,7 @@ jobs:
           echo "::notice::Dry run — the report is in the job summary; the sticky report issue was not touched."
 
       - name: Upsert the sticky report issue
+        id: upsert
         if: steps.policy.outputs.armed == 'true' && !inputs.dry_run
         uses: actions/github-script@v8
         with:
@@ -162,18 +168,21 @@ jobs:
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           ARMED: ${{ steps.policy.outputs.armed }}
           REPORT_OUTCOME: ${{ steps.report.outcome }}
+          UPSERT_OUTCOME: ${{ steps.upsert.outcome }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           {
             echo "### Backlog groomer — run outcome"
             if [ "$POLICY_OUTCOME" != "success" ]; then
-              echo "- ❌ policy step failed — the committed conf did not parse; nothing ran."
+              echo "- ❌ policy step did not complete (${POLICY_OUTCOME:-skipped}) — the committed conf did not parse; nothing ran."
             elif [ "$ARMED" != "true" ]; then
               echo "- ⏸️ armed by the repo variable but paused in git (conf enabled != true)."
             elif [ "$REPORT_OUTCOME" != "success" ]; then
               echo "- ❌ report build failed — see the step log; the sticky issue was not touched."
             elif [ "$DRY_RUN" = "true" ]; then
               echo "- 🧪 dry run: report rendered above, upsert skipped."
+            elif [ "$UPSERT_OUTCOME" != "success" ]; then
+              echo "- ❌ report rendered but the upsert did not complete (${UPSERT_OUTCOME:-skipped}) — the sticky issue may be stale; see the upsert step log."
             else
               echo "- ✅ report rendered and upserted to the sticky report issue."
             fi
@@ -188,9 +197,14 @@ jobs:
     permissions: {}
     steps:
       - name: Explain why nothing ran
+        env:
+          # Env indirection — never interpolate ref names or variables
+          # directly into run: (the siblings' template-injection rule).
+          ENABLED_VAR: ${{ vars.BACKLOG_GROOMER_ENABLED }}
+          REF: ${{ github.ref_name }}
         run: |
-          if [ "${{ vars.BACKLOG_GROOMER_ENABLED }}" != "true" ]; then
+          if [ "$ENABLED_VAR" != "true" ]; then
             echo "::notice::Backlog groomer is disarmed — set the repo variable BACKLOG_GROOMER_ENABLED=true (and keep .github/backlog-groomer.conf 'enabled: true') to arm it. Two keys must agree; this is the live one."
           else
-            echo "::notice::Backlog groomer only runs from the default branch — this dispatch targeted '${{ github.ref_name }}'."
+            echo "::notice::Backlog groomer only runs from the default branch — this dispatch targeted '${REF}'."
           fi

@@ -37,7 +37,7 @@ def _line_stale(f: dict) -> str:
 
 
 def _line_armed_stuck(f: dict) -> str:
-    return f"- #{f['number']} {_clean_title(f['title'])} — armed {f['days']} days, no open closing PR"
+    return f"- #{f['number']} {_clean_title(f['title'])} — quiet {f['days']} days, no open closing PR"
 
 
 def _line_plain(f: dict) -> str:
@@ -73,7 +73,7 @@ def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any) -> str:
         ("stale",
          f"Stale — no update in >{cfg.staleness_days} days", _line_stale),
         ("armed-stuck",
-         f"Armed but stuck — `autonomy-ok` for >{cfg.armed_stuck_days} days with no open closing PR",
+         f"Armed but stuck — `autonomy-ok`, quiet for >{cfg.armed_stuck_days} days, no open closing PR",
          _line_armed_stuck),
         ("unsized-armed",
          "Armed but unsized — `autonomy-ok` without a `points-<n>` label", _line_plain),
