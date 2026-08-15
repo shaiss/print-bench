@@ -62,6 +62,7 @@ jobs:
       stylelift_tests: ${{ steps.filter.outputs.stylelift_tests }}
       lineage_tests: ${{ steps.filter.outputs.lineage_tests }}
       backlog_burn_tests: ${{ steps.filter.outputs.backlog_burn_tests }}
+      backlog_groomer_tests: ${{ steps.filter.outputs.backlog_groomer_tests }}
       telemetry_tests: ${{ steps.filter.outputs.telemetry_tests }}
       ci_gates_tests: ${{ steps.filter.outputs.ci_gates_tests }}
       styles: ${{ steps.filter.outputs.styles }}
@@ -621,6 +622,26 @@ jobs:
         run: pip install -e 'tools/backlog-burn[test]'
       - name: Run tests
         run: python -m pytest tools/backlog-burn/tests -q
+
+  backlog-groomer-tests:
+    name: backlog-groomer unit tests
+    needs: changes
+    if: needs.changes.outputs.backlog_groomer_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install backlog-groomer
+        # Stdlib-only like its burn sibling — the [test] extra is just pytest;
+        # the scheduled groomer workflow installs without it.
+        run: pip install -e 'tools/backlog-groomer[test]'
+      - name: Run tests
+        run: python -m pytest tools/backlog-groomer/tests -q
 
   telemetry-tests:
     name: telemetry unit tests
@@ -1532,6 +1553,7 @@ jobs:
       - stylelift-tests
       - lineage-tests
       - backlog-burn-tests
+      - backlog-groomer-tests
       - telemetry-tests
       - ci-gates-tests
       - docs-standards

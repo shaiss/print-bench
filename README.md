@@ -306,6 +306,12 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   burn (`.github/workflows/backlog-burn.yml`): picks one unclaimed,
   `autonomy-ok`-labelled issue for a nightly unattended `/ship-issue` run —
   see its [README](tools/backlog-burn/README.md)
+- `tools/backlog-groomer/` — the deterministic backlog-health reporter behind
+  the scheduled groomer (`.github/workflows/backlog-groomer.yml`): seven
+  detectors over the open-issue queue (stale, armed-but-stuck, unsized,
+  resolved-but-parked decisions, unchunked epics, duplicate candidates,
+  completed epics), advisory-only into one sticky report issue — see its
+  [README](tools/backlog-groomer/README.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log
   into the report — see its [README](tools/telemetry/README.md)

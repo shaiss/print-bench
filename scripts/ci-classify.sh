@@ -9,11 +9,12 @@
 # time the classifier moved. Now the workflow and the local mirror share this
 # implementation — they cannot disagree.
 #
-#   Emits, one `key=value` per line on STDOUT (the 13 outputs ci.yml's
+#   Emits, one `key=value` per line on STDOUT (the 14 outputs ci.yml's
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests,
-#     backlog_burn_tests, telemetry_tests, ci_gates_tests, styles, gate,
-#     gate_designs, regen, regen_designs, docs_standards
+#     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
+#     ci_gates_tests, styles, gate, gate_designs, regen, regen_designs,
+#     docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
 # Usage:
@@ -47,7 +48,7 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
-  local bbtests=false tmtests=false cgtests=false docs_standards=false
+  local bbtests=false bgtests=false tmtests=false cgtests=false docs_standards=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -55,7 +56,7 @@ classify() {
     # Default-branch push (or any non-PR trigger): run everything, gate and
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
-    bbtests=true; tmtests=true; cgtests=true; docs_standards=true
+    bbtests=true; bgtests=true; tmtests=true; cgtests=true; docs_standards=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -121,6 +122,7 @@ classify() {
           geo_infra=true ;;
         scripts/*|site/*|vercel.json|tools/photoshot/*|\
         tools/backlog-burn/*|.github/backlog-burn.conf|\
+        tools/backlog-groomer/*|.github/backlog-groomer.conf|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
           soft_infra=true ;;
@@ -177,6 +179,10 @@ classify() {
         .github/workflows/ci.yml) bbtests=true ;;
       esac
       case "$f" in
+        tools/backlog-groomer/*|.github/backlog-groomer.conf|\
+        .github/workflows/ci.yml) bgtests=true ;;
+      esac
+      case "$f" in
         tools/telemetry/*|.github/workflows/ci.yml) tmtests=true ;;
       esac
       case "$f" in
@@ -206,6 +212,7 @@ classify() {
         designs/*|lib/*|templates/*|scripts/*|styles/*|site/*|\
         vercel.json|printer.conf|tools/lineage/*|tools/photoshot/*|\
         tools/backlog-burn/*|.github/backlog-burn.conf|\
+        tools/backlog-groomer/*|.github/backlog-groomer.conf|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
           scad=true ;;
@@ -297,6 +304,7 @@ classify() {
   echo "stylelift_tests=$stests"
   echo "lineage_tests=$ltests"
   echo "backlog_burn_tests=$bbtests"
+  echo "backlog_groomer_tests=$bgtests"
   echo "telemetry_tests=$tmtests"
   echo "ci_gates_tests=$cgtests"
   echo "styles=$styles"
@@ -369,7 +377,7 @@ selftest() {
   out="$(run "docs/derivative-designs.md")"
   check "docs-only" "$out" \
     "scad=false" "gate=false" "gate_designs=" "regen=false" "styles=false" \
-    "printcheck_tests=false" "docs_standards=true"
+    "printcheck_tests=false" "docs_standards=true" "backlog_groomer_tests=false"
   out="$(run ".claude/skills/preflight/SKILL.md")"
   check "skills-only" "$out" \
     "scad=false" "gate=false" "docs_standards=false" "printcheck_tests=false"
@@ -401,6 +409,17 @@ selftest() {
   out="$(run "scripts/readme-gate.sh")"
   check "soft-infra" "$out" \
     "gate=true" "gate_designs=" "printcheck_tests=true" "scad=true"
+
+  # 4d. The backlog groomer is soft-infra like its burn sibling: its own tests
+  #     run, and the required contexts RUN with an empty design list — it reads
+  #     issues and renders markdown, it moves no mesh and no pixels.
+  out="$(run "tools/backlog-groomer/src/backlog_groomer/detectors.py")"
+  check "groomer-only" "$out" \
+    "backlog_groomer_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "backlog_burn_tests=false"
+  out="$(run ".github/backlog-groomer.conf")"
+  check "groomer-conf" "$out" \
+    "backlog_groomer_tests=true" "gate=true" "gate_designs=" "regen=false"
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must

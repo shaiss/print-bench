@@ -1,0 +1,196 @@
+# Backlog groomer (issue #244) — the deterministic backlog-health report.
+#
+# The autonomy routines (backlog burn #95, design run #96, chunker) all feed
+# one issue queue; this is the routine that tends it. It runs the
+# tools/backlog-groomer detectors over a live snapshot and upserts ONE sticky
+# report issue — advisory-only: no label edits, no closes, no comments on
+# other issues, and no LLM anywhere (every finding is a recomputable fact).
+# Because there is no agentic step, this workflow holds NO provider secret;
+# the only token it ever sees is the ambient GITHUB_TOKEN.
+#
+# TWO keys must agree to run: committed `enabled: true` in
+# .github/backlog-groomer.conf AND the repo variable
+# BACKLOG_GROOMER_ENABLED == "true". Either off → inert. The decision is
+# code (`backlog-groomer armed`), unit-tested over the full 2×2 matrix,
+# not YAML expression soup.
+#
+# Cadence lives twice by necessity (Actions cannot read a file for
+# on.schedule): the cron literal below and the conf's `cadence:` key must
+# stay identical. 05:41 UTC daily — after the chunker (05:29), so a freshly
+# chunked epic's children appear in the same morning's report; :41 avoids
+# the :17 (burn), :23 (design run) and :29 (chunker) slots.
+
+name: Backlog groomer
+
+on:
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the report into the job summary but skip the issue upsert
+        type: boolean
+        default: false
+
+# Default deny; the groom job asks for exactly what it uses.
+permissions:
+  contents: read
+
+# Serialize against ourselves only; never cancel a mid-upsert run.
+concurrency:
+  group: backlog-groomer
+  cancel-in-progress: false
+
+jobs:
+  groom:
+    # Key 1 of the two-key arming: the live repo variable. The same
+    # expression pins the run to the default branch so a dispatch against a
+    # PR branch can never run that branch's tool code.
+    if: vars.BACKLOG_GROOMER_ENABLED == 'true' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    # A deterministic report over a small repo is seconds of work; bound a
+    # hung run well under GitHub's 6-hour default.
+    timeout-minutes: 10
+    permissions:
+      # checkout + reading the repo
+      contents: read
+      # the ONE write this workflow performs: upserting the sticky report issue
+      issues: write
+      # the gather layer lists open PRs (closing-PR detection); its GET is
+      # uncaught, so a missing scope would hard-fail the run rather than
+      # degrade — grant the read explicitly (the chunker's reasoning)
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install backlog-groomer
+        # Stdlib-only tool — the [test] extra (pytest) is deliberately NOT
+        # installed here; CI's backlog-groomer-tests job owns the tests.
+        run: pip install -e tools/backlog-groomer
+
+      - name: Read policy (key 2 — the committed conf)
+        id: policy
+        env:
+          GROOMER_VARIABLE: ${{ vars.BACKLOG_GROOMER_ENABLED }}
+        run: |
+          enabled="$(backlog-groomer config --get enabled --path .github/backlog-groomer.conf)"
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          # The tested 2×2 decision; appends armed=true/false to $GITHUB_OUTPUT.
+          backlog-groomer armed --variable "$GROOMER_VARIABLE" --conf-enabled "$enabled"
+
+      - name: Paused in git
+        if: steps.policy.outputs.armed != 'true'
+        run: |
+          echo "::notice::Backlog groomer is armed (BACKLOG_GROOMER_ENABLED=true) but .github/backlog-groomer.conf says 'enabled: ${{ steps.policy.outputs.enabled }}' — doing nothing. Flip the conf in a reviewed PR to resume."
+
+      - name: Build the report
+        if: steps.policy.outputs.armed == 'true'
+        id: report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          backlog-groomer run --repo "$GITHUB_REPOSITORY" \
+            --conf .github/backlog-groomer.conf --out report.md > /dev/null
+          {
+            echo "## Backlog groomer"
+            echo ""
+            cat report.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry run — skipping the upsert
+        if: steps.policy.outputs.armed == 'true' && inputs.dry_run
+        run: |
+          echo "::notice::Dry run — the report is in the job summary; the sticky report issue was not touched."
+
+      - name: Upsert the sticky report issue
+        if: steps.policy.outputs.armed == 'true' && !inputs.dry_run
+        uses: actions/github-script@v8
+        with:
+          script: |
+            // The one write surface of the whole routine. The report issue
+            // is found belt-and-braces: by its label (unspoofable machine
+            // state — write access required to set it) AND by the marker
+            // that tools/backlog-groomer renders as the body's first line.
+            // Create once, edit forever after — never a second report issue.
+            const fs = require('fs');
+            const body = fs.readFileSync('report.md', 'utf8');
+            const MARKER = '<!-- backlog-groomer-report -->';
+            const LABEL = 'groomer-report';
+            const TITLE = '🧹 Backlog grooming report';
+            if (!body.startsWith(MARKER)) {
+              core.setFailed('report.md does not start with the groomer marker — refusing to upsert');
+              return;
+            }
+            // Ensure the label exists (idempotent, decide.yml's pattern).
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner, repo: context.repo.repo,
+                name: LABEL, color: '0e8a16',
+                description: 'The backlog groomer\'s sticky report issue (issue #244)',
+              });
+            } catch (e) { /* already exists */ }
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: LABEL, per_page: 100,
+            });
+            const prev = issues.find(i => i.body && i.body.startsWith(MARKER));
+            if (prev) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: prev.number, title: TITLE, body,
+              });
+              core.notice(`Updated the grooming report: #${prev.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: TITLE, body, labels: [LABEL],
+              });
+              core.notice(`Created the grooming report: #${created.data.number}`);
+            }
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          ARMED: ${{ steps.policy.outputs.armed }}
+          REPORT_OUTCOME: ${{ steps.report.outcome }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "### Backlog groomer — run outcome"
+            if [ "$POLICY_OUTCOME" != "success" ]; then
+              echo "- ❌ policy step failed — the committed conf did not parse; nothing ran."
+            elif [ "$ARMED" != "true" ]; then
+              echo "- ⏸️ armed by the repo variable but paused in git (conf enabled != true)."
+            elif [ "$REPORT_OUTCOME" != "success" ]; then
+              echo "- ❌ report build failed — see the step log; the sticky issue was not touched."
+            elif [ "$DRY_RUN" = "true" ]; then
+              echo "- 🧪 dry run: report rendered above, upsert skipped."
+            else
+              echo "- ✅ report rendered and upserted to the sticky report issue."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    # The visible no-op: a skipped gated job is mute, so a sibling with no
+    # permissions and no secrets says why nothing happened.
+    if: vars.BACKLOG_GROOMER_ENABLED != 'true' || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain why nothing ran
+        run: |
+          if [ "${{ vars.BACKLOG_GROOMER_ENABLED }}" != "true" ]; then
+            echo "::notice::Backlog groomer is disarmed — set the repo variable BACKLOG_GROOMER_ENABLED=true (and keep .github/backlog-groomer.conf 'enabled: true') to arm it. Two keys must agree; this is the live one."
+          else
+            echo "::notice::Backlog groomer only runs from the default branch — this dispatch targeted '${{ github.ref_name }}'."
+          fi
