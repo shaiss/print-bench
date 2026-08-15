@@ -105,6 +105,12 @@ update it in the same commit as the work. Record decisions with their
 date and reason, so a later session can tell a considered choice from an
 accident.
 
+That reconcile-in-one-commit rule covers the art-direction tables too: when a
+shot changes, keep the charter's tier-1 shot list, the **tier-1.5 product-still
+table**, and the **Seed columns** on the tier-2 lifestyle and motion tables in
+sync with `shots.conf` / `product-still.conf` / `lifestyle.conf` / `motion.conf`
+— the same discipline `/art-direction` applies on the shot side.
+
 When the charter and NOTES.md disagree about what was decided, NOTES.md
 records what happened and PM.md records what was intended — reconcile
 them explicitly rather than letting both drift.

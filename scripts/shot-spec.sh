@@ -9,10 +9,18 @@
 #   ./scripts/shot-spec.sh views                       # named framing presets
 #   ./scripts/shot-spec.sh palette                     # named filament colors
 #   ./scripts/shot-spec.sh add <design> <shot> [opts]  # -> shots.conf (tier 1)
-#   ./scripts/shot-spec.sh lifestyle <design> <shot> --scene '...'  # tier 2
-#   ./scripts/shot-spec.sh embed <design> <shot> [--lifestyle]      # README block
+#   ./scripts/shot-spec.sh still <design> <still> --prompt '...' [--seed <shot>]  # -> product-still.conf (tier 1.5)
+#   ./scripts/shot-spec.sh lifestyle <design> <shot> --scene '...' [--seed <ref>] # -> lifestyle.conf (tier 2)
+#   ./scripts/shot-spec.sh motion <design> <shot> --motion '...' [--seed <ref>]   # -> motion.conf (tier 2 clip)
+#   ./scripts/shot-spec.sh embed <design> <shot> [--lifestyle|--still|--motion]   # README block
 #   ./scripts/shot-spec.sh check <design>              # validate manifests
 #   ./scripts/shot-spec.sh --selftest
+#
+# The tiers form one image-to-image SEED chain — a bare-part product still (tier
+# 1.5) seeds a lifestyle scene (tier 2), which seeds a motion clip — so `--seed`
+# names the committed previews/<ref>.png each stage starts from. A still seeds
+# only a geometry-true tier-1 render (angle = which render it seeds); a scene
+# may seed a tier-1 render or a product still; a clip may seed any of them.
 #
 # What it deliberately does NOT do: touch README.md, or render anything. The
 # skill places the embed with framing judgment, and CI renders the PNGs
@@ -82,6 +90,67 @@ die() { echo "error: $*" >&2; exit 1; }
 # kebab-case, the repo convention for design and shot names. Same shape
 # product-shot.sh's <shot> and lifestyle-shot.sh validate against.
 is_kebab() { [[ "$1" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; }
+
+# A seed reference is the basename of a committed preview (previews/<ref>.png).
+# An AI-prefixed seed (lifestyle-* scene, product-still-* still) is a repaint,
+# not a geometry-true render — the tiers that must stay mesh-pinned refuse one.
+is_ai_prefix() { case "$1" in lifestyle-*|product-still-*) return 0 ;; *) return 1 ;; esac; }
+
+# Parse a seedable manifest line "<name> | [seed=<ref> |] <prompt>" into the
+# globals PSL_name / PSL_seed / PSL_prompt (PSL_seed empty when there is no
+# seed= field). Sets globals rather than echoing joined fields on purpose: an
+# empty middle field collapses under `read`'s IFS-whitespace handling, so a
+# seedless line would misparse its prompt as the seed. Mirrors the seed parsing
+# in lifestyle-shot.sh / lifestyle-clip.sh — only a middle field that literally
+# starts with 'seed=' is a seed, so a '|' inside a prompt still parses.
+# Bash-3.2-safe (no namerefs).
+PSL_name=""; PSL_seed=""; PSL_prompt=""; PSL_has_seed=0
+parse_seedable_line() {  # <line>  -> sets PSL_name / PSL_seed / PSL_prompt / PSL_has_seed
+  local line="$1" rest rtrim
+  PSL_name="${line%%|*}"; PSL_name="${PSL_name//[[:space:]]/}"
+  rest="${line#*|}"
+  rtrim="${rest#"${rest%%[![:space:]]*}"}"; rtrim="${rtrim%"${rtrim##*[![:space:]]}"}"
+  PSL_seed=""
+  # PSL_has_seed flags that a middle field starting with 'seed=' is PRESENT, so a
+  # validator can tell a genuine no-seed line from a malformed one: an empty
+  # value ("seed= | prompt") or a bare "seed=ref" with no trailing "| prompt"
+  # (which lands whole in PSL_prompt) must be rejected, not silently accepted.
+  [[ "$rtrim" == seed=* ]] && PSL_has_seed=1 || PSL_has_seed=0
+  if [[ "$rtrim" == seed=* && "$rest" == *"|"* ]]; then
+    PSL_seed="${rest%%|*}"; PSL_seed="${PSL_seed//[[:space:]]/}"; PSL_seed="${PSL_seed#seed=}"
+    PSL_prompt="${rest#*|}"; PSL_prompt="${PSL_prompt#"${PSL_prompt%%[![:space:]]*}"}"; PSL_prompt="${PSL_prompt%"${PSL_prompt##*[![:space:]]}"}"
+  else
+    PSL_prompt="$rtrim"
+  fi
+}
+
+# Validate the parsed seed field for a tier. <loc> is "conf:n" for messages;
+# <tier> is lifestyle|still|motion and governs the allowed seed prefixes. Sets
+# `bad=1` (dynamic scope from cmd_check) on any problem. Catches the malformed
+# forms the generators reject at runtime — empty 'seed=' and 'seed=' with no
+# prompt — so `shot-spec check` fails BEFORE a paid CI generation does.
+check_seed_field() {  # <loc> <tier>
+  local loc="$1" tier="$2"
+  [[ "$PSL_has_seed" == 1 ]] || return 0
+  if [[ "$PSL_prompt" == seed=* ]]; then
+    echo "  FAIL $loc — 'seed=' without a following '| <prompt>'"; bad=1; return 0
+  fi
+  if [[ -z "$PSL_seed" ]]; then
+    echo "  FAIL $loc — empty 'seed=' (give a ref or drop the field)"; bad=1; return 0
+  fi
+  is_kebab "$PSL_seed" || { echo "  FAIL $loc — seed '$PSL_seed' not kebab-case"; bad=1; return 0; }
+  case "$tier" in
+    still)
+      if is_ai_prefix "$PSL_seed"; then
+        echo "  FAIL $loc — seed '$PSL_seed' is an AI image; a product still must seed from a geometry-true tier-1 render"; bad=1
+      fi ;;
+    lifestyle)
+      case "$PSL_seed" in
+        lifestyle-*) echo "  FAIL $loc — seed '$PSL_seed' is a lifestyle-* scene; seed from a geometry-true render or a product-still-* still"; bad=1 ;;
+      esac ;;
+    motion) : ;;   # a clip may seed from any kebab ref (incl. an AI still)
+  esac
+}
 
 # Every subcommand interpolates <design> into paths ("$ROOT/$design/..."), so a
 # name like "../scripts" would escape the design tree. Pin it to kebab-case
@@ -175,6 +244,28 @@ embed_lifestyle() {  # <design> <shot>
   printf 'render above and the STL for the true shape.*\n'
 }
 
+# Tier-1.5 product-still disclosure — the SAME canonical tokens ("AI-styled
+# scene" alt, "geometry is approximate" caption) lifestyle-shot.sh --kind
+# product-still emits, so the PM's pasted embed matches the generator's exactly.
+embed_still() {  # <design> <still>
+  printf '![AI-styled scene: %s bare-part product still](previews/product-still-%s.png)\n\n' \
+    "$1" "$2"
+  printf '*AI-generated impression for general illustration only — geometry is '
+  printf 'approximate and may not exactly match the printed part; see the studio '
+  printf 'render above and the STL for the true shape.*\n'
+}
+
+# Tier-2 motion-clip disclosure — same canonical tokens, plus the honest note
+# that the MOTION itself is illustrative (the model can invent movement the
+# print can't perform; the deterministic turntable stays the motion-true GIF).
+embed_motion() {  # <design> <shot>
+  printf '![AI-styled scene: %s shown in motion](previews/lifestyle-%s.gif)\n\n' \
+    "$1" "$2"
+  printf '*AI-generated impression for general illustration only — geometry is '
+  printf 'approximate and the motion is illustrative; see the deterministic '
+  printf 'turntable and the STL for the true shape and behavior.*\n'
+}
+
 # Does a manifest already carry an entry named <shot>? (first pipe field,
 # comments/blank ignored). This is the freeze guard.
 manifest_has() {  # <conf> <shot>
@@ -263,11 +354,12 @@ cmd_add() {
 
 cmd_lifestyle() {
   local design="${1:-}" shot="${2:-}"; shift $(( $# >= 2 ? 2 : $# ))
-  [[ -n "$design" && -n "$shot" ]] || die "usage: lifestyle <design> <shot> --scene '...' [--dry-run]"
-  local scene="" dry=0
+  [[ -n "$design" && -n "$shot" ]] || die "usage: lifestyle <design> <shot> --scene '...' [--seed <ref>] [--dry-run]"
+  local scene="" seed="" dry=0
   while (( $# )); do
     case "$1" in
       --scene)   scene="${2:?}"; shift 2;;
+      --seed)    seed="${2:?}"; shift 2;;
       --dry-run) dry=1; shift;;
       *) die "unknown option '$1' to lifestyle";;
     esac
@@ -275,12 +367,21 @@ cmd_lifestyle() {
   require_design "$design"
   [[ -d "$ROOT/$design" ]] || die "no $ROOT/$design"
   is_kebab "$shot" || die "shot name '$shot' must be kebab-case ([a-z0-9-])"
-  [[ -n "$scene" ]] || die "a lifestyle shot needs --scene '<describe the setting>' (text-to-image: describe the scene, not fake geometry)"
+  [[ -n "$scene" ]] || die "a lifestyle shot needs --scene '<describe the setting>' (image-to-image seeded from a real render: describe the SCENE, not fake geometry)"
   # A '#' in the scene would be read as a comment by lifestyle-shot.sh's
   # full-line rule only at line start, but the manifest is '<shot> | <prompt>'
   # and a literal newline can't live in one line — reject it early with a clear
   # message rather than writing a broken second line.
   [[ "$scene" != *$'\n'* ]] || die "scene must be a single line"
+  # A lifestyle scene seeds from a geometry-true tier-1 render OR a tier-1.5
+  # product still — but never another lifestyle-* scene (a repaint of a repaint,
+  # nothing anchoring the shape). Same rule lifestyle-shot.sh enforces.
+  if [[ -n "$seed" ]]; then
+    is_kebab "$seed" || die "seed '$seed' must be kebab-case ([a-z0-9-])"
+    case "$seed" in
+      lifestyle-*) die "seed '$seed' is a lifestyle-* scene — a lifestyle scene seeds from a geometry-true render or a product-still-* still, not another scene" ;;
+    esac
+  fi
 
   local conf="$ROOT/$design/lifestyle.conf"
   if manifest_has "$conf" "$shot"; then
@@ -288,14 +389,18 @@ cmd_lifestyle() {
   fi
 
   local line="$shot | $scene"
+  [[ -n "$seed" ]] && line="$shot | seed=$seed | $scene"
   if (( dry )); then
     echo "# would append to $conf:"
     echo "$line"
   else
     if [[ ! -f "$conf" ]]; then
-      echo "# Tier-2 AI lifestyle-shot prompts (scripts/lifestyle-shot.sh) — one" >"$conf"
-      echo "# '<shot> | <prompt>' per line. COSMETIC and text-to-image, so the" >>"$conf"
-      echo "# geometry is only an impression; readme-gate forces the disclosure." >>"$conf"
+      cat >"$conf" <<'HDR'
+# Tier-2 AI lifestyle-shot prompts (scripts/lifestyle-shot.sh) — one
+# '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>' per line. COSMETIC,
+# but image-to-image seeded from a committed geometry-true render (or a
+# product still), so the shape is pinned; readme-gate forces the disclosure.
+HDR
     fi
     printf '%s\n' "$line" >>"$conf"
     echo "wrote scene '$shot' to $conf"
@@ -305,13 +410,118 @@ cmd_lifestyle() {
   embed_lifestyle "$design" "$shot"
 }
 
+cmd_still() {
+  local design="${1:-}" still="${2:-}"; shift $(( $# >= 2 ? 2 : $# ))
+  [[ -n "$design" && -n "$still" ]] || die "usage: still <design> <still> --prompt '...' [--seed <tier-1-shot>] [--dry-run]"
+  local seed="" prompt="" dry=0
+  while (( $# )); do
+    case "$1" in
+      --seed)    seed="${2:?}"; shift 2;;
+      --prompt)  prompt="${2:?}"; shift 2;;
+      --dry-run) dry=1; shift;;
+      *) die "unknown option '$1' to still";;
+    esac
+  done
+  require_design "$design"
+  [[ -d "$ROOT/$design" ]] || die "no $ROOT/$design"
+  is_kebab "$still" || die "still name '$still' must be kebab-case ([a-z0-9-])"
+  [[ -n "$prompt" ]] || die "a product still needs --prompt '<describe the BARE part, no scene>'"
+  [[ "$prompt" != *$'\n'* ]] || die "prompt must be a single line"
+  # Angle-by-seed: an image-to-image still has no camera of its own — its angle
+  # comes from the tier-1 render it seeds, which is why there is no --view/--camera
+  # here. Default the seed to the still's own name; it must be a geometry-true
+  # render (a shots.conf shot), never an AI image, so the shape stays mesh-pinned.
+  [[ -n "$seed" ]] || seed="$still"
+  is_kebab "$seed" || die "seed '$seed' must be kebab-case ([a-z0-9-])"
+  ! is_ai_prefix "$seed" || die "seed '$seed' is an AI image — a product still must seed from a geometry-true tier-1 render (a shots.conf shot) so its shape stays pinned to the real mesh"
+
+  local conf="$ROOT/$design/product-still.conf"
+  if manifest_has "$conf" "$still"; then
+    die "product-still.conf already has an entry '$still' — stills are frozen across review rounds; pick a new name instead of moving it (CLAUDE.md: Frozen preview cameras)"
+  fi
+
+  local line="$still | seed=$seed | $prompt"
+  if (( dry )); then
+    echo "# would append to $conf:"
+    echo "$line"
+  else
+    if [[ ! -f "$conf" ]]; then
+      cat >"$conf" <<'HDR'
+# Tier-1.5 AI product stills (scripts/lifestyle-shot.sh --kind product-still)
+# — the BARE part, no scene, image-to-image seeded from a geometry-true
+# tier-1 render. One '<still> | seed=<ref> | <prompt>' per line; readme-gate
+# forces the AI disclosure on the committed previews/product-still-<still>.png.
+HDR
+    fi
+    printf '%s\n' "$line" >>"$conf"
+    echo "wrote still '$still' to $conf"
+  fi
+  echo
+  echo "Embed this in $ROOT/$design/README.md (VERBATIM — the disclosure is gated):"
+  embed_still "$design" "$still"
+}
+
+cmd_motion() {
+  local design="${1:-}" shot="${2:-}"; shift $(( $# >= 2 ? 2 : $# ))
+  [[ -n "$design" && -n "$shot" ]] || die "usage: motion <design> <shot> --motion '...' [--seed <ref>] [--dry-run]"
+  local motion="" seed="" dry=0
+  while (( $# )); do
+    case "$1" in
+      --motion)  motion="${2:?}"; shift 2;;
+      --seed)    seed="${2:?}"; shift 2;;
+      --dry-run) dry=1; shift;;
+      *) die "unknown option '$1' to motion";;
+    esac
+  done
+  require_design "$design"
+  [[ -d "$ROOT/$design" ]] || die "no $ROOT/$design"
+  is_kebab "$shot" || die "shot name '$shot' must be kebab-case ([a-z0-9-])"
+  [[ -n "$motion" ]] || die "a motion clip needs --motion '<describe the motion>' (image-to-video; the motion is illustrative)"
+  [[ "$motion" != *$'\n'* ]] || die "motion prompt must be a single line"
+  # A clip MAY seed from an AI image — animating a lifestyle scene or a product
+  # still is exactly the still->clip hop — so only kebab is required here.
+  if [[ -n "$seed" ]]; then
+    is_kebab "$seed" || die "seed '$seed' must be kebab-case ([a-z0-9-])"
+  fi
+
+  local conf="$ROOT/$design/motion.conf"
+  if manifest_has "$conf" "$shot"; then
+    die "motion.conf already has an entry '$shot' — add a new clip name instead of moving one"
+  fi
+
+  local line="$shot | $motion"
+  [[ -n "$seed" ]] && line="$shot | seed=$seed | $motion"
+  if (( dry )); then
+    echo "# would append to $conf:"
+    echo "$line"
+  else
+    if [[ ! -f "$conf" ]]; then
+      cat >"$conf" <<'HDR'
+# Tier-2 AI motion-clip prompts (scripts/lifestyle-clip.sh) — one
+# '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>' per line. COSMETIC
+# image-to-video seeded from a committed still; the motion is illustrative.
+# readme-gate forces the disclosure on previews/lifestyle-<shot>.gif.
+HDR
+    fi
+    printf '%s\n' "$line" >>"$conf"
+    echo "wrote clip '$shot' to $conf"
+  fi
+  echo
+  echo "Embed this in $ROOT/$design/README.md (VERBATIM — the disclosure is gated):"
+  embed_motion "$design" "$shot"
+}
+
 cmd_embed() {
   local design="${1:-}" shot="${2:-}"; shift $(( $# >= 2 ? 2 : $# ))
-  [[ -n "$design" && -n "$shot" ]] || die "usage: embed <design> <shot> [--lifestyle]"
+  [[ -n "$design" && -n "$shot" ]] || die "usage: embed <design> <shot> [--lifestyle|--still|--motion]"
   require_design "$design"
   is_kebab "$shot" || die "shot name '$shot' must be kebab-case ([a-z0-9-])"
   if [[ "${1:-}" == "--lifestyle" ]]; then
     embed_lifestyle "$design" "$shot"
+  elif [[ "${1:-}" == "--still" ]]; then
+    embed_still "$design" "$shot"
+  elif [[ "${1:-}" == "--motion" ]]; then
+    embed_motion "$design" "$shot"
   else
     # Recover the color/finish from the manifest so the alt text is accurate.
     local conf="$ROOT/$design/shots.conf" line name color finish
@@ -366,7 +576,7 @@ check_shots() {  # <conf> ; sets rc via `bad`
 }
 
 check_lifestyle() {  # <conf>
-  local conf="$1" line shot prompt
+  local conf="$1" line name seed prompt
   [[ -f "$conf" ]] || return 0
   local n=0
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -375,11 +585,43 @@ check_lifestyle() {  # <conf>
     # lifestyle-shot.sh.
     local trimmed="${line#"${line%%[![:space:]]*}"}"
     [[ -z "$trimmed" || "$trimmed" == '#'* ]] && continue
-    [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<shot> | <prompt>'"; bad=1; continue; }
-    shot="${line%%|*}"; shot="${shot//[[:space:]]/}"
-    prompt="${line#*|}"; prompt="${prompt#"${prompt%%[![:space:]]*}"}"; prompt="${prompt%"${prompt##*[![:space:]]}"}"
-    is_kebab "$shot" || { echo "  FAIL $conf:$n — scene name '$shot' not kebab-case"; bad=1; }
+    [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>'"; bad=1; continue; }
+    parse_seedable_line "$line"; name="$PSL_name"; prompt="$PSL_prompt"
+    is_kebab "$name" || { echo "  FAIL $conf:$n — scene name '$name' not kebab-case"; bad=1; }
+    check_seed_field "$conf:$n" lifestyle
     [[ -n "$prompt" ]] || { echo "  FAIL $conf:$n — empty scene prompt"; bad=1; }
+  done <"$conf"
+}
+
+check_stills() {  # <conf>
+  local conf="$1" line name seed prompt
+  [[ -f "$conf" ]] || return 0
+  local n=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    n=$((n+1))
+    local trimmed="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$trimmed" || "$trimmed" == '#'* ]] && continue
+    [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<still> | seed=<ref> | <prompt>'"; bad=1; continue; }
+    parse_seedable_line "$line"; name="$PSL_name"; prompt="$PSL_prompt"
+    is_kebab "$name" || { echo "  FAIL $conf:$n — still name '$name' not kebab-case"; bad=1; }
+    check_seed_field "$conf:$n" still
+    [[ -n "$prompt" ]] || { echo "  FAIL $conf:$n — empty still prompt"; bad=1; }
+  done <"$conf"
+}
+
+check_motion() {  # <conf>
+  local conf="$1" line name seed prompt
+  [[ -f "$conf" ]] || return 0
+  local n=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    n=$((n+1))
+    local trimmed="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$trimmed" || "$trimmed" == '#'* ]] && continue
+    [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>'"; bad=1; continue; }
+    parse_seedable_line "$line"; name="$PSL_name"; prompt="$PSL_prompt"
+    is_kebab "$name" || { echo "  FAIL $conf:$n — clip name '$name' not kebab-case"; bad=1; }
+    check_seed_field "$conf:$n" motion
+    [[ -n "$prompt" ]] || { echo "  FAIL $conf:$n — empty motion prompt"; bad=1; }
   done <"$conf"
 }
 
@@ -390,7 +632,9 @@ cmd_check() {
   [[ -d "$ROOT/$design" ]] || die "no $ROOT/$design"
   local bad=0
   check_shots "$ROOT/$design/shots.conf"
+  check_stills "$ROOT/$design/product-still.conf"
   check_lifestyle "$ROOT/$design/lifestyle.conf"
+  check_motion "$ROOT/$design/motion.conf"
   if (( bad )); then
     echo "FAIL  $design: manifest problems above"
     return 1
@@ -461,7 +705,44 @@ run_selftest() {
   _run 1 "already has an entry"    -- lifestyle gadget product-hero --scene "again"
   _run 1 "needs --scene"           -- lifestyle gadget nostory
 
-  # check: passes on the good tree
+  # still (tier 1.5): happy path writes a seed= line + disclosure, then freeze,
+  # missing-prompt, and the AI-seed refusal (a still stays geometry-pinned).
+  _run 0 "geometry is approximate" -- still gadget hero-iso --seed product-hero --prompt "the bare part on a seamless white sweep"
+  if ! grep -qE '^hero-iso \| seed=product-hero \| the bare part on a seamless white sweep$' "$tmp/designs/gadget/product-still.conf"; then
+    echo "SELFTEST FAIL: still did not write the expected line"; sed 's/^/    /' "$tmp/designs/gadget/product-still.conf"; pass=0
+  else echo "selftest ok    still wrote the expected line"; fi
+  _run 1 "already has an entry"            -- still gadget hero-iso --seed product-hero --prompt "again"
+  _run 1 "needs --prompt"                  -- still gadget nostory --seed product-hero
+  _run 1 "must seed from a geometry-true"  -- still gadget badseed --seed lifestyle-x --prompt "x"
+  _run 1 "must seed from a geometry-true"  -- still gadget badseed2 --seed product-still-x --prompt "x"
+  # still defaults --seed to the still's own name when omitted
+  _run 0 "wrote still" -- still gadget front --prompt "the bare part head-on, plain background"
+  if ! grep -qE '^front \| seed=front \| the bare part head-on, plain background$' "$tmp/designs/gadget/product-still.conf"; then
+    echo "SELFTEST FAIL: still default-seed line wrong"; sed 's/^/    /' "$tmp/designs/gadget/product-still.conf"; pass=0
+  else echo "selftest ok    still defaulted seed to its own name"; fi
+
+  # lifestyle --seed: emits a seed= line + rejects a lifestyle-* seed (a scene
+  # may seed a product still, never another scene).
+  _run 0 "geometry is approximate" -- lifestyle gadget on-desk --seed product-still-hero --scene "on a desk beside a laptop"
+  if ! grep -qE '^on-desk \| seed=product-still-hero \| on a desk beside a laptop$' "$tmp/designs/gadget/lifestyle.conf"; then
+    echo "SELFTEST FAIL: lifestyle --seed did not write the seed= line"; sed 's/^/    /' "$tmp/designs/gadget/lifestyle.conf"; pass=0
+  else echo "selftest ok    lifestyle wrote the seed= line"; fi
+  _run 1 "is a lifestyle-* scene" -- lifestyle gadget badscene --seed lifestyle-x --scene "x"
+
+  # motion (tier 2 clip): happy path — an AI still IS a legal seed here — plus
+  # freeze and missing-motion.
+  _run 0 "geometry is approximate" -- motion gadget clip --seed lifestyle-on-desk --motion "a slow steady orbit"
+  if ! grep -qE '^clip \| seed=lifestyle-on-desk \| a slow steady orbit$' "$tmp/designs/gadget/motion.conf"; then
+    echo "SELFTEST FAIL: motion did not write the expected line"; sed 's/^/    /' "$tmp/designs/gadget/motion.conf"; pass=0
+  else echo "selftest ok    motion wrote the expected line"; fi
+  _run 1 "already has an entry" -- motion gadget clip --motion "again"
+  _run 1 "needs --motion"       -- motion gadget nostory2 --seed lifestyle-on-desk
+
+  # traversal guard on the new verbs
+  _run 1 "must be kebab-case" -- still  ../scripts evil --prompt "x"
+  _run 1 "must be kebab-case" -- motion ../scripts evil --motion "x"
+
+  # check: passes on the good tree (now also covering product-still/motion/seeded-lifestyle)
   _run 0 "well-formed" -- check gadget
 
   # check: fails on a hand-corrupted line (bad finish, bad camera)
@@ -476,6 +757,41 @@ run_selftest() {
   printf 'hero | 3a6b46 | satin | 35,18,0.9 | 1280x960 | part="a" | oops\n' >"$root/widget/shots.conf"
   _run 1 "too many fields" -- check widget
 
+  # check: the seed-aware validators fire on corrupt manifests (a fresh fixture
+  # so it can't be masked by widget's already-corrupt shots.conf).
+  mkdir -p "$root/still-check"
+  # a product still seeding from an AI image -> rejected
+  printf 'bad | seed=product-still-x | a bare part\n' >"$root/still-check/product-still.conf"
+  _run 1 "geometry-true tier-1 render" -- check still-check
+  # a lifestyle scene seeding from another scene -> rejected
+  printf 'good | seed=product-hero | a bare part\n' >"$root/still-check/product-still.conf"
+  printf 'bad | seed=lifestyle-x | a scene\n' >"$root/still-check/lifestyle.conf"
+  _run 1 "is a lifestyle-* scene" -- check still-check
+  # a motion clip with a non-kebab seed -> rejected
+  rm -f "$root/still-check/lifestyle.conf"
+  printf 'clip | seed=Bad_Seed | a motion\n' >"$root/still-check/motion.conf"
+  _run 1 "seed 'Bad_Seed' not kebab-case" -- check still-check
+  # a motion clip seeding from an AI still is FINE (the still->clip hop) -> passes
+  printf 'clip | seed=lifestyle-x | a motion\n' >"$root/still-check/motion.conf"
+  _run 0 "well-formed" -- check still-check
+
+  # malformed seed= forms are rejected before a paid CI generation (matching the
+  # generators' runtime guards): an empty 'seed=' value, and a 'seed=ref' with no
+  # trailing '| <prompt>'. One per tier so each validator's check_seed_field fires.
+  rm -f "$root/still-check/motion.conf"
+  printf 'hero | seed= | a bare part\n' >"$root/still-check/product-still.conf"
+  _run 1 "empty 'seed='" -- check still-check
+  printf 'hero | seed=product-hero\n' >"$root/still-check/product-still.conf"
+  _run 1 "without a following" -- check still-check
+  printf 'good | seed=product-hero | a bare part\n' >"$root/still-check/product-still.conf"
+  printf 'scene | seed= | a scene\n' >"$root/still-check/lifestyle.conf"
+  _run 1 "empty 'seed='" -- check still-check
+  printf 'scene | seed=product-hero\n' >"$root/still-check/lifestyle.conf"
+  _run 1 "without a following" -- check still-check
+  rm -f "$root/still-check/lifestyle.conf"
+  printf 'clip | seed= | a motion\n' >"$root/still-check/motion.conf"
+  _run 1 "empty 'seed='" -- check still-check
+
   if (( pass )); then echo "ok    shot-spec --selftest: every validator and the freeze guard fire"; return 0; fi
   echo "FAIL  shot-spec --selftest"; return 1
 }
@@ -487,12 +803,14 @@ case "${1:-}" in
   views)      shift; cmd_views "$@";;
   palette)    shift; cmd_palette "$@";;
   add)        shift; cmd_add "$@";;
+  still)      shift; cmd_still "$@";;
   lifestyle)  shift; cmd_lifestyle "$@";;
+  motion)     shift; cmd_motion "$@";;
   embed)      shift; cmd_embed "$@";;
   check)      shift; cmd_check "$@";;
   --selftest) run_selftest;;
   ""|-h|--help)
-    sed -n '2,40p' "$SELF" | sed 's/^# \{0,1\}//'
+    sed -n '2,48p' "$SELF" | sed 's/^# \{0,1\}//'
     ;;
-  *) die "unknown command '$1' — try: views, palette, add, lifestyle, embed, check, --selftest";;
+  *) die "unknown command '$1' — try: views, palette, add, still, lifestyle, motion, embed, check, --selftest";;
 esac
