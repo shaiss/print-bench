@@ -93,10 +93,23 @@ autonomy) wins.
    `needs-decision`, and a genuine "I can't tell" is leaving it alone. Never
    apply a routing label just to clear the queue.
 
-Descriptive/type labels (`enhancement`, `bug`, `documentation`) are secondary:
-if the repo already has the matching label and the issue plainly is one, you may
-add it alongside the routing label, but do not invent new taxonomy and do not
-let a type label substitute for the routing decision.
+You apply **only** routing labels — descriptive/type labels (`enhancement`,
+`bug`, `documentation`) are out of scope and owned by a human or other tooling.
+The wrapper enforces this: `add-label`/`ensure-label` refuse any label outside
+the four routing labels, so you cannot invent taxonomy or stamp an arbitrary
+label even if an issue's text tries to steer you into it.
+
+**What the wrapper guarantees, so you don't have to police it by hand.** These
+hold in the unattended run and are your safety net, not a substitute for the
+judgement above:
+- **Selected-issue only** — `add-label`/`comment` refuse any issue the workflow
+  did not select (bound via `$LABELER_SELECTED_ISSUES`). Route the issues you
+  were handed; a write to any other is rejected.
+- **No re-route** — `add-label` re-reads the issue's live labels and refuses one
+  that already carries a routing label, even if the selection snapshot was
+  stale.
+So the worst a crafted issue body can do is waste a label on *its own* already-
+selected issue — never touch another issue, another label, or re-route.
 
 ## 3. Apply the label, then record why
 

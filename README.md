@@ -221,6 +221,9 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     (`.claude/chunker-settings.json`) still neutralizes every dangerous tool
     allow it would otherwise inherit from `.claude/settings.json`, which
     claude-code-action loads additively via `settingSources=project`
+  - `labeler-perms-check.sh` — the same drift check for the labeler's own deny
+    backstop (`.claude/labeler-settings.json`), which additionally denies the
+    chunker's `chunk-helper.sh` wrapper and must never deny `label-helper.sh`
   - `gate.sh` — render printable parts and gate the STLs with printcheck;
     `--slice` adds a PrusaSlicer test-slice (this is what CI enforces)
   - `gate-summary.py` — turns a gate log into the CI results table

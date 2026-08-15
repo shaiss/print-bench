@@ -208,15 +208,23 @@ jobs:
       # run reads untrusted issue text while holding a provider key, so a general
       # shell — or a file-write that could overwrite the wrapper and run it —
       # would turn prompt-injection into arbitrary commands / key exfiltration.
+      # `--permission-mode dontAsk` makes that surface exclusive: any tool not on
+      # the allow-list is DENIED (never prompted — there is no human in an
+      # unattended run), the recommended pairing for a locked-down CI session.
+      #
       # But --allowedTools only ADDS allows; claude-code-action loads
-      # .claude/settings.json (settingSources=project) whose dev allows (e.g.
-      # Bash(xvfb-run:*)) would leak in. --settings closes that with the SAME
-      # deny backstop the chunker uses (.claude/chunker-settings.json): deny
-      # beats allow from every source, and scripts/chunker-perms-check.sh keeps
-      # it in sync with settings.json. Reusing that gated file — rather than a
-      # second, ungated copy that could drift — is deliberate; the labeler's
-      # wrapper is simply not on settings.json's allow-list, so the check never
-      # has to exempt it. The pin is the immutable commit behind the v1 tag.
+      # .claude/settings.json (settingSources=project) whose dev allows leak in —
+      # not just Bash(xvfb-run:*) (arbitrary execution) but
+      # Bash(.claude/skills/chunk-issue/chunk-helper.sh:*), the CHUNKER's wrapper,
+      # which can CREATE issues and comments (beyond the labeler's add-only
+      # remit). --settings closes that with the labeler's OWN deny backstop,
+      # .claude/labeler-settings.json: deny beats allow from every source. It is
+      # deliberately NOT the chunker's backstop — that one must LEAVE chunk-helper
+      # usable, whereas the labeler must DENY it — so the labeler ships its own,
+      # gated by scripts/labeler-perms-check.sh (every settings.json Bash allow,
+      # chunk-helper included, must be denied; the label-helper wrapper must never
+      # be, or the labeler fails closed). The pin is the immutable commit behind
+      # the v1 tag.
 
       - name: Run via Z.AI (GLM)
         id: run_zai
@@ -237,11 +245,15 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          # The trusted workflow's selection, bound into the agent's environment.
+          # label-helper.sh refuses to write to any issue not in this set, so a
+          # prompt-injected agent cannot touch an issue it was never handed.
+          LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --model glm-5.2 --effort low --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model glm-5.2 --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
           prompt: "/label-issues ${{ steps.select.outputs.issues }}"
 
       - name: Run via Anthropic (Claude)
@@ -254,12 +266,15 @@ jobs:
           && github.event.inputs.dry_run != 'true'
         # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
         # right fit for an unattended bot — no OAuth token / subscription seat.
+        env:
+          # Same trusted selection bound as the Z.AI step (see its comment).
+          LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          # Same narrow tool grant + shared deny backstop as the Z.AI step.
-          claude_args: --model claude-opus-4-8 --effort low --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          # Same narrow tool grant + labeler deny backstop + dontAsk as the Z.AI step.
+          claude_args: --model claude-opus-4-8 --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
           prompt: "/label-issues ${{ steps.select.outputs.issues }}"
 
       - name: Explain a skipped agentic run
