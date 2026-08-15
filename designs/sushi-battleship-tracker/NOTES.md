@@ -109,6 +109,29 @@ seeding. The `seed` now resolving to `product-hero` in `lifestyle.conf` pins the
 shape to the real mesh only from the **next re-roll** onward — it does not
 retroactively describe the currently committed image.
 
+## Deterministic animations
+
+`animations.conf` (issue #236) gives the page a motion depiction that is
+*measured*, not modeled: the AI clip above it is an impression, and a
+customer who watches a shutter slide there deserves to see the real
+mechanism do the same thing. Two entries, both inherited from the parent —
+the tracker includes it verbatim and redefines only `door()`, so
+`anim="shutter"` drives the parent's keyframes on the refit's own doors
+(seat and all) through `lid_assembly()`:
+
+- **`shutter-slide`** — same camera/frames/delay/size as the parent's
+  entry (the D1 corner framing, where the 6.7 mm travel reads clearly), so
+  the two boards' animations are visually comparable. The seat dish is
+  visible on the sliding door top — verified on the rendered frames before
+  committing, since manifest cameras freeze at commit.
+- **`turntable`** — full-board 360°, D1 open with the demo piece visible;
+  camera-only motion, no `$t` dependency.
+
+No `.scad` change: the parent's `anim` machinery is inherited verbatim, and
+per repo convention the `$t`-dependent values live inside the parent's
+geometry blocks, so `-D '$t=…'` lands correctly. GIFs render at 72.6 KB and
+301 KB — far inside the 6 MiB `MAX_GIF_BYTES` budget.
+
 ## Field test log
 
 (None yet — B1 on the PM backlog. Append entries per
