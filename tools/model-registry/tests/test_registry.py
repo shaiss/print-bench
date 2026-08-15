@@ -160,6 +160,17 @@ def test_duplicate_stanza_raises(tmp_path):
         load(tmp_path, GOOD + "\n[provider:zai]\nsecret = AGAIN\n")
 
 
+def test_duplicate_normalized_id_raises(tmp_path):
+    # configparser only rejects BYTE-identical section names, but the id is
+    # stripped: `[model:glm-5.2]` and `[model: glm-5.2]` are distinct raw
+    # sections that normalize to the same (kind, id). Without the guard the
+    # second silently overwrites the first — a model misrouted to the wrong
+    # provider/secret with no diagnostic. The guard turns it into a hard error.
+    bad = GOOD + "\n[model: glm-5.2]\nprovider = anthropic\nnotes = shadow\n"
+    with pytest.raises(ValueError, match=r"duplicate model id 'glm-5.2'"):
+        load(tmp_path, bad)
+
+
 def test_resolve_unknown_chain_raises(tmp_path):
     reg = load(tmp_path, GOOD)
     with pytest.raises(KeyError, match="unknown chain 'nope'"):

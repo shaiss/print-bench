@@ -121,9 +121,21 @@ class Registry:
         providers: dict[str, Provider] = {}
         models: dict[str, Model] = {}
         chains: dict[str, Chain] = {}
+        seen: set[tuple[str, str]] = set()
 
         for section in parser.sections():
             kind, ident = _split_section(section)
+            # configparser only rejects byte-identical section names, but the id
+            # is stripped, so `[model:x]` and `[model: x]` are distinct raw
+            # sections that normalize to the same (kind, id) — a duplicate by the
+            # registry's own id semantics. Catch it so the second can't silently
+            # overwrite the first (a model misrouted to the wrong provider/secret).
+            if (kind, ident) in seen:
+                raise ValueError(
+                    f"stanza [{section}]: duplicate {kind} id {ident!r} — another "
+                    f"[{kind}:{ident}] stanza is already declared"
+                )
+            seen.add((kind, ident))
             fields = dict(parser.items(section))
             where = f"stanza [{section}]"
             if kind == "provider":
