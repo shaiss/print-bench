@@ -60,7 +60,7 @@ proof of life.
 
 ## Config: where the on/off and the thresholds live
 
-```
+```text
 enabled: true
 cadence: 41 5 * * *
 staleness_days: 14

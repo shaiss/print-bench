@@ -9,6 +9,7 @@ values, so tuning a threshold in a reviewed PR stays green).
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pytest
 
@@ -130,7 +131,7 @@ def test_cadence_accepts_preset_and_raw_cron(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# armed(): the full 2×2 matrix (AC3), plus the strictness edges
+# armed(): the full 2x2 matrix (AC3), plus the strictness edges
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("variable,conf_enabled,expected", [
@@ -162,3 +163,21 @@ def test_committed_conf_is_well_formed():
     # file parsing at all.
     repo_root = pathlib.Path(__file__).resolve().parents[3]
     config.load(str(repo_root / config.DEFAULT_PATH))
+
+
+def test_committed_cadence_matches_workflow_cron():
+    # Actions cannot read a file for on.schedule, so the cadence lives twice
+    # by necessity — the conf's `cadence:` key and the workflow's `- cron:`
+    # literal. Both files say they must stay identical; this pins it so the
+    # duplication cannot drift. Skipped only if the conf leaves cadence
+    # unset (workflow literal authoritative by documented contract).
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    cadence = config.load(str(repo_root / config.DEFAULT_PATH)).cadence
+    if not cadence:
+        return
+    workflow = (repo_root / ".github/workflows/backlog-groomer.yml").read_text(
+        encoding="utf-8"
+    )
+    crons = re.findall(r"^\s*- cron:\s*'([^']*)'", workflow, re.MULTILINE)
+    resolved = config.CADENCE_PRESETS.get(cadence, cadence)
+    assert crons == [resolved]

@@ -9,8 +9,8 @@
 ``report`` is the pure, tested core; ``gather`` is the thin GET-only live
 read; ``run`` composes them.  The workflow stays a few lines of glue with
 no policy of its own — including the arming decision, which is code here
-(``config.armed``) rather than YAML expression soup, so the 2×2
-variable×conf matrix is unit-tested.
+(``config.armed``) rather than YAML expression soup, so the 2x2
+variable-by-conf matrix is unit-tested.
 """
 
 from __future__ import annotations

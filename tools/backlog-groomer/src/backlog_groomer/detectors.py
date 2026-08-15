@@ -18,6 +18,7 @@ must mean "checked, clean", not "couldn't look".
 
 from __future__ import annotations
 
+import heapq
 import re
 from datetime import datetime
 from typing import Any, Optional
@@ -209,25 +210,36 @@ def dup_candidates(
         (i["number"], i["title"], _title_tokens(i["title"])) for i in issues
     ]
     tokened = [(n, t, toks) for n, t, toks in tokened if toks]
-    pairs = []
-    for a in range(len(tokened)):
-        for b in range(a + 1, len(tokened)):
-            n1, t1, tok1 = tokened[a]
-            n2, t2, tok2 = tokened[b]
-            score = len(tok1 & tok2) / len(tok1 | tok2)
-            if score >= threshold:
-                lo, hi = sorted((n1, n2))
-                pairs.append(
-                    {
+
+    # Bounded retention: a pathological queue where every title resembles
+    # every other produces O(n²) matching pairs, so only the capped top-N
+    # are ever held (heapq.nsmallest keeps a cap-sized heap over the
+    # generator) while the total is counted for the report's disclosure.
+    # nsmallest returns ascending by the same (-score, a, b) key the full
+    # sort used, so the output is byte-identical to sort-then-slice.
+    total = [0]
+
+    def _matching_pairs():
+        for a in range(len(tokened)):
+            for b in range(a + 1, len(tokened)):
+                n1, t1, tok1 = tokened[a]
+                n2, t2, tok2 = tokened[b]
+                score = len(tok1 & tok2) / len(tok1 | tok2)
+                if score >= threshold:
+                    total[0] += 1
+                    lo, hi = sorted((n1, n2))
+                    yield {
                         "a": lo,
                         "b": hi,
                         "title_a": t1 if lo == n1 else t2,
                         "title_b": t2 if hi == n2 else t1,
                         "score": score,
                     }
-                )
-    pairs.sort(key=lambda p: (-p["score"], p["a"], p["b"]))
-    return pairs[:cap], len(pairs)
+
+    top = heapq.nsmallest(
+        cap, _matching_pairs(), key=lambda p: (-p["score"], p["a"], p["b"])
+    )
+    return top, total[0]
 
 
 def epic_complete(issues: list[dict]) -> list[dict]:

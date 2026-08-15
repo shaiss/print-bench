@@ -88,7 +88,10 @@ def test_titles_are_defused_and_capped():
     ])
     cfg = Config()
     report = render(evaluate(snapshot, cfg), snapshot, cfg)
-    line = next(l for l in report.splitlines() if l.startswith("- #10"))
+    line = next(
+        report_line for report_line in report.splitlines()
+        if report_line.startswith("- #10")
+    )
     assert "\\`weird\\`" in line and "\\|" in line  # markdown defused
     assert "\n" not in line[1:]                     # newline collapsed
     assert "…" in line                              # length-capped
