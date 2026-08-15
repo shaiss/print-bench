@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "backlog-groomer"
+version = "0.1.0"
+description = "Deterministic backlog-health report for print-bench's autonomy loop (advisory-only)"
+license = "CC-BY-SA-4.0"
+requires-python = ">=3.10"
+# Stdlib-only on purpose: the scheduled workflow runs this on the system
+# Python right after checkout, and a third-party import would force a pip
+# resolve in front of the step that reports on the backlog — the same rule
+# tools/lineage and tools/backlog-burn keep.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+backlog-groomer = "backlog_groomer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
