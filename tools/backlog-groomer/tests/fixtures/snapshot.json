@@ -1,0 +1,24 @@
+{
+  "generatedAt": "2026-08-15T06:00:00+00:00",
+  "issues": [
+    {"number": 10, "title": "Ancient bug in render pipeline", "labels": ["bug"], "createdAt": "2026-07-16T06:00:00+00:00", "updatedAt": "2026-07-16T06:00:00+00:00"},
+    {"number": 11, "title": "Fresh discussion thread", "labels": [], "createdAt": "2026-08-13T06:00:00+00:00", "updatedAt": "2026-08-13T06:00:00+00:00"},
+    {"number": 20, "title": "Armed task waiting forever", "labels": ["autonomy-ok", "points-2"], "createdAt": "2026-07-26T06:00:00+00:00", "updatedAt": "2026-07-26T06:00:00+00:00"},
+    {"number": 21, "title": "Armed task with rescue PR", "labels": ["autonomy-ok", "points-1"], "createdAt": "2026-07-31T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00"},
+    {"number": 22, "title": "Armed but never sized", "labels": ["autonomy-ok"], "createdAt": "2026-08-13T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00"},
+    {"number": 30, "title": "Parked decision now answered", "labels": ["needs-decision", "decision-approved"], "createdAt": "2026-08-05T06:00:00+00:00", "updatedAt": "2026-08-12T06:00:00+00:00"},
+    {"number": 31, "title": "Parked decision still waiting", "labels": ["needs-decision"], "createdAt": "2026-08-05T06:00:00+00:00", "updatedAt": "2026-08-12T06:00:00+00:00"},
+    {"number": 40, "title": "Giant epic nobody split", "labels": ["declined-too-big"], "createdAt": "2026-08-03T06:00:00+00:00", "updatedAt": "2026-08-05T06:00:00+00:00"},
+    {"number": 50, "title": "Tracking epic all done", "labels": [], "createdAt": "2026-08-05T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00", "subIssues": {"total": 2, "completed": 2}},
+    {"number": 51, "title": "Tracking epic half done", "labels": [], "createdAt": "2026-08-05T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00", "subIssues": {"total": 3, "completed": 1}},
+    {"number": 60, "title": "Widget mount bracket 1", "labels": [], "createdAt": "2026-08-13T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00"},
+    {"number": 61, "title": "Widget mount bracket 2", "labels": [], "createdAt": "2026-08-13T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00"},
+    {"number": 62, "title": "Widget mount bracket 3", "labels": [], "createdAt": "2026-08-13T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00"},
+    {"number": 63, "title": "Widget mount bracket 4", "labels": [], "createdAt": "2026-08-13T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00"},
+    {"number": 64, "title": "Widget mount bracket 5", "labels": [], "createdAt": "2026-08-13T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00"},
+    {"number": 65, "title": "Widget mount bracket 6", "labels": [], "createdAt": "2026-08-13T06:00:00+00:00", "updatedAt": "2026-08-14T06:00:00+00:00"}
+  ],
+  "openPRs": [
+    {"number": 100, "body": "Rescue work under way.\n\nFixes #21"}
+  ]
+}
