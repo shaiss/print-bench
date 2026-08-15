@@ -16,8 +16,12 @@ fuses all three domains of `docs/advanced-techniques.md` in a single print.
 
 ## What you get
 
-- `compliant-gripper` — one print, ≈ 44 mm across × 30 mm tall, in **two separate
-  bodies** (fixed base+fingers, and the free sliding collar).
+- `compliant-gripper` — one print, ≈ 29 mm across × 29 mm tall, in **two separate
+  bodies** (fixed base+fingers, and the free sliding collar). Grips rods
+  **≈ 10.5–14 mm Ø** (fat markers, 12 mm dowels): the collar bore is the hard
+  stop, so the jaws floor at 2·(`collar_ir` − `finger_wall`) ≈ 10.4 mm — a
+  standard ~7–8 mm pencil falls through; shrink `ro_tip`/`finger_wall` for
+  thinner stock.
 
 ## Print settings
 

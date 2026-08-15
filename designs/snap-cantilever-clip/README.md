@@ -15,7 +15,7 @@ mechanism — a snap — done right (`docs/advanced-techniques.md`, Domain 1).
 
 ## What you get
 
-- `snap-cantilever-clip` — one part, ≈ 27 × 11 × 10 mm, with a mounting hole.
+- `snap-cantilever-clip` — one part, ≈ 23 × 11 × 10 mm, with a mounting hole.
 
 ## Print settings
 
