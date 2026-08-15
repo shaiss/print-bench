@@ -31,6 +31,7 @@ Every workflow in `.github/workflows/` that has a `workflow_dispatch` trigger **
 | `design-run.yml` | schedule, `workflow_dispatch` | contents, issues, pull-requests | `CLAUDE_KEY`, `GH_TOKEN`, `ZAI_KEY` | `DESIGN_RUN_ENABLED` + committed `enabled:` | pinned to `default_branch` |
 | `chunker.yml` | schedule, `workflow_dispatch` | issues (only; no contents/pull-requests write) | `ANTHROPIC_API_KEY`, `ZAI_KEY` | `CHUNKER_ENABLED` + committed `enabled:` | pinned to `default_branch`; agent tools locked to a wrapper + deny backstop (CR-A below) |
 | `lifestyle-shot.yml` | push (`designs/*/lifestyle.conf`), `workflow_dispatch` | contents, pull-requests | `GITHUB_TOKEN`, `ZAI_KEY` | none — gated on `ZAI_KEY` presence | unpinned |
+| `product-still.yml` | push (`designs/*/product-still.conf`), `workflow_dispatch` | contents, pull-requests | `GITHUB_TOKEN`, `ZAI_KEY` | none — gated on `ZAI_KEY` presence | unpinned |
 | `lifestyle-clip.yml` | push (`designs/*/motion.conf`), `workflow_dispatch` | contents, pull-requests (job-level) | `GITHUB_TOKEN`, `ZAI_KEY` | none — gated on `ZAI_KEY` presence | unpinned |
 | `avatar.yml` | `workflow_dispatch` | contents, pull-requests | `GITHUB_TOKEN` | none — inputs shape-validated, draft PR only | unpinned |
 | `backlog-burn-config.yml` | `issue_comment`, `workflow_dispatch` | issues, pull-requests | `REGEN_TOKEN` | none | trusted base-branch tooling only (see note) |
