@@ -185,7 +185,9 @@ jobs:
             if [ -z "$nums" ]; then
               echo "- no untriaged open issues (every open issue already carries a routing label)"
             else
-              echo "- untriaged issues to triage: $(echo "$nums" | sed 's/\([0-9]\+\)/#\1/g')"
+              # Prefix each space-separated number with '#' via parameter
+              # expansion (nums is non-empty here): "204 206" -> "#204 #206".
+              echo "- untriaged issues to triage: #${nums// / #}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -304,7 +306,7 @@ jobs:
             elif [ -z "${ISSUES}" ]; then
               echo "- selected: none (every open issue already carries a routing label)"
             else
-              echo "- selected untriaged issues: $(echo "${ISSUES}" | sed 's/\([0-9]\+\)/#\1/g')"
+              echo "- selected untriaged issues: #${ISSUES// / #}"
               echo "- provider: ${PROVIDER}"
               echo "- run step: ${RUN:-skipped} (the applied labels and one-line rationales are on each issue thread)"
             fi
