@@ -50,21 +50,24 @@ name: Labeler (scheduled issue triage)
 
 on:
   schedule:
-    # Once a day at :11 past the hour — an off-peak minute (not :00) to avoid
+    # Every 4 hours at :11 past the hour — an off-peak minute (not :00) to avoid
     # Actions scheduler congestion, and offset from backlog-burn's :17,
     # design-run's :23 and chunker's :29 so the routines don't fire
-    # simultaneously. 05:11 runs BEFORE the 05:29 chunker and the 06:17 backlog
-    # burn, so an issue armed this morning is available to the same morning's
-    # chunk-and-ship. Cron must be a literal — Actions evaluates no files or
-    # variables for on.schedule — so change the cadence by editing this line in
-    # a one-line PR (and the `cadence:` key in .github/labeler.conf to match),
-    # e.g.:
+    # simultaneously. Firing 6× a day (01:11 / 05:11 / 09:11 / 13:11 / 17:11 /
+    # 21:11 UTC) keeps the queue moving so a freshly-filed issue is routed within
+    # hours instead of waiting for the next morning; the 05:11 fire still runs
+    # BEFORE the 05:29 chunker and the 06:17 backlog burn, so an issue armed then
+    # is available to that morning's chunk-and-ship. Cron must be a literal —
+    # Actions evaluates no files or variables for on.schedule — so change the
+    # cadence by editing this line in a one-line PR (and the `cadence:` key in
+    # .github/labeler.conf to match), e.g.:
     #   twice daily:  '11 5,17 * * *'
-    #   weekly:       '11 5 * * 1'
+    #   daily:        '11 5 * * *'
     # The two-key guard (LABELER_ENABLED + committed `enabled: true`) ensures the
-    # schedule is harmless until deliberately armed, so firing daily is safe:
-    # idle firings cost nothing.
-    - cron: '11 5 * * *'
+    # schedule is harmless until deliberately armed, and the routine is bounded
+    # (≤15 issues/run, add-only, no re-route), so firing 6×/day is cheap and
+    # safe: an idle firing that finds nothing untriaged skips before any model call.
+    - cron: '11 1,5,9,13,17,21 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
