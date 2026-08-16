@@ -309,6 +309,13 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   burn (`.github/workflows/backlog-burn.yml`): picks one unclaimed,
   `autonomy-ok`-labelled issue for a nightly unattended `/ship-issue` run —
   see its [README](tools/backlog-burn/README.md)
+- `tools/model-registry/` — the provider/model registry + chain resolver behind
+  the agentic workflows (`.github/models/registry.conf`, issue #206): the single
+  source of truth for which models run, in what order, and why. A stdlib-only
+  parser + selector resolves a named fallback chain into the ordered links a
+  workflow consumes; `auto-review.yml` is the first consumer (its reviewer chain
+  is now a registry edit, not per-job YAML), pinned by a drift-guard test — see
+  its [README](tools/model-registry/README.md)
 - `tools/backlog-groomer/` — the deterministic backlog-health reporter behind
   the scheduled groomer (`.github/workflows/backlog-groomer.yml`): seven
   detectors over the open-issue queue (stale, armed-but-stuck, unsized,

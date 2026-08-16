@@ -9,12 +9,12 @@
 # time the classifier moved. Now the workflow and the local mirror share this
 # implementation — they cannot disagree.
 #
-#   Emits, one `key=value` per line on STDOUT (the 14 outputs ci.yml's
+#   Emits, one `key=value` per line on STDOUT (the 15 outputs ci.yml's
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
-#     ci_gates_tests, styles, gate, gate_designs, regen, regen_designs,
-#     docs_standards
+#     ci_gates_tests, model_registry_tests, styles, gate, gate_designs, regen,
+#     regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
 # Usage:
@@ -48,7 +48,7 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
-  local bbtests=false bgtests=false tmtests=false cgtests=false docs_standards=false
+  local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false docs_standards=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -56,7 +56,7 @@ classify() {
     # Default-branch push (or any non-PR trigger): run everything, gate and
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
-    bbtests=true; bgtests=true; tmtests=true; cgtests=true; docs_standards=true
+    bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; docs_standards=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -123,6 +123,7 @@ classify() {
         scripts/*|site/*|vercel.json|tools/photoshot/*|\
         tools/backlog-burn/*|.github/backlog-burn.conf|\
         tools/backlog-groomer/*|.github/backlog-groomer.conf|\
+        tools/model-registry/*|.github/models/registry.conf|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
           soft_infra=true ;;
@@ -183,6 +184,13 @@ classify() {
         .github/workflows/ci.yml) bgtests=true ;;
       esac
       case "$f" in
+        # The model registry (issue #206). auto-review.yml is here because the
+        # drift-guard test reads it — a change to that workflow's chain must
+        # re-run the guard that pins it to .github/models/registry.conf.
+        tools/model-registry/*|.github/models/registry.conf|\
+        .github/workflows/auto-review.yml|.github/workflows/ci.yml) mrtests=true ;;
+      esac
+      case "$f" in
         tools/telemetry/*|.github/workflows/ci.yml) tmtests=true ;;
       esac
       case "$f" in
@@ -213,6 +221,7 @@ classify() {
         vercel.json|printer.conf|tools/lineage/*|tools/photoshot/*|\
         tools/backlog-burn/*|.github/backlog-burn.conf|\
         tools/backlog-groomer/*|.github/backlog-groomer.conf|\
+        tools/model-registry/*|.github/models/registry.conf|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
           scad=true ;;
@@ -307,6 +316,7 @@ classify() {
   echo "backlog_groomer_tests=$bgtests"
   echo "telemetry_tests=$tmtests"
   echo "ci_gates_tests=$cgtests"
+  echo "model_registry_tests=$mrtests"
   echo "styles=$styles"
   echo "gate=$gate"
   echo "gate_designs=$designs"
@@ -377,7 +387,8 @@ selftest() {
   out="$(run "docs/derivative-designs.md")"
   check "docs-only" "$out" \
     "scad=false" "gate=false" "gate_designs=" "regen=false" "styles=false" \
-    "printcheck_tests=false" "docs_standards=true" "backlog_groomer_tests=false"
+    "printcheck_tests=false" "docs_standards=true" "backlog_groomer_tests=false" \
+    "model_registry_tests=false"
   out="$(run ".claude/skills/preflight/SKILL.md")"
   check "skills-only" "$out" \
     "scad=false" "gate=false" "docs_standards=false" "printcheck_tests=false"
@@ -420,6 +431,20 @@ selftest() {
   out="$(run ".github/backlog-groomer.conf")"
   check "groomer-conf" "$out" \
     "backlog_groomer_tests=true" "gate=true" "gate_designs=" "regen=false"
+
+  # 4e. The model registry (issue #206) is soft-infra like its tool siblings: its
+  #     own tests run and the required contexts RUN with an empty design list — it
+  #     resolves model chains, moving no mesh and no pixels. A registry.conf-only
+  #     change and an auto-review.yml change both re-run the drift-guard.
+  out="$(run "tools/model-registry/src/model_registry/registry.py")"
+  check "model-registry-only" "$out" \
+    "model_registry_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "backlog_groomer_tests=false"
+  out="$(run ".github/models/registry.conf")"
+  check "model-registry-conf" "$out" \
+    "model_registry_tests=true" "gate=true" "gate_designs=" "regen=false"
+  out="$(run ".github/workflows/auto-review.yml")"
+  check "auto-review-runs-drift-guard" "$out" "model_registry_tests=true"
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must

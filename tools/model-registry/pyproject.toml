@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "model-registry"
+version = "0.1.0"
+description = "Provider/model registry + chain resolver for the agentic workflows (issue #206)"
+license = { text = "CC-BY-SA-4.0" }
+requires-python = ">=3.10"
+# Stdlib-only on purpose: a workflow resolves the chain straight from the
+# checkout (PYTHONPATH + python -m model_registry) with no pip step in front of
+# the review pipeline, and the classifier/CI jobs run it on the system Python —
+# the same rule tools/lineage, tools/ci-gates and tools/backlog-burn keep. A
+# single third-party import would force an install before the routine that
+# decides which model runs.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+model-registry = "model_registry.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
