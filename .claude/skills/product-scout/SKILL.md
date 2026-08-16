@@ -21,6 +21,50 @@ non-negotiable?", where a wrong answer is expensive. Generation asks "what
 should exist that doesn't?", where a wrong answer is a proposal a human
 closes. Different model needs, different job (issue #229).
 
+## Run this — the exact procedure (do every step)
+
+All GitHub reads and writes go through **one** shell surface, the wrapper
+`.claude/skills/product-scout/scout-helper.sh` (the only command you may run);
+use Read/Grep/Glob for the repo's files. Every run, in order:
+
+1. **Dedup first — see what's already proposed.** Run:
+   `.claude/skills/product-scout/scout-helper.sh list-briefs`
+   For any existing brief you might overlap with, read it:
+   `.claude/skills/product-scout/scout-helper.sh read-thread <n>`
+   Never re-propose something already open.
+
+2. **Read the committed signals** with Read/Grep/Glob — `telemetry/log.ndjson`,
+   the `## Field test log` sections of `designs/*/NOTES.md`, `designs/*/README.md`
+   and `PM.md` — and frame catalog gaps against the mandate (§1) and what counts
+   as an unmet need (§1).
+
+3. **File each proposal as its own issue — this is the deliverable.** You **MUST
+   actually run the `file-brief` command** for every proposal: writing a brief in
+   your reply, or merely deciding what you *would* file, files nothing. Compose a
+   body that matches `templates/design-brief.md` section for section (§3), then
+   run **exactly** this shape — the `$(printf '%s' '...')` wrapper is required, not
+   decorative, and both it and the `printf` inside are on the run's allow-list:
+   ```
+   .claude/skills/product-scout/scout-helper.sh file-brief \
+     --title "Design brief: <short idea>" \
+     --body "$(printf '%s' '<full markdown body, design-brief.md sections>')"
+   ```
+   The body sits inside **single quotes**, so backticks, parentheses, `#`, `$` and
+   double quotes are all safe **literally** — but a single apostrophe (`'`) ends the
+   quote and breaks the command. So write the body **without apostrophes**: use
+   "does not" not "doesn't", "the port's face" → "the face of the port". Keep the
+   markdown otherwise verbatim. The wrapper hardcodes the `design-brief` label and
+   caps how many you may file per run; file up to that many **strong, distinct,
+   non-overlapping** proposals. Filing **zero** when a real catalog gap exists means
+   you did not finish — on a normal run, file **at least one** well-formed brief.
+
+4. **Read each filed issue back** as a stranger design session (§7). Stop once
+   you've filed your strong proposals; do not pad to the cap with weak ideas.
+
+The rest of this skill is the detail behind those four steps — the mandate that
+decides *what* to propose (§1), the signals to read (§2), the brief format (§3),
+the advisory-only boundary (§4), and what "done" means (§7).
+
 ## 1. The mandate — what to chase
 
 The mandate is the product; the rest of this skill is method. It is the
