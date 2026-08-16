@@ -92,6 +92,83 @@ function asset(path) {
   return ASSET_VERSION ? `${path}?v=${ASSET_VERSION}` : path;
 }
 
+// The header notification bell's data, set once per build (like ASSET_VERSION)
+// so every page's shared header renders the same tray without threading it
+// through every page function. build.mjs assembles the bundle from its sources
+// (today: the open decision queue, via notifications.mjs) and calls this before
+// any page renders. Empty by default — a local/CI build has no network source,
+// so the bell renders deterministically as "all caught up", which is exactly
+// the standard empty-state a notification icon shows.
+let NOTIFICATIONS = { items: [], actions: [] };
+export function setNotifications(bundle) {
+  NOTIFICATIONS =
+    bundle && Array.isArray(bundle.items)
+      ? { items: bundle.items, actions: Array.isArray(bundle.actions) ? bundle.actions : [] }
+      : { items: [], actions: [] };
+}
+
+// A stroke bell that inherits currentColor, so it themes with the nav the way
+// the brand mark and theme toggle do — no emoji, keeping the Modernist look.
+const BELL_SVG = `<svg class="notif-bell" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>`;
+
+/**
+ * The header notification bell + dropdown tray — the standard app notification
+ * pattern, and the base every future notification source renders through. Built
+ * as a native <details> disclosure so it opens and closes with no JavaScript
+ * (site.js only adds outside-click / Escape-to-close); the badge shows the count
+ * and the tray lists each notification linking to the thing it's about. Always
+ * rendered — an empty bell shows the "all caught up" state, the same as any
+ * app's notification icon, so it never disappears and reappears.
+ */
+function notificationBell() {
+  const items = NOTIFICATIONS.items || [];
+  const actions = NOTIFICATIONS.actions || [];
+  const count = items.length;
+  const label =
+    count === 0
+      ? "Notifications: none waiting"
+      : `Notifications: ${count} waiting`;
+  const badge = count
+    ? `<span class="notif-badge" data-notif-count>${escapeHtml(String(count))}</span>`
+    : "";
+  const rows = items
+    .map(
+      (n) => `        <li class="notif-item">
+          <a href="${escapeHtml(n.url)}" rel="noopener noreferrer">
+            <span class="notif-cat">${escapeHtml(n.categoryLabel || "")}</span>
+            <span class="notif-item-title">${escapeHtml(n.title || "")}</span>
+            ${n.meta ? `<span class="notif-meta">${escapeHtml(n.meta)}</span>` : ""}
+          </a>
+        </li>`
+    )
+    .join("\n");
+  const body = count
+    ? `      <ul class="notif-list">
+${rows}
+      </ul>`
+    : `      <p class="notif-empty">You're all caught up.</p>`;
+  const foot = actions.length
+    ? `      <div class="notif-foot">
+${actions
+  .map(
+    (a) =>
+      `        <a href="${escapeHtml(a.url)}" rel="noopener noreferrer">${escapeHtml(a.label || "")}</a>`
+  )
+  .join("\n")}
+      </div>`
+    : "";
+  return `<details class="notif" data-notif>
+    <summary class="notif-btn" aria-label="${escapeHtml(label)}" title="Notifications">
+      ${BELL_SVG}${badge}
+    </summary>
+    <div class="notif-tray" data-notif-tray role="region" aria-label="Notifications">
+      <p class="notif-tray-head">Notifications${count ? ` <span class="notif-tray-count">${escapeHtml(String(count))}</span>` : ""}</p>
+${body}
+${foot}
+    </div>
+  </details>`;
+}
+
 /**
  * Applied before first paint so a stored theme choice never flashes.
  * Kept inline (and tiny) for that reason — site.js only wires the button.
@@ -125,6 +202,7 @@ ${extraHead}
       <a href="/people/"${canonicalPath.startsWith("/people") ? ' aria-current="page"' : ""}>People</a>
       <a href="/how-it-works/"${canonicalPath.startsWith("/how-it-works") ? ' aria-current="page"' : ""}>How it works</a>
       <a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">Source ↗</a>
+      ${notificationBell()}
       <button class="theme-toggle" type="button" aria-label="Switch theme">☾</button>
     </nav>
   </div>
@@ -248,42 +326,12 @@ function card(design, roster = null) {
 </article>`;
 }
 
-/**
- * The read-only "Decisions awaiting a human" queue (issue #181, the surfacing
- * follow-up to the #161 HITL decision gate). Built from the open needs-decision
- * issues/PRs fetched at deploy time; null (or an empty rows list) when the
- * queue is empty or the fetch was skipped (local/CI) — so the section simply
- * does not appear, the same no-empty-heading rule the Downloads rail holds (an
- * absent queue is never a broken anything). Each row links to the issue it
- * surfaces; resolving still goes through /decide (docs/decision-gate.md).
- * Surfacing only — this section never decides.
- */
-function decisionsSection(queue) {
-  if (!queue || !Array.isArray(queue.rows) || queue.rows.length === 0) return "";
-  const rows = queue.rows
-    .map((d) => {
-      const kind = d.kind === "pull" ? "PR" : "issue";
-      return `      <li><a href="${escapeHtml(d.url)}" rel="noopener noreferrer"><span class="dec-num">#${escapeHtml(
-        String(d.number)
-      )}</span>${escapeHtml(d.title)}</a> <span class="dec-kind">${kind}</span></li>`;
-    })
-    .join("\n");
-  return `<section class="decisions" aria-labelledby="decisions-h">
-    <p class="eyebrow">Decision queue</p>
-    <h2 id="decisions-h">Decisions awaiting a human</h2>
-    <p>Open issues the autonomy pipeline parked for a yes/no a person owns.
-    Resolve one with <code>/decide</code> on its thread — this section surfaces
-    them, it does not decide them.</p>
-    <ul class="dec-list">
-${rows}
-    </ul>
-    <p class="dec-search"><a href="${escapeHtml(
-      queue.searchUrl
-    )}" rel="noopener noreferrer">Every open decision →</a></p>
-  </section>`;
-}
-
-export function indexPage(designs, { rosters = new Map(), decisions = null } = {}) {
+export function indexPage(designs, { rosters = new Map() } = {}) {
+  // Parked decisions used to render here as a full-width panel above the
+  // gallery; they now live in the header notification bell (see
+  // notificationBell / setNotifications), so the index leads straight into the
+  // designs. The bell is global, so every page surfaces the queue, not just
+  // this one.
   const body = `<div class="wrap">
   <section class="hero">
     <p class="eyebrow">${escapeHtml(String(designs.length))} designs · every one gated in CI</p>
@@ -292,7 +340,7 @@ export function indexPage(designs, { rosters = new Map(), decisions = null } = {
     from source; a printability gate — watertight, overhang-checked,
     test-sliced — passes before merge.</p>
   </section>
-  ${decisionsSection(decisions)}<section class="grid">
+  <section class="grid">
 ${designs.map((d) => card(d, rosters.get(d.name) || null)).join("\n")}
   </section>
 </div>`;
