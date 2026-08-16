@@ -52,8 +52,12 @@ The fitchecks prove the end poses; the *action* lives in the last ~5° of
 closing. Sweeping strip ∩ lid interference by fold angle: 0 through 172°,
 0.62 mm³ at 173°, peaking **28.09 mm³ at 176.5°**, back to 0 by 179.5° (tab
 seated in the window). The tab cams the strip's top land outward **~1.4–1.5 mm**
-before it drops in; once latched, free play before the latch re-engages is
-0.47 mm, and `hook` protrudes only 0.1 mm past the strip's outer face — the
+before it drops in; once latched, free play is **0.40 mm** land-to-land at the
+window plane (closed tab z ∈ [16.75, 19.15] inside the window band
+[16.35, 19.55] — measured on the tab's full-height wall slab, the face that
+actually bears; an earlier round quoted 0.47 from a different probe, and the
+land-to-land figure is the reproducible one), and `hook` protrudes only
+0.1 mm past the strip's outer face — the
 retention is the window's side/bottom lands, not a positive hook. So the latch
 relies on the strip flexing ~1.5 mm outward on every close/open; if it prints
 stiff (ABS, cold chamber), the box will resist closing — reduce `latch_h` or

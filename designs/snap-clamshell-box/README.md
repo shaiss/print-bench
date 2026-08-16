@@ -25,7 +25,8 @@ Closed and latched (preview pose):
   ≈ 53 × 43 × 26 mm closed box — the two tray-halves close face-to-face into one
   deep compartment. The closed interior clears ≈ 22.8 mm — enough to hold a pair
   of earbuds lying on their sides (21.8 mm is a bud's narrowest dimension; stood
-  upright they do not fit).
+  upright they do not fit). Expect a faint click from the stowed buds in a bag —
+  the ~1 mm of clearance that makes them easy to drop in also lets them shift.
 
 ## Print settings
 

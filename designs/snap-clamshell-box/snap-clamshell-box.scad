@@ -92,7 +92,9 @@ module tray() {
 // of the closed lid wall is the fix; a buttress below the rim (z <= wall_h,
 // where the lid never reaches) carries the offset strip so it still prints flat.
 lw     = 20;                          // latch strip width, X
-win_z  = wall_h + latch_h * 0.55;     // window centre height (closed frame = same, base doesn't fold)
+win_z  = wall_h + latch_h * 0.55;     // window centre height; 0.55 (not 0.5) biases the
+                                      // window above mid-arm so the folded tab lands clear
+                                      // of the rim — not a taste constant, don't "fix" to 0.5
 win_h  = 3.2;                          // window height
 // The windowed compliant strip alone (no buttress). `clr` is the outward
 // standoff; the fitchecks intersect THIS against the closed lid.
