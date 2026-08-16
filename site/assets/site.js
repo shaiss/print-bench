@@ -110,6 +110,28 @@
   });
 })();
 
+// Header notification bell (issue #181's decision queue, now the general
+// notification tray). The tray is a native <details>, so it already opens,
+// closes and is keyboard-reachable with no JavaScript. This only adds the two
+// conveniences a bare <details> lacks: close when a click lands outside it, and
+// close on Escape (returning focus to the bell). Nothing here is required for
+// the tray to work.
+(function () {
+  document.addEventListener("DOMContentLoaded", function () {
+    var notif = document.querySelector("[data-notif]");
+    if (!notif) return;
+    document.addEventListener("click", function (e) {
+      if (notif.open && !notif.contains(e.target)) notif.open = false;
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !notif.open) return;
+      notif.open = false;
+      var summary = notif.querySelector("summary");
+      if (summary) summary.focus();
+    });
+  });
+})();
+
 // Product-page tabs (wireframe 1d: one concern on screen at a time).
 //
 // The page ships as a stacked document: the tab bar is `hidden` and every
