@@ -50,6 +50,10 @@ Closed and latched (preview pose):
   0.45 mm perimeter passes per side plus a bridged core across the spine gap on
   the first layer. "Detect thin walls" is not needed and changes nothing here
   *(measured)*
+
+*The measured counts above come from stock PrusaSlicer with the repo gate's CLI
+settings (0.4 mm nozzle, 0.2 mm layers); on another slicer or profile, re-slice
+and verify — the recommendations hold, the exact counts may not.*
 - **Orientation:** **flat, both trays open** (as modelled). Fold the lid 180° over
   the base after printing; the front tab snaps into the base window.
 
@@ -66,7 +70,7 @@ box closes.
 | `inner_d` | 34 mm | inner tray depth (each tray) |
 | `wall_h` | 13 mm | wall height per tray (closed interior ≈ 2·(wall_h − floor_t)) |
 | `hinge_t` | 0.6 mm | living-hinge web thickness (thin = folds easily; 0.4–1.0) |
-| `hook` | 2.0 mm | how far the tab reaches out to meet the strip (retention is the window lands — see NOTES) |
+| `hook` | 2.0 mm | hook depth over the lid rim; the tab reaches through the window, and retention comes from the window lands, not the hook |
 | `latch_t` | 1.6 mm | latch strip (arm) thickness — drives snap stiffness; thickens outward, so the anti-clash clearance is preserved |
 | `latch_h` | 9 mm | latch strip height above the rim — drives `win_z` and the fold map (`tab_flat_z`) |
 | `hinge_gap` | 2.0 mm | spine gap between the trays that the hinge web bridges |
