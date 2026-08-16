@@ -112,9 +112,9 @@ module latch_buttress() {
     translate([-lw/2, td - wall_t, 0])
         cube([lw, latch_clr + latch_t, wall_h]);   // wall face out to the strip's outer face (= wall_t + latch_clr at the 1.6 defaults)
 }
-module base_latch() {
+module base_latch(clr = latch_clr) {
     latch_buttress();
-    latch_strip();
+    latch_strip(clr);
 }
 
 // Lid tab: a ramped nub protruding OUTWARD from the lid outer wall (tray frame
@@ -147,7 +147,7 @@ module living_hinge() {
 module placed_base(clr = latch_clr) {
     translate([0, -hinge_gap/2, 0]) mirror([0, 1, 0]) {
         tray();
-        base_latch();
+        base_latch(clr);
     }
 }
 module placed_base_strip(clr = latch_clr) {
@@ -167,6 +167,14 @@ module placed_lid(fold, with_tab = true) {
 module main() {
     assert(hinge_t >= 0.4, "living hinge under two layers — it will tear");
     assert(hinge_t <= 1.0, "living hinge too thick to fold without a huge radius");
+    // Self-enforcing form of the documented rule ">= wall_t + a print
+    // clearance": below wall_t the strip re-enters the wall band the closed lid
+    // folds onto (issue #230's 216 mm^3 clash); +0.2 is the low end of the
+    // repo's FDM clearance convention. The fitchecks probe the pre-fix pose via
+    // the `clr` ARGUMENT (placed_base_strip(0)), not this global, so the
+    // negative control still renders.
+    assert(latch_clr >= wall_t + 0.2,
+        "latch_clr under wall_t + 0.2 mm: the latch strip re-enters the closed lid's wall band (issue #230 clash)");
 
     placed_base();                 // base tray + windowed latch strip, −Y
     placed_lid(demo_fold);         // lid tray + ramped tab, folds about spine top

@@ -20,16 +20,20 @@ Closed and latched (preview pose):
 
 ## What you get
 
-- `snap-clamshell-box` — one flat print, ≈ 53 × 81 × 22 mm as printed (both trays
-  open and flat, the latch strip standing proud of the rim); folds to a
-  ≈ 53 × 43 × 26 mm closed box with two compartments. The closed interior clears
-  ≈ 22.8 mm — enough to hold a pair of earbuds.
+- `snap-clamshell-box` — one flat print, ≈ 53 × 80.5 × 22 mm as printed (both
+  trays open and flat, the latch strip standing proud of the rim); folds to a
+  ≈ 53 × 43 × 26 mm closed box — the two tray-halves close face-to-face into one
+  deep compartment. The closed interior clears ≈ 22.8 mm — enough to hold a pair
+  of earbuds lying on their sides (21.8 mm is a bud's narrowest dimension; stood
+  upright they do not fit).
 
 ## Print settings
 
 - **Material:** PETG / PP for the living hinge (it folds many times); PLA will
   crack at the hinge
-- **Layer height:** 0.2 mm
+- **Layer height:** 0.2 mm or finer — the 0.6 mm living hinge is exactly
+  3 layers at 0.2 mm; 0.24 mm and coarser drops it to 2 and it will crack at
+  the fold
 - **Infill:** 20–30 %
 - **Supports:** none needed
 - **Orientation:** **flat, both trays open** (as modelled). Fold the lid 180° over
@@ -49,7 +53,10 @@ box closes.
 | `wall_h` | 13 mm | wall height per tray (closed interior ≈ 2·(wall_h − floor_t)) |
 | `hinge_t` | 0.6 mm | living-hinge web thickness (thin = folds easily; 0.4–1.0) |
 | `hook` | 2.0 mm | latch tab protrusion (snap strength) |
-| `latch_clr` | 2.0 mm | outward standoff of the latch strip so it clears the closed lid wall (≥ `wall_t` + a print clearance) |
+| `latch_t` | 1.6 mm | latch strip (arm) thickness — drives snap stiffness; thickens outward, so the anti-clash clearance is preserved |
+| `latch_h` | 9 mm | latch strip height above the rim — drives `win_z` and the fold map (`tab_flat_z`) |
+| `hinge_gap` | 2.0 mm | spine gap between the trays that the hinge web bridges |
+| `latch_clr` | 2.0 mm | outward standoff of the latch strip so it clears the closed lid wall (≥ `wall_t` + a print clearance, asserted in the model) |
 
 All parameters are at the top of `snap-clamshell-box.scad`; override with
 `-D 'inner_w=60'`. `demo_fold` is a preview pose only — print at 0.

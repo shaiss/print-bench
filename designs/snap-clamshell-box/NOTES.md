@@ -46,6 +46,22 @@ re-measured above). Locked in by `ci.fitchecks`: `closed-clash` must render empt
 `closed-clash-ctrl` (the same intersection with `latch_clr = 0`) must reproduce
 the 216 mm³ interference — the negative control proving the check can fail.
 
+## The snap's cam event (measured, PR #268 review round)
+
+The fitchecks prove the end poses; the *action* lives in the last ~5° of
+closing. Sweeping strip ∩ lid interference by fold angle: 0 through 172°,
+0.62 mm³ at 173°, peaking **28.09 mm³ at 176.5°**, back to 0 by 179.5° (tab
+seated in the window). The tab cams the strip's top land outward **~1.4–1.5 mm**
+before it drops in; once latched, free play before the latch re-engages is
+0.47 mm, and `hook` protrudes only 0.1 mm past the strip's outer face — the
+retention is the window's side/bottom lands, not a positive hook. So the latch
+relies on the strip flexing ~1.5 mm outward on every close/open; if it prints
+stiff (ABS, cold chamber), the box will resist closing — reduce `latch_h` or
+thin `latch_t` before forcing it. Isotropic beam math on the top land puts the
+camming load at 100–240 N depending on material; FDM laminates are weaker and
+less stiff than that model, so treat it as an upper bound — it is exactly the
+number the latch coupon exists to settle on a printed part.
+
 ## Name note
 
 The closure is a **snap** (two stable states, open/latched, separated by the
@@ -55,8 +71,10 @@ bistable latch is a possible variant but wouldn't print as flat.
 
 ## Print
 
-Flat, no supports. Living hinge → PETG/PP (folds), not PLA (cracks). Snap latch
-material is less critical (few cycles).
+Flat, no supports. Living hinge → PETG/PP (folds), not PLA (cracks). The snap
+latch flexes on every open/close — the same 2–4 cycles/day the hinge sees
+(≈700–1500/year for a daily-use box), so it wants the same PETG/PP; PLA fatigues
+at the latch root on the identical schedule (Drik review, PR #268).
 
 ## Status
 
@@ -64,6 +82,11 @@ material is less critical (few cycles).
   seats in the window.
 - Closed-pose latch clash fixed and gated (`ci.fitchecks`, issue #230); `wall_h`
   raised to 13 so the closed interior (22.8 mm) holds an earbud.
-- TODO: `gate.sh --slice` (needs PrusaSlicer; run in CI); `previews/cameras.conf`
-  + an `animations.conf` fold animation; the deeper latch coupon sweeping the
-  tab/window interference fit remains worthwhile for tuning.
+- `gate.sh --slice` ran green (CI + the PR #268 review round) — done.
+  `previews/cameras.conf` added in PR #268 (owns `closed-latched` and the
+  contact sheet, closing the #69-style staleness of issue #265).
+- TODO (ranked by the PR #268 Drik review): the **latch coupon** sweeping the
+  tab/window fit — promoted to top of the queue (the latch takes ~1000
+  cycles/year and the 28 mm³ cam event is its measured input); then an
+  `animations.conf` fold animation (it would have *shown* the 216 mm³ jam this
+  design had to derive).
