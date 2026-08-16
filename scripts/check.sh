@@ -257,6 +257,18 @@ if ! ./scripts/scout-perms-check.sh; then
   fail=1
 fi
 
+# Scout MCP filing tool: the scout's WRITE surface is the file_design_brief MCP
+# tool (.claude/skills/product-scout/scout_mcp.py), which replaced a Bash verb so
+# a rich multi-line brief body travels as a JSON argument instead of a shell
+# command line the dontAsk matcher rejects. Its --selftest proves the security
+# invariants a live run cannot show — the label is hardcoded to design-brief and
+# unpassable, the title must carry the 'Design brief:' prefix, and the per-run
+# cap fires — the same firing-guard discipline the perms-checks follow.
+echo "-- scout MCP selftest: .claude/skills/product-scout/scout_mcp.py --selftest"
+if ! python3 .claude/skills/product-scout/scout_mcp.py --selftest; then
+  fail=1
+fi
+
 # Lineage check: derives.conf parses, its parents exist, the declared parent
 # order still matches the entry .scad's include order, and every diamond is
 # explicitly asserted. All static, all milliseconds, so it runs unconditionally
