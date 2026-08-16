@@ -1,0 +1,273 @@
+name: Product scout (scheduled design-brief proposals)
+
+# The scheduled heartbeat for /product-scout (issues #241/#242). On a weekly
+# cadence it reads the repo's committed signals (telemetry, field-test logs, the
+# design catalog, open issues) and files `design-brief` issues proposing new
+# designs and improvements against a standing product mandate. It is the
+# GENERATIVE front of the autonomy loop — where the labeler ROUTES existing
+# issues, the scout ORIGINATES them — feeding the same human-gated pipeline
+# (/design-run, the backlog burn). The skill runs the same attended or
+# unattended and is advisory-only by construction (it proposes; it never
+# approves, arms an issue for autonomy, or merges); this workflow just gives it a
+# cadence.
+#
+# This is the SIBLING of backlog-burn.yml, design-run.yml, chunker.yml and
+# labeler.yml. It shares their config parser and their two-key safety model. Like
+# the labeler it has no selector (it does not pick an issue by a label); unlike
+# the labeler its one write is CREATING a `design-brief` issue, never editing an
+# existing one's labels.
+#
+# WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
+#   * Policy → committed, git-tracked: .github/product-scout.conf holds
+#     `enabled`, the `provider` and the `cadence`. Change it with a reviewed
+#     one-line PR; a clone carries it.
+#   * Live arming / kill switch → the PRODUCT_SCOUT_ENABLED repo variable, a fast
+#     human-only toggle (Settings → Secrets and variables → Actions → Variables).
+#     Not in git on purpose: arming an agent that WRITES issues should be a
+#     conscious act a fresh clone/fork can't inherit, and flipping it off halts
+#     the routine in seconds without a PR.
+#   * Cadence → the `cron` literal below. Actions cannot read a file or variable
+#     for on.schedule, so the schedule must be literal here — kept in sync with
+#     the `cadence:` key in .github/product-scout.conf.
+#
+# Safety properties (same as the siblings, plus the scout's own bounds):
+#   * TWO keys must agree to run: committed `enabled: true` AND
+#     PRODUCT_SCOUT_ENABLED == 'true'. Either off → inert.
+#   * Advisory-only + bounded: the run's ONLY shell surface is
+#     .claude/skills/product-scout/scout-helper.sh, whose file-brief verb
+#     hardcodes the `design-brief` label (never `autonomy-ok` &c.) and caps
+#     briefs per run at SCOUT_MAX_BRIEFS. A prompt-injected run can at worst file
+#     a bounded number of design-brief proposals — noise a human closes.
+#   * The scout's deny backstop (.claude/scout-settings.json, via --settings)
+#     neutralizes the additive settings.json allows (chunk-helper AND
+#     label-helper included), kept honest by scripts/scout-perms-check.sh.
+
+on:
+  schedule:
+    # Weekly, Monday 05:47 UTC — an off-peak minute offset from the labeler's
+    # :11, the backlog burn's :17, the design run's :23, the chunker's :29 and
+    # the groomer's :41, so the routines don't fire simultaneously. Cron must be
+    # a literal — Actions evaluates no files or variables for on.schedule — so
+    # change the cadence by editing this line in a one-line PR (and the
+    # `cadence:` key in .github/product-scout.conf to match). The two-key guard
+    # (PRODUCT_SCOUT_ENABLED + committed `enabled: true`) keeps the schedule
+    # harmless until deliberately armed.
+    - cron: '47 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Log intent but do not invoke /product-scout'
+        type: boolean
+        default: false
+
+# Scoped to what the unattended /product-scout run actually does: it reads the
+# repo to run the skill (contents:read) and CREATES design-brief issues
+# (issues:write). It pushes no branch and opens no PR, so it needs NEITHER
+# contents:write NOR pull-requests:write — the same tight grant as the labeler
+# and chunker. The job is off unless PRODUCT_SCOUT_ENABLED is set AND the
+# committed config says enabled, and the writing step is skipped without the
+# provider's secret, so even these grants sit idle until the routine is armed.
+permissions:
+  contents: read
+  issues: write
+
+# Never run two scouts at once — this group serializes THIS workflow with itself
+# (the siblings use their own group strings, so it does not serialize against
+# them). Do not cancel an in-flight run.
+concurrency:
+  group: product-scout
+  cancel-in-progress: false
+
+jobs:
+  scout:
+    name: Propose design briefs with /product-scout
+    # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
+    # anything but 'true' pauses the whole job in seconds without a commit.
+    # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
+    # Also pin the run to the DEFAULT BRANCH: this job carries a write scope and
+    # a secret, and workflow_dispatch can target any in-repo branch — so a
+    # dispatch against a PR branch must not run that branch's skill code with the
+    # secret. On schedule github.ref_name is already the default branch.
+    if: >-
+      vars.PRODUCT_SCOUT_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    # A hung /product-scout must not hold a runner for the 6-hour default while
+    # holding a secret, unwatched.
+    timeout-minutes: 40
+    env:
+      # Secrets cannot be read in a step `if:` directly, so surface each
+      # provider's key presence as a plain string and gate on it below.
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      # The per-run brief cap, enforced by scout-helper.sh's file-brief verb. Bump
+      # it to let one run seed more of the backlog; the human still culls.
+      SCOUT_MAX_BRIEFS: '3'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # Belt-and-braces with the job `if:` above: always check out the
+          # default branch, so the secret-bearing agent runs the reviewed, merged
+          # skill — never a dispatched branch's version.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install the config parser
+        # The scout reuses the backlog burn's config parser verbatim (only the
+        # `enabled`/`provider`/`cadence` keys — it has no selector).
+        run: pip install -e tools/backlog-burn
+
+      - name: Read policy (.github/product-scout.conf)
+        id: policy
+        # Key 2 of 2: the committed, git-tracked source of truth. A malformed or
+        # typo'd config (bad key, unknown provider) fails this step loudly rather
+        # than running on a policy nobody wrote. It also resolves the configured
+        # provider to whether *that provider's* secret is present, so the run
+        # steps below gate on one `key_present` output.
+        run: |
+          set -euo pipefail
+          conf=.github/product-scout.conf
+          enabled="$(backlog-burn config --get enabled --path "$conf")"
+          provider="$(backlog-burn config --get provider --path "$conf")"
+          case "$provider" in
+            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
+            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          {
+            echo "enabled=$enabled"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Note when disabled by committed policy
+        if: steps.policy.outputs.enabled != 'true'
+        run: echo "::notice::.github/product-scout.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
+
+      # One explicit run step per provider — a provider is a reviewed, git-tracked
+      # step because GitHub Actions can only reference a secret by its literal name
+      # (secrets can't be selected by a runtime variable). The committed
+      # `provider:` label picks which one runs. Both share the pin, the write
+      # permission, the `github_token` that authenticates the wrapper's gh calls,
+      # and the same /product-scout prompt. The default GITHUB_TOKEN is fine: the
+      # scout opens no PR (issue writes run no CI), so the PAT reasoning the burn
+      # and design run carry does not apply.
+      #
+      # Tool surface: the skill drives every GitHub write through ONE committed
+      # wrapper, .claude/skills/product-scout/scout-helper.sh (list-briefs /
+      # read-thread / ensure-label / file-brief), so the CLI allow-list is that
+      # wrapper plus the READ-ONLY file tools. It is NOT unrestricted `Bash` and
+      # NOT `Write`: the run reads untrusted issue text while holding a provider
+      # key, so a general shell — or a file-write that could overwrite the wrapper
+      # and run it — would turn prompt-injection into arbitrary commands / key
+      # exfiltration. `--permission-mode dontAsk` makes that surface exclusive: any
+      # tool not on the allow-list is DENIED (never prompted — no human in an
+      # unattended run). --settings .claude/scout-settings.json closes the additive
+      # allow leak from .claude/settings.json (deny beats allow from every source;
+      # it denies chunk-helper AND label-helper — neither is the scout's surface),
+      # kept in sync by scripts/scout-perms-check.sh. The pin is the immutable
+      # commit behind the v1 tag.
+
+      - name: Run via Z.AI (GLM)
+        id: run_zai
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
+        # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
+        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the same
+        # ZAI_KEY is also passed as anthropic_api_key to satisfy the action's
+        # credential check. Generation is the cheap-to-be-wrong case, so the cheap
+        # GLM tier is the right default — trade cost for quality on the --model /
+        # --effort line.
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model glm-5.2 --effort low --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          prompt: "/product-scout"
+
+      - name: Run via Anthropic (Claude)
+        id: run_anthropic
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
+        # right fit for an unattended bot — no OAuth token / subscription seat.
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          # Same narrow tool grant + scout deny backstop + dontAsk as the Z.AI step.
+          claude_args: --model claude-opus-4-8 --effort low --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          prompt: "/product-scout"
+
+      - name: Explain a skipped agentic run
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && (steps.policy.outputs.key_present != '1'
+              || github.event.inputs.dry_run == 'true')
+        env:
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — did not invoke /product-scout"
+          else
+            echo "::notice::the configured provider '${PROVIDER}' has no key set (ZAI_KEY for zai, ANTHROPIC_API_KEY for anthropic) — skipping the unattended /product-scout run"
+          fi
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+        run: |
+          {
+            echo "## Product scout — run outcome"
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/product-scout.conf \`enabled\` != true) — nothing ran"
+            else
+              echo "- provider: ${PROVIDER}"
+              echo "- run step: ${RUN:-skipped} (any filed design-brief issues are on the issue tracker, labelled \`design-brief\`)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    name: Explain a disarmed run
+    # The `scout` job is gated at job level, so an unset arming variable (the
+    # default clone/fork state) or a dispatch against a non-default ref skips it
+    # silently. This sibling makes that legible. No secrets, no write perms.
+    if: >-
+      vars.PRODUCT_SCOUT_ENABLED != 'true'
+      || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the routine did not run
+        env:
+          ARMED: ${{ vars.PRODUCT_SCOUT_ENABLED }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::notice::the product scout is disarmed — set the PRODUCT_SCOUT_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/product-scout.conf; both must agree before it runs."
+          else
+            echo "::notice::the product scout only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
+          fi
