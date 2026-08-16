@@ -76,8 +76,11 @@ makes the site look more locked-down than it is. Kept apart:
   API is down). `lib/history.mjs` is the second (`SITE_FETCH_HISTORY=1`): a
   design's own git commits over the GitHub API, folded into the team timeline as
   `commit · git` events, attributed to a member via their committed `github:`
-  login. Any further deploy-time source — PR / review history — follows the same
-  shape.
+  login. `lib/decisions.mjs` is the third (`SITE_FETCH_DECISIONS=1`): the open
+  `needs-decision` queue over the GitHub search API, mapped by `notifications.mjs`
+  into the header notification bell — empty locally, so the bell shows its
+  "all caught up" state. Any further deploy-time source — PR / review history —
+  follows the same shape.
 - **The served output references nothing external.** Every asset the *browser*
   loads is vendored (three.js, the OpenSCAD-WASM runtime, the `text()` font),
   resolved by an inline import map, never a CDN. "No external references" is a
@@ -234,13 +237,16 @@ things keep it consistent with the rest of the site:
 - `lib/history.mjs` — the deploy-time git-history source for the team timeline: a design's path-filtered commits over the GitHub API (best-effort and Vercel-scoped, like `releases.mjs`; merge commits dropped) → attributed `commit · git` events, the author mapped to a member by their committed `github:` login. The pure commit→event transform is unit-tested; the fetch boundary is stubbed, never the network
 - `lib/model.mjs` — the per-design model bundle (entry, source, files, sections, asserts) the configurator and viewer share
 - `lib/releases.mjs` — release download links (issue #139): the pure manifest → per-part download-link mapping, and the best-effort, Vercel-scoped fetch of the latest release's manifests (injectable `fetch`, empty on any failure)
+- `lib/decisions.mjs` — the deploy-time source for the parked-decision queue (issue #181): the open `needs-decision` issues/PRs over the GitHub search API (best-effort and Vercel-scoped, like `releases.mjs`). The pure search-item → row transform is unit-tested; the fetch boundary is stubbed, never the network
+- `lib/notifications.mjs` — the generic notification model the header bell renders from: a data source (today `decisions.mjs`) → a `{items, actions}` bundle, via `setNotifications` in `templates.mjs`. Pure and total on junk; the base every future notification source funnels through (`mergeBundles`) instead of growing another page panel
 - `lib/templates.mjs` — the page shells
 - `test/` — `npm --prefix site test`; run by `./scripts/site.sh` and CI
 - `assets/` — `site.css` (the Modernist design system from the site-wireframes
   design export: Archivo, ink on a light ground, one red accent, zero radius,
   2px rules; dark is a derived variant so the toggle survives), `site.js`
-  (theme toggle + the product page's tabs, which fall back to a stacked
-  document without JavaScript), `configurator.js` (the panel), `viewer.js`
+  (theme toggle, the header notification bell's outside-click/Escape close, and
+  the product page's tabs, which fall back to a stacked document without
+  JavaScript), `configurator.js` (the panel), `viewer.js`
   (the 3D viewer) and `openscad-worker.js` (the renderer), plus two vendored
   asset dirs — `fonts/` (Archivo variable woff2, OFL 1.1) and `avatars/`
   (one DiceBear SVG per `people/` member, provenance in its README) — all
