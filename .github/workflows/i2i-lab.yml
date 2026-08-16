@@ -93,6 +93,7 @@ jobs:
           REPO = os.environ["REPO"]
           SHA = os.environ["SHA"]
           ENDPOINT = "https://api.z.ai/api/paas/v4/images/generations"
+          ENDPOINT_PREFIX = "https://api.z.ai/"
           OUT = "probe-out"
           os.makedirs(OUT, exist_ok=True)
 
@@ -106,9 +107,9 @@ jobs:
           rows = []
           seeds_copied = set()
 
-          def post(body):
+          def post(body, endpoint):
               req = urllib.request.Request(
-                  ENDPOINT,
+                  endpoint,
                   data=json.dumps(body).encode(),
                   headers={"Content-Type": "application/json",
                            "Authorization": "Bearer " + KEY},
@@ -151,6 +152,9 @@ jobs:
                   rows.append((name, mode, "-", "unknown mode")); continue
               if isinstance(c.get("params"), dict):
                   body.update(c["params"])
+              endpoint = c.get("endpoint", ENDPOINT)
+              if not endpoint.startswith(ENDPOINT_PREFIX):
+                  rows.append((name, mode, "-", "endpoint must be under " + ENDPOINT_PREFIX)); continue
               if mode in ("data", "hosted") and seed_path not in seeds_copied:
                   seeds_copied.add(seed_path)
                   with open(seed_path, "rb") as fh:
@@ -160,7 +164,7 @@ jobs:
                           o.write(fh.read())
 
               t0 = time.time()
-              code, resp = post(body)
+              code, resp = post(body, endpoint)
               dur = round(time.time() - t0, 1)
               try:
                   obj = json.loads(resp)
