@@ -67,7 +67,7 @@ on:
     # schedule is harmless until deliberately armed, and the routine is bounded
     # (≤15 issues/run, add-only, no re-route), so firing 6×/day is cheap and
     # safe: an idle firing that finds nothing untriaged skips before any model call.
-    - cron: '11 */4 * * *'
+    - cron: '11 1,5,9,13,17,21 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
