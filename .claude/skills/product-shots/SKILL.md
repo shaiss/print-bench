@@ -181,12 +181,12 @@ Two ways to generate one, both landing the same disclosed
   committed geometry-true render** (`seed=<ref>` → `previews/<ref>.png`,
   defaulting to the shot's own name), sizes the result to budget, embeds it
   with the disclosure below, runs `readme-gate.sh`, and opens a **draft PR** to
-  approve. The seed pins the part's shape to the real mesh, so the scene,
-  lighting and materials are AI but the geometry is not hallucinated the way
-  blind text-to-image did. It stays disclosed as approximate — the model still
-  repaints — but it is a faithful restyle, not an invention. Dispatch the
-  workflow by hand only to re-roll a shot you don't like, or to override the
-  size.
+  approve. On this provider the seed does **not** constrain the part's shape to
+  the real mesh (issue #302) — the model follows the prompt, not the reference
+  geometry — so the scene, lighting, materials *and* the geometry are all AI and
+  approximate. It is disclosed as approximate, and the *disclosure*, not any
+  fidelity guarantee, is what keeps it honest. Dispatch the workflow by hand
+  only to re-roll a shot you don't like, or to override the size.
 - **In-session**, only when the session actually has an image-generation tool
   (check your available tools; do not shell out to external image APIs that
   aren't configured). If none is available, skip this tier silently — tier 1
@@ -196,17 +196,18 @@ Two ways to generate one, both landing the same disclosed
 - **Prompt for the scene.** Describe the same object in a real setting
   relevant to the design's use (the battleship board on a dinner table set
   with sushi; the desiccant capsule beside a filament dry-box), natural
-  lighting, shallow depth of field. The CI path is now **image-to-image seeded
+  lighting, shallow depth of field. The CI path runs **image-to-image seeded
   from the committed tier-1 raytrace** (issue #66, previously a tabled backlog
-  item), so the part begins from the real mesh — you are restyling a true shape
-  into a scene, not summoning geometry from words. The seed defaults to the
-  shot's own name (`previews/<shot>.png`); add `seed=<ref>` to start from a
-  different render — a hero shot, a frozen `cameras.conf` view, a custom-angle
-  tier-1 render you add, or a **tier-1.5 product still**
-  (`seed=product-still-<x>`, itself already pinned to the mesh) — so you can
-  choose the angle that sells the scene. It is still disclosed as approximate
-  (the model repaints), but the fidelity is far higher than the old
-  text-to-image path.
+  item), but on this provider the seed does **not** constrain the geometry to
+  the real mesh (issue #302) — the model follows the prompt, so treat the
+  scene's geometry as an impression, not a restyle of the true shape. The seed
+  defaults to the shot's own name (`previews/<shot>.png`); add `seed=<ref>` to
+  start from a different render — a hero shot, a frozen `cameras.conf` view, a
+  custom-angle tier-1 render you add, or a **tier-1.5 product still**
+  (`seed=product-still-<x>`) — so you can choose the angle that sells the
+  scene. It is disclosed as approximate (the model repaints and can reshape the
+  part), and the *disclosure*, not any fidelity guarantee, is what keeps it
+  honest.
 - **It is cosmetic, so assume it is geometrically off.** Image generators
   add, drop, and reshape features, and we do **not** reject a lifestyle shot
   for that — chasing pixel-faithful geometry out of a restyle is a losing
