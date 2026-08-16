@@ -194,7 +194,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --model glm-5.2 --effort low --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model glm-5.2 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Run via Anthropic (Claude)
@@ -211,7 +211,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           # Same narrow tool grant + scout deny backstop + dontAsk as the Z.AI step.
-          claude_args: --model claude-opus-4-8 --effort low --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model claude-opus-4-8 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Explain a skipped agentic run
