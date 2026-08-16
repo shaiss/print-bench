@@ -79,10 +79,10 @@ win_z  = wall_h + latch_h * 0.55;     // window centre height (closed frame = sa
 win_h  = 3.2;                          // window height
 module base_latch() {
     difference() {
-        translate([-lw/2, td - wall_t, wall_h - 0.01])
-            cube([lw, wall_t, latch_h]);           // raised compliant strip
-        translate([-lw/2 + 3, td - wall_t - 0.1, win_z - win_h/2])
-            cube([lw - 6, wall_t + 0.2, win_h]);   // window
+        translate([-lw/2, td - latch_t, wall_h - 0.01])
+            cube([lw, latch_t, latch_h]);           // raised compliant strip (arm thickness = latch_t)
+        translate([-lw/2 + 3, td - latch_t - 0.1, win_z - win_h/2])
+            cube([lw - 6, latch_t + 0.2, win_h]);   // window (punches full latch_t)
     }
 }
 
