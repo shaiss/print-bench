@@ -197,15 +197,20 @@ jobs:
           # show_full_output surfaces the agent's tool calls and any permission
           # denials in the (public-repo) Actions log — the scout reads only public
           # signals and writes only public design-brief issues, so its transcript
-          # carries nothing sensitive, and seeing it is what turns "filed zero, no
-          # error" from a guess into a diagnosis. Bash(printf:*) is on the allow-list
-          # because the skill passes a multi-line brief body as --body "$(printf '%s'
-          # '...')"; under --permission-mode dontAsk the nested printf must itself be
-          # allowed or the whole file-brief command is denied. printf is a
-          # stdout-only builtin (no file write without a redirect — and redirects are
-          # not allowed — no exec, no network), so it adds no reachable capability.
+          # carries nothing sensitive, and seeing it is what turned "filed zero, no
+          # error" from a guess into a diagnosis. The allow-list is the wrapper
+          # (both path spellings) plus the read-only file tools, and NOTHING more:
+          # under --permission-mode dontAsk the matcher accepts only a BARE
+          # `scout-helper.sh <verb> <args>` — any shell operator (`;`, `&&`, `|`) or
+          # command substitution (`$(...)`) makes it "not a plain allowed
+          # invocation" and it is denied, even if the nested program is itself
+          # allow-listed (an earlier Bash(printf:*) for a --body "$(printf ...)"
+          # pattern did NOT help — the substitution construct is the blocker, not
+          # printf). So the skill passes the brief body as one single-quoted literal
+          # argument and never appends `; echo`; adding programs here would not
+          # change that and would only widen the surface, so we don't.
           show_full_output: "true"
-          claude_args: --model glm-5.2 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Bash(printf:*),Read,Grep,Glob"
+          claude_args: --model glm-5.2 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Run via Anthropic (Claude)
@@ -221,11 +226,11 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          # Same narrow tool grant + scout deny backstop + dontAsk as the Z.AI step,
-          # including Bash(printf:*) for the file-brief body substitution and
-          # show_full_output for observability (see the Z.AI step's comment).
+          # Same narrow tool grant (wrapper + read-only file tools, bare-command
+          # only) + scout deny backstop + dontAsk + show_full_output as the Z.AI
+          # step (see its comment for why the surface is exactly this and no more).
           show_full_output: "true"
-          claude_args: --model claude-opus-4-8 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Bash(printf:*),Read,Grep,Glob"
+          claude_args: --model claude-opus-4-8 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Explain a skipped agentic run
