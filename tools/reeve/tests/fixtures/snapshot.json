@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-08-16T06:00:00Z",
+  "reportPlaceholder": true,
+  "records": [
+    {
+      "schema": 1,
+      "kind": "gate-run",
+      "utc": "2026-08-10T05:00:00Z",
+      "meta": {"designs": "ALL", "event": "push", "run_id": "100", "sha": "aaa"},
+      "gate": {
+        "parts": [
+          {"stl": "build/alpha.stl", "score": 95, "verdict": "printable", "criticals": 0, "warnings": 0, "slice_failed": false, "print_time": "1h", "filament_g": "10"},
+          {"stl": "build/beta.stl", "score": 90, "verdict": "printable", "criticals": 0, "warnings": 1, "slice_failed": false, "print_time": "2h", "filament_g": "20"}
+        ],
+        "pre_fails": [],
+        "derivatives": [],
+        "design_seconds": {"alpha": 40, "beta": 30},
+        "archived_skips": ["old-one"],
+        "fail_lines": 0,
+        "ok": true
+      },
+      "budgets": []
+    },
+    {
+      "schema": 1,
+      "kind": "gate-run",
+      "utc": "2026-08-15T05:00:00Z",
+      "meta": {"designs": "ALL", "event": "push", "run_id": "200", "sha": "bbb"},
+      "gate": {
+        "parts": [
+          {"stl": "build/alpha.stl", "score": 85, "verdict": "printable with care", "criticals": 0, "warnings": 2, "slice_failed": false, "print_time": "1h", "filament_g": "10"},
+          {"stl": "build/beta.stl", "score": 72, "verdict": "marginal", "criticals": 1, "warnings": 0, "slice_failed": false, "print_time": "2h", "filament_g": "20"},
+          {"stl": "build/gamma.stl", "score": null, "verdict": null, "criticals": 0, "warnings": 0, "slice_failed": true, "print_time": null, "filament_g": null}
+        ],
+        "pre_fails": ["delta: render failed"],
+        "derivatives": [
+          {"ok": false, "design": "epsilon", "kind": "override", "subject": "parent:lid", "detail": "mesh matches the parent (no override took)"}
+        ],
+        "design_seconds": {"alpha": 100, "beta": 30},
+        "archived_skips": ["old-one", "new-two"],
+        "fail_lines": 3,
+        "ok": false
+      },
+      "budgets": []
+    }
+  ],
+  "previews": [
+    {"file": "designs/beta/previews/hero.png", "bytes": 3200000, "budget": 3145728, "headroom_pct": -1.7},
+    {"file": "designs/alpha/previews/turntable.gif", "bytes": 6000000, "budget": 6291456, "headroom_pct": 4.6},
+    {"file": "designs/gamma/previews/ok.png", "bytes": 1000000, "budget": 3145728, "headroom_pct": 68.2}
+  ]
+}

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reeve"
+version = "0.1.0"
+description = "Deterministic bench-health report for print-bench's platform PM (advisory-only)"
+license = "CC-BY-SA-4.0"
+requires-python = ">=3.10"
+# Stdlib-only on purpose: the scheduled workflow runs this on the system
+# Python right after checkout, and a third-party import would force a pip
+# resolve in front of the step that reads the bench's pulse — the same rule
+# tools/lineage, tools/telemetry and tools/backlog-groomer keep. Reeve also
+# reads only committed files (telemetry + previews + confs), so it needs no
+# network stack at all.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+reeve = "reeve.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
