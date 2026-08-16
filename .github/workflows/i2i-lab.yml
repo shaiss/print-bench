@@ -65,9 +65,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Enforce default-branch dispatch
+        # This job holds ZAI_KEY and contents: write. workflow_dispatch can be
+        # aimed at any ref, so refuse to run (before any secret is in scope) if
+        # dispatched from anything but the default branch, and check out that
+        # branch explicitly below — the run always executes reviewed default-
+        # branch code, never a fork/feature ref's.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::i2i-lab must be dispatched from the default branch (${DEFAULT_BRANCH}), not '${REF_NAME}'"
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+
+      - name: Resolve checked-out SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Validate design input
         env:
@@ -86,7 +107,7 @@ jobs:
       - name: Write runner
         run: |
           cat > i2i-lab-runner.py <<'PY'
-          import base64, json, os, sys, time, urllib.request, urllib.error
+          import base64, json, os, re, sys, time, urllib.request, urllib.error
 
           KEY = os.environ["ZAI_KEY"]
           DESIGN = os.environ["DESIGN"]
@@ -96,6 +117,28 @@ jobs:
           ENDPOINT_PREFIX = "https://api.z.ai/"
           OUT = "probe-out"
           os.makedirs(OUT, exist_ok=True)
+
+          # A seed is a committed geometry-true preview and nothing else. This
+          # confines the dispatch-supplied path to designs/<d>/previews/<f>.png:
+          # the pattern admits no absolute path, no "..", no dotfiles, and the
+          # realpath must stay inside the workspace and exist. Without this a
+          # dispatcher could point seed= at /proc/self/environ and have the bytes
+          # base64'd into the API request and committed to the results branch.
+          SEED_RE = re.compile(r"^designs/[a-z0-9][a-z0-9-]*/previews/[a-z0-9][a-z0-9-]*\.png$")
+          WS = os.path.realpath(os.environ.get("GITHUB_WORKSPACE", "."))
+          MAX_SEED = 8 * 1024 * 1024
+
+          def read_seed(p):
+              """Return the confined seed's bytes, or (None, reason)."""
+              if not SEED_RE.match(p):
+                  return None, "seed must match designs/<d>/previews/<f>.png"
+              rp = os.path.realpath(p)
+              if not (rp == WS or rp.startswith(WS + os.sep)) or not os.path.isfile(rp):
+                  return None, "seed path escapes the workspace or is missing"
+              if os.path.getsize(rp) > MAX_SEED:
+                  return None, "seed exceeds 8 MB"
+              with open(rp, "rb") as fh:
+                  return fh.read(), None
 
           cases = json.loads(os.environ["EXPERIMENTS"])
           if not isinstance(cases, list) or not (1 <= len(cases) <= 10):
@@ -135,10 +178,14 @@ jobs:
               body = {"model": c.get("model", "glm-image"),
                       "prompt": c.get("prompt", ""),
                       "size": c.get("size", "1280x960")}
+              seed_bytes = None
+              if mode in ("data", "hosted"):
+                  seed_bytes, why = read_seed(seed_path)
+                  if seed_bytes is None:
+                      rows.append((name, mode, "-", f"{why}: {seed_path}")); continue
               if mode == "data":
-                  with open(seed_path, "rb") as fh:
-                      b64 = base64.b64encode(fh.read()).decode()
-                  body["image_urls"] = ["data:image/png;base64," + b64]
+                  body["image_urls"] = [
+                      "data:image/png;base64," + base64.b64encode(seed_bytes).decode()]
               elif mode == "hosted":
                   body["image_urls"] = [
                       f"https://raw.githubusercontent.com/{REPO}/{SHA}/{seed_path}"]
@@ -157,11 +204,14 @@ jobs:
                   rows.append((name, mode, "-", "endpoint must be under " + ENDPOINT_PREFIX)); continue
               if mode in ("data", "hosted") and seed_path not in seeds_copied:
                   seeds_copied.add(seed_path)
-                  with open(seed_path, "rb") as fh:
+                  # seed_bytes is the confined content read above (hosted mode
+                  # validated it too); write a copy for side-by-side review.
+                  sb = seed_bytes if seed_bytes is not None else read_seed(seed_path)[0]
+                  if sb is not None:
                       with open(os.path.join(OUT, "seed-" + os.path.basename(
                               os.path.dirname(os.path.dirname(seed_path))) + "-" +
                               os.path.basename(seed_path)), "wb") as o:
-                          o.write(fh.read())
+                          o.write(sb)
 
               t0 = time.time()
               code, resp = post(body, endpoint)
@@ -208,7 +258,7 @@ jobs:
           DESIGN: ${{ github.event.inputs.design }}
           EXPERIMENTS: ${{ github.event.inputs.experiments }}
           REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
+          SHA: ${{ steps.sha.outputs.sha }}
         run: |
           set -euo pipefail
           if [ -z "${ZAI_KEY:-}" ]; then
