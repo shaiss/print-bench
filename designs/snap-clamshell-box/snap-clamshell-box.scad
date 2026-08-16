@@ -28,8 +28,10 @@ use <printability.scad>
 inner_w = 50;
 // Inner tray depth per tray, Y (mm)
 inner_d = 34;
-// Wall height (each tray) (mm)
-wall_h = 12;
+// Wall height (each tray) (mm). 13 (not 12) so the closed cavity —
+// 2*(wall_h - floor_t) = 22.8 mm — clears a 21.8 mm earbud with 1.0 mm to
+// spare; the lifestyle scene stages the box with earbuds (issue #230 §3).
+wall_h = 13;
 // Wall thickness (mm)
 wall_t = 1.6;
 // Floor thickness (mm)
@@ -48,6 +50,15 @@ latch_t = 1.6;
 latch_h = 9;
 // Hook depth (how far the hook reaches over the lid rim) (mm)
 hook = 2.0;
+// Outward standoff of the windowed strip from its original (flush) position
+// (mm). The bug (issue #230 §1): at 0 the strip sits in the SAME wall plane the
+// lid's front wall folds onto — 216 mm³ of interference, the first close jams.
+// >= wall_t + a print clearance lifts the strip's inner face outboard of the
+// closed lid wall so nothing clashes; the tab (protruding `hook`) still reaches
+// through the window. A local buttress below the rim carries the offset strip so
+// it still prints flat with no support. `latch_clr = 0` is the pre-fix pose the
+// `closed-clash-ctrl` fitcheck renders as its negative control.
+latch_clr = 2.0;
 
 /* [Preview only] */
 // Fold the lid about the spine (deg). PRINT AT 0.
@@ -70,20 +81,40 @@ module tray() {
     }
 }
 
-// Base latch: the outer wall is extended above the rim into a compliant strip
-// with a rectangular WINDOW. It flexes outward as the lid's tab ramps past, then
-// springs back so the tab is captured in the window. (tray frame: outer wall at
-// y = td, rim at z = wall_h.)
+// Base latch: a compliant strip with a rectangular WINDOW, standing above the
+// rim. It flexes outward as the lid's tab ramps past, then springs back so the
+// tab is captured in the window. (tray frame: outer wall at y = td, rim at
+// z = wall_h.)
+//
+// The strip is offset OUTWARD by `latch_clr` from the outer-wall plane. At the
+// original `latch_clr = 0` the strip shared the exact plane the lid's front wall
+// folds onto — the 216 mm³ closed-pose clash of issue #230. Offsetting it clear
+// of the closed lid wall is the fix; a buttress below the rim (z <= wall_h,
+// where the lid never reaches) carries the offset strip so it still prints flat.
 lw     = 20;                          // latch strip width, X
 win_z  = wall_h + latch_h * 0.55;     // window centre height (closed frame = same, base doesn't fold)
 win_h  = 3.2;                          // window height
-module base_latch() {
+// The windowed compliant strip alone (no buttress). `clr` is the outward
+// standoff; the fitchecks intersect THIS against the closed lid.
+module latch_strip(clr = latch_clr) {
+    y0 = td - wall_t + clr;               // strip inner face
     difference() {
-        translate([-lw/2, td - wall_t, wall_h - 0.01])
+        translate([-lw/2, y0, wall_h - 0.01])
             cube([lw, wall_t, latch_h]);           // raised compliant strip
-        translate([-lw/2 + 3, td - wall_t - 0.1, win_z - win_h/2])
+        translate([-lw/2 + 3, y0 - 0.1, win_z - win_h/2])
             cube([lw - 6, wall_t + 0.2, win_h]);   // window
     }
+}
+// Buttress: fills from the tray outer wall out to the offset strip, bed to rim.
+// Capped at the rim (z = wall_h) — the fold plane — so it is structurally part
+// of the base and cannot reach into the lid's closed volume (z >= wall_h).
+module latch_buttress() {
+    translate([-lw/2, td - wall_t, 0])
+        cube([lw, wall_t + latch_clr, wall_h]);
+}
+module base_latch() {
+    latch_buttress();
+    latch_strip();
 }
 
 // Lid tab: a ramped nub protruding OUTWARD from the lid outer wall (tray frame
@@ -110,26 +141,54 @@ module living_hinge() {
         cube([tw, hinge_gap + 2*ov, hinge_t]);
 }
 
-module main() {
-    assert(hinge_t >= 0.4, "living hinge under two layers — it will tear");
-    assert(hinge_t <= 1.0, "living hinge too thick to fold without a huge radius");
-
-    // base tray: extends −Y, carries the windowed latch strip
+// --- placement (shared by main() and the fitchecks so they cannot drift) -----
+// Base tray + its windowed strip, extending −Y. The strip's outward standoff is
+// `clr` (default latch_clr); the fitchecks pass 0 to recover the pre-fix pose.
+module placed_base(clr = latch_clr) {
     translate([0, -hinge_gap/2, 0]) mirror([0, 1, 0]) {
         tray();
         base_latch();
     }
-    // lid tray: extends +Y, folds about the SPINE TOP (y=0, z=wall_h) for the
-    // preview so the openings meet correctly. Carries the ramped tab.
-    translate([0, 0, wall_h]) rotate([demo_fold, 0, 0]) translate([0, 0, -wall_h])
+}
+module placed_base_strip(clr = latch_clr) {
+    translate([0, -hinge_gap/2, 0]) mirror([0, 1, 0]) latch_strip(clr);
+}
+// Lid tray, folded `fold`° about the SPINE TOP (y=0, z=wall_h). fold=0 is the
+// flat print pose; fold=180 is the closed box. `with_tab` includes the ramped
+// latch tab.
+module placed_lid(fold, with_tab = true) {
+    translate([0, 0, wall_h]) rotate([fold, 0, 0]) translate([0, 0, -wall_h])
         translate([0, hinge_gap/2, 0]) {
             tray();
-            lid_tab();
+            if (with_tab) lid_tab();
         }
+}
+
+module main() {
+    assert(hinge_t >= 0.4, "living hinge under two layers — it will tear");
+    assert(hinge_t <= 1.0, "living hinge too thick to fold without a huge radius");
+
+    placed_base();                 // base tray + windowed latch strip, −Y
+    placed_lid(demo_fold);         // lid tray + ramped tab, folds about spine top
 
     // living-hinge flexure across the spine (does not fold in the preview — it
     // is the thing that bends; kept flat so both attach points stay visible)
     living_hinge();
 }
 
-main();
+// --- part dispatch -----------------------------------------------------------
+// Default (no -D part): the printable flat model. The `closed-clash*` parts are
+// non-printable fit probes for designs/snap-clamshell-box/ci.fitchecks — they
+// render the boolean of the latch strip against the CLOSED lid, never a part.
+part = undef;
+if (part == undef || part == "")      main();
+else if (part == "closed-clash")
+    // The fix in place: strip standoff = latch_clr → must be EMPTY (the strip
+    // clears the closed lid wall). This is AC1 of issue #230.
+    intersection() { placed_base_strip(latch_clr); placed_lid(180); }
+else if (part == "closed-clash-ctrl")
+    // Negative control: standoff forced to 0 (the pre-fix pose) → must INTERFERE
+    // (the 216 mm³ clash returns), proving the check can fail.
+    intersection() { placed_base_strip(0); placed_lid(180); }
+else
+    assert(false, str("unknown part: ", part));
