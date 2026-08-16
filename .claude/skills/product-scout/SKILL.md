@@ -41,16 +41,22 @@ use Read/Grep/Glob for the repo's files. Every run, in order:
 3. **File each proposal as its own issue — this is the deliverable.** You **MUST
    actually run the `file-brief` command** for every proposal: writing a brief in
    your reply, or merely deciding what you *would* file, files nothing. Compose a
-   body that matches `templates/design-brief.md` section for section (§3), then:
+   body that matches `templates/design-brief.md` section for section (§3), then
+   run **exactly** this shape — the `$(printf '%s' '...')` wrapper is required, not
+   decorative, and both it and the `printf` inside are on the run's allow-list:
    ```
    .claude/skills/product-scout/scout-helper.sh file-brief \
      --title "Design brief: <short idea>" \
      --body "$(printf '%s' '<full markdown body, design-brief.md sections>')"
    ```
-   The wrapper hardcodes the `design-brief` label and caps how many you may file
-   per run; file up to that many **strong, distinct, non-overlapping** proposals.
-   Filing **zero** when a real catalog gap exists means you did not finish — on a
-   normal run, file **at least one** well-formed brief.
+   The body sits inside **single quotes**, so backticks, parentheses, `#`, `$` and
+   double quotes are all safe **literally** — but a single apostrophe (`'`) ends the
+   quote and breaks the command. So write the body **without apostrophes**: use
+   "does not" not "doesn't", "the port's face" → "the face of the port". Keep the
+   markdown otherwise verbatim. The wrapper hardcodes the `design-brief` label and
+   caps how many you may file per run; file up to that many **strong, distinct,
+   non-overlapping** proposals. Filing **zero** when a real catalog gap exists means
+   you did not finish — on a normal run, file **at least one** well-formed brief.
 
 4. **Read each filed issue back** as a stranger design session (§7). Stop once
    you've filed your strong proposals; do not pad to the cap with weak ideas.
