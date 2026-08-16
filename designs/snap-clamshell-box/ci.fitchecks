@@ -1,0 +1,14 @@
+# Closed-pose interference proof: the base latch must clear the folded lid's
+# shell. `fitcheck` renders that intersection and must be EMPTY — the strip
+# stands `latch_clear` outboard of the wall face, and the folded lid's own front
+# wall lands on the band the strip used to occupy. `fitcheck_neg` rebuilds the
+# strip flush inside that band (clear = -wall_t), which is the geometry this
+# design shipped with, and MUST render non-empty: 216.00 mm³ across 32 facets
+# (issue #230).
+#
+# This is the guard that catches a closed-pose clash. Nothing else here can:
+# the design prints FLAT, so every existing check — the default render, the
+# preview sheet, printcheck, the test slice — looks at a pose where the two
+# halves are 76 mm apart, scores it watertight and clean, and never folds it.
+fitcheck      empty
+fitcheck_neg  interferes
