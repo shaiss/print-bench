@@ -1,0 +1,8 @@
+# Boolean fit checks for snap-clamshell-box (issue #230). Never printed/sliced.
+# closed-clash: base latch strip ∩ the CLOSED (folded) lid — must be empty, i.e.
+#   the strip clears the lid's front wall so the box can close (the fix).
+# closed-clash-ctrl: the same intersection with the strip standoff forced to 0
+#   (the pre-fix pose) — the mandatory negative control; it MUST interfere, which
+#   proves the empty check above can actually fail.
+closed-clash       empty
+closed-clash-ctrl  interferes
