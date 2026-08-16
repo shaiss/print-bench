@@ -66,6 +66,7 @@ jobs:
       telemetry_tests: ${{ steps.filter.outputs.telemetry_tests }}
       ci_gates_tests: ${{ steps.filter.outputs.ci_gates_tests }}
       model_registry_tests: ${{ steps.filter.outputs.model_registry_tests }}
+      reeve_tests: ${{ steps.filter.outputs.reeve_tests }}
       styles: ${{ steps.filter.outputs.styles }}
       gate: ${{ steps.filter.outputs.gate }}
       gate_designs: ${{ steps.filter.outputs.gate_designs }}
@@ -643,6 +644,26 @@ jobs:
         run: pip install -e 'tools/backlog-groomer[test]'
       - name: Run tests
         run: python -m pytest tools/backlog-groomer/tests -q
+
+  reeve-tests:
+    name: reeve unit tests
+    needs: changes
+    if: needs.changes.outputs.reeve_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install reeve
+        # Stdlib-only like its groomer sibling — the [test] extra is just
+        # pytest; the scheduled reeve workflow installs without it.
+        run: pip install -e 'tools/reeve[test]'
+      - name: Run tests
+        run: python -m pytest tools/reeve/tests -q
 
   model-registry-tests:
     name: model-registry unit tests
@@ -1576,6 +1597,7 @@ jobs:
       - backlog-burn-tests
       - backlog-groomer-tests
       - model-registry-tests
+      - reeve-tests
       - telemetry-tests
       - ci-gates-tests
       - docs-standards
