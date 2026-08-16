@@ -1,0 +1,231 @@
+name: I2I lab (temporary)
+
+# TEMPORARY experiment runner for diagnosing and fixing the lifestyle-shot
+# image-to-image pipeline (issue #247 follow-up). The AI shots on the site
+# track the prompt and ignore the seed render; this lab runs parameterized
+# GLM-Image API calls — seed transport modes (base64 data URI vs hosted URL vs
+# none), prompt styles (keep/edit-instruction vs full scene), extra body
+# params, and multi-step chains (the output of one call seeding the next) —
+# so the working recipe can be found by dispatch-time iteration without
+# committing per-experiment code.
+#
+# Dispatch-only; holds ZAI_KEY; runs only the default branch's committed
+# tree. Results (per-case PNG + response JSON + RESULTS.md + the seed) are
+# committed to a throwaway debug/i2i-lab-<run_id> branch for review; delete
+# those branches after reading. Remove this workflow once the pipeline fix
+# lands.
+
+on:
+  workflow_dispatch:
+    inputs:
+      design:
+        description: Design whose previews/hero.png is the default seed
+        required: false
+        default: bistable-toggle
+        type: string
+      experiments:
+        description: >-
+          JSON array of cases. Each: {"name": "a1", "mode":
+          "data|hosted|none|chain:<case>", "prompt": "...", "seed":
+          "designs/<d>/previews/<ref>.png" (optional), "size": "1280x960"
+          (optional), "model": "glm-image" (optional), "params": {...}
+          (optional, merged into the request body)}. Max 10 cases.
+        required: false
+        default: >-
+          [{"name":"a-data-keep","mode":"data","prompt":"Keep the object
+          exactly as shown, completely unchanged: same shape, same
+          proportions, same color, same camera angle, same composition. Only
+          make the lighting slightly warmer."},
+          {"name":"b-none-keep","mode":"none","prompt":"Keep the object
+          exactly as shown, completely unchanged: same shape, same
+          proportions, same color, same camera angle, same composition. Only
+          make the lighting slightly warmer."},
+          {"name":"c-hosted-keep","mode":"hosted","prompt":"Keep the object
+          exactly as shown, completely unchanged: same shape, same
+          proportions, same color, same camera angle, same composition. Only
+          make the lighting slightly warmer."},
+          {"name":"d-data-scene","mode":"data","prompt":"A single flat red
+          3D-printed plastic part on a light wooden desk: an open rectangular
+          frame spanned by a gently bowed ribbon arch with a small central
+          push-nub, one monolithic piece of matte PETG with visible
+          fused-filament layer lines. Product photography, soft daylight,
+          shallow depth of field."}]
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: i2i-lab
+  cancel-in-progress: false
+
+jobs:
+  lab:
+    name: Run experiment batch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validate design input
+        env:
+          DESIGN: ${{ github.event.inputs.design }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$DESIGN" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            echo "::error::'design' must be a kebab-case design directory name"
+            exit 1
+          fi
+          if [ ! -f "designs/$DESIGN/previews/hero.png" ]; then
+            echo "::error::designs/$DESIGN/previews/hero.png not found"
+            exit 1
+          fi
+
+      - name: Write runner
+        run: |
+          cat > i2i-lab-runner.py <<'PY'
+          import base64, json, os, sys, time, urllib.request, urllib.error
+
+          KEY = os.environ["ZAI_KEY"]
+          DESIGN = os.environ["DESIGN"]
+          REPO = os.environ["REPO"]
+          SHA = os.environ["SHA"]
+          ENDPOINT = "https://api.z.ai/api/paas/v4/images/generations"
+          OUT = "probe-out"
+          os.makedirs(OUT, exist_ok=True)
+
+          cases = json.loads(os.environ["EXPERIMENTS"])
+          if not isinstance(cases, list) or not (1 <= len(cases) <= 10):
+              print("::error::experiments must be a JSON array of 1..10 cases")
+              sys.exit(1)
+
+          default_seed = f"designs/{DESIGN}/previews/hero.png"
+          outputs = {}   # name -> png bytes
+          rows = []
+          seeds_copied = set()
+
+          def post(body):
+              req = urllib.request.Request(
+                  ENDPOINT,
+                  data=json.dumps(body).encode(),
+                  headers={"Content-Type": "application/json",
+                           "Authorization": "Bearer " + KEY},
+                  method="POST")
+              try:
+                  with urllib.request.urlopen(req, timeout=240) as r:
+                      return r.status, r.read().decode("utf-8", "replace")
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read().decode("utf-8", "replace")
+              except Exception as e:
+                  return 0, str(e)
+
+          def fetch(url):
+              with urllib.request.urlopen(url, timeout=120) as r:
+                  return r.read()
+
+          for c in cases:
+              name = str(c.get("name", ""))
+              if not name.replace("-", "").replace("_", "").isalnum():
+                  rows.append((name or "?", "-", "-", "invalid name")); continue
+              mode = c.get("mode", "data")
+              seed_path = c.get("seed", default_seed)
+              body = {"model": c.get("model", "glm-image"),
+                      "prompt": c.get("prompt", ""),
+                      "size": c.get("size", "1280x960")}
+              if mode == "data":
+                  with open(seed_path, "rb") as fh:
+                      b64 = base64.b64encode(fh.read()).decode()
+                  body["image_urls"] = ["data:image/png;base64," + b64]
+              elif mode == "hosted":
+                  body["image_urls"] = [
+                      f"https://raw.githubusercontent.com/{REPO}/{SHA}/{seed_path}"]
+              elif mode.startswith("chain:"):
+                  prev = mode.split(":", 1)[1]
+                  if prev not in outputs:
+                      rows.append((name, mode, "-", f"chain source '{prev}' has no output")); continue
+                  body["image_urls"] = [
+                      "data:image/png;base64," + base64.b64encode(outputs[prev]).decode()]
+              elif mode != "none":
+                  rows.append((name, mode, "-", "unknown mode")); continue
+              if isinstance(c.get("params"), dict):
+                  body.update(c["params"])
+              if mode in ("data", "hosted") and seed_path not in seeds_copied:
+                  seeds_copied.add(seed_path)
+                  with open(seed_path, "rb") as fh:
+                      with open(os.path.join(OUT, "seed-" + os.path.basename(
+                              os.path.dirname(os.path.dirname(seed_path))) + "-" +
+                              os.path.basename(seed_path)), "wb") as o:
+                          o.write(fh.read())
+
+              t0 = time.time()
+              code, resp = post(body)
+              dur = round(time.time() - t0, 1)
+              try:
+                  obj = json.loads(resp)
+              except Exception:
+                  obj = None
+              png = None
+              note = ""
+              if obj and isinstance(obj.get("data"), list) and obj["data"]:
+                  item = obj["data"][0]
+                  if item.get("url"):
+                      try:
+                          png = fetch(item["url"]); note = "url"
+                      except Exception as e:
+                          note = "url-fetch-failed: " + str(e)[:120]
+                  elif item.get("b64_json"):
+                      png = base64.b64decode(item["b64_json"]); note = "b64"
+                      item["b64_json"] = "<stripped>"
+              if png is None and not note:
+                  note = (json.dumps(obj)[:300] if obj else resp[:300])
+              with open(os.path.join(OUT, name + ".response.json"), "w") as fh:
+                  fh.write(json.dumps(obj)[:4000] if obj else resp[:4000])
+              if png:
+                  outputs[name] = png
+                  with open(os.path.join(OUT, name + ".png"), "wb") as fh:
+                      fh.write(png)
+                  note += f" {len(png)}B"
+              rows.append((name, mode, f"{code}/{dur}s", note[:200]))
+
+          with open(os.path.join(OUT, "RESULTS.md"), "w") as fh:
+              fh.write(f"# i2i-lab — design {DESIGN} @ {SHA}\n\n")
+              fh.write("| case | mode | http/time | outcome |\n|---|---|---|---|\n")
+              for r in rows:
+                  fh.write("| " + " | ".join(str(x).replace("|", "/") for x in r) + " |\n")
+          if not outputs:
+              print("::warning::no case produced an image")
+          PY
+
+      - name: Run experiments
+        env:
+          ZAI_KEY: ${{ secrets.ZAI_KEY }}
+          DESIGN: ${{ github.event.inputs.design }}
+          EXPERIMENTS: ${{ github.event.inputs.experiments }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ZAI_KEY:-}" ]; then
+            echo "::error::ZAI_KEY secret is not set"
+            exit 1
+          fi
+          python3 i2i-lab-runner.py
+          cat probe-out/RESULTS.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit results to a debug branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          branch="debug/i2i-lab-${RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -f probe-out
+          git commit -m "i2i-lab results (run ${RUN_ID})"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$branch"
+          echo "Results on branch: ${branch}" >> "$GITHUB_STEP_SUMMARY"
