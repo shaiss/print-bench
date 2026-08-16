@@ -17,8 +17,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 # The preview size caps, from scripts/preview-budget.sh (the single source of
-# truth). Kept in sync with that file by convention; the telemetry writer
-# sources the same two values, so a committed record can never disagree.
+# truth). These duplicate that file's two values, so drift is guarded like the
+# cadence↔cron duplication: test_budgets_match_preview_budget_sh reads the shell
+# file and fails if these disagree, and ci-classify.sh runs reeve's tests when
+# preview-budget.sh changes — so a budget edit that skips Reeve turns red.
 MAX_GIF_BYTES = 6 * 1024 * 1024
 MAX_SHOT_BYTES = 3 * 1024 * 1024
 

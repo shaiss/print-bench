@@ -196,7 +196,12 @@ classify() {
       esac
       case "$f" in
         # Reeve, the platform PM's ops routine (issue #272): its own tests.
+        # reeve.yml and preview-budget.sh are here because reeve's tests read
+        # them for drift guards (the cadence↔cron pin and the budget-caps pin),
+        # the same way model-registry's tests trigger on auto-review.yml — so a
+        # change to either that skips reeve can't slip a drift past the guard.
         tools/reeve/*|.github/reeve.conf|\
+        .github/workflows/reeve.yml|scripts/preview-budget.sh|\
         .github/workflows/ci.yml) rvtests=true ;;
       esac
       case "$f" in
@@ -464,6 +469,12 @@ selftest() {
   out="$(run ".github/reeve.conf")"
   check "reeve-conf" "$out" \
     "reeve_tests=true" "gate=true" "gate_designs=" "regen=false"
+  # The drift-guard files reeve's tests read must re-run those tests when they
+  # change alone, or the cadence↔cron / budget-caps guards can be bypassed.
+  out="$(run ".github/workflows/reeve.yml")"
+  check "reeve-workflow-drift" "$out" "reeve_tests=true"
+  out="$(run "scripts/preview-budget.sh")"
+  check "reeve-budget-drift" "$out" "reeve_tests=true"
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must

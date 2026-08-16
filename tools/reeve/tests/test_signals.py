@@ -4,6 +4,8 @@ anywhere; the seam only reads committed files.
 """
 
 import json
+import pathlib
+import re
 
 import pytest
 
@@ -111,3 +113,27 @@ def test_gather_snapshot_detects_placeholder_report(tmp_path):
     (tel / "REPORT.md").write_text(
         "# Telemetry report\n\n_No gate runs recorded yet. CI appends..._\n", encoding="utf-8")
     assert signals.gather_snapshot(str(tmp_path))["reportPlaceholder"] is True
+
+
+# --- drift guard: budgets must match scripts/preview-budget.sh ---------------
+
+def _sh_budget(text, name):
+    # Extract e.g. `MAX_GIF_BYTES=$((6 * 1024 * 1024))` and evaluate the
+    # arithmetic. The expression is restricted to digits/spaces/`*` before eval,
+    # so this can only ever multiply integers from a repo-controlled file.
+    m = re.search(rf"^{name}=\$\(\((.+?)\)\)", text, re.MULTILINE)
+    assert m, f"{name} not found in scripts/preview-budget.sh"
+    expr = m.group(1).strip()
+    assert re.fullmatch(r"[\d\s*]+", expr), f"unexpected arithmetic for {name}: {expr!r}"
+    return eval(expr)  # noqa: S307 — digits/spaces/* only, from a committed file
+
+
+def test_budgets_match_preview_budget_sh():
+    # scripts/preview-budget.sh is the single source of truth for the caps, and
+    # Reeve duplicates them (it reads live file sizes, not a sourced shell var).
+    # Pin the two together so a budget change there without a matching Reeve edit
+    # is a test failure — the same idiom as the cadence↔cron drift guard.
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    text = (repo_root / "scripts/preview-budget.sh").read_text(encoding="utf-8")
+    assert signals.MAX_GIF_BYTES == _sh_budget(text, "MAX_GIF_BYTES")
+    assert signals.MAX_SHOT_BYTES == _sh_budget(text, "MAX_SHOT_BYTES")

@@ -134,10 +134,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    """CLI entry point; returns the process exit code."""
+    """CLI entry point; returns the process exit code.
+
+    A malformed conf (ValueError), an unknown config key (KeyError), or a
+    missing/unreadable snapshot or conf (OSError, incl. FileNotFoundError, and
+    json.JSONDecodeError — a ValueError subclass) prints a one-line ``error:``
+    to stderr and returns 1 — never a traceback, so a scheduled workflow step's
+    log stays legible. argparse's own usage errors (exit 2) pass through.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (ValueError, KeyError, FileNotFoundError, OSError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 1
 
 
 if __name__ == "__main__":  # pragma: no cover
