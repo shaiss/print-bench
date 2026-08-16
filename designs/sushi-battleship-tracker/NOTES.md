@@ -112,9 +112,12 @@ dishes.
 The committed still is now an **image-to-image generation seeded from
 `previews/seat-detail.png`** — the tier-1 close-up of the top (`shots.conf`
 `seat-detail`, `part="top"`, zoom 1.25) in which the dished seats are the
-subject of the frame. Seeded from that, the repaint keeps the seats
-(same-name seeding from `product-hero.png` — the whole board at distance,
-dishes a few pixels wide — was tried first and loses them to drift; see
+subject of the frame. Same-name seeding from `product-hero.png` (the whole
+board at distance, where the ~5.3 mm dishes are a few pixels wide) was
+*predicted* to lose them (#251) and was never rolled; even seeded from the
+close-up the first re-roll still smoothed the doors, and the second kept
+them — a ~5 mm feature surviving a dinner-table-scale repaint is per-roll,
+not guaranteed, so re-check any future re-roll against the tier-1 shot (see
 the `seed=` note in `lifestyle.conf` and #251). It remains tier-2: the scene,
 lighting and materials are AI, the disclosure caption on the page still
 applies, and the tier-1 studio shot plus the STL stay the geometry-true
