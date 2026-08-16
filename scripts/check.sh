@@ -225,6 +225,22 @@ if ! ./scripts/chunker-perms-check.sh; then
   fail=1
 fi
 
+# Labeler deny-backstop drift check: same reasoning as the chunker's, for the
+# labeler's own backstop (.claude/labeler-settings.json). It must deny every
+# dangerous settings.json allow — INCLUDING the chunker's chunk-helper.sh wrapper,
+# which the chunker's backstop deliberately leaves usable — and must never deny
+# the label-helper.sh wrapper (or the scheduled labeler fails closed with no other
+# CI signal). Separate script because the two wrappers' allow/deny roles are
+# opposite (docs/actions-security.md, CR-A).
+echo "-- labeler-perms selftest: scripts/labeler-perms-check.sh --selftest"
+if ! ./scripts/labeler-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- labeler-perms check: scripts/labeler-perms-check.sh"
+if ! ./scripts/labeler-perms-check.sh; then
+  fail=1
+fi
+
 # Lineage check: derives.conf parses, its parents exist, the declared parent
 # order still matches the entry .scad's include order, and every diamond is
 # explicitly asserted. All static, all milliseconds, so it runs unconditionally
