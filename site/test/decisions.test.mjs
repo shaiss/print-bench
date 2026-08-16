@@ -19,7 +19,6 @@ import {
   searchToDecisions,
   fetchOpenDecisions,
 } from "../lib/decisions.mjs";
-import { indexPage } from "../lib/templates.mjs";
 
 const OWNER = "shaiss";
 const REPO = "print-bench";
@@ -178,45 +177,7 @@ test("shouldFetchDecisions: on for Vercel or explicit opt-in, off otherwise", ()
   assert.equal(shouldFetchDecisions({ VERCEL: "1", SITE_FETCH_DECISIONS: "0" }), false); // explicit off wins
 });
 
-// --- the rendered section, driven through the index page (no network) ---
-//
-// The positive render path is deploy-only — the gate is off for a local/CI
-// build and the queue may be empty even on the deploy — so the build cannot
-// prove a non-empty queue renders. These hold that path against regression by
-// feeding indexPage a non-empty decision bundle directly, the same way
-// how-it-works.test.mjs drives howItWorksPage.
-
-test("indexPage renders a Decisions section from a non-empty queue", () => {
-  const html = indexPage([], {
-    decisions: {
-      rows: [
-        { number: 42, title: "Loosen the coupon fit?", url: "https://github.com/o/r/issues/42", kind: "issue" },
-        { number: 9, title: "ship it?", url: "https://github.com/o/r/pull/9", kind: "pull" },
-      ],
-      searchUrl: "https://github.com/o/r/issues?q=needs-decision",
-    },
-  });
-  assert.match(html, /Decisions awaiting a human/);
-  assert.match(html, /class="decisions"/);
-  assert.match(html, /#42/, "issue number rendered");
-  assert.match(html, /Loosen the coupon fit\?/, "issue title rendered");
-  assert.match(html, /href="https:\/\/github\.com\/o\/r\/issues\/42"/, "row links to the issue");
-  assert.match(html, /Every open decision/, "search link rendered");
-  // each row carries an honest kind label
-  const kinds = html.match(/<span class="dec-kind">/g) || [];
-  assert.equal(kinds.length, 2, "one kind label per row");
-  // the how-it-works sanity checks: no leaks into the page
-  assert.ok(!html.includes("undefined"), "no undefined leaked into the page");
-  assert.ok(!html.includes("${"), "no unrendered template placeholder");
-});
-
-test("indexPage renders no Decisions section when the queue is null or empty", () => {
-  // null (fetch skipped, local/CI) — the determinism case
-  assert.ok(!indexPage([], { decisions: null }).includes("Decisions awaiting a human"));
-  assert.ok(!indexPage([], { decisions: null }).includes('class="decisions"'));
-  // empty rows (queue legitimately empty on the deploy)
-  assert.ok(
-    !indexPage([], { decisions: { rows: [], searchUrl: "x" } }).includes("Decisions awaiting a human"),
-    "an empty queue renders nothing, not an empty heading"
-  );
-});
+// The decision queue's *rendering* is now the header notification bell, not a
+// section on the index page. The mapping from a queue to notifications and the
+// bell markup are pinned in notifications.test.mjs; decisions.mjs stays the
+// data source and is tested only for that here.

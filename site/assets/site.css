@@ -286,80 +286,167 @@ pre code { background: none; padding: 0; }
   margin: 0 0 0.9rem;
 }
 
-/* ---------- decision queue (index) ---------- */
+/* ---------- notification bell (header) ---------- */
 
-/* A maintainer-facing alert: the autonomy pipeline parked these for a human.
-   Accent-tinted with an accent left rule so it reads as "needs you" without
-   abandoning the flat, 2px-rule Modernist discipline. Absent entirely (no DOM)
-   when the queue is empty or the fetch was skipped — so this never renders a
-   hollow panel on a local/CI build. */
-.decisions {
-  border: 2px solid var(--rule);
-  border-left: 6px solid var(--accent);
-  background: var(--accent-soft);
-  padding: clamp(1.25rem, 3vw, 1.75rem);
-  margin: 0 0 2rem;
+/* The standard app notification pattern: a bell in the header opens a dropdown
+   tray. Parked decisions (issue #181) used to be a full-width panel above the
+   gallery; they're notifications, so they live here instead — one glyph that
+   doesn't take over the page, and the base every future notification source
+   renders through. Built as a native <details> so it opens with no JavaScript;
+   site.js only adds outside-click / Escape-to-close. */
+.notif {
+  position: relative;
 }
 
-.decisions h2 {
-  font-size: 1.35rem;
-  margin: 0 0 0.5rem;
-}
-
-.decisions > p {
-  max-width: 60ch;
+/* The bell button — matched to the theme toggle beside it (same 32px square,
+   1px ink border, zero radius, accent on hover). */
+.notif-btn {
+  border: 1px solid var(--ink);
+  background: transparent;
   color: var(--ink-soft);
-  font-size: 0.95rem;
-  margin: 0 0 0.85rem;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  position: relative;
+  list-style: none;          /* strip the <summary> disclosure marker */
 }
 
-.dec-list {
-  list-style: none;
-  margin: 0 0 0.85rem;
-  padding: 0;
-  border-top: 1px solid var(--rule-soft);
-}
+.notif-btn::-webkit-details-marker { display: none; }
 
-.dec-list li {
-  border-bottom: 1px solid var(--rule-soft);
-}
-
-.dec-list li a {
-  display: block;
-  padding: 0.5rem 0;
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.dec-list li a:hover {
+.notif-btn:hover,
+.notif[open] .notif-btn {
   color: var(--accent);
+  border-color: var(--accent);
 }
 
-.dec-num {
-  font-family: var(--mono);
-  color: var(--ink-faint);
-  margin-right: 0.45rem;
-}
+.notif-bell { display: block; }
 
-.dec-kind {
-  display: inline-block;
-  margin-left: 0.45rem;
-  font-size: 0.66rem;
+/* The unread count — an accent pip anchored to the bell's top-right corner. */
+.notif-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.62rem;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 8px;
+}
+
+/* The dropdown tray. Anchored under the bell, right-aligned so it never spills
+   off the edge; caps its height and scrolls a long queue. */
+.notif-tray {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(340px, calc(100vw - 2 * var(--gutter)));
+  max-height: min(70vh, 460px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 2px solid var(--rule);
+  box-shadow: var(--shadow);
+  z-index: 30;
+  padding: 0.75rem 0 0.25rem;
+}
+
+.notif-tray-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  padding: 0 0.9rem 0.6rem;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
   text-transform: uppercase;
   color: var(--ink-faint);
 }
 
-.dec-search {
+.notif-tray-count {
+  color: #fff;
+  background: var(--accent);
+  border-radius: 8px;
+  font-size: 0.66rem;
+  line-height: 1;
+  padding: 0.15rem 0.4rem;
+  letter-spacing: 0;
+}
+
+.notif-list {
+  list-style: none;
   margin: 0;
+  padding: 0;
+}
+
+.notif-item + .notif-item {
+  border-top: 1px solid var(--rule-soft);
+}
+
+.notif-item a {
+  display: block;
+  padding: 0.65rem 0.9rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.notif-item a:hover {
+  background: var(--accent-soft);
+}
+
+.notif-cat {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.2rem;
+}
+
+.notif-item-title {
+  display: block;
+  font-size: 0.9rem;
+  line-height: 1.3;
+}
+
+.notif-meta {
+  display: block;
+  margin-top: 0.2rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+.notif-empty {
+  margin: 0;
+  padding: 0.5rem 0.9rem 0.9rem;
+  color: var(--ink-soft);
   font-size: 0.9rem;
 }
 
-.dec-search a {
+.notif-foot {
+  margin-top: 0.25rem;
+  padding: 0.6rem 0.9rem 0.35rem;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.notif-foot a {
   color: var(--accent);
   font-weight: 700;
+  font-size: 0.85rem;
+  text-decoration: none;
 }
+
+.notif-foot a:hover { text-decoration: underline; }
 
 /* ---------- gallery ---------- */
 

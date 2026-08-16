@@ -44,6 +44,7 @@ import {
   shouldFetchDecisions,
   fetchOpenDecisions,
 } from "./lib/decisions.mjs";
+import { decisionsToNotifications } from "./lib/notifications.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
 import { stripReadmeMedia, designMedia, missingMediaRefs } from "./lib/media.mjs";
 import { buildModel } from "./lib/model.mjs";
@@ -56,6 +57,7 @@ import {
   howItWorksPage,
   redirectPage,
   setAssetVersion,
+  setNotifications,
   FAVICON,
 } from "./lib/templates.mjs";
 import { createHash } from "node:crypto";
@@ -312,11 +314,12 @@ async function main() {
   // The read-only "Decisions awaiting a human" queue (issue #181, the surfacing
   // follow-up to the #161 HITL decision gate). Best-effort and Vercel-scoped
   // exactly like release download links and git history — on the deploy (which
-  // has network) the open needs-decision queue becomes a section on the index
-  // page; locally and in CI the fetch is off, so the build stays deterministic
-  // and simply shows no section. Any failure here leaves the queue empty, so a
-  // rate-limited or offline deploy is never a broken build. Surfacing only:
-  // the section links out to the issues; resolving still goes through /decide.
+  // has network) the open needs-decision queue feeds the header notification
+  // bell; locally and in CI the fetch is off, so the build stays deterministic
+  // and the bell shows its "all caught up" empty state. Any failure here leaves
+  // the queue empty, so a rate-limited or offline deploy is never a broken
+  // build. Surfacing only: each notification links out to the issue; resolving
+  // still goes through /decide.
   let decisionQueue = null;
   if (shouldFetchDecisions()) {
     try {
@@ -334,14 +337,19 @@ async function main() {
         };
         console.log(`      decisions: ${rows.length} open decision(s) fetched for the queue`);
       } else {
-        console.log(`      decisions: queue empty — index shows no decision section`);
+        console.log(`      decisions: queue empty — notification bell shows "all caught up"`);
       }
     } catch (err) {
       console.warn(
-        `      decisions: fetch skipped (${err.message}) — index shows no decision queue`
+        `      decisions: fetch skipped (${err.message}) — notification bell shows "all caught up"`
       );
     }
   }
+
+  // Feed the header notification bell before any page renders (setNotifications
+  // is module-level state read by the shared header, like setAssetVersion). The
+  // decision queue is the only source today; more plug in here via mergeBundles.
+  setNotifications(decisionsToNotifications(decisionQueue));
 
   const timelines = new Map();
   for (const [design, roster] of team.rosters) {
@@ -487,7 +495,7 @@ async function main() {
 
   for (const page of rendered) write(out, page.path, page.contents);
 
-  write(out, "index.html", indexPage(designs, { rosters: team.rosters, decisions: decisionQueue }));
+  write(out, "index.html", indexPage(designs, { rosters: team.rosters }));
   if (styles.length) write(out, "styles/index.html", stylesIndexPage(styles, designs));
 
   let assetBytes = 0;
