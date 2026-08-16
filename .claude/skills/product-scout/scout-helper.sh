@@ -69,12 +69,15 @@ BRIEF_LABEL_DESC="Well-formed design brief a design session can pick up cold"
 # positional slot or a REST path (no flag-injection, no path traversal).
 need_num() { case "$1" in ''|*[!0-9]*) die "$2: '$1' is not an issue number";; esac; }
 
-# The per-run brief cap. The workflow exports SCOUT_MAX_BRIEFS; a run-scoped
-# counter file (keyed on the Actions run id so it persists across the several
-# file-brief invocations of ONE run, and is fresh for the next run) tracks how
-# many have been filed. The agent's only Bash surface is this wrapper and it has
-# no Write tool, so it cannot set the env var or tamper with the counter.
-brief_count_file() { echo "${TMPDIR:-/tmp}/scout-brief-count-${GITHUB_RUN_ID:-local}"; }
+# The per-run brief cap is an UNATTENDED guardrail. Inside an Actions run
+# GITHUB_RUN_ID is set and stable across the several file-brief invocations of
+# ONE run (and unique per run), so this counter file is properly run-scoped: it
+# accumulates within a run and is fresh for the next. Attended (no run id) the
+# cap is skipped entirely (see file-brief), so there is no `-local` fallback file
+# to persist stale state across unrelated local runs. The agent's only Bash
+# surface is this wrapper and it has no Write tool, so it can neither set the env
+# var nor tamper with the counter.
+brief_count_file() { echo "${TMPDIR:-/tmp}/scout-brief-count-${GITHUB_RUN_ID}"; }
 
 cmd="${1:-}"
 if [ "$#" -gt 0 ]; then shift; fi
@@ -164,22 +167,27 @@ labels: {{range .labels}}{{.name}} {{end}}
       *) die "file-brief: --title must start with 'Design brief:' (got '$title')" ;;
     esac
 
-    # Enforce the per-run cap (default 3 when the workflow set nothing). The
-    # counter persists across this run's file-brief calls and refuses beyond the
-    # cap — a bounded blast radius for a prompt-injected run.
-    max="${SCOUT_MAX_BRIEFS:-3}"; need_num "$max" "SCOUT_MAX_BRIEFS"
-    cf="$(brief_count_file)"
-    count=0
-    [ -f "$cf" ] && count="$(cat "$cf")"
-    need_num "$count" "brief counter"
-    [ "$count" -lt "$max" ] || die "per-run brief cap reached ($count/$max); refusing to file more"
+    # Enforce the per-run cap ONLY inside an Actions run (GITHUB_RUN_ID set) —
+    # the unattended, unwatched case the cap exists to bound, where the run id
+    # makes the counter properly run-scoped (default 3 when the workflow set
+    # nothing). Attended (no run id) a human is the trust boundary — the same
+    # posture label-helper.sh takes for its selected-issue check — so no cap and
+    # no persistent counter file to go stale.
+    cf="" count=0
+    if [ -n "${GITHUB_RUN_ID:-}" ]; then
+      max="${SCOUT_MAX_BRIEFS:-3}"; need_num "$max" "SCOUT_MAX_BRIEFS"
+      cf="$(brief_count_file)"
+      [ -f "$cf" ] && count="$(cat "$cf")"
+      need_num "$count" "brief counter"
+      [ "$count" -lt "$max" ] || die "per-run brief cap reached ($count/$max); refusing to file more"
+    fi
 
     ensure_brief_label
-    # Flags first, then `--` so a title/body beginning with '-' can't be read as
-    # a flag. The label is hardcoded — the scout applies no other.
+    # The label is hardcoded — the scout applies no other; title and body are
+    # passed as flag values, never positionals.
     url="$(gh issue create --repo "$repo" --label "$BRIEF_LABEL" \
       --title "$title" --body "$body")"
-    echo "$((count + 1))" > "$cf"
+    [ -n "$cf" ] && echo "$((count + 1))" > "$cf"
     echo "FILED $url"
     ;;
 
