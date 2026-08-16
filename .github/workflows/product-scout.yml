@@ -194,7 +194,18 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --model glm-5.2 --effort low --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          # show_full_output surfaces the agent's tool calls and any permission
+          # denials in the (public-repo) Actions log — the scout reads only public
+          # signals and writes only public design-brief issues, so its transcript
+          # carries nothing sensitive, and seeing it is what turns "filed zero, no
+          # error" from a guess into a diagnosis. Bash(printf:*) is on the allow-list
+          # because the skill passes a multi-line brief body as --body "$(printf '%s'
+          # '...')"; under --permission-mode dontAsk the nested printf must itself be
+          # allowed or the whole file-brief command is denied. printf is a
+          # stdout-only builtin (no file write without a redirect — and redirects are
+          # not allowed — no exec, no network), so it adds no reachable capability.
+          show_full_output: "true"
+          claude_args: --model glm-5.2 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Bash(printf:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Run via Anthropic (Claude)
@@ -210,8 +221,11 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          # Same narrow tool grant + scout deny backstop + dontAsk as the Z.AI step.
-          claude_args: --model claude-opus-4-8 --effort low --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          # Same narrow tool grant + scout deny backstop + dontAsk as the Z.AI step,
+          # including Bash(printf:*) for the file-brief body substitution and
+          # show_full_output for observability (see the Z.AI step's comment).
+          show_full_output: "true"
+          claude_args: --model claude-opus-4-8 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Bash(printf:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Explain a skipped agentic run
