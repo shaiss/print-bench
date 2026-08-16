@@ -77,11 +77,32 @@ jobs:
       designs_changed: ${{ steps.check.outputs.designs_changed }}
       changed_designs: ${{ steps.check.outputs.changed_designs }}
       is_new_round: ${{ steps.round.outputs.is_new_round }}
+      # The reviewer fallback chain, sourced from .github/models/registry.conf
+      # (issue #206) instead of hardcoded per job. Reordering or swapping a model
+      # within the chain is now a registry edit; the drift-guard test
+      # (tools/model-registry/tests/test_workflow_drift.py) pins these to the
+      # registry so the two cannot diverge. The per-provider secret wiring stays
+      # literal in each ship step below (the Actions constraint).
+      model1: ${{ steps.chain.outputs.link1_model }}
+      model2: ${{ steps.chain.outputs.link2_model }}
+      model3: ${{ steps.chain.outputs.link3_model }}
+      model4: ${{ steps.chain.outputs.link4_model }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
           fetch-depth: 0
+
+      # Resolve the ordered model ids for the `review` chain from the committed
+      # registry. Stdlib-only, so it runs straight from the checkout with no pip
+      # step in front of the review pipeline; a malformed registry fails loudly
+      # here (and is caught pre-merge by the model-registry tests + `check`).
+      - name: Resolve the reviewer model chain (issue #206)
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          python3 -m model_registry resolve review --gh-output "$GITHUB_OUTPUT"
 
       - name: Detect design file changes
         id: check
@@ -161,13 +182,18 @@ jobs:
       needs.design-changes.outputs.designs_changed == 'true'
       && needs.design-changes.outputs.is_new_round == 'true'
     runs-on: ubuntu-latest
-    # Provider fallback chain (simple, hand-ordered for now — issue #206 tracks
-    # replacing this with a provider/model registry that adds/removes providers
-    # and does intelligent per-job routing without editing every job). Order:
-    #   1. Z.AI GLM 5.2   (secrets.ZAI_KEY, via the Anthropic-compatible endpoint)
-    #   2. Z.AI GLM 5.1
-    #   3. Z.AI GLM 4.6
-    #   4. Anthropic Opus 4.8 (secrets.ANTHROPIC_API_KEY)
+    # Provider fallback chain, sourced from .github/models/registry.conf's
+    # `review` chain (issue #206). The order + model ids arrive as the
+    # design-changes job's model1..model4 outputs — swapping or reordering a
+    # model within a provider is a registry edit, not a change here. Each ship
+    # step keeps its provider's secret wiring LITERAL (the Actions constraint),
+    # so the slot→provider shape (slots 1–3 Z.AI, slot 4 Anthropic) is pinned to
+    # the registry by the drift-guard test; changing that shape needs both.
+    # Default chain:
+    #   1. model1  Z.AI GLM 5.2   (secrets.ZAI_KEY, Anthropic-compatible endpoint)
+    #   2. model2  Z.AI GLM 5.1
+    #   3. model3  Z.AI GLM 4.6
+    #   4. model4  Anthropic Opus 4.8 (secrets.ANTHROPIC_API_KEY)
     # Each attempt is continue-on-error and gated on the previous ones NOT having
     # succeeded, so the first success short-circuits the rest. A final gate step
     # fails the job only when every *configured* provider failed. With neither
@@ -193,7 +219,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-5.2
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -209,7 +235,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-5.1
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -225,7 +251,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-4.6
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -241,7 +267,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model claude-opus-4-8
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -294,7 +320,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-5.2
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -310,7 +336,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-5.1
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -326,7 +352,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-4.6
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -342,7 +368,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model claude-opus-4-8
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -400,7 +426,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-5.2
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
@@ -416,7 +442,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-5.1
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
@@ -432,7 +458,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-4.6
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
@@ -448,7 +474,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode bypassPermissions --model claude-opus-4-8
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
