@@ -40,7 +40,7 @@ def test_parse_log_empty_is_no_history():
 
 
 def test_parse_log_malformed_line_raises_with_lineno():
-    with pytest.raises(ValueError, match="log.ndjson:2: not valid JSON"):
+    with pytest.raises(ValueError, match=r"log\.ndjson:2: not valid JSON"):
         signals.parse_log(json.dumps(_rec()) + "\n{ broken\n")
 
 

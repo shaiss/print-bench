@@ -18,19 +18,19 @@ as the product's memory of intent.
 
 ## Target — which product, which charter
 
-`/pm <arg>` names **which product you are the PM of**. Resolve once, up front:
+`/pm <arg>` names **which product you are the PM of**. Resolve once, up front,
+**in this order** (an existing design directory always wins):
 
-- `/pm print-bench` — also `/pm repo`, `/pm (repo)`, `/pm .` — → the
+- `/pm <name>` where `designs/<name>/` exists → the **design PM** (the default
+  and common case): the charter is `designs/<name>/PM.md`. This check comes
+  first, so a design always wins even if its name matches a platform alias below.
+- otherwise `/pm print-bench` — also `/pm repo`, `/pm (repo)`, `/pm .` — → the
   **platform PM** (Reeve): the charter is **`PM.md` at the repo root**, the
   product charter for print-bench *the platform* — the toolchain (`scripts/`,
   `tools/`), the site, the autonomy loop and its conventions — not any one
-  design.
-- `/pm <name>` where `designs/<name>/` exists → the **design PM** (the default
-  and common case): the charter is `designs/<name>/PM.md`.
+  design. (These aliases collide with no existing design today.)
 - No arg, or an arg that is neither → infer the design from PR/session context
-  as before; if genuinely ambiguous, ask rather than guess. The reserved
-  platform aliases collide with no existing design; if a design were ever named
-  one, the existence of `designs/<arg>/` wins.
+  as before; if genuinely ambiguous, ask rather than guess.
 
 Everywhere below, **the charter** means whichever file the target resolved to,
 and **the product** means the design or the platform accordingly. The method is

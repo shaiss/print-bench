@@ -19,9 +19,9 @@
 #
 # Cadence lives twice by necessity (Actions cannot read a file for
 # on.schedule): the cron literal below and the conf's `cadence:` key must stay
-# identical (a test pins them). 05:53 UTC daily — after the groomer (05:41), so
-# the bench-health report reflects the same morning's freshly-tended backlog;
-# :53 avoids the :11/:17/:23/:29/:41/:47 sibling slots.
+# identical (a test pins them). 05:53 UTC daily — an off-peak slot after the
+# sibling routines (:11/:17/:23/:29/:41/:47). Reeve reads committed telemetry
+# and preview sizes, not the issue backlog, so a calm daily cadence is right.
 
 name: Reeve — bench health
 

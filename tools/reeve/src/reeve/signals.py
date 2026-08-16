@@ -93,7 +93,14 @@ def gather_snapshot(root: str = ".", now: Optional[datetime] = None) -> dict[str
     report_placeholder = True
     if os.path.exists(report_path):
         with open(report_path, encoding="utf-8") as fh:
-            report_placeholder = _PLACEHOLDER in fh.read()
+            # Anchor the marker to a line start — a populated report renders
+            # tables and never a line beginning with this phrase, so a stray
+            # in-body occurrence can't be mistaken for the empty placeholder.
+            # (A first-line check would miss it: in telemetry/REPORT.md the
+            # placeholder sits below the H1 and the generated-by comment.)
+            report_placeholder = any(
+                line.startswith(_PLACEHOLDER) for line in fh.read().splitlines()
+            )
 
     return {
         "generatedAt": _now_iso(now),

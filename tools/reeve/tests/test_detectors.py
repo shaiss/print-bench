@@ -191,7 +191,11 @@ def test_evaluate_is_pure_and_repeatable():
 
 _PKG = pathlib.Path(detectors.__file__).parent
 _FORBIDDEN_IMPORTS = {"urllib", "socket", "http", "subprocess", "requests"}
-_PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py")
+# Includes signals.py — Reeve's one I/O seam. It reads only committed files
+# (os/glob/json), so proving even *it* imports nothing network-capable is the
+# strongest form of the no-GitHub-read guarantee (stronger than the groomer,
+# whose github.py genuinely uses urllib and is therefore excluded there).
+_PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py", "signals.py")
 
 
 def _imports_of(path):

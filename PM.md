@@ -64,7 +64,7 @@ Each names the standing decision or issue behind it.
 | N1 | Humans write source, CI writes everything derived | No hand-committed renders, shots, galleries, telemetry — `regen` regenerates them in the same run that gates the source | CLAUDE.md "What CI generates"; issue #69 | Never — the freshness hole reopens the moment a human commits a derived artifact |
 | N2 | Copyleft stays out of shared first-party core | `scripts/`, `site/`, `lib/*.scad` may not `include`/bundle GPL-vendored code; a design may opt in and disclose | Standing decision, issue #160; `license-boundary-check.sh`; `docs/licensing.md` | Never — it is a decision, not a deferral |
 | N3 | Autonomy converges on gates, never on taste | Agentic runs drive geometry to gate-clean and hand off; approving a *shape* and every merge is the human lead's | `/design-run`, `/ship-issue`; HITL gate `needs-decision`, issue #161 | Never |
-| N4 | The reproducible source of truth lives in git | Decisions (CI-gate registry, backlog policy, model registry, Reeve's conf) are committed config a clone carries; GitHub supplies only interaction + auth | `.github/**/*.conf` pattern; `tools/ci-gates` | A better reproducible store than the repo itself exists |
+| N4 | The reproducible source of truth lives in git | Decisions (CI-gate registry, backlog policy, model registry, Reeve's conf) are committed config a clone carries; GitHub supplies interaction, auth, and live arming/kill switches — a repo variable (e.g. `REEVE_ENABLED`) can only enable or disable committed policy, never define it | `.github/**/*.conf` pattern; `tools/ci-gates` | A better reproducible store than the repo itself exists |
 | N5 | The served site invents nothing and depends on nothing external | Every word/image traces to a provenanced committed file or first-party record; served bytes are vendored, no CDN; a broken local ref fails the build | `site/README.md` | Never |
 | N6 | The tooling must not outgrow the designs it serves | New platform machinery must trace to a design need a real session hit; "interesting to build" is not a reason | This charter | The bench's purpose changes from co-designing parts to something else |
 
@@ -86,8 +86,10 @@ Each names the standing decision or issue behind it.
 - **Autonomy that merges its own taste** (N3), a non-deterministic / CDN-dependent
   site (N5), or copyleft in shared core (N2). The "never" list is where the
   non-negotiables become refusals.
-- **A second source of truth outside git** for any platform decision (N4) — no
-  console-only config, no state a clone doesn't carry.
+- **A second policy source outside git** for any platform decision (N4) — no
+  console-only policy, no state a clone doesn't carry. (Live arming/kill switches
+  like `REEVE_ENABLED` are controls, not policy: they only enable or disable what
+  the committed conf already declares.)
 
 ## What "working" looks like
 
@@ -103,9 +105,11 @@ Not a one-time definition of done — the health invariants a stranger can check
       arms, the burn ships, `needs-decision` parks what's the human lead's.
 - [ ] No platform feature is live that no design uses (N6) — or it's tracked to a
       design that will.
-- [ ] The ops pulse is read, not just emitted: no telemetry regression (gate
-      score, budget headroom, skip rate) sits unremarked — Reeve's report is
-      current.
+- [ ] The ops pulse is read, not just emitted: no regression Reeve detects (gate
+      failure, score drop, budget headroom, wall-time, a design newly frozen out
+      of gating, report drift) sits unremarked — Reeve's report is current. (A
+      broader coverage-drop detector — a part silently un-gated *without* being
+      archived — is a backlog enhancement, not a v1 claim.)
 
 ## Backlog, ranked by platform value
 

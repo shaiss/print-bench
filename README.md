@@ -331,7 +331,8 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   over the committed telemetry log and live preview sizes (budget tightening,
   gate failures, score/wall-time regressions, archived creep, report drift),
   advisory-only into one sticky report issue — the platform-ops sibling of the
-  backlog groomer — see its [README](tools/reeve/README.md)
+  backlog groomer — see its [README](tools/reeve/README.md) and the platform
+  charter [PM.md](PM.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log
   into the report — see its [README](tools/telemetry/README.md)
