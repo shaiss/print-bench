@@ -224,6 +224,10 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   - `labeler-perms-check.sh` — the same drift check for the labeler's own deny
     backstop (`.claude/labeler-settings.json`), which additionally denies the
     chunker's `chunk-helper.sh` wrapper and must never deny `label-helper.sh`
+  - `scout-perms-check.sh` — the same drift check for the product scout's own
+    deny backstop (`.claude/scout-settings.json`), which additionally denies
+    BOTH `chunk-helper.sh` and `label-helper.sh` and must never deny
+    `scout-helper.sh`
   - `gate.sh` — render printable parts and gate the STLs with printcheck;
     `--slice` adds a PrusaSlicer test-slice (this is what CI enforces)
   - `gate-summary.py` — turns a gate log into the CI results table

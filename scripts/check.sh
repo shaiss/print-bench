@@ -241,6 +241,22 @@ if ! ./scripts/labeler-perms-check.sh; then
   fail=1
 fi
 
+# Scout deny-backstop drift check: same reasoning as the chunker's and labeler's,
+# for the product scout's own backstop (.claude/scout-settings.json). It must deny
+# every dangerous settings.json allow — INCLUDING BOTH the chunker's
+# chunk-helper.sh AND the labeler's label-helper.sh (neither is the scout's
+# surface) — and must never deny the scout-helper.sh wrapper (or the scheduled
+# scout fails closed with no other CI signal). Separate script because each
+# routine's wrapper allow/deny roles differ (docs/actions-security.md, CR-A).
+echo "-- scout-perms selftest: scripts/scout-perms-check.sh --selftest"
+if ! ./scripts/scout-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- scout-perms check: scripts/scout-perms-check.sh"
+if ! ./scripts/scout-perms-check.sh; then
+  fail=1
+fi
+
 # Lineage check: derives.conf parses, its parents exist, the declared parent
 # order still matches the entry .scad's include order, and every diamond is
 # explicitly asserted. All static, all milliseconds, so it runs unconditionally
