@@ -38,13 +38,14 @@ Closed and latched (preview pose):
 - **Infill:** 20–30 %
 - **Supports:** none needed
 - **Seam position:** `Rear` — the default aligned seam lands on the latch
-  strip's window corner (a crack-starter on the flexing arm) on 17 of 63 strip
-  layers; `Rear` moves it to the strip's end corners (1 layer touching) and
-  parks the body seam on the hidden spine side *(measured on the sliced gcode)*
+  strip's window corner (a crack-starter on the flexing arm) on 16 of the
+  strip's 45 layers; `Rear` moves every one of them to the strip's end corners
+  and parks the body seam on the hidden spine side *(measured on the sliced
+  gcode)*
 - **Bridging angle:** `90°` — the hinge spine runs along X, so 90° runs each
   bridge line the short way across the 2 mm spine gap, anchored on both tray
   rims. Stock auto-detect already picks 90° on this geometry; setting it pins
-  the choice *(measured: 113 spans, all at 90°)*
+  the choice *(measured: 112 spans, all at 90°)*
 - **Hinge web, what the slicer actually does:** the 0.6 mm web is horizontal —
   not a thin wall — and slices as 3 stacked 0.2 mm layers: 3 concentric
   0.45 mm perimeter passes per side plus a bridged core across the spine gap on
