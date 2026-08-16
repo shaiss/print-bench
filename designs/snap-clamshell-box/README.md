@@ -37,6 +37,19 @@ Closed and latched (preview pose):
   the fold
 - **Infill:** 20–30 %
 - **Supports:** none needed
+- **Seam position:** `Rear` — the default aligned seam lands on the latch
+  strip's window corner (a crack-starter on the flexing arm) on 17 of 63 strip
+  layers; `Rear` moves it to the strip's end corners (1 layer touching) and
+  parks the body seam on the hidden spine side *(measured on the sliced gcode)*
+- **Bridging angle:** `90°` — the hinge spine runs along X, so 90° runs each
+  bridge line the short way across the 2 mm spine gap, anchored on both tray
+  rims. Stock auto-detect already picks 90° on this geometry; setting it pins
+  the choice *(measured: 113 spans, all at 90°)*
+- **Hinge web, what the slicer actually does:** the 0.6 mm web is horizontal —
+  not a thin wall — and slices as 3 stacked 0.2 mm layers: 3 concentric
+  0.45 mm perimeter passes per side plus a bridged core across the spine gap on
+  the first layer. "Detect thin walls" is not needed and changes nothing here
+  *(measured)*
 - **Orientation:** **flat, both trays open** (as modelled). Fold the lid 180° over
   the base after printing; the front tab snaps into the base window.
 
@@ -53,7 +66,7 @@ box closes.
 | `inner_d` | 34 mm | inner tray depth (each tray) |
 | `wall_h` | 13 mm | wall height per tray (closed interior ≈ 2·(wall_h − floor_t)) |
 | `hinge_t` | 0.6 mm | living-hinge web thickness (thin = folds easily; 0.4–1.0) |
-| `hook` | 2.0 mm | latch tab protrusion (snap strength) |
+| `hook` | 2.0 mm | how far the tab reaches out to meet the strip (retention is the window lands — see NOTES) |
 | `latch_t` | 1.6 mm | latch strip (arm) thickness — drives snap stiffness; thickens outward, so the anti-clash clearance is preserved |
 | `latch_h` | 9 mm | latch strip height above the rim — drives `win_z` and the fold map (`tab_flat_z`) |
 | `hinge_gap` | 2.0 mm | spine gap between the trays that the hinge web bridges |
