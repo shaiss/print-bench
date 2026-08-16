@@ -21,6 +21,60 @@ non-negotiable?", where a wrong answer is expensive. Generation asks "what
 should exist that doesn't?", where a wrong answer is a proposal a human
 closes. Different model needs, different job (issue #229).
 
+## Run this — the exact procedure (do every step)
+
+You have exactly two GitHub surfaces, split by direction:
+
+- **Reading** goes through the wrapper `.claude/skills/product-scout/scout-helper.sh`
+  (verbs `list-briefs` / `read-thread`). **Run it as a single bare command —
+  nothing else on the line:** no `;`, `&&`, `||`, `|`, no trailing
+  `; echo "exit=$?"`, no `$(...)`, no redirection. The run allows the wrapper *by
+  itself*, so anything more than `scout-helper.sh <verb> <args>` is denied
+  outright. Read the wrapper's own output for the result.
+- **Filing** goes through the MCP tool **`file_design_brief`** (a real tool, not a
+  shell command). You call it with two arguments, `title` and `body`. Because the
+  body travels as a JSON argument and never touches a shell command line, it can be
+  the full markdown brief — tables, pipes, backticks, newlines, apostrophes, all
+  fine. This is the deliverable path; the wrapper has no filing verb you should use.
+
+Use Read/Grep/Glob for the repo's own files.
+
+Every run, in order:
+
+1. **Dedup first — see what's already proposed.** Run it bare:
+   `.claude/skills/product-scout/scout-helper.sh list-briefs`
+   For any existing brief you might overlap with, read it:
+   `.claude/skills/product-scout/scout-helper.sh read-thread <n>`
+   Never re-propose something already open.
+
+2. **Read the committed signals** with Read/Grep/Glob — `telemetry/log.ndjson`,
+   the `## Field test log` sections of `designs/*/NOTES.md`, `designs/*/README.md`
+   and `PM.md` — and frame catalog gaps against the mandate (§1) and what counts
+   as an unmet need (§1).
+
+3. **File each proposal as its own issue — this is the deliverable.** You **MUST
+   actually call the `file_design_brief` tool** for every proposal: writing a brief
+   in your reply, or merely deciding what you *would* file, files nothing. Compose a
+   body that matches `templates/design-brief.md` section for section (§3), then call
+   the tool:
+   - `title`: `Design brief: <short idea>` (the tool requires the `Design brief:`
+     prefix and rejects anything else).
+   - `body`: the full markdown body, verbatim — headings, the Must-fit table,
+     blank lines and all. No escaping, no quoting tricks, no apostrophe-dodging:
+     it is a plain JSON string argument, so write natural markdown.
+
+   The tool applies the `design-brief` label itself (the only label it can set) and
+   caps how many you may file per run; file up to that many **strong, distinct,
+   non-overlapping** proposals. Filing **zero** when a real catalog gap exists means
+   you did not finish — on a normal run, file **at least one** well-formed brief.
+
+4. **Read each filed issue back** as a stranger design session (§7). Stop once
+   you've filed your strong proposals; do not pad to the cap with weak ideas.
+
+The rest of this skill is the detail behind those four steps — the mandate that
+decides *what* to propose (§1), the signals to read (§2), the brief format (§3),
+the advisory-only boundary (§4), and what "done" means (§7).
+
 ## 1. The mandate — what to chase
 
 The mandate is the product; the rest of this skill is method. It is the
@@ -118,8 +172,8 @@ Each proposal is one issue whose body matches `templates/design-brief.md`
   or not. An empty section is a checkable claim, not an omission.
 
 Title `Design brief: <idea>`, label **`design-brief`** — the *only* label the
-scout may apply. Filing is through the wrapper (`scout-helper.sh file-brief`),
-which hardcodes that label; the scout can never mint an `autonomy-ok`,
+scout may apply. Filing is through the `file_design_brief` MCP tool, which
+hardcodes that label; the scout can never mint an `autonomy-ok`,
 `declined-too-big` or `needs-decision` issue, because arming, chunking and
 parking are decisions the scout does not get to make.
 
@@ -147,19 +201,36 @@ registry (#206, landed) — tracked as child C, #243`, so the pinned model
 becomes a `[chain:scout]` resolved from `.github/models/registry.conf` rather
 than a fourth inline chain.
 
-## 6. The wrapper — the scout's only write surface
+## 6. The write surface — an MCP tool, not a shell command
 
-An unattended run reads untrusted issue text while holding a provider key, so
-every GitHub write goes through one committed wrapper,
-`.claude/skills/product-scout/scout-helper.sh` (read verbs `list-briefs` /
-`read-thread`; write verbs `ensure-label` / `file-brief`). The wrapper
-hardcodes the `design-brief` label, refuses any other, and caps how many
-briefs one run may file (`SCOUT_MAX_BRIEFS`), so a prompt-injected run can at
-worst file a bounded number of `design-brief` proposals — noise a human
-closes, never an escalation. The run allow-lists only that wrapper plus the
-read-only file tools (never `Bash`, never `Write`), with the scout's deny
-backstop (`.claude/scout-settings.json`) closing the additive-allow leak from
-`.claude/settings.json` (kept honest by `scripts/scout-perms-check.sh`).
+An unattended run reads untrusted issue text while holding a GitHub token, so
+its GitHub access is split by direction and bounded on both sides.
+
+**Filing** is the `file_design_brief` MCP tool, served by the committed stdio
+server `.claude/skills/product-scout/scout_mcp.py` (wired in via
+`--mcp-config .claude/skills/product-scout/scout-mcp.json`). It exists as a tool
+rather than a Bash verb for a concrete reason: the brief body is rich multi-line
+markdown, and under `--permission-mode dontAsk` the Bash matcher denies any
+command whose argument reads as shell structure — a table pipe or an embedded
+newline in `--body` was enough to deny every filing attempt, no quoting fixed it
+(proven from a run's verbatim `permission_denials`). An MCP tool takes `title`
+and `body` as JSON over a stdio pipe, never on a command line, so that class of
+denial cannot occur. The server hardcodes the `design-brief` label, refuses any
+title without the `Design brief:` prefix, and caps how many issues one run may
+file (`SCOUT_MAX_BRIEFS`) with a run-scoped in-process counter — so a
+prompt-injected run can at worst file a bounded number of `design-brief`
+proposals, noise a human closes, never an escalation. Its only GitHub call is
+`POST /issues` on the current repo.
+
+**Reading** stays on the committed wrapper
+`.claude/skills/product-scout/scout-helper.sh` (`list-briefs` / `read-thread`) —
+its arguments are trivial and pass the matcher as bare commands.
+
+The run allow-lists exactly those two surfaces (`mcp__scout__file_design_brief`
+plus the wrapper's read verbs) and the read-only file tools — never `Write`,
+never a general `Bash`. The scout deny backstop (`.claude/scout-settings.json`)
+closes the additive-allow leak from `.claude/settings.json` (kept honest by
+`scripts/scout-perms-check.sh`).
 
 ## 7. Done means
 

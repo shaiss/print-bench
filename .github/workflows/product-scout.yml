@@ -190,11 +190,38 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          # The scout's WRITE surface is now an MCP tool (scout_mcp.py), launched
+          # by Claude Code over a stdio pipe and inheriting this step's env. It
+          # authenticates to the GitHub REST API with this token (issues:write is
+          # all the job grants), so it must be exported here — GITHUB_REPOSITORY /
+          # GITHUB_RUN_ID are set by Actions automatically, SCOUT_MAX_BRIEFS from
+          # the job env.
+          GITHUB_TOKEN: ${{ github.token }}
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --model glm-5.2 --effort low --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          # show_full_output surfaces the agent's tool calls and any permission
+          # denials in the (public-repo) Actions log — the scout reads only public
+          # signals and writes only public design-brief issues, so its transcript
+          # carries nothing sensitive, and seeing it is what turned "filed zero, no
+          # error" from a guess into a diagnosis.
+          #
+          # Tool surface (why exactly this): FILING is an MCP tool
+          # (mcp__scout__file_design_brief, served by scout_mcp.py via
+          # --mcp-config) because the brief body is rich multi-line markdown, and
+          # under --permission-mode dontAsk the Bash matcher denies any command
+          # whose argument reads as shell structure — a table pipe or an embedded
+          # newline in --body was enough, no quoting fixed it (proven from a run's
+          # verbatim permission_denials). An MCP tool takes its arguments as JSON
+          # over a pipe, never on a command line, so that whole class of denial
+          # disappears. The scout's READ verbs stay on the wrapper (both path
+          # spellings) — their args are trivial and pass the matcher fine. Plus the
+          # read-only file tools; never Write, never a general Bash. The scout deny
+          # backstop (--settings) still neutralises any Bash allow that leaks from
+          # settings.json.
+          show_full_output: "true"
+          claude_args: --model glm-5.2 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Run via Anthropic (Claude)
@@ -206,12 +233,19 @@ jobs:
           && github.event.inputs.dry_run != 'true'
         # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
         # right fit for an unattended bot — no OAuth token / subscription seat.
+        env:
+          # Same reason as the Z.AI step: the MCP filing tool inherits this env
+          # and authenticates with it.
+          GITHUB_TOKEN: ${{ github.token }}
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          # Same narrow tool grant + scout deny backstop + dontAsk as the Z.AI step.
-          claude_args: --model claude-opus-4-8 --effort low --permission-mode dontAsk --settings .claude/scout-settings.json --allowedTools "Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          # Same tool surface as the Z.AI step: MCP filing tool + wrapper read
+          # verbs + read-only file tools + scout deny backstop + dontAsk +
+          # show_full_output (see its comment for why it is exactly this).
+          show_full_output: "true"
+          claude_args: --model claude-opus-4-8 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Explain a skipped agentic run

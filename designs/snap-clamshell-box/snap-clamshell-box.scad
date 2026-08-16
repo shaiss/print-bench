@@ -97,12 +97,12 @@ win_h  = 3.2;                          // window height
 // The windowed compliant strip alone (no buttress). `clr` is the outward
 // standoff; the fitchecks intersect THIS against the closed lid.
 module latch_strip(clr = latch_clr) {
-    y0 = td - wall_t + clr;               // strip inner face
+    y0 = td - wall_t + clr;   // strip INNER face — pinned, so a thicker latch_t grows outward and cannot eat the anti-clash clearance
     difference() {
         translate([-lw/2, y0, wall_h - 0.01])
-            cube([lw, wall_t, latch_h]);           // raised compliant strip
+            cube([lw, latch_t, latch_h]);           // raised compliant strip (arm thickness = latch_t, #271)
         translate([-lw/2 + 3, y0 - 0.1, win_z - win_h/2])
-            cube([lw - 6, wall_t + 0.2, win_h]);   // window
+            cube([lw - 6, latch_t + 0.2, win_h]);   // window (punches full latch_t)
     }
 }
 // Buttress: fills from the tray outer wall out to the offset strip, bed to rim.
@@ -110,7 +110,7 @@ module latch_strip(clr = latch_clr) {
 // of the base and cannot reach into the lid's closed volume (z >= wall_h).
 module latch_buttress() {
     translate([-lw/2, td - wall_t, 0])
-        cube([lw, wall_t + latch_clr, wall_h]);
+        cube([lw, latch_clr + latch_t, wall_h]);   // wall face out to the strip's outer face (= wall_t + latch_clr at the 1.6 defaults)
 }
 module base_latch() {
     latch_buttress();

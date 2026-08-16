@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "scout": {
+      "command": "python3",
+      "args": [".claude/skills/product-scout/scout_mcp.py"]
+    }
+  }
+}
