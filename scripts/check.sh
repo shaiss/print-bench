@@ -269,6 +269,26 @@ if ! python3 .claude/skills/product-scout/scout_mcp.py --selftest; then
   fail=1
 fi
 
+# Cadence-parity check (issue #276): every scheduled autonomy routine stores
+# its cadence TWICE — the `cadence:` key in .github/<routine>.conf and the
+# `cron:` literal in .github/workflows/<routine>.yml (Actions can't read a
+# file for on.schedule) — and before this check nothing held them together,
+# so a one-sided edit shipped a routine firing on a schedule nobody
+# reviewed. The check resolves presets (backlog-burn stores `hourly`, the
+# workflow carries `17 * * * *`) through backlog-burn's own parser so the
+# mapping has one source, and compares. PARITY only, not correctness: it
+# does not check a cron against the prose schedule the comments describe
+# (see the script header). Selftest first — it is the only thing proving
+# the failure direction still fires — then the real files.
+echo "-- cadence-sync selftest: scripts/cadence-sync-check.sh --selftest"
+if ! ./scripts/cadence-sync-check.sh --selftest; then
+  fail=1
+fi
+echo "-- cadence-sync check: scripts/cadence-sync-check.sh"
+if ! ./scripts/cadence-sync-check.sh; then
+  fail=1
+fi
+
 # Lineage check: derives.conf parses, its parents exist, the declared parent
 # order still matches the entry .scad's include order, and every diamond is
 # explicitly asserted. All static, all milliseconds, so it runs unconditionally

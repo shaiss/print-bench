@@ -228,6 +228,13 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     deny backstop (`.claude/scout-settings.json`), which additionally denies
     BOTH `chunk-helper.sh` and `label-helper.sh` and must never deny
     `scout-helper.sh`
+  - `cadence-sync-check.sh` — cadence-parity check for the scheduled autonomy
+    routines (issue #276): the `cadence:` key in `.github/<routine>.conf` must
+    resolve to the same schedule as the `cron:` literal in the matching
+    workflow (Actions can't read a file for `on.schedule`, so each cadence
+    lives in both places). Presets are resolved through backlog-burn's own
+    parser, and the guarantee is parity, not correctness — it does not check a
+    cron against the schedule the prose comments describe
   - `gate.sh` — render printable parts and gate the STLs with printcheck;
     `--slice` adds a PrusaSlicer test-slice (this is what CI enforces)
   - `gate-summary.py` — turns a gate log into the CI results table
