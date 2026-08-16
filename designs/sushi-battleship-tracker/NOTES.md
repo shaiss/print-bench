@@ -103,11 +103,25 @@ marker seat (~30–45 min print). Before committing to the full board:
 
 ## Product-shot provenance
 
-The committed `previews/lifestyle-product-hero.png` and `lifestyle-product-hero.gif`
-were generated **blind (text-to-image)**, before the pipeline gained image-to-image
-seeding. The `seed` now resolving to `product-hero` in `lifestyle.conf` pins the
-shape to the real mesh only from the **next re-roll** onward — it does not
-retroactively describe the currently committed image.
+The first committed `previews/lifestyle-product-hero.png` (and the
+`lifestyle-product-hero.gif` seed frame) was generated **blind
+(text-to-image)**, before the pipeline gained image-to-image seeding — it
+shows a smooth-lidded board with neither the sliding shutters nor the seat
+dishes.
+
+The committed still is now an **image-to-image generation seeded from
+`previews/seat-detail.png`** — the tier-1 close-up of the top (`shots.conf`
+`seat-detail`, `part="top"`, zoom 1.25) in which the dished seats are the
+subject of the frame. Seeded from that, the repaint keeps the seats
+(same-name seeding from `product-hero.png` — the whole board at distance,
+dishes a few pixels wide — was tried first and loses them to drift; see
+the `seed=` note in `lifestyle.conf` and #251). It remains tier-2: the scene,
+lighting and materials are AI, the disclosure caption on the page still
+applies, and the tier-1 studio shot plus the STL stay the geometry-true
+artifacts.
+
+The `lifestyle-product-hero.gif` motion clip is still the blind-generation
+lineage — its `motion.conf` seeding question is filed separately (#287).
 
 ## Field test log
 
