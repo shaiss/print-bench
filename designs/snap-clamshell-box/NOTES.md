@@ -24,8 +24,27 @@ The latch's two halves are authored in the flat print but must meet after a 180�
 fold about the spine top `(y=0, z=wall_h)`. That fold maps a point
 `(y, z) → (−y, 2·wall_h − z)`. So the lid tab's flat height is
 `tab_flat_z = 2·wall_h − win_z`, which lands it exactly at the base window when
-closed. Verified on the closed pose (`previews/closed-latched.png`): the tab sits
-captured in the window.
+closed. Note `win_z = wall_h + latch_h·0.55` scales *with* `wall_h`, so the map
+re-solves at any wall height: at `wall_h = 13`, `win_z = 17.95` and
+`tab_flat_z = 8.05`. Verified on the export — the closed tab measures `z ∈
+[16.75, 19.15]`, centred on the window band `[16.35, 19.55]`, with 42.8 mm³ of
+tab-in-window overlap.
+
+## The closed-pose clash and its fix (issue #230)
+
+The strip was authored in the *outer-wall plane* (`y ∈ [td−wall_t, td]`). That is
+exactly where the lid's own front wall lands when it folds over, so base strip ∩
+closed lid = **216.00 mm³ (32 facets)** — ~100 % of the strip, and the box jams on
+the first close. It was invisible to the flat-pose gates: nothing overlaps until
+you fold. Fix: stand the strip off outward by `latch_clr` (default 2.0 mm =
+`wall_t` + 0.4 mm print clearance) so its inner face sits proud of the closed lid
+wall, and carry it on a buttress that fills from the outer wall out to the strip
+but stops at the rim (`z ≤ wall_h`) — below the plane the lid ever reaches, so the
+buttress is structurally base-side and cannot itself clash. The tab still
+protrudes `hook = 2.0 mm`, enough to reach through the offset window (engagement
+re-measured above). Locked in by `ci.fitchecks`: `closed-clash` must render empty,
+`closed-clash-ctrl` (the same intersection with `latch_clr = 0`) must reproduce
+the 216 mm³ interference — the negative control proving the check can fail.
 
 ## Name note
 
@@ -43,6 +62,8 @@ material is less critical (few cycles).
 
 - Renders clean; folded + latch-face poses confirm the box closes and the tab
   seats in the window.
-- TODO: `gate.sh --slice`; latch is a tuned fit → a coupon sweeping the tab/window
-  interference (with an interfering negative control); README + product shot;
-  `previews/cameras.conf` + an `animations.conf` fold animation.
+- Closed-pose latch clash fixed and gated (`ci.fitchecks`, issue #230); `wall_h`
+  raised to 13 so the closed interior (22.8 mm) holds an earbud.
+- TODO: `gate.sh --slice` (needs PrusaSlicer; run in CI); `previews/cameras.conf`
+  + an `animations.conf` fold animation; the deeper latch coupon sweeping the
+  tab/window interference fit remains worthwhile for tuning.

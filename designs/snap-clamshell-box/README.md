@@ -20,8 +20,10 @@ Closed and latched (preview pose):
 
 ## What you get
 
-- `snap-clamshell-box` — one flat print, ≈ 53 × 78 × 12 mm open; folds to a
-  ≈ 53 × 39 × 21 mm closed box with two compartments.
+- `snap-clamshell-box` — one flat print, ≈ 53 × 81 × 22 mm as printed (both trays
+  open and flat, the latch strip standing proud of the rim); folds to a
+  ≈ 53 × 43 × 26 mm closed box with two compartments. The closed interior clears
+  ≈ 22.8 mm — enough to hold a pair of earbuds.
 
 ## Print settings
 
@@ -44,9 +46,10 @@ box closes.
 |---|---|---|
 | `inner_w` | 50 mm | inner tray width |
 | `inner_d` | 34 mm | inner tray depth (each tray) |
-| `wall_h` | 12 mm | wall height per tray |
+| `wall_h` | 13 mm | wall height per tray (closed interior ≈ 2·(wall_h − floor_t)) |
 | `hinge_t` | 0.6 mm | living-hinge web thickness (thin = folds easily; 0.4–1.0) |
 | `hook` | 2.0 mm | latch tab protrusion (snap strength) |
+| `latch_clr` | 2.0 mm | outward standoff of the latch strip so it clears the closed lid wall (≥ `wall_t` + a print clearance) |
 
 All parameters are at the top of `snap-clamshell-box.scad`; override with
 `-D 'inner_w=60'`. `demo_fold` is a preview pose only — print at 0.
