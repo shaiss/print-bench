@@ -39,6 +39,7 @@ drifts. Read the outputs and run §2 accordingly:
 | `lineage_tests` | `pytest tools/lineage/tests` |
 | `backlog_burn_tests` | `pytest tools/backlog-burn/tests` |
 | `backlog_groomer_tests` | `pytest tools/backlog-groomer/tests` |
+| `model_registry_tests` | `pytest tools/model-registry/tests` |
 | `telemetry_tests` | `pytest tools/telemetry/tests` |
 | `ci_gates_tests` | `pytest tools/ci-gates/tests` |
 
@@ -73,6 +74,7 @@ python -m pytest tools/stylelift/tests -q            # if stylelift_tests=true
 python -m pytest tools/lineage/tests -q              # if lineage_tests=true
 python -m pytest tools/backlog-burn/tests -q         # if backlog_burn_tests=true
 python -m pytest tools/backlog-groomer/tests -q      # if backlog_groomer_tests=true
+python -m pytest tools/model-registry/tests -q       # if model_registry_tests=true
 python -m pytest tools/telemetry/tests -q            # if telemetry_tests=true
 python -m pytest tools/ci-gates/tests -q             # if ci_gates_tests=true
 ```
