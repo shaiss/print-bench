@@ -326,6 +326,12 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   resolved-but-parked decisions, unchunked oversized issues, duplicate
   candidates, completed epics), advisory-only into one sticky report issue — see its
   [README](tools/backlog-groomer/README.md)
+- `tools/reeve/` — the deterministic **bench-health** reporter behind Reeve,
+  the platform PM (`.github/workflows/reeve.yml`, issue #272): six detectors
+  over the committed telemetry log and live preview sizes (budget tightening,
+  gate failures, score/wall-time regressions, archived creep, report drift),
+  advisory-only into one sticky report issue — the platform-ops sibling of the
+  backlog groomer — see its [README](tools/reeve/README.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log
   into the report — see its [README](tools/telemetry/README.md)

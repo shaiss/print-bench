@@ -1,0 +1,214 @@
+# Reeve — the platform PM's bench-health report (issue #272).
+#
+# print-bench splits the PM role three ways: Remy (/product-scout) proposes what
+# designs should exist, Vera (/pm) enforces one design's scope, and REEVE owns
+# the system — the bench as a running whole. This is how Reeve reads the ops
+# pulse: it runs the tools/reeve detectors over the committed telemetry log, the
+# live preview sizes and the routine confs, and upserts ONE sticky "bench
+# health" report issue. Advisory-only: no label edits, no closes, no comments
+# on other issues, and no LLM anywhere (every finding is a recomputable fact).
+# Because there is no agentic step, this workflow holds NO provider secret; the
+# only token it ever sees is the ambient GITHUB_TOKEN. Reeve reads only
+# committed files, so it makes no GitHub read at all — the sticky-issue upsert
+# is its single interaction with the API.
+#
+# TWO keys must agree to run: committed `enabled: true` in .github/reeve.conf
+# AND the repo variable REEVE_ENABLED == "true". Either off → inert. The
+# decision is code (`reeve armed`), unit-tested over the full 2×2 matrix, not
+# YAML expression soup.
+#
+# Cadence lives twice by necessity (Actions cannot read a file for
+# on.schedule): the cron literal below and the conf's `cadence:` key must stay
+# identical (a test pins them). 05:53 UTC daily — after the groomer (05:41), so
+# the bench-health report reflects the same morning's freshly-tended backlog;
+# :53 avoids the :11/:17/:23/:29/:41/:47 sibling slots.
+
+name: Reeve — bench health
+
+on:
+  schedule:
+    - cron: '53 5 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the report into the job summary but skip the issue upsert
+        type: boolean
+        default: false
+
+# Default deny; the report job asks for exactly what it uses.
+permissions:
+  contents: read
+
+# Serialize against ourselves only; never cancel a mid-upsert run.
+concurrency:
+  group: reeve
+  cancel-in-progress: false
+
+jobs:
+  report:
+    # Key 1 of the two-key arming: the live repo variable. The same expression
+    # pins the run to the default branch so a dispatch against a PR branch can
+    # never run that branch's tool code.
+    if: vars.REEVE_ENABLED == 'true' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    # A deterministic report over committed files is seconds of work; bound a
+    # hung run well under GitHub's 6-hour default.
+    timeout-minutes: 10
+    permissions:
+      # checkout + reading the committed telemetry/previews/confs
+      contents: read
+      # the ONE write this workflow performs: upserting the sticky report issue.
+      # Reeve reads no PRs, so no pull-requests scope is needed.
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install reeve
+        # Stdlib-only tool — the [test] extra (pytest) is deliberately NOT
+        # installed here; CI's reeve-tests job owns the tests.
+        run: pip install -e tools/reeve
+
+      - name: Read policy (key 2 — the committed conf)
+        id: policy
+        env:
+          REEVE_VARIABLE: ${{ vars.REEVE_ENABLED }}
+        run: |
+          enabled="$(reeve config --get enabled --path .github/reeve.conf)"
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          # The tested 2×2 decision; appends armed=true/false to $GITHUB_OUTPUT.
+          reeve armed --variable "$REEVE_VARIABLE" --conf-enabled "$enabled"
+
+      - name: Paused in git
+        if: steps.policy.outputs.armed != 'true'
+        env:
+          # Env indirection rather than inline ${{ }} in run: — the sibling
+          # workflows' template-injection discipline, kept even for values the
+          # tool constrains to true/false.
+          CONF_ENABLED: ${{ steps.policy.outputs.enabled }}
+        run: |
+          echo "::notice::Reeve is armed (REEVE_ENABLED=true) but .github/reeve.conf says 'enabled: ${CONF_ENABLED}' — doing nothing. Flip the conf in a reviewed PR to resume."
+
+      - name: Build the report
+        if: steps.policy.outputs.armed == 'true'
+        id: report
+        run: |
+          # Reeve reads committed files only — no token, no network read.
+          reeve run --root . --conf .github/reeve.conf --out report.md > /dev/null
+          {
+            echo "## Reeve — bench health"
+            echo ""
+            cat report.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry run — skipping the upsert
+        if: steps.policy.outputs.armed == 'true' && inputs.dry_run
+        run: |
+          echo "::notice::Dry run — the report is in the job summary; the sticky report issue was not touched."
+
+      - name: Upsert the sticky report issue
+        id: upsert
+        if: steps.policy.outputs.armed == 'true' && !inputs.dry_run
+        uses: actions/github-script@v8
+        with:
+          script: |
+            // The one write surface of the whole routine. The report issue is
+            // found belt-and-braces: by its label (unspoofable machine state —
+            // write access required to set it) AND by the marker that
+            // tools/reeve renders as the body's first line. Create once, edit
+            // forever after — never a second report issue.
+            const fs = require('fs');
+            const body = fs.readFileSync('report.md', 'utf8');
+            const MARKER = '<!-- reeve-bench-health -->';
+            const LABEL = 'reeve-report';
+            const TITLE = '🩺 Bench health report';
+            if (!body.startsWith(MARKER)) {
+              core.setFailed('report.md does not start with the reeve marker — refusing to upsert');
+              return;
+            }
+            // Ensure the label exists (idempotent, the groomer's pattern).
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner, repo: context.repo.repo,
+                name: LABEL, color: '1d76db',
+                description: 'Reeve\'s sticky bench-health report issue (issue #272)',
+              });
+            } catch (e) {
+              // 422 = already exists (the idempotent path); anything else —
+              // 403, rate limit — is a real failure and must stay loud.
+              if (e.status !== 422) throw e;
+            }
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: LABEL, per_page: 100,
+            });
+            // The issues listing interleaves PRs — never select (and then
+            // overwrite!) a PR, the same defensive filter the siblings apply.
+            const prev = issues.find(i => !i.pull_request && i.body && i.body.startsWith(MARKER));
+            if (prev) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: prev.number, title: TITLE, body,
+              });
+              core.notice(`Updated the bench-health report: #${prev.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: TITLE, body, labels: [LABEL],
+              });
+              core.notice(`Created the bench-health report: #${created.data.number}`);
+            }
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          ARMED: ${{ steps.policy.outputs.armed }}
+          REPORT_OUTCOME: ${{ steps.report.outcome }}
+          UPSERT_OUTCOME: ${{ steps.upsert.outcome }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "### Reeve — run outcome"
+            if [ "$POLICY_OUTCOME" != "success" ]; then
+              echo "- ❌ policy step did not complete (${POLICY_OUTCOME:-skipped}) — the committed conf did not parse; nothing ran."
+            elif [ "$ARMED" != "true" ]; then
+              echo "- ⏸️ armed by the repo variable but paused in git (conf enabled != true)."
+            elif [ "$REPORT_OUTCOME" != "success" ]; then
+              echo "- ❌ report build failed — see the step log; the sticky issue was not touched."
+            elif [ "$DRY_RUN" = "true" ]; then
+              echo "- 🧪 dry run: report rendered above, upsert skipped."
+            elif [ "$UPSERT_OUTCOME" != "success" ]; then
+              echo "- ❌ report rendered but the upsert did not complete (${UPSERT_OUTCOME:-skipped}) — the sticky issue may be stale; see the upsert step log."
+            else
+              echo "- ✅ report rendered and upserted to the sticky report issue."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    # The visible no-op: a skipped gated job is mute, so a sibling with no
+    # permissions and no secrets says why nothing happened.
+    if: vars.REEVE_ENABLED != 'true' || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain why nothing ran
+        env:
+          # Env indirection — never interpolate ref names or variables directly
+          # into run: (the siblings' template-injection rule).
+          ENABLED_VAR: ${{ vars.REEVE_ENABLED }}
+          REF: ${{ github.ref_name }}
+        run: |
+          if [ "$ENABLED_VAR" != "true" ]; then
+            echo "::notice::Reeve is disarmed — set the repo variable REEVE_ENABLED=true (and keep .github/reeve.conf 'enabled: true') to arm it. Two keys must agree; this is the live one."
+          else
+            echo "::notice::Reeve only runs from the default branch — this dispatch targeted '${REF}'."
+          fi

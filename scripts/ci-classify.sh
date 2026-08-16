@@ -9,12 +9,12 @@
 # time the classifier moved. Now the workflow and the local mirror share this
 # implementation — they cannot disagree.
 #
-#   Emits, one `key=value` per line on STDOUT (the 15 outputs ci.yml's
+#   Emits, one `key=value` per line on STDOUT (the 16 outputs ci.yml's
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
-#     ci_gates_tests, model_registry_tests, styles, gate, gate_designs, regen,
-#     regen_designs, docs_standards
+#     ci_gates_tests, model_registry_tests, reeve_tests, styles, gate,
+#     gate_designs, regen, regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
 # Usage:
@@ -44,11 +44,11 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 
 # --- classify: the shared decision -------------------------------------------
 # Reads the changed-file list from stdin (one path per line), reads the working
-# tree for existence/ARCHIVED/style.conf facts, and prints the 13 outputs.
+# tree for existence/ARCHIVED/style.conf facts, and prints the 16 outputs.
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
-  local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false docs_standards=false
+  local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false docs_standards=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -56,7 +56,7 @@ classify() {
     # Default-branch push (or any non-PR trigger): run everything, gate and
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
-    bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; docs_standards=true
+    bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; docs_standards=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -124,6 +124,7 @@ classify() {
         tools/backlog-burn/*|.github/backlog-burn.conf|\
         tools/backlog-groomer/*|.github/backlog-groomer.conf|\
         tools/model-registry/*|.github/models/registry.conf|\
+        tools/reeve/*|.github/reeve.conf|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
           soft_infra=true ;;
@@ -194,6 +195,11 @@ classify() {
         tools/telemetry/*|.github/workflows/ci.yml) tmtests=true ;;
       esac
       case "$f" in
+        # Reeve, the platform PM's ops routine (issue #272): its own tests.
+        tools/reeve/*|.github/reeve.conf|\
+        .github/workflows/ci.yml) rvtests=true ;;
+      esac
+      case "$f" in
         # The smart-ci selector's own unit tests. The registry is data the
         # selector reads, so a registry edit re-runs them too.
         tools/ci-gates/*|.github/ci-gates/*|\
@@ -222,6 +228,7 @@ classify() {
         tools/backlog-burn/*|.github/backlog-burn.conf|\
         tools/backlog-groomer/*|.github/backlog-groomer.conf|\
         tools/model-registry/*|.github/models/registry.conf|\
+        tools/reeve/*|.github/reeve.conf|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
           scad=true ;;
@@ -317,6 +324,7 @@ classify() {
   echo "telemetry_tests=$tmtests"
   echo "ci_gates_tests=$cgtests"
   echo "model_registry_tests=$mrtests"
+  echo "reeve_tests=$rvtests"
   echo "styles=$styles"
   echo "gate=$gate"
   echo "gate_designs=$designs"
@@ -445,6 +453,17 @@ selftest() {
     "model_registry_tests=true" "gate=true" "gate_designs=" "regen=false"
   out="$(run ".github/workflows/auto-review.yml")"
   check "auto-review-runs-drift-guard" "$out" "model_registry_tests=true"
+
+  # 4f. Reeve (issue #272) is soft-infra like its groomer sibling: its own tests
+  #     run and the required contexts RUN with an empty design list — it reads
+  #     committed files and renders markdown, moving no mesh and no pixels.
+  out="$(run "tools/reeve/src/reeve/detectors.py")"
+  check "reeve-only" "$out" \
+    "reeve_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "backlog_groomer_tests=false"
+  out="$(run ".github/reeve.conf")"
+  check "reeve-conf" "$out" \
+    "reeve_tests=true" "gate=true" "gate_designs=" "regen=false"
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must
