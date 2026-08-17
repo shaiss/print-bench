@@ -289,6 +289,17 @@ if ! ./scripts/cadence-sync-check.sh; then
   fail=1
 fi
 
+# vercel-ignore-build selftest (scripts/vercel-ignore-build.sh --selftest): the
+# Vercel "Ignored Build Step" gate decides whether a preview deployment is worth
+# building from the changed-file list alone. The classifier is a pure function
+# of paths, so the selftest is the only thing that proves it still skips a
+# tooling/CI/docs-only diff and still builds on any site input (a design, a lib
+# in the include closure, an architecture doc, an unknown top-level dir).
+echo "-- vercel-ignore-build selftest: scripts/vercel-ignore-build.sh --selftest"
+if ! ./scripts/vercel-ignore-build.sh --selftest; then
+  fail=1
+fi
+
 # Lineage check: derives.conf parses, its parents exist, the declared parent
 # order still matches the entry .scad's include order, and every diamond is
 # explicitly asserted. All static, all milliseconds, so it runs unconditionally
