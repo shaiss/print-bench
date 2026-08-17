@@ -185,11 +185,20 @@ classify() {
         .github/workflows/ci.yml) bgtests=true ;;
       esac
       case "$f" in
-        # The model registry (issue #206). auto-review.yml is here because the
-        # drift-guard test reads it — a change to that workflow's chain must
-        # re-run the guard that pins it to .github/models/registry.conf.
+        # The model registry (issue #206). These workflows are here because the
+        # drift-guard test reads them — a change to a consumer workflow's chain
+        # wiring must re-run the guard that pins it to
+        # .github/models/registry.conf (auto-review.yml originally; the four
+        # #297 walk-step routines — design-run, backlog-burn, chunker, labeler
+        # — and the scout's product-scout.yml since).
         tools/model-registry/*|.github/models/registry.conf|\
-        .github/workflows/auto-review.yml|.github/workflows/ci.yml) mrtests=true ;;
+        .github/workflows/auto-review.yml|\
+        .github/workflows/design-run.yml|\
+        .github/workflows/backlog-burn.yml|\
+        .github/workflows/chunker.yml|\
+        .github/workflows/labeler.yml|\
+        .github/workflows/product-scout.yml|\
+        .github/workflows/ci.yml) mrtests=true ;;
       esac
       case "$f" in
         tools/telemetry/*|.github/workflows/ci.yml) tmtests=true ;;
