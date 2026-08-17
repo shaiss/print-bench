@@ -353,7 +353,11 @@ def test_evaluate_is_pure_and_repeatable():
 
 # ---------------------------------------------------------------------------
 # AC4: the pure core imports nothing network-capable, and the whole package
-# performs no write verbs anywhere — advisory-only, checkable.
+# performs no write verbs anywhere — advisory-only, checkable. The one
+# deliberate exception is narrative.py's model-API POST (#248): it talks to
+# an LLM provider, never to GitHub, and it is carved out *by name* so the
+# guard still fires on any write verb added anywhere else — including a
+# second POST smuggled into github.py.
 # ---------------------------------------------------------------------------
 
 _PKG = pathlib.Path(detectors.__file__).parent
@@ -377,13 +381,44 @@ def test_pure_modules_import_nothing_network_capable(module):
     assert not _imports_of(_PKG / module) & _FORBIDDEN_IMPORTS
 
 
-def test_package_contains_no_write_verbs():
-    # The single I/O module is GET-only: no POST/PATCH/PUT/DELETE anywhere
-    # in the package source (word-bounded, so GITHUB_OUTPUT's "PUT" doesn't
-    # trip it). The workflow's upsert is the sole write surface.
+def test_narrative_module_imports_only_urllib():
+    # narrative.py (#248) is allowed urllib for its one model-API call and
+    # nothing else network-capable — the carve-out is exactly one module
+    # and exactly one library.
+    assert _imports_of(_PKG / "narrative.py") & _FORBIDDEN_IMPORTS == {"urllib"}
+
+
+def test_github_module_stays_get_only():
+    # The GitHub-facing module must never grow the narrative's excuse: its
+    # reads are GETs, and the workflow's upsert is the sole GitHub write.
+    assert not _imports_of(_PKG / "github.py") & _FORBIDDEN_IMPORTS - {"urllib"}
     import re as _re
 
     verb_re = _re.compile(r"\b(POST|PATCH|PUT|DELETE)\b")
-    for path in _PKG.glob("*.py"):
-        match = verb_re.search(path.read_text(encoding="utf-8"))
-        assert match is None, f"{path.name} mentions {match.group(0) if match else ''}"
+    match = verb_re.search((_PKG / "github.py").read_text(encoding="utf-8"))
+    assert match is None, f"github.py mentions {match.group(0) if match else ''}"
+
+
+def test_narratives_post_is_confined_to_the_seam():
+    # The single POST in narrative.py must be the `_post_message` seam and
+    # nothing else: a second write anywhere in the package would mean a
+    # second write surface nobody reviewed. Checked on the AST — string
+    # *values* count (that is where a smuggled verb would live), docstring
+    # prose does not.
+    def _string_consts(fn: ast.FunctionDef) -> list[str]:
+        out: list[str] = []
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                out.append(node.value)
+        return out
+
+    tree = ast.parse((_PKG / "narrative.py").read_text(encoding="utf-8"))
+    fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
+    seam = next(f for f in fns if f.name == "_post_message")
+    seam_verbs = [v for v in _string_consts(seam) if v in ("POST", "PATCH", "PUT", "DELETE")]
+    assert seam_verbs == ["POST"], f"_post_message carries {seam_verbs}"
+    for fn in fns:
+        if fn is seam:
+            continue
+        others = [v for v in _string_consts(fn) if v in ("POST", "PATCH", "PUT", "DELETE")]
+        assert not others, f"narrative.py:{fn.lineno} ({fn.name}) carries {others}"
