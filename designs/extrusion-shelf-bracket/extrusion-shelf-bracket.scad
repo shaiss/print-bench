@@ -9,7 +9,7 @@
 // its ends, two 45-degree gussets brace plate to arm, and the lug fins are
 // constant-cross-section extrusions standing against the plate's inner face
 // — the hammer heads stack as identical layers, so nothing needs supports
-// except the top fin's 3.5 mm head bridge (deliberate, see NOTES.md).
+// except each elevated head's short flange bridge (deliberate, see NOTES.md).
 //
 // Slot ground truth: NopSCADlib E2020 (lib/NopSCADlib/vitamins/extrusions.scad)
 // — mouth 6.0, cavity 12.0 wide / 8.0 deep, lips 2.0. Lugs slide in along
@@ -99,7 +99,7 @@ slot_y = bracket_w - 10;
 // z0..z0+lug_len along the slot axis. Constant cross-section extruded up, so
 // every layer is the full T outline: neck through the mouth (buried 1 mm
 // into the plate), head hooking behind the lips.
-module lug_fin(z0) {
+module lug_head(z0) {
     hx0 = -(slot_lip_t + lug_engage);   // head outboard face (under the lip)
     hx1 = -slot_lip_t;                  // head inboard face (lip inner edge)
     ny1 = 1;                            // neck buried into the plate
@@ -117,18 +117,25 @@ module lug_fin(z0) {
             ]);
 }
 
-// 45-degree lead-in under an elevated fin's head (the thread_neck move):
-// without it the head's first layer cantilevers off the plate face; with it
-// the head grows out of the plate at 45 degrees, self-supporting. The ramp
-// is widest at the fin's bottom (the full head span) and tapers down to the
-// plate face, overlapping 0.5 mm up into the fin so the union is solid.
-module fin_ramp(z0) {
-    h = slot_lip_t + lug_engage;
-    hx0 = -(slot_lip_t + lug_engage);
-    translate([0, slot_y + lug_head_w / 2, 0])
-        rotate([90, 0, 0])
-            linear_extrude(lug_head_w)
-                polygon([[0.5, z0 - h], [0.5, z0 + 0.5], [hx0, z0 + 0.5]]);
+// Neck-width stem from the bed up to an elevated head. An elevated fin
+// cannot cantilever off the plate face, and the first design bridged the
+// gap with a separate 45-degree ramp wedge — which Manifold (CI's render
+// backend) unioned into zero-area triangles along the partial-overlap
+// coincident faces, failing printcheck as non-manifold (CGAL silently
+// cleaned the same seam, so the local gate never saw it). The stem solves
+// it structurally: one more constant-cross-section extrusion, subset-
+// coincident with the head's bottom face (a clean union), printing
+// support-free. The head's 2.35 mm flange underside at z0 remains a short
+// 10 mm bridge — same warning class every T-slot head has.
+module neck_stem(z0) {
+    ny1 = 1;                            // neck buried into the plate
+    linear_extrude(z0)
+        polygon([
+            [-slot_lip_t, slot_y - lug_neck_w / 2],
+            [ny1, slot_y - lug_neck_w / 2],
+            [ny1, slot_y + lug_neck_w / 2],
+            [-slot_lip_t, slot_y + lug_neck_w / 2],
+        ]);
 }
 
 // 45-degree gusset: triangle in the XZ plane (vertical face against the
@@ -156,14 +163,14 @@ module bracket() {
     // two gussets along the sides
     for (y = [0, bracket_w - gusset_t])
         gusset(y);
-    // lug fins: the first starts on the (coupon/plate) bed strip, the second
-    // grows out of the plate at 45 degrees (fin_ramp), so neither cantilevers
-    lug_fin(lug_z0[0]);
-    fin_ramp(lug_z0[1]);
-    lug_fin(lug_z0[1]);
+    // lug heads: the first starts on the bed, the second stands on a
+    // neck-width stem from the bed — both constant cross-sections
+    lug_head(lug_z0[0]);
+    neck_stem(lug_z0[1]);
+    lug_head(lug_z0[1]);
 }
 
-// "Print this first" coupon: the two production lug fins on a narrow strip
+// "Print this first" coupon: the two production lug heads on a narrow strip
 // of the production plate, in the production orientation — slide it into
 // your real extrusion rail and tune slot_fit_tol. See NOTES.md.
 module coupon() {
@@ -171,9 +178,9 @@ module coupon() {
     translate([0, slot_y - w / 2, 0])
         rounded_box([t, w, lug_len * 2 + 10 + 2 * t], r = r_t,
                     bottom_chamfer = bottom_chamfer);
-    lug_fin(lug_z0[0]);
-    fin_ramp(lug_z0[1]);
-    lug_fin(lug_z0[1]);
+    lug_head(lug_z0[0]);
+    neck_stem(lug_z0[1]);
+    lug_head(lug_z0[1]);
 }
 
 module main() {
