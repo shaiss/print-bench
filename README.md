@@ -228,6 +228,13 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     deny backstop (`.claude/scout-settings.json`), which additionally denies
     BOTH `chunk-helper.sh` and `label-helper.sh` and must never deny
     `scout-helper.sh`
+  - `cadence-sync-check.sh` — cadence-parity check for the scheduled autonomy
+    routines (issue #276): the `cadence:` key in `.github/<routine>.conf` must
+    resolve to the same schedule as the `cron:` literal in the matching
+    workflow (Actions can't read a file for `on.schedule`, so each cadence
+    lives in both places). Presets are resolved through backlog-burn's own
+    parser, and the guarantee is parity, not correctness — it does not check a
+    cron against the schedule the prose comments describe
   - `gate.sh` — render printable parts and gate the STLs with printcheck;
     `--slice` adds a PrusaSlicer test-slice (this is what CI enforces)
   - `gate-summary.py` — turns a gate log into the CI results table
@@ -249,9 +256,10 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   - `lifestyle-shot.sh` — tier-2 AI lifestyle shots from `lifestyle.conf`,
     and tier-1.5 AI product stills (the bare part) from `product-still.conf`
     via `--kind product-still` — each image-to-image seeded from a committed
-    render through the Z.AI GLM-Image API: a product still seeds only from a
-    tier-1 render, a lifestyle scene from a tier-1 render or a product still
-    (cosmetic, geometry-approximate, disclosed)
+    render through the Z.AI GLM-Image API (though on this provider the seed
+    does not constrain the geometry to the real mesh — issue #302): a product
+    still seeds only from a tier-1 render, a lifestyle scene from a tier-1
+    render or a product still (cosmetic, geometry-approximate, disclosed)
   - `shot-spec.sh` — authors `shots.conf`/`lifestyle.conf` from a PM's
     art-direction brief (named views/colors, freeze and disclosure enforced);
     the mechanics behind the `/art-direction` skill
@@ -324,7 +332,9 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   the scheduled groomer (`.github/workflows/backlog-groomer.yml`): seven
   detectors over the open-issue queue (stale, armed-but-stuck, unsized,
   resolved-but-parked decisions, unchunked oversized issues, duplicate
-  candidates, completed epics), advisory-only into one sticky report issue — see its
+  candidates, completed epics), advisory-only into one sticky report issue,
+  plus an optional fast-model narrative layer that only phrases the
+  deterministic findings (default off) — see its
   [README](tools/backlog-groomer/README.md)
 - `tools/reeve/` — the deterministic **bench-health** reporter behind Reeve,
   the platform PM (`.github/workflows/reeve.yml`, issue #272): six detectors

@@ -48,8 +48,9 @@ plain language. The `/art-direction` skill turns this into the shot manifests
 here, not manifest syntax. The tables are separate because the page has a
 **tiered image pipeline** and each tier's freedom differs — but they form one
 **seed chain**, each AI hop image-to-image (or -video) from the render before it,
-so the part's shape stays pinned to the real mesh even as the scene turns
-cosmetic: **tier 1** the geometry-true studio render (`shots.conf`), its levers
+though on the current provider the seed does not constrain the part's shape to
+the real mesh (issue #302), so every AI hop is cosmetic and geometry-approximate:
+**tier 1** the geometry-true studio render (`shots.conf`), its levers
 pose, color, finish and framing; **tier 1.5** an AI *product still* of the bare
 part (`product-still.conf`), photoreal and in isolation, seeded from a tier-1
 render; **tier 2** the AI *lifestyle scene* (`lifestyle.conf`) that stages a
@@ -79,9 +80,10 @@ that seeds it. Every still ships the "geometry is approximate" disclosure.
 |---|---|---|
 
 **Lifestyle scenes — tier 2 (AI, cosmetic, disclosed).** Optional. Describe the
-*setting*, not fake detail; the scene is AI but seeded image-to-image from a real
-render, so the shape stays pinned — name the tier-1 or tier-1.5 render each
-scene seeds from.
+*setting*, not fake detail; the scene is AI, seeded image-to-image from a real
+render, but on the current provider the seed does not constrain the shape to the
+real mesh (issue #302) — name the tier-1 or tier-1.5 render each scene seeds
+from.
 
 | Shot | Seed | Scene |
 |---|---|---|

@@ -155,6 +155,32 @@ def test_get_cadence(tmp_path):
     assert cfg.get("cadence", path) == "weekly"
 
 
+def test_resolve_cadence_preset():
+    # resolve_cadence is the public face of the preset table — what
+    # scripts/cadence-sync-check.sh resolves through, so the checker reads
+    # this mapping instead of carrying a hand-copied second one (which would
+    # drift exactly the way a conf drifts from its workflow).
+    assert cfg.resolve_cadence("hourly") == "17 * * * *"
+    assert cfg.resolve_cadence("daily") == "17 6 * * *"
+
+
+def test_resolve_cadence_raw_cron_passthrough():
+    # A raw cron resolves to itself (the workflow literal is the raw cron).
+    assert cfg.resolve_cadence("23 * * * *") == "23 * * * *"
+
+
+def test_resolve_cadence_strips_surrounding_whitespace():
+    # Robust against a conf line that carries stray trailing whitespace —
+    # the shell-facing path this was added for reads the value off the line.
+    assert cfg.resolve_cadence("  hourly  ") == "17 * * * *"
+
+
+def test_resolve_cadence_bad_value_fails_loudly():
+    # A typo'd preset must fail here too, not silently resolve to itself.
+    with pytest.raises(ValueError, match="'cadence' must be a preset"):
+        cfg.resolve_cadence("hourlyy")
+
+
 # ---------------------------------------------------------------------------
 # set_value — round-trip write
 # ---------------------------------------------------------------------------

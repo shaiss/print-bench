@@ -10,6 +10,7 @@ import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { declaredParents, parseDerivesConf, resolveLineage } from "./lineage.mjs";
+import { aiLifestyleEnabled, isAiLifestyle } from "./media.mjs";
 
 export const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"]);
 
@@ -133,6 +134,12 @@ function lines(path) {
 export function readDesigns(repoRoot) {
   const out = [];
   const declared = new Map();
+  // AI lifestyle imagery feature flag (issue #302). When off (the committed
+  // default), every AI-styled preview is dropped at this single source, so it
+  // reaches no downstream surface — the media stage, the gallery hero/thumb/
+  // count, and the copied asset set all read from `previews`. Geometry-true
+  // tier-1 previews are untouched.
+  const aiOn = aiLifestyleEnabled(repoRoot);
   for (const name of dirs(join(repoRoot, "designs"))) {
     const dir = join(repoRoot, "designs", name);
     const entry = join(dir, `${name}.scad`);
@@ -160,11 +167,13 @@ export function readDesigns(repoRoot) {
     );
 
     const previewsDir = join(dir, "previews");
-    const previews = existsSync(previewsDir)
-      ? readdirSync(previewsDir)
-          .filter((f) => IMAGE_EXT.has(f.slice(f.lastIndexOf(".")).toLowerCase()))
-          .sort()
-      : [];
+    const previews = (
+      existsSync(previewsDir)
+        ? readdirSync(previewsDir)
+            .filter((f) => IMAGE_EXT.has(f.slice(f.lastIndexOf(".")).toLowerCase()))
+            .sort()
+        : []
+    ).filter((f) => aiOn || !isAiLifestyle(f));
 
     const scads = readdirSync(dir)
       .filter((f) => f.endsWith(".scad"))
