@@ -30,6 +30,8 @@ def test_defaults_are_the_documented_ones(tmp_path):
     cfg = config.load(write(tmp_path, "# nothing set\n"))
     assert cfg.enabled is False  # absent enabled never reads as "on"
     assert cfg.cadence == ""
+    assert cfg.provider == ""
+    assert cfg.narrative is False  # the narrative layer ships OFF (#248)
     assert cfg.staleness_days == 14
     assert cfg.armed_stuck_days == 7
     assert cfg.oversized_stuck_days == 7
@@ -41,6 +43,8 @@ def test_full_file_parses(tmp_path):
     cfg = config.load(write(tmp_path, (
         "enabled: true\n"
         "cadence: 41 5 * * *\n"
+        "narrative: true\n"
+        "provider: zai\n"
         "staleness_days: 21\n"
         "armed_stuck_days: 3\n"
         "oversized_stuck_days: 5\n"
@@ -49,6 +53,8 @@ def test_full_file_parses(tmp_path):
     )))
     assert cfg.enabled is True
     assert cfg.cadence == "41 5 * * *"
+    assert cfg.narrative is True
+    assert cfg.provider == "zai"
     assert cfg.staleness_days == 21
     assert cfg.dup_threshold == 0.8
     assert cfg.max_dup_pairs == 5
@@ -76,7 +82,13 @@ def test_get_renders_numbers_bare(tmp_path):
 
 def test_get_unknown_key_raises(tmp_path):
     with pytest.raises(KeyError, match="unknown config key"):
-        config.get("provider", path=write(tmp_path, "enabled: true\n"))
+        config.get("narrative_model", path=write(tmp_path, "enabled: true\n"))
+
+
+def test_get_renders_narrative_keys(tmp_path):
+    path = write(tmp_path, "narrative: true\nprovider: anthropic\n")
+    assert config.get("narrative", path=path) == "true"
+    assert config.get("provider", path=path) == "anthropic"
 
 
 # ---------------------------------------------------------------------------
@@ -89,8 +101,31 @@ def test_colonless_line_raises(tmp_path):
 
 
 def test_unknown_key_raises(tmp_path):
-    with pytest.raises(ValueError, match="unknown key 'provider'"):
-        config.load(write(tmp_path, "provider: zai\n"))
+    with pytest.raises(ValueError, match="unknown key 'model'"):
+        config.load(write(tmp_path, "model: glm-5.2\n"))
+
+
+def test_bad_provider_raises(tmp_path):
+    with pytest.raises(ValueError, match="'provider' must be one of"):
+        config.load(write(tmp_path, "provider: openai\n"))
+
+
+def test_bad_narrative_bool_raises(tmp_path):
+    with pytest.raises(ValueError, match="'narrative' must be 'true' or 'false'"):
+        config.load(write(tmp_path, "narrative: maybe\nprovider: zai\n"))
+
+
+def test_narrative_true_without_provider_raises(tmp_path):
+    # The layer needs to know whose key to use; that must be caught at
+    # parse time, not mid-workflow.
+    with pytest.raises(ValueError, match="requires a 'provider:' key"):
+        config.load(write(tmp_path, "enabled: true\nnarrative: true\n"))
+
+
+def test_narrative_false_without_provider_is_fine(tmp_path):
+    # Off is off — no provider needed when the layer never runs.
+    cfg = config.load(write(tmp_path, "enabled: true\nnarrative: false\n"))
+    assert cfg.narrative is False and cfg.provider == ""
 
 
 def test_duplicate_key_raises(tmp_path):
