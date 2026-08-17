@@ -88,7 +88,9 @@ is the two production lug fins on a narrow strip of the production plate, in
 the production orientation. Print it (~20 min) and slide it into your real
 extrusion rail **before** committing to a bracket:
 
-1. Print the coupon in PETG, 0.2 mm layers, as oriented.
+1. Print the coupon in PETG, 0.2 mm layers, as oriented, **with a 3–4 mm
+   brim** (PrusaSlicer flags it for stability: 9.5 × 20 mm footprint,
+   42 mm tall — inherent to testing the fit in the production orientation).
 2. Slide it into the rail's side slot from an open end.
    - **Slides with light drag, no wobble** → print the bracket with defaults.
    - **Won't go in** → raise `slot_fit_tol` in 0.05 steps (0.15 → 0.20 → 0.25)

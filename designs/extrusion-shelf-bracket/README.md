@@ -29,6 +29,9 @@ print four, slide them on, drop a shelf board in.
 - **Orientation:** as modeled — arm flat on the bed, back plate and stop lip
   standing. Do not rotate; the lug fins print as identical stacked layers,
   which is what makes the hammer heads come out clean.
+- **Brim:** 3–4 mm on the **coupon** only — it is deliberately tall and
+  narrow (9.5 × 20 mm footprint, 42 mm) because it must print in the
+  production orientation to test the real fit. The bracket needs no brim.
 
 ## Parameters
 
