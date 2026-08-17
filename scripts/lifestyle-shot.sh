@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
+# NOTE (issue #302): the AI lifestyle tier is DISABLED by default behind the
+# committed .github/ai-lifestyle.conf (enabled: false). The generation workflows
+# (lifestyle-shot.yml / product-still.yml) skip while it is off; this script runs
+# only when a human flips the flag or dispatches it deliberately. It is kept for
+# that day, and for --mock testing.
+#
 # Generate an AI-restyled image for a design via the Z.AI GLM-Image API in
-# IMAGE-TO-IMAGE mode — seeded from a committed, geometry-true render — size it
-# to the product-shot budget, and embed it in the design's README with the
-# canonical disclosure readme-gate requirement 9 demands (an "AI-styled scene"
-# alt label and a "geometry is approximate" caption). The image stays COSMETIC
-# and geometrically approximate — the model repaints scene, lighting and
-# materials — but because the request carries a real render of the mesh as its
-# seed (image_urls), the shape is PINNED to the true geometry instead of
-# hallucinated the way blind text-to-image did (which is why a 4x4 grid used to
-# come back as 5x5). See .claude/skills/product-shots/SKILL.md and issue #66.
+# image-to-image mode — the request carries a committed, geometry-true render as
+# its seed (image_urls) — size it to the product-shot budget, and embed it in the
+# design's README with the canonical disclosure readme-gate requirement 9 demands
+# (an "AI-styled scene" alt label and a "geometry is approximate" caption). The
+# image is COSMETIC and geometrically approximate: the model repaints scene,
+# lighting and materials, and — the reason the tier is disabled — GLM-Image does
+# NOT treat the seed as a shape constraint (it follows the prompt), so the output
+# is not pinned to the mesh however true the seed is. The disclosure, not the
+# seed, is what keeps it honest; the geometry-true tier-1 render and the STL stay
+# the source of truth for the real shape. See
+# .claude/skills/product-shots/SKILL.md and issues #66 and #302.
 #
 # One hardened generator, two artifact KINDs (see --kind):
 #   lifestyle      (default) tier-2 SCENE — the part staged in a real-world
@@ -259,13 +267,15 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     exit 1
   fi
   # Seed integrity, bounded per kind. A lifestyle SCENE may seed from a
-  # geometry-true tier-1 render OR a tier-1.5 product still (both pin the shape),
-  # but never another lifestyle-* scene — seeding a repaint from a repaint drifts
-  # with nothing left anchoring it. A PRODUCT STILL is the geometry-pinning hop,
-  # so it may seed ONLY from a geometry-true render — never any AI image
-  # (neither a lifestyle-* scene nor another product-still-*). The break of the
-  # old "a seed is always geometry-true" invariant is deliberate and made
-  # explicit here rather than silently.
+  # geometry-true tier-1 render OR a tier-1.5 product still, but never another
+  # lifestyle-* scene — seeding a repaint from a repaint drifts even further from
+  # the real shape. A PRODUCT STILL may seed ONLY from a geometry-true render —
+  # never any AI image (neither a lifestyle-* scene nor another product-still-*).
+  # These rules keep the seed as close to the true mesh as the pipeline allows;
+  # they do NOT make the output faithful — GLM-Image follows the prompt, not the
+  # seed's geometry (issue #302), which is why the whole tier ships disabled. The
+  # break of the old "a seed is always geometry-true" invariant is deliberate and
+  # made explicit here rather than silently.
   if [[ "$seed" == lifestyle-* ]]; then
     echo "invalid seed '${seed}' in ${conf} — a ${kind_label} must not seed from a lifestyle-* scene (an AI repaint); seed from a geometry-true tier-1 render (or, for a lifestyle scene, a product-still-* render)" >&2
     exit 1
@@ -297,11 +307,12 @@ while IFS= read -r line || [[ -n "$line" ]]; do
       exit 1
     fi
     # Build the request body in a temp file. It carries the base64-encoded seed
-    # render (the geometry-true tier-1 image) in image_urls, which is what
-    # switches glm-image into image-to-image and pins the output to the real
-    # shape — so the body is far too large to pass as a shell argument (ARG_MAX).
-    # Python reads the seed straight off disk and writes the JSON; nothing large
-    # ever transits argv or a shell variable.
+    # render (the geometry-true tier-1 image) in image_urls, which switches
+    # glm-image into image-to-image mode — though the model follows the prompt
+    # rather than constraining shape to the seed (issue #302). The base64 payload
+    # is far too large to pass as a shell argument (ARG_MAX). Python reads the
+    # seed straight off disk and writes the JSON; nothing large ever transits
+    # argv or a shell variable.
     ZAI_MODEL="$ZAI_MODEL" PROMPT="$prompt" ZAI_SIZE="$ZAI_SIZE" SEED_PATH="$seed_path" \
       python3 - "$tmp/req.json" <<'PY'
 import base64, json, os, sys

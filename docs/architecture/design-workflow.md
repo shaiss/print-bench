@@ -143,9 +143,10 @@ because approving a shape is the human's merge decision.
   it seeds); it is shown on the page and gated like any preview. Tier-2 is
   AI-generated lifestyle imagery/motion — a world around the part, or its
   movement — each AI hop image-to-image/-video seeded from the render before it
-  (raytrace → product still → lifestyle scene → motion clip). Every AI tier is
-  cosmetic and geometry-approximate, gated for presence *and* an honest
-  disclosure label, never for pixels.
+  (raytrace → product still → lifestyle scene → motion clip), though on the
+  current provider the seed does not constrain the geometry to the real mesh
+  (issue #302). Every AI tier is cosmetic and geometry-approximate, gated for
+  presence *and* an honest disclosure label, never for pixels.
 - **Archiving** — an `ARCHIVED` marker freezes a design at v0.1 and retires it
   from every full-catalog CI run, so it stops spending render/slice cycles. It's
   still gated by a PR that edits its own files, and still appears on the site.

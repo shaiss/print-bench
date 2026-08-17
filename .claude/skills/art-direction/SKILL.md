@@ -32,8 +32,9 @@ execute it. If there is no PM.md at all, that is `/pm`'s job first.
 
 This is the one thing to hold onto, because it decides which verb you reach for.
 There are four rungs, and they form **one seed chain** — each AI rung is
-image-to-image (or -video) from the render before it, so the part's shape stays
-pinned to the real mesh even as the scene turns cosmetic:
+image-to-image (or -video) from the render before it, though on the current
+provider the seed does not constrain the part's shape to the real mesh (issue
+#302), so every AI rung is cosmetic and geometry-approximate:
 
 - **Tier 1 — the studio render (`shots.conf`).** Geometry-true, deterministic,
   CI-rendered. The scene is **fixed** (white cyclorama, three-point light,
@@ -47,14 +48,17 @@ pinned to the real mesh even as the scene turns cosmetic:
   the *angle of a still is which tier-1 shot seeds it*. Want a new angle? Add a
   tier-1 `shots.conf` row for that view, then a still that seeds it. Reach for it
   to sell finish and form in isolation — a cleaner, more photographic bare-part
-  image than the studio raytrace, still honest about shape because it begins from
-  the real mesh. Disclosed as approximate (the model repaints).
+  image than the studio raytrace. On the current provider the seed does not
+  constrain the shape to the real mesh (issue #302), so it is disclosed as
+  approximate (the model repaints) and the studio raytrace stays the source of
+  truth for the real shape.
 - **Tier 2 — the AI lifestyle scene (`lifestyle.conf`).** This is where
   **scenery and staging** live: a workbench, a dinner table, a drybox. It is
   cosmetic and **image-to-image** — seeded from a tier-1 render *or a tier-1.5
-  product still* (`seed=product-still-<x>`), so the geometry is a faithful
-  restyle rather than an invention — which is exactly why it still ships the
-  "geometry is approximate" disclosure and is never the hero or the only image.
+  product still* (`seed=product-still-<x>`); but on the current provider the
+  seed does not constrain the geometry to the real mesh (issue #302), so the
+  geometry is approximate — which is exactly why it ships the "geometry is
+  approximate" disclosure and is never the hero or the only image.
 - **Tier-2 motion clip (`motion.conf`).** The moving sibling of the lifestyle
   scene: image-to-video seeded from a tier-1 shot or a lifestyle still (an
   explicit `seed=<ref>` field). Doubly cosmetic — geometry approximate *and* the
