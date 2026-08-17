@@ -333,7 +333,7 @@ EOF
     >/dev/null || st_fail "a success outcome did not no-op cleanly"
   grep -qx 'withdrawn=false' "$tmp/out" || st_fail "the success no-op did not emit withdrawn=false"
   grep -qx 'escalated=false' "$tmp/out" || st_fail "the success no-op did not emit escalated=false"
-  GITHUB_OUTPUT= GITHUB_STEP_SUMMARY= "$SELF" \
+  GITHUB_OUTPUT='' GITHUB_STEP_SUMMARY='' "$SELF" \
     --repo o/r --issue 1 --agent-outcome skipped --run-url u --routine backlog-burn \
     >/dev/null || st_fail "a skipped outcome did not no-op cleanly"
   # Negative control: a dead outcome must NOT no-op — with no GH_TOKEN it must
