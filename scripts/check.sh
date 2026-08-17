@@ -362,6 +362,21 @@ if ! ./scripts/ci-classify.sh --selftest; then
   fail=1
 fi
 
+# routine-lock-cleanup.sh withdraws the 🚢 SHIP-LOCK a dead scheduled
+# design-run/backlog-burn firing leaves behind (issue #312) — the orphaned
+# claim otherwise excludes the issue from every later selection, so ghost
+# locks read as green no-ops. Its --selftest pins the selector-compatibility
+# contract against select.py (first-non-blank-line classification, the
+# closing-keyword #9-vs-#95 boundary, the branch near-miss, the escalation
+# threshold, the withdrawal line the selector must read as released), each
+# with a negative control, fully offline — nothing else would notice if the
+# withdrawal wording drifted off what the selector reads. Fast (no network),
+# so it runs here with the other suites.
+echo "-- routine-lock-cleanup selftest: scripts/routine-lock-cleanup.sh --selftest"
+if ! ./scripts/routine-lock-cleanup.sh --selftest; then
+  fail=1
+fi
+
 # release-bundle.sh is the build half of the versioned-download UX (issue
 # #102): its --selftest proves the shell glue — the manifest names every part,
 # each recorded SHA-256 recomputes over the bundled STL, the README's print

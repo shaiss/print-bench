@@ -95,10 +95,14 @@ jobs:
       vars.BACKLOG_BURN_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # A hung /ship-issue (model stall, tool loop) must not hold a runner for the
-    # 6-hour default (GitHub's) while holding a provider-key secret, unwatched,
-    # every hour.
-    timeout-minutes: 50
+    # Job budget 120 = ship step 110 + headroom for the lock cleanup below.
+    # A job-level kill cancels every remaining step, so a run that died after
+    # posting its SHIP-LOCK left the claim standing and starved the issue
+    # (issue #312) — the ship STEP timeout dies first on purpose, keeping the
+    # cleanup reachable while a hung /ship-issue (model stall, tool loop)
+    # still never holds a runner and a provider-key secret for the 6-hour
+    # default, unwatched, every hour.
+    timeout-minutes: 120
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
@@ -196,6 +200,12 @@ jobs:
           && steps.policy.outputs.provider == 'anthropic'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
+        # The step must die inside a live job (step timeout < job timeout) so
+        # the lock cleanup below runs as a normal step, not in a cancellation
+        # grace window; continue-on-error keeps the job alive for it (the
+        # "Turn a dead agentic run red" step restores the failure).
+        timeout-minutes: 110
+        continue-on-error: true
         # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
         # right fit for an unattended bot — no OAuth token / subscription seat.
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
@@ -216,6 +226,11 @@ jobs:
           && steps.policy.outputs.provider == 'zai'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
+        # Same as the Anthropic step: die inside a live job so the lock
+        # cleanup below runs as a normal step; continue-on-error keeps the
+        # job alive for it (the red-on-death step restores the failure).
+        timeout-minutes: 110
+        continue-on-error: true
         # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
         # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
         # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the
@@ -235,16 +250,46 @@ jobs:
           claude_args: --permission-mode bypassPermissions --model glm-5.2 --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
+      - name: Withdraw a dead run's SHIP-LOCK
+        id: lock_cleanup
+        # The agent posts the SHIP-LOCK claim on the selected issue but cannot
+        # withdraw it when killed — the orphaned claim then excludes the issue
+        # from every later selection (issue #312). The script mirrors the
+        # selector's semantics and leaves a claim alone when a branch or
+        # closing PR corroborates it. Ambient github.token ON PURPOSE, not the
+        # GH_TOKEN PAT: GITHUB_TOKEN-authored comments never trigger
+        # issue_comment workflows (decide.yml, backlog-burn-config.yml,
+        # ci-gate-approve.yml) — a PAT here would.
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.select.outputs.issue }}
+          # .outcome, never .conclusion — continue-on-error rewrites a failed
+          # step's conclusion to success; outcome keeps the real result.
+          AGENT_OUTCOME: ${{ steps.policy.outputs.provider == 'zai' && steps.ship_zai.outcome || steps.ship_anthropic.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+            --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine backlog-burn
+
       - name: Note a checkless draft PR (no CI-triggering PAT)
         # A /ship-issue draft PR opened with the default GITHUB_TOKEN does not
         # auto-run CI, so a reviewer can't see whether the work passes. Fires
-        # only when we actually shipped and GH_TOKEN was not set.
+        # only when we actually shipped and GH_TOKEN was not set — the ship
+        # outcome guard matters now that continue-on-error keeps the job alive
+        # past a dead ship step, which opened no PR to note.
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && env.HAS_GH_TOKEN != 'true'
+          && (steps.policy.outputs.provider == 'zai' && steps.ship_zai.outcome || steps.ship_anthropic.outcome) == 'success'
         run: |
           echo "::notice::the draft PR for #${{ steps.select.outputs.issue }} was opened with GITHUB_TOKEN, so CI will not auto-run on it — push any commit, or set the GH_TOKEN repo secret (a PAT with contents + pull-requests + issues write) so future ships trigger checks automatically."
 
@@ -290,6 +335,7 @@ jobs:
           # Only the step matching the configured provider runs; the other is
           # 'skipped'. Report the one that actually ran.
           SHIP: ${{ steps.policy.outputs.provider == 'zai' && steps.ship_zai.outcome || steps.ship_anthropic.outcome }}
+          LOCK_WITHDRAWN: ${{ steps.lock_cleanup.outputs.withdrawn }}
           # $GITHUB_STEP_SUMMARY does not auto-link a bare #N, so build a real
           # link to the issue holding the authoritative verdict.
           SERVER: ${{ github.server_url }}
@@ -309,10 +355,33 @@ jobs:
               echo "- selected: [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE})"
               echo "- provider: ${PROVIDER}"
               echo "- ship step: ${SHIP:-skipped} (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /ship-issue verdict and any draft PR)"
+              if [ "${LOCK_WITHDRAWN}" = "true" ]; then
+                echo "- lock cleanup: withdrew the dead run's SHIP-LOCK on #${ISSUE} so the next firing can re-select it"
+              fi
             fi
             echo ""
             echo "**Steer this routine** — comment \`/backlog-burn set <key> <value>\` (\`enabled\` · \`label\` · \`provider\` · \`cadence\`) on any issue or PR to change policy without a PR (write access required); flip the \`BACKLOG_BURN_ENABLED\` repo variable to arm or disarm it."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Turn a dead agentic run red
+        # continue-on-error on the ship steps keeps the cleanup above
+        # reachable, but alone it would leave a dead run green — and
+        # green/cancelled starvation looking like health is exactly the
+        # livelock's disguise (issue #312). Restore the failure last, after
+        # the cleanup and the record have run.
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.policy.outputs.provider == 'zai' && steps.ship_zai.outcome || steps.ship_anthropic.outcome) != 'success'
+        env:
+          ISSUE: ${{ steps.select.outputs.issue }}
+          AGENT_OUTCOME: ${{ steps.policy.outputs.provider == 'zai' && steps.ship_zai.outcome || steps.ship_anthropic.outcome }}
+        run: |
+          echo "::error::the /ship-issue agent step for #${ISSUE} did not succeed (outcome: ${AGENT_OUTCOME}) — its SHIP-LOCK cleanup ran above; failing the job so the death is visible"
+          exit 1
 
   disarmed-notice:
     name: Explain a disarmed run
