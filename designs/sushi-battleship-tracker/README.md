@@ -18,6 +18,10 @@ lose track of called shots — which is everyone eating dinner off it.
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
+![Shutter mechanism in motion: door D1 slides to its stop and lifts out](previews/shutter-slide.gif)
+
+![Turntable: the full board, D1 slid open, marker seats on the door top faces](previews/turntable.gif)
+
 ![AI-styled scene: sushi-battleship-tracker staged in a real-world setting](previews/lifestyle-product-hero.png)
 
 *AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render above and the STL for the true shape.*
