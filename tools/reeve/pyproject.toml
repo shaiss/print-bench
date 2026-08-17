@@ -11,9 +11,9 @@ requires-python = ">=3.10"
 # Stdlib-only on purpose: the scheduled workflow runs this on the system
 # Python right after checkout, and a third-party import would force a pip
 # resolve in front of the step that reads the bench's pulse — the same rule
-# tools/lineage, tools/telemetry and tools/backlog-groomer keep. Reeve also
-# reads only committed files (telemetry + previews + confs), so it needs no
-# network stack at all.
+# tools/lineage, tools/telemetry and tools/backlog-groomer keep. Reeve's
+# primary pulse is committed files (telemetry + previews + confs); the opt-in
+# run-health read (github.py, issue #313) uses stdlib urllib.
 dependencies = []
 
 [project.optional-dependencies]

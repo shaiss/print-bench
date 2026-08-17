@@ -107,7 +107,9 @@ Not a one-time definition of done — the health invariants a stranger can check
       design that will.
 - [ ] The ops pulse is read, not just emitted: no regression Reeve detects (gate
       failure, score drop, budget headroom, wall-time, a design newly frozen out
-      of gating, report drift) sits unremarked — Reeve's report is current. (A
+      of gating, report drift, a scheduled routine whose recent runs all died, a
+      leaked SHIP-LOCK — an active claim with no branch or PR behind it) sits
+      unremarked — Reeve's report is current. (A
       broader coverage-drop detector — a part silently un-gated *without* being
       archived — is a backlog enhancement, not a v1 claim.)
 
@@ -141,3 +143,4 @@ Append-only. A later session must be able to tell a considered choice from an ac
 | 2026-08-16 | Reeve completes the PM split as the *operational* third leg beside Remy (generative) and Vera (enforcement) | Issue #229 split the PM role two ways; neither owns the bench's own health |
 | 2026-08-16 | Ship v1 as a deterministic bench-health reporter in the backlog-groomer mold; stage the LLM "hands" behind the labeler's deny-backstop | The safe, repo-native path: no agent + no secret + one trusted write needs no backstop; hands do |
 | 2026-08-16 | Lead the non-negotiables with N6 (tooling must not outgrow its designs) as Reeve's core instinct | It is the failure mode no single PR looks guilty of, and the one the ops data shows first |
+| 2026-08-17 | Tie the SHIP-LOCK lifecycle to the run lifecycle — step-level agent timeouts + cleanup withdrawal + red-on-death in design-run/backlog-burn (run budgets 240/120 min) — and give Reeve GET-only run-health detectors (routine-dead, lock-leak) via a groomer-mirrored github.py | The design-run livelock: timeout-killed runs left ghost locks, and the starved routine rendered green (#312/#313) |

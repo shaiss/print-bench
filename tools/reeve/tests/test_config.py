@@ -30,6 +30,8 @@ def test_defaults_are_fail_safe():
     assert cfg.score_floor == 80.0
     assert cfg.walltime_ratio == 1.5
     assert cfg.walltime_min_seconds == 30
+    assert cfg.routine_dead_runs == 3
+    assert cfg.lock_leak_hours == 2.0
 
 
 def test_full_file_parses(tmp_path):
@@ -42,6 +44,8 @@ def test_full_file_parses(tmp_path):
         score_floor: 75
         walltime_ratio: 2.0
         walltime_min_seconds: 60
+        routine_dead_runs: 5
+        lock_leak_hours: 4.5
     """.replace("        ", "")))
     assert cfg.enabled is True
     assert cfg.cadence == "53 5 * * *"
@@ -50,6 +54,8 @@ def test_full_file_parses(tmp_path):
     assert cfg.score_floor == 75.0
     assert cfg.walltime_ratio == 2.0
     assert cfg.walltime_min_seconds == 60
+    assert cfg.routine_dead_runs == 5
+    assert cfg.lock_leak_hours == 4.5
 
 
 def test_comments_and_blank_lines_ignored(tmp_path):
@@ -129,6 +135,33 @@ def test_bad_ratio_raises(tmp_path, bad):
 def test_bad_cadence_raises(tmp_path):
     with pytest.raises(ValueError, match="'cadence' must be"):
         config.load(_write(tmp_path, "cadence: not a cron\n"))
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "x", "2.5"])
+def test_bad_routine_dead_runs_raises(tmp_path, bad):
+    with pytest.raises(ValueError, match="'routine_dead_runs' must be a positive integer"):
+        config.load(_write(tmp_path, f"routine_dead_runs: {bad}\n"))
+
+
+def test_routine_dead_runs_capped_at_the_fetch_window(tmp_path):
+    # github.py fetches only 10 completed runs per workflow; a wider window
+    # could never fill and the detector would silently stop firing.
+    cfg = config.load(_write(tmp_path, "routine_dead_runs: 10\n"))
+    assert cfg.routine_dead_runs == 10
+    with pytest.raises(ValueError, match="'routine_dead_runs' must be ≤ 10"):
+        config.load(_write(tmp_path, "routine_dead_runs: 11\n"))
+
+
+@pytest.mark.parametrize("bad", ["0", "-2", "x", "nan", "inf", "1e999"])
+def test_bad_lock_leak_hours_raises(tmp_path, bad):
+    # nan/inf/1e999 must be rejected too — every age comparison against nan is
+    # False, so a non-finite threshold would silently disable the detector.
+    with pytest.raises(ValueError, match="'lock_leak_hours' must be"):
+        config.load(_write(tmp_path, f"lock_leak_hours: {bad}\n"))
+
+
+def test_lock_leak_hours_accepts_a_fraction(tmp_path):
+    assert config.load(_write(tmp_path, "lock_leak_hours: 0.5\n")).lock_leak_hours == 0.5
 
 
 # ---------------------------------------------------------------------------

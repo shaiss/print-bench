@@ -65,7 +65,7 @@ export DEBIAN_FRONTEND=noninteractive
 # Package indexes in the base image can be stale (404s on install); refresh
 # first and tolerate unrelated repo failures (e.g. blocked PPAs).
 $SUDO apt-get update -qq 2>/dev/null || true
-$SUDO apt-get install -y -qq openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle
+$SUDO apt-get install -y -qq openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq
 
 # Blender ships on PyPI as `bpy`, a self-contained Python module — no apt
 # package, no X display. Pinned to the 4.5 LTS series: product shots are

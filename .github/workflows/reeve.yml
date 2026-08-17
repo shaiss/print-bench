@@ -8,9 +8,9 @@
 # health" report issue. Advisory-only: no label edits, no closes, no comments
 # on other issues, and no LLM anywhere (every finding is a recomputable fact).
 # Because there is no agentic step, this workflow holds NO provider secret; the
-# only token it ever sees is the ambient GITHUB_TOKEN. Reeve reads only
-# committed files, so it makes no GitHub read at all — the sticky-issue upsert
-# is its single interaction with the API.
+# only token it ever sees is the ambient GITHUB_TOKEN. Reeve's primary pulse is
+# committed files, plus GET-only run-health reads via src/reeve/github.py (the
+# groomer's pattern; issue #313) — the sticky upsert remains the sole write.
 #
 # TWO keys must agree to run: committed `enabled: true` in .github/reeve.conf
 # AND the repo variable REEVE_ENABLED == "true". Either off → inert. The
@@ -57,9 +57,14 @@ jobs:
     permissions:
       # checkout + reading the committed telemetry/previews/confs
       contents: read
-      # the ONE write this workflow performs: upserting the sticky report issue.
-      # Reeve reads no PRs, so no pull-requests scope is needed.
+      # the ONE write this workflow performs: upserting the sticky report issue
       issues: write
+      # the run-health gather (src/reeve/github.py) lists workflow runs and
+      # open PRs; its GETs are uncaught, so a missing scope would hard-fail
+      # the run rather than degrade — grant the reads explicitly (the
+      # groomer's reasoning)
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v5
         with:
@@ -99,9 +104,13 @@ jobs:
       - name: Build the report
         if: steps.policy.outputs.armed == 'true'
         id: report
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Reeve reads committed files only — no token, no network read.
-          reeve run --root . --conf .github/reeve.conf --out report.md > /dev/null
+          # GET-only run-health reads via src/reeve/github.py (the groomer's
+          # pattern); the sticky upsert remains the sole write.
+          reeve run --root . --repo "$GITHUB_REPOSITORY" \
+            --conf .github/reeve.conf --out report.md > /dev/null
           {
             echo "## Reeve — bench health"
             echo ""

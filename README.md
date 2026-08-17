@@ -235,6 +235,10 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     lives in both places). Presets are resolved through backlog-burn's own
     parser, and the guarantee is parity, not correctness — it does not check a
     cron against the schedule the prose comments describe
+  - `routine-lock-cleanup.sh` — withdraws a dead scheduled run's SHIP-LOCK (a
+    run killed by its timeout cannot run the skill's own release step) and
+    escalates to `needs-decision` after 3 run-deaths on one issue; invoked by
+    `design-run.yml` and `backlog-burn.yml` (issues #312/#313)
   - `gate.sh` — render printable parts and gate the STLs with printcheck;
     `--slice` adds a PrusaSlicer test-slice (this is what CI enforces)
   - `gate-summary.py` — turns a gate log into the CI results table
