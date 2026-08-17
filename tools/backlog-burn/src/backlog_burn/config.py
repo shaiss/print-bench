@@ -80,6 +80,21 @@ def _validate_cadence(value: str, where: str) -> str:
     )
 
 
+def resolve_cadence(value: str) -> str:
+    """Resolve a stored ``cadence:`` value (preset name or raw cron) to its cron.
+
+    The public face of the preset table in :func:`_validate_cadence`, so
+    anything that needs "what cron does this cadence actually fire on?" reads
+    it from here rather than hand-copying ``CADENCE_PRESETS`` — a second copy
+    would drift from this one exactly the way a conf drifts from its workflow
+    (that is what ``scripts/cadence-sync-check.sh`` exists to catch, and it
+    resolves through this function for that reason).  Raises
+    :class:`ValueError` on a value that is neither a preset nor a 5-field
+    cron, so a typo'd conf fails loudly here too.
+    """
+    return _validate_cadence(value.strip(), "resolve_cadence")
+
+
 @dataclass
 class Config:
     """The routine's committed policy."""
