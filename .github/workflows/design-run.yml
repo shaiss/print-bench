@@ -115,7 +115,10 @@ jobs:
       vars.DESIGN_RUN_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # Job budget 240 = agent step 225 + headroom for the lock cleanup below.
+    # Job budget 240 = agent step 220 + 20 min headroom: the pre-agent steps
+    # (checkout, pip, policy, select — low single-digit minutes in practice)
+    # and the lock cleanup must both fit inside it, so the job timeout can
+    # never fire before the agent step's own timeout does.
     # The old 60 was the livelock's guillotine (issue #312): it killed the
     # agent after it posted its SHIP-LOCK on the selected brief but before it
     # could deliver or withdraw, and the orphaned claim made every later
@@ -248,7 +251,7 @@ jobs:
         # the lock cleanup below runs as a normal step, not in a cancellation
         # grace window; continue-on-error keeps the job alive for it (the
         # "Turn a dead agentic run red" step restores the failure).
-        timeout-minutes: 225
+        timeout-minutes: 220
         continue-on-error: true
         # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
         # right fit for an unattended bot — no OAuth token / subscription seat.
@@ -273,7 +276,7 @@ jobs:
         # Same as the Anthropic step: die inside a live job so the lock
         # cleanup below runs as a normal step; continue-on-error keeps the
         # job alive for it (the red-on-death step restores the failure).
-        timeout-minutes: 225
+        timeout-minutes: 220
         continue-on-error: true
         # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
         # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic

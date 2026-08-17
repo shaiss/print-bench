@@ -59,7 +59,7 @@ def test_lock_leak_title_is_sanitized():
     }
     cfg = Config()
     body = render(evaluate(snapshot, cfg), snapshot, cfg)
-    line = next(l for l in body.splitlines() if l.startswith("- #281"))
+    line = next(ln for ln in body.splitlines() if ln.startswith("- #281"))
     assert "evil \\`code\\` # heading \\[x\\](y)" in line
     assert "\n# heading" not in line
 
