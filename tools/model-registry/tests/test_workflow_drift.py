@@ -11,8 +11,8 @@ The load-bearing check parses each reviewer job's ordered ship steps and asserts
 * the step at slot k sources `--model … outputs.model{k}` — the slot→model binding,
   so a scrambled reference (slot 1 pulling `model4`) is caught, not just the count;
 * the step's literal `anthropic_api_key: secrets.<X>` is the registry link's secret
-  at that position — so slots 1–3 wire `ZAI_KEY`, slot 4 `ANTHROPIC_API_KEY`, and
-  swapping one is caught;
+  at that position — so slots 1–3 wire `ZAI_KEY`, slots 4–6 `ANTHROPIC_API_KEY`
+  (the #298 Anthropic tail), and swapping one is caught;
 * the step's `ANTHROPIC_BASE_URL` matches the link's `base_url` exactly — present
   and equal for Z.AI (the Anthropic-compatible endpoint), absent for Anthropic —
   so pointing a slot at the wrong endpoint is caught.

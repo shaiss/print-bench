@@ -47,6 +47,17 @@ python3 -m model_registry chain review
 
 # A human summary of every provider, model, and chain.
 python3 -m model_registry show
+
+# Prove each chain link is actually CALLABLE (issue #298): a real 1-token
+# Messages request per link whose provider secret is set in the environment.
+# Exit 0 only when every attempted link answered; a run that could attempt
+# nothing (no secret set) fails too. `check` proves the file parses — it cannot
+# prove a model id is servable by a key; only a live request can (the review
+# chain's old claude-opus-4-8 backstop passed every static check and was
+# rejected at $0 on its first real call). The dispatchable model-smoke.yml
+# workflow runs this with the repo secrets; dispatch it after editing a chain,
+# or before pointing a new routine at one.
+ZAI_KEY=... ANTHROPIC_API_KEY=... python3 -m model_registry smoke review
 ```
 
 Stdlib-only, so a workflow runs it straight from the checkout with
@@ -63,16 +74,24 @@ reviewed workflow ship step too (its secret is literal), so the registry entry a
 the ship step land together.
 
 `auto-review.yml` is the first consumer: its `design-changes` job resolves the
-`review` chain into `model1..model4` outputs, and the Jane/Drik/coach ship steps
+`review` chain into `model1..model6` outputs, and the Jane/Drik/coach ship steps
 read those instead of hardcoding `--model`. `tests/test_workflow_drift.py` pins the
 registry and the workflow together so they cannot silently diverge.
+
+The `review` chain's Anthropic backstop is itself a chain — Opus 5 → Sonnet 5 →
+Haiku 4.5 — rather than a single model (issue #298): the lone `claude-opus-4-8`
+link proved unservable by the `ANTHROPIC_API_KEY` on its first live call, so one
+unservable id must never again be the whole "never lose a review" backstop.
 
 ## Layout
 
 - `src/model_registry/registry.py` — the parser (fail-loud, stdlib `configparser`)
   and the `resolve(chain)` → ordered `ResolvedLink`s.
-- `src/model_registry/cli.py` — `check` / `resolve` / `chain` / `show`; `resolve`
-  emits the `$GITHUB_OUTPUT` links a workflow consumes.
+- `src/model_registry/cli.py` — `check` / `resolve` / `chain` / `show` / `smoke`;
+  `resolve` emits the `$GITHUB_OUTPUT` links a workflow consumes.
+- `src/model_registry/smoke.py` — the live-callability proof (issue #298) and the
+  package's single network seam (`_post`); everything else stays statically
+  network-free, and a test enforces that confinement.
 - `src/model_registry/__main__.py` — `python -m model_registry` for the no-install
   workflow invocation.
 
@@ -89,5 +108,7 @@ python -m pytest tools/model-registry/tests -q
 ```
 
 A positive case and a negative control for every parser rule, the CLI's
-`$GITHUB_OUTPUT` emission, and the drift guard that holds `.github/models/registry.conf`
-and `.github/workflows/auto-review.yml` in correspondence.
+`$GITHUB_OUTPUT` emission, the smoke command's judgement (served / failed /
+skipped, and never green with nothing attempted) through its injected seam, and
+the drift guard that holds `.github/models/registry.conf` and
+`.github/workflows/auto-review.yml` in correspondence.
