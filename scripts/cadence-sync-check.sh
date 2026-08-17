@@ -38,10 +38,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# The four scheduled routines issue #276 named. Keep in sync with that issue's
-# table; a routine not listed here is not checked (see the script header for
-# what that means) — extend the list only with the issue that asks for it.
-ROUTINES=(backlog-burn design-run chunker labeler)
+# The seven scheduled routines with a `cadence:` key — the four issue #276
+# named (backlog-burn, design-run, chunker, labeler) plus the three issue
+# #293 added (product-scout, backlog-groomer, reeve). Keep in sync with
+# those issues' tables; a routine not listed here is not checked (see the
+# script header for what that means) — extend the list only with the issue
+# that asks for it.
+#
+# reeve and backlog-groomer confs are parsed by their own tools, not by
+# `backlog-burn config` — the conf READER here is the same `key: value`
+# house format every one of those parsers uses (see the Python docstring
+# below), not a call into the shared parser.
+ROUTINES=(backlog-burn design-run chunker labeler product-scout backlog-groomer reeve)
 
 # Compare one conf/workflow pair. Prints a diagnosis and returns non-zero on
 # drift. Kept as a function so --selftest can point it at fixtures.
