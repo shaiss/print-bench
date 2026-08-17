@@ -127,7 +127,10 @@ jobs:
         # typo'd config (bad key, unknown provider) fails this step loudly rather
         # than running on a policy nobody wrote. It also resolves the configured
         # provider to whether *that provider's* secret is present, so the run
-        # steps below gate on one `key_present` output.
+        # steps below gate on one `key_present` output. The model itself is NOT
+        # decided here — it comes from the registry chain below, so the provider
+        # label picks which ship step runs while the registry picks which model
+        # that step runs.
         run: |
           set -euo pipefail
           conf=.github/product-scout.conf
@@ -144,6 +147,38 @@ jobs:
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
+      # Resolve the scout's model from the committed provider/model registry
+      # (issue #206; the migration itself is #243) — the same step
+      # auto-review.yml's design-changes job runs. Stdlib-only, so it needs no
+      # install in front of it. A malformed registry, or one whose `scout` chain
+      # went missing, fails this step loudly BEFORE any key is spent — and is
+      # caught pre-merge by the model-registry drift-guard tests, which fire on
+      # this workflow and on registry.conf. `link_count` plus `link1_model` are
+      # what the ship steps below read; the secret stays literal per step (the
+      # Actions constraint), so the registry decides the model, never the auth.
+      #
+      # The cross-check at the end guards the one way this migration could
+      # mis-run: the conf's `provider:` label picks which ship step (and so
+      # which endpoint + secret) runs, while the registry picks the model — and
+      # a model hosted elsewhere (glm-* on the Anthropic step, claude-* on the
+      # Z.AI step) would fail at request time with a key spent. Pointing the
+      # `scout` chain at another provider is a real registry edit, but it has to
+      # travel with the conf label; saying so HERE, loudly, beats discovering it
+      # in the weekly run's logs.
+      - name: Resolve the scout model chain (issue #206)
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve scout --gh-output "$GITHUB_OUTPUT"
+          link_provider="$(sed -n 's/^link1_provider=//p' "$GITHUB_OUTPUT" | head -1)"
+          conf_provider="$(backlog-burn config --get provider --path .github/product-scout.conf)"
+          if [ "$link_provider" != "$conf_provider" ]; then
+            echo "::error::the registry's 'scout' chain resolves to provider '$link_provider' but .github/product-scout.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/product-scout.conf."
+            exit 1
+          fi
+
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
         run: echo "::notice::.github/product-scout.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
@@ -151,11 +186,13 @@ jobs:
       # One explicit run step per provider — a provider is a reviewed, git-tracked
       # step because GitHub Actions can only reference a secret by its literal name
       # (secrets can't be selected by a runtime variable). The committed
-      # `provider:` label picks which one runs. Both share the pin, the write
-      # permission, the `github_token` that authenticates the wrapper's gh calls,
-      # and the same /product-scout prompt. The default GITHUB_TOKEN is fine: the
-      # scout opens no PR (issue writes run no CI), so the PAT reasoning the burn
-      # and design run carry does not apply.
+      # `provider:` label picks which one runs; the MODEL each runs comes from the
+      # registry's `scout` chain (steps.chain.outputs), so swapping the scout to a
+      # different model is a registry edit, not a workflow edit. Both share the
+      # write permission, the `github_token` that authenticates the wrapper's gh
+      # calls, and the same /product-scout prompt. The default GITHUB_TOKEN is
+      # fine: the scout opens no PR (issue writes run no CI), so the PAT reasoning
+      # the burn and design run carry does not apply.
       #
       # Tool surface: the skill drives every GitHub write through ONE committed
       # wrapper, .claude/skills/product-scout/scout-helper.sh (list-briefs /
@@ -184,8 +221,8 @@ jobs:
         # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the same
         # ZAI_KEY is also passed as anthropic_api_key to satisfy the action's
         # credential check. Generation is the cheap-to-be-wrong case, so the cheap
-        # GLM tier is the right default — trade cost for quality on the --model /
-        # --effort line.
+        # GLM tier is the right default — which model exactly is the registry's
+        # `scout` chain's call, not this step's.
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -221,7 +258,7 @@ jobs:
           # backstop (--settings) still neutralises any Bash allow that leaks from
           # settings.json.
           show_full_output: "true"
-          claude_args: --model glm-5.2 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Run via Anthropic (Claude)
@@ -245,7 +282,7 @@ jobs:
           # verbs + read-only file tools + scout deny backstop + dontAsk +
           # show_full_output (see its comment for why it is exactly this).
           show_full_output: "true"
-          claude_args: --model claude-opus-4-8 --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/scout-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/product-scout/scout-helper.sh:*),Bash(./.claude/skills/product-scout/scout-helper.sh:*),Read,Grep,Glob"
           prompt: "/product-scout"
 
       - name: Explain a skipped agentic run
