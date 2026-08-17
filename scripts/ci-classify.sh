@@ -185,11 +185,13 @@ classify() {
         .github/workflows/ci.yml) bgtests=true ;;
       esac
       case "$f" in
-        # The model registry (issue #206). auto-review.yml is here because the
-        # drift-guard test reads it — a change to that workflow's chain must
-        # re-run the guard that pins it to .github/models/registry.conf.
+        # The model registry (issue #206). auto-review.yml and product-scout.yml
+        # are here because the drift-guard test reads them — a change to either
+        # workflow's chain must re-run the guard that pins it to
+        # .github/models/registry.conf.
         tools/model-registry/*|.github/models/registry.conf|\
-        .github/workflows/auto-review.yml|.github/workflows/ci.yml) mrtests=true ;;
+        .github/workflows/auto-review.yml|.github/workflows/product-scout.yml|\
+        .github/workflows/ci.yml) mrtests=true ;;
       esac
       case "$f" in
         tools/telemetry/*|.github/workflows/ci.yml) tmtests=true ;;
@@ -458,6 +460,8 @@ selftest() {
     "model_registry_tests=true" "gate=true" "gate_designs=" "regen=false"
   out="$(run ".github/workflows/auto-review.yml")"
   check "auto-review-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/workflows/product-scout.yml")"
+  check "scout-workflow-runs-drift-guard" "$out" "model_registry_tests=true"
 
   # 4f. Reeve (issue #272) is soft-infra like its groomer sibling: its own tests
   #     run and the required contexts RUN with an empty design list — it reads
