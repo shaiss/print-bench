@@ -138,6 +138,30 @@ jobs:
         # `enabled`/`provider`/`cadence` keys — it does not use the selector).
         run: pip install -e tools/backlog-burn
 
+      - name: Resolve the model chain (registry, issue #297)
+        id: chain
+        # The run steps' model ids come from the committed provider/model
+        # registry's `labeler` chain (issues #206/#297) — cheapest-first, see
+        # the stanza's notes — instead of hardcoded `--model` literals.
+        # Stdlib-only, so it runs straight from the checkout. Also asserts the
+        # chain ends on an anthropic link, because that tail step is the
+        # walk-back target.
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve labeler --gh-output "$GITHUB_OUTPUT"
+          provider="$(backlog-burn config --get provider --path .github/labeler.conf)"
+          last_provider="$(python3 -c "
+          import sys; sys.path.insert(0, 'tools/model-registry/src')
+          from model_registry.registry import Registry
+          print(Registry.load('.github/models/registry.conf').resolve('labeler')[-1].provider)")"
+          if [ "$last_provider" != "anthropic" ]; then
+            echo "::error::the registry's labeler chain must end on an anthropic link (the walk-back tail step); it ends on '$last_provider'. Edit .github/models/registry.conf [chain:labeler]."
+            exit 1
+          fi
+          echo "chain tail provider '$last_provider' (conf provider: '$provider')"
+
       - name: Read policy (.github/labeler.conf)
         id: policy
         # Key 2 of 2: the committed, git-tracked source of truth. A malformed or
@@ -229,21 +253,22 @@ jobs:
       # be, or the labeler fails closed). The pin is the immutable commit behind
       # the v1 tag.
 
-      - name: Run via Z.AI (GLM)
-        id: run_zai
+      - name: Run via Z.AI GLM (chain link 1)
+        id: run_zai1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
           && steps.policy.outputs.provider == 'zai'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
+        continue-on-error: true
         # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
         # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
         # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the same
         # ZAI_KEY is also passed as anthropic_api_key to satisfy the action's
         # credential check. Labelling is light and every label a human can
-        # remove, so the cheap GLM tier is the right default here. Change the
-        # model on the --model line to trade cost for quality.
+        # remove, so the registry's `labeler` chain is cheapest-first (link 1
+        # here) — the stanza's notes say why.
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -256,29 +281,78 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --model glm-5.2 --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
           prompt: "/label-issues ${{ steps.select.outputs.issues }}"
 
-      - name: Run via Anthropic (Claude)
+      - name: Run via Z.AI GLM fallback (chain link 2)
+        id: run_zai2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai1.outcome == 'failure'
+        continue-on-error: true
+        # Registry `labeler` chain link 2 — same endpoint/secret/narrow tool
+        # grant as link 1 (see there); only the model id differs.
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model ${{ steps.chain.outputs.link2_model }} --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          prompt: "/label-issues ${{ steps.select.outputs.issues }}"
+
+      - name: Run via Anthropic (Claude, chain link 3 — the walk-back tail)
         id: run_anthropic
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
-          && steps.policy.outputs.provider == 'anthropic'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.run_zai1.outcome != 'success'
+          && steps.run_zai2.outcome != 'success'
+          && env.HAS_ANTHROPIC_KEY == 'true'
+        continue-on-error: true
         # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
         # right fit for an unattended bot — no OAuth token / subscription seat.
+        # Registry `labeler` chain link 3, the tail: runs when both zai links
+        # failed, or directly when the conf's provider is anthropic (which
+        # skips the provider-gated zai steps above). Frontier as the backstop —
+        # an unlabelled queue blocks the whole autonomy loop — not for quality.
+        # Gated on the anthropic key's OWN presence, not on key_present (which
+        # reflects the conf's provider), so the walk-back works from either
+        # conf.
         env:
-          # Same trusted selection bound as the Z.AI step (see its comment).
+          # Same trusted selection bound as the Z.AI steps (see their comment).
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          # Same narrow tool grant + labeler deny backstop + dontAsk as the Z.AI step.
-          claude_args: --model claude-opus-4-8 --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          # Same narrow tool grant + labeler deny backstop + dontAsk as the Z.AI steps.
+          claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
           prompt: "/label-issues ${{ steps.select.outputs.issues }}"
+
+      - name: Fail when every chain link failed
+        # The #297 guarantee, restated as a gate: a link dying walks to the
+        # next; only the WHOLE chain dying fails the job.
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai1.outcome != 'success'
+          && steps.run_zai2.outcome != 'success'
+          && steps.run_anthropic.outcome != 'success'
+        run: |
+          echo "::error::the labeler chain (registry [chain:labeler]) failed on every link — ${{ steps.chain.outputs.link1_model }} → ${{ steps.chain.outputs.link2_model }} → ${{ steps.chain.outputs.link3_model }}. See the failed step logs above."
+          exit 1
 
       - name: Explain a skipped agentic run
         if: >-
@@ -309,7 +383,9 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+          # Chain-walked, not provider-picked: any of the three run steps may
+          # have run, so report the LAST one that actually executed.
+          RUN: ${{ steps.run_anthropic.outcome != 'skipped' && steps.run_anthropic.outcome || (steps.run_zai2.outcome != 'skipped' && steps.run_zai2.outcome || steps.run_zai1.outcome) }}
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
         run: |

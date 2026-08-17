@@ -126,6 +126,31 @@ jobs:
       - name: Install the selector
         run: pip install -e tools/backlog-burn
 
+      - name: Resolve the model chain (registry, issue #297)
+        id: chain
+        # The ship steps' model ids come from the committed provider/model
+        # registry's `ship` chain (issues #206/#297) instead of hardcoded
+        # `--model` literals — cheapest capable GLM first, Anthropic frontier
+        # last (the stanza's notes say why). Stdlib-only, so it runs straight
+        # from the checkout. Also cross-checks the conf's `provider:` label
+        # against the chain's last link (the anthropic tail step) so the two
+        # cannot silently disagree — the check PR #304 gave the scout.
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve ship --gh-output "$GITHUB_OUTPUT"
+          provider="$(backlog-burn config --get provider)"
+          last_provider="$(python3 -c "
+          import sys; sys.path.insert(0, 'tools/model-registry/src')
+          from model_registry.registry import Registry
+          print(Registry.load('.github/models/registry.conf').resolve('ship')[-1].provider)")"
+          if [ "$last_provider" != "anthropic" ]; then
+            echo "::error::the registry's ship chain must end on an anthropic link (the walk-back tail step); it ends on '$last_provider'. Edit .github/models/registry.conf [chain:ship]."
+            exit 1
+          fi
+          echo "chain tail provider '$last_provider' (conf provider: '$provider')"
+
       - name: Read policy (.github/backlog-burn.conf)
         id: policy
         # Key 2 of 2: the committed, git-tracked source of truth. A malformed
@@ -184,46 +209,34 @@ jobs:
       # "Note a checkless draft PR" step below says so). GH_TOKEN is the same
       # secret design-run.yml uses for this.
       #
+      # The models come from the registry's `ship` chain (issue #297): each zai
+      # step runs ONE chain link by position, continue-on-error, gated on the
+      # earlier zai links having failed — so a dead link walks to the next link
+      # of the same provider, and exhausting them walks to the anthropic tail.
+      # First success wins; one dead model is a logged fallback, never a dead
+      # run (the #297 failure mode).
+      #
       # The pin is the immutable commit behind the v1 tag; a moved tag must not
       # silently change what runs with write perms + a secret. Re-pin
       # deliberately to adopt a new release.
 
-      - name: Ship via Anthropic (Claude)
-        id: ship_anthropic
-        if: >-
-          steps.policy.outputs.enabled == 'true'
-          && steps.select.outputs.issue != ''
-          && steps.policy.outputs.provider == 'anthropic'
-          && steps.policy.outputs.key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-        # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
-        # right fit for an unattended bot — no OAuth token / subscription seat.
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GH_TOKEN || github.token }}
-          # Pin the model explicitly (Opus 4.8, the maintainer's pick — PR #172
-          # review) and run at maximum reasoning effort: an unattended ship run
-          # is exactly the correctness-over-cost case.
-          claude_args: --permission-mode bypassPermissions --model claude-opus-4-8 --effort max
-          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
-
-      - name: Ship via Z.AI (GLM)
-        id: ship_zai
+      - name: Ship via Z.AI GLM (chain link 1)
+        id: ship_zai1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.provider == 'zai'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
+        continue-on-error: true
         # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
         # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
-        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the
-        # same ZAI_KEY is also passed as anthropic_api_key to satisfy the
-        # action's credential check (the endpoint uses whichever header it
-        # validates). Best-effort: Anthropic doesn't officially support routing
-        # Claude Code to non-Claude models, and /ship-issue is a Claude Code
-        # skill, so quality may vary. Change the model on the --model line.
+        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the same
+        # ZAI_KEY is also passed as anthropic_api_key to satisfy the action's
+        # credential check (the endpoint uses whichever header it validates).
+        # Best-effort: Anthropic doesn't officially support routing Claude Code
+        # to non-Claude models, and /ship-issue is a Claude Code skill, so
+        # quality may vary. Registry `ship` chain link 1.
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -232,8 +245,96 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
-          claude_args: --permission-mode bypassPermissions --model glm-5.2 --effort max
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link1_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Ship via Z.AI GLM fallback (chain link 2)
+        id: ship_zai2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.ship_zai1.outcome == 'failure'
+        continue-on-error: true
+        # Registry `ship` chain link 2 — same endpoint/secret as link 1 (see
+        # there); only the model id differs, and it is the registry's.
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ secrets.GH_TOKEN || github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link2_model }} --effort max
+          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Ship via Z.AI GLM fallback (chain link 3)
+        id: ship_zai3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.ship_zai1.outcome == 'failure'
+          && steps.ship_zai2.outcome == 'failure'
+        continue-on-error: true
+        # Registry `ship` chain link 3 — the last zai link (see link 1).
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ secrets.GH_TOKEN || github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link3_model }} --effort max
+          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Ship via Anthropic (Claude, chain link 4 — the walk-back tail)
+        id: ship_anthropic
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.ship_zai1.outcome != 'success'
+          && steps.ship_zai2.outcome != 'success'
+          && steps.ship_zai3.outcome != 'success'
+          && env.HAS_ANTHROPIC_KEY == 'true'
+        continue-on-error: true
+        # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
+        # right fit for an unattended bot — no OAuth token / subscription seat.
+        # Registry `ship` chain link 4, the tail: runs when every zai link
+        # failed, or directly when the conf's provider is anthropic (which
+        # skips the provider-gated zai steps above). Gated on the anthropic
+        # key's OWN presence, not on key_present (which reflects the conf's
+        # provider), so the walk-back works from either conf.
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GH_TOKEN || github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link4_model }} --effort max
+          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Fail when every chain link failed
+        # The #297 guarantee, restated as a gate: a link dying walks to the
+        # next; only the WHOLE chain dying fails the job.
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.ship_zai1.outcome != 'success'
+          && steps.ship_zai2.outcome != 'success'
+          && steps.ship_zai3.outcome != 'success'
+          && steps.ship_anthropic.outcome != 'success'
+        run: |
+          echo "::error::the ship chain (registry [chain:ship]) failed on every link — ${{ steps.chain.outputs.link1_model }} → ${{ steps.chain.outputs.link2_model }} → ${{ steps.chain.outputs.link3_model }} → ${{ steps.chain.outputs.link4_model }}. See the failed step logs above."
+          exit 1
 
       - name: Note a checkless draft PR (no CI-triggering PAT)
         # A /ship-issue draft PR opened with the default GITHUB_TOKEN does not
@@ -287,9 +388,11 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          # Only the step matching the configured provider runs; the other is
-          # 'skipped'. Report the one that actually ran.
-          SHIP: ${{ steps.policy.outputs.provider == 'zai' && steps.ship_zai.outcome || steps.ship_anthropic.outcome }}
+          # Chain-walked, not provider-picked: any of the four ship steps may
+          # have run (the chain walks links then providers), so report the
+          # LAST one that actually executed — the tail if the chain walked all
+          # the way, else the step that succeeded/stopped the walk.
+          SHIP: ${{ steps.ship_anthropic.outcome != 'skipped' && steps.ship_anthropic.outcome || (steps.ship_zai3.outcome != 'skipped' && steps.ship_zai3.outcome || (steps.ship_zai2.outcome != 'skipped' && steps.ship_zai2.outcome || steps.ship_zai1.outcome)) }}
           # $GITHUB_STEP_SUMMARY does not auto-link a bare #N, so build a real
           # link to the issue holding the authoritative verdict.
           SERVER: ${{ github.server_url }}
