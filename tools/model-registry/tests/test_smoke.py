@@ -83,7 +83,7 @@ def test_non_200_on_a_configured_link_fails(tmp_path):
     # Negative control: the exact #298 signature — the provider answers, but
     # rejects the model id — must fail the run, echoing the API's reason.
     def post(url, headers, payload):
-        if "anthropic.com" in url and b"claude-opus-5" in payload:
+        if url == "https://api.anthropic.com/v1/messages" and b"claude-opus-5" in payload:
             return 404, '{"error":{"message":"model not found"}}'
         return 200, "{}"
     lines, code = smoke.smoke_chain(
