@@ -13,8 +13,9 @@ in [Sources & provenance](#sources--provenance) at the end.
 
 Companion work: the flexure library this doc argues for is tracked in
 **[#202](https://github.com/shaiss/print-bench/issues/202)**; the frontier
-(metamaterials / 4D) is parked as a research spike in
-**[#201](https://github.com/shaiss/print-bench/issues/201)**.
+(metamaterials / 4D) is surveyed in
+[`metamaterials-4d.md`](metamaterials-4d.md) (issue
+**[#201](https://github.com/shaiss/print-bench/issues/201)**).
 
 ---
 
@@ -368,8 +369,11 @@ primitives yet. Ranked:
    integer-layer snap.
 
 Gears: lean on BOSL2 `gears.scad` and document the rules, rather than build fresh.
-Metamaterials / 4D: parked in [#201](https://github.com/shaiss/print-bench/issues/201)
-— the one family that doesn't yet reduce to a clean parametric primitive.
+Metamaterials / 4D: surveyed in
+[`metamaterials-4d.md`](metamaterials-4d.md) ([#201](https://github.com/shaiss/print-bench/issues/201))
+— verdict: auxetic cells are the one encodable family, but nothing encodes
+until a design asks for it; 4D stays document-only (a slicer-G-code
+technique an STL pipeline can't gate).
 
 ---
 
