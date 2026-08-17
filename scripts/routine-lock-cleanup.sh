@@ -66,6 +66,17 @@ EOF
   exit 2
 }
 
+# jq is this script's one JSON tool (its stream filters are what the decision
+# functions are built from), a departure from the no-standalone-jq convention
+# product-page.sh documents — accepted for this script because the selftest
+# and live mode share the same jq predicates. It is preinstalled on the CI
+# runners and installed by .claude/hooks/session-start.sh; fail with a clear
+# name here rather than a mid-run command-not-found.
+command -v jq >/dev/null 2>&1 || {
+  echo "routine-lock-cleanup: jq is required (apt-get install -y jq, or re-run .claude/hooks/session-start.sh --force)" >&2
+  exit 1
+}
+
 # ---- pure decision functions (JSON/text on stdin, no network) -------------
 
 # stdin: NDJSON comments {body, created_at}. Prints the latest SHIP-LOCK's
