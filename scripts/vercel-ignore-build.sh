@@ -49,11 +49,15 @@ path_is_irrelevant() {
     templates/*)  return 0 ;;
     audits/*)     return 0 ;;
     docs/*)       return 0 ;;
-    printer.conf) return 0 ;;
     CLAUDE.md)    return 0 ;;
     .gitignore)   return 0 ;;
     # Everything else is site-relevant: designs/ styles/ people/ lib/ site/
     # PM.md README.md telemetry/ vercel.json — and any path not named above.
+    # printer.conf lands here on purpose: lib/printer-conf.scad does
+    # `include <printer.conf>`, and site/lib/model.mjs embeds a design's whole
+    # include closure, so a design that opts into the print-feedback profile
+    # would serve its bytes. It is a rare-changing stub, so building on it costs
+    # nothing and closes a latent stale-preview hole.
     *)            return 1 ;;
   esac
 }
@@ -137,7 +141,7 @@ selftest() {
   check 0 tooling-only        ".github/workflows/ci.yml" "tools/reeve/src/reeve/cli.py" "scripts/check.sh"
   check 0 docs-nonarch        "docs/metamaterials-4d.md"
   check 0 templates-audits    "templates/design.scad" "audits/pr3/before.png"
-  check 0 root-noise          "CLAUDE.md" "printer.conf" ".gitignore"
+  check 0 root-noise          "CLAUDE.md" ".gitignore"
   check 0 empty-diff          # no paths -> identical to base
 
   # BUILD (1): at least one site-relevant file, incl. the guarded exceptions.
@@ -151,6 +155,7 @@ selftest() {
   check 1 ai-lifestyle-conf   ".github/ai-lifestyle.conf"
   check 1 root-pm             "PM.md"
   check 1 vercel-json         "vercel.json"
+  check 1 printer-conf        "printer.conf"  # enters the include closure via printer-conf.scad
   check 1 unknown-topdir      "newthing/x.txt"
   check 1 mixed               "scripts/check.sh" "designs/foo/README.md"
 
