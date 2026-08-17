@@ -1,12 +1,16 @@
-# Backlog groomer (issue #244) — the deterministic backlog-health report.
+# Backlog groomer (issue #244) — the deterministic backlog-health report,
+# with the optional fast-model narrative layer of #248 layered on top.
 #
 # The autonomy routines (backlog burn #95, design run #96, chunker) all feed
 # one issue queue; this is the routine that tends it. It runs the
 # tools/backlog-groomer detectors over a live snapshot and upserts ONE sticky
 # report issue — advisory-only: no label edits, no closes, no comments on
-# other issues, and no LLM anywhere (every finding is a recomputable fact).
-# Because there is no agentic step, this workflow holds NO provider secret;
-# the only token it ever sees is the ambient GITHUB_TOKEN.
+# other issues, and no LLM in any FINDING (every finding is a recomputable
+# fact). The one optional model call (#248, `narrative: true` in the conf,
+# default off) only PHRASES the deterministic findings: its sole input is the
+# rendered report, and a missing key or failed call degrades to the plain
+# deterministic report. That step alone holds a provider secret; everything
+# else sees only the ambient GITHUB_TOKEN.
 #
 # TWO keys must agree to run: committed `enabled: true` in
 # .github/backlog-groomer.conf AND the repo variable
@@ -104,15 +108,111 @@ jobs:
         run: |
           backlog-groomer run --repo "$GITHUB_REPOSITORY" \
             --conf .github/backlog-groomer.conf --out report.md > /dev/null
+
+      # ── The optional fast-model narrative layer (issue #248) ─────────────
+      #
+      # A 3-5 sentence "this week's focus" atop the report, PHRASING the
+      # deterministic findings — never a source of them. Substance stays
+      # deterministic by construction: the model's sole input is the
+      # rendered report body, the tool refuses to write anything but the
+      # marked narrative span, and `strip_narrative` recovers the
+      # deterministic bytes exactly (a unit test proves the identity).
+      #
+      # Three keys must agree before any provider key is touched: armed
+      # (both halves), `narrative: true` in the committed conf, and the
+      # provider's secret present. Every other combination notices and
+      # skips — the deterministic report below is unaffected.
+      #
+      # One explicit step per provider (the house pattern — a secret can
+      # only be referenced by its literal name, so each provider owns a
+      # reviewed step; the committed `provider:` label picks which runs).
+      # The model comes from the #206 registry's `groomer-narrative`
+      # chain, resolved inside the tool.
+
+      - name: Read narrative policy
+        id: narrative_policy
+        if: steps.policy.outputs.armed == 'true'
+        env:
+          HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+          HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          narrative="$(backlog-groomer config --get narrative --path .github/backlog-groomer.conf)"
+          provider="$(backlog-groomer config --get provider --path .github/backlog-groomer.conf)"
+          case "$provider" in
+            zai)       key="$HAS_ZAI_KEY" ;;
+            anthropic) key="$HAS_ANTHROPIC_KEY" ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          {
+            echo "narrative=$narrative"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write the narrative (via Z.AI)
+        id: narrative_zai
+        if: >-
+          steps.narrative_policy.outputs.narrative == 'true'
+          && steps.narrative_policy.outputs.provider == 'zai'
+          && steps.narrative_policy.outputs.key_present == 'true'
+          && steps.report.outcome == 'success'
+        env:
+          # The tool resolves the model + base_url from the #206 registry
+          # and reads the key from the provider's literal secret name.
+          ZAI_KEY: ${{ secrets.ZAI_KEY }}
+        run: backlog-groomer narrative --report report.md --conf .github/backlog-groomer.conf
+
+      - name: Write the narrative (via Anthropic)
+        id: narrative_anthropic
+        if: >-
+          steps.narrative_policy.outputs.narrative == 'true'
+          && steps.narrative_policy.outputs.provider == 'anthropic'
+          && steps.narrative_policy.outputs.key_present == 'true'
+          && steps.report.outcome == 'success'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: backlog-groomer narrative --report report.md --conf .github/backlog-groomer.conf
+
+      - name: Note a skipped narrative
+        if: >-
+          steps.narrative_policy.outcome == 'success'
+          && steps.narrative_policy.outputs.narrative != 'true'
+        run: >
+          echo "::notice::narrative layer is off in .github/backlog-groomer.conf —
+          posting the deterministic report unchanged (flip 'narrative:' to true
+          in a reviewed PR to enable it)"
+
+      - name: Note a keyless narrative
+        if: >-
+          steps.narrative_policy.outcome == 'success'
+          && steps.narrative_policy.outputs.narrative == 'true'
+          && steps.narrative_policy.outputs.key_present != 'true'
+        env:
+          PROVIDER: ${{ steps.narrative_policy.outputs.provider }}
+        run: >
+          echo "::notice::narrative: true but the configured provider
+          '${PROVIDER}' has no key set — posting the deterministic report
+          unchanged"
+
+      - name: Publish the report to the job summary
+        if: steps.policy.outputs.armed == 'true' && steps.report.outcome == 'success'
+        run: |
           {
             echo "## Backlog groomer"
             echo ""
             cat report.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Dry run — skipping the upsert
+      - name: Dry run — mock narrative, skip the upsert
         if: steps.policy.outputs.armed == 'true' && inputs.dry_run
+        env:
+          NARRATIVE: ${{ steps.narrative_policy.outputs.narrative }}
         run: |
+          if [ "$NARRATIVE" = "true" ]; then
+            # Offline stand-in for the provider call: exercises the whole
+            # narrative pipeline (placement, markers, disclosure) with no key.
+            backlog-groomer narrative --report report.md --mock > /dev/null
+          fi
           echo "::notice::Dry run — the report is in the job summary; the sticky report issue was not touched."
 
       - name: Upsert the sticky report issue
@@ -177,6 +277,8 @@ jobs:
           REPORT_OUTCOME: ${{ steps.report.outcome }}
           UPSERT_OUTCOME: ${{ steps.upsert.outcome }}
           DRY_RUN: ${{ inputs.dry_run }}
+          NARRATIVE: ${{ steps.narrative_policy.outputs.narrative }}
+          NARRATIVE_RUN: ${{ steps.narrative_policy.outputs.provider == 'anthropic' && steps.narrative_anthropic.outcome || steps.narrative_zai.outcome }}
         run: |
           {
             echo "### Backlog groomer — run outcome"
@@ -192,6 +294,11 @@ jobs:
               echo "- ❌ report rendered but the upsert did not complete (${UPSERT_OUTCOME:-skipped}) — the sticky issue may be stale; see the upsert step log."
             else
               echo "- ✅ report rendered and upserted to the sticky report issue."
+            fi
+            if [ "$NARRATIVE" = "true" ]; then
+              echo "- ✍️ narrative layer (${NARRATIVE_RUN:-skipped}): model-written summary atop the deterministic sections."
+            else
+              echo "- ✍️ narrative layer: off (conf narrative != true)."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

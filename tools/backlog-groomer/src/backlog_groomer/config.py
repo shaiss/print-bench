@@ -28,12 +28,24 @@ DEFAULT_PATH = ".github/backlog-groomer.conf"
 _KNOWN_KEYS = (
     "enabled",
     "cadence",
+    "provider",
+    "narrative",
     "staleness_days",
     "armed_stuck_days",
     "oversized_stuck_days",
     "dup_threshold",
     "max_dup_pairs",
 )
+
+# Providers with a narrative ship step in the workflow (the house
+# per-provider pattern: a secret can only be referenced by its literal
+# name, so each provider owns a reviewed step). Maps the committed
+# `provider:` label to that provider's secret name — the same vocabulary
+# backlog-burn's conf and the #206 registry use.
+NARRATIVE_PROVIDERS: dict[str, str] = {
+    "zai": "ZAI_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
 
 # Named cadence presets → cron expression, same vocabulary as the burn's
 # config so the two files read alike.  NOTE the presets all fire at :17 —
@@ -56,6 +68,22 @@ def _parse_bool(value: str, where: str) -> bool:
     if low in ("true", "false"):
         return low == "true"
     raise ValueError(f"{where}: 'enabled' must be 'true' or 'false', got {value!r}")
+
+
+def _parse_provider(value: str, where: str) -> str:
+    if value not in NARRATIVE_PROVIDERS:
+        known = ", ".join(sorted(NARRATIVE_PROVIDERS))
+        raise ValueError(
+            f"{where}: 'provider' must be one of ({known}), got {value!r}"
+        )
+    return value
+
+
+def _parse_narrative_bool(value: str, where: str) -> bool:
+    low = value.strip().lower()
+    if low in ("true", "false"):
+        return low == "true"
+    raise ValueError(f"{where}: 'narrative' must be 'true' or 'false', got {value!r}")
 
 
 def _parse_positive_int(value: str, key: str, where: str) -> int:
@@ -103,6 +131,12 @@ class Config:
 
     enabled: bool = False
     cadence: str = ""  # preset name or raw cron ("" = workflow's literal is authoritative)
+    # The narrative layer (#248): which provider's key the optional step
+    # uses, and whether the step runs at all. `narrative` defaults OFF —
+    # the deterministic report is the committed behavior, the narrative is
+    # an opt-in layer on top.
+    provider: str = ""  # "" = unset; the workflow fails loudly if narrative needs one
+    narrative: bool = False
     staleness_days: int = 14
     armed_stuck_days: int = 7
     oversized_stuck_days: int = 7
@@ -135,12 +169,22 @@ def load(path: str = DEFAULT_PATH) -> Config:
             elif key == "cadence":
                 _validate_cadence(value, where)  # validate but keep original string
                 cfg.cadence = value
+            elif key == "provider":
+                cfg.provider = _parse_provider(value, where)
+            elif key == "narrative":
+                cfg.narrative = _parse_narrative_bool(value, where)
             elif key == "dup_threshold":
                 cfg.dup_threshold = _parse_threshold(value, where)
             elif key == "max_dup_pairs":
                 cfg.max_dup_pairs = _parse_positive_int(value, key, where)
             else:  # the three *_days thresholds
                 setattr(cfg, key, _parse_positive_int(value, key, where))
+    if cfg.narrative and not cfg.provider:
+        raise ValueError(
+            f"{path}: 'narrative: true' requires a 'provider:' key — the "
+            "narrative step needs to know whose key to use (known: "
+            f"{sorted(NARRATIVE_PROVIDERS)})"
+        )
     return cfg
 
 

@@ -331,7 +331,9 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
   the scheduled groomer (`.github/workflows/backlog-groomer.yml`): seven
   detectors over the open-issue queue (stale, armed-but-stuck, unsized,
   resolved-but-parked decisions, unchunked oversized issues, duplicate
-  candidates, completed epics), advisory-only into one sticky report issue — see its
+  candidates, completed epics), advisory-only into one sticky report issue,
+  plus an optional fast-model narrative layer that only phrases the
+  deterministic findings (default off) — see its
   [README](tools/backlog-groomer/README.md)
 - `tools/reeve/` — the deterministic **bench-health** reporter behind Reeve,
   the platform PM (`.github/workflows/reeve.yml`, issue #272): six detectors
