@@ -112,7 +112,7 @@ retroactively describe the currently committed image.
 ## Deterministic animations
 
 `animations.conf` (issue #236) gives the page a motion depiction that is
-*measured*, not modeled: the AI clip above it is an impression, and a
+*measured*, not modeled: the AI clip below it is an impression, and a
 customer who watches a shutter slide there deserves to see the real
 mechanism do the same thing. Two entries, both inherited from the parent —
 the tracker includes it verbatim and redefines only `door()`, so
@@ -124,13 +124,16 @@ the tracker includes it verbatim and redefines only `door()`, so
   the two boards' animations are visually comparable. The seat dish is
   visible on the sliding door top — verified on the rendered frames before
   committing, since manifest cameras freeze at commit.
-- **`turntable`** — full-board 360°, D1 open with the demo piece visible;
-  camera-only motion, no `$t` dependency.
+- **`turntable`** — full-board 360°, D1 slid open, marker seats reading on
+  the door top faces; camera-only motion, no `$t` dependency. (The demo
+  piece seated under a door stays occluded behind the window membrane, so
+  it is not visible in this shot — the seats are.)
 
 No `.scad` change: the parent's `anim` machinery is inherited verbatim, and
 per repo convention the `$t`-dependent values live inside the parent's
-geometry blocks, so `-D '$t=…'` lands correctly. GIFs render at 72.6 KB and
-301 KB — far inside the 6 MiB `MAX_GIF_BYTES` budget.
+geometry blocks, so `-D '$t=…'` lands correctly. GIFs render to ~70 KB and
+~295 KB (the exact bytes wobble across runners; the gate holds the 6 MiB
+`MAX_GIF_BYTES` budget, so the prose doesn't have to) — far inside budget.
 
 ## Field test log
 

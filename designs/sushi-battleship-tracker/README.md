@@ -20,7 +20,7 @@ lose track of called shots — which is everyone eating dinner off it.
 
 ![Shutter mechanism in motion: door D1 slides to its stop and lifts out](previews/shutter-slide.gif)
 
-![Turntable: the full board, D1 open with the demo piece visible](previews/turntable.gif)
+![Turntable: the full board, D1 slid open, marker seats on the door top faces](previews/turntable.gif)
 
 ![AI-styled scene: sushi-battleship-tracker staged in a real-world setting](previews/lifestyle-product-hero.png)
 
