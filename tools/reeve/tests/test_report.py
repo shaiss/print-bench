@@ -43,6 +43,27 @@ def test_over_budget_preview_is_flagged():
     assert "❌ over budget" in body
 
 
+def test_lock_leak_title_is_sanitized():
+    # Issue titles are the report's only untrusted text (they arrive from the
+    # GitHub listing): markdown specials must come out escaped and newlines
+    # collapsed, so one weird title cannot reshape the report.
+    snapshot = {
+        "generatedAt": "2026-08-16T06:00:00Z", "records": [], "previews": [],
+        "reportPlaceholder": False,
+        "runHealth": {
+            "gatheredAt": "2026-08-16T06:00:00Z", "workflows": [],
+            "issues": [{"number": 281, "title": "evil `code`\n# heading [x](y)",
+                        "lockCreatedAt": "2026-08-16T00:00:00Z"}],
+            "openPRs": [], "branches": [],
+        },
+    }
+    cfg = Config()
+    body = render(evaluate(snapshot, cfg), snapshot, cfg)
+    line = next(ln for ln in body.splitlines() if ln.startswith("- #281"))
+    assert "evil \\`code\\` # heading \\[x\\](y)" in line
+    assert "\n# heading" not in line
+
+
 def test_not_evaluated_never_silently_empty():
     # A snapshot with no telemetry still renders every section — the absent
     # ones say "Not evaluated", not a blank/clean line.

@@ -1,11 +1,13 @@
-"""The one I/O seam — build a snapshot from the repo's committed files.
+"""The committed-files I/O seam — build a snapshot from the repo's tree.
 
-Unlike the backlog groomer (which GETs live issues), Reeve's pulse is read
-entirely from committed files: the telemetry log, the live preview sizes, and
-the telemetry report. There is no network read at all — the tool holds no
-token, and the scheduled workflow's only write is the sticky report issue it
-renders. Kept a separate module (imported lazily by the CLI) so the pure
-detector/report core needs no filesystem walk to run over a fixed snapshot.
+Reeve's primary pulse is read entirely from committed files: the telemetry
+log, the live preview sizes, and the telemetry report. This module makes no
+network read at all (os/glob/json only) — the second, GET-only seam is
+``github.py`` (issue #313), which attaches the opt-in ``runHealth`` block and
+is the one module allowed a network import; the scheduled workflow's only
+write stays the sticky report issue it renders. Kept a separate module
+(imported lazily by the CLI) so the pure detector/report core needs no
+filesystem walk to run over a fixed snapshot.
 """
 
 from __future__ import annotations

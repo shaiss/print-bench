@@ -11,6 +11,11 @@ composes them. The workflow stays a few lines of glue with no policy of its
 own — including the arming decision, which is code here (``config.armed``)
 rather than YAML expression soup, so the 2x2 variable-by-conf matrix is
 unit-tested.
+
+``gather`` and ``run`` take an optional ``--repo owner/name`` (issue #313):
+when set, the GET-only run-health read (``github.gather_run_health``) is
+attached to the snapshot as ``runHealth``. Without it the run stays entirely
+offline and the two run-health detectors read "not evaluated".
 """
 
 from __future__ import annotations
@@ -39,6 +44,27 @@ def _load_config(path: Optional[str]) -> config_mod.Config:
     return config_mod.load(path) if path else config_mod.Config()
 
 
+def _token() -> str:
+    """The GitHub token from ``GH_TOKEN``/``GITHUB_TOKEN`` (``""`` if unset)."""
+    return os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+
+
+def _gather(args: argparse.Namespace) -> dict[str, Any]:
+    """The snapshot for ``--root``, plus run health when ``--repo`` was given."""
+    from .signals import gather_snapshot  # here so the pure commands need no filesystem walk
+
+    snapshot = gather_snapshot(args.root)
+    if args.repo:
+        # Lazy for the same reason signals is — and stricter: github.py is the
+        # one network-capable module, and importing it at module top would put
+        # cli.py in breach of the purity test. The offline default never
+        # touches it.
+        from .github import gather_run_health
+
+        snapshot["runHealth"] = gather_run_health(args.repo, _token())
+    return snapshot
+
+
 def _emit_report(snapshot: dict[str, Any], args: argparse.Namespace) -> int:
     cfg = _load_config(args.conf)
     body = render(evaluate(snapshot, cfg), snapshot, cfg)
@@ -55,20 +81,15 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 
 def cmd_gather(args: argparse.Namespace) -> int:
-    """`gather`: print the snapshot for ``--root`` as JSON."""
-    from .signals import gather_snapshot  # here so the pure commands need no filesystem walk
-
-    snapshot = gather_snapshot(args.root)
-    json.dump(snapshot, sys.stdout, indent=2, sort_keys=True)
+    """`gather`: print the snapshot for ``--root`` (and ``--repo``) as JSON."""
+    json.dump(_gather(args), sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     """`run`: gather the committed pulse then render the report."""
-    from .signals import gather_snapshot
-
-    return _emit_report(gather_snapshot(args.root), args)
+    return _emit_report(_gather(args), args)
 
 
 def cmd_config(args: argparse.Namespace) -> int:
@@ -106,10 +127,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_gather = sub.add_parser("gather", help="read the snapshot from committed files")
     p_gather.add_argument("--root", default=".", help="repo root (default: .)")
+    p_gather.add_argument("--repo", default=None,
+                          help="owner/name — also gather GitHub run health (GET-only)")
     p_gather.set_defaults(func=cmd_gather)
 
     p_run = sub.add_parser("run", help="gather then report")
     p_run.add_argument("--root", default=".", help="repo root (default: .)")
+    p_run.add_argument("--repo", default=None,
+                       help="owner/name — also gather GitHub run health (GET-only)")
     p_run.add_argument("--conf", help="policy file (default: built-in defaults)")
     p_run.add_argument("--out", help="also write the report to this file")
     p_run.set_defaults(func=cmd_run)

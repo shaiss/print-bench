@@ -3,13 +3,15 @@
 
 Advisory only — this report is Reeve's sole output; nothing else was changed.
 Pulse: 2 gate-run record(s) (2 full-catalog), 3 committed previews, at 2026-08-16T06:00:00Z.
-Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.5, walltime_min_seconds=30.
+Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.5, walltime_min_seconds=30, routine_dead_runs=3, lock_leak_hours=2.
 
 ## Summary
 
 | Signal | Findings |
 |---|---|
 | gate-failing | 4 |
+| routine-dead | 1 |
+| lock-leak | 1 |
 | score-regression | 3 |
 | budget-tightening | 2 |
 | walltime-regression | 1 |
@@ -22,6 +24,14 @@ Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.
 - part: build/beta.stl: 1 critical(s)
 - part: build/gamma.stl: no printcheck score, test-slice failed
 - pre-fail: delta: render failed
+
+## Routine dead — no success in a routine's last 3 completed runs
+
+- `design-run.yml` — cancelled, failure, cancelled — [latest run](https://github.com/o/r/actions/runs/300)
+
+## Ship-lock leak — an uncorroborated 🚢 SHIP-LOCK older than 2h
+
+- #281 Design brief: NUGGS desiccant tower — locked 48.5h ago, uncorroborated
 
 ## Score regression — a part below 80/100 or down ≥3
 

@@ -48,5 +48,26 @@
     {"file": "designs/beta/previews/hero.png", "bytes": 3200000, "budget": 3145728, "headroom_pct": -1.7},
     {"file": "designs/alpha/previews/turntable.gif", "bytes": 6000000, "budget": 6291456, "headroom_pct": 4.6},
     {"file": "designs/gamma/previews/ok.png", "bytes": 1000000, "budget": 3145728, "headroom_pct": 68.2}
-  ]
+  ],
+  "runHealth": {
+    "gatheredAt": "2026-08-16T06:00:00Z",
+    "workflows": [
+      {"file": "design-run.yml", "runs": [
+        {"conclusion": "cancelled", "createdAt": "2026-08-16T05:23:00Z", "url": "https://github.com/o/r/actions/runs/300"},
+        {"conclusion": "failure", "createdAt": "2026-08-15T05:23:00Z", "url": "https://github.com/o/r/actions/runs/299"},
+        {"conclusion": "cancelled", "createdAt": "2026-08-14T05:23:00Z", "url": "https://github.com/o/r/actions/runs/298"}
+      ]},
+      {"file": "backlog-burn.yml", "runs": [
+        {"conclusion": "success", "createdAt": "2026-08-16T05:17:00Z", "url": "https://github.com/o/r/actions/runs/301"},
+        {"conclusion": "success", "createdAt": "2026-08-15T05:17:00Z", "url": "https://github.com/o/r/actions/runs/297"},
+        {"conclusion": "failure", "createdAt": "2026-08-14T05:17:00Z", "url": "https://github.com/o/r/actions/runs/296"}
+      ]}
+    ],
+    "issues": [
+      {"number": 281, "title": "Design brief: NUGGS desiccant tower", "lockCreatedAt": "2026-08-14T05:30:00Z"},
+      {"number": 284, "title": "Design brief: corroborated by a branch", "lockCreatedAt": "2026-08-14T05:30:00Z"}
+    ],
+    "openPRs": [],
+    "branches": ["main", "claude/issue-284-corroborated"]
+  }
 }

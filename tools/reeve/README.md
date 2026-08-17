@@ -17,10 +17,9 @@ print-bench splits the PM role three ways (issue #229 established the first two)
 Reeve is advisory. The human lead stays primary and owns every merge; Reeve
 never gates one. Its charter is the repo-root `PM.md`.
 
-## What it reads (committed files only)
+## What it reads
 
-No GitHub GET even to gather — the pulse is entirely file-read, so the tool
-holds no token and makes no network read:
+The primary pulse is entirely file-read from the committed tree:
 
 - **`telemetry/log.ndjson`** (issue #93) — per-run gate history: printcheck
   scores, per-design wall time, preview-budget headroom, archived skips,
@@ -31,14 +30,26 @@ holds no token and makes no network read:
 - **`telemetry/REPORT.md`** — to detect roll-up drift (log has runs, report
   didn't regenerate).
 
+Plus one opt-in, GET-only live read (`src/reeve/github.py`, the groomer's
+pattern; issue #313) — only when `--repo` is passed:
+
+- **Workflow-run conclusions** for the scheduled routines (`design-run.yml`,
+  `backlog-burn.yml`, `chunker.yml`, `labeler.yml`) — the ten newest completed
+  runs each.
+- **Open issues carrying an active 🚢 SHIP-LOCK** claim, and the open PRs and
+  `claude/issue-<N>-*` branches that would corroborate one (the selector's
+  lock semantics, mirrored from `tools/backlog-burn`, not imported).
+
 ## The detectors
 
-Six pure functions of one snapshot, deterministic order, byte-stable report:
+Eight pure functions of one snapshot, deterministic order, byte-stable report:
 
 | Detector | Fires when |
 |---|---|
 | `budget-tightening` | a committed preview's size headroom is under `low_headroom_pct` (or over budget) |
 | `gate-failing` | the latest run has pre-fails, a part with no score / criticals / a failed slice, or a false derivative override |
+| `routine-dead` | none of a routine's last `routine_dead_runs` completed runs succeeded and at least one hard-failed (a pure-cancelled streak is queue noise) |
+| `lock-leak` | an active 🚢 SHIP-LOCK is older than `lock_leak_hours` with no corroborating branch or closing PR — a killed run's ghost claim (issue #312) |
 | `score-regression` | a part is below `score_floor`, or down ≥ `score_drop` vs the prior full-catalog run |
 | `walltime-regression` | a design's gate wall time rose ≥ `walltime_ratio`× (and past `walltime_min_seconds`) |
 | `archived-creep` | a design newly dropped out of gating vs the prior full-catalog run |
@@ -46,13 +57,15 @@ Six pure functions of one snapshot, deterministic order, byte-stable report:
 
 Comparisons only use full-catalog (`designs=ALL`) runs — a scoped run gates
 fewer parts. A detector whose input is absent is reported **not evaluated** with
-a reason, never silently empty (the groomer's honesty rule).
+a reason, never silently empty (the groomer's honesty rule); an offline run
+(no `--repo`) reports both run-health detectors that way.
 
 ## Advisory-only, checkable
 
 - The tool never writes: a test asserts no HTTP write verb (`POST`/`PATCH`/
   `PUT`/`DELETE`) appears anywhere in the package, and the pure core imports
-  nothing network-capable.
+  nothing network-capable — `github.py` is the one module allowed `urllib`,
+  and everything it does is a GET.
 - The scheduled workflow's single write is upserting one marker-matched sticky
   `reeve-report` issue, keyed belt-and-braces by its label and the body's first
   line. No provider secret is held, so it needs no deny-backstop.
@@ -74,9 +87,14 @@ The 2×2 decision is code (`reeve armed`), unit-tested.
 reeve report --input snapshot.json          # snapshot JSON -> markdown report
 reeve gather --root .                        # committed files -> snapshot JSON
 reeve run --root . --conf .github/reeve.conf # gather then report (the workflow)
+reeve run --root . --repo owner/name         # + the GET-only run-health read
 reeve config --get enabled                   # read the committed policy
 reeve armed --variable "$REEVE_ENABLED" --conf-enabled "$enabled"
 ```
+
+`--repo` (on `gather` and `run`) attaches the run-health block; the token comes
+from `GH_TOKEN`/`GITHUB_TOKEN`. Without it the run is fully offline and the
+run-health detectors read "not evaluated".
 
 ## Tests
 

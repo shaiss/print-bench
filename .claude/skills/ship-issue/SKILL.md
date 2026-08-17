@@ -54,6 +54,13 @@ workflow did). Section 7 says what changes when nobody is watching.
    by a run that walked away. (GitHub offers no atomic claim for an issue. If
    this ever needs to be airtight, push a claim ref first: creating a remote
    branch fails when it already exists, which a comment cannot.)
+6. **Release on a terminal stop.** If this run stops for any reason *before*
+   a `claude/issue-<N>-*` branch or an open closing PR exists — a §1 decline,
+   a parked decision (§8), any stop — **withdraw your claim** the same way
+   (edit the first line to `🚢 SHIP-LOCK WITHDRAWN`). A run that claimed then
+   walked away must not leave the issue frozen until it ages into a stale
+   takeover; the branch/PR is what carries the claim forward once real work
+   exists.
 
 If the issue is taken, say so and stop. Never work two.
 
@@ -271,10 +278,9 @@ is wrong — decline and ask, don't enumerate.
 
    Resolve with `/decide yes tol-default-loosen` or `/decide no tol-default-loosen`.
    ```
-4. **Halt cleanly.** Withdraw the SHIP-LOCK (edit its first line to
-   `🚢 SHIP-LOCK WITHDRAWN`): a parked decision leaves no branch or PR, so
-   release the claim — the `needs-decision` label is the durable pause now, not
-   the lock. Then stop. Do not push a half-resolved PR.
+4. **Halt cleanly.** A parked decision is a terminal stop with no branch or
+   PR, so withdraw the SHIP-LOCK per §0.6 — the `needs-decision` label is the
+   durable pause now, not the lock. Then stop. Do not push a half-resolved PR.
 
 **Consume** — a later run that reclaims this issue resumes by reading the
 verdict, not by re-asking:
