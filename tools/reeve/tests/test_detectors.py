@@ -40,6 +40,22 @@ def preview(file, headroom):
     return {"file": file, "bytes": 1, "budget": 100, "headroom_pct": headroom}
 
 
+def wf(file, conclusions):
+    # Newest-first, as the API returns them; the newest run carries url .../0.
+    return {"file": file, "runs": [
+        {"conclusion": c, "createdAt": f"2026-08-{16 - i:02d}T05:23:00Z",
+         "url": f"https://runs/{file}/{i}"}
+        for i, c in enumerate(conclusions)
+    ]}
+
+
+def locked(number, title="Design brief: ghost", locked_at="2026-08-16T00:00:00Z"):
+    return {"number": number, "title": title, "lockCreatedAt": locked_at}
+
+
+NOW = "2026-08-16T06:00:00Z"   # 6h after locked()'s default lockCreatedAt
+
+
 # --- budget-tightening -------------------------------------------------------
 
 def test_budget_tightening_fires_under_threshold():
@@ -79,6 +95,92 @@ def test_gate_failing_lists_hard_failures():
 
 def test_gate_failing_silent_on_clean_run():              # negative control
     assert detectors.gate_failing(record(parts=[part("build/a.stl", score=95)])) == []
+
+
+# --- routine-dead ------------------------------------------------------------
+
+def test_routine_dead_fires_on_successless_window_with_hard_failure():
+    found = detectors.routine_dead(
+        [wf("design-run.yml", ["cancelled", "failure", "cancelled"])], 3)
+    assert found == [{"workflow": "design-run.yml", "window": 3,
+                      "conclusions": ["cancelled", "failure", "cancelled"],
+                      "url": "https://runs/design-run.yml/0"}]
+
+
+def test_routine_dead_silent_with_success_in_window():    # negative control
+    assert detectors.routine_dead(
+        [wf("design-run.yml", ["failure", "success", "failure"])], 3) == []
+
+
+def test_routine_dead_silent_with_too_few_runs():         # negative control
+    # k-1 completed runs is too little history to call a routine dead.
+    assert detectors.routine_dead([wf("design-run.yml", ["failure", "failure"])], 3) == []
+
+
+def test_routine_dead_silent_on_pure_cancelled_streak():  # negative control
+    # Queue supersession cancels runs without the routine ever failing.
+    assert detectors.routine_dead(
+        [wf("design-run.yml", ["cancelled", "cancelled", "cancelled"])], 3) == []
+
+
+def test_routine_dead_only_judges_the_k_newest():
+    # A success older than the window does not save a routine.
+    found = detectors.routine_dead(
+        [wf("design-run.yml", ["failure", "failure", "failure", "success"])], 3)
+    assert [f["workflow"] for f in found] == ["design-run.yml"]
+
+
+def test_routine_dead_sorted_by_workflow_name():
+    found = detectors.routine_dead(
+        [wf("labeler.yml", ["failure"] * 3), wf("chunker.yml", ["failure"] * 3)], 3)
+    assert [f["workflow"] for f in found] == ["chunker.yml", "labeler.yml"]
+
+
+# --- lock-leak ---------------------------------------------------------------
+
+def test_lock_leak_fires_on_old_uncorroborated_lock():
+    found = detectors.lock_leak([locked(281)], [], [], NOW, CFG.lock_leak_hours)
+    assert found == [{"number": 281, "title": "Design brief: ghost",
+                      "age_hours": 6.0, "lockCreatedAt": "2026-08-16T00:00:00Z"}]
+
+
+def test_lock_leak_silent_with_corroborating_branch():    # negative control
+    assert detectors.lock_leak(
+        [locked(281)], [], ["claude/issue-281-ghost"], NOW, CFG.lock_leak_hours) == []
+
+
+def test_lock_leak_silent_with_closing_pr_body():         # negative control
+    prs = [{"number": 9, "headRefName": "other", "body": "Resolved: #281"}]
+    assert detectors.lock_leak([locked(281)], prs, [], NOW, CFG.lock_leak_hours) == []
+
+
+def test_lock_leak_silent_with_pr_head_branch():          # negative control
+    prs = [{"number": 9, "headRefName": "claude/issue-281-fix", "body": ""}]
+    assert detectors.lock_leak([locked(281)], prs, [], NOW, CFG.lock_leak_hours) == []
+
+
+def test_lock_leak_silent_under_age_threshold():          # negative control
+    fresh = locked(281, locked_at="2026-08-16T05:30:00Z")  # 0.5h < 2h
+    assert detectors.lock_leak([fresh], [], [], NOW, CFG.lock_leak_hours) == []
+
+
+def test_lock_leak_branch_match_is_boundary_safe():
+    # issue 28's branch must not corroborate issue 281's lock.
+    found = detectors.lock_leak(
+        [locked(281)], [], ["claude/issue-28-other"], NOW, CFG.lock_leak_hours)
+    assert [f["number"] for f in found] == [281]
+
+
+def test_lock_leak_skips_unparseable_lock_date():
+    # A claim that cannot be dated is skipped, never reported as leaked.
+    assert detectors.lock_leak(
+        [locked(281, locked_at="not-a-date")], [], [], NOW, CFG.lock_leak_hours) == []
+
+
+def test_lock_leak_sorted_by_number():
+    found = detectors.lock_leak(
+        [locked(285), locked(281)], [], [], NOW, CFG.lock_leak_hours)
+    assert [f["number"] for f in found] == [281, 285]
 
 
 # --- score-regression --------------------------------------------------------
@@ -176,6 +278,31 @@ def test_evaluate_scoped_runs_do_not_enable_comparisons():
     assert "walltime-regression" in result["not_evaluated"]
 
 
+def test_evaluate_marks_absent_run_health_not_evaluated():
+    # The offline invariant: no runHealth key -> both run-health detectors are
+    # "not evaluated" with the pass-`--repo` reason, never silently empty.
+    result = detectors.evaluate({"records": [], "previews": [], "reportPlaceholder": True}, CFG)
+    ne = result["not_evaluated"]
+    assert "offline run" in ne["routine-dead"]
+    assert "offline run" in ne["lock-leak"]
+    assert "routine-dead" not in result["findings"]
+    assert "lock-leak" not in result["findings"]
+
+
+def test_evaluate_run_health_present_evaluates_both():
+    snap = {"records": [], "previews": [], "reportPlaceholder": True,
+            "generatedAt": "2026-08-01T00:00:00Z",
+            "runHealth": {"gatheredAt": NOW,
+                          "workflows": [wf("design-run.yml", ["failure"] * 3)],
+                          "issues": [locked(281)], "openPRs": [], "branches": []}}
+    result = detectors.evaluate(snap, CFG)
+    assert "routine-dead" not in result["not_evaluated"]
+    assert "lock-leak" not in result["not_evaluated"]
+    assert [f["workflow"] for f in result["findings"]["routine-dead"]] == ["design-run.yml"]
+    # Ages are computed from runHealth's own gatheredAt, not generatedAt.
+    assert result["findings"]["lock-leak"][0]["age_hours"] == 6.0
+
+
 def test_evaluate_is_pure_and_repeatable():
     snap = {"records": [record(parts=[part("x", 90)])], "previews": [preview("a.png", 5.0)],
             "reportPlaceholder": True}
@@ -191,10 +318,11 @@ def test_evaluate_is_pure_and_repeatable():
 
 _PKG = pathlib.Path(detectors.__file__).parent
 _FORBIDDEN_IMPORTS = {"urllib", "socket", "http", "subprocess", "requests"}
-# Includes signals.py — Reeve's one I/O seam. It reads only committed files
-# (os/glob/json), so proving even *it* imports nothing network-capable is the
-# strongest form of the no-GitHub-read guarantee (stronger than the groomer,
-# whose github.py genuinely uses urllib and is therefore excluded there).
+# Includes signals.py — the committed-files seam, which reads only os/glob/json.
+# The one excluded module is github.py, the opt-in GET-only run-health seam
+# (issue #313): it genuinely uses urllib, exactly like the groomer's, and
+# test_github.py holds it to GET-only. cli.py stays in this list because it
+# imports github.py lazily, inside the --repo path only.
 _PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py", "signals.py")
 
 

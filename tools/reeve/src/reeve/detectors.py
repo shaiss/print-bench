@@ -13,7 +13,14 @@ The snapshot (built by ``signals.gather_snapshot``) is a plain dict::
       "records":   [ <gate-run record>, ... ],   # oldest-first
       "previews":  [ {"file","bytes","budget","headroom_pct"}, ... ],
       "reportPlaceholder": true/false,            # telemetry/REPORT.md still empty?
+      "runHealth": { ... },                       # optional: github.gather_run_health
     }
+
+The optional ``runHealth`` block (``github.gather_run_health``, issue #313)
+carries ``gatheredAt``, per-routine ``workflows`` run conclusions, the open
+``issues`` holding an active 🚢 SHIP-LOCK claim, and the ``openPRs`` /
+``branches`` that would corroborate one. It is absent on an offline run
+(no ``--repo``), and the two run-health detectors then read "not evaluated".
 
 Gate-run records carry the telemetry schema (issue #93): ``meta.designs``
 (``"ALL"`` for a full-catalog run, else a scoped list), ``gate.parts`` (per
@@ -31,14 +38,63 @@ empty, so those read "not evaluated" until history accrues.
 from __future__ import annotations
 
 import re
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 _WS_RE = re.compile(r"\s+")
+
+# GitHub honours these nine keywords, case-insensitively, each optionally
+# followed by a colon, to auto-close an issue from a PR body. Mirrored from
+# tools/backlog-burn/src/backlog_burn/select.py, not imported — the tools stay
+# independently installable, and select.py's own tests pin the semantics.
+_CLOSING_KEYWORDS = (
+    "close", "closes", "closed",
+    "fix", "fixes", "fixed",
+    "resolve", "resolves", "resolved",
+)
 
 
 def _flat(text: str) -> str:
     """Collapse whitespace so a telemetry string renders on one line."""
     return _WS_RE.sub(" ", str(text)).strip()
+
+
+def _parse_iso(ts: str) -> Optional[datetime]:
+    """Parse a GitHub ISO-8601 UTC timestamp; ``None`` if unparseable.
+
+    ``datetime.fromisoformat`` only learned to accept a trailing ``Z`` in
+    3.11, and the tool must run on 3.10, so normalise it by hand.
+    """
+    if not ts:
+        return None
+    try:
+        parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _issue_branch_re(number: int) -> re.Pattern[str]:
+    """Matcher for a ``claude/issue-<number>-*`` branch (boundary-safe).
+
+    ``number`` is escaped so a malformed snapshot value (e.g. the string
+    ``".*"``) matches as a literal, never a pattern — select.py's own guard.
+    """
+    return re.compile(rf"^claude/issue-{re.escape(str(number))}-")
+
+
+def _closes_issue(pr_body: str, number: int) -> bool:
+    """True if ``pr_body`` closes issue ``number`` via any GitHub keyword."""
+    num = re.escape(str(number))
+    for kw in _CLOSING_KEYWORDS:
+        # keyword, optional ':', whitespace, '#<number>', not glued to more
+        # digits (so "#9" does not match issue 95).
+        pattern = rf"(?i)\b{kw}:?\s+#{num}\b"
+        if re.search(pattern, pr_body or ""):
+            return True
+    return False
 
 
 def _all_records(records: list[dict]) -> list[dict]:
@@ -102,6 +158,79 @@ def gate_failing(record: dict) -> list[dict]:
                 {"kind": "derivative", "detail": f"{_flat(d['design'])} ({label}): {_flat(d.get('detail', ''))}"}
             )
     findings.sort(key=lambda f: (f["kind"], f["detail"]))
+    return findings
+
+
+def routine_dead(workflows: list[dict], k: int) -> list[dict]:
+    """Scheduled routines whose ``k`` newest completed runs hold no success.
+
+    Fires only when at least one of those runs ended in a *hard* conclusion
+    (``failure`` / ``timed_out`` / ``startup_failure``): a pure-cancelled
+    streak is queue-supersession noise (concurrency groups cancel superseded
+    runs), not a dead routine. Fewer than ``k`` completed runs is too little
+    history to call a routine dead.
+    """
+    hard = {"failure", "timed_out", "startup_failure"}
+    findings: list[dict] = []
+    for wf in workflows:
+        runs = wf.get("runs", [])[:k]  # newest-first, as the API returns them
+        if len(runs) < k:
+            continue
+        conclusions = [r.get("conclusion") for r in runs]
+        if "success" in conclusions:
+            continue
+        if not any(c in hard for c in conclusions):
+            continue
+        findings.append(
+            {"workflow": wf["file"], "window": k, "conclusions": conclusions,
+             "url": runs[0].get("url")}
+        )
+    findings.sort(key=lambda f: f["workflow"])
+    return findings
+
+
+def lock_leak(
+    issues: list[dict],
+    open_prs: list[dict],
+    branches: list[str],
+    generated_at: str,
+    leak_hours: float,
+) -> list[dict]:
+    """Active 🚢 SHIP-LOCK claims that outlived any evidence of work.
+
+    Mirrors the selector's corroboration order (``select.py``): a
+    ``claude/issue-<N>-*`` branch, or an open PR whose head branch matches or
+    whose body carries a closing keyword, corroborates the claim and clears
+    the issue here. What remains is the #312 incident class — a run killed
+    between posting its lock and pushing a branch — and it fires once the
+    claim is older than ``leak_hours``. An unparseable ``lockCreatedAt`` is
+    skipped: never report a leak on a claim that cannot be dated.
+    """
+    now = _parse_iso(generated_at)
+    findings: list[dict] = []
+    for issue in issues:
+        number = issue["number"]
+        rx = _issue_branch_re(number)
+        if any(rx.match(b or "") for b in branches or []):
+            continue
+        if any(
+            _closes_issue(pr.get("body", ""), number)
+            or rx.match(pr.get("headRefName", "") or "")
+            for pr in open_prs or []
+        ):
+            continue
+        created = _parse_iso(issue.get("lockCreatedAt", ""))
+        if created is None or now is None:
+            continue
+        age_hours = (now - created).total_seconds() / 3600.0
+        if age_hours <= leak_hours:
+            continue
+        findings.append(
+            {"number": number, "title": issue.get("title", ""),
+             "age_hours": round(age_hours, 1),
+             "lockCreatedAt": issue.get("lockCreatedAt", "")}
+        )
+    findings.sort(key=lambda f: f["number"])
     return findings
 
 
@@ -199,6 +328,23 @@ def evaluate(snapshot: dict[str, Any], cfg: Any) -> dict[str, Any]:
         not_evaluated["gate-failing"] = "no gate-run records in telemetry/log.ndjson yet"
     else:
         findings["gate-failing"] = gate_failing(records[-1])
+
+    # Run health is opt-in (issue #313): absent means an offline run, and the
+    # "not evaluated is never silently empty" rule applies to both detectors.
+    run_health = snapshot.get("runHealth")
+    if run_health is None:
+        reason = "no GitHub run-health gathered (offline run — pass --repo to enable)"
+        not_evaluated["routine-dead"] = reason
+        not_evaluated["lock-leak"] = reason
+    else:
+        rh_now = run_health.get("gatheredAt") or snapshot["generatedAt"]
+        findings["routine-dead"] = routine_dead(
+            run_health.get("workflows", []), cfg.routine_dead_runs
+        )
+        findings["lock-leak"] = lock_leak(
+            run_health.get("issues", []), run_health.get("openPRs", []),
+            run_health.get("branches", []), rh_now, cfg.lock_leak_hours,
+        )
 
     all_with_parts = [r for r in _all_records(records) if r.get("gate", {}).get("parts")]
     if not all_with_parts:

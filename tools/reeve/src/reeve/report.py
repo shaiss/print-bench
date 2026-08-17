@@ -6,21 +6,47 @@ result, and the workflow only reads the file it wrote and does the GitHub
 call. The marker is the first line of the body so the upsert step can find
 the one report issue it owns with a ``startsWith`` match.
 
-Reeve reads only committed files, so — unlike the groomer's issue-title case —
-the report carries no untrusted user text; the file paths and design names it
-renders come from the tree and the telemetry log, both controlled.
+Most of what Reeve renders — file paths, design names — comes from the tree
+and the telemetry log, both controlled. The lock-leak findings (issue #313)
+are the exception: their issue titles are untrusted GitHub text, so they go
+through ``_clean_title`` — the groomer's defusal — before rendering.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # First line of the report issue's body; the workflow's upsert keys on it.
 MARKER = "<!-- reeve-bench-health -->"
 
 
+def _clean_title(title: str) -> str:
+    """One-line, length-capped, markdown-defused rendering of an issue title.
+
+    Titles are the report's only untrusted text; they get newlines collapsed,
+    markdown specials backslash-escaped, and an 80-char cap so one weird
+    title can't reshape the report.  Deterministic by construction.
+    """
+    flat = re.sub(r"\s+", " ", title).strip()
+    escaped = re.sub(r"([\\`*_\[\]|~<>])", r"\\\1", flat)
+    return escaped[:80] + "…" if len(escaped) > 80 else escaped
+
+
 def _line_gate_failing(f: dict) -> str:
     return f"- {f['kind']}: {f['detail']}"
+
+
+def _line_routine_dead(f: dict) -> str:
+    conclusions = ", ".join(str(c) for c in f["conclusions"])
+    return f"- `{f['workflow']}` — {conclusions} — [latest run]({f['url']})"
+
+
+def _line_lock_leak(f: dict) -> str:
+    return (
+        f"- #{f['number']} {_clean_title(f['title'])} — "
+        f"locked {f['age_hours']}h ago, uncorroborated"
+    )
 
 
 def _line_score(f: dict) -> str:
@@ -57,6 +83,12 @@ def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any) -> str:
     sections = [
         ("gate-failing",
          "Gate failing — the latest run has hard failures", _line_gate_failing),
+        ("routine-dead",
+         f"Routine dead — no success in a routine's last {cfg.routine_dead_runs} completed runs",
+         _line_routine_dead),
+        ("lock-leak",
+         f"Ship-lock leak — an uncorroborated 🚢 SHIP-LOCK older than {cfg.lock_leak_hours:g}h",
+         _line_lock_leak),
         ("score-regression",
          f"Score regression — a part below {cfg.score_floor:g}/100 or down ≥{cfg.score_drop}",
          _line_score),
@@ -80,7 +112,8 @@ def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any) -> str:
         f"at {generated}.",
         f"Thresholds: low_headroom_pct={cfg.low_headroom_pct:g}, score_drop={cfg.score_drop}, "
         f"score_floor={cfg.score_floor:g}, walltime_ratio={cfg.walltime_ratio:g}, "
-        f"walltime_min_seconds={cfg.walltime_min_seconds}.",
+        f"walltime_min_seconds={cfg.walltime_min_seconds}, "
+        f"routine_dead_runs={cfg.routine_dead_runs}, lock_leak_hours={cfg.lock_leak_hours:g}.",
         "",
         "## Summary",
         "",

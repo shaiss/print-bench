@@ -35,7 +35,15 @@ _KNOWN_KEYS = (
     "score_floor",
     "walltime_ratio",
     "walltime_min_seconds",
+    "routine_dead_runs",
+    "lock_leak_hours",
 )
+
+# github.py fetches only this many completed runs per workflow (_RUNS_FETCHED
+# there; duplicated as a literal so this pure module never imports the network
+# seam). A `routine_dead_runs` window wider than the fetch could never fill,
+# and the detector — which requires a full window — would silently stop firing.
+_MAX_ROUTINE_DEAD_RUNS = 10
 
 # Named cadence presets → cron expression, same vocabulary as the sibling
 # confs so the files read alike. NOTE the presets all fire at :17 — the
@@ -95,6 +103,21 @@ def _parse_ratio(value: str, where: str) -> float:
     return parsed
 
 
+def _parse_positive_float(value: str, key: str, where: str) -> float:
+    """A finite number strictly greater than 0."""
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise ValueError(f"{where}: {key!r} must be a number > 0, got {value!r}") from None
+    # Reject non-finite (nan/inf, and overflow like 1e999) with the same
+    # discipline as _parse_ratio: `nan <= 0` is False, so a bare `<= 0` guard
+    # would let nan through and the lock-leak detector would silently never
+    # fire (every age comparison against nan is False).
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise ValueError(f"{where}: {key!r} must be a finite number > 0, got {value!r}")
+    return parsed
+
+
 def _validate_cadence(value: str, where: str) -> str:
     """Return the cron for ``value`` (preset name or raw 5-field cron)."""
     if value in CADENCE_PRESETS:
@@ -123,6 +146,8 @@ class Config:
     score_floor: float = 80.0
     walltime_ratio: float = 1.5
     walltime_min_seconds: int = 30
+    routine_dead_runs: int = 3
+    lock_leak_hours: float = 2.0
 
 
 def load(path: str = DEFAULT_PATH) -> Config:
@@ -154,6 +179,16 @@ def load(path: str = DEFAULT_PATH) -> Config:
                 setattr(cfg, key, _parse_pct(value, key, where))
             elif key == "walltime_ratio":
                 cfg.walltime_ratio = _parse_ratio(value, where)
+            elif key == "routine_dead_runs":
+                parsed = _parse_positive_int(value, key, where)
+                if parsed > _MAX_ROUTINE_DEAD_RUNS:
+                    raise ValueError(
+                        f"{where}: 'routine_dead_runs' must be ≤ {_MAX_ROUTINE_DEAD_RUNS} "
+                        f"(github.py fetches only that many runs per workflow), got {value!r}"
+                    )
+                cfg.routine_dead_runs = parsed
+            elif key == "lock_leak_hours":
+                cfg.lock_leak_hours = _parse_positive_float(value, key, where)
             else:  # score_drop, walltime_min_seconds
                 setattr(cfg, key, _parse_positive_int(value, key, where))
     return cfg
