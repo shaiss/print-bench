@@ -75,7 +75,12 @@ jobs:
     name: Resolve which designs to render
     runs-on: ubuntu-latest
     outputs:
-      designs: ${{ steps.pick.outputs.designs }}
+      # AI lifestyle imagery feature flag (issue #302). Off unless the committed
+      # .github/ai-lifestyle.conf says enabled: true — force '[]' so the whole
+      # generate matrix (the API call + PR) skips via its existing needs.detect
+      # guard. Z.AI has no true image-to-image (seed) model, so the tier ships
+      # disabled; flip the conf in a reviewed PR to re-enable it.
+      designs: ${{ steps.gate.outputs.enabled == 'true' && steps.pick.outputs.designs || '[]' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -83,8 +88,24 @@ jobs:
           # Full history: a push can carry many commits, and the range below
           # has to reach whichever one touched the manifest.
           fetch-depth: 0
+      - name: Off switch (.github/ai-lifestyle.conf)
+        id: gate
+        run: |
+          set -euo pipefail
+          # Fail-safe default-off: grep as the `if` condition is exempt from
+          # `set -e`, so a missing file, no `enabled:` line, or a non-true value
+          # all fall through to the else branch instead of aborting the step
+          # (issue #302 contract: "missing / blank / typo all read as off").
+          # Same regex as scripts/readme-gate.sh's ai_lifestyle_enabled().
+          if grep -Eq '^[[:space:]]*enabled[[:space:]]*:[[:space:]]*true[[:space:]]*(#.*)?$' .github/ai-lifestyle.conf 2>/dev/null; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::.github/ai-lifestyle.conf enabled != 'true' — AI lifestyle imagery is off (issue #302); nothing to generate. Flip the conf in a reviewed PR to enable."
+          fi
       - name: List the designs whose motion.conf this run is about
         id: pick
+        if: steps.gate.outputs.enabled == 'true'
         env:
           EVENT: ${{ github.event_name }}
           INPUT_DESIGN: ${{ github.event.inputs.design }}

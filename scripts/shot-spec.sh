@@ -93,7 +93,8 @@ is_kebab() { [[ "$1" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; }
 
 # A seed reference is the basename of a committed preview (previews/<ref>.png).
 # An AI-prefixed seed (lifestyle-* scene, product-still-* still) is a repaint,
-# not a geometry-true render — the tiers that must stay mesh-pinned refuse one.
+# not a geometry-true render — the tiers whose seed must stay geometry-true
+# refuse one (a repaint-of-a-repaint drifts even further from the real shape).
 is_ai_prefix() { case "$1" in lifestyle-*|product-still-*) return 0 ;; *) return 1 ;; esac; }
 
 # Parse a seedable manifest line "<name> | [seed=<ref> |] <prompt>" into the
@@ -397,9 +398,11 @@ cmd_lifestyle() {
     if [[ ! -f "$conf" ]]; then
       cat >"$conf" <<'HDR'
 # Tier-2 AI lifestyle-shot prompts (scripts/lifestyle-shot.sh) — one
-# '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>' per line. COSMETIC,
-# but image-to-image seeded from a committed geometry-true render (or a
-# product still), so the shape is pinned; readme-gate forces the disclosure.
+# '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>' per line. COSMETIC
+# and geometry-approximate: image-to-image seeded from a committed geometry-true
+# render (or a product still), but the model follows the prompt, not the seed's
+# shape (issue #302); readme-gate forces the disclosure. Disabled by default via
+# .github/ai-lifestyle.conf.
 HDR
     fi
     printf '%s\n' "$line" >>"$conf"
@@ -430,10 +433,12 @@ cmd_still() {
   # Angle-by-seed: an image-to-image still has no camera of its own — its angle
   # comes from the tier-1 render it seeds, which is why there is no --view/--camera
   # here. Default the seed to the still's own name; it must be a geometry-true
-  # render (a shots.conf shot), never an AI image, so the shape stays mesh-pinned.
+  # render (a shots.conf shot), never an AI image, so the seed is as close to the
+  # true mesh as the pipeline allows (the output is still an approximate repaint,
+  # issue #302).
   [[ -n "$seed" ]] || seed="$still"
   is_kebab "$seed" || die "seed '$seed' must be kebab-case ([a-z0-9-])"
-  ! is_ai_prefix "$seed" || die "seed '$seed' is an AI image — a product still must seed from a geometry-true tier-1 render (a shots.conf shot) so its shape stays pinned to the real mesh"
+  ! is_ai_prefix "$seed" || die "seed '$seed' is an AI image — a product still must seed from a geometry-true tier-1 render (a shots.conf shot), never a repaint"
 
   local conf="$ROOT/$design/product-still.conf"
   if manifest_has "$conf" "$still"; then
@@ -706,7 +711,7 @@ run_selftest() {
   _run 1 "needs --scene"           -- lifestyle gadget nostory
 
   # still (tier 1.5): happy path writes a seed= line + disclosure, then freeze,
-  # missing-prompt, and the AI-seed refusal (a still stays geometry-pinned).
+  # missing-prompt, and the AI-seed refusal (a still seeds from geometry-true).
   _run 0 "geometry is approximate" -- still gadget hero-iso --seed product-hero --prompt "the bare part on a seamless white sweep"
   if ! grep -qE '^hero-iso \| seed=product-hero \| the bare part on a seamless white sweep$' "$tmp/designs/gadget/product-still.conf"; then
     echo "SELFTEST FAIL: still did not write the expected line"; sed 's/^/    /' "$tmp/designs/gadget/product-still.conf"; pass=0

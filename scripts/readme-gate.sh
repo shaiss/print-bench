@@ -102,6 +102,26 @@ cd "$(dirname "$0")/.."
 # fixture tree without touching the real designs/; defaults to designs/.
 ROOT="${READMEGATE_DESIGNS_DIR:-designs}"
 
+# AI lifestyle imagery feature flag (issue #302). Requirement 9 below gates
+# AI-styled embeds (previews/lifestyle-* and previews/product-still-*) only when
+# the tier is ENABLED; when off, a committed AI image is neither required to be
+# embedded nor rejected for how it is. The switch is the committed
+# .github/ai-lifestyle.conf (`enabled: true`); off is fail-safe (a missing file,
+# a blank value, or a typo all read as off) — Z.AI has no true image-to-image
+# (seed) model, so the tier ships disabled. READMEGATE_AI_LIFESTYLE is a
+# test-only override the --selftest sets to force the check on, so the
+# requirement-9 fixtures still fire regardless of the repo's real flag;
+# production never sets it. Tier-1 studio shots (requirement 7) are unaffected.
+ai_lifestyle_enabled() {
+  case "${READMEGATE_AI_LIFESTYLE:-}" in
+    true)  return 0 ;;
+    false) return 1 ;;
+  esac
+  local conf=".github/ai-lifestyle.conf"
+  [[ -f "$conf" ]] || return 1
+  grep -qE '^[[:space:]]*enabled[[:space:]]*:[[:space:]]*true[[:space:]]*(#.*)?$' "$conf"
+}
+
 fail=0
 
 err() {
@@ -467,9 +487,10 @@ check_one() {
   #    previews/lifestyle-*.png (tier-2 scene still), previews/lifestyle-*.gif
   #    (tier-2 motion clip, issue #75), or previews/product-still-*.png
   #    (tier-1.5 bare-part still) IS the trigger, because an AI restyle cannot
-  #    be regenerated from source. A product still is image-to-image seeded from
-  #    the true mesh so its shape is close, but it is still an AI repaint, so it
-  #    carries the identical disclosure. All are
+  #    be regenerated from source. A product still is nominally image-to-image
+  #    from a tier-1 render, but the provider does not treat the seed as a shape
+  #    constraint (issue #302), so it is an AI repaint like the rest and carries
+  #    the identical disclosure. All are
   #    cosmetic and assumed geometrically approximate, so the gate never
   #    checks geometry — it checks the DISCLOSURE, in canonical form, that
   #    keeps a cosmetic image off the page passing as a photo (or a working
@@ -485,6 +506,12 @@ check_one() {
   #    its pixels. That masquerade is exactly what the /jane-review and
   #    /drik-review disclosure rules exist to catch; the gate closes the
   #    honest-author failure modes, the reviewers close the adversarial one.
+  # Gated by the AI-lifestyle feature flag (issue #302): when the tier is off
+  # (the committed default), a committed lifestyle-*/product-still- image is
+  # neither required to be embedded nor rejected for how it is — so "hide the
+  # existing AI imagery" passes whether a design keeps or drops its embeds. Flip
+  # .github/ai-lifestyle.conf to `enabled: true` to re-arm the disclosure gate.
+  if ai_lifestyle_enabled; then
   local lf lrel lbytes budget verdict
   # -iname: case-insensitive, so a stray .PNG can't slip the lowercase glob.
   while IFS= read -r lf; do
@@ -522,6 +549,7 @@ check_one() {
   done < <(find "${dir}/previews" -maxdepth 1 -type f \
              \( -iname 'lifestyle-*.png' -o -iname 'lifestyle-*.gif' \
                 -o -iname 'product-still-*.png' \) 2>/dev/null | sort)
+  fi
 
   if [[ "$ok" == 1 ]]; then
     echo "ok    ${name}"
@@ -559,9 +587,14 @@ run_selftest() {
   }
 
   local pass=1
-  _check() {   # _check <name> <expected-rc> <needle>
+  # _check forces the AI-lifestyle flag ON (issue #302) so every requirement-9
+  # fixture below exercises the disclosure gate regardless of the repo's real
+  # (default-off) flag — otherwise disabling the tier would silently disarm the
+  # only coverage requirement 9 has. _check_off is the mirror that proves the
+  # flag actually switches the gate off.
+  _check() {   # _check <name> <expected-rc> <needle>  (AI-lifestyle flag ON)
     local n="$1" want_rc="$2" needle="$3" out rc=0
-    out="$(READMEGATE_DESIGNS_DIR="$tmp" bash "$SELF" "$n" 2>&1)" || rc=$?
+    out="$(READMEGATE_DESIGNS_DIR="$tmp" READMEGATE_AI_LIFESTYLE=true bash "$SELF" "$n" 2>&1)" || rc=$?
     if [[ "$rc" != "$want_rc" ]]; then
       echo "SELFTEST FAIL  ${n}: expected exit ${want_rc}, got ${rc}"
       sed 's/^/    /' <<<"$out"
@@ -575,6 +608,23 @@ run_selftest() {
       return
     fi
     echo "selftest ok    ${n} (${needle:-passes clean})"
+  }
+  _check_off() {   # like _check but with the AI-lifestyle flag forced OFF
+    local n="$1" want_rc="$2" needle="$3" out rc=0
+    out="$(READMEGATE_DESIGNS_DIR="$tmp" READMEGATE_AI_LIFESTYLE=false bash "$SELF" "$n" 2>&1)" || rc=$?
+    if [[ "$rc" != "$want_rc" ]]; then
+      echo "SELFTEST FAIL  ${n} (flag off): expected exit ${want_rc}, got ${rc}"
+      sed 's/^/    /' <<<"$out"
+      pass=0
+      return
+    fi
+    if [[ -n "$needle" ]] && ! grep -qF "$needle" <<<"$out"; then
+      echo "SELFTEST FAIL  ${n} (flag off): output missing \"${needle}\""
+      sed 's/^/    /' <<<"$out"
+      pass=0
+      return
+    fi
+    echo "selftest ok    ${n} (flag off; ${needle:-passes clean})"
   }
 
   local d
@@ -741,8 +791,9 @@ run_selftest() {
   _check motion-uppercase-gif-budget 0 ""
 
   # --- Product stills (previews/product-still-*.png, tier 1.5). A bare-part AI
-  # still is image-to-image seeded from the true mesh, but still an AI repaint,
-  # so it carries the IDENTICAL disclosure and reuses lifestyle_disclosure()
+  # still is nominally image-to-image from a tier-1 render, but an AI repaint all
+  # the same (the provider ignores the seed's shape, issue #302), so it carries
+  # the IDENTICAL disclosure and reuses lifestyle_disclosure()
   # verbatim. No product-still-*.png exists in designs/ yet, so these fixtures
   # are the ONLY proof the product-still- trigger fires — without them the glob
   # branch could be dropped and every gate in the repo would stay green.
@@ -807,6 +858,23 @@ run_selftest() {
     printf 'Ready to print.\n'
   } >>"$d/README.md"
   _check still-uppercase-ext 1 "AI-styled scene"
+
+  # --- AI-lifestyle feature flag (issue #302). Every fixture above runs with
+  # READMEGATE_AI_LIFESTYLE=true (forced on by _check), so requirement 9 fires.
+  # These pin the flag itself: the SAME undisclosed committed image FAILS when
+  # the tier is on and PASSES when it is off — proving the gate both fires and
+  # switches off, so "hide the existing AI imagery behind the flag" is honest.
+
+  # flag-off-lifestyle: a committed lifestyle still, never embedded/disclosed.
+  d="$(_fixture flag-off-lifestyle)"; : >"$d/previews/lifestyle-hero.png"
+  _check flag-off-lifestyle 1 "never shows it"   # flag ON  -> MISSING_EMBED fails
+  _check_off flag-off-lifestyle 0 ""             # flag OFF -> requirement 9 skipped, passes
+
+  # flag-off-still: same for a product still, so the off-switch covers the whole
+  # AI family, not just lifestyle-*.
+  d="$(_fixture flag-off-still)"; : >"$d/previews/product-still-hero.png"
+  _check flag-off-still 1 "never shows it"       # flag ON  -> fails
+  _check_off flag-off-still 0 ""                 # flag OFF -> passes
 
   # --- Assembly (previews/exploded.png, issue #157). A design with an
   # assembly.conf must commit the exploded view, embed it, and stay in budget.

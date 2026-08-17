@@ -6,7 +6,38 @@
 // embeds and disclosures (readme-gate.sh requirement 9 gates them there);
 // this only changes how the *site* presents what the README already carries.
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 const MEDIA_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+
+/**
+ * Is this preview an AI-styled tier (lifestyle scene, motion clip, or product
+ * still)? The single predicate the feature flag keys on — it reuses
+ * classifyMedia so "what counts as AI" is defined in exactly one place.
+ * Covers `lifestyle-*.png`, `lifestyle-*.gif`, and `product-still-*.png`.
+ */
+export function isAiLifestyle(file) {
+  return classifyMedia(file).ai;
+}
+
+/**
+ * The AI-lifestyle feature flag (issue #302), read from the committed
+ * `.github/ai-lifestyle.conf`. Default-off and fail-safe: enabled ONLY when a
+ * non-comment line reads exactly `enabled: true` — a missing file, a blank
+ * value, or anything else is off. The build is offline/deterministic, so this
+ * is a plain committed-file read (the site can't shell out to the repo's conf
+ * tools on Vercel). When off, the site passes over every AI-styled preview.
+ */
+export function aiLifestyleEnabled(repoRoot) {
+  const conf = join(repoRoot, ".github", "ai-lifestyle.conf");
+  if (!existsSync(conf)) return false;
+  for (const raw of readFileSync(conf, "utf8").split("\n")) {
+    const line = raw.replace(/#.*$/, "").trim();
+    if (/^enabled\s*:\s*true$/.test(line)) return true;
+  }
+  return false;
+}
 
 /** The standard AI disclosures, shown as a stage caption on exactly the
  * media they apply to — same substance as the README's italic paragraphs. */

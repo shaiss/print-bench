@@ -46,7 +46,13 @@ import {
 } from "./lib/decisions.mjs";
 import { decisionsToNotifications } from "./lib/notifications.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
-import { stripReadmeMedia, designMedia, missingMediaRefs } from "./lib/media.mjs";
+import {
+  stripReadmeMedia,
+  designMedia,
+  missingMediaRefs,
+  aiLifestyleEnabled,
+  isAiLifestyle,
+} from "./lib/media.mjs";
 import { buildModel } from "./lib/model.mjs";
 import {
   indexPage,
@@ -397,6 +403,15 @@ async function main() {
     // are registered as assets by hand because — like the gallery thumbnails
     // below — no rendered markdown references them anymore.
     const { markdown: proseMarkdown, alts } = stripReadmeMedia(design.readme);
+    // AI lifestyle imagery feature flag (issue #302). When off, readDesigns
+    // already dropped the AI previews from design.previews, but the README may
+    // still embed them (readme-gate requirement 9 is flag-gated, not forced to
+    // strip). Those embeds are lifted out of the prose by stripReadmeMedia and
+    // never rendered, so drop their now-orphaned alts keys before the reference
+    // check below — otherwise missingMediaRefs would flag a deliberately hidden
+    // file as a broken embed and fail the build.
+    if (!aiLifestyleEnabled(REPO_ROOT))
+      for (const k of [...alts.keys()]) if (isAiLifestyle(k)) alts.delete(k);
     // The stripper lifts embeds before renderMarkdown's reference checker
     // sees them, so a lifted embed naming a missing file must fail the build
     // here — silently dropping it would break the unresolved-local-reference
