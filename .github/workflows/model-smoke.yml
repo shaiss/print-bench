@@ -1,0 +1,52 @@
+name: Model chain smoke
+
+# Proof that a registry chain's links are actually CALLABLE, not just
+# well-formed (issue #298). `model-registry check` and the drift guard prove
+# the registry parses and matches the workflow; neither can prove a model id
+# is servable by the key that would call it — the review chain's old
+# claude-opus-4-8 backstop passed every static check and was rejected at $0 on
+# its first live request. This workflow makes the live request: it walks the
+# selected chain and sends a real 1-token Messages call per link whose
+# provider secret is set, failing if any configured link cannot answer (or if
+# no secret is configured at all — a run that proves nothing must not be
+# green).
+#
+# Dispatch it on demand: after editing a chain's Anthropic tail, when a
+# provider misbehaves, or before pointing a new routine at a chain (#243).
+# Dispatching from a PR branch is deliberate — it proves a registry edit
+# BEFORE it merges. Read-only permissions; the provider secrets are the only
+# exposure, the same accepted dispatch posture as the other key-holding
+# workflows (docs/actions-security.md — write access is required to dispatch).
+#
+# Each provider's secret is wired LITERALLY below (the Actions constraint the
+# registry documents): a new provider stanza needs its secret line added here
+# in the same PR, or its links report "secret not set" and are skipped.
+
+on:
+  workflow_dispatch:
+    inputs:
+      chain:
+        description: "Registry chain to smoke-test (.github/models/registry.conf)"
+        required: false
+        default: review
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke the selected chain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Ping every configured link with a real 1-token request
+        env:
+          PYTHONPATH: tools/model-registry/src
+          CHAIN: ${{ inputs.chain }}
+          ZAI_KEY: ${{ secrets.ZAI_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python3 -m model_registry smoke "$CHAIN"

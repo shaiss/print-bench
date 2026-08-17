@@ -4,6 +4,7 @@
     model-registry resolve <chain>       # ordered links -> $GITHUB_OUTPUT + JSON
     model-registry chain <chain>         # the ordered model ids, one per line
     model-registry show                  # human summary of providers/models/chains
+    model-registry smoke <chain>         # live 1-token ping of each configured link
 
 ``resolve`` is what a workflow calls: it appends ``link_count`` plus
 ``link<N>_model`` / ``link<N>_provider`` lines to ``$GITHUB_OUTPUT`` (the same
@@ -27,6 +28,7 @@ from dataclasses import asdict
 from typing import Optional
 
 from . import registry as reg_mod
+from . import smoke as smoke_mod
 from .registry import Registry
 
 
@@ -105,6 +107,23 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_smoke(args: argparse.Namespace) -> int:
+    """`smoke <chain>`: prove each configured link is callable with a live request.
+
+    Static checks cannot prove a model id is servable by a key (issue #298 —
+    the review chain's claude-opus-4-8 backstop passed every check and was dead
+    on its first live call).  This walks the chain and makes a real 1-token
+    request per link whose provider secret is set in the environment; exit 0
+    only when every attempted link answered, and a run that could attempt
+    nothing (no secret set) fails too, so it can never report a green nothing.
+    """
+    reg = _load(args)
+    lines, code = smoke_mod.smoke_chain(reg, args.chain, os.environ)
+    for line in lines:
+        print(line)
+    return code
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="model-registry", description=__doc__)
     parser.add_argument("--path", default=None,
@@ -126,6 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_show = sub.add_parser("show", help="human summary of the registry")
     p_show.set_defaults(func=cmd_show)
+
+    p_smoke = sub.add_parser(
+        "smoke", help="live 1-token ping of each chain link whose secret is set")
+    p_smoke.add_argument("chain", help="the chain id to smoke-test")
+    p_smoke.set_defaults(func=cmd_smoke)
 
     return parser
 

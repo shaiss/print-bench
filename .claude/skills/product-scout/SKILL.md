@@ -193,13 +193,16 @@ parking are decisions the scout does not get to make.
 
 ## 5. Model tier
 
-Runs on a **fast/cheap model**, pinned inline in
-`.github/workflows/product-scout.yml` per the repo's simple-fallback pattern
-(the same shape `backlog-burn.yml` uses), because generation is the
-cheap-to-be-wrong case. `TODO: migrate model selection to the provider/model
-registry (#206, landed) — tracked as child C, #243`, so the pinned model
-becomes a `[chain:scout]` resolved from `.github/models/registry.conf` rather
-than a fourth inline chain.
+Runs on a **fast/cheap model**, resolved from the `scout` chain in
+`.github/models/registry.conf` (the provider/model registry, #206) —
+`.github/workflows/product-scout.yml` resolves the chain into
+`steps.chain.outputs.link1_model` and passes it as the `--model` to both
+provider ship steps, so no model id is pinned in the workflow or this skill.
+Single link on purpose: generation is the cheap-to-be-wrong case (a bad
+proposal is one a human closes, and a failed run costs nothing), so there is
+no frontier backstop to walk — the same reasoning as the groomer's
+`groomer-narrative` chain. Swapping the scout to another model is a registry
+edit, not a skill or workflow edit.
 
 ## 6. The write surface — an MCP tool, not a shell command
 
