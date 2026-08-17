@@ -88,9 +88,12 @@ jobs:
         id: gate
         run: |
           set -euo pipefail
-          enabled="$(grep -E '^[[:space:]]*enabled[[:space:]]*:' .github/ai-lifestyle.conf 2>/dev/null \
-            | head -1 | sed -E 's/#.*$//; s/^[^:]*:[[:space:]]*//; s/[[:space:]]*$//')"
-          if [ "$enabled" = "true" ]; then
+          # Fail-safe default-off: grep as the `if` condition is exempt from
+          # `set -e`, so a missing file, no `enabled:` line, or a non-true value
+          # all fall through to the else branch instead of aborting the step
+          # (issue #302 contract: "missing / blank / typo all read as off").
+          # Same regex as scripts/readme-gate.sh's ai_lifestyle_enabled().
+          if grep -Eq '^[[:space:]]*enabled[[:space:]]*:[[:space:]]*true[[:space:]]*(#.*)?$' .github/ai-lifestyle.conf 2>/dev/null; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
