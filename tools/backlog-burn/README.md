@@ -145,14 +145,22 @@ by its literal name, so a runtime label can't pick the secret on its own:
 
 - `anthropic` — Claude via `api.anthropic.com`, secret `ANTHROPIC_API_KEY` (default).
 - `zai` — Z.AI GLM via its Anthropic-compatible endpoint
-  (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, `--model glm-5.2`),
-  secret `ZAI_KEY`.
+  (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`), secret `ZAI_KEY`.
 
 Switching is this one line in the config. Adding a new provider is a new ship
 step in the workflow plus its label in `KNOWN_PROVIDERS`. Note: `/ship-issue`
 is a Claude Code skill and Anthropic doesn't officially support routing Claude
 Code to non-Claude models, so non-`anthropic` providers are best-effort and
 quality may vary.
+
+The **model ids** are the model registry's decision, not this config's
+(issue #297): `backlog-burn.yml` resolves `[chain:ship]` from
+`.github/models/registry.conf` (glm-5.2 → glm-5.1 → glm-4.6 → claude-opus-4-8)
+and walks the links — one continue-on-error step per link, a dead model
+falling through to the next instead of failing the run. `provider:` picks
+which provider's step STARTS the walk; the per-provider secret wiring stays
+literal (the Actions constraint). `tools/model-registry`'s drift-guard test
+pins the workflow to the chain.
 
 ## Layout
 

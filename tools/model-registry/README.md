@@ -67,6 +67,18 @@ the ship step land together.
 read those instead of hardcoding `--model`. `tests/test_workflow_drift.py` pins the
 registry and the workflow together so they cannot silently diverge.
 
+Since #297 the four scheduled agentic routines consume it too, in a slightly
+different shape: `design-run.yml`, `backlog-burn.yml`, `chunker.yml` and
+`labeler.yml` each resolve their chain inside the running job and express the
+links as **walk steps** — one continue-on-error claude-code-action step per
+link, each gated on the earlier links having failed, so a dead model falls
+through to the next link instead of killing the run (the failure mode that
+motivated #297). Chains: `[chain:design-run]` (frontier-first),
+`[chain:ship]` (the burn and the chunker, cheapest-capable-first) and
+`[chain:labeler]` (cheapest-first). The same drift-guard test pins all of
+them — link position, literal secret, endpoint, the walk gates, the
+whole-chain-failure gate, and the secret-absent `::notice::` skip.
+
 ## Layout
 
 - `src/model_registry/registry.py` — the parser (fail-loud, stdlib `configparser`)
@@ -90,4 +102,5 @@ python -m pytest tools/model-registry/tests -q
 
 A positive case and a negative control for every parser rule, the CLI's
 `$GITHUB_OUTPUT` emission, and the drift guard that holds `.github/models/registry.conf`
-and `.github/workflows/auto-review.yml` in correspondence.
+and the five consuming workflows (`auto-review.yml` per-link; `design-run.yml`,
+`backlog-burn.yml`, `chunker.yml`, `labeler.yml` per-walk-step) in correspondence.
