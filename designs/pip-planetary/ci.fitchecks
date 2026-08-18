@@ -1,0 +1,17 @@
+# Print-in-place fit proof for the whole captive train, as three boolean
+# checks on rendered intersections (facet count of the export):
+#   fitcheck        empty       — every pairwise intersection of the moving
+#                                 bodies (sun/planets/carrier, pairwise and vs
+#                                 the housing) renders zero facets: the train
+#                                 is free, not fused.
+#   fitcheck_neg    interferes  — the planet bore shrunk onto the carrier pin
+#                                 (clearance driven 0.6 negative) MUST overlap,
+#                                 proving the empty check can fail.
+#   fitcheck_phase  interferes  — the sun's mesh phase typo'd from the
+#                                 calibrated 15° to 0° MUST collide with the
+#                                 planets, proving the phasing constants are
+#                                 load-bearing, not decoration (issue #37's
+#                                 lesson: a render cannot measure itself).
+fitcheck        empty
+fitcheck_neg    interferes
+fitcheck_phase  interferes
