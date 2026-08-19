@@ -5,7 +5,8 @@
 John Cena carries a watch engraved on two sides: *"comparison is the thief of
 joy"* on the back (for when he doesn't feel enough) and *"memento mori"* on the
 other (for when his head gets too big) — "a keeper of perspective, not time"
-([interview](https://www.reddit.com/r/MotivationalThoughts/s/q9BbhOayrd)).
+(as he tells it in an [interview clip shared on
+Reddit](https://www.reddit.com/r/MotivationalThoughts/s/q9BbhOayrd)).
 This design turns those two engravings into a two-sided pocket coin, plus a
 print-in-place **flipper charm**: the coin captured in a keyring gimbal so you
 physically flip it to the reminder you need. Tier reference:

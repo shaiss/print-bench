@@ -1,6 +1,8 @@
 # Perspective Coin
 
-A two-sided pocket coin of the two engravings John Cena keeps on his watch —
+A two-sided pocket coin of the two engravings John Cena keeps on his watch
+(as he tells it in an [interview clip shared on
+Reddit](https://www.reddit.com/r/MotivationalThoughts/s/q9BbhOayrd)) —
 **"COMPARISON IS THE THIEF OF JOY"** around a radiant sun on one face, for the
 days you don't feel like enough, and **"MEMENTO MORI"** around an hourglass on
 the other, for the days your head gets too big. Print the bare coin for your
