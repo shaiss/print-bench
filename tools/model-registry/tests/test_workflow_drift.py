@@ -41,9 +41,10 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "auto-review.yml"
 SCOUT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "product-scout.yml"
 REGISTRY = REPO_ROOT / ".github" / "models" / "registry.conf"
 
-# The three reviewer jobs that carry the fallback chain. Each has one ship step
-# per registry link, in chain order.
-REVIEWER_JOBS = ("jane-review", "drik-review", "design-coach")
+# The reviewer-round jobs that carry the fallback chain — the two reviewer
+# personas, the PM triage gate on their feedback, and the coach. Each has one
+# ship step per registry link, in chain order.
+REVIEWER_JOBS = ("jane-review", "drik-review", "pm-triage", "design-coach")
 
 # A top-level job header: a 2-space-indented `name:` with no inline value. Only
 # valid inside the `jobs:` section (elsewhere — e.g. `on:` → `pull_request:` — a
@@ -102,7 +103,7 @@ def test_every_ship_step_is_pinned_to_its_registry_link():
     This is the guard's core: it reads the *workflow* and compares each slot's
     model reference, literal secret, and endpoint against what the *registry*
     resolves to — so a scrambled model reference, a rewired secret, or a wrong
-    endpoint in any of the three jobs fails, and nothing is restated as a constant.
+    endpoint in any of the four jobs fails, and nothing is restated as a constant.
     """
     links = Registry.load(str(REGISTRY)).resolve("review")
     assert links, "the `review` chain resolved to zero links"
