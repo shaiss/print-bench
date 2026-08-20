@@ -1,0 +1,118 @@
+# A neutral vendor adoption study: a request to EVALUATE a product, not to
+# adopt it. Field labels below must stay identical to the `## ` headings in
+# templates/adoption-study.md — that file is the canonical format.
+name: Adoption study
+description: Request a neutral evaluation of a vendor product — its capabilities, license reach, and how it might slot into print-bench. Not a request to adopt.
+title: "Adoption study: "
+labels: ["adoption-study"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A **neutral** study of a vendor product: filing this asks for an
+        **evaluation**, not adoption — no decision to integrate is implied or
+        made here. Every capability claim needs a **link or evidence**; an
+        unsupported claim is an assumption, so put it under *Assumptions &
+        claims to verify* rather than stating it as fact. License reach is
+        first-class here — print-bench treats the GPL-vs-BSD boundary as a
+        design constraint (`docs/licensing.md`), so be exact about terms.
+        Canonical format, with fuller guidance per section:
+        `templates/adoption-study.md`.
+  - type: input
+    id: vendor-company
+    attributes:
+      label: Vendor / company
+      description: Who makes or maintains the product.
+      placeholder: Acme Robotics, Inc.
+    validations:
+      required: true
+  - type: input
+    id: product-name
+    attributes:
+      label: Product name
+      description: The product being studied.
+      placeholder: SlicerPro
+    validations:
+      required: true
+  - type: input
+    id: product-url
+    attributes:
+      label: Product URL
+      description: The canonical home page or repository for the product.
+      placeholder: https://example.com/slicerpro
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: License
+      description: "Exact license (e.g. BSD-2-Clause, GPL-3.0, MIT, proprietary). Reach matters here — see docs/licensing.md for the GPL/BSD boundary."
+      placeholder: GPL-3.0-or-later
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: What kind of thing this is, so the study routes to the right evaluators.
+      options:
+        - OpenSCAD library
+        - Slicer / CAM tool
+        - Hardware catalogue (vitamins)
+        - Rendering / preview tool
+        - CI / tooling / observability integration
+        - Printer / material profile
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-it-does
+    attributes:
+      label: What it does / what it claims
+      description: One paragraph — what the product is, the problem it solves, and what its makers claim it does.
+      placeholder: A CLI slicer that claims support-free tree-support generation and 2x faster path planning than PrusaSlicer.
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities-offered
+    attributes:
+      label: Capabilities offered
+      description: "One row per capability. Each needs evidence — a link, a doc reference, or a demo — not a bare claim."
+      value: |
+        | Capability | What it does | Evidence / link |
+        |---|---|---|
+        | | | |
+    validations:
+      required: true
+  - type: textarea
+    id: integration-surface
+    attributes:
+      label: Integration surface
+      description: How it would slot into print-bench — a lib/ module, a scripts/ tool, a styles/ pack, a single design, or the autonomy loop. Where it plugs in, and what it would touch.
+  - type: textarea
+    id: links-docs
+    attributes:
+      label: Links & docs
+      description: Repository, API reference, examples, and anything else an evaluator needs to reach the real thing.
+    validations:
+      required: true
+  - type: textarea
+    id: licensing-distribution
+    attributes:
+      label: Licensing & distribution notes
+      description: Copyleft reach, attribution obligations, and how distributing print-bench output would be affected. See docs/licensing.md.
+  - type: textarea
+    id: maintenance-provenance
+    attributes:
+      label: Maintenance & provenance
+      description: Release cadence and recency, versioning scheme, who maintains it, and how healthy the project looks.
+  - type: textarea
+    id: assumptions-claims
+    attributes:
+      label: Assumptions & claims to verify
+      description: Every claim taken on faith, restated in one list so an evaluator can confirm or refute each.
+  - type: textarea
+    id: open-questions
+    attributes:
+      label: Open questions
+      description: What must be answered before an adoption decision could be made. Empty claims the study is ready to evaluate as-is.
