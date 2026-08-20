@@ -78,17 +78,29 @@ if jobs_start is None:
     sys.stderr.write(f"ci-ok-guard: {workflow_path} has no top-level `jobs:` block\n")
     sys.exit(1)
 
-# (name, start_line_index) for every job header, in file order.
+# (name, start_line_index) for every job header, in file order. A job header
+# is a 2-space-indented key — bare, "double-" or 'single-'quoted — with ANY
+# value form after the colon: empty, a scalar, a {flow map}, or an &anchor.
+# Anything else at 2-space indent inside the jobs block is an unrecognized
+# form we refuse to skip silently: a silently-skipped job is the exact false
+# pass this guard exists to prevent, so it fails loud instead.
 job_headers = []
+JOB_HEADER = re.compile(r"""^  (?:"([A-Za-z0-9_-]+)"|'([A-Za-z0-9_-]+)'|([A-Za-z0-9_-]+)):(?:\s.*)?$""")
 for i in range(jobs_start + 1, len(lines)):
     ln = lines[i]
     if ln.strip() == "" or ln.lstrip().startswith("#"):
         continue
     if re.match(r"^\S", ln):          # a new top-level key → jobs block ended
         break
-    m = re.match(r"^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$", ln)
+    m = JOB_HEADER.match(ln)
     if m:
-        job_headers.append((m.group(1), i))
+        job_headers.append((m.group(1) or m.group(2) or m.group(3), i))
+    elif re.match(r"^  \S", ln):      # a 2-space key we could not parse as a job
+        sys.stderr.write(
+            f"ci-ok-guard: {workflow_path}:{i + 1}: unrecognized job-header form "
+            f"{ln.strip()!r} — cannot prove it is wired into {aggregator}.needs; "
+            f"a silently-skipped job is the false pass this guard exists to catch\n")
+        sys.exit(1)
 
 if not job_headers:
     sys.stderr.write(f"ci-ok-guard: {workflow_path} defines no jobs under `jobs:`\n")
@@ -108,8 +120,11 @@ def is_job_level_advisory(name):
     indent). Step-level flags (8+ spaces, inside `steps:`) are NOT this — they
     make one step non-fatal, not the whole job advisory."""
     start, end = bounds[name]
+    # Case-insensitive true: YAML/Actions accept `true`/`True`/`TRUE`, and a
+    # truthy flag makes the job non-gating however it is spelled, so exempting
+    # it is correct regardless of case.
     for ln in lines[start + 1:end]:
-        if re.match(r"^    continue-on-error:\s*true\s*(?:#.*)?$", ln):
+        if re.match(r"^    continue-on-error:\s*true\s*(?:#.*)?$", ln, re.IGNORECASE):
             return True
     return False
 
@@ -130,7 +145,16 @@ while i < a_end:
         seen_needs_key = True
         rest = m.group(1)
         if rest.startswith("["):                     # flow list: needs: [a, b]
-            needs += [t.strip() for t in rest.strip("[]").split(",") if t.strip()]
+            # May span multiple lines: keep consuming until the closing ']'.
+            flow = rest
+            j = i + 1
+            while "]" not in flow and j < a_end:
+                flow += " " + lines[j].strip()
+                j += 1
+            inner = flow[flow.find("[") + 1: flow.rfind("]")] if "]" in flow else flow[1:]
+            needs += [t.strip().strip("'\"") for t in inner.split(",") if t.strip()]
+            i = j
+            continue
         elif rest and not rest.startswith("#"):       # single scalar: needs: a
             needs.append(rest)
         else:                                         # block list on next lines
@@ -326,6 +350,71 @@ EOF
     return 1
   else
     echo "ok    selftest: an unflagged 'advisory' job still must be wired"
+  fi
+
+  # BAD 5: the false-pass the header regex used to allow — a blocking job whose
+  # header carries a flow-mapping value (valid Actions YAML), unwired. It must
+  # NOT be silently skipped; the guard must catch it. Must FAIL.
+  cat > "$tmp/flowjob.yml" <<'EOF'
+name: T
+on: [push]
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+  newgate: {runs-on: ubuntu-latest}
+  ci-ok:
+    needs:
+      - changes
+    runs-on: ubuntu-latest
+EOF
+  if check_file "$tmp/flowjob.yml" ci-ok >/dev/null 2>&1; then
+    echo "FAIL  selftest: an unwired flow-mapping job was silently skipped (false pass)"
+    return 1
+  else
+    echo "ok    selftest: an unwired job with a flow-mapping header is caught"
+  fi
+
+  # GOOD 3: a multi-line YAML flow sequence for needs (valid) must be parsed in
+  # full, not aborted as "no needs list". Must PASS.
+  cat > "$tmp/multineeds.yml" <<'EOF'
+name: T
+on: [push]
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest
+  ci-ok:
+    needs: [changes,
+            build]
+    runs-on: ubuntu-latest
+EOF
+  if check_file "$tmp/multineeds.yml" ci-ok >/dev/null 2>&1; then
+    echo "ok    selftest: a multi-line flow needs list is parsed in full"
+  else
+    echo "FAIL  selftest: a valid multi-line flow needs list was rejected"; return 1
+  fi
+
+  # GOOD 4: the advisory exemption is case-insensitive — `continue-on-error:
+  # True` still exempts an unwired job. Must PASS.
+  cat > "$tmp/capadvisory.yml" <<'EOF'
+name: T
+on: [push]
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+  advisory:
+    runs-on: ubuntu-latest
+    continue-on-error: True
+  ci-ok:
+    needs:
+      - changes
+    runs-on: ubuntu-latest
+EOF
+  if check_file "$tmp/capadvisory.yml" ci-ok >/dev/null 2>&1; then
+    echo "ok    selftest: a capitalized continue-on-error: True exempts the job"
+  else
+    echo "FAIL  selftest: a capitalized advisory flag was not recognized"; return 1
   fi
 }
 

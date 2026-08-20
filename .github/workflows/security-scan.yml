@@ -60,8 +60,14 @@ jobs:
             # First push of a new branch: `before` is all-zeros, no range —
             # scan just the tip commit.
             log_opts="-1 ${HEAD_SHA}"
-          else
+          elif git rev-parse -q --verify "${BEFORE_SHA}^{commit}" >/dev/null 2>&1; then
             log_opts="${BEFORE_SHA}..${HEAD_SHA}"
+          else
+            # `before` names a commit no longer reachable (a force-push that
+            # orphaned the old tip): the range would error on a missing object.
+            # Scan just the tip loudly instead of failing red on nothing.
+            echo "before-commit ${BEFORE_SHA} unreachable (force-push?) — scanning tip only"
+            log_opts="-1 ${HEAD_SHA}"
           fi
           echo "scanning git log range: ${log_opts}"
           # gitleaks auto-loads .gitleaks.toml from the repo root (vendored-tree
