@@ -61,9 +61,18 @@ _TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
 # Substrings marking an account-funding / quota rejection (any status) — the
 # request reached the model but the account could not pay for it. External to
 # the registry, so inconclusive, not a defect.
+#
+# Every marker must be UNAMBIGUOUSLY about funding/quota. A bare "insufficient"
+# is NOT: a 403 permission denial phrased "insufficient permissions" (or
+# "insufficient scope"/"insufficient access") is the exact #298 defect — a
+# model id the key cannot serve — and matching it here would silently downgrade
+# that FAIL to inconclusive, greening the gate on an unservable id. The funding
+# senses ("insufficient credit/balance/quota/funds") are already covered by the
+# specific tokens, so the bare word is dropped and "funds" added to keep
+# "insufficient funds" caught.
 _ACCOUNT_MARKERS = (
-    "credit", "billing", "balance", "quota", "payment",
-    "insufficient", "exhausted", "too low", "rate limit", "rate_limit",
+    "credit", "billing", "balance", "quota", "payment", "funds",
+    "exhausted", "too low", "rate limit", "rate_limit",
 )
 
 

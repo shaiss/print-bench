@@ -104,6 +104,33 @@ def test_permission_denied_is_a_dead_id_fail(tmp_path):
     assert any(l.startswith("FAIL") for l in lines)
 
 
+def test_permission_denial_worded_insufficient_is_still_dead(tmp_path):
+    # VADE finding: a 403 permission denial whose body happens to say
+    # "insufficient permissions" is the #298 defect (an id the key cannot
+    # serve), NOT account funding. A bare "insufficient" marker would misread it
+    # as inconclusive and green the gate on an unservable id — so it must FAIL.
+    def post(url, headers, payload):
+        return 403, ('{"error":{"type":"permission_error","message":'
+                     '"insufficient permissions to access this model"}}')
+    lines, code = smoke.smoke_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
+    assert code == 1
+    assert any(l.startswith("FAIL") for l in lines)
+
+
+def test_insufficient_funds_billing_is_still_inconclusive(tmp_path):
+    # The other direction: a genuine funding rejection worded "insufficient
+    # funds" must stay inconclusive — the specific funding tokens still catch it
+    # after the bare "insufficient" marker was dropped.
+    def post(url, headers, payload):
+        return 400, ('{"error":{"type":"invalid_request_error","message":'
+                     '"insufficient funds in your account"}}')
+    lines, code = smoke.smoke_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert code == 0
+    assert all(not l.startswith("FAIL") for l in lines)
+    assert any(l.startswith("INCONC") for l in lines)
+
+
 def test_rate_limited_is_inconclusive_not_a_fail(tmp_path):
     # 429 says the account is over quota, not that the id is bad — the exact
     # signature that would otherwise red every registry PR on a broke key.
