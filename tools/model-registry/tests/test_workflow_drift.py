@@ -34,6 +34,8 @@ from __future__ import annotations
 import pathlib
 import re
 
+import pytest
+
 from model_registry.registry import Registry
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -308,3 +310,150 @@ def test_scout_no_hardcoded_model_literal_survives():
     literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
                 if not tok.startswith("${{")]
     assert not literals, f"hardcoded --model literal(s) in product-scout.yml: {literals}"
+
+
+# ── The Oracle reviewer (issue #333) ──────────────────────────────────────────
+#
+# The Oracle is the registry's third consumer: the cross-vendor, reasoning-blind
+# advisory reviewer on autonomy PRs. Its shape combines the other two — like the
+# scout it resolves its chains in the same job that consumes them
+# (`steps.<id>.outputs`), like the reviewer jobs it carries one ship step per
+# chain link with first-success short-circuiting — with one twist: it resolves
+# BOTH role chains (oracle-anthropic and oracle-glm) every run, and a runtime
+# vendor-inversion step picks which chain's ship steps fire. The guard below
+# pins each chain's ship steps to its registry links position-for-position, the
+# same property the reviewer guard proves, plus the two Oracle-specific
+# invariants: every ship step carries the deny backstop + dontAsk (punch-list
+# item #6 — the workflow must not quietly shed it), and each role chain stays
+# SINGLE-vendor with the two chains on DIFFERENT vendors (the independence bet:
+# an "opposite vendor" chain that mixed vendors, or two chains on one vendor,
+# would silently unmake the cross-vendor split).
+
+ORACLE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "oracle.yml"
+# chain id → the resolve step id whose outputs that chain's ship steps read.
+ORACLE_CHAINS = {"oracle-anthropic": "anth", "oracle-glm": "glm"}
+
+
+def _oracle_text() -> str:
+    return ORACLE_WORKFLOW.read_text(encoding="utf-8")
+
+
+def _oracle_ship_steps(text: str, step_id: str) -> list[dict]:
+    """The ship steps sourcing their model from `steps.<step_id>.outputs`,
+    in document order — i.e. one chain's steps, the other chain's excluded."""
+    pat = re.compile(
+        r"--model \$\{\{ steps\." + re.escape(step_id)
+        + r"\.outputs\.link(\d+)_model \}\}")
+    steps: list[dict] = []
+    for chunk in re.split(r"\n      - ", text):
+        if "uses: anthropics/claude-code-action" not in chunk:
+            continue
+        model = pat.search(chunk)
+        if not model:
+            continue  # the other chain's step (or a stray, caught by counts)
+        secret = re.search(r"anthropic_api_key: \$\{\{ secrets\.(\w+) \}\}", chunk)
+        base = re.search(r"ANTHROPIC_BASE_URL: (\S+)", chunk)
+        steps.append({
+            "model_slot": int(model.group(1)),
+            "secret": secret.group(1) if secret else None,
+            "base_url": base.group(1) if base else "",
+            "chunk": chunk,
+        })
+    return steps
+
+
+def _assert_oracle_chain_pinned(text: str, chain: str, step_id: str) -> None:
+    """One chain's ship steps match its resolved links, position for position,
+    each carrying the deny backstop. Factored out so the negative controls can
+    run it against tampered workflow text."""
+    links = Registry.load(str(REGISTRY)).resolve(chain)
+    assert links, f"the `{chain}` chain resolved to zero links"
+    steps = _oracle_ship_steps(text, step_id)
+    assert len(steps) == len(links), (
+        f"oracle: {len(steps)} ship steps read steps.{step_id}.outputs but the "
+        f"`{chain}` chain has {len(links)} links — add/remove a ship step to match.")
+    for link, step in zip(links, steps):
+        assert step["model_slot"] == link.position, (
+            f"oracle {chain} slot {link.position}: references "
+            f"link{step['model_slot']}_model but must reference "
+            f"link{link.position}_model (the chain's order).")
+        assert step["secret"] == link.secret, (
+            f"oracle {chain} slot {link.position}: wires secrets.{step['secret']} "
+            f"but the registry routes this position to secrets.{link.secret}.")
+        assert step["base_url"] == link.base_url, (
+            f"oracle {chain} slot {link.position}: ANTHROPIC_BASE_URL is "
+            f"{step['base_url']!r} but the registry endpoint is {link.base_url!r}.")
+        # Punch-list item #6: the ship step must not shed its narrowed surface.
+        assert "--permission-mode dontAsk" in step["chunk"], (
+            f"oracle {chain} slot {link.position}: ship step no longer runs "
+            f"under --permission-mode dontAsk.")
+        assert "--settings .claude/oracle-settings.json" in step["chunk"], (
+            f"oracle {chain} slot {link.position}: ship step no longer carries "
+            f"the deny backstop (--settings .claude/oracle-settings.json).")
+
+
+def test_oracle_chains_exist_and_are_single_vendor():
+    # Both role chains resolve, each stays on ONE provider, and the two are on
+    # DIFFERENT providers — the property that makes "resolve the opposite
+    # vendor's chain" mean anything at all.
+    reg = Registry.load(str(REGISTRY))
+    providers = {}
+    for chain in ORACLE_CHAINS:
+        links = reg.resolve(chain)
+        assert links, f"the `{chain}` chain resolved to zero links"
+        chain_providers = {link.provider for link in links}
+        assert len(chain_providers) == 1, (
+            f"the `{chain}` chain mixes providers {sorted(chain_providers)} — "
+            f"a role chain must stay single-vendor or the blind review is not "
+            f"cross-vendor.")
+        providers[chain] = chain_providers.pop()
+    assert providers["oracle-anthropic"] != providers["oracle-glm"], (
+        "both oracle chains resolve to the same provider — the cross-vendor "
+        "split is gone.")
+
+
+def test_oracle_ship_steps_are_pinned_to_their_registry_links():
+    text = _oracle_text()
+    for chain, step_id in ORACLE_CHAINS.items():
+        _assert_oracle_chain_pinned(text, chain, step_id)
+
+
+def test_oracle_resolves_both_chains_in_workflow():
+    # Both resolve steps must target their chains by name, or a ship step's
+    # linkN_model reference reads an empty output and the action errors.
+    text = _oracle_text()
+    for chain in ORACLE_CHAINS:
+        assert f"model_registry resolve {chain}" in text, (
+            f"oracle.yml no longer resolves the `{chain}` chain")
+
+
+def test_oracle_no_hardcoded_model_literal_survives():
+    # The #333 acceptance criterion as a test: no `--model` literal of ANY
+    # provider may appear in oracle.yml — every one must be a `${{ … }}`
+    # expression sourced from a resolve step's outputs.
+    text = _oracle_text()
+    literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
+                if not tok.startswith("${{")]
+    assert not literals, f"hardcoded --model literal(s) in oracle.yml: {literals}"
+
+
+def test_oracle_drift_guard_catches_a_scrambled_slot():
+    # NEGATIVE CONTROL: the guard must FAIL on a positional scramble — slot 1
+    # reading link3's model — or it proves nothing (the repo's standing rule:
+    # a check that cannot fail is worthless).
+    text = _oracle_text()
+    tampered = text.replace(
+        "steps.anth.outputs.link1_model", "steps.anth.outputs.link3_model", 1)
+    assert tampered != text, "tamper target not found — the fixture is stale"
+    with pytest.raises(AssertionError):
+        _assert_oracle_chain_pinned(tampered, "oracle-anthropic", "anth")
+
+
+def test_oracle_drift_guard_catches_a_dropped_backstop():
+    # NEGATIVE CONTROL: stripping the deny backstop from a ship step must fail
+    # the guard — that flag is punch-list item #6's whole enforcement.
+    text = _oracle_text()
+    tampered = text.replace("--settings .claude/oracle-settings.json ", "", 1)
+    assert tampered != text, "tamper target not found — the fixture is stale"
+    with pytest.raises(AssertionError):
+        _assert_oracle_chain_pinned(tampered, "oracle-anthropic", "anth")

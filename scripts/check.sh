@@ -269,6 +269,37 @@ if ! python3 .claude/skills/product-scout/scout_mcp.py --selftest; then
   fail=1
 fi
 
+# Oracle deny-backstop drift check: same reasoning as the chunker's, labeler's
+# and scout's, for the cross-vendor Oracle reviewer's own backstop
+# (.claude/oracle-settings.json, issue #333). The Oracle has NO shell wrapper —
+# its one write is the MCP posting tool — so unlike the siblings its coverage
+# rule has no wrapper exemption: EVERY Bash allow in settings.json must be
+# denied, PLUS all three sibling write surfaces (chunk-helper.sh,
+# label-helper.sh, scout-helper.sh and the scout MCP server), while never
+# denying mcp__oracle__post_oracle_review (or the unattended Oracle fails
+# closed with no other CI signal).
+echo "-- oracle-perms selftest: scripts/oracle-perms-check.sh --selftest"
+if ! ./scripts/oracle-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- oracle-perms check: scripts/oracle-perms-check.sh"
+if ! ./scripts/oracle-perms-check.sh; then
+  fail=1
+fi
+
+# Oracle MCP posting tool: the Oracle's ONE write surface is the
+# post_oracle_review MCP tool (.claude/skills/oracle-review/oracle_mcp.py) —
+# a JSON-argument tool for the same dontAsk-matcher reason as the scout's. Its
+# --selftest proves the security invariants a live run cannot show: the target
+# PR comes only from the workflow's ORACLE_PR (unredirectable), the marker /
+# advisory header / attribution footer are hardcoded onto every post, and the
+# one-post-per-run cap fires — the same firing-guard discipline the
+# perms-checks follow.
+echo "-- oracle MCP selftest: .claude/skills/oracle-review/oracle_mcp.py --selftest"
+if ! python3 .claude/skills/oracle-review/oracle_mcp.py --selftest; then
+  fail=1
+fi
+
 # Cadence-parity check (issue #276): every scheduled autonomy routine stores
 # its cadence TWICE — the `cadence:` key in .github/<routine>.conf and the
 # `cron:` literal in .github/workflows/<routine>.yml (Actions can't read a

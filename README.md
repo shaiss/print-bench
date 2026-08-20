@@ -234,6 +234,11 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     deny backstop (`.claude/scout-settings.json`), which additionally denies
     BOTH `chunk-helper.sh` and `label-helper.sh` and must never deny
     `scout-helper.sh`
+  - `oracle-perms-check.sh` — the same drift check for the Oracle reviewer's
+    own deny backstop (`.claude/oracle-settings.json`, issue #333): the Oracle
+    has no shell wrapper, so EVERY Bash allow must be denied plus all three
+    sibling write surfaces (the chunker's, labeler's and scout's), and its one
+    MCP posting tool must never be denied
   - `cadence-sync-check.sh` — cadence-parity check for the scheduled autonomy
     routines (issue #276): the `cadence:` key in `.github/<routine>.conf` must
     resolve to the same schedule as the `cron:` literal in the matching

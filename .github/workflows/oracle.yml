@@ -1,0 +1,461 @@
+name: Oracle review (cross-vendor, reasoning-blind)
+
+# The Oracle (issue #333, punch-list item #5 of audits/foreman-baseline/
+# PUNCHLIST.md): an independent, blind, frontier second opinion on every
+# AUTONOMY PR, run on the vendor the shipper did NOT use. Both providers are
+# frontier (GLM is cheaper, not weaker) — the cross-vendor split buys
+# INDEPENDENCE: a second vendor's blind spots differ from the shipper's, which
+# a same-vendor self-review structurally cannot offer. Combined with the
+# repo's falsifiable gates this is where print-bench exceeds the Foreman/eve
+# baseline rather than matching it.
+#
+# Blind means blind: the reviewer sees ONLY (1) the PR diff, (2) the frozen
+# acceptance contract (the 🚢 SHIP-LOCK comment on the linked issue, posted
+# before any code was written), and (3) CI's posted results — assembled below
+# by TRUSTED workflow bash into .oracle-context/ before the agent starts. It
+# never sees the shipper's session transcript or chain-of-thought, and it has
+# no tools to go looking: read-only file tools plus ONE MCP posting tool
+# (mcp__oracle__post_oracle_review), under --permission-mode dontAsk with the
+# deny backstop .claude/oracle-settings.json (punch-list item #6; drift-proofed
+# by scripts/oracle-perms-check.sh, run by check.sh).
+#
+# Which vendor shipped the PR? The ship routines' provider is the committed
+# `provider:` key in .github/backlog-burn.conf / .github/design-run.conf (the
+# two routines that push code), read directly below in the house key:value
+# format. When the two agree the Oracle inverts that vendor; when they
+# disagree or cannot be read it defaults to `oracle-anthropic` — safe, because
+# GLM-first shipping is the cost-optimized default, so Anthropic is the usual
+# opposite (issue #333's stated default). A per-PR vendor stamp at ship time
+# is the more invasive alternative, deliberately left as a follow-up.
+#
+# ADVISORY, PROMOTABLE (the same posture security-scan.yml took): this is its
+# own workflow, not a job in ci.yml, so it is NOT one of ci-ok's required
+# contexts — a red Oracle never blocks a merge. To promote it later, a
+# maintainer adds the `oracle` job as a required status check in branch
+# protection; do NOT wire it into ci-ok.needs (promotion is a human decision,
+# made after the verdicts have earned trust).
+#
+# Cost guard (issue #333's open question, resolved conservatively): the Oracle
+# runs ONLY on autonomy PRs — head branches under claude/* — and only once per
+# PR lifecycle event (opened / reopened / ready_for_review, never on every
+# push). Re-roll a review by closing and reopening the PR. A human-PR mode is
+# a possible extension, not this. The `no-oracle-review` label is the human
+# escape hatch for a PR that should not be reviewed.
+#
+# Registry-driven (issue #206): NO model id is hardcoded here. Both role
+# chains — oracle-anthropic (Anthropic-first) and oracle-glm (GLM-first) —
+# resolve from .github/models/registry.conf, and the drift-guard test
+# (tools/model-registry/tests/test_workflow_drift.py) pins every ship step's
+# model slot, literal secret and endpoint to the registry so they cannot
+# silently diverge. Each provider's secret stays literal per step (the Actions
+# constraint the registry generalizes rather than eliminates).
+#
+# Security posture: the checkout is the BASE branch, not the PR head — the
+# agent holds a provider key while reading an untrusted diff, so the skill,
+# settings and registry it runs are the reviewed, merged versions; the PR's
+# code is handed to it strictly as DATA (the assembled diff). A first-landing
+# guard skips the ship steps while the skill is not yet on the base branch,
+# so this workflow bootstraps green on its own PR.
+
+on:
+  pull_request:
+    types:
+      - opened
+      - ready_for_review
+      - reopened
+
+# The Oracle reads the repo (contents), reads the PR + its linked issues for
+# the contract (pull-requests), reads CI's check runs (checks), and posts ONE
+# comment via the issues endpoint (issues:write). It pushes no code, edits no
+# labels, approves nothing.
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  issues: write
+
+# One Oracle per PR at a time; a reopen while a review is in flight waits.
+concurrency:
+  group: oracle-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  oracle:
+    name: Oracle review (opposite-vendor, blind)
+    # Autonomy PRs only (the cost guard): claude/* head branches, same-repo.
+    # The label is the human escape hatch, mirroring auto-review's.
+    if: >-
+      startsWith(github.event.pull_request.head.ref, 'claude/')
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && !contains(github.event.pull_request.labels.*.name, 'no-oracle-review')
+    runs-on: ubuntu-latest
+    # A hung review must not hold a runner (and a key) for the 6-hour default.
+    timeout-minutes: 30
+    env:
+      HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
+      HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # Full history: the context step diffs base...head below.
+          fetch-depth: 0
+          # The BASE branch, not the merge ref: the secret-bearing agent runs
+          # the reviewed skill/settings/registry, never a PR's version of them
+          # (see the header). The PR's content arrives as data only.
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      # First-landing / self-defense guard: the ship steps need the reviewed
+      # skill and deny backstop on the BASE branch. Absent (this workflow's own
+      # bootstrap PR, or a PR that would remove them), skip the review with a
+      # notice instead of improvising without the persona or the backstop.
+      - name: Check the Oracle is on the base branch
+        id: ready
+        run: |
+          set -euo pipefail
+          if [ -f .claude/skills/oracle-review/SKILL.md ] \
+             && [ -f .claude/oracle-settings.json ] \
+             && [ -f .claude/skills/oracle-review/oracle_mcp.py ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the Oracle's skill/settings are not on the base branch yet (first landing) — skipping the review"
+          fi
+
+      # Which chain is the OPPOSITE of the shipping vendor — see the header.
+      - name: Pick the opposite vendor's chain
+        id: vendor
+        run: |
+          set -euo pipefail
+          read_provider() {
+            sed -n 's/^provider:[[:space:]]*//p' "$1" 2>/dev/null | head -1 | tr -d '[:space:]'
+          }
+          bb="$(read_provider .github/backlog-burn.conf)"
+          dr="$(read_provider .github/design-run.conf)"
+          if [ -n "$bb" ] && [ "$bb" = "$dr" ]; then
+            ship="$bb"
+          else
+            ship="unknown"
+          fi
+          case "$ship" in
+            zai)       chain=oracle-anthropic ;;
+            anthropic) chain=oracle-glm ;;
+            *)
+              chain=oracle-anthropic
+              echo "::notice::shipping vendor could not be determined from the routine confs (backlog-burn='${bb:-?}', design-run='${dr:-?}') — defaulting to oracle-anthropic, the usual opposite of the GLM-first shipping default"
+              ;;
+          esac
+          {
+            echo "ship_vendor=$ship"
+            echo "oracle_chain=$chain"
+          } >> "$GITHUB_OUTPUT"
+          echo "shipping vendor: $ship → Oracle chain: $chain"
+
+      # Resolve BOTH role chains from the committed registry (issue #206) —
+      # stdlib-only, straight from the checkout. Only the selected chain's ship
+      # steps run, but resolving both validates both stanzas on every run, and
+      # gives the drift guard one stable step id per chain to pin.
+      - name: Resolve the oracle-anthropic chain (issue #206)
+        id: anth
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          python3 -m model_registry resolve oracle-anthropic --gh-output "$GITHUB_OUTPUT"
+
+      - name: Resolve the oracle-glm chain (issue #206)
+        id: glm
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          python3 -m model_registry resolve oracle-glm --gh-output "$GITHUB_OUTPUT"
+
+      # Assemble the BLIND context with trusted bash, before any agent starts:
+      # the diff, the frozen contract, and CI's posted results — and nothing
+      # else. The agent reads these files; it has no tool to fetch more.
+      - name: Assemble the blind review context
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          mkdir -p .oracle-context
+
+          # 1. The diff — merge-base(base, head)..head, the PR's actual change.
+          git fetch --no-tags origin "$HEAD_SHA"
+          git diff "${BASE_SHA}...${HEAD_SHA}" > .oracle-context/pr.diff
+
+          {
+            echo "pr: #${PR_NUMBER}"
+            echo "title: ${PR_TITLE}"
+            echo "head: ${HEAD_REF} (${HEAD_SHA})"
+            echo "base: ${BASE_REF} (${BASE_SHA})"
+            echo "diff_bytes: $(wc -c < .oracle-context/pr.diff)"
+            echo ""
+            echo "changed files:"
+            git diff --name-status "${BASE_SHA}...${HEAD_SHA}" | sed 's/^/  /'
+          } > .oracle-context/pr.meta
+
+          # 2. The frozen acceptance contract: the latest ACTIVE 🚢 SHIP-LOCK
+          # comment on each linked closing issue (GitHub's linked-PR metadata,
+          # not a fragile keyword grep — the same source /ship-issue's own lock
+          # check reads). A WITHDRAWN lock is released and does not count.
+          {
+            echo "# Frozen acceptance contract(s)"
+            echo
+            issues="$(gh api graphql \
+              -f query='query($owner:String!,$repo:String!,$pr:Int!){
+                repository(owner:$owner,name:$repo){
+                  pullRequest(number:$pr){
+                    closingIssuesReferences(first:5){nodes{number}}}}}' \
+              -F owner="${GITHUB_REPOSITORY%/*}" \
+              -F repo="${GITHUB_REPOSITORY#*/}" \
+              -F pr="$PR_NUMBER" \
+              --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[].number' \
+              || true)"
+            if [ -z "$issues" ]; then
+              echo "NO LINKED CLOSING ISSUE — this PR closes nothing, so there is"
+              echo "no frozen contract. Judge against the PR description and flag"
+              echo "the missing contract as a finding."
+            fi
+            for n in $issues; do
+              echo "## Issue #${n}"
+              echo
+              gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}" \
+                --jq '"**" + .title + "**\n\n" + (.body // "(no body)")'
+              echo
+              lock="$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}/comments" \
+                --paginate \
+                --jq '[.[] | select(.body | startswith("🚢 SHIP-LOCK"))
+                           | select(.body | startswith("🚢 SHIP-LOCK WITHDRAWN") | not)]
+                      | last
+                      | if . == null then ""
+                        else "### SHIP-LOCK contract (by " + .user.login
+                             + " at " + .created_at + ")\n\n" + .body end')"
+              if [ -n "$lock" ]; then
+                printf '%s\n\n' "$lock"
+              else
+                echo "### No active SHIP-LOCK contract found on issue #${n}"
+                echo
+              fi
+            done
+          } > .oracle-context/contract.md
+
+          # 3. CI's posted results for the head commit, as they stand right
+          # now (a check still running is reported as such, never as a pass).
+          {
+            echo "# CI check runs for ${HEAD_SHA}"
+            echo
+            echo "Captured at review time — checks still in progress are NOT"
+            echo "passes; treat them as 'not yet concluded'."
+            echo
+            gh api "/repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
+              --paginate \
+              --jq '.check_runs[] | "- **" + .name + "**: " + .status
+                    + (if .conclusion then " / " + .conclusion else "" end)
+                    + (if .output.summary then "\n  " + (.output.summary | split("\n")[0]) else "" end)' \
+              || echo "(check-runs could not be listed)"
+          } > .oracle-context/ci-results.md
+
+          echo "assembled: $(du -sh .oracle-context | cut -f1) in .oracle-context/"
+
+      # One ship step per registry link, in chain order — only the selected
+      # (opposite-vendor) chain's steps run; the first success short-circuits
+      # the rest. Tool surface (why exactly this): POSTING is an MCP tool
+      # (mcp__oracle__post_oracle_review, served by oracle_mcp.py via
+      # --mcp-config) because a review body is rich multi-line markdown and the
+      # dontAsk Bash matcher denies such arguments no matter the quoting (the
+      # scout's proven lesson); READS are the read-only file tools over the
+      # assembled context. Never Write, never a general Bash. The deny backstop
+      # (--settings .claude/oracle-settings.json) neutralizes every Bash allow
+      # that leaks additively from .claude/settings.json, kept honest by
+      # scripts/oracle-perms-check.sh. ORACLE_PR pins the one PR the posting
+      # tool may write to; the model cannot redirect it.
+
+      - name: Oracle via Anthropic (chain link 1)
+        id: a1
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && steps.vendor.outputs.oracle_chain == 'oracle-anthropic'
+          && env.HAS_ANTHROPIC == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ORACLE_PR: ${{ github.event.pull_request.number }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.anth.outputs.link1_model }}
+          prompt: >-
+            /oracle-review ${{ github.event.pull_request.number }}
+
+      - name: Oracle via Anthropic (chain link 2)
+        id: a2
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && steps.vendor.outputs.oracle_chain == 'oracle-anthropic'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.a1.outcome != 'success'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ORACLE_PR: ${{ github.event.pull_request.number }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.anth.outputs.link2_model }}
+          prompt: >-
+            /oracle-review ${{ github.event.pull_request.number }}
+
+      - name: Oracle via Anthropic (chain link 3)
+        id: a3
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && steps.vendor.outputs.oracle_chain == 'oracle-anthropic'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.a1.outcome != 'success'
+          && steps.a2.outcome != 'success'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ORACLE_PR: ${{ github.event.pull_request.number }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.anth.outputs.link3_model }}
+          prompt: >-
+            /oracle-review ${{ github.event.pull_request.number }}
+
+      - name: Oracle via Z.AI GLM (chain link 1)
+        id: g1
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && steps.vendor.outputs.oracle_chain == 'oracle-glm'
+          && env.HAS_ZAI == 'true'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          ORACLE_PR: ${{ github.event.pull_request.number }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.glm.outputs.link1_model }}
+          prompt: >-
+            /oracle-review ${{ github.event.pull_request.number }}
+
+      - name: Oracle via Z.AI GLM (chain link 2)
+        id: g2
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && steps.vendor.outputs.oracle_chain == 'oracle-glm'
+          && env.HAS_ZAI == 'true'
+          && steps.g1.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          ORACLE_PR: ${{ github.event.pull_request.number }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.glm.outputs.link2_model }}
+          prompt: >-
+            /oracle-review ${{ github.event.pull_request.number }}
+
+      - name: Oracle via Z.AI GLM (chain link 3)
+        id: g3
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && steps.vendor.outputs.oracle_chain == 'oracle-glm'
+          && env.HAS_ZAI == 'true'
+          && steps.g1.outcome != 'success'
+          && steps.g2.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          ORACLE_PR: ${{ github.event.pull_request.number }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.glm.outputs.link3_model }}
+          prompt: >-
+            /oracle-review ${{ github.event.pull_request.number }}
+
+      - name: Oracle via Z.AI GLM (chain link 4)
+        id: g4
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && steps.vendor.outputs.oracle_chain == 'oracle-glm'
+          && env.HAS_ZAI == 'true'
+          && steps.g1.outcome != 'success'
+          && steps.g2.outcome != 'success'
+          && steps.g3.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          ORACLE_PR: ${{ github.event.pull_request.number }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.glm.outputs.link4_model }}
+          prompt: >-
+            /oracle-review ${{ github.event.pull_request.number }}
+
+      # No cross-vendor fallback on a missing key, by design: a same-vendor
+      # review is not an Oracle review — independence is the whole point, so
+      # the honest degradation is a notice, not a substitute reviewer.
+      - name: Opposite vendor's key is not configured
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && ((steps.vendor.outputs.oracle_chain == 'oracle-anthropic' && env.HAS_ANTHROPIC != 'true')
+              || (steps.vendor.outputs.oracle_chain == 'oracle-glm' && env.HAS_ZAI != 'true'))
+        run: |
+          echo "::notice::the opposite vendor's key (${{ steps.vendor.outputs.oracle_chain == 'oracle-anthropic' && 'ANTHROPIC_API_KEY' || 'ZAI_KEY' }}) is not set — skipping the Oracle review rather than falling back to the shipping vendor (a same-vendor review would not be independent)"
+
+      - name: Every configured link failed
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && ((steps.vendor.outputs.oracle_chain == 'oracle-anthropic'
+               && env.HAS_ANTHROPIC == 'true'
+               && steps.a1.outcome != 'success'
+               && steps.a2.outcome != 'success'
+               && steps.a3.outcome != 'success')
+              || (steps.vendor.outputs.oracle_chain == 'oracle-glm'
+                  && env.HAS_ZAI == 'true'
+                  && steps.g1.outcome != 'success'
+                  && steps.g2.outcome != 'success'
+                  && steps.g3.outcome != 'success'
+                  && steps.g4.outcome != 'success'))
+        run: |
+          echo "::error::the Oracle review failed on every link of the ${{ steps.vendor.outputs.oracle_chain }} chain. Advisory only — this does not block the merge — but see the failed step logs above."
+          exit 1
