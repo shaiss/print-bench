@@ -1,9 +1,15 @@
-name: Auto design review (Jane / Drik / coach)
+name: Auto design review (Jane / Drik / PM / coach)
 
 # Fires once per review round — on PR open, ready-for-review, or a subsequent
-# push that materially changes design files — and runs the three reviewer
-# personas (/jane-review, /drik-review, /design-coach) as unattended Claude
-# sessions.
+# push that materially changes design files — and runs the reviewer personas
+# (/jane-review, /drik-review), the PM triage gate (/pm, §8 of that skill) and
+# the merge coach (/design-coach) as unattended Claude sessions.
+#
+# Division of labor (the recast reviewer scope): CI's gates check the numbers;
+# Jane and Drik contribute tagged print/use-experience feedback; the design's
+# PM rules on that feedback (act-now / queue / decline against the charter)
+# before the next iteration acts on any of it. The reviewers are feedback,
+# the PM is the gate.
 #
 # Scope guard (prevents spurious runs on backend/infra-only PRs):
 #   * The `design-changes` job checks whether the PR diff contains any file
@@ -131,7 +137,7 @@ jobs:
           # review isn't left with unexplained silence (the downstream jobs just
           # skip on designs_changed != true).
           if [ "$designs_changed" != "true" ]; then
-            echo "::notice::auto-review did not run — this PR changes no files under designs/, so the design reviewers (Jane / Drik / coach) have nothing to review."
+            echo "::notice::auto-review did not run — this PR changes no files under designs/, so the design reviewers (Jane / Drik / PM / coach) have nothing to review."
           fi
 
       # For `synchronize` events we only want to fire a new review round when
@@ -468,16 +474,226 @@ jobs:
           exit 1
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 4. Design coach (verification-first rounds until merge)
-  #    Runs after Jane and Drik so it can synthesise their findings.
+  # 4. PM triage (the gate on reviewer feedback)
+  #    Runs after Jane and Drik so the design's PM can rule on their tagged
+  #    findings — act-now for this round, queue to the backlog, or decline with
+  #    the charter line / CI evidence — before the next iteration acts on any
+  #    of them. The reviewers provide feedback; the PM is the gate. Unlike the
+  #    coach it runs on EVERY round: each new push's feedback gets a fresh
+  #    verdict. The job is read-only on the repo (comments only, no pushes) —
+  #    the /pm skill's §8 records any needed charter edit in the verdict
+  #    comment for the next design session to commit.
+  # ─────────────────────────────────────────────────────────────────────────────
+  pm-triage:
+    name: PM triage (reviewer-feedback gate)
+    needs: [design-changes, jane-review, drik-review]
+    # always(): triage what DID land — a failed Drik job must not cancel the
+    # verdict on Jane's posted feedback (the stamp still marks such a round
+    # incomplete, so it retries on the next design push). Skip only when
+    # neither reviewer completed: then there is nothing to triage.
+    if: >-
+      always()
+      && needs.design-changes.outputs.designs_changed == 'true'
+      && needs.design-changes.outputs.is_new_round == 'true'
+      && (needs.jane-review.result == 'success' || needs.drik-review.result == 'success')
+    runs-on: ubuntu-latest
+    # Provider fallback chain — see the jane-review job for the rationale and
+    # ordering (Z.AI glm-5.2 → glm-5.1 → glm-4.6 → Anthropic claude-opus-5 →
+    # claude-sonnet-5 → claude-haiku-4-5; first success wins; a missing key
+    # degrades gracefully). Issues #206, #298. The PM shares the `review`
+    # chain deliberately: the registry is where a future decision to give the
+    # enforcement PM a frontier-first chain of its own belongs.
+    env:
+      HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
+      HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: /pm triage via Z.AI GLM 5.2
+        id: p1
+        if: env.HAS_ZAI == 'true'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model1 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
+            reviewer-feedback triage (skill §8) for PR
+            #${{ github.event.pull_request.number }}: Jane and Drik have posted
+            their tagged feedback on this PR. For each design named above
+            (space-separated), load its charter per §0, triage every tagged
+            finding per §8, and post one PM verdict comment per design on the
+            PR. This job is read-only on the repo: post comments only, never
+            push.
+
+      - name: /pm triage via Z.AI GLM 5.1
+        id: p2
+        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model2 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
+            reviewer-feedback triage (skill §8) for PR
+            #${{ github.event.pull_request.number }}: Jane and Drik have posted
+            their tagged feedback on this PR. For each design named above
+            (space-separated), load its charter per §0, triage every tagged
+            finding per §8, and post one PM verdict comment per design on the
+            PR. This job is read-only on the repo: post comments only, never
+            push.
+
+      - name: /pm triage via Z.AI GLM 4.6
+        id: p3
+        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model3 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
+            reviewer-feedback triage (skill §8) for PR
+            #${{ github.event.pull_request.number }}: Jane and Drik have posted
+            their tagged feedback on this PR. For each design named above
+            (space-separated), load its charter per §0, triage every tagged
+            finding per §8, and post one PM verdict comment per design on the
+            PR. This job is read-only on the repo: post comments only, never
+            push.
+
+      - name: /pm triage via Anthropic Opus 5
+        id: p4
+        if: >-
+          env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model4 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
+            reviewer-feedback triage (skill §8) for PR
+            #${{ github.event.pull_request.number }}: Jane and Drik have posted
+            their tagged feedback on this PR. For each design named above
+            (space-separated), load its charter per §0, triage every tagged
+            finding per §8, and post one PM verdict comment per design on the
+            PR. This job is read-only on the repo: post comments only, never
+            push.
+
+      - name: /pm triage via Anthropic Sonnet 5
+        id: p5
+        if: >-
+          env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model5 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
+            reviewer-feedback triage (skill §8) for PR
+            #${{ github.event.pull_request.number }}: Jane and Drik have posted
+            their tagged feedback on this PR. For each design named above
+            (space-separated), load its charter per §0, triage every tagged
+            finding per §8, and post one PM verdict comment per design on the
+            PR. This job is read-only on the repo: post comments only, never
+            push.
+
+      - name: /pm triage via Anthropic Haiku 4.5
+        id: p6
+        if: >-
+          env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model6 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
+            reviewer-feedback triage (skill §8) for PR
+            #${{ github.event.pull_request.number }}: Jane and Drik have posted
+            their tagged feedback on this PR. For each design named above
+            (space-separated), load its charter per §0, triage every tagged
+            finding per §8, and post one PM verdict comment per design on the
+            PR. This job is read-only on the repo: post comments only, never
+            push.
+
+      - name: No provider key configured
+        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        run: |
+          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping the PM triage for PR #${{ github.event.pull_request.number }}"
+
+      - name: Every configured provider failed
+        if: >-
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        run: |
+          echo "::error::the PM triage failed on every configured provider (Z.AI glm-5.2 → glm-5.1 → glm-4.6 → Anthropic claude-opus-5 → claude-sonnet-5 → claude-haiku-4-5). See the failed step logs above."
+          exit 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 5. Design coach (drives review rounds until merge)
+  #    Runs after Jane, Drik and the PM triage so it can synthesise the tagged
+  #    findings AND the PM's verdict on them into the round it drives.
   #    Fires only on opened/ready_for_review — subsequent rounds are driven by
   #    the coach's own COACH-LOCK loop inside the skill.
   # ─────────────────────────────────────────────────────────────────────────────
   design-coach:
     name: Design coach
-    needs: [design-changes, jane-review, drik-review]
+    needs: [design-changes, jane-review, drik-review, pm-triage]
+    # Explicit condition, not the implicit success()-over-needs: pm-triage is
+    # in `needs` for ORDERING only (the PM verdict should be on the thread when
+    # the coach starts), but a failed triage must not cost the PR its coach —
+    # the coach only ever fires on these three actions, so a skip here is
+    # unrecoverable (retry rounds arrive as `synchronize`, which this guard
+    # excludes, and the COACH-LOCK loop lives inside the session that would
+    # never have started). Both reviewers must still have succeeded, as the
+    # implicit success() required before pm-triage joined the needs.
     if: >-
-      needs.design-changes.outputs.designs_changed == 'true'
+      always()
+      && needs.design-changes.outputs.designs_changed == 'true'
+      && needs.jane-review.result == 'success'
+      && needs.drik-review.result == 'success'
+      && needs.pm-triage.result != 'cancelled'
       && (github.event.action == 'opened'
           || github.event.action == 'ready_for_review'
           || github.event.action == 'reopened')
@@ -612,12 +828,12 @@ jobs:
           exit 1
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 5. Stamp this review round so future synchronize events can tell
+  # 6. Stamp this review round so future synchronize events can tell
   #    whether any design files changed since we last reviewed.
   # ─────────────────────────────────────────────────────────────────────────────
   review-stamp:
     name: Stamp review round
-    needs: [design-changes, jane-review, drik-review, design-coach]
+    needs: [design-changes, jane-review, drik-review, pm-triage, design-coach]
     # Run whenever we did a new round (design-coach is conditional so use
     # always() + check the designs_changed output ourselves).
     if: >-
@@ -643,6 +859,7 @@ jobs:
           HAS_SECRET: ${{ (secrets.ZAI_KEY != '' || secrets.ANTHROPIC_API_KEY != '') && 'true' || 'false' }}
           JANE: ${{ needs.jane-review.result }}
           DRIK: ${{ needs.drik-review.result }}
+          PM: ${{ needs.pm-triage.result }}
           COACH: ${{ needs.design-coach.result }}
         run: |
           set -euo pipefail
@@ -653,8 +870,15 @@ jobs:
           # Anything else — failure, CANCELLED, or an unexpected state — is not a
           # completed review and must not advance the reviewed-SHA (Qodo review
           # on #165: a 'cancelled' round was falling into the success path).
+          # The PM triage gets the same allowance as the coach: 'skipped' only
+          # happens when neither reviewer completed (its own if-guard), and that
+          # case is already caught below by JANE/DRIK not both being 'success' —
+          # while a FAILED triage must not advance the SHA either, because a
+          # round whose feedback carries no PM verdict is not a complete round.
           coach_ok=false
           if [ "$COACH" = "success" ] || [ "$COACH" = "skipped" ]; then coach_ok=true; fi
+          pm_ok=false
+          if [ "$PM" = "success" ] || [ "$PM" = "skipped" ]; then pm_ok=true; fi
           if [ "$HAS_SECRET" != "true" ]; then
             # Nothing actually ran — do NOT advance the reviewed-SHA.
             body="$(printf '%s\n' \
@@ -664,11 +888,11 @@ jobs:
               "Add the \`no-auto-review\` label to suppress future rounds." \
               "" "---" "$gen")"
             echo "::notice::auto-review skipped — no provider key (ZAI_KEY/ANTHROPIC_API_KEY) set; reviewed-SHA not advanced so the round will retry"
-          elif [ "$JANE" = "success" ] && [ "$DRIK" = "success" ] && [ "$coach_ok" = "true" ]; then
+          elif [ "$JANE" = "success" ] && [ "$DRIK" = "success" ] && [ "$pm_ok" = "true" ] && [ "$coach_ok" = "true" ]; then
             # A real review ran clean — mark the commit reviewed.
             body="$(printf '%s\n' \
               "<!-- AUTO_REVIEW_STAMP sha=${HEAD_SHA} -->" \
-              "🔍 **Auto-review round complete** — reviewed commit \`${short}\` (designs: \`${DESIGNS}\`). See the Jane / Drik / coach comments on this thread." \
+              "🔍 **Auto-review round complete** — reviewed commit \`${short}\` (designs: \`${DESIGNS}\`). See the Jane / Drik / PM / coach comments on this thread." \
               "A new round fires automatically on the next push that changes a \`designs/\` file." \
               "Add the \`no-auto-review\` label to suppress future rounds." \
               "" "---" "$gen")"
@@ -677,11 +901,11 @@ jobs:
             # unexpected state) — do NOT advance the reviewed-SHA.
             body="$(printf '%s\n' \
               "<!-- AUTO_REVIEW_STAMP -->" \
-              "⚠️ **Auto-review incomplete** — a reviewer job did not complete this round for \`${short}\` (jane: \`${JANE}\`, drik: \`${DRIK}\`, coach: \`${COACH}\`)." \
+              "⚠️ **Auto-review incomplete** — a reviewer job did not complete this round for \`${short}\` (jane: \`${JANE}\`, drik: \`${DRIK}\`, pm: \`${PM}\`, coach: \`${COACH}\`)." \
               "This round is **not** marked reviewed; it retries on the next push that changes a \`designs/\` file. See the job states above / the run log for details." \
               "Add the \`no-auto-review\` label to suppress future rounds." \
               "" "---" "$gen")"
-            echo "::warning::auto-review incomplete — a reviewer did not complete (jane=$JANE drik=$DRIK coach=$COACH); reviewed-SHA not advanced so the round will retry"
+            echo "::warning::auto-review incomplete — a reviewer did not complete (jane=$JANE drik=$DRIK pm=$PM coach=$COACH); reviewed-SHA not advanced so the round will retry"
           fi
 
           # Find an existing stamp comment to update rather than accumulating
