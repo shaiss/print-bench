@@ -302,6 +302,12 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     the top of the script and the board is created by running the recipe, since
     the automation can't create a board here (issue #148, see
     [docs/roadmap-board.md](docs/roadmap-board.md))
+  - `vercel-ignore-build.sh` — the Vercel *Ignored Build Step* gate: from a
+    PR's changed-file list it skips a preview deployment when every changed
+    path is one the served site never reads (CI, tooling, scripts, most docs),
+    so a tooling-only PR doesn't rebuild a byte-identical site; conservative —
+    any design, any `lib/` file a design includes, an architecture doc, or an
+    unknown path still builds, and `main` always builds
 - `site/` — the static product site built from the designs, styles and
   previews already committed here, and deployed on Vercel — see its
   [README](site/README.md)
