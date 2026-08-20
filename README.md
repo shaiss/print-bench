@@ -241,6 +241,13 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     lives in both places). Presets are resolved through backlog-burn's own
     parser, and the guarantee is parity, not correctness — it does not check a
     cron against the schedule the prose comments describe
+  - `ci-ok-guard.sh` — proves every job in `ci.yml` is wired into the `ci-ok`
+    aggregation job's hand-maintained `needs:` list, or is legitimately exempt
+    as a job-level advisory (`continue-on-error`) job. Closes the hole `ci.yml`
+    documents in its own comment: a new gating job left out of `needs` can fail
+    RED while `ci-ok` stays green and the PR merges anyway. The exemption is
+    read from each job's own flag, so a new advisory job is exempt
+    automatically and a new blocking one is not; with a `--selftest`
   - `routine-lock-cleanup.sh` — withdraws a dead scheduled run's SHIP-LOCK (a
     run killed by its timeout cannot run the skill's own release step) and
     escalates to `needs-decision` after 3 run-deaths on one issue; invoked by
