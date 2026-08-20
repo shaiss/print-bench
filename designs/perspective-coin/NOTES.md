@@ -168,7 +168,18 @@ jobs had failed on a provider outage, so no reviewer had actually looked):
 - The tight **IS THE ↔ THIEF OF JOY** clearance was re-measured after the
   respacing at **0.62 mm** (was 0.54 mm; the 0.25 mm engraving closing merges
   under 0.50 mm), so the legends stay separate. Hourglass, sun, diamonds,
-  fits and fitchecks unchanged; coin 92 / flipper 100 / coupon 100 hold.
+  fits and fitchecks unchanged; coin 92 / coupon 100 hold.
+- **Per-glyph engraving closing (manifold degenerate-faces fix).** The tighter
+  proportional spacing left some intra-word pairs (the 0.11 mm E-F of "THIEF",
+  and arc-rotated pairs that stay close no matter how wide the track) under the
+  0.5 mm the closing fills — welding them into slivers that OpenSCAD's *manifold*
+  backend (CI's renderer; the stable CGAL backend did not) triangulated as
+  **degenerate faces**, dropping the coin 92→84 and flipper 100→92 on CI (a
+  score-only warning — the part still sliced and gated clean). Fixed at the root:
+  `engrave_close()` now closes each glyph/emblem on its own instead of closing
+  the whole face-art union, so neighbours never fuse on any backend. A small
+  `legend_gap` adds breathing room. Diagnosed by pulling the CI (nightly+manifold)
+  findings — the local stable render never showed it.
 
 Also (tooling, same round): **bridge-aware printcheck** made shape-aware — a
 solid acute ceiling (an 8 mm triangle spans 6.9 mm) is no longer mistaken for a

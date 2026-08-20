@@ -211,7 +211,7 @@ def _bridgeable_mask(mesh: trimesh.Trimesh, oh: np.ndarray, cfg: Config) -> np.n
     - A solid/compact region must be crossed by full straight bridges, so the
       binding span is its convex-hull minimum width, not its local thinness.
 
-    The two are told apart by Polsby–Popper compactness (4π·area / perimeter²):
+    The two are told apart by Polsby-Popper compactness (4π·area / perimeter²):
     a stroke or ring is elongated (low), a filled blob is compact (high). A
     compact region is bridgeable only if its hull min-width ≤ `bridge_max_mm`;
     a thin region is bridgeable if it erodes away. Either way a wide flat shelf
@@ -241,7 +241,7 @@ def _bridgeable_mask(mesh: trimesh.Trimesh, oh: np.ndarray, cfg: Config) -> np.n
 
     tri = mesh.triangles  # (F, 3, 3)
     r = cfg.bridge_max_mm / 2.0
-    # Above this Polsby–Popper value a region is treated as a compact blob
+    # Above this Polsby-Popper value a region is treated as a compact blob
     # (equilateral triangle ≈ 0.60, disc = 1.0) rather than a thin stroke/ring
     # (elongated, well below 0.4).
     compact_pp = 0.4

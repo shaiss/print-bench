@@ -154,6 +154,22 @@ function _adv(c) = let(k = search(c, legend_adv_chars))
                        len(k) > 0 ? legend_adv[k[0]] : 0.6;
 function _cum(v, i) = i <= 0 ? 0 : v[i - 1] + _cum(v, i - 1);  // prefix sum
 
+// A little extra ink gap between adjacent glyphs (mm), added to every advance
+// purely for legibility breathing room. It is NOT what keeps the letters from
+// welding — engrave_close() (below) closes each glyph on its own, so tight or
+// arc-rotated pairs never fuse regardless of this value.
+legend_gap = 0.35;
+
+// The engraving closing (dilate then erode by engrave_relief), applied to ONE
+// element at a time. Closing the whole face-art union instead would weld any
+// two elements within 2*relief of each other — e.g. the sub-0.5 mm E-F of
+// "THIEF" — into a sliver that OpenSCAD's manifold backend triangulates as a
+// degenerate face (a score-only warning). Closing per element fixes each
+// glyph's own acute crotches without ever bridging to its neighbours.
+module engrave_close() {
+    offset(r = -engrave_relief) offset(r = engrave_relief) children();
+}
+
 // One character per proportional slot around the coin (0 deg = 12 o'clock).
 // Every glyph's baseline sits on radius r, so the RADIAL extent is set by
 // r + size (independent of `track`) while `track` scales only the angular
@@ -161,18 +177,18 @@ function _cum(v, i) = i <= 0 ? 0 : v[i - 1] + _cum(v, i - 1);  // prefix sum
 // OUTWARD from r; bottom legends grow INWARD, so both share one annulus band.
 module arc_legend(txt, r, size, track, top) {
     n = len(txt);
-    adv = [for (i = [0 : n - 1]) _adv(txt[i]) * size * track];
+    adv = [for (i = [0 : n - 1]) _adv(txt[i]) * size * track + legend_gap];
     total = _cum(adv, n);
     for (i = [0 : n - 1]) {
         s = _cum(adv, i) + adv[i] / 2 - total / 2;   // arc-length to glyph mid
         a = s / r * 180 / PI;                         // -> degrees along the arc
         if (top)
             rotate([0, 0, -a]) translate([0, r, 0])
-                text(txt[i], size = size, font = font,
+                engrave_close() text(txt[i], size = size, font = font,
                      halign = "center", valign = "baseline");
         else
             rotate([0, 0, a]) translate([0, -r, 0])
-                text(txt[i], size = size, font = font,
+                engrave_close() text(txt[i], size = size, font = font,
                      halign = "center", valign = "baseline");
     }
 }
@@ -231,12 +247,12 @@ module face_a_2d() {
     // "IS THE": 3.2 mm, its row-corner at r ~13.9. THIEF stays at r 17.8 (its
     // inward glyph tops ~r 14.5) so this clearance holds at ~0.5 mm; the sun's
     // down-ray tip clears by ~2.3 mm (re-derive if you move either).
-    translate([0, -10.7]) text("IS THE", size = 3.2, font = font,
+    engrave_close() translate([0, -10.7]) text("IS THE", size = 3.2, font = font,
                                halign = "center", valign = "center",
                                spacing = 1.0);
     arc_text_bottom("THIEF OF JOY", 17.8, 3.4, 1.42);
-    sun_2d();
-    pivot_diamonds_2d(16.3);
+    engrave_close() sun_2d();
+    engrave_close() pivot_diamonds_2d(16.3);
 }
 
 // Face B — "MEMENTO MORI" around an hourglass. v2.1: MEMENTO pulls in to
@@ -245,8 +261,8 @@ module face_a_2d() {
 module face_b_2d() {
     arc_text_top("MEMENTO", 13.9, 4.0, 1.28);
     arc_text_bottom("MORI", 17.5, 3.9, 1.35);
-    hourglass_2d();
-    pivot_diamonds_2d(16.3);
+    engrave_close() hourglass_2d();
+    engrave_close() pivot_diamonds_2d(16.3);
 }
 
 // ---- coin ---------------------------------------------------------------
@@ -283,12 +299,14 @@ module reeds_cut() {
     }
 }
 
-// Engraving cutter for the TOP face (z = coin_t). The offset pair is the
-// closing described at `engrave_relief` (dilate, then erode).
+// Engraving cutter for the TOP face (z = coin_t). Each art element arrives
+// already closed by engrave_close() (per element, so neighbours never weld),
+// so the cutter only extrudes — no union-wide closing that would re-bridge
+// adjacent glyphs into manifold-degenerate slivers.
 module top_face_cut() {
     translate([0, 0, coin_t - engrave_depth])
         linear_extrude(engrave_depth + 0.02)
-            offset(r = -engrave_relief) offset(r = engrave_relief) children();
+            children();
 }
 
 // Same cutter flipped onto the BOTTOM face by a 180-degree turn about the
