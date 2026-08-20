@@ -81,6 +81,10 @@ loop_hole_d = 4.5;
 // v2 fix — at 6 mm the coils had to pry over the whole ring height (issue: the
 // tab was as thick as the ring; keyfobs keep it ~2-3 mm).
 loop_thick = 3.0;
+// Loop-tab clearance (mm): the tab's inner bulge sits this far OUTSIDE the ring
+// bore, at every coin_d / loop_hole_d by construction (the derived placement
+// below). Raise it if a manual edit ever trips the loop-tab asserts.
+tab_bore_margin = 0.2;
 
 /* [Pivot — the tuned fit] */
 // Axle vertex radius: half the diamond's corner-to-corner diagonal (mm)
@@ -128,9 +132,9 @@ flip_sweep_r = sqrt(coin_r * coin_r + pivot_z * pivot_z);
 // but the coupon fused and jammed and loop_hole_d silently narrowed the flip
 // pad. Deriving the inner disc from the bore makes the tab's inner bulge sit a
 // fixed margin OUTSIDE the bore at every coin_d and every loop_hole_d by
-// construction: tab_reach = tab_inner_y - tab_r = bore_r + tab_bore_margin,
-// independent of loop_hole_d (tab_r cancels).
-tab_bore_margin = 0.2;                   // tab bulge sits this far outside the bore
+// construction: tab_reach = tab_inner_y - tab_r = bore_r + tab_bore_margin
+// (the input `tab_bore_margin` lives in [Flip ring]), independent of
+// loop_hole_d (tab_r cancels).
 tab_r    = loop_hole_d / 2 + 2.2;        // loop tab disc radius
 tab_inner_y = bore_r + tab_r + tab_bore_margin;
 tab_outer_y = tab_inner_y + 4.2;         // loop length (hole sits here)
@@ -138,28 +142,42 @@ tab_reach   = tab_inner_y - tab_r;       // closest approach of tab to centre
 
 // ---- 2D artwork ---------------------------------------------------------
 
-// One character per slot, fanned around the TOP of the coin: char i sits at
-// angle a0 - i*dpc (0 deg = 12 o'clock, +CCW), baseline on radius r, glyph
-// growing outward, upright along its local radial.
-module arc_text_top(txt, r, size, dpc) {
-    n = len(txt);
-    for (i = [0 : n - 1])
-        rotate([0, 0, (n - 1) * dpc / 2 - i * dpc])
-            translate([0, r, 0])
-                text(txt[i], size = size, font = font,
-                     halign = "center", valign = "baseline");
-}
+// Proportional advance-width table (Liberation Sans Bold caps, ~em). Uniform
+// degrees-per-char gives a narrow glyph the same angular slot as a wide one,
+// so "MORI" fans out to "MOR I" and "COMPARISON" to "COMPAR I SON". Advancing
+// each glyph by its own width instead makes the legends read as words. The
+// space is widened so word gaps stay legible on the tight bottom arc.
+legend_adv_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ .";
+legend_adv = [.72,.72,.72,.72,.67,.61,.78,.72,.28,.56,.72,.61,.83,
+              .72,.78,.67,.78,.72,.67,.61,.72,.67,.94,.67,.67,.61,.28,.62];
+function _adv(c) = let(k = search(c, legend_adv_chars))
+                       len(k) > 0 ? legend_adv[k[0]] : 0.6;
+function _cum(v, i) = i <= 0 ? 0 : v[i - 1] + _cum(v, i - 1);  // prefix sum
 
-// Fanned around the BOTTOM, reading left to right, glyphs growing inward
-// from baseline radius r (so top and bottom legends share one annulus band).
-module arc_text_bottom(txt, r, size, dpc) {
+// One character per proportional slot around the coin (0 deg = 12 o'clock).
+// Every glyph's baseline sits on radius r, so the RADIAL extent is set by
+// r + size (independent of `track`) while `track` scales only the angular
+// spread — tune edge margin and letter-spacing separately. Top legends grow
+// OUTWARD from r; bottom legends grow INWARD, so both share one annulus band.
+module arc_legend(txt, r, size, track, top) {
     n = len(txt);
-    for (i = [0 : n - 1])
-        rotate([0, 0, -(n - 1) * dpc / 2 + i * dpc])
-            translate([0, -r, 0])
+    adv = [for (i = [0 : n - 1]) _adv(txt[i]) * size * track];
+    total = _cum(adv, n);
+    for (i = [0 : n - 1]) {
+        s = _cum(adv, i) + adv[i] / 2 - total / 2;   // arc-length to glyph mid
+        a = s / r * 180 / PI;                         // -> degrees along the arc
+        if (top)
+            rotate([0, 0, -a]) translate([0, r, 0])
                 text(txt[i], size = size, font = font,
                      halign = "center", valign = "baseline");
+        else
+            rotate([0, 0, a]) translate([0, -r, 0])
+                text(txt[i], size = size, font = font,
+                     halign = "center", valign = "baseline");
+    }
 }
+module arc_text_top(txt, r, size, track = 1.0)    { arc_legend(txt, r, size, track, true);  }
+module arc_text_bottom(txt, r, size, track = 1.0) { arc_legend(txt, r, size, track, false); }
 
 // Radiant sun — the JOY side emblem. Every filled region stays under
 // ~2.5 mm across: when this face prints downward, each engraved void's roof
@@ -204,28 +222,29 @@ module pivot_diamonds_2d(r) {
 }
 
 // Face A — "COMPARISON / IS THE / THIEF OF JOY" around a radiant sun.
-// Arc spacing rule of thumb: wide glyphs (M, W) graze their fanned
-// neighbors when the slot arc at the baseline drops under ~3.5 mm, so each
-// zone carries few enough characters to stay clear (measured: the original
-// single 17-char top arc left 0.01 mm between O and M).
+// v2.1 legends: proportional arc spacing (arc_legend) reads the words as
+// words, and the TOP arc pulls in to r 14.0 so its outermost glyph lands at
+// r ~17.8 — 1.4 mm off the rim bevel (v1/v2 sat 0.7 mm off). The BOTTOM arc
+// keeps r 17.8 to preserve the IS THE clearance below.
 module face_a_2d() {
-    arc_text_top("COMPARISON", 14.8, 3.6, 14.4);
-    // "IS THE": v2 raises 2.6 -> 3.2 mm — at 2.6 the stroke was ~0.52 mm (one
-    // extrusion) and the closing sealed the S. At 3.2 the row-corner reaches
-    // r 13.9, clearing the THIEF arc glyph tops (r 14.46) with 0.54 mm land and
-    // the sun's down-ray tip by 2.3 mm (re-derive if you move either).
+    arc_text_top("COMPARISON", 14.0, 3.5, 1.34);
+    // "IS THE": 3.2 mm, its row-corner at r ~13.9. THIEF stays at r 17.8 (its
+    // inward glyph tops ~r 14.5) so this clearance holds at ~0.5 mm; the sun's
+    // down-ray tip clears by ~2.3 mm (re-derive if you move either).
     translate([0, -10.7]) text("IS THE", size = 3.2, font = font,
                                halign = "center", valign = "center",
                                spacing = 1.0);
-    arc_text_bottom("THIEF OF JOY", 17.8, 3.5, 11.2);
+    arc_text_bottom("THIEF OF JOY", 17.8, 3.4, 1.42);
     sun_2d();
     pivot_diamonds_2d(16.3);
 }
 
-// Face B — "MEMENTO MORI" around an hourglass.
+// Face B — "MEMENTO MORI" around an hourglass. v2.1: MEMENTO pulls in to
+// r 13.9 (outermost glyph r ~17.5, ~1.7 mm off the bevel; v1/v2 sat 0.7 mm
+// off), MORI to r 17.5; both proportionally spaced so "MORI" reads as a word.
 module face_b_2d() {
-    arc_text_top("MEMENTO", 14.6, 4.2, 17);
-    arc_text_bottom("MORI", 17.8, 4.2, 17);
+    arc_text_top("MEMENTO", 13.9, 4.0, 1.28);
+    arc_text_bottom("MORI", 17.5, 3.9, 1.35);
     hourglass_2d();
     pivot_diamonds_2d(16.3);
 }

@@ -237,7 +237,9 @@ export function parseChangelog(text) {
     const m = raw.match(/^###\s+(.*\S)\s*$/);
     if (!m) continue;
     const heading = m[1].trim();
-    const parts = heading.match(/^(.+?)\s+—\s+(\S+)\s+—\s+(.+\S)\s*$/);
+    // title is (\S(?:.*\S)?) so a single-character title ("### v0.2 — DATE — X")
+    // is accepted; (.+\S) would have required two non-space chars and dropped it.
+    const parts = heading.match(/^(.+?)\s+—\s+(\S+)\s+—\s+(\S(?:.*\S)?)\s*$/);
     if (!parts) {
       problems.push(`line ${lineno}: changelog heading must be '### <version> — YYYY-MM-DD — <title>', got '${heading}'`);
       continue;

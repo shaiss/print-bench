@@ -146,6 +146,34 @@ Design version history, newest first. A version is cut as a release
 "what changed and why" beside it. Each entry cites the field prints that drove
 it (see `## Field test log`).
 
+### v0.2.1 — 2026-08-20 — legend legibility + off-the-rim margin
+
+A review-round pass after the owner flagged, from the v0.2 product shots, that
+**MEMENTO still sat hard on the rim** and the legends "read as if the letters
+collide." Ground-truthed both against the geometry (the auto-review Jane/Drik
+jobs had failed on a provider outage, so no reviewer had actually looked):
+
+- **Off the rim.** The top arcs (MEMENTO, COMPARISON) grew *outward* from their
+  baseline, so their outermost glyph reached r≈18.5 — **0.69 mm** from the rim
+  bevel. Pulled MEMENTO to r 13.9 / COMPARISON to r 14.0; every legend's
+  outermost glyph now clears the bevel by **≥1.3 mm** (measured from the
+  exported 2D art). The top-arc radii were unchanged since v0.1 — this margin
+  was never actually addressed before, hence "still".
+- **Reads as words.** Uniform degrees-per-char gave a narrow glyph the same
+  slot as a wide one, fanning "MORI"→"MOR I" and "COMPARISON"→"COMPAR I SON".
+  Replaced with **proportional arc spacing** (`arc_legend`, advance ∝ glyph
+  width from a Liberation-Sans-Bold width table); the words now read as words.
+  No literal glyph intersection existed — the "collide" look was the uneven
+  spacing plus the angled product shot foreshortening the far side.
+- The tight **IS THE ↔ THIEF OF JOY** clearance was re-measured after the
+  respacing at **0.62 mm** (was 0.54 mm; the 0.25 mm engraving closing merges
+  under 0.50 mm), so the legends stay separate. Hourglass, sun, diamonds,
+  fits and fitchecks unchanged; coin 92 / flipper 100 / coupon 100 hold.
+
+Also (tooling, same round): **bridge-aware printcheck** made shape-aware — a
+solid acute ceiling (an 8 mm triangle spans 6.9 mm) is no longer mistaken for a
+bridgeable thin ring (CodeRabbit review); thin strokes/rings stay exempt.
+
 ### v0.2 — 2026-08-20 — field-driven refinement
 
 Driven by the first two field prints (print 1 + 2 below) and a Jane/Drik
@@ -175,8 +203,11 @@ review pass. Geometry:
   Documented deliberately so a future round doesn't "fix" it.
 - README gains the print-settings the field asked for (plate, seam, ironing,
   layer-height quantization) and a **two-color-swap recipe** — the engraving is
-  exactly 3 × 0.2 layers, so a filament swap at z=0.6 and z=4.4 gives both
-  faces contrasting text on any single-extruder printer.
+  0.6 mm deep, so filament swaps at z=0.6 and z=4.4 (`coin_t − engrave_depth`)
+  give both faces contrasting text on any single-extruder printer. Both heights
+  land on layer boundaries at the reference 0.2 mm; z=4.4 does not divide the
+  other supported heights, so the README scopes the layer indices to 0.2 mm and
+  says to round the second swap to a layer boundary otherwise.
 
 ### v0.1 — 2026-08-18 — first shipped version
 

@@ -64,16 +64,23 @@ about the pivot, so the back face reads upright after a flip.
 
 ### Two-color faces (optional, any single-extruder printer)
 
-The engraving is exactly three 0.2 mm layers deep on each face, so a plain
-filament swap gives both legends a contrasting color with no model change:
+The engraving is 0.6 mm deep on each face, so a plain filament swap gives both
+legends a contrasting color with no model change. **The layer numbers below
+assume the reference 0.2 mm layer height** — the swap *heights* are what matter,
+so pause by Z height, not by layer index:
 
-1. Load your **field** color. Print to **z = 0.6 mm** (layer 3), then swap to
-   the **legend** color — the MEMENTO face's engraved voids fill with it.
-2. Print to **z = 4.4 mm** (layer 22), swap back to the field color.
+1. Load your **field** color. Print to **z = 0.6 mm** (layer 3 at 0.2 mm), then
+   swap to the **legend** color — the MEMENTO face's engraved voids fill with it.
+2. Print to **z = 4.4 mm** (`coin_t − engrave_depth`; layer 22 at 0.2 mm), swap
+   back to the field color.
 3. The remaining engraving (the COMPARISON face's void floors) stays the
    legend color. Two manual swaps, both faces two-tone.
 
-(Scale the two heights if you change `engrave_depth` or `coin_t`.)
+Both swap heights are multiples of 0.2 mm, so at 0.2 mm they fall exactly on
+layer boundaries. `z = 0.6` also divides 0.12 / 0.15 / 0.3 mm cleanly, but
+`z = 4.4` does **not** (e.g. 4.4 / 0.15 = 29.3) — at any non-0.2 mm height,
+round the second swap to the nearest layer boundary at or above 4.4 mm. Scale
+both heights if you change `engrave_depth` or `coin_t`.
 
 ## Parameters
 

@@ -245,6 +245,14 @@ test("parseChangelog keeps a hyphenated title intact (em-dash separators)", () =
   assert.equal(entries[0].title, "support-free re-work of the hinge");
 });
 
+test("parseChangelog accepts a single-character title", () => {
+  const text = "## Changelog\n\n### v0.2 — 2026-08-20 — X\n- y\n";
+  const { entries, problems } = parseChangelog(text);
+  assert.deepEqual(problems, []);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].title, "X");
+});
+
 test("parseChangelog: absent section is a quiet zero", () => {
   const { entries, problems } = parseChangelog("## NOTES\n\nno changelog\n");
   assert.deepEqual(entries, []);

@@ -28,12 +28,14 @@ class Config:
     # degrees from vertical; faces steeper than this need support
     overhang_deg: float = 45.0
     # mm, the widest unsupported span FDM bridges cleanly without support. A
-    # downward region narrower than this everywhere is self-supporting (a
-    # bridge), so it is NOT counted as needing support — this is what keeps a
-    # debossed letter's ceiling, a thin relief chamfer, or a print-in-place
+    # downward region whose straight span stays under this is self-supporting
+    # (a bridge), so it is NOT counted as needing support — this is what keeps
+    # a debossed letter's ceiling, a thin relief chamfer, or a print-in-place
     # socket roof from scoring as an overhang the way a wide flat shelf does.
-    # 5 mm is conservative (most printers bridge 5-10 mm); the region test is
-    # a morphological erosion, so shape (rings, strokes) is handled correctly.
+    # 5 mm is conservative (most printers bridge 5-10 mm). The region test is
+    # shape-aware (see _bridgeable_mask): thin strokes/rings by erosion, solid
+    # blobs by hull min-width, so a filled triangular ceiling is not mistaken
+    # for a bridgeable ring.
     bridge_max_mm: float = 5.0
     # mm, printer build volume (X, Y, Z)
     build_volume_mm: tuple = (250.0, 210.0, 220.0)
@@ -170,21 +172,54 @@ def check_integrity(mesh: trimesh.Trimesh, cfg: Config):
 # Overhangs / support need
 # --------------------------------------------------------------------------
 
+def _hull_min_width(poly) -> float:
+    """Minimum width (smallest distance between two parallel supporting lines)
+    of a polygon's convex hull — the shortest span a straight bridge across the
+    solid shape must cover. Rotating-calipers via each hull edge's normal."""
+    hull = poly.convex_hull
+    xy = np.asarray(hull.exterior.coords)[:-1]  # drop repeated closing vertex
+    if len(xy) < 3:
+        return 0.0
+    edges = np.roll(xy, -1, axis=0) - xy               # (E, 2)
+    lens = np.hypot(edges[:, 0], edges[:, 1])
+    keep = lens > 1e-9
+    if not keep.any():
+        return 0.0
+    normals = np.stack([-edges[keep, 1], edges[keep, 0]], axis=1) / lens[keep, None]
+    proj = xy @ normals.T                               # (V, E) vertex·normal
+    widths = proj.max(axis=0) - proj.min(axis=0)        # extent along each normal
+    return float(widths.min())
+
+
 def _bridgeable_mask(mesh: trimesh.Trimesh, oh: np.ndarray, cfg: Config) -> np.ndarray:
     """Of the overhang faces `oh`, return a mask of those that are BRIDGEABLE
-    — part of a connected downward region that is everywhere narrower than
-    `bridge_max_mm`, so FDM spans it without support.
+    — part of a connected downward region FDM spans without support.
 
-    Bridgeability is a morphological test, not a bounding-box one: each
-    connected overhang region is projected to its XY footprint and eroded by
-    half the bridge width. If nothing survives, every point of the region is
-    within a bridge's reach of unsupported air on two sides — a debossed
-    letter's ceiling, a thin annular relief chamfer, a print-in-place socket
-    roof. A wide flat shelf survives erosion and stays support-needing.
+    Bridgeability is shape-aware, because a *thin* region and a *solid* region
+    fail in different ways and one test cannot catch both:
 
-    Falls back to "nothing is bridgeable" (current behaviour) if shapely is
-    unavailable or a region's geometry defeats the union — never exempts on
-    error, so the check can only get stricter, not weaker, when it degrades.
+    - A thin region (a debossed letter's stroke, a thin annular relief chamfer,
+      a print-in-place socket roof, a ring) is spanned by short local bridges
+      across its width, so the test is a morphological erosion by half the
+      bridge width: if the footprint erodes to nothing it is everywhere
+      narrower than `bridge_max_mm`. A ring erodes away here even though it is
+      geometrically wide — which is why a plain inradius/erosion test alone was
+      chosen — but that same erosion wrongly clears a *solid* acute blob (an
+      equilateral triangle of side 8 mm has inradius 2.31 < 2.5 mm yet its
+      shortest straight bridge is 6.9 mm).
+
+    - A solid/compact region must be crossed by full straight bridges, so the
+      binding span is its convex-hull minimum width, not its local thinness.
+
+    The two are told apart by Polsby–Popper compactness (4π·area / perimeter²):
+    a stroke or ring is elongated (low), a filled blob is compact (high). A
+    compact region is bridgeable only if its hull min-width ≤ `bridge_max_mm`;
+    a thin region is bridgeable if it erodes away. Either way a wide flat shelf
+    (survives erosion, compact, min-width huge) stays support-needing.
+
+    Falls back to "nothing is bridgeable" if shapely is unavailable or a
+    region's geometry defeats the union — never exempts on error, so the check
+    can only get stricter, not weaker, when it degrades.
     """
     idx = np.where(oh)[0]
     if idx.size == 0:
@@ -206,6 +241,10 @@ def _bridgeable_mask(mesh: trimesh.Trimesh, oh: np.ndarray, cfg: Config) -> np.n
 
     tri = mesh.triangles  # (F, 3, 3)
     r = cfg.bridge_max_mm / 2.0
+    # Above this Polsby–Popper value a region is treated as a compact blob
+    # (equilateral triangle ≈ 0.60, disc = 1.0) rather than a thin stroke/ring
+    # (elongated, well below 0.4).
+    compact_pp = 0.4
     bridgeable = np.zeros(len(mesh.faces), dtype=bool)
     for comp in comps:
         comp = np.asarray(comp)
@@ -216,8 +255,16 @@ def _bridgeable_mask(mesh: trimesh.Trimesh, oh: np.ndarray, cfg: Config) -> np.n
             foot = unary_union([p for p in polys if p.is_valid and p.area > 0])
             if foot.is_empty:
                 continue
-            if foot.buffer(-r).is_empty:      # erodes away → everywhere ≤ 2r wide
-                bridgeable[comp] = True
+            if not foot.buffer(-r).is_empty:
+                continue                       # fat core survives → needs support
+            # Erodes away, so it is locally thin. Distinguish a genuinely thin
+            # stroke/ring (bridge it) from a solid acute blob whose straight
+            # span still exceeds the budget (support it).
+            per = foot.length
+            pp = 4 * np.pi * foot.area / (per * per) if per > 1e-9 else 1.0
+            if pp > compact_pp and _hull_min_width(foot) > cfg.bridge_max_mm:
+                continue                       # compact blob, span too wide
+            bridgeable[comp] = True
         except Exception:
             continue  # unresolvable region stays support-needing (conservative)
     return bridgeable

@@ -79,13 +79,74 @@ def test_narrow_bridge_is_not_counted_as_overhang(tmp_path):
 
 def test_wide_ceiling_is_counted_as_overhang(tmp_path):
     # The same shape with a 14 mm span is too wide to bridge: still flagged,
-    # and the metrics report the bridgeable split.
+    # and the metrics report the full bridgeable split.
     arch = _arch(gap=14.0)
     report = analyze(_save(tmp_path, arch, "wide.stl"))
     oh = [f for f in report.findings if f.check == "overhangs"]
     assert oh, "a 14 mm unsupported ceiling must still need support"
     assert oh[0].metrics["overhang_area_mm2"] > 0
     assert "raw_overhang_area_mm2" in oh[0].metrics
+    # nothing bridges here, and the bridge budget is reported for provenance
+    assert oh[0].metrics["bridgeable_area_mm2"] == 0
+    assert oh[0].metrics["bridge_max_mm"] == 5.0
+
+
+def _tri_ceiling(side, h=8.0, thick=2.0):
+    """An equilateral-triangle slab (side `side`) held at height h on a thin
+    central column, so its whole triangular underside is one downward overhang
+    region — a *solid* ceiling, unlike the thin strokes _arch builds."""
+    from shapely.geometry import Polygon
+    import math
+    R = side / math.sqrt(3)  # circumradius; vertices of an equilateral triangle
+    verts = [(R * math.cos(a), R * math.sin(a))
+             for a in (math.pi / 2, math.pi / 2 + 2 * math.pi / 3,
+                       math.pi / 2 + 4 * math.pi / 3)]
+    slab = trimesh.creation.extrude_polygon(Polygon(verts), thick)
+    slab.apply_translation([0, 0, h])
+    col = trimesh.creation.cylinder(radius=0.8, height=h)
+    col.apply_translation([0, 0, h / 2])
+    return trimesh.util.concatenate([slab, col])
+
+
+def test_solid_triangle_ceiling_needs_support(tmp_path):
+    # An 8 mm equilateral solid ceiling: its inradius (2.31 mm) erodes away, but
+    # its shortest straight bridge is ~6.9 mm — a plain erosion test would clear
+    # it wrongly. The shape-aware (hull min-width) branch must still flag it.
+    tri = _tri_ceiling(side=8.0)
+    report = analyze(_save(tmp_path, tri, "tri8.stl"))
+    assert any(f.check == "overhangs" for f in report.findings), \
+        "a solid 8 mm triangular ceiling spans too far to bridge"
+
+
+def test_small_triangle_ceiling_bridges(tmp_path):
+    # A 3 mm equilateral ceiling spans < 5 mm in every direction: bridgeable,
+    # so the shape-aware branch must not over-flag small solid features.
+    tri = _tri_ceiling(side=3.0)
+    report = analyze(_save(tmp_path, tri, "tri3.stl"))
+    assert not any(f.check == "overhangs" for f in report.findings)
+
+
+def _ring_ceiling(outer=8.0, width=1.4, h=8.0, thick=2.0):
+    """A thin annular slab on a thin column — a downward ring whose stroke is
+    `width` mm wide but whose overall diameter is large. It must stay bridgeable
+    (short local bridges across the stroke), proving the compact-blob fix did
+    not regress the thin-ring exemption."""
+    from shapely.geometry import Point
+    ring = Point(0, 0).buffer(outer).difference(Point(0, 0).buffer(outer - width))
+    slab = trimesh.creation.extrude_polygon(ring, thick)
+    slab.apply_translation([0, 0, h])
+    col = trimesh.creation.cylinder(radius=0.6, height=h)
+    col.apply_translation([outer - width / 2, 0, h / 2])  # under the stroke
+    return trimesh.util.concatenate([slab, col])
+
+
+def test_thin_ring_ceiling_bridges(tmp_path):
+    # A wide-diameter but thin-stroked ring: erodes away, elongated (low
+    # compactness), so it stays bridgeable — the case a naive min-width test
+    # would wrongly flag.
+    ring = _ring_ceiling()
+    report = analyze(_save(tmp_path, ring, "ring.stl"))
+    assert not any(f.check == "overhangs" for f in report.findings)
 
 
 def test_bridge_threshold_is_configurable(tmp_path):
