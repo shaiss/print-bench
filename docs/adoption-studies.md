@@ -22,7 +22,9 @@ adoption decision is implied or made by opening one.
 
 Open an **Adoption study** issue from the chooser
 (`.github/ISSUE_TEMPLATE/adoption-study.yml`). The form auto-labels the issue
-`adoption-study` and titles it `Adoption study: <product>`; its fields mirror
+`adoption-study` and pre-fills its title with `Adoption study: ` — the submitter
+completes it with the product name (a GitHub issue form fills a fixed title
+prefix, not a field value). Its fields mirror
 the canonical format in `templates/adoption-study.md` heading-for-heading (the
 two are kept identical the same way the design-brief form mirrors
 `templates/design-brief.md`). Fill it as a neutral dossier:
@@ -132,7 +134,7 @@ an observability vendor. The study recommends; it adopts nothing.
 
 Today the assessment is **human-run**: a person reads the filed study against
 the baseline and writes the split verdict. An **agentic assessor** that
-auto-produces the study from the filed issue is a *proposed* follow-up, designed
+reads a filed study and auto-drafts its split verdict is a *proposed* follow-up, designed
 but deliberately **not built here**, because auto-drafting a disposition from
 untrusted issue text crosses the bench's "agentic writer over untrusted issue
 text" boundary — the same line the labeler and product scout sit behind. The

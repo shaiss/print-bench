@@ -11,7 +11,8 @@ body:
       value: |
         A **neutral** study of a vendor product: filing this asks for an
         **evaluation**, not adoption — no decision to integrate is implied or
-        made here. Every capability claim needs a **link or evidence**; an
+        made here. **Complete the pre-filled title** (`Adoption study: `) with
+        the product name. Every capability claim needs a **link or evidence**; an
         unsupported claim is an assumption, so put it under *Assumptions &
         claims to verify* rather than stating it as fact. License reach is
         first-class here — print-bench treats the GPL-vs-BSD boundary as a

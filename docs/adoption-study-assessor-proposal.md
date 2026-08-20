@@ -18,7 +18,9 @@ inventing machinery (N6): the bet is orchestration, not a new mechanism.
 
 ## The one boundary this agent may never cross
 
-The assessor produces an **advisory disposition a human — or Reeve — acts on**.
+The assessor produces an **advisory disposition a human acts on** — one Reeve
+*surfaces* to the lead but never acts on itself (Reeve stays a reporter, per
+`docs/adoption-studies.md` and `PM.md`; the disposition is a human's call).
 That single sentence is the whole safety story, and it decomposes into four
 refusals the build must enforce by construction, not by prompt:
 
@@ -60,10 +62,17 @@ shell:
   verdict is a rich, multi-line markdown body (tables, newlines) and a
   `gh issue comment --body '…'` with table pipes is **denied on a command line
   under `dontAsk` no matter how it is quoted**, whereas a JSON tool argument
-  never touches a command line. The tool hardcodes what keeps it safe: it
-  **requires the target issue to carry the `adoption-study` label**, prepends the
-  advisory framing to every body, applies **no label**, and **caps dispositions
-  per run** via a run-scoped in-process counter.
+  never touches a command line. The tool hardcodes what keeps it safe, and
+  **validates the target at write time** rather than trusting the model's supplied
+  number: immediately before posting it **re-reads the target issue and requires
+  it to be open, still carry `adoption-study`, and carry no `disposition:*`
+  label** — so a stale or prompt-injected run cannot comment on a closed or
+  already-ruled study (the read wrapper's `list-awaiting` is a convenience, never
+  the enforcement boundary, since the model supplies the number later). It
+  **binds the write to the run's candidate set** and **rejects a duplicate**
+  disposition on an issue it (or a prior run) already commented on; it prepends
+  the advisory framing to every body, applies **no label**, and **caps
+  dispositions per run** via a run-scoped in-process counter.
 
 ### 2. `--permission-mode dontAsk` makes `--allowedTools` exclusive
 

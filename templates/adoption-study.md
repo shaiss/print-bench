@@ -1,8 +1,10 @@
 <!-- The adoption-study format — a NEUTRAL evaluation of a vendor product.
      This is the shape the .github/ISSUE_TEMPLATE/adoption-study.yml issue form
      collects; the section headings here and that form's field labels must stay
-     identical. The study becomes the BODY of an issue titled
-     "Adoption study: <product>" and labeled `adoption-study`. Filing it is a
+     identical. The study becomes the BODY of an issue labeled `adoption-study`
+     and titled "Adoption study: <product>" — the form pre-fills the
+     "Adoption study: " prefix and the submitter completes it with the product
+     name (an issue form fills a fixed title prefix, not a field value). Filing it is a
      request to EVALUATE a product, not to adopt it — no integration decision is
      implied or made here. Every capability claim carries a link or evidence; a
      claim taken on faith belongs under Assumptions & claims to verify, never
