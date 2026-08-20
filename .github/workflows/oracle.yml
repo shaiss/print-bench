@@ -191,9 +191,6 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          # shellcheck disable=SC2016  # the single-quoted GraphQL query below
-          # carries $owner/$repo/$pr as GraphQL variables — they must NOT
-          # expand in the shell; gh api -F binds them.
           set -euo pipefail
           mkdir -p .oracle-context
 
@@ -219,6 +216,9 @@ jobs:
           {
             echo "# Frozen acceptance contract(s)"
             echo
+            # shellcheck disable=SC2016
+            # (the single-quoted GraphQL query: $owner/$repo/$pr are GraphQL
+            # variables bound by `gh api -F`, not shell expansions)
             issues="$(gh api graphql \
               -f query='query($owner:String!,$repo:String!,$pr:Int!){
                 repository(owner:$owner,name:$repo){
