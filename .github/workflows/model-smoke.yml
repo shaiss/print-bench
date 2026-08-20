@@ -7,8 +7,13 @@ name: Model chain smoke
 # claude-opus-4-8 backstop passed every static check and was rejected at $0 on
 # its first live request. This workflow makes the live request: it walks a
 # chain and sends a real 1-token Messages call per link whose provider secret
-# is set, failing if any configured link cannot answer (or if no secret is
-# configured at all — a run that proves nothing must not be green).
+# is set. It fails ONLY on positive evidence of a registry defect — a model id
+# the key genuinely cannot serve (404/not-found, permission denial, an
+# invalid-model 400): the #298 failure. A rate limit, a "credit balance too
+# low" billing rejection, or a network blip is INCONCLUSIVE, not a failure —
+# external to the registry, so an automatic per-PR gate does not red on a key
+# that is merely out of quota. (No secret configured at all still fails: a run
+# that could attempt nothing proves nothing.)
 #
 # TWO WAYS IN:
 #   • Automatically, on any PR that edits the registry, the model-registry

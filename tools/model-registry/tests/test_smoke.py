@@ -2,9 +2,11 @@
 
 The smoke command exists because static checks cannot prove a model id is
 servable by a key (issue #298); these tests prove the *judgement* — what counts
-as served, failed, and skipped, and that a run proving nothing never reports
-green — with a positive case and a negative control per rule, and pin that the
-package's network I/O stays confined to the one `_post` seam.
+as served (ok), a proven-unservable id (FAIL, the registry defect it blocks
+on), inconclusive (rate limit / account funding / auth / network — external to
+the registry, must not red the gate), and skipped — with a positive case and a
+negative control per rule, and pin that the package's network I/O stays
+confined to the one `_post` seam.
 """
 
 from __future__ import annotations
@@ -81,7 +83,7 @@ def test_request_wiring_per_provider(tmp_path):
 
 def test_non_200_on_a_configured_link_fails(tmp_path):
     # Negative control: the exact #298 signature — the provider answers, but
-    # rejects the model id — must fail the run, echoing the API's reason.
+    # rejects the model id as not found — must fail the run, echoing the reason.
     def post(url, headers, payload):
         if url == "https://api.anthropic.com/v1/messages" and b"claude-opus-5" in payload:
             return 404, '{"error":{"message":"model not found"}}'
@@ -92,12 +94,62 @@ def test_non_200_on_a_configured_link_fails(tmp_path):
     assert any(l.startswith("FAIL") and "model not found" in l for l in lines)
 
 
-def test_network_error_on_a_configured_link_fails(tmp_path):
+def test_permission_denied_is_a_dead_id_fail(tmp_path):
+    # A 403 permission denial (the key exists but cannot serve this id) is the
+    # #298 access failure — a registry defect — not an account-funding excuse.
+    def post(url, headers, payload):
+        return 403, '{"error":{"type":"permission_error","message":"no access to model"}}'
+    lines, code = smoke.smoke_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
+    assert code == 1
+    assert any(l.startswith("FAIL") for l in lines)
+
+
+def test_rate_limited_is_inconclusive_not_a_fail(tmp_path):
+    # 429 says the account is over quota, not that the id is bad — the exact
+    # signature that would otherwise red every registry PR on a broke key.
+    def post(url, headers, payload):
+        return 429, '{"error":{"type":"rate_limit_error","message":"Weekly Limit Exhausted"}}'
+    lines, code = smoke.smoke_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
+    assert code == 0
+    assert any(l.startswith("INCONC") for l in lines)
+    assert any(l.startswith("WARN") and "NOT PROVEN" in l for l in lines)
+
+
+def test_credit_balance_too_low_is_inconclusive(tmp_path):
+    # A 400 whose body is a billing rejection ("credit balance too low") reached
+    # the model — the account, not the id, is the problem. Inconclusive.
+    def post(url, headers, payload):
+        return 400, ('{"error":{"type":"invalid_request_error","message":'
+                     '"Your credit balance is too low to access the Anthropic API."}}')
+    lines, code = smoke.smoke_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert code == 0
+    assert all(not l.startswith("FAIL") for l in lines)
+    assert any(l.startswith("INCONC") for l in lines)
+
+
+def test_a_dead_link_fails_even_amid_inconclusive_ones(tmp_path):
+    # One genuinely-dead id must fail the run even if other links are only
+    # inconclusive — a real defect is not masked by a broke key elsewhere.
+    def post(url, headers, payload):
+        if b"claude-opus-5" in payload:
+            return 404, '{"error":{"message":"model not found"}}'
+        return 429, '{"error":{"message":"rate limited"}}'
+    lines, code = smoke.smoke_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert code == 1
+    assert any(l.startswith("FAIL") and "model not found" in l for l in lines)
+
+
+def test_network_error_is_inconclusive_not_a_registry_defect(tmp_path):
+    # A network blip proves nothing about a model id, so it is inconclusive, not
+    # a failure — the gate must not red on transient connectivity.
     def post(url, headers, payload):
         raise OSError("connection refused")
     lines, code = smoke.smoke_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
-    assert code == 1
-    assert any("connection refused" in l for l in lines)
+    assert code == 0
+    assert any(l.startswith("INCONC") and "connection refused" in l for l in lines)
+    assert any(l.startswith("WARN") and "NOT PROVEN" in l for l in lines)
 
 
 def test_missing_secret_skips_the_link_not_the_run(tmp_path):
