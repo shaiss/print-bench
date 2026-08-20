@@ -123,8 +123,13 @@ jobs:
           fi
 
       # Which chain is the OPPOSITE of the shipping vendor — see the header.
+      # Every step below gates on the first-landing guard: until the Oracle is
+      # on the base branch, the registry there has no oracle-* chains either,
+      # so an ungated resolve step would fail this job red on its own
+      # bootstrap PR (it did — first landing, first lesson).
       - name: Pick the opposite vendor's chain
         id: vendor
+        if: steps.ready.outputs.ready == 'true'
         run: |
           set -euo pipefail
           read_provider() {
@@ -157,6 +162,7 @@ jobs:
       # gives the drift guard one stable step id per chain to pin.
       - name: Resolve the oracle-anthropic chain (issue #206)
         id: anth
+        if: steps.ready.outputs.ready == 'true'
         env:
           PYTHONPATH: tools/model-registry/src
         run: |
@@ -164,6 +170,7 @@ jobs:
 
       - name: Resolve the oracle-glm chain (issue #206)
         id: glm
+        if: steps.ready.outputs.ready == 'true'
         env:
           PYTHONPATH: tools/model-registry/src
         run: |
@@ -174,6 +181,7 @@ jobs:
       # else. The agent reads these files; it has no tool to fetch more.
       - name: Assemble the blind review context
         id: context
+        if: steps.ready.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -183,6 +191,9 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          # shellcheck disable=SC2016  # the single-quoted GraphQL query below
+          # carries $owner/$repo/$pr as GraphQL variables — they must NOT
+          # expand in the shell; gh api -F binds them.
           set -euo pipefail
           mkdir -p .oracle-context
 
