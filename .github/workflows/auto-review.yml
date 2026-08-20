@@ -531,8 +531,10 @@ jobs:
             their tagged feedback on this PR. For each design named above
             (space-separated), load its charter per §0, triage every tagged
             finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on the repo: post comments only, never
-            push.
+            PR. This job is read-only on repository content: post comments,
+            and — only when §8 routes a blocking binary fork through the §7
+            HITL gate — add the needs-decision label; never push or edit
+            repository content.
 
       - name: /pm triage via Z.AI GLM 5.1
         id: p2
@@ -554,8 +556,10 @@ jobs:
             their tagged feedback on this PR. For each design named above
             (space-separated), load its charter per §0, triage every tagged
             finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on the repo: post comments only, never
-            push.
+            PR. This job is read-only on repository content: post comments,
+            and — only when §8 routes a blocking binary fork through the §7
+            HITL gate — add the needs-decision label; never push or edit
+            repository content.
 
       - name: /pm triage via Z.AI GLM 4.6
         id: p3
@@ -577,8 +581,10 @@ jobs:
             their tagged feedback on this PR. For each design named above
             (space-separated), load its charter per §0, triage every tagged
             finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on the repo: post comments only, never
-            push.
+            PR. This job is read-only on repository content: post comments,
+            and — only when §8 routes a blocking binary fork through the §7
+            HITL gate — add the needs-decision label; never push or edit
+            repository content.
 
       - name: /pm triage via Anthropic Opus 5
         id: p4
@@ -600,8 +606,10 @@ jobs:
             their tagged feedback on this PR. For each design named above
             (space-separated), load its charter per §0, triage every tagged
             finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on the repo: post comments only, never
-            push.
+            PR. This job is read-only on repository content: post comments,
+            and — only when §8 routes a blocking binary fork through the §7
+            HITL gate — add the needs-decision label; never push or edit
+            repository content.
 
       - name: /pm triage via Anthropic Sonnet 5
         id: p5
@@ -624,8 +632,10 @@ jobs:
             their tagged feedback on this PR. For each design named above
             (space-separated), load its charter per §0, triage every tagged
             finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on the repo: post comments only, never
-            push.
+            PR. This job is read-only on repository content: post comments,
+            and — only when §8 routes a blocking binary fork through the §7
+            HITL gate — add the needs-decision label; never push or edit
+            repository content.
 
       - name: /pm triage via Anthropic Haiku 4.5
         id: p6
@@ -649,8 +659,10 @@ jobs:
             their tagged feedback on this PR. For each design named above
             (space-separated), load its charter per §0, triage every tagged
             finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on the repo: post comments only, never
-            push.
+            PR. This job is read-only on repository content: post comments,
+            and — only when §8 routes a blocking binary fork through the §7
+            HITL gate — add the needs-decision label; never push or edit
+            repository content.
 
       - name: No provider key configured
         if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'

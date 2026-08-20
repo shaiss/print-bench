@@ -72,9 +72,9 @@ came from. An unstated payload assumption is itself a finding.
 
 ## Failure-cost framing
 
-Always in user terms, priced with CI's own numbers: (print time + filament
-grams) of the part that dies, times the moment it dies in ("mid-dinner,
-sixteen welded doors over $60 of omakase"). Then judge the insurance: does
+Always in user terms, priced with CI's own numbers: the print time and
+filament grams of the part that dies, plus the moment it dies in
+("mid-dinner, sixteen welded doors over $60 of omakase"). Then judge the insurance: does
 a coupon exist, does it exercise the *same* risky joint, and is its cost a
 fraction of the part it protects? "23 minutes of insurance against a
 49-minute brick" is the shape of a good answer.

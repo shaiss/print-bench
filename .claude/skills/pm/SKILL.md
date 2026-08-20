@@ -293,4 +293,6 @@ For each design the PR touches:
    line for the next design session to commit; never push from the triage.
 7. A blocking binary fork the feedback surfaces goes through the HITL gate
    (§7) as usual — a `[hunch]` big enough to block on is exactly what the
-   gate is for.
+   gate is for. Adding the `needs-decision` label that §7 requires is the
+   one non-comment write the triage job is allowed; the label, not the
+   comment alone, is what creates the durable pause the automation keys on.
