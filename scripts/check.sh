@@ -289,6 +289,21 @@ if ! ./scripts/cadence-sync-check.sh; then
   fail=1
 fi
 
+# ci-ok wiring guard (scripts/ci-ok-guard.sh): every gating job in ci.yml is
+# in ci-ok's hand-maintained `needs:` list, or is job-level advisory
+# (continue-on-error). Closes the hole ci.yml documents in its own comment — a
+# new gating job left out of needs can fail RED while ci-ok stays green.
+# Selftest first (the only thing proving the failure direction fires), then the
+# real ci.yml.
+echo "-- ci-ok-guard selftest: scripts/ci-ok-guard.sh --selftest"
+if ! ./scripts/ci-ok-guard.sh --selftest; then
+  fail=1
+fi
+echo "-- ci-ok-guard check: scripts/ci-ok-guard.sh"
+if ! ./scripts/ci-ok-guard.sh; then
+  fail=1
+fi
+
 # vercel-ignore-build selftest (scripts/vercel-ignore-build.sh --selftest): the
 # Vercel "Ignored Build Step" gate decides whether a preview deployment is worth
 # building from the changed-file list alone. The classifier is a pure function

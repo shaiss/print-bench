@@ -5,18 +5,29 @@ name: Model chain smoke
 # the registry parses and matches the workflow; neither can prove a model id
 # is servable by the key that would call it — the review chain's old
 # claude-opus-4-8 backstop passed every static check and was rejected at $0 on
-# its first live request. This workflow makes the live request: it walks the
-# selected chain and sends a real 1-token Messages call per link whose
-# provider secret is set, failing if any configured link cannot answer (or if
-# no secret is configured at all — a run that proves nothing must not be
-# green).
+# its first live request. This workflow makes the live request: it walks a
+# chain and sends a real 1-token Messages call per link whose provider secret
+# is set, failing if any configured link cannot answer (or if no secret is
+# configured at all — a run that proves nothing must not be green).
 #
-# Dispatch it on demand: after editing a chain's Anthropic tail, when a
-# provider misbehaves, or before pointing a new routine at a chain (#243).
-# Dispatching from a PR branch is deliberate — it proves a registry edit
-# BEFORE it merges. Read-only permissions; the provider secrets are the only
-# exposure, the same accepted dispatch posture as the other key-holding
-# workflows (docs/actions-security.md — write access is required to dispatch).
+# TWO WAYS IN:
+#   • Automatically, on any PR that edits the registry, the model-registry
+#     tool, or this workflow (the `pull_request` paths below) — smoking EVERY
+#     chain, so a registry edit can no longer ship an unservable id just
+#     because nobody remembered to dispatch this by hand. That "dispatch-only,
+#     so it never runs on its own" gap was the unclosed half of #298.
+#   • On demand via workflow_dispatch — smoke one named chain (the default,
+#     `review`), or clear the input to smoke every chain. Dispatch after
+#     editing a chain's Anthropic tail, when a provider misbehaves, or before
+#     pointing a new routine at a chain (#243).
+#
+# The PR trigger is scoped to same-repo PRs: a fork PR has no provider secrets,
+# so a live smoke there could only report "proves nothing" and fail — this
+# repo's PRs are all same-repo session branches (docs/actions-security.md).
+# model-smoke is NOT one of ci-ok's required contexts, so a red smoke informs
+# without blocking a merge until a maintainer promotes it in branch protection.
+# Read-only permissions; the provider secrets are the only exposure, the same
+# accepted posture as the other key-holding workflows.
 #
 # Each provider's secret is wired LITERALLY below (the Actions constraint the
 # registry documents): a new provider stanza needs its secret line added here
@@ -26,16 +37,26 @@ on:
   workflow_dispatch:
     inputs:
       chain:
-        description: "Registry chain to smoke-test (.github/models/registry.conf)"
+        description: "Registry chain to smoke-test (blank = every chain)"
         required: false
         default: review
+  pull_request:
+    paths:
+      - ".github/models/**"
+      - "tools/model-registry/**"
+      - ".github/workflows/model-smoke.yml"
 
 permissions:
   contents: read
 
 jobs:
   smoke:
-    name: Smoke the selected chain
+    name: Smoke the registry chains
+    # Skip fork PRs: no provider secrets there, so a live smoke can only fail
+    # "proves nothing". Dispatch runs and same-repo PRs still smoke for real.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -45,8 +66,29 @@ jobs:
       - name: Ping every configured link with a real 1-token request
         env:
           PYTHONPATH: tools/model-registry/src
-          CHAIN: ${{ inputs.chain }}
+          EVENT: ${{ github.event_name }}
+          CHAIN_INPUT: ${{ inputs.chain }}
           ZAI_KEY: ${{ secrets.ZAI_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          python3 -m model_registry smoke "$CHAIN"
+          set -euo pipefail
+          # Dispatch with a named chain smokes just that one (default `review`,
+          # preserving the old behavior); a cleared dispatch input or any PR
+          # trigger smokes EVERY chain the registry declares, so no chain edit
+          # ships an unservable id unproven (#298).
+          if [ "$EVENT" = "workflow_dispatch" ] && [ -n "${CHAIN_INPUT:-}" ]; then
+            chains="$CHAIN_INPUT"
+          else
+            chains="$(grep -oE '^\[chain:[A-Za-z0-9_-]+\]' .github/models/registry.conf \
+                        | sed -E 's/^\[chain:(.+)\]$/\1/')"
+          fi
+          if [ -z "${chains//[[:space:]]/}" ]; then
+            echo "::error::no chains found in .github/models/registry.conf"
+            exit 1
+          fi
+          rc=0
+          for c in $chains; do
+            echo "== smoking chain: $c =="
+            python3 -m model_registry smoke "$c" || rc=1
+          done
+          exit "$rc"

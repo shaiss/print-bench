@@ -1,0 +1,19 @@
+# gitleaks config for print-bench (used by .github/workflows/security-scan.yml
+# and by a local `gitleaks git` run). Extends gitleaks' built-in rule set and
+# allowlists paths that are third-party vendored code or generated artifacts —
+# never first-party credentials. The CI scan only looks at a PR's introduced
+# commits, so this allowlist mainly matters when a change actually touches one
+# of these trees.
+title = "print-bench"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Vendored third-party code and generated artifacts are not first-party secrets"
+paths = [
+  '''lib/BOSL2/.*''',
+  '''lib/NopSCADlib/.*''',
+  '''build/.*''',
+  '''.*/previews/.*''',
+]
