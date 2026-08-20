@@ -1,0 +1,104 @@
+name: Security scan
+
+# Secret scanning the repo did not have (baseline audit vs Foreman/eve — the
+# cohort ships secret detection on autonomous commits; print-bench had none).
+# Runs gitleaks over the NEW commits a change introduces — a PR's base..head
+# range, or a push's before..after — so it blocks a freshly-introduced
+# credential without re-litigating the entire vendored history on every run.
+# High-signal, low-false-positive: it only looks at what you are adding.
+#
+# NOT one of ci-ok's required contexts (it is its own workflow, not a job in
+# ci.yml): it reports RED on a finding but does not block a merge until a
+# maintainer promotes it in branch protection — the advisory→gating posture the
+# smart-CI registry documents. GitHub's native secret scanning + push
+# protection is a repo SETTING, not a file, so it cannot be enabled from here;
+# turn it on in Settings → Code security as belt-and-suspenders (this workflow
+# catches secrets already committed in a diff; push protection catches them at
+# push time, before they land).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # Full history so both endpoints of the scanned range are reachable.
+          fetch-depth: 0
+
+      - name: Install gitleaks (pinned, checksum-verified)
+        env:
+          GITLEAKS_VERSION: 8.21.2
+        run: |
+          set -euo pipefail
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL "${base}/${tarball}" -o "$tarball"
+          curl -fsSL "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o checksums.txt
+          # Verify the archive's SHA-256 against the published checksum BEFORE
+          # extracting — a pinned version alone does not prove the bytes are
+          # unchanged. awk isolates this archive's line; sha256sum -c fails the
+          # step on any mismatch or if the file is absent.
+          awk -v f="$tarball" '$2 == f' checksums.txt | sha256sum -c -
+          tar -xzf "$tarball" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan the introduced commits for secrets
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # The empty-tree object is "before every commit", so `empty_tree..HEAD`
+          # is every commit reachable from HEAD — the repo's own house pattern
+          # (lifestyle-shot/clip, product-still). Used for the fallback cases
+          # where the real predecessor is unknown, so an EARLIER pushed commit
+          # carrying a secret is scanned too, not just the tip.
+          empty_tree="$(git hash-object -t tree /dev/null)"
+          if [ "$EVENT" = "pull_request" ]; then
+            log_opts="${BASE_SHA}..${HEAD_SHA}"
+          elif printf '%s' "${BEFORE_SHA:-}" | grep -qE '^0{40}$'; then
+            # First push of a new branch: `before` is all-zeros, no predecessor.
+            log_opts="${empty_tree}..${HEAD_SHA}"
+          elif git rev-parse -q --verify "${BEFORE_SHA}^{commit}" >/dev/null 2>&1; then
+            log_opts="${BEFORE_SHA}..${HEAD_SHA}"
+          else
+            # `before` names a commit no longer reachable (a force-push that
+            # orphaned the old tip): the range would error on a missing object.
+            # Scan the whole reachable history rather than failing red on nothing.
+            echo "before-commit ${BEFORE_SHA} unreachable (force-push?) — scanning full reachable history"
+            log_opts="${empty_tree}..${HEAD_SHA}"
+          fi
+
+          # On a pull_request, checkout gives the MERGE ref, so the working tree
+          # carries the PR's OWN .gitleaks.toml — a PR could add a secret AND
+          # allowlist it in the same change. Load the config from the BASE
+          # revision instead (built-in rules if the base has none). On push the
+          # working-tree config already IS the merged base, so let gitleaks
+          # auto-load it.
+          config_arg=()
+          if [ "$EVENT" = "pull_request" ]; then
+            if git show "${BASE_SHA}:.gitleaks.toml" > "${RUNNER_TEMP}/base-gitleaks.toml" 2>/dev/null; then
+              config_arg=(--config "${RUNNER_TEMP}/base-gitleaks.toml")
+              echo "using .gitleaks.toml from base ${BASE_SHA}"
+            else
+              rm -f "${RUNNER_TEMP}/base-gitleaks.toml"
+              echo "base ${BASE_SHA} has no .gitleaks.toml — using gitleaks built-in rules"
+            fi
+          fi
+
+          echo "scanning git log range: ${log_opts}"
+          # --exit-code 1 (the default) fails the job on a finding.
+          gitleaks git --no-banner --redact "${config_arg[@]}" --log-opts="${log_opts}" .

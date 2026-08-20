@@ -1,0 +1,31 @@
+# Dependency update automation (baseline audit vs Foreman/eve: the repo had no
+# dependency scanning). Dependabot opens grouped PRs when a dependency it
+# tracks has a newer version — chiefly the pinned GitHub Actions (the repo pins
+# actions by tag/SHA, so this keeps them current and patched) and the two tools
+# that carry real Python dependencies (printcheck: numpy; stylelift: numpy +
+# mapbox-earcut). Grouped and rate-limited so a solo maintainer sees a few
+# batched PRs, not a flood. Every Dependabot PR runs the normal CI gates.
+version: 2
+updates:
+  # Pinned GitHub Actions across every workflow.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # The Python tools. `directories` glob covers each tool package's manifest
+  # (pyproject.toml); most declare no runtime deps, so this mostly tracks the
+  # numpy / mapbox-earcut / pytest pins that do exist and any future addition.
+  - package-ecosystem: pip
+    directories:
+      - "/tools/*"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python:
+        patterns: ["*"]
