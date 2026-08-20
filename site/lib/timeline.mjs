@@ -13,10 +13,11 @@
 //      assembly or the render. Each source is a pure function of committed
 //      inputs → events + problems, exactly the collect-don't-throw contract
 //      the rest of site/lib uses.
-//   2. Two concrete committed-only sources — the design's `PM.md` decision
-//      log (the real, already-committed calibration-cube content this issue
-//      calibrates on) and, optionally, the `NOTES.md` field-test log (the
-//      FIELD-TEST convention, issue #101) — plus the assembly that merges
+//   2. Concrete committed-only sources — the design's `PM.md` decision log
+//      (the real, already-committed calibration-cube content this issue
+//      calibrates on), the optional `NOTES.md` field-test log (the FIELD-TEST
+//      convention, issue #101), and the optional `NOTES.md` changelog (the
+//      in-place version-lineage convention) — plus the assembly that merges
 //      them newest-first and the render that lays them out.
 //
 // Product-scoping (the #122 principle): a timeline is *one product's*
@@ -213,6 +214,44 @@ export function parseFieldTestLog(text) {
   return { entries, problems };
 }
 
+/**
+ * Parse a `## Changelog` section into version entries (the design-iteration
+ * lineage convention). Each version is a
+ * `### <version> — <YYYY-MM-DD> — <title>` subheading: em-dashes separate the
+ * three fields so a hyphenated title ("field-driven") stays unambiguous. Only
+ * the date is validated and pinned; version and title are free text. Optional
+ * source — a design without the section yields nothing, quietly.
+ *
+ * This is what makes an IN-PLACE v1 -> v2 evolution first-class: a derivative
+ * gets its lineage from derives.conf, but a design iterated in place records
+ * its version history here, and this parse feeds it to the product-page
+ * timeline beside the field-test prints that drove each version.
+ */
+export function parseChangelog(text) {
+  const problems = [];
+  const entries = [];
+  const section = sectionLines(text, "Changelog");
+  if (section === null) return { entries, problems };
+
+  for (const { text: raw, lineno } of section) {
+    const m = raw.match(/^###\s+(.*\S)\s*$/);
+    if (!m) continue;
+    const heading = m[1].trim();
+    const parts = heading.match(/^(.+?)\s+—\s+(\S+)\s+—\s+(.+\S)\s*$/);
+    if (!parts) {
+      problems.push(`line ${lineno}: changelog heading must be '### <version> — YYYY-MM-DD — <title>', got '${heading}'`);
+      continue;
+    }
+    const [, version, date, title] = parts;
+    if (!isRealDate(date)) {
+      problems.push(`line ${lineno}: changelog version '${version.trim()}' needs a real YYYY-MM-DD date, got '${date}'`);
+      continue;
+    }
+    entries.push({ version: version.trim(), date, title: title.trim(), lineno });
+  }
+  return { entries, problems };
+}
+
 // ---------------------------------------------------------------------------
 // The source adapter interface (the seam).
 //
@@ -276,6 +315,28 @@ export const fieldTestSource = {
   },
 };
 
+/** The design's NOTES.md changelog — its in-place version history. */
+export const changelogSource = {
+  id: "changelog",
+  label: "version · NOTES.md",
+  read({ notesText, roster }) {
+    if (notesText == null) return { events: [], problems: [] };
+    const { entries, problems } = parseChangelog(notesText);
+    // Cutting a version is the charter owner's call, like a PM.md decision, so
+    // it attributes to the roster's pm where derivable — else null (honest).
+    const handle = roster && roster.pm ? roster.pm.handle : null;
+    const events = entries.map((e) => ({
+      date: e.date,
+      source: "changelog",
+      sourceTag: "version · NOTES.md",
+      text: `${e.version} — ${e.title}`,
+      detail: "",
+      handle,
+    }));
+    return { events, problems };
+  },
+};
+
 /**
  * The repo's own git history for this design — the first deploy-time (non-
  * committed) source, feeding the seam the committed sources were built around
@@ -294,7 +355,7 @@ export const gitHistorySource = {
 };
 
 /** The sources readTimeline runs, in declaration order. */
-export const SOURCES = [decisionLogSource, fieldTestSource, gitHistorySource];
+export const SOURCES = [decisionLogSource, fieldTestSource, changelogSource, gitHistorySource];
 
 /**
  * Assemble one product's timeline from its committed inputs.

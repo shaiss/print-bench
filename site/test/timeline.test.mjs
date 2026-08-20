@@ -21,8 +21,10 @@ import { join } from "node:path";
 import {
   parseDecisionLog,
   parseFieldTestLog,
+  parseChangelog,
   decisionLogSource,
   fieldTestSource,
+  changelogSource,
   gitHistorySource,
   SOURCES,
   readTimeline,
@@ -214,6 +216,57 @@ test("NEGATIVE: a field-test heading without a real date is a problem", () => {
   assert.match(problems[0], /real YYYY-MM-DD/);
 });
 
+// --- parseChangelog (in-place version lineage) ----------------------------
+
+test("parseChangelog reads ### version — date — title subheadings", () => {
+  const text = `## Changelog
+
+### v0.2 — 2026-08-20 — field-driven refinement
+Loop tab derived from the bore, axial float halved.
+
+### v0.1 — 2026-08-18 — first shipped version
+Two-sided coin + flipper.
+`;
+  const { entries, problems } = parseChangelog(text);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(
+    entries.map((e) => [e.version, e.date, e.title]),
+    [
+      ["v0.2", "2026-08-20", "field-driven refinement"],
+      ["v0.1", "2026-08-18", "first shipped version"],
+    ],
+  );
+});
+
+test("parseChangelog keeps a hyphenated title intact (em-dash separators)", () => {
+  const text = "## Changelog\n\n### v2 — 2026-01-02 — support-free re-work of the hinge\n- x\n";
+  const { entries, problems } = parseChangelog(text);
+  assert.deepEqual(problems, []);
+  assert.equal(entries[0].title, "support-free re-work of the hinge");
+});
+
+test("parseChangelog: absent section is a quiet zero", () => {
+  const { entries, problems } = parseChangelog("## NOTES\n\nno changelog\n");
+  assert.deepEqual(entries, []);
+  assert.deepEqual(problems, []);
+});
+
+test("NEGATIVE: a changelog heading missing the date/title fields is a problem", () => {
+  const text = "## Changelog\n\n### v0.1 first version\n- x\n";
+  const { entries, problems } = parseChangelog(text);
+  assert.deepEqual(entries, []);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /<version> — YYYY-MM-DD — <title>/);
+});
+
+test("NEGATIVE: a changelog version with a non-calendar date is a problem", () => {
+  const text = "## Changelog\n\n### v0.1 — 2026-02-30 — impossible day\n- x\n";
+  const { entries, problems } = parseChangelog(text);
+  assert.deepEqual(entries, []);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /real YYYY-MM-DD/);
+});
+
 // --- the adapters + assembly ----------------------------------------------
 
 const ROSTER = { pm: { handle: "vera", name: "Vera", kind: "agent", initials: "V" } };
@@ -239,9 +292,26 @@ test("fieldTestSource never attributes (a printer is not a member)", () => {
   assert.equal(events[0].sourceTag, "field test · NOTES.md");
 });
 
+test("changelogSource attributes a version to the roster pm and tags the source", () => {
+  const text = "## Changelog\n\n### v0.2 — 2026-08-20 — refinement\n- x\n";
+  const { events, problems } = changelogSource.read({ notesText: text, roster: ROSTER });
+  assert.deepEqual(problems, []);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].handle, "vera");
+  assert.equal(events[0].sourceTag, "version · NOTES.md");
+  assert.equal(events[0].text, "v0.2 — refinement");
+});
+
+test("changelogSource with no roster leaves the version unattributed", () => {
+  const text = "## Changelog\n\n### v0.2 — 2026-08-20 — refinement\n- x\n";
+  const { events } = changelogSource.read({ notesText: text, roster: null });
+  assert.equal(events[0].handle, null);
+});
+
 test("a source given a null file yields nothing (absent = quiet)", () => {
   assert.deepEqual(decisionLogSource.read({ pmText: null, roster: ROSTER }).events, []);
   assert.deepEqual(fieldTestSource.read({ notesText: null }).events, []);
+  assert.deepEqual(changelogSource.read({ notesText: null, roster: ROSTER }).events, []);
 });
 
 test("readTimeline merges sources newest-first and collects problems", () => {
@@ -270,7 +340,7 @@ test("readTimeline surfaces a bad row's problem", () => {
 });
 
 test("SOURCES is the default source set, in declaration order", () => {
-  assert.deepEqual(SOURCES.map((s) => s.id), ["decision-log", "field-test", "git"]);
+  assert.deepEqual(SOURCES.map((s) => s.id), ["decision-log", "field-test", "changelog", "git"]);
 });
 
 test("gitHistorySource merges pre-fetched git events, and is quiet when absent", () => {

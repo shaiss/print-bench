@@ -138,9 +138,10 @@ Design version history, newest first. A version is cut as a release
 "what changed and why" beside it. Each entry cites the field prints that drove
 it (see `## Field test log`).
 
-### v0.2 — field-driven refinement (from v0.1 print 1 + 2)
+### v0.2 — 2026-08-20 — field-driven refinement
 
-Driven by the first two field prints and a Jane/Drik review pass. Geometry:
+Driven by the first two field prints (print 1 + 2 below) and a Jane/Drik
+review pass. Geometry:
 
 - **Loop tab no longer intrudes into the bore or the flip path.** The tab's
   inner disc is now *derived* (`tab_inner_y = bore_r + tab_r + tab_bore_margin`)
@@ -169,7 +170,7 @@ Driven by the first two field prints and a Jane/Drik review pass. Geometry:
   exactly 3 × 0.2 layers, so a filament swap at z=0.6 and z=4.4 gives both
   faces contrasting text on any single-extruder printer.
 
-### v0.1 — first shipped version
+### v0.1 — 2026-08-18 — first shipped version
 
 Two-sided coin + print-in-place flipper. The pivot recipe (teardrop socket +
 45° diamond axle + `pivot_clear = 0.35`), coin-flip text alignment, glyph
