@@ -114,7 +114,7 @@ def test_permission_denial_worded_insufficient_is_still_dead(tmp_path):
                      '"insufficient permissions to access this model"}}')
     lines, code = smoke.smoke_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
     assert code == 1
-    assert any(l.startswith("FAIL") for l in lines)
+    assert any(line.startswith("FAIL") for line in lines)
 
 
 def test_insufficient_funds_billing_is_still_inconclusive(tmp_path):
@@ -127,8 +127,20 @@ def test_insufficient_funds_billing_is_still_inconclusive(tmp_path):
     lines, code = smoke.smoke_chain(
         load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
     assert code == 0
-    assert all(not l.startswith("FAIL") for l in lines)
-    assert any(l.startswith("INCONC") for l in lines)
+    assert all(not line.startswith("FAIL") for line in lines)
+    assert any(line.startswith("INCONC") for line in lines)
+
+
+def test_unlisted_5xx_is_inconclusive_not_dead(tmp_path):
+    # A non-standard server-side status (Cloudflare 520) is a provider outage,
+    # not evidence the id is bad — it must be inconclusive, never fall through
+    # to "dead" and red the gate on a transient.
+    def post(url, headers, payload):
+        return 520, "Web server returned an unknown error"
+    lines, code = smoke.smoke_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
+    assert code == 0
+    assert all(not line.startswith("FAIL") for line in lines)
+    assert any(line.startswith("INCONC") for line in lines)
 
 
 def test_rate_limited_is_inconclusive_not_a_fail(tmp_path):

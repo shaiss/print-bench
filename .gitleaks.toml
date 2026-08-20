@@ -14,6 +14,5 @@ description = "Vendored third-party code and generated artifacts are not first-p
 paths = [
   '''lib/BOSL2/.*''',
   '''lib/NopSCADlib/.*''',
-  '''build/.*''',
   '''.*/previews/.*''',
 ]

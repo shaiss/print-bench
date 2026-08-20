@@ -1,11 +1,14 @@
 # print-bench vs. Foreman/eve — baseline audit & punch list
 
-A competitive baseline of print-bench's AI-automation and CI pipeline against
-Vercel's **Foreman** — which is the same thing as the
+**Audit date: 2026-08-20.** A competitive baseline of print-bench's
+AI-automation and CI pipeline against Vercel's **Foreman** — the software
+factory implemented by
 [`vercel-labs/eve-software-factory-template`](https://github.com/vercel-labs/eve-software-factory-template)
-(site: [ask-foreman.dev](https://ask-foreman.dev/)), a reference "software
-factory" built on **eve**, Vercel's open-source framework for durable AI
-agents. The two names the audit started from collapse to one strong reference.
+(site: [ask-foreman.dev](https://ask-foreman.dev/)) on **eve**, Vercel's
+open-source framework for durable AI agents. The two names the audit started
+from collapse to one strong reference. Both are mutable upstreams: the
+comparison reflects their public docs as of the audit date, not a pinned
+revision.
 
 This file is the durable record of that audit and the punch list it produced.
 It is preserved review history (see `audits/`), not a live spec.
@@ -40,18 +43,22 @@ print-bench built by convention what Vercel built as a framework.
 
 ## Scorecard (weighted where print-bench actually competes)
 
+The dimensions below are the axes worth scoring, not a strict 1:1 with the six
+layers above — several (provider abstraction, security backstops, self-measurement,
+proportionality) are cross-cutting concerns rather than layers.
+
 | Dimension | print-bench | Foreman/eve |
 |---|:---:|:---:|
-| Verification gate rigor (L4) | **A** | B+ |
+| Verification gate rigor (layer 4) | **A** | B+ |
 | Gate-selection determinism | **A** | B |
 | Provenance / anti-staleness | **A** | B |
-| Human-in-the-loop design | A– | **A** |
-| Execution isolation (L1) | **C** | A |
-| Durable orchestration (L6) | B– | **A** |
-| Provider abstraction (L7) | C+ | B+ |
-| Security backstops | B | **A** |
-| Self-measurement in practice | **F** | B |
-| Proportionality / scope control | **D** | A |
+| Human-in-the-loop design (layer 5) | A– | **A** |
+| Execution isolation (layer 1) | **C** | A |
+| Durable orchestration (layer 6) | B– | **A** |
+| Provider abstraction (cross-cutting) | C+ | B+ |
+| Security backstops (cross-cutting) | B | **A** |
+| Self-measurement in practice (cross-cutting) | **F** | B |
+| Proportionality / scope control (cross-cutting) | **D** | A |
 
 ## Where print-bench is genuinely ahead (keep these)
 
@@ -89,10 +96,10 @@ impact or a real bug → do first.
 
 | # | Item | Effort | Impact | Status |
 |---|------|:---:|:---:|--------|
-| 1 | **Wire the model registry into the ship routines + walk a fallback chain.** `backlog-burn.yml` / `design-run.yml` hardcoded `claude-opus-4-8` (in no chain, no fallback) and bypassed the registry. | S | 5 | **DONE** — issue #297, PR #306 (migrates all four routines: design-run, backlog-burn, chunker, labeler). Just needs rebase + merge. |
+| 1 | **Wire the model registry into the ship routines + walk a fallback chain.** `backlog-burn.yml` / `design-run.yml` hardcoded `claude-opus-4-8` (in no chain, no fallback) and bypassed the registry. | S | 5 | **IMPLEMENTED — PENDING MERGE** in issue #297 / PR #306 (migrates all four routines: design-run, backlog-burn, chunker, labeler). #306 still needs a rebase + merge; mark DONE once it lands. |
 | 2 | **Guard `ci-ok`'s needs-list.** The file admits: "a job missing from needs can fail without blocking merge, and nothing detects the omission." A check parses `ci.yml`, lists every job + `ci-ok.needs`, fails if any job is missing (bar a justified exclusion set). | S | 4 | **THIS PR** — `scripts/ci-ok-guard.sh` |
-| 3 | **Fire `model-smoke` on registry change.** It was `workflow_dispatch`-only, so a registry edit shipped an unservable id until a human remembered. Add a `pull_request` trigger scoped to registry paths. | S | 3 | **THIS PR** — `model-smoke.yml` |
-| 4 | **Turn on secret + dependency scanning.** No SAST/dep-scan existed. gitleaks over the PR's new commits + Dependabot for Actions and pip. | S | 3 | **THIS PR** — `security-scan.yml`, `dependabot.yml` |
+| 3 | **Fire `model-smoke` on registry change.** It was `workflow_dispatch`-only, so a registry edit shipped an unservable id until a human remembered. Runs automatically on same-repo PRs touching `.github/models/**` or `tools/model-registry/**` (and the workflow itself), smoking every chain; `workflow_dispatch` is preserved (a named chain, or blank = all). | S | 3 | **THIS PR** — `model-smoke.yml` |
+| 4 | **Turn on secret + dependency scanning.** No SAST/dep-scan existed. gitleaks over the PR's new commits (advisory / non-blocking — not a required `ci-ok` context until promoted in branch protection) + Dependabot for Actions and pip. | S | 3 | **THIS PR** — `security-scan.yml`, `dependabot.yml` |
 
 ## P1 — the leapfrogs and the credibility fixes
 
@@ -120,11 +127,15 @@ impact or a real bug → do first.
 
 ## Where the waves land you
 
-After Waves 1+2, print-bench is **ahead of Foreman on 8 of 10 axes**. It stays
-behind on exactly two — execution isolation and durable orchestration — and
-both are the paid-cloud moat that is correctly out of scope. You can't
-out-Vercel Vercel on cloud infra; you can beat their *factory design* wherever
-it is made of judgment rather than money.
+The scorecard above is **today's** state: print-bench leads on 3 dimensions
+(verification rigor, gate determinism, provenance) and trails on the other 7.
+The waves are what close that gap. **Projected after Waves 1+2**, the fixes flip
+five more cells — provider abstraction (item 1), security backstops (items 4/6),
+self-measurement (item 7), plus independent review (item 5) — leaving
+print-bench **ahead on ~8 of 10 axes** and behind on exactly two: execution
+isolation and durable orchestration. Those two are the paid-cloud moat, and
+correctly out of scope (P3). You can't out-Vercel Vercel on cloud infra; you can
+beat their *factory design* wherever it is made of judgment rather than money.
 
 ---
 

@@ -84,8 +84,12 @@ jobs:
           if [ "$EVENT" = "workflow_dispatch" ] && [ -n "${CHAIN_INPUT:-}" ]; then
             chains="$CHAIN_INPUT"
           else
+            # `|| true`: grep exits 1 when it matches nothing, which under
+            # pipefail+errexit would abort the step BEFORE the empty-chains
+            # diagnostic below. Swallow it so a chainless registry is reported,
+            # not a bare non-zero exit.
             chains="$(grep -oE '^\[chain:[A-Za-z0-9_-]+\]' .github/models/registry.conf \
-                        | sed -E 's/^\[chain:(.+)\]$/\1/')"
+                        | sed -E 's/^\[chain:(.+)\]$/\1/' || true)"
           fi
           if [ -z "${chains//[[:space:]]/}" ]; then
             echo "::error::no chains found in .github/models/registry.conf"

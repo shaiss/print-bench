@@ -55,8 +55,12 @@ _BODY_SNIPPET = 500
 _TIMEOUT_S = 120
 
 # Statuses that mean the ACCOUNT/provider could not answer right now, not that
-# the model id is bad: rate limiting and provider-side outages. Transient.
-_TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
+# the model id is bad: 429 rate limiting, 408 request timeout, and EVERY 5xx
+# server-side outage (including non-standard ones like Cloudflare 520/522).
+# Transient — external to the registry, so inconclusive, never a defect. The
+# full 5xx range matters: an unlisted 5xx must not fall through to "dead".
+def _is_transient(status: int) -> bool:
+    return status in (408, 429) or 500 <= status < 600
 
 # Substrings marking an account-funding / quota rejection (any status) — the
 # request reached the model but the account could not pay for it. External to
@@ -87,7 +91,7 @@ def _classify(status: int, body: str) -> str:
     """
     if status == 200:
         return "ok"
-    if status in _TRANSIENT_STATUSES:
+    if _is_transient(status):
         return "inconc"
     if status == 401:                       # missing/invalid key: config, not id
         return "inconc"

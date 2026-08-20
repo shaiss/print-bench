@@ -156,13 +156,16 @@ while i < a_end:
             i = j
             continue
         elif rest and not rest.startswith("#"):       # single scalar: needs: a
-            needs.append(rest)
+            needs.append(rest.strip("'\""))           # strip YAML quotes if any
         else:                                         # block list on next lines
             j = i + 1
             while j < a_end:
-                b = re.match(r"^      -\s*([A-Za-z0-9_-]+)\s*(?:#.*)?$", lines[j])
+                # Accept bare, "double-" and 'single-'quoted job names alike.
+                b = re.match(
+                    r"""^      -\s*(?:"([A-Za-z0-9_-]+)"|'([A-Za-z0-9_-]+)'|([A-Za-z0-9_-]+))\s*(?:#.*)?$""",
+                    lines[j])
                 if b:
-                    needs.append(b.group(1))
+                    needs.append(b.group(1) or b.group(2) or b.group(3))
                     j += 1
                 elif lines[j].strip() == "" or lines[j].lstrip().startswith("#"):
                     j += 1
@@ -273,6 +276,46 @@ EOF
     echo "ok    selftest: a wired formerly-advisory job passes"
   else
     echo "FAIL  selftest: a wired job was rejected"; return 1
+  fi
+
+  # GOOD 3: quoted needs entries — a quoted scalar and quoted block items are
+  # valid YAML and must parse to the same job names, not phantom deps. Must PASS.
+  cat > "$tmp/good3.yml" <<'EOF'
+name: T
+on: [push]
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest
+  ci-ok:
+    needs:
+      - "changes"
+      - 'build'
+    runs-on: ubuntu-latest
+EOF
+  if check_file "$tmp/good3.yml" ci-ok >/dev/null 2>&1; then
+    echo "ok    selftest: quoted needs entries parse without phantoms"
+  else
+    echo "FAIL  selftest: quoted needs entries were misparsed"; return 1
+  fi
+
+  # GOOD 4: a single quoted SCALAR needs value (needs: "changes"). Must PASS —
+  # the quotes must be stripped, not carried into a phantom dependency.
+  cat > "$tmp/good4.yml" <<'EOF'
+name: T
+on: [push]
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+  ci-ok:
+    needs: "changes"
+    runs-on: ubuntu-latest
+EOF
+  if check_file "$tmp/good4.yml" ci-ok >/dev/null 2>&1; then
+    echo "ok    selftest: a quoted scalar needs value parses without phantoms"
+  else
+    echo "FAIL  selftest: a quoted scalar needs value was misparsed"; return 1
   fi
 
   # BAD 1: the footgun — a new BLOCKING job absent from needs. Must FAIL.

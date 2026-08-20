@@ -113,9 +113,12 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     Static checks cannot prove a model id is servable by a key (issue #298 —
     the review chain's claude-opus-4-8 backstop passed every check and was dead
     on its first live call).  This walks the chain and makes a real 1-token
-    request per link whose provider secret is set in the environment; exit 0
-    only when every attempted link answered, and a run that could attempt
-    nothing (no secret set) fails too, so it can never report a green nothing.
+    request per link whose provider secret is set in the environment.  Exit 1
+    only on positive evidence of a registry defect — a link proven UNSERVABLE
+    (404/permission/invalid-model) — or when no link could be attempted at all
+    (no secret set), so it can never report a green nothing.  A run whose every
+    attempt was inconclusive (rate limit / account funding / auth / network)
+    exits 0 with a loud WARN: nothing proven, but nothing proved unservable.
     """
     reg = _load(args)
     lines, code = smoke_mod.smoke_chain(reg, args.chain, os.environ)

@@ -55,9 +55,11 @@ python3 -m model_registry show
 # prove a model id is servable by a key; only a live request can (the review
 # chain's old claude-opus-4-8 backstop passed every static check and was
 # rejected at $0 on its first real call). The model-smoke.yml workflow runs
-# this with the repo secrets — automatically on any PR that edits the registry
-# or this tool (smoking every chain), and on demand via workflow_dispatch for a
-# single chain; dispatch it before pointing a new routine at a chain.
+# this with the repo secrets — automatically on any same-repo PR that edits the
+# registry or this tool (smoking every chain), and on demand via
+# workflow_dispatch: a named chain smokes only that one (default `review`), a
+# blank chain input smokes every declared chain. Dispatch it before pointing a
+# new routine at a chain.
 ZAI_KEY=... ANTHROPIC_API_KEY=... python3 -m model_registry smoke review
 ```
 
