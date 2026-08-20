@@ -130,16 +130,24 @@ evaluation is **declined for geometry** on principle, because the bench's
 geometry quality is proven by deterministic gates and negative controls, not by
 an observability vendor. The study recommends; it adopts nothing.
 
-## The agentic assessor is a proposal, not a build
+## The agentic assessor is built, and shipped disarmed
 
-Today the assessment is **human-run**: a person reads the filed study against
-the baseline and writes the split verdict. An **agentic assessor** that
-reads a filed study and auto-drafts its split verdict is a *proposed* follow-up, designed
-but deliberately **not built here**, because auto-drafting a disposition from
-untrusted issue text crosses the bench's "agentic writer over untrusted issue
-text" boundary — the same line the labeler and product scout sit behind. The
-full design (the one narrow intake surface, the deny-backstop, the two-key
-arming, and the one boundary it may never cross) is in
+The assessment is **human-run today** — a person reads the filed study against
+the baseline and writes the split verdict — and it stays that way until the
+assessor is armed. The **agentic assessor** that reads a filed study and
+auto-drafts its split verdict is now **built and committed**, but **shipped
+disarmed**: it fires only when both the git-tracked
+`.github/adoption-assessor.conf` (`enabled: true`) and the live
+`ADOPTION_ASSESSOR_ENABLED` repo variable (unset) agree, so a maintainer arms it
+with that one repo variable. When armed, it posts the split verdict as an
+**advisory comment** on the study thread — nothing more: it **never applies a
+`disposition:*` label** (that stays the human's reading), never decides adoption,
+never routes a label, never crosses the license boundary, and never merges. A
+human still applies the disposition, and **Reeve still surfaces** the awaiting
+and worth-raising-but-open studies deterministically — the assessor only makes
+the draft the human reads land sooner. The full design (the one narrow intake
+surface, the deny-backstop, the two-key arming, the model chain, and the one
+boundary it may never cross) is the design of record in
 [`docs/adoption-study-assessor-proposal.md`](adoption-study-assessor-proposal.md).
 
 ## References
@@ -148,5 +156,6 @@ arming, and the one boundary it may never cross) is in
 - `.github/ISSUE_TEMPLATE/adoption-study.yml` — the intake form.
 - `docs/licensing.md` — the GPL/BSD boundary a study reads against (issue #160).
 - `PM.md` — Reeve's charter; the bench-health report is Reeve's surface.
-- `docs/adoption-study-assessor-proposal.md` — the proposed agentic assessor.
+- `docs/adoption-study-assessor-proposal.md` — the agentic assessor's design of
+  record (built, shipped disarmed).
 - Issue [#332](https://github.com/shaiss/print-bench/issues/332) — the worked example.

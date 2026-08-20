@@ -1,0 +1,391 @@
+name: Adoption-study assessor (scheduled advisory verdicts)
+
+# The scheduled heartbeat for the adoption-study assessor
+# (docs/adoption-study-assessor-proposal.md). On a weekly cadence it reads the
+# open `adoption-study` issues that carry no `disposition:*` label (the
+# "awaiting a disposition" set — docs/adoption-studies.md) and posts ONE
+# advisory split-verdict comment per study: the redundant / additive /
+# where-integration reading plus qualifying questions, modelled on the worked
+# example (issue #332). A human then applies the `disposition:*` label.
+#
+# THE ONE BOUNDARY (docs/adoption-study-assessor-proposal.md): the assessor
+# produces an advisory disposition a HUMAN acts on. It NEVER applies a label
+# (not even the advisory `disposition:*` ones), never decides adoption, never
+# crosses the license boundary (#160), and never merges / pushes / opens a PR.
+# Its single write is the drafted split-verdict COMMENT, through the ambient
+# GITHUB_TOKEN — which triggers no workflow, exactly right here: the assessor
+# informs, it does not re-trigger anything.
+#
+# This is the SIBLING of backlog-burn.yml, design-run.yml, chunker.yml,
+# labeler.yml and product-scout.yml. It shares their config parser and their
+# two-key safety model. Like the labeler it has a trusted Select step that
+# hands the agent only a bounded set of issue numbers; unlike the labeler its
+# one write is COMMENTING on an existing issue, never editing its labels.
+#
+# WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
+#   * Policy → committed, git-tracked: .github/adoption-assessor.conf holds
+#     `enabled`, the `provider` and the `cadence`. Change it with a reviewed
+#     one-line PR; a clone carries it.
+#   * Live arming / kill switch → the ADOPTION_ASSESSOR_ENABLED repo variable, a
+#     fast human-only toggle (Settings → Secrets and variables → Actions →
+#     Variables). Not in git on purpose: arming an agent that reads untrusted
+#     issue text and writes a comment should be a conscious act a fresh
+#     clone/fork can't inherit, and flipping it off halts the routine in seconds
+#     without a PR. SHIPPED DISARMED — the variable is unset by default.
+#   * Cadence → the `cron` literal below. Actions cannot read a file or variable
+#     for on.schedule, so the schedule must be literal here — kept in sync with
+#     the `cadence:` key in .github/adoption-assessor.conf.
+#
+# Safety properties (same as the siblings, plus the assessor's own bounds):
+#   * TWO keys must agree to run: committed `enabled: true` AND
+#     ADOPTION_ASSESSOR_ENABLED == 'true'. Either off → inert.
+#   * Advisory-only + bounded: the run's write surface is the MCP tool
+#     post_adoption_disposition, which hardcodes the advisory framing, requires
+#     the `adoption-study` label, applies NO label, and caps dispositions per
+#     run. The agent is handed only the trusted Select step's bounded issue set.
+#   * The assessor's deny backstop (.claude/adoption-assessor-settings.json, via
+#     --settings) neutralizes the additive settings.json allows (chunk-helper,
+#     label-helper AND scout-helper — none is the assessor's surface), kept
+#     honest by scripts/adoption-assessor-perms-check.sh.
+
+on:
+  schedule:
+    # Weekly, Monday 06:37 UTC — an off-peak slot after Reeve's daily 05:53
+    # bench-health report, so a freshly-drafted disposition shows up in the next
+    # report. Cron must be a literal — Actions evaluates no files or variables
+    # for on.schedule — so change the cadence by editing this line in a one-line
+    # PR (and the `cadence:` key in .github/adoption-assessor.conf to match). The
+    # two-key guard (ADOPTION_ASSESSOR_ENABLED + committed `enabled: true`) keeps
+    # the schedule harmless until deliberately armed.
+    - cron: '37 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Select and log the awaiting studies, but do not invoke the assessor'
+        type: boolean
+        default: false
+
+# Scoped to what the unattended assessor actually does: it reads the repo to run
+# the skill (contents:read) and posts a comment on an issue (issues:write). It
+# pushes no branch and opens no PR, so it needs NEITHER contents:write NOR
+# pull-requests:write — the same deliberately tight grant as the labeler and
+# scout. The job is off unless ADOPTION_ASSESSOR_ENABLED is set AND the
+# committed config says enabled, and the writing step is skipped entirely
+# without the provider's secret, so even these grants sit idle until the routine
+# is deliberately switched on.
+permissions:
+  contents: read
+  issues: write
+
+# Never run two assessors at once — this group serializes THIS workflow with
+# itself (the siblings use their own group strings, so it does not serialize
+# against them). Do not cancel an in-flight run.
+concurrency:
+  group: adoption-assessor
+  cancel-in-progress: false
+
+jobs:
+  assess:
+    name: Draft advisory dispositions on awaiting adoption studies
+    # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
+    # anything but 'true' pauses the whole job in seconds without a commit.
+    # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
+    # Also pin the run to the DEFAULT BRANCH: this job carries a write scope and
+    # a secret, and workflow_dispatch can target any in-repo branch — so a
+    # dispatch against a PR branch must not run that branch's skill code with the
+    # secret. On schedule github.ref_name is already the default branch, so this
+    # only ever blocks a hand-dispatch against a non-default ref.
+    if: >-
+      vars.ADOPTION_ASSESSOR_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    # A hung assessor must not hold a runner for the 6-hour default while holding
+    # a secret, unwatched.
+    timeout-minutes: 30
+    env:
+      # Secrets cannot be read in a step `if:` directly, so surface each
+      # provider's key presence as a plain string and gate on it below. The
+      # "Read policy" step turns these + the configured provider into a single
+      # `key_present` output.
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # Belt-and-braces with the job `if:` above: always check out the
+          # default branch, so the secret-bearing agent runs the reviewed, merged
+          # skill — never a dispatched branch's version. The agent reads
+          # untrusted issue text, so it must run trusted base tooling.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install the config parser
+        # The assessor reuses the backlog burn's config parser verbatim (only the
+        # `enabled`/`provider`/`cadence` keys — it has no selector).
+        run: pip install -e tools/backlog-burn
+
+      - name: Read policy (.github/adoption-assessor.conf)
+        id: policy
+        # Key 2 of 2: the committed, git-tracked source of truth. A malformed or
+        # typo'd config (bad key, unknown provider) fails this step loudly rather
+        # than running on a policy nobody wrote. It also resolves the configured
+        # provider to whether *that provider's* secret is present, so the run
+        # steps below gate on one `key_present` output. The model itself is NOT
+        # decided here — it comes from the registry chain below, so the provider
+        # label picks which ship step runs while the registry picks which model
+        # that step runs.
+        run: |
+          set -euo pipefail
+          conf=.github/adoption-assessor.conf
+          enabled="$(backlog-burn config --get enabled --path "$conf")"
+          provider="$(backlog-burn config --get provider --path "$conf")"
+          case "$provider" in
+            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
+            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          {
+            echo "enabled=$enabled"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      # Resolve the assessor's model from the committed provider/model registry
+      # (issue #206) — the same step auto-review.yml and product-scout.yml run.
+      # Stdlib-only, so it needs no install in front of it. A malformed registry,
+      # or one whose `adoption-assessor` chain went missing, fails this step
+      # loudly BEFORE any key is spent. `link1_model` is what the ship steps
+      # below read; the secret stays literal per step (the Actions constraint),
+      # so the registry decides the model, never the auth.
+      #
+      # The cross-check at the end guards the one way this could mis-run: the
+      # conf's `provider:` label picks which ship step (and so which endpoint +
+      # secret) runs, while the registry picks the model — and a model hosted
+      # elsewhere (glm-* on the Anthropic step, claude-* on the Z.AI step) would
+      # fail at request time with a key spent. Pointing the `adoption-assessor`
+      # chain at another provider is a real registry edit, but it has to travel
+      # with the conf label; saying so HERE, loudly, beats discovering it in the
+      # weekly run's logs.
+      - name: Resolve the assessor model chain (issue #206)
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve adoption-assessor --gh-output "$GITHUB_OUTPUT"
+          link_provider="$(sed -n 's/^link1_provider=//p' "$GITHUB_OUTPUT" | head -1)"
+          conf_provider="$(backlog-burn config --get provider --path .github/adoption-assessor.conf)"
+          if [ "$link_provider" != "$conf_provider" ]; then
+            echo "::error::the registry's 'adoption-assessor' chain resolves to provider '$link_provider' but .github/adoption-assessor.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/adoption-assessor.conf."
+            exit 1
+          fi
+
+      - name: Note when disabled by committed policy
+        if: steps.policy.outputs.enabled != 'true'
+        run: echo "::notice::.github/adoption-assessor.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
+
+      - name: Select awaiting adoption studies
+        id: select
+        if: steps.policy.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Cap the discovery list so a bad run touches a bounded set.
+          LIMIT: '15'
+        run: |
+          set -euo pipefail
+          # "Awaiting a disposition" = an OPEN `adoption-study` issue carrying
+          # NEITHER disposition label (docs/adoption-studies.md). This runs in the
+          # TRUSTED workflow context (github.token), not the agent — the agent is
+          # handed only the resulting numbers, so a prompt-injected run cannot
+          # widen its own candidate set. gh injects the repo + issue scope, so the
+          # negative-only search is correct here.
+          list="$(gh issue list \
+            --state open \
+            --label adoption-study \
+            --search '-label:"disposition:worth-raising" -label:"disposition:declined"' \
+            --limit "$LIMIT" \
+            --json number \
+            --jq '.[].number')"
+          # Join the one-number-per-line list into a single space-separated
+          # string, e.g. "332\n341" -> "332 341".
+          nums="$(printf '%s\n' "$list" | sed '/^$/d' | tr '\n' ' ' | sed 's/ *$//')"
+          echo "issues=$nums" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Adoption-study assessor — selection"
+            if [ -z "$nums" ]; then
+              echo "- no awaiting adoption studies (every open \`adoption-study\` issue already carries a \`disposition:*\` label)"
+            else
+              # Prefix each space-separated number with '#' (nums is non-empty):
+              # "332 341" -> "#332 #341".
+              echo "- awaiting studies to assess: #${nums// / #}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One explicit run step per provider — a provider is a reviewed,
+      # git-tracked step because GitHub Actions can only reference a secret by
+      # its literal name (secrets can't be selected by a runtime variable). The
+      # committed `provider:` label picks which one runs; the MODEL each runs
+      # comes from the registry's `adoption-assessor` chain (steps.chain.outputs),
+      # so swapping the model is a registry edit, not a workflow edit. The default
+      # GITHUB_TOKEN is fine: the assessor opens no PR (a GITHUB_TOKEN comment
+      # runs no CI), so the PAT reasoning the burn and design run carry does not
+      # apply.
+      #
+      # Tool surface: WRITING is an MCP tool (mcp__assessor__post_adoption_-
+      # disposition, served by assessor_mcp.py via --mcp-config) because a split
+      # verdict is rich multi-line markdown (tables, newlines), and under
+      # --permission-mode dontAsk the Bash matcher denies any command whose
+      # argument reads as shell structure — a JSON tool argument never touches a
+      # command line, so that class of denial disappears. READING stays on the
+      # narrow wrapper assessor-helper.sh (both path spellings) — trivial args
+      # that pass the matcher. Plus the read-only file tools; never Write, never a
+      # general Bash. --settings closes the additive allow leak from
+      # settings.json with the assessor's OWN deny backstop
+      # (.claude/adoption-assessor-settings.json — deny beats allow from every
+      # source; it denies chunk-helper, label-helper AND scout-helper, none the
+      # assessor's surface), kept honest by scripts/adoption-assessor-perms-
+      # check.sh. The pin is the immutable commit behind the v1 tag.
+
+      - name: Run via Anthropic (Claude)
+        id: run_anthropic
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
+        # right fit for an unattended bot — no OAuth token / subscription seat.
+        # Turning an untrusted study into a careful verdict is expensive-to-be-
+        # wrong (the review tier), so anthropic is the default provider; which
+        # model exactly is the registry's `adoption-assessor` chain's call.
+        env:
+          # The assessor's WRITE surface is an MCP tool (assessor_mcp.py),
+          # launched by Claude Code over a stdio pipe and inheriting this step's
+          # env. It authenticates to the GitHub REST API with this token
+          # (issues:write is all the job grants), so it must be exported here.
+          GITHUB_TOKEN: ${{ github.token }}
+          # The trusted Select step's bounded issue set, bound into the agent's
+          # environment so the MCP write tool can refuse any issue not in it.
+          ASSESSOR_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          # show_full_output surfaces the agent's tool calls and any permission
+          # denials in the Actions log — the assessor reads public issue text and
+          # writes only a public advisory comment, so its transcript carries
+          # nothing sensitive, and seeing it turns "posted nothing, no error" from
+          # a guess into a diagnosis.
+          show_full_output: "true"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/adoption-assessor-settings.json --mcp-config .claude/skills/adoption-assessor/assessor-mcp.json --allowedTools "mcp__assessor__post_adoption_disposition,Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*),Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*),Read,Grep,Glob"
+          prompt: "/adoption-assessor ${{ steps.select.outputs.issues }}"
+
+      - name: Run via Z.AI (GLM)
+        id: run_zai
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
+        # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
+        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the same
+        # ZAI_KEY is also passed as anthropic_api_key to satisfy the action's
+        # credential check. Available as an alternative provider; which model
+        # exactly is the registry's `adoption-assessor` chain's call (its first
+        # link's provider must match the conf `provider:` — the cross-check above).
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          # Same reason as the Anthropic step: the MCP write tool inherits this
+          # env and authenticates with it.
+          GITHUB_TOKEN: ${{ github.token }}
+          ASSESSOR_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          # Same tool surface as the Anthropic step: MCP write tool + wrapper read
+          # verbs + read-only file tools + assessor deny backstop + dontAsk +
+          # show_full_output (see its comment for why it is exactly this).
+          show_full_output: "true"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/adoption-assessor-settings.json --mcp-config .claude/skills/adoption-assessor/assessor-mcp.json --allowedTools "mcp__assessor__post_adoption_disposition,Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*),Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*),Read,Grep,Glob"
+          prompt: "/adoption-assessor ${{ steps.select.outputs.issues }}"
+
+      - name: Explain a skipped agentic run
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && (steps.policy.outputs.key_present != '1'
+              || github.event.inputs.dry_run == 'true')
+        env:
+          ISSUES: ${{ steps.select.outputs.issues }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — selected awaiting studies (${ISSUES}) but did not invoke the assessor"
+          else
+            echo "::notice::the configured provider '${PROVIDER}' has no key set (ANTHROPIC_API_KEY for anthropic, ZAI_KEY for zai) — selected (${ISSUES}) but skipping the unattended assessor run"
+          fi
+
+      - name: Explain an empty selection
+        if: steps.policy.outputs.enabled == 'true' && steps.select.outputs.issues == ''
+        run: echo "::notice::no awaiting adoption studies — every open adoption-study issue already carries a disposition:* label; nothing to assess"
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          ISSUES: ${{ steps.select.outputs.issues }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          SELECT_OUTCOME: ${{ steps.select.outcome }}
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+        run: |
+          {
+            echo "## Adoption-study assessor — run outcome"
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/adoption-assessor.conf \`enabled\` != true) — nothing ran"
+            elif [ "${SELECT_OUTCOME}" != "success" ]; then
+              echo "- selection did not complete (\`${SELECT_OUTCOME:-skipped}\`) — the select step failed; see the log"
+            elif [ -z "${ISSUES}" ]; then
+              echo "- selected: none (every open adoption-study issue already carries a disposition:* label)"
+            else
+              echo "- selected awaiting studies: #${ISSUES// / #}"
+              echo "- provider: ${PROVIDER}"
+              echo "- run step: ${RUN:-skipped} (any drafted advisory dispositions are comments on each issue thread — a human applies the disposition:* label)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    name: Explain a disarmed run
+    # The `assess` job is gated at job level, so an unset arming variable (the
+    # default clone/fork state) or a dispatch against a non-default ref skips it
+    # silently. This sibling makes that legible. No secrets, no write perms.
+    if: >-
+      vars.ADOPTION_ASSESSOR_ENABLED != 'true'
+      || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the routine did not run
+        env:
+          ARMED: ${{ vars.ADOPTION_ASSESSOR_ENABLED }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::notice::the adoption-study assessor is disarmed — set the ADOPTION_ASSESSOR_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/adoption-assessor.conf; both must agree before it runs."
+          else
+            echo "::notice::the adoption-study assessor only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
+          fi

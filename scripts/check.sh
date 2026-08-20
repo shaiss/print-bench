@@ -257,6 +257,24 @@ if ! ./scripts/scout-perms-check.sh; then
   fail=1
 fi
 
+# Adoption-assessor deny-backstop drift check: same reasoning as the chunker's,
+# labeler's and scout's, for the adoption-study assessor's own backstop
+# (.claude/adoption-assessor-settings.json). It is the WIDEST backstop in the
+# family — it must deny every dangerous settings.json allow AND all three sibling
+# wrappers (chunk-helper.sh, label-helper.sh, scout-helper.sh; none is the
+# assessor's surface) — and must never deny its own assessor-helper.sh wrapper
+# (or the scheduled assessor fails closed with no other CI signal). Separate
+# script because each routine's wrapper allow/deny roles differ
+# (docs/actions-security.md, CR-A; docs/adoption-study-assessor-proposal.md §3).
+echo "-- adoption-assessor-perms selftest: scripts/adoption-assessor-perms-check.sh --selftest"
+if ! ./scripts/adoption-assessor-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- adoption-assessor-perms check: scripts/adoption-assessor-perms-check.sh"
+if ! ./scripts/adoption-assessor-perms-check.sh; then
+  fail=1
+fi
+
 # Scout MCP filing tool: the scout's WRITE surface is the file_design_brief MCP
 # tool (.claude/skills/product-scout/scout_mcp.py), which replaced a Bash verb so
 # a rich multi-line brief body travels as a JSON argument instead of a shell
