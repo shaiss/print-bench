@@ -49,6 +49,11 @@ def _line_lock_leak(f: dict) -> str:
     )
 
 
+def _line_adoption_study(f: dict) -> str:
+    # The title is untrusted GitHub text, so it goes through _clean_title.
+    return f"- #{f['number']} {_clean_title(f['title'])} — {f['state']}"
+
+
 def _line_score(f: dict) -> str:
     return f"- `{f['stl']}` — {f['reason']}"
 
@@ -98,6 +103,9 @@ def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any) -> str:
          f"Gate wall-time regression — a design ≥ {cfg.walltime_ratio:g}× slower", _line_walltime),
         ("archived-creep",
          "Archived creep — a design newly frozen out of gating", _line_archived),
+        ("adoption-study",
+         "Adoption study submissions awaiting a disposition or worth raising",
+         _line_adoption_study),
         ("report-drift",
          "Telemetry report drift — REPORT.md out of sync with the log", _line_drift),
     ]

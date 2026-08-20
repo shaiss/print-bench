@@ -67,6 +67,11 @@
       {"number": 281, "title": "Design brief: NUGGS desiccant tower", "lockCreatedAt": "2026-08-14T05:30:00Z"},
       {"number": 284, "title": "Design brief: corroborated by a branch", "lockCreatedAt": "2026-08-14T05:30:00Z"}
     ],
+    "adoptionStudies": [
+      {"number": 305, "title": "Adoption study: BOSL2 involute gear generator", "labels": ["adoption-study"], "createdAt": "2026-08-12T05:00:00Z", "updatedAt": "2026-08-13T05:00:00Z", "url": "https://github.com/o/r/issues/305"},
+      {"number": 306, "title": "Adoption study: lasercut finger-joint box", "labels": ["adoption-study", "disposition:worth-raising"], "createdAt": "2026-08-11T05:00:00Z", "updatedAt": "2026-08-14T05:00:00Z", "url": "https://github.com/o/r/issues/306"},
+      {"number": 307, "title": "Adoption study: declined idea", "labels": ["adoption-study", "disposition:declined"], "createdAt": "2026-08-10T05:00:00Z", "updatedAt": "2026-08-15T05:00:00Z", "url": "https://github.com/o/r/issues/307"}
+    ],
     "openPRs": [],
     "branches": ["main", "claude/issue-284-corroborated"]
   }

@@ -171,6 +171,16 @@ split, the comment-command authorisation) is documented in full in
 [CLAUDE.md](CLAUDE.md); the accepted security posture toward manually dispatched,
 write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md).
 
+### Evaluating a tool for adoption
+
+Wondering whether an outside library, slicer, or service belongs in the bench?
+File an **Adoption study** issue: a neutral, repeatable evaluation that measures
+the tool against print-bench's own gates and reports where it is redundant,
+where it is additive, and where integration would make sense — no adoption
+decision implied by asking. The process, the disposition labels, and how Reeve
+surfaces studies awaiting a read live in
+[docs/adoption-studies.md](docs/adoption-studies.md).
+
 ## Layout
 
 - `designs/<name>/` — one directory per design: the parametric `.scad`

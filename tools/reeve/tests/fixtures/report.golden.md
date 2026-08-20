@@ -16,6 +16,7 @@ Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.
 | budget-tightening | 2 |
 | walltime-regression | 1 |
 | archived-creep | 1 |
+| adoption-study | 2 |
 | report-drift | 1 |
 
 ## Gate failing — the latest run has hard failures
@@ -51,6 +52,11 @@ Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.
 ## Archived creep — a design newly frozen out of gating
 
 - `new-two` — newly archived, dropped from gating
+
+## Adoption study submissions awaiting a disposition or worth raising
+
+- #305 Adoption study: BOSL2 involute gear generator — awaiting-disposition
+- #306 Adoption study: lasercut finger-joint box — worth-raising
 
 ## Telemetry report drift — REPORT.md out of sync with the log
 

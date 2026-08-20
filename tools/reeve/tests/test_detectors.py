@@ -53,6 +53,12 @@ def locked(number, title="Design brief: ghost", locked_at="2026-08-16T00:00:00Z"
     return {"number": number, "title": title, "lockCreatedAt": locked_at}
 
 
+def adoption(number, title="Adoption study: x", labels=("adoption-study",)):
+    return {"number": number, "title": title, "labels": list(labels),
+            "createdAt": "2026-08-12T05:00:00Z", "updatedAt": "2026-08-13T05:00:00Z",
+            "url": f"https://github.com/o/r/issues/{number}"}
+
+
 NOW = "2026-08-16T06:00:00Z"   # 6h after locked()'s default lockCreatedAt
 
 
@@ -183,6 +189,40 @@ def test_lock_leak_sorted_by_number():
     assert [f["number"] for f in found] == [281, 285]
 
 
+# --- adoption-study ----------------------------------------------------------
+
+def test_adoption_study_flags_awaiting_and_worth_raising():
+    found = detectors.adoption_study([
+        adoption(305, labels=["adoption-study"]),
+        adoption(306, labels=["adoption-study", "disposition:worth-raising"]),
+    ])
+    assert {f["number"]: f["state"] for f in found} == {
+        305: "awaiting-disposition", 306: "worth-raising"}
+    assert found[0]["url"] == "https://github.com/o/r/issues/305"
+
+
+def test_adoption_study_silent_on_declined():            # negative control
+    # A recorded disposition (not worth-raising) means the ruling is made.
+    assert detectors.adoption_study(
+        [adoption(307, labels=["adoption-study", "disposition:declined"])]) == []
+
+
+def test_adoption_study_worth_raising_wins_over_co_present_disposition():
+    # A flagged escalation is never dropped by a co-present disposition label.
+    found = detectors.adoption_study(
+        [adoption(308, labels=["adoption-study", "disposition:declined",
+                               "disposition:worth-raising"])])
+    assert [f["state"] for f in found] == ["worth-raising"]
+
+
+def test_adoption_study_sorted_by_number():
+    found = detectors.adoption_study([
+        adoption(306, labels=["adoption-study"]),
+        adoption(305, labels=["adoption-study"]),
+    ])
+    assert [f["number"] for f in found] == [305, 306]
+
+
 # --- score-regression --------------------------------------------------------
 
 def test_score_regression_flags_below_floor():
@@ -285,8 +325,10 @@ def test_evaluate_marks_absent_run_health_not_evaluated():
     ne = result["not_evaluated"]
     assert "offline run" in ne["routine-dead"]
     assert "offline run" in ne["lock-leak"]
+    assert "offline run" in ne["adoption-study"]
     assert "routine-dead" not in result["findings"]
     assert "lock-leak" not in result["findings"]
+    assert "adoption-study" not in result["findings"]
 
 
 def test_evaluate_run_health_present_evaluates_both():
@@ -294,13 +336,16 @@ def test_evaluate_run_health_present_evaluates_both():
             "generatedAt": "2026-08-01T00:00:00Z",
             "runHealth": {"gatheredAt": NOW,
                           "workflows": [wf("design-run.yml", ["failure"] * 3)],
-                          "issues": [locked(281)], "openPRs": [], "branches": []}}
+                          "issues": [locked(281)], "openPRs": [], "branches": [],
+                          "adoptionStudies": [adoption(305, labels=["adoption-study"])]}}
     result = detectors.evaluate(snap, CFG)
     assert "routine-dead" not in result["not_evaluated"]
     assert "lock-leak" not in result["not_evaluated"]
+    assert "adoption-study" not in result["not_evaluated"]
     assert [f["workflow"] for f in result["findings"]["routine-dead"]] == ["design-run.yml"]
     # Ages are computed from runHealth's own gatheredAt, not generatedAt.
     assert result["findings"]["lock-leak"][0]["age_hours"] == 6.0
+    assert [f["state"] for f in result["findings"]["adoption-study"]] == ["awaiting-disposition"]
 
 
 def test_evaluate_is_pure_and_repeatable():

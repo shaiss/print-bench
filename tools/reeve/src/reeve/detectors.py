@@ -234,6 +234,39 @@ def lock_leak(
     return findings
 
 
+def adoption_study(studies: list[dict]) -> list[dict]:
+    """Open ``adoption-study`` submissions needing the lead's attention.
+
+    Each study carries its own ``labels`` (``github.gather_run_health`` only
+    lists **open** issues, so a closed one never reaches here). The disposition
+    is read from those labels:
+
+    - no ``disposition:*`` label at all → ``awaiting-disposition`` (the queue
+      reminder — a submission nobody has ruled on yet);
+    - ``disposition:worth-raising`` → ``worth-raising`` (escalate to the lead);
+    - any other ``disposition:*`` (e.g. ``disposition:declined``) → not flagged,
+      the ruling has been made.
+
+    ``worth-raising`` takes precedence over a co-present ``disposition:*`` so a
+    flagged escalation is never silently dropped.
+    """
+    findings: list[dict] = []
+    for study in studies:
+        labels = study.get("labels", [])
+        if "disposition:worth-raising" in labels:
+            state = "worth-raising"
+        elif any(lbl.startswith("disposition:") for lbl in labels):
+            continue  # a disposition was recorded (declined/other) — not flagged
+        else:
+            state = "awaiting-disposition"
+        findings.append(
+            {"number": study["number"], "title": study.get("title", ""),
+             "state": state, "url": study.get("url", "")}
+        )
+    findings.sort(key=lambda f: f["number"])
+    return findings
+
+
 def score_regression(records: list[dict], score_drop: int, score_floor: float) -> list[dict]:
     """Parts below the score floor, or down by ≥ ``score_drop`` vs the prior run.
 
@@ -336,6 +369,7 @@ def evaluate(snapshot: dict[str, Any], cfg: Any) -> dict[str, Any]:
         reason = "no GitHub run-health gathered (offline run — pass --repo to enable)"
         not_evaluated["routine-dead"] = reason
         not_evaluated["lock-leak"] = reason
+        not_evaluated["adoption-study"] = reason
     else:
         rh_now = run_health.get("gatheredAt") or snapshot["generatedAt"]
         findings["routine-dead"] = routine_dead(
@@ -344,6 +378,9 @@ def evaluate(snapshot: dict[str, Any], cfg: Any) -> dict[str, Any]:
         findings["lock-leak"] = lock_leak(
             run_health.get("issues", []), run_health.get("openPRs", []),
             run_health.get("branches", []), rh_now, cfg.lock_leak_hours,
+        )
+        findings["adoption-study"] = adoption_study(
+            run_health.get("adoptionStudies", [])
         )
 
     all_with_parts = [r for r in _all_records(records) if r.get("gate", {}).get("parts")]
