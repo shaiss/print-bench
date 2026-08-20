@@ -51,6 +51,11 @@ def _responses():
         # An entry from the interleaved PR listing — must be dropped.
         {"number": 2, "title": "A PR in issue clothing", "comments": 3,
          "pull_request": {"url": "..."}},
+        # A PR that also carries the adoption-study label — still a PR, so the
+        # pull_request guard drops it before the label scan; must NOT appear
+        # under adoptionStudies.
+        {"number": 4, "title": "PR wearing the adoption-study label", "comments": 0,
+         "pull_request": {"url": "..."}, "labels": [{"name": "adoption-study"}]},
         # Zero comments — the comments endpoint must never be fetched for it.
         {"number": 3, "title": "Quiet issue", "comments": 0},
         # An active lock (the #312 ghost).
@@ -61,6 +66,14 @@ def _responses():
         {"number": 283, "title": "Design brief: released", "comments": 2},
         # Comments but none of them a lock.
         {"number": 290, "title": "Chatty issue", "comments": 1},
+        # An adoption-study submission awaiting a disposition. Zero comments, but
+        # still collected — the label scan precedes the comments skip.
+        {"number": 305, "title": "Adoption study: BOSL2 gears", "comments": 0,
+         "labels": [{"name": "adoption-study"}],
+         "created_at": "2026-08-12T05:00:00Z", "updated_at": "2026-08-13T05:00:00Z",
+         "html_url": "https://github.com/o/r/issues/305"},
+        # An unlabeled issue — the control; must NOT appear under adoptionStudies.
+        {"number": 306, "title": "Unlabeled issue", "comments": 0, "labels": []},
     ]
     responses[f"{github.API_ROOT}/repos/{REPO}/issues?state=open&per_page=100"] = (
         issues_page1, '<https://next.example/issues2>; rel="next"')
@@ -154,6 +167,22 @@ def test_gather_maps_prs_and_branches(monkeypatch):
     ]
     assert health["branches"] == ["main", "claude/issue-100-x"]
     assert health["gatheredAt"].endswith("Z")
+
+
+def test_gather_collects_adoption_studies_and_drops_pr(monkeypatch):
+    calls: list[str] = []
+    fake_get(monkeypatch, calls)
+    health = github.gather_run_health(REPO, "tok")
+    # The labeled issue is collected with its labels + timestamps; the unlabeled
+    # control (#306) is absent, and the labeled PR (#4) is dropped as a PR.
+    assert health["adoptionStudies"] == [
+        {"number": 305, "title": "Adoption study: BOSL2 gears",
+         "labels": ["adoption-study"],
+         "createdAt": "2026-08-12T05:00:00Z", "updatedAt": "2026-08-13T05:00:00Z",
+         "url": "https://github.com/o/r/issues/305"},
+    ]
+    # A zero-comment study is gathered without ever fetching its comments.
+    assert not any("/issues/305/comments" in url for url in calls)
 
 
 def test_missing_workflow_runs_key_raises(monkeypatch):
