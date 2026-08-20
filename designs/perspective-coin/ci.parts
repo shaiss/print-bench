@@ -1,0 +1,5 @@
+# Printable parts to render and gate in CI. The default render equals the
+# `flipper` part (the print-in-place charm IS printable), but gating both
+# named parts keeps the bare coin a first-class deliverable.
+coin
+flipper
