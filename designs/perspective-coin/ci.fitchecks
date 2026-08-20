@@ -1,0 +1,6 @@
+# Print-in-place fit proof: the coin + axles must be a free captive body,
+# clearing the ring on every surface (rim moat + both teardrop sockets).
+# `fitcheck` renders rotor ∩ ring and must be EMPTY. `fitcheck_neg` drives
+# the sockets into the axles so it MUST overlap, proving the check can fail.
+fitcheck      empty
+fitcheck_neg  interferes

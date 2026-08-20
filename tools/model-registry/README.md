@@ -74,7 +74,7 @@ reviewed workflow ship step too (its secret is literal), so the registry entry a
 the ship step land together.
 
 `auto-review.yml` is the first consumer: its `design-changes` job resolves the
-`review` chain into `model1..model6` outputs, and the Jane/Drik/coach ship steps
+`review` chain into `model1..model6` outputs, and the Jane/Drik/PM-triage/coach ship steps
 read those instead of hardcoding `--model`. `tests/test_workflow_drift.py` pins the
 registry and the workflow together so they cannot silently diverge.
 
