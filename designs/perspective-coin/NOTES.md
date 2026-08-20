@@ -123,11 +123,19 @@ the full-size flipper. The bare coin has no fit to tune.
 - Fitchecks wired (`ci.fitchecks`): rest-pose `fitcheck` + negative control,
   **plus the v0.2 swept-flip `fitcheck_flip`** (the rotor swept across the
   flip must clear the bore *and* the loop tab at every tilt) + its control.
-- `gate.sh --slice`: flipper 92/100, coupon 92/100, bare coin 84/100 — the
-  coin's residual warnings are structural to a two-sided engraved coin (the
-  bed-face engraving roofs count as overhang area — all spans ≤ ~2.5 mm and
-  PrusaSlicer slices without a stability warning — and glyph lands between
-  0.5–0.8 mm sample as thin). No score-affecting slivers remain.
+- `gate.sh --slice`: **flipper 100/100, coupon 100/100, bare coin 92/100**
+  (with the bridge-aware overhang check — see below). The flipper and coupon
+  are clean; the coin's one remaining warning is the *reeded edge* sampling as
+  thin wall (the ridge tips), which is cosmetic and removable via `reed_n=0`
+  if a perfect score is wanted over the reeding.
+- **Why the scores rose from v0.1's 84/92/92:** printcheck's overhang check
+  became bridge-aware in this change — a downward region narrower than the
+  bridge span (a debossed letter's ceiling, the thin bore-relief chamfer, the
+  print-in-place socket roof) is self-supporting and no longer scored as an
+  overhang, while a genuinely wide flat shelf still is. The geometry did not
+  change; the metric got honest. (Decomposition: the bare coin blank always
+  scored 100; every prior deduction was a deliberate feature or a printcheck
+  artifact — the analysis is in the PR.)
 - The pivot is **field-validated at `pivot_clear = 0.35`** (v0.1 print 1 freed
   first flip). v0.2 targets the field findings, not the pivot recipe.
 

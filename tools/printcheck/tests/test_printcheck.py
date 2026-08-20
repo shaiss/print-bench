@@ -50,6 +50,55 @@ def test_overhang_detected_and_orientation_fixes_it(tmp_path):
     assert report.orientation_hint["best"] != "current"
 
 
+def _arch(gap, depth=10.0, h=12.0, foot=4.0, ceiling_z=6.0):
+    """An inverted-U prism: two feet on the plate, a flat ceiling of width
+    `gap` bridging between them at z=ceiling_z. The ceiling is the only
+    unsupported downward face, so `gap` is exactly the unsupported span."""
+    from shapely.geometry import Polygon
+    w = gap + 2 * foot
+    profile = [(-w / 2, 0), (-gap / 2, 0), (-gap / 2, ceiling_z),
+               (gap / 2, ceiling_z), (gap / 2, 0), (w / 2, 0),
+               (w / 2, h), (-w / 2, h)]
+    # extrude_polygon lays the profile in XY and extrudes +Z; rotate so the
+    # profile stands in XZ (ceiling faces -Z) and the extrusion runs along Y,
+    # then rest it on the plate.
+    mesh = trimesh.creation.extrude_polygon(Polygon(profile), depth)
+    mesh.apply_transform(
+        trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
+    return mesh
+
+
+def test_narrow_bridge_is_not_counted_as_overhang(tmp_path):
+    # A 2 mm ceiling bridges without support: no overhang finding (score 100).
+    arch = _arch(gap=2.0)
+    report = analyze(_save(tmp_path, arch, "bridge.stl"))
+    assert not any(f.check == "overhangs" for f in report.findings)
+    assert report.score == 100
+
+
+def test_wide_ceiling_is_counted_as_overhang(tmp_path):
+    # The same shape with a 14 mm span is too wide to bridge: still flagged,
+    # and the metrics report the bridgeable split.
+    arch = _arch(gap=14.0)
+    report = analyze(_save(tmp_path, arch, "wide.stl"))
+    oh = [f for f in report.findings if f.check == "overhangs"]
+    assert oh, "a 14 mm unsupported ceiling must still need support"
+    assert oh[0].metrics["overhang_area_mm2"] > 0
+    assert "raw_overhang_area_mm2" in oh[0].metrics
+
+
+def test_bridge_threshold_is_configurable(tmp_path):
+    # The same 8 mm ceiling flips from support-needing to bridgeable when the
+    # bridge budget is raised past it — proving the knob drives the exemption.
+    arch = _arch(gap=8.0)
+    path = _save(tmp_path, arch, "arch8.stl")
+    strict = analyze(path, Config(bridge_max_mm=5.0))
+    lenient = analyze(path, Config(bridge_max_mm=12.0))
+    assert any(f.check == "overhangs" for f in strict.findings)
+    assert not any(f.check == "overhangs" for f in lenient.findings)
+
+
 def test_thin_walls_flagged(tmp_path):
     shell = trimesh.creation.box(extents=(30, 30, 0.4))
     shell.apply_translation([0, 0, 5])

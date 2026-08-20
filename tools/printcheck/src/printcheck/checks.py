@@ -27,6 +27,14 @@ class Config:
     min_wall_mm: float = 0.8
     # degrees from vertical; faces steeper than this need support
     overhang_deg: float = 45.0
+    # mm, the widest unsupported span FDM bridges cleanly without support. A
+    # downward region narrower than this everywhere is self-supporting (a
+    # bridge), so it is NOT counted as needing support — this is what keeps a
+    # debossed letter's ceiling, a thin relief chamfer, or a print-in-place
+    # socket roof from scoring as an overhang the way a wide flat shelf does.
+    # 5 mm is conservative (most printers bridge 5-10 mm); the region test is
+    # a morphological erosion, so shape (rings, strokes) is handled correctly.
+    bridge_max_mm: float = 5.0
     # mm, printer build volume (X, Y, Z)
     build_volume_mm: tuple = (250.0, 210.0, 220.0)
     # count, face samples for the wall-thickness ray casts
@@ -162,21 +170,91 @@ def check_integrity(mesh: trimesh.Trimesh, cfg: Config):
 # Overhangs / support need
 # --------------------------------------------------------------------------
 
+def _bridgeable_mask(mesh: trimesh.Trimesh, oh: np.ndarray, cfg: Config) -> np.ndarray:
+    """Of the overhang faces `oh`, return a mask of those that are BRIDGEABLE
+    — part of a connected downward region that is everywhere narrower than
+    `bridge_max_mm`, so FDM spans it without support.
+
+    Bridgeability is a morphological test, not a bounding-box one: each
+    connected overhang region is projected to its XY footprint and eroded by
+    half the bridge width. If nothing survives, every point of the region is
+    within a bridge's reach of unsupported air on two sides — a debossed
+    letter's ceiling, a thin annular relief chamfer, a print-in-place socket
+    roof. A wide flat shelf survives erosion and stays support-needing.
+
+    Falls back to "nothing is bridgeable" (current behaviour) if shapely is
+    unavailable or a region's geometry defeats the union — never exempts on
+    error, so the check can only get stricter, not weaker, when it degrades.
+    """
+    idx = np.where(oh)[0]
+    if idx.size == 0:
+        return np.zeros(len(mesh.faces), dtype=bool)
+    try:
+        from shapely.geometry import Polygon
+        from shapely.ops import unary_union
+    except Exception:
+        return np.zeros(len(mesh.faces), dtype=bool)
+
+    # Connected components of the overhang subset (faces adjacent across a
+    # shared edge, both in `oh`). Isolated overhang faces are their own region.
+    adj = mesh.face_adjacency
+    both = oh[adj[:, 0]] & oh[adj[:, 1]]
+    try:
+        comps = trimesh.graph.connected_components(adj[both], nodes=idx)
+    except Exception:
+        comps = [np.array([i]) for i in idx]
+
+    tri = mesh.triangles  # (F, 3, 3)
+    r = cfg.bridge_max_mm / 2.0
+    bridgeable = np.zeros(len(mesh.faces), dtype=bool)
+    for comp in comps:
+        comp = np.asarray(comp)
+        if comp.size == 0:
+            continue
+        try:
+            polys = [Polygon(tri[f][:, :2]) for f in comp]
+            foot = unary_union([p for p in polys if p.is_valid and p.area > 0])
+            if foot.is_empty:
+                continue
+            if foot.buffer(-r).is_empty:      # erodes away → everywhere ≤ 2r wide
+                bridgeable[comp] = True
+        except Exception:
+            continue  # unresolvable region stays support-needing (conservative)
+    return bridgeable
+
+
 def check_overhangs(mesh: trimesh.Trimesh, cfg: Config):
-    """Quantify downward-facing surface that would need support material."""
+    """Quantify downward-facing surface that would need support material.
+
+    Counts only overhang that a bridge cannot span: a downward region wider
+    than `bridge_max_mm` everywhere. Narrow regions (debossed text ceilings,
+    thin relief chamfers, print-in-place socket roofs) are self-supporting and
+    excluded — so the score reflects support NEED, not raw downward area.
+    """
     if len(mesh.faces) == 0:
         return
-    area = float(mesh.area_faces[overhang_faces(mesh, cfg)].sum())
+    oh = overhang_faces(mesh, cfg)
+    raw_area = float(mesh.area_faces[oh].sum())
+    bridgeable = _bridgeable_mask(mesh, oh, cfg)
+    support = oh & ~bridgeable
+    area = float(mesh.area_faces[support].sum())
+    bridge_area = raw_area - area
     total = float(mesh.area)
     frac = area / total if total else 0.0
     if frac > 0.001:
         sev = Severity.WARNING if frac < 0.25 else Severity.CRITICAL
+        extra = (f" ({bridge_area:.0f} mm² more is downward-facing but bridgeable "
+                 "and self-supporting.)") if bridge_area > 0.5 else ""
         yield Finding(
             "overhangs", sev,
-            f"{frac:.0%} of surface overhangs beyond {cfg.overhang_deg:.0f}°",
-            f"{area:.0f} mm² of downward-facing surface will need support "
-            "material or a better orientation.",
+            f"{frac:.0%} of surface needs support (unbridgeable overhang beyond "
+            f"{cfg.overhang_deg:.0f}°)",
+            f"{area:.0f} mm² of downward-facing surface is too wide to bridge and "
+            f"will need support material or a better orientation.{extra}",
             {"overhang_area_mm2": area, "overhang_fraction": frac,
+             "raw_overhang_area_mm2": raw_area,
+             "bridgeable_area_mm2": bridge_area,
+             "bridge_max_mm": cfg.bridge_max_mm,
              "threshold_deg": cfg.overhang_deg},
         )
 
