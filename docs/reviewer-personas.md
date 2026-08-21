@@ -119,9 +119,9 @@ rule on, and without the PM the tags are decoration — the pair is the mechanis
 ## Registration checklist
 
 Every artifact a new persona needs, in the order to land them. The drift-guard
-pin (step 5) must land in the **same PR** as the ship job (step 4) — the guard
-fails the build the moment a reviewer job exists that it does not pin, which is
-the point of it.
+pin (step 5) must land in the **same PR** as the ship job (step 4): the guard
+checks only the jobs the tuple names, so a job shipped unpinned is a job whose
+chain wiring nothing verifies — it must never exist in that state.
 
 | # | Artifact | What it is |
 |---|---|---|
@@ -129,7 +129,7 @@ the point of it.
 | 2 | `.claude/skills/<name>-review/references/*.md` | The bundled knowledge pack the skill's §0 loads before reviewing (see above). Ship at least one file; more only when the method has genuinely different moments. |
 | 3 | `people/<handle>.md` | The team-registry entry: a `---`-fenced header with `name`/`kind: agent`/`role`/`initials`, **`shared: true`** (review specialists are registry-wide, never in a design's `team.conf` core), and **`mandate: .claude/skills/<name>-review/SKILL.md`** — the header points at the charter and never restates it. An unresolvable mandate path fails `./scripts/site.sh`. |
 | 4 | A ship-job block in `.github/workflows/auto-review.yml` | The job that runs the persona on each new review round: `needs: design-changes`, gated on `designs_changed`/`is_new_round`, then **one ship step per link of the registry `review` chain** (`needs.design-changes.outputs.model1..modelN`), each `continue-on-error` and gated on the previous not succeeding, a missing-key notice step, and a final gate step failing only when every configured provider failed. Copy the `jane-review` job's shape wholesale — including its provider-fallback rationale comment — and change only the persona name and prompt. Slot→provider wiring stays literal (the Actions constraint): slots 1–3 Z.AI via `secrets.ZAI_KEY`, slots 4–6 Anthropic via `secrets.ANTHROPIC_API_KEY`, pinned to the registry by the guard. Add the job to the `needs:` of `pm-triage` and `design-coach`, and extend their skip conditions (the `result == 'success'` clauses listing which reviewers completed) so the verdict and the coach see its feedback and a failed persona job doesn't cancel them. |
-| 5 | The `REVIEWER_JOBS` addition in `tools/model-registry/tests/test_workflow_drift.py` | The drift-guard pin: add the job id to the `REVIEWER_JOBS` tuple so the test asserts the job exists, has exactly one ship step per chain link, and sources the right `model{k}` slot per step — a reviewer added without a pin (or a chain reordered without the YAML following) fails the model-registry test suite. |
+| 5 | The `REVIEWER_JOBS` addition in `tools/model-registry/tests/test_workflow_drift.py` | The drift-guard pin: add the job id to the `REVIEWER_JOBS` tuple so the test asserts the job exists, has exactly one ship step per chain link, and sources the right `model{k}` slot per step. The check is one-directional — it iterates the tuple, not the workflow — so the tuple entry is what brings a job under guard; a reviewer job added without it is simply never checked, and the guard can't notice. |
 | 6 | A CLAUDE.md bullet in the Review skills section | One line in the voice of the existing Jane/Drik bullets: the lens, the stakeholder, the trust-in-CI boundary, the tags, and that findings are PM-triaged feedback. Not optional bookkeeping: `scripts/docs-check.sh` check 2 fails if a skill exists that CLAUDE.md doesn't mention, and CLAUDE.md is what a session actually loads — an undocumented persona is a persona nobody invokes. |
 
 Steps 1–2 are the persona; 3–5 wire it into the loop; 6 tells humans (and
