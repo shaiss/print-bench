@@ -42,6 +42,12 @@ _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 # the two tools must stay independently installable (the groomer's precedent).
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 
+# The label an adoption-study submission carries. Collected from the same
+# open-issues listing the lock scan reads (no extra request), so Reeve can
+# surface studies awaiting a disposition — or flagged worth-raising — to the
+# platform lead. The disposition itself is read from the issue's own labels.
+ADOPTION_STUDY_LABEL = "adoption-study"
+
 # The scheduled routines whose death Reeve watches (the #312 incident class:
 # a run killed by its own timeout leaves conclusion "cancelled"/"failure" and
 # a ghost lock behind).
@@ -144,9 +150,25 @@ def gather_run_health(
         )
 
     issues: list[dict[str, Any]] = []
+    adoption_studies: list[dict[str, Any]] = []
     for item in _paged(f"{API_ROOT}/repos/{repo}/issues?state=open&per_page=100", token):
         if "pull_request" in item:
             continue  # the issues endpoint interleaves PRs; drop them
+        label_names = [lbl.get("name", "") for lbl in item.get("labels", [])]
+        if ADOPTION_STUDY_LABEL in label_names:
+            # Collected before the comments skip below: a study is flagged by its
+            # labels alone, so it must be gathered even with zero comments (the
+            # skip only guards the per-issue lock-comments GET).
+            adoption_studies.append(
+                {
+                    "number": item["number"],
+                    "title": item["title"],
+                    "labels": label_names,
+                    "createdAt": item.get("created_at", ""),
+                    "updatedAt": item.get("updated_at", ""),
+                    "url": item.get("html_url", ""),
+                }
+            )
         if not item.get("comments"):
             continue  # no comments, no lock — skip the per-issue comments GET
         comments = _paged(
@@ -192,6 +214,7 @@ def gather_run_health(
         "gatheredAt": stamp,
         "workflows": workflows,
         "issues": issues,
+        "adoptionStudies": adoption_studies,
         "openPRs": open_prs,
         "branches": branches,
     }
