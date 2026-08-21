@@ -185,6 +185,20 @@ Also (tooling, same round): **bridge-aware printcheck** made shape-aware — a
 solid acute ceiling (an 8 mm triangle spans 6.9 mm) is no longer mistaken for a
 bridgeable thin ring (CodeRabbit review); thin strokes/rings stay exempt.
 
+**Reviewer round (Jane/Drik, provider recovered).** Once the auto-review
+provider outage cleared, Jane and Drik reviewed the v0.2 head; the PM triage
+ruled five **doc-only** README fixes act-now (no geometry, no cameras, no
+manifests): corrected the **seam** advice (a Rear seam lands the scar *opposite*
+the +Y loop, so lead with scarf / rotate-then-Back); an **ironing** caveat
+(Bambu's default "Top surfaces" irons the deboss floors and can fill the
+~0.55 mm `IS THE` stems → *Topmost surface only*); a **PETG** honesty line
+(fit is PLA-tuned; PETG wants `pivot_clear` at the 0.40 coupon ceiling);
+softened the **ring-threading** claim (counterbore is v0.2-new, not yet
+field-threaded); and extended the coupon symptom→knob recipe to **wear**.
+Queued for the owner: a v0.2 **carry print + field-log line** (both field logs
+are still v0.1) and, gated on that, a **tab-on-coupon** variant if the loop
+proves the failure point. PM also recommends chartering `PM.md`.
+
 ### v0.2 — 2026-08-20 — field-driven refinement
 
 Driven by the first two field prints (print 1 + 2 below) and a Jane/Drik

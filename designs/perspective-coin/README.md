@@ -44,7 +44,9 @@ about the pivot, so the back face reads upright after a flip.
 ## Print settings
 
 - **Material:** any rigid filament — PLA is the reference; gold silk PLA if
-  you want it to look the part
+  you want it to look the part. The fit is tuned on PLA; PETG usually runs a
+  touch tighter, so a PETG flipper tends to want `pivot_clear` at the 0.40
+  coupon-ladder ceiling (see the coupon note below).
 - **Layer height:** 0.2 mm. Use a height that **divides 0.6** (0.12 / 0.15 /
   0.2 / 0.3) — the engravings are exactly three 0.2 mm layers, and a draft
   0.24 / 0.28 profile quantizes their depth off that grid.
@@ -52,10 +54,15 @@ about the pivot, so the back face reads upright after a flip.
   is the first layer, and a textured sheet stipples it. Textured still prints
   legibly, just softer.
 - **Ironing:** **on for the top surface** — it smooths the JOY legend field
-  (a big win on silk/metallic PLA).
-- **Seam:** set seam position **Rear** (or scarf, on Bambu) so the ring seam
-  lands on the loop's outer arc where the split ring hides it — the default
-  "nearest" stacks it in the tab junction and leaves a visible scar.
+  (a big win on silk/metallic PLA). If the finest text (`IS THE`) fills in,
+  set the ironing type to *Topmost surface only* (or off): the default "Top
+  surfaces" also irons the engraved floors and can soften the ~0.55 mm stems.
+- **Seam:** the default "nearest" stacks the ring seam in the tab junction and
+  leaves a visible scar. **Scarf** (on Bambu) is the cleanest fix — on a clean
+  Ø54 cylinder a scarf seam is near-invisible wherever it lands. To hide it
+  behind the loop with a **Rear/Back** seam instead, rotate the part 180° on
+  the plate first (loop toward the back): the loop is modeled at the front, so
+  a Rear seam without that rotation lands the scar on the bare arc opposite it.
 - **Infill:** 15–25 % (it's a coin — top it up to 100 % if you want the heft)
 - **Supports:** none needed — teardrop sockets, 45° axles, top-side counterbore
 - **Orientation:** as modeled, flat on the bed; the flipper prints in place
@@ -112,8 +119,11 @@ The coin has **no detent** — whichever face is up when you pull your keys out
 is whatever the last jostle left. That is on purpose: *the coin picks your
 reminder*, and half the time it picks the one you weren't looking for.
 
-Threading it onto a keyring: the loop is counterbored so a standard split ring
-climbs over ~3 mm, not the full ring. If the pivot is stiff or sloppy, reprint
-the **coupon**: raise `pivot_clear` if it won't break free, lower `pivot_clear`
-for across-axis wobble, lower `socket_end_clear` for along-axis end-play — then
-carry the value into the full-size print.
+Threading it onto a keyring: the loop is counterbored to a ~3 mm wrap at the
+hole, so a standard split ring is meant to climb over just that ~3 mm, not the
+full ring. (The counterbore is new in v0.2 and not yet field-threaded.) If the
+pivot is stiff or sloppy, reprint the **coupon**: raise `pivot_clear` if it
+won't break free, lower `pivot_clear` for across-axis wobble, lower
+`socket_end_clear` for along-axis end-play — then carry the value into the
+full-size print. The same two knobs fix wear: if the pivot goes loose after
+months of carry, lower `pivot_clear` / `socket_end_clear` and reprint.
