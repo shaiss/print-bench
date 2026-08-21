@@ -335,6 +335,11 @@ def test_scout_no_hardcoded_model_literal_survives():
 # * the walk is real: each link-N step (N>1) must be gated on the earlier
 #   links of its block NOT having succeeded, so a deepened chain actually
 #   walks rather than running every link unconditionally;
+# * the walk's OUTCOME is read off every link (#327): the AGENT_OUTCOME /
+#   RUN / red-on-death expressions must treat any link's success as the
+#   walk's success — an expression still reading only link 1 after the chain
+#   deepened would send a healthy link-2 run red and (via
+#   routine-lock-cleanup) withdraw a live run's SHIP-LOCK;
 # * the run steps still gate on key_present (the #326 constraint that the
 #   secret-absent path stays a ::notice:: skip, verbatim from before).
 #
@@ -551,6 +556,391 @@ def test_routine_run_steps_gate_on_key_presence():
             assert step["gates_on_key"], (
                 f"{workflow}: a ship step does not gate on key_present == '1' — "
                 "an absent provider key would not skip it")
+
+
+# ── The walk's OUTCOME wiring (#327) ─────────────────────────────────────────
+#
+# Deepening a chain is a same-PR pair with a THIRD half the step-graph tests
+# above cannot see: every expression that reads the walk's result —
+# AGENT_OUTCOME (which feeds routine-lock-cleanup's --agent-outcome), the
+# red-on-death gate's `if`, and the summary's RUN/SHIP — must treat ANY
+# link's success as the walk's success. An expression still reading only
+# link 1 after the chain grew sends a healthy link-2 run red AND withdraws
+# its SHIP-LOCK (the cleanup reads AGENT_OUTCOME), the exact regression the
+# design-run comment warned "#327 deepens it and this expression grows a
+# link2/link3 disjunct then" about.
+#
+# The strong form of the check is simulation: pull each `${{ … }}` outcome
+# expression out of the workflow, substitute step outcomes for every walk
+# state, and evaluate the GitHub-expression semantics the workflow will use
+# (&&/|| short-circuit, non-empty strings truthy, comparisons string-wise).
+# Structural text-matching alone would pass an expression that mentions
+# link2 in a dead branch.
+
+
+def _outcome_expressions(text: str) -> dict[str, list[str]]:
+    """Map each outcome variable name to EVERY `${{ … }}` expression assigned it.
+
+    AGENT_OUTCOME is assigned twice in the SHIP-LOCK workflows (the lock
+    cleanup's env and the red-on-death step's env) and those two MUST agree —
+    a divergence would have the cleanup release a lock while the gate still
+    calls the run dead, or vice versa. So the mapping is name → list, and the
+    simulation checks every occurrence.
+    """
+    exprs: dict[str, list[str]] = {}
+    for m in re.finditer(r"^(\s+)(AGENT_OUTCOME|RUN|SHIP):\s*\$\{\{(.+?)\}\}\s*$",
+                         text, re.MULTILINE | re.DOTALL):
+        exprs.setdefault(m.group(2), []).append(m.group(3))
+    return exprs
+
+
+def _eval_github_expression(expr: str, outcomes: dict[str, str]) -> str:
+    """Evaluate one `${{ … }}` body under GitHub's operator semantics.
+
+    Implemented as recursive descent over the &&/||/== grammar with
+    `steps.<id>.outcome` context lookups and quoted string literals —
+    the same subset the four workflows' walk expressions use, so a
+    change to an expression the evaluator cannot parse raises (better a
+    red test than an silently unexercised expression).
+    """
+    pos = 0
+
+    def skip_ws():
+        nonlocal pos
+        while pos < len(expr) and expr[pos] in " \t\n":
+            pos += 1
+
+    def peek(tok: str) -> bool:
+        skip_ws()
+        return expr.startswith(tok, pos)
+
+    def eat(tok: str) -> bool:
+        nonlocal pos
+        skip_ws()
+        if expr.startswith(tok, pos):
+            pos += len(tok)
+            return True
+        return False
+
+    def parse_operand():
+        nonlocal pos
+        skip_ws()
+        if eat("("):
+            node = parse_or()
+            assert eat(")"), f"unbalanced parens in walk expression: {expr!r}"
+            return node
+        m = re.match(r"'([^']*)'", expr[pos:])
+        if m:
+            pos += m.end()
+            return ("lit", m.group(1))
+        m = re.match(r"steps\.([A-Za-z0-9_]+)\.outcome", expr[pos:])
+        if m:
+            pos += m.end()
+            return ("ref", m.group(1))
+        # steps.policy.outputs.<key> — a plain string output; the simulation
+        # fixes it to the conf's provider (the branch selector).
+        m = re.match(r"steps\.policy\.outputs\.provider", expr[pos:])
+        if m:
+            pos += m.end()
+            return ("lit", _PROVIDER_UNDER_TEST)
+        m = re.match(r"always\(\)", expr[pos:])
+        if m:
+            pos += m.end()
+            return ("lit", "always")
+        m = re.match(r"env\.([A-Z_]+)", expr[pos:])
+        if m:
+            pos += m.end()
+            return ("env", m.group(1))
+        raise AssertionError(
+            f"walk-outcome expression uses syntax the test evaluator cannot "
+            f"parse (at offset {pos}): {expr!r}")
+
+    def parse_eq():
+        node = parse_operand()
+        while peek("=="):
+            eat("==")
+            node = ("==", node, parse_operand())
+        return node
+
+    def parse_and():
+        node = parse_eq()
+        while eat("&&"):
+            node = ("&&", node, parse_eq())
+        return node
+
+    def parse_or():
+        node = parse_and()
+        while eat("||"):
+            node = ("||", node, parse_and())
+        return node
+
+    ast = parse_or()
+    skip_ws()
+    assert pos == len(expr), f"trailing tokens in walk expression: {expr!r}"
+
+    def ev(node):
+        """Yield GitHub's three value kinds: bool, string, or '' (null).
+
+        Truthiness follows GitHub: booleans by their own value, strings (and
+        the null '') by non-emptiness — a comparison yields a REAL boolean,
+        never the string 'false', so `false && x` is falsy. Conflating the
+        two (returning 'true'/'false' strings) silently inverts every
+        negative comparison, which is exactly the bug this evaluator must
+        not have: it would read an all-dead walk as success.
+        """
+        kind = node[0]
+        if kind == "lit":
+            return node[1]
+        if kind == "ref":
+            return outcomes.get(node[1], "")
+        if kind == "env":
+            return outcomes.get(node[1], "")
+        if kind == "==":
+            return ev(node[1]) == ev(node[2])
+        if kind == "&&":
+            left = ev(node[1])
+            return ev(node[2]) if _gh_truthy(left) else left
+        if kind == "||":
+            left = ev(node[1])
+            return left if _gh_truthy(left) else ev(node[2])
+        raise AssertionError(f"unhandled AST node {node!r}")
+
+    def _gh_truthy(val) -> bool:
+        if isinstance(val, bool):
+            return val
+        return val != ""
+
+    return ev(ast)
+
+
+def _truthy(val: str) -> bool:
+    # GitHub: a string is truthy when non-empty (after its coercion rules;
+    # the expressions here only produce 'success'/'failure'/'skipped'/''/
+    # 'true'/'false', all of which follow the non-empty rule — and 'false'
+    # the STRING is truthy in GitHub expressions, a known quirk these
+    # workflows avoid by never branching on a bare boolean literal).
+    return val != ""
+
+
+# The provider the simulation fixes `steps.policy.outputs.provider` to — the
+# conf's declared provider, i.e. the block that actually runs. Set per
+# workflow by the tests before evaluating.
+_PROVIDER_UNDER_TEST = "zai"
+
+
+def _walk_states(n_links: int):
+    """Every combination of link outcomes worth distinguishing, labeled.
+
+    n_links ≤ 3 keeps this at ≤ 27 rows — the full cartesian set, so the
+    simulation is exhaustive rather than sampled: every state where any link
+    succeeded must read success, every all-dead state must not.
+    """
+    from itertools import product
+    values = ("success", "failure", "skipped")
+    for combo in product(values, repeat=n_links):
+        yield combo
+
+
+def _provider_block_ids(text: str, provider: str) -> list[str]:
+    """Step ids of the walk steps in `provider`'s block, link order."""
+    ids = re.findall(r"id:\s*((?:run|ship)_%s_\d+)" % provider, text)
+    return sorted(set(ids), key=lambda i: int(i.rsplit("_", 1)[1]))
+
+
+def test_routine_walk_outcome_covers_every_link():
+    """The walk's outcome expressions must read EVERY link of the active block.
+
+    For each routine: resolve its chain, take the provider its conf declares,
+    and evaluate the AGENT_OUTCOME / RUN / SHIP expression under every
+    outcome combination of that block's walk steps. Any state where a link
+    succeeded must yield 'success' — and the all-dead states must not.
+    """
+    reg = Registry.load(str(REGISTRY))
+    for workflow, (chain_id, conf) in ROUTINES.items():
+        links = reg.resolve(chain_id)
+        provider = _routine_provider(conf)
+        text = _routine_text(workflow)
+        block_ids = _provider_block_ids(text, provider)
+        assert len(block_ids) == len(links), (
+            f"{workflow}: the `{chain_id}` chain has {len(links)} links but the "
+            f"{provider} block carries {len(block_ids)} walk steps "
+            f"({block_ids}) — the drift guard's step tests should have caught "
+            "this first")
+        exprs = _outcome_expressions(text)
+        assert exprs, (
+            f"{workflow}: no AGENT_OUTCOME/RUN/SHIP expression found — the "
+            "walk-outcome wiring this test exists to pin is missing")
+        global _PROVIDER_UNDER_TEST
+        _PROVIDER_UNDER_TEST = provider
+        for var, expr_list in exprs.items():
+            for expr in expr_list:
+                for state in _walk_states(len(links)):
+                    outcomes = dict(zip(block_ids, state))
+                    got = _eval_github_expression(expr, outcomes)
+                    any_success = "success" in state
+                    if any_success:
+                        assert got == "success", (
+                            f"{workflow}: {var} evaluated to {got!r} with link "
+                            f"outcomes {dict(zip(block_ids, state))} — a link "
+                            "succeeded but the walk's outcome is not success; "
+                            "the expression does not cover every link of the "
+                            "walk")
+                    else:
+                        assert got != "success", (
+                            f"{workflow}: {var} read {got!r} with no link "
+                            f"having succeeded ({state}) — the walk claims a "
+                            "success nobody produced")
+
+
+def test_routine_red_on_death_gates_on_whole_chain_failure():
+    """The red-on-death `if` must fire exactly when NO link succeeded.
+
+    Simulates the gate's condition under every outcome combination: green
+    when any link succeeded, red when none did. A gate still pinned to link 1
+    alone would fire (fail the job) after a healthy link-2 run.
+    """
+    reg = Registry.load(str(REGISTRY))
+    for workflow, (chain_id, conf) in ROUTINES.items():
+        if workflow not in ("design-run.yml", "backlog-burn.yml"):
+            continue  # only these two carry the SHIP-LOCK red-on-death step
+        links = reg.resolve(chain_id)
+        provider = _routine_provider(conf)
+        text = _routine_text(workflow)
+        block_ids = _provider_block_ids(text, provider)
+        m = re.search(
+            r"name:\s*Turn a dead agentic run red(?:\s*#.*)?\n(?:\s*#.*\n)*"
+            r"\s*if: >-\n((?:\s+.+\n)+?)(?=\s*\w+:)",
+            text)
+        assert m, (
+            f"{workflow}: the 'Turn a dead agentic run red' step's if-condition "
+            "was not found — the SHIP-LOCK lifecycle wiring changed shape")
+        cond = " ".join(l.strip() for l in m.group(1).splitlines())
+        # Drop the legs the simulation fixes green (policy/enabled/select/
+        # key/dry_run) and the leading always(), leaving the outcome clause.
+        sim_cond = cond
+        sim_cond = re.sub(r"^always\(\)\s*&&\s*", "", sim_cond)
+        sim_cond = re.sub(
+            r"steps\.policy\.outputs\.(enabled|key_present)\s*==\s*'(true|1)'\s*&&\s*",
+            "", sim_cond)
+        sim_cond = re.sub(r"steps\.select\.outputs\.\w+\s*!=\s*''\s*&&\s*", "", sim_cond)
+        sim_cond = re.sub(r"github\.event\.inputs\.dry_run\s*!=\s*'true'\s*&&\s*", "", sim_cond)
+        # The surviving clause is `(walk-success test) != 'success'`.
+        mm = re.match(r"^\((.+)\)\s*!=\s*'success'\s*$", sim_cond.strip())
+        assert mm, (
+            f"{workflow}: the red-on-death condition's outcome clause does not "
+            f"match the expected `(walk) != 'success'` shape after stripping "
+            f"the fixed-green legs: {sim_cond!r}")
+        inner = mm.group(1)
+        for state in _walk_states(len(links)):
+            outcomes = dict(zip(block_ids, state))
+            walk = _eval_github_expression(inner, outcomes)
+            # `inner` is the walk-success TEST, so it evaluates to a boolean
+            # (each leg is `outcome == 'success'`); the gate fires on its
+            # negation.
+            assert isinstance(walk, bool), (
+                f"{workflow}: the red-on-death walk clause does not reduce to "
+                f"a boolean test: {inner!r} → {walk!r}")
+            fired = not walk
+            any_success = "success" in state
+            assert fired == (not any_success), (
+                f"{workflow}: the red-on-death gate fired={fired} under link "
+                f"outcomes {dict(zip(block_ids, state))} — expected "
+                f"fired={not any_success}; the gate does not cover the whole "
+                "chain")
+
+
+def test_walk_outcome_guard_fires_on_a_stale_link1_expression(tmp_path, monkeypatch):
+    """Negative control: prove the walk-outcome guard can fail.
+
+    The regression it exists for is a chain deepened while an outcome
+    expression still reads only link 1 — the exact drift the design-run
+    comment warned about. Reintroduce it in a copy of design-run.yml (revert
+    AGENT_OUTCOME to the pre-#327 link-1-only form) and re-run the real
+    assertions against the mutated tree, which must FAIL: with a link-2
+    success, the stale expression reports the walk as dead, which would
+    withdraw a live run's SHIP-LOCK.
+    """
+    import shutil
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    for workflow in ROUTINES:
+        shutil.copy(REPO_ROOT / ".github" / "workflows" / workflow, workflows_dir)
+    victim = workflows_dir / "design-run.yml"
+    text = victim.read_text(encoding="utf-8")
+    stale = ("steps.run_zai_1.outcome == 'success' && 'success' || "
+             "steps.run_zai_2.outcome == 'success' && 'success' || "
+             "steps.run_zai_3.outcome")
+    # EVERY occurrence — AGENT_OUTCOME is assigned twice (lock cleanup env,
+    # red-on-death env) and both must go stale together for this mutation to
+    # represent the real regression; mutating only the first leaves the
+    # extractor's second occurrence healthy and the control passes vacuously.
+    assert text.count(stale) >= 2, (
+        "the live AGENT_OUTCOME expression changed shape — update the mutation")
+    victim.write_text(text.replace(stale, "steps.run_zai_1.outcome"),
+                      encoding="utf-8")
+
+    original = _routine_text
+
+    def _mutated(workflow: str) -> str:
+        mutated = workflows_dir / workflow
+        if mutated.exists():
+            return mutated.read_text(encoding="utf-8")
+        return original(workflow)
+
+    monkeypatch.setitem(globals(), "_routine_text", _mutated)
+    try:
+        test_routine_walk_outcome_covers_every_link()
+    except AssertionError:
+        return  # the guard fired — the control passes
+    raise AssertionError(
+        "the walk-outcome guard passed on an AGENT_OUTCOME expression that "
+        "still reads only link 1 after the chain deepened — it has been "
+        "weakened into a restatement")
+
+
+def test_red_on_death_guard_fires_on_a_stale_link1_gate(tmp_path, monkeypatch):
+    """Negative control for the red-on-death gate simulation.
+
+    Same mutation class, different surface: the gate's `if` still pinned to
+    link 1 would fire (fail the job) after a healthy link-2 run. Reintroduce
+    that in a copy of backlog-burn.yml and require the simulation to fail.
+    """
+    import shutil
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    for workflow in ROUTINES:
+        shutil.copy(REPO_ROOT / ".github" / "workflows" / workflow, workflows_dir)
+    victim = workflows_dir / "backlog-burn.yml"
+    text = victim.read_text(encoding="utf-8")
+    stale = ("(steps.ship_zai_1.outcome == 'success' || "
+             "steps.ship_zai_2.outcome == 'success' || "
+             "steps.ship_zai_3.outcome == 'success')")
+    # EVERY occurrence — the same walk test is quoted by the checkless-draft
+    # notice's `if:` and the red-on-death gate's `if:`; a stale gate means all
+    # its copies are stale, and mutating only the first would leave the gate
+    # the simulation reads untouched (the control would pass vacuously).
+    assert text.count(stale) >= 2, (
+        "the live walk-test expression changed shape — update the mutation")
+    victim.write_text(text.replace(
+        stale, "steps.ship_zai_1.outcome == 'success'"),
+        encoding="utf-8")
+
+    original = _routine_text
+
+    def _mutated(workflow: str) -> str:
+        mutated = workflows_dir / workflow
+        if mutated.exists():
+            return mutated.read_text(encoding="utf-8")
+        return original(workflow)
+
+    monkeypatch.setitem(globals(), "_routine_text", _mutated)
+    try:
+        test_routine_red_on_death_gates_on_whole_chain_failure()
+    except AssertionError:
+        return  # the guard fired — the control passes
+    raise AssertionError(
+        "the red-on-death simulation passed on a gate still pinned to link 1 "
+        "after the chain deepened — it has been weakened into a restatement")
 
 
 def test_no_hardcoded_model_literal_in_any_routine():

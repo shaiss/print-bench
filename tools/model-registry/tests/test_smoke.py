@@ -18,6 +18,10 @@ from model_registry import smoke
 from model_registry.cli import main
 from model_registry.registry import Registry
 
+# The committed registry (the routine-chain test reads the real chains, not a
+# fixture — the deepened tails are the subject).
+REGISTRY_PATH = pathlib.Path(__file__).resolve().parents[3] / ".github" / "models" / "registry.conf"
+
 REG = """\
 [provider:zai]
 secret = ZAI_KEY
@@ -229,6 +233,71 @@ def test_cli_smoke_command_wires_env_and_exit_code(tmp_path, capsys, monkeypatch
     out = capsys.readouterr().out
     assert "ok    link 2 claude-opus-5 (anthropic)" in out
     assert out.startswith("skip")
+
+
+def test_invalid_model_400_is_a_dead_id_fail(tmp_path):
+    # The third #298 signature: a 400 whose body names the model as invalid is
+    # the registry naming an id the provider does not know — a defect, not a
+    # funding/billing rejection (which is why _classify checks the account
+    # markers BEFORE falling through to dead, and why this body carries none).
+    def post(url, headers, payload):
+        return 400, ('{"error":{"type":"invalid_request_error","message":'
+                     '"invalid model id: glm-9.9-not-a-model"}}')
+    lines, code = smoke.smoke_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert code == 1
+    assert any(l.startswith("FAIL") and "invalid model" in l for l in lines)
+
+
+def test_auth_401_is_inconclusive_not_a_dead_id(tmp_path):
+    # A 401 means the KEY is wrong or missing — a configuration problem that
+    # says nothing about any model id's validity, so it must not red the gate
+    # on a model the registry correctly named.
+    def post(url, headers, payload):
+        return 401, '{"error":{"type":"authentication_error","message":"invalid x-api-key"}}'
+    lines, code = smoke.smoke_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert code == 0
+    assert all(not l.startswith("FAIL") for l in lines)
+    assert any(l.startswith("INCONC") for l in lines)
+    assert any(l.startswith("WARN") and "NOT PROVEN" in l for l in lines)
+
+
+def test_routine_chains_are_smokeable_and_within_their_provider():
+    """#327 AC: the four routine chains resolve to >1 link, all on the routine's
+    conf provider, so a model-smoke run (the model-smoke.yml workflow smokes
+    EVERY chain on any registry edit, and dispatch accepts any chain name)
+    actually exercises the deepened tails.
+
+    This is the smoke-side half of the drift guard's chain checks: not that
+    the workflows walk (test_workflow_drift proves that), but that what they
+    walk can be PROVEN callable — every link resolvable and skippable by
+    secret presence, none dangling.
+    """
+    reg = Registry.load(REGISTRY_PATH)
+    routines = {
+        "design-run": "zai",
+        "backlog-burn": "zai",
+        "chunker": "anthropic",
+        "labeler": "zai",
+    }
+    for chain_id, provider in routines.items():
+        links = reg.resolve(chain_id)
+        assert len(links) > 1, (
+            f"the `{chain_id}` chain has {len(links)} link(s) — #327 requires "
+            "a multi-model tail so one unservable id cannot kill the routine")
+        for link in links:
+            assert link.provider == provider, (
+                f"the `{chain_id}` chain's link {link.position} ({link.model}) "
+                f"is on provider {link.provider!r} but .github/{chain_id}.conf "
+                f"declares {provider!r} — the run holds only that provider's "
+                "secret, so the walk cannot reach this link")
+    # And the smoke itself runs end-to-end over a routine chain with all its
+    # provider's secrets absent: exit 1 "proves nothing" (the documented
+    # misconfiguration verdict), not a crash on the deepened tail.
+    lines, code = smoke.smoke_chain(reg, "chunker", {}, post=None)
+    assert code == 1
+    assert any("proves nothing" in l for l in lines)
 
 
 def test_post_is_the_packages_only_network_seam():
