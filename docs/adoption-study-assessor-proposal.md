@@ -1,20 +1,24 @@
-# Proposal: an agentic adoption-study assessor
+# The agentic adoption-study assessor (design of record)
 
-**Status: proposed, not built.** This document designs an unattended agent that
-would read a filed [adoption study](adoption-studies.md) and auto-draft its
-split verdict — the *redundant / additive / where-integration* reading a human
-writes today. It is written so a future session can build it in one PR against a
-frozen design, the way `docs/decision-gate.md` shipped its gate before its
-skills consumed it. **Nothing here exists yet**; the assessment stays
-human-run until this is built and armed.
+**Status: BUILT (shipped disarmed).** This document is the design of record for
+the unattended agent that reads a filed [adoption study](adoption-studies.md)
+and auto-drafts its split verdict — the *redundant / additive /
+where-integration* reading a human writes today. The routine is built and
+committed; it **ships disarmed** — the git-tracked `.github/adoption-assessor.conf`
+carries `enabled: true`, but the live `ADOPTION_ASSESSOR_ENABLED` repo variable
+is **unset**, so nothing fires until a maintainer arms it with that one repo
+variable (the two-key arming in §5). The design was frozen before the build, the
+way `docs/decision-gate.md` shipped its gate before its skills consumed it; the
+assessment stays **human-run** until the routine is armed, and even armed it only
+drafts an advisory comment a human still dispositions.
 
-Why write the design down now and stop there: auto-drafting a disposition means
-an agent reading **untrusted issue text** and writing back to GitHub, which is
-exactly the boundary the labeler, the chunker, and the product scout sit behind.
-That boundary is crossable — the repo has a proven, gated pattern for it — but it
-is not crossed by accident, and it is not worth crossing until a human is drowning
-in studies to read. This proposal reuses that pattern verbatim rather than
-inventing machinery (N6): the bet is orchestration, not a new mechanism.
+Why it stays behind the full harness: auto-drafting a disposition means an agent
+reading **untrusted issue text** and writing back to GitHub — exactly the
+boundary the labeler, the chunker, and the product scout sit behind. That
+boundary is crossable — the repo has a proven, gated pattern for it — but it is
+not crossed by accident, which is why the routine is **shipped disarmed** and
+reuses that pattern **verbatim** rather than inventing machinery (N6): the bet is
+orchestration, not a new mechanism.
 
 ## The one boundary this agent may never cross
 
@@ -74,11 +78,15 @@ shell:
   the advisory framing to every body, applies **no label**, and **caps
   dispositions per run** via a run-scoped in-process counter.
 
-### 2. `--permission-mode dontAsk` makes `--allowedTools` exclusive
+### 2. `--permission-mode dontAsk` runs unattended; the deny backstop restricts tools
 
 Run the agent with `--permission-mode dontAsk` over its own two surfaces
-(`assessor-helper.sh` + the MCP tool) so nothing else is even proposable — the
-same mode the scheduled scout, labeler, and chunker use.
+(`assessor-helper.sh` + the MCP tool) — the same mode the scheduled scout,
+labeler, and chunker use. `dontAsk` only suppresses the interactive approval
+prompt (there is no human to answer one); it does **not**, on its own, make
+`--allowedTools` exclusive, because `settingSources=project` still merges
+`.claude/settings.json`'s `permissions.allow`. The deny backstop below (§3) is
+what actually blocks those inherited allows.
 
 ### 3. A per-routine deny backstop
 
@@ -146,7 +154,7 @@ comment through the ambient `GITHUB_TOKEN`; a `GITHUB_TOKEN`-authored comment
 triggers no workflow, which is correct here — the assessor informs, it does not
 re-trigger anything.
 
-## The concrete files a build would add
+## The concrete files this build added
 
 | File | Role |
 |---|---|
