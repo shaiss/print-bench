@@ -338,7 +338,7 @@ Multi-part designs (lids, hinged pairs, assemblies) stay in one design directory
 
 ## Review skills
 
-Reviewer personas live in `.claude/skills/` and can be invoked on any design PR or `designs/<name>/` directory:
+Reviewer personas live in `.claude/skills/` and can be invoked on any design PR or `designs/<name>/` directory. The pattern they follow — one persona = one lens + one reference pack + PM-gated tags, and the checklist for adding another — is documented in [docs/reviewer-personas.md](docs/reviewer-personas.md):
 
 - **`/jane-review`** — real-world printability feedback as Jane, the person who will slice and print the part tonight: reviews this geometry against what stock slicer profiles actually do (feature sizes vs the nozzle, first-layer squish on the fits, seam defaults, bridge-angle auto-selection, bed exclusion zones) and QAs preview cameras before they freeze. Trusts CI's gates for the math — she consumes the posted printcheck/slice results instead of re-deriving or re-running them; her findings are tagged feedback the design's PM triages, not a merge gate.
 - **`/drik-review`** — end-user/fitness-for-purpose feedback as Drik, the design's first real customer: walks a real session of use and re-ranks the backlog by usage frequency, checks payload fit and handling against what real-world objects measure, audits for information leaks (fog-of-war) that geometry checks can't catch, and polices product-page honesty. Trusts CI's gates for the math — never recomputes the designer's numbers; his findings are tagged feedback the design's PM triages, not a merge gate.
