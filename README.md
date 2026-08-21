@@ -244,6 +244,11 @@ surfaces studies awaiting a read live in
     deny backstop (`.claude/scout-settings.json`), which additionally denies
     BOTH `chunk-helper.sh` and `label-helper.sh` and must never deny
     `scout-helper.sh`
+  - `oracle-perms-check.sh` — the same drift check for the Oracle reviewer's
+    own deny backstop (`.claude/oracle-settings.json`, issue #333): the Oracle
+    has no shell wrapper, so EVERY Bash allow must be denied plus all three
+    sibling write surfaces (the chunker's, labeler's and scout's), and its one
+    MCP posting tool must never be denied
   - `adoption-assessor-perms-check.sh` — the same drift check for the
     adoption-study assessor's own deny backstop
     (`.claude/adoption-assessor-settings.json`), which additionally denies
