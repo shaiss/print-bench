@@ -171,6 +171,16 @@ split, the comment-command authorisation) is documented in full in
 [CLAUDE.md](CLAUDE.md); the accepted security posture toward manually dispatched,
 write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md).
 
+### Evaluating a tool for adoption
+
+Wondering whether an outside library, slicer, or service belongs in the bench?
+File an **Adoption study** issue: a neutral, repeatable evaluation that measures
+the tool against print-bench's own gates and reports where it is redundant,
+where it is additive, and where integration would make sense — no adoption
+decision implied by asking. The process, the disposition labels, and how Reeve
+surfaces studies awaiting a read live in
+[docs/adoption-studies.md](docs/adoption-studies.md).
+
 ## Layout
 
 - `designs/<name>/` — one directory per design: the parametric `.scad`
@@ -234,6 +244,11 @@ write-scoped workflows is in [docs/actions-security.md](docs/actions-security.md
     deny backstop (`.claude/scout-settings.json`), which additionally denies
     BOTH `chunk-helper.sh` and `label-helper.sh` and must never deny
     `scout-helper.sh`
+  - `adoption-assessor-perms-check.sh` — the same drift check for the
+    adoption-study assessor's own deny backstop
+    (`.claude/adoption-assessor-settings.json`), which additionally denies
+    `chunk-helper.sh`, `label-helper.sh` AND `scout-helper.sh` and must never
+    deny its own `assessor-helper.sh`
   - `cadence-sync-check.sh` — cadence-parity check for the scheduled autonomy
     routines (issue #276): the `cadence:` key in `.github/<routine>.conf` must
     resolve to the same schedule as the `cron:` literal in the matching
