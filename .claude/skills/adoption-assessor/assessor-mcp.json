@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "assessor": {
+      "command": "python3",
+      "args": [".claude/skills/adoption-assessor/assessor_mcp.py"]
+    }
+  }
+}

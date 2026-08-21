@@ -49,7 +49,7 @@ cd "$(dirname "$0")/.."
 # `backlog-burn config` — the conf READER here is the same `key: value`
 # house format every one of those parsers uses (see the Python docstring
 # below), not a call into the shared parser.
-ROUTINES=(backlog-burn design-run chunker labeler product-scout backlog-groomer reeve)
+ROUTINES=(backlog-burn design-run chunker labeler product-scout backlog-groomer reeve adoption-assessor)
 
 # Compare one conf/workflow pair. Prints a diagnosis and returns non-zero on
 # drift. Kept as a function so --selftest can point it at fixtures.
