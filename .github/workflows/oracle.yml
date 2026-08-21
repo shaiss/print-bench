@@ -204,6 +204,10 @@ jobs:
           # scheme actions/checkout uses) so the blind context assembles
           # regardless of repo visibility.
           FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          # Actions masks the raw token in logs but NOT a derived encoding —
+          # register the base64 form as a secret too (actions/checkout does
+          # the same before using it), so no error path can print it.
+          echo "::add-mask::${FETCH_AUTH}"
           git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
             fetch --no-tags origin "$HEAD_SHA"
           git diff "${BASE_SHA}...${HEAD_SHA}" > .oracle-context/pr.diff
@@ -312,7 +316,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.anth.outputs.link1_model }}
           prompt: >-
             /oracle-review ${{ github.event.pull_request.number }}
@@ -332,7 +335,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.anth.outputs.link2_model }}
           prompt: >-
             /oracle-review ${{ github.event.pull_request.number }}
@@ -353,7 +355,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.anth.outputs.link3_model }}
           prompt: >-
             /oracle-review ${{ github.event.pull_request.number }}
@@ -375,7 +376,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.glm.outputs.link1_model }}
           prompt: >-
             /oracle-review ${{ github.event.pull_request.number }}
@@ -398,7 +398,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.glm.outputs.link2_model }}
           prompt: >-
             /oracle-review ${{ github.event.pull_request.number }}
@@ -422,7 +421,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.glm.outputs.link3_model }}
           prompt: >-
             /oracle-review ${{ github.event.pull_request.number }}
@@ -447,7 +445,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/oracle-settings.json --mcp-config .claude/skills/oracle-review/oracle-mcp.json --allowedTools "mcp__oracle__post_oracle_review,Read,Grep,Glob" --model ${{ steps.glm.outputs.link4_model }}
           prompt: >-
             /oracle-review ${{ github.event.pull_request.number }}

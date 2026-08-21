@@ -392,11 +392,11 @@ def _assert_oracle_chain_pinned(text: str, chain: str, step_id: str) -> None:
             f"the deny backstop (--settings .claude/oracle-settings.json).")
 
 
-def test_oracle_chains_exist_and_are_single_vendor():
-    # Both role chains resolve, each stays on ONE provider, and the two are on
-    # DIFFERENT providers — the property that makes "resolve the opposite
-    # vendor's chain" mean anything at all.
-    reg = Registry.load(str(REGISTRY))
+def _assert_oracle_chains_single_vendor(reg: Registry) -> None:
+    """Both role chains resolve, each stays on ONE provider, and the two are
+    on DIFFERENT providers — the property that makes "resolve the opposite
+    vendor's chain" mean anything at all. Factored out so the negative control
+    can run it against a tampered registry."""
     providers = {}
     for chain in ORACLE_CHAINS:
         links = reg.resolve(chain)
@@ -410,6 +410,25 @@ def test_oracle_chains_exist_and_are_single_vendor():
     assert providers["oracle-anthropic"] != providers["oracle-glm"], (
         "both oracle chains resolve to the same provider — the cross-vendor "
         "split is gone.")
+
+
+def test_oracle_chains_exist_and_are_single_vendor():
+    _assert_oracle_chains_single_vendor(Registry.load(str(REGISTRY)))
+
+
+def test_oracle_drift_guard_catches_a_mixed_vendor_chain(tmp_path):
+    # NEGATIVE CONTROL: the single-vendor guard must FAIL on a chain that
+    # quietly gains the other vendor's model — the registry edit that would
+    # unmake the cross-vendor split while every ship step stays green.
+    text = REGISTRY.read_text(encoding="utf-8")
+    tampered = text.replace(
+        "models = glm-5.3, glm-5.2, glm-5.1, glm-4.6",
+        "models = glm-5.3, glm-5.2, glm-5.1, claude-haiku-4-5", 1)
+    assert tampered != text, "tamper target not found — the fixture is stale"
+    bad = tmp_path / "registry.conf"
+    bad.write_text(tampered, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        _assert_oracle_chains_single_vendor(Registry.load(str(bad)))
 
 
 def test_oracle_ship_steps_are_pinned_to_their_registry_links():
