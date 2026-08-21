@@ -287,6 +287,21 @@ if ! python3 .claude/skills/product-scout/scout_mcp.py --selftest; then
   fail=1
 fi
 
+# Adoption-assessor MCP disposition tool: the assessor's WRITE surface is the
+# post_adoption_disposition MCP tool (.claude/skills/adoption-assessor/
+# assessor_mcp.py), a JSON-argument tool rather than a Bash verb for the same
+# reason the scout's is. It validates its TARGET at write time — re-reads the
+# issue and refuses unless it is open, still labeled adoption-study, and carries
+# no disposition:* label; binds to the run's candidate set; rejects a duplicate;
+# caps posts per run. Those write-time guards are what keep a stale or
+# prompt-injected run from commenting on a closed or already-ruled study, so
+# --selftest proves each one fires offline — the negative-control discipline the
+# perms-checks follow, applied to the write tool the deny-backstop cannot cover.
+echo "-- adoption-assessor MCP selftest: .claude/skills/adoption-assessor/assessor_mcp.py --selftest"
+if ! python3 .claude/skills/adoption-assessor/assessor_mcp.py --selftest; then
+  fail=1
+fi
+
 # Cadence-parity check (issue #276): every scheduled autonomy routine stores
 # its cadence TWICE — the `cadence:` key in .github/<routine>.conf and the
 # `cron:` literal in .github/workflows/<routine>.yml (Actions can't read a
