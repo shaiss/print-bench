@@ -244,6 +244,11 @@ surfaces studies awaiting a read live in
     deny backstop (`.claude/scout-settings.json`), which additionally denies
     BOTH `chunk-helper.sh` and `label-helper.sh` and must never deny
     `scout-helper.sh`
+  - `adoption-assessor-perms-check.sh` — the same drift check for the
+    adoption-study assessor's own deny backstop
+    (`.claude/adoption-assessor-settings.json`), which additionally denies
+    `chunk-helper.sh`, `label-helper.sh` AND `scout-helper.sh` and must never
+    deny its own `assessor-helper.sh`
   - `cadence-sync-check.sh` — cadence-parity check for the scheduled autonomy
     routines (issue #276): the `cadence:` key in `.github/<routine>.conf` must
     resolve to the same schedule as the `cron:` literal in the matching
