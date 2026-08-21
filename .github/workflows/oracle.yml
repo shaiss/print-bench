@@ -90,7 +90,12 @@ jobs:
       && !contains(github.event.pull_request.labels.*.name, 'no-oracle-review')
     runs-on: ubuntu-latest
     # A hung review must not hold a runner (and a key) for the 6-hour default.
-    timeout-minutes: 30
+    # Sized against the per-request API_TIMEOUT_MS (600000 ms = 10 min) so the
+    # worst case — every link of the longest chain (4 GLM links) hanging to its
+    # per-request limit — still fails INSIDE the job budget and the "every
+    # configured link failed" step gets to report, instead of the runner dying
+    # mid-chain with no verdict.
+    timeout-minutes: 45
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
@@ -251,8 +256,12 @@ jobs:
             for n in $issues; do
               echo "## Issue #${n}"
               echo
+              # Tolerate a transient API failure (same as the GraphQL call
+              # above): a rate-limited read must degrade the context, not
+              # abort the whole review under set -e.
               gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}" \
-                --jq '"**" + .title + "**\n\n" + (.body // "(no body)")'
+                --jq '"**" + .title + "**\n\n" + (.body // "(no body)")' \
+                || echo "(issue #${n} could not be read)"
               echo
               lock="$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}/comments" \
                 --paginate \
@@ -261,7 +270,7 @@ jobs:
                       | last
                       | if . == null then ""
                         else "### SHIP-LOCK contract (by " + .user.login
-                             + " at " + .created_at + ")\n\n" + .body end')"
+                             + " at " + .created_at + ")\n\n" + .body end' || true)"
               if [ -n "$lock" ]; then
                 printf '%s\n\n' "$lock"
               else
@@ -369,7 +378,7 @@ jobs:
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
-          API_TIMEOUT_MS: "3000000"
+          API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
@@ -391,7 +400,7 @@ jobs:
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
-          API_TIMEOUT_MS: "3000000"
+          API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
@@ -414,7 +423,7 @@ jobs:
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
-          API_TIMEOUT_MS: "3000000"
+          API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
@@ -438,7 +447,7 @@ jobs:
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
-          API_TIMEOUT_MS: "3000000"
+          API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1

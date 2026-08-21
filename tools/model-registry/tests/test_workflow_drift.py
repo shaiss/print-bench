@@ -470,9 +470,15 @@ def test_oracle_drift_guard_catches_a_scrambled_slot():
 
 def test_oracle_drift_guard_catches_a_dropped_backstop():
     # NEGATIVE CONTROL: stripping the deny backstop from a ship step must fail
-    # the guard — that flag is punch-list item #6's whole enforcement.
+    # the guard — that flag is punch-list item #6's whole enforcement. The
+    # tamper is anchored inside the FIRST anth ship step (not the file's first
+    # occurrence) so the control stays valid whichever chain's steps come
+    # first in the workflow.
     text = _oracle_text()
-    tampered = text.replace("--settings .claude/oracle-settings.json ", "", 1)
-    assert tampered != text, "tamper target not found — the fixture is stale"
+    step = _oracle_ship_steps(text, "anth")[0]["chunk"]
+    assert "--settings .claude/oracle-settings.json " in step, (
+        "tamper target not found — the fixture is stale")
+    tampered = text.replace(
+        step, step.replace("--settings .claude/oracle-settings.json ", "", 1), 1)
     with pytest.raises(AssertionError):
         _assert_oracle_chain_pinned(tampered, "oracle-anthropic", "anth")
