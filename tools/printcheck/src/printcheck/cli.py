@@ -54,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
                    default=_D.overhang_deg,
                    help="support threshold in degrees from vertical "
                         f"(default {_D.overhang_deg:g})")
+    p.add_argument("--bridge-max", type=_positive_mm, default=_D.bridge_max_mm,
+                   help="widest unsupported span treated as a self-supporting "
+                        f"bridge, in mm (default {_D.bridge_max_mm:g}); "
+                        "narrower downward regions are not counted as overhang")
     p.add_argument("--build-volume", type=str, default=_D_BUILD_VOLUME,
                    help=f"printer build volume as XxYxZ in mm "
                         f"(default {_D_BUILD_VOLUME})")
@@ -137,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         layer_height_mm=args.layer_height,
         min_wall_mm=args.min_wall if args.min_wall else args.nozzle * 2,
         overhang_deg=args.overhang_angle,
+        bridge_max_mm=args.bridge_max,
         build_volume_mm=bv,
     )
 

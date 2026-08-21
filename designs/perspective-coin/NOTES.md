@@ -86,14 +86,22 @@ All assumed (no fit to an external object):
 
 `perspective-coin-coupon.scad` — the production ring, sockets and axles at a
 24 mm disc (include + override, no copied geometry). Print it flat, then flip
-the disc firmly to shear the break-in fusion:
+the disc firmly to shear the break-in fusion. Two *different* clearances tune
+two *different* symptoms — this is the whole reason the coupon exists:
 
-1. Fused solid → raise `pivot_clear` by 0.05 and reprint.
-2. Spins but rattles along/across the axis → lower `pivot_clear` by 0.05.
-3. Sweet spot: flips freely with a faint click, no slop you can feel.
+1. **Fused solid / won't break free** → raise `pivot_clear` by 0.05 and
+   reprint. Ceiling is **0.40** (above it the socket bowl breaks through the
+   ring underside — the assert says so); if your printer needs more, raise
+   `coin_t` to 5.5 and everything re-derives.
+2. **Rattles ACROSS the axis** (radial click, coin wobbles in its plane) →
+   lower `pivot_clear` by 0.05.
+3. **Slides ALONG the axis** (end-play, coin shifts side to side on the pivot)
+   → lower `socket_end_clear` by 0.05. `pivot_clear` cannot fix this — it is
+   the radial annulus only. (v0.2 already halved the default float to 0.8 mm.)
+4. Sweet spot: flips freely with a faint click, no slop you can feel.
 
-Carry the tuned value into the full-size flipper. The bare coin has no fit
-to tune.
+Carry the tuned `pivot_clear` (and `socket_end_clear` if you touched it) into
+the full-size flipper. The bare coin has no fit to tune.
 
 ## Print settings
 
@@ -108,12 +116,147 @@ to tune.
 
 ## Status
 
+- **v0.2** — field-driven refinement of the shipped v0.1, in place (not a
+  derivative). See `## Changelog` and `## Field test log` below.
 - Geometry renders clean (CGAL), both faces reviewed in preview, cutaway
   verified: teardrop apex up, clearance ring visible all around the axle.
-- Fitchecks wired (`ci.fitchecks`): rotor ∩ ring empty + negative control.
-- `gate.sh --slice`: flipper 92/100, coupon 92/100, bare coin 84/100 — the
-  coin's residual warnings are structural to a two-sided engraved coin (the
-  bed-face engraving roofs count as overhang area — all spans ≤ ~2.5 mm and
-  PrusaSlicer slices without a stability warning — and glyph lands between
-  0.5–0.8 mm sample as thin). No score-affecting slivers remain.
-- Field-tuning pending a real print (pivot_clear 0.35 is the paper value).
+- Fitchecks wired (`ci.fitchecks`): rest-pose `fitcheck` + negative control,
+  **plus the v0.2 swept-flip `fitcheck_flip`** (the rotor swept across the
+  flip must clear the bore *and* the loop tab at every tilt) + its control.
+- `gate.sh --slice`: **flipper 100/100, coupon 100/100, bare coin 92/100**
+  (with the bridge-aware overhang check — see below). The flipper and coupon
+  are clean; the coin's one remaining warning is the *reeded edge* sampling as
+  thin wall (the ridge tips), which is cosmetic and removable via `reed_n=0`
+  if a perfect score is wanted over the reeding.
+- **Why the scores rose from v0.1's 84/92/92:** printcheck's overhang check
+  became bridge-aware in this change — a downward region narrower than the
+  bridge span (a debossed letter's ceiling, the thin bore-relief chamfer, the
+  print-in-place socket roof) is self-supporting and no longer scored as an
+  overhang, while a genuinely wide flat shelf still is. The geometry did not
+  change; the metric got honest. (Decomposition: the bare coin blank always
+  scored 100; every prior deduction was a deliberate feature or a printcheck
+  artifact — the analysis is in the PR.)
+- The pivot is **field-validated at `pivot_clear = 0.35`** (v0.1 print 1 freed
+  first flip). v0.2 targets the field findings, not the pivot recipe.
+
+## Changelog
+
+Design version history, newest first. A version is cut as a release
+(`scripts/release-bundle.sh`, defaulting v0.1); this section is the human-read
+"what changed and why" beside it. Each entry cites the field prints that drove
+it (see `## Field test log`).
+
+### v0.2.1 — 2026-08-20 — legend legibility + off-the-rim margin
+
+A review-round pass after the owner flagged, from the v0.2 product shots, that
+**MEMENTO still sat hard on the rim** and the legends "read as if the letters
+collide." Ground-truthed both against the geometry (the auto-review Jane/Drik
+jobs had failed on a provider outage, so no reviewer had actually looked):
+
+- **Off the rim.** The top arcs (MEMENTO, COMPARISON) grew *outward* from their
+  baseline, so their outermost glyph reached r≈18.5 — **0.69 mm** from the rim
+  bevel. Pulled MEMENTO to r 13.9 / COMPARISON to r 14.0; every legend's
+  outermost glyph now clears the bevel by **≥1.3 mm** (measured from the
+  exported 2D art). The top-arc radii were unchanged since v0.1 — this margin
+  was never actually addressed before, hence "still".
+- **Reads as words.** Uniform degrees-per-char gave a narrow glyph the same
+  slot as a wide one, fanning "MORI"→"MOR I" and "COMPARISON"→"COMPAR I SON".
+  Replaced with **proportional arc spacing** (`arc_legend`, advance ∝ glyph
+  width from a Liberation-Sans-Bold width table); the words now read as words.
+  No literal glyph intersection existed — the "collide" look was the uneven
+  spacing plus the angled product shot foreshortening the far side.
+- The tight **IS THE ↔ THIEF OF JOY** clearance was re-measured after the
+  respacing at **0.62 mm** (was 0.54 mm; the 0.25 mm engraving closing merges
+  under 0.50 mm), so the legends stay separate. Hourglass, sun, diamonds,
+  fits and fitchecks unchanged; coin 92 / coupon 100 hold.
+- **Per-glyph engraving closing (manifold degenerate-faces fix).** The tighter
+  proportional spacing left some intra-word pairs (the 0.11 mm E-F of "THIEF",
+  and arc-rotated pairs that stay close no matter how wide the track) under the
+  0.5 mm the closing fills — welding them into slivers that OpenSCAD's *manifold*
+  backend (CI's renderer; the stable CGAL backend did not) triangulated as
+  **degenerate faces**, dropping the coin 92→84 and flipper 100→92 on CI (a
+  score-only warning — the part still sliced and gated clean). Fixed at the root:
+  `engrave_close()` now closes each glyph/emblem on its own instead of closing
+  the whole face-art union, so neighbours never fuse on any backend. A small
+  `legend_gap` adds breathing room. Diagnosed by pulling the CI (nightly+manifold)
+  findings — the local stable render never showed it.
+
+Also (tooling, same round): **bridge-aware printcheck** made shape-aware — a
+solid acute ceiling (an 8 mm triangle spans 6.9 mm) is no longer mistaken for a
+bridgeable thin ring (CodeRabbit review); thin strokes/rings stay exempt.
+
+### v0.2 — 2026-08-20 — field-driven refinement
+
+Driven by the first two field prints (print 1 + 2 below) and a Jane/Drik
+review pass. Geometry:
+
+- **Loop tab no longer intrudes into the bore or the flip path.** The tab's
+  inner disc is now *derived* (`tab_inner_y = bore_r + tab_r + tab_bore_margin`)
+  so its bulge sits a fixed 0.2 mm *outside* the bore at every `coin_d` and
+  every `loop_hole_d` — the old hardcoded offset put it 0.45 mm inside the
+  full-size bore and **0.05 mm from the coupon coin (the coupon fused and
+  jammed at 12 o'clock)**. New asserts guard `tab_reach`, and a new swept-flip
+  fitcheck proves the coin clears the tab across the whole flip.
+- **Axial float halved:** `socket_end_clear` 0.7 → 0.4 (float 1.4 → 0.8 mm —
+  print 1 had perceptible end-play). Docs now name the *right* knob:
+  along-axis rattle is `socket_end_clear`, across-axis is `pivot_clear`.
+- **Hourglass redesigned** so it reads as an hourglass, not a rune: a bolder
+  bowtie silhouette (side rails apex-to-apex), one settled sand pile + a
+  falling grain, no overlapping voids.
+- **"IS THE" raised 2.6 → 3.2 mm** — at 2.6 the stroke was one extrusion wide
+  and the closing sealed the S.
+- **Loop threads a split ring:** a top-side 45° counterbore thins the hole
+  region to `loop_thick = 3 mm` (was the full 6 mm ring height).
+- **Moat tightened** `rim_gap` 1.5 → 1.2 and bore inset 0.5 → 0.3 (v0.1 read
+  ~2.8 mm apparent moat; the coin now fills its ring). Every guard margin held.
+- **Randomness is the feature:** the coin has no detent, so the face at
+  retrieval is whatever the last jostle left — "the coin picks your reminder."
+  Documented deliberately so a future round doesn't "fix" it.
+- README gains the print-settings the field asked for (plate, seam, ironing,
+  layer-height quantization) and a **two-color-swap recipe** — the engraving is
+  0.6 mm deep, so filament swaps at z=0.6 and z=4.4 (`coin_t − engrave_depth`)
+  give both faces contrasting text on any single-extruder printer. Both heights
+  land on layer boundaries at the reference 0.2 mm; z=4.4 does not divide the
+  other supported heights, so the README scopes the layer indices to 0.2 mm and
+  says to round the second swap to a layer boundary otherwise.
+
+### v0.1 — 2026-08-18 — first shipped version
+
+Two-sided coin + print-in-place flipper. The pivot recipe (teardrop socket +
+45° diamond axle + `pivot_clear = 0.35`), coin-flip text alignment, glyph
+morphological closing, sub-45° chamfers, reed-skip axle-root protection.
+Field-validated: print 1 freed on the first flip.
+
+## Field test log
+
+_Real prints of this design, newest at the bottom. See templates/FIELD-TEST.md
+and docs/print-feedback.md for the convention._
+
+### 2026-08-19 — Prusa-style textured PEI (orange PLA)
+- **Printed from:** v0.1 (flipper, as shipped)
+- **Part(s):** flipper (MEMENTO face on the bed, COMPARISON face up)
+- **Slicer settings:** 0.2 mm layer · 0.4 mm nozzle · PLA · textured PEI plate
+- **Result:** **pivot freed on the first firm flip** — both diamond axle stubs
+  intact, coin rotates freely, photographed at multiple angles. COMPARISON arc
+  text crisp; "IS THE" (2.6 mm) marginal; some fuzz/scarring around OF JOY.
+  MEMENTO bed face legible but soft on the textured sheet; the hourglass read
+  as a bordered rune. Perceptible **axial play** along the pivot. Moat looked
+  wide; a divot/seam scar sat at the loop junction.
+- **Measured deviations:** `pivot_clear = 0.35` → free (no change); axial
+  float ~1.4 mm (perceptible); "IS THE" and the hourglass below legibility.
+- **Carry forward:** `pivot_clear = 0.35` confirmed for textured-PEI PLA — no
+  `printer.conf` change. All other items drove v0.2 (see Changelog).
+
+### 2026-08-19 — smooth plate, multi-color (translucent + cream PLA)
+- **Printed from:** v0.1 (flipper) — captured mid-print, top-down
+- **Part(s):** flipper, two-color experiment
+- **Slicer settings:** 0.2 mm layer · 0.4 mm nozzle · PLA · smooth plate · purge tower
+- **Result:** mid-print top-down view — the bed-face (MEMENTO) engraving reads
+  crisp and **high-contrast** at layer ~3 (plate showing through the voids),
+  confirming the finished textured-plate softness is a *plate/finish* issue,
+  not geometry. The top-down mid-print looks mirrored because face B is built
+  to read upright *from below* — expected, not a slicer mirror (the model's
+  180° flip is a rigid rotation, det = +1, and cannot mirror).
+- **Measured deviations:** none (cosmetic experiment).
+- **Carry forward:** motivates the v0.2 two-color-swap recipe (both faces get
+  contrasting text with two filament changes, no geometry change).
