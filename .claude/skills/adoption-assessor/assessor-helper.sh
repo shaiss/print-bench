@@ -85,6 +85,8 @@ case "$cmd" in
 
   read-thread)
     n="${1:?read-thread: issue number required}"; need_num "$n" read-thread
+    shift
+    [ "$#" -eq 0 ] || die "read-thread: unexpected argument '$1'"
     echo "== issue #$n =="
     gh issue view "$n" --repo "$repo" --json number,title,state,labels,body \
       --template '{{.title}} ({{.state}})

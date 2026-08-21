@@ -78,11 +78,15 @@ shell:
   the advisory framing to every body, applies **no label**, and **caps
   dispositions per run** via a run-scoped in-process counter.
 
-### 2. `--permission-mode dontAsk` makes `--allowedTools` exclusive
+### 2. `--permission-mode dontAsk` runs unattended; the deny backstop restricts tools
 
 Run the agent with `--permission-mode dontAsk` over its own two surfaces
-(`assessor-helper.sh` + the MCP tool) so nothing else is even proposable — the
-same mode the scheduled scout, labeler, and chunker use.
+(`assessor-helper.sh` + the MCP tool) — the same mode the scheduled scout,
+labeler, and chunker use. `dontAsk` only suppresses the interactive approval
+prompt (there is no human to answer one); it does **not**, on its own, make
+`--allowedTools` exclusive, because `settingSources=project` still merges
+`.claude/settings.json`'s `permissions.allow`. The deny backstop below (§3) is
+what actually blocks those inherited allows.
 
 ### 3. A per-routine deny backstop
 

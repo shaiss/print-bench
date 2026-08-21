@@ -276,12 +276,13 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          # show_full_output surfaces the agent's tool calls and any permission
-          # denials in the Actions log — the assessor reads public issue text and
-          # writes only a public advisory comment, so its transcript carries
-          # nothing sensitive, and seeing it turns "posted nothing, no error" from
-          # a guess into a diagnosis.
-          show_full_output: "true"
+          # Keep the full agent transcript OUT of the public Actions log. This
+          # step holds the provider key + GITHUB_TOKEN and has issues:write, and a
+          # public repo's Actions log is world-readable, so dumping the whole
+          # transcript is more exposure than it is worth beyond secret masking. The
+          # run-outcome summary and any permission denials still surface — enough
+          # to diagnose a quiet run.
+          show_full_output: "false"
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/adoption-assessor-settings.json --mcp-config .claude/skills/adoption-assessor/assessor-mcp.json --allowedTools "mcp__assessor__post_adoption_disposition,Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*),Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*),Read,Grep,Glob"
           prompt: "/adoption-assessor ${{ steps.select.outputs.issues }}"
 
@@ -313,9 +314,10 @@ jobs:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           # Same tool surface as the Anthropic step: MCP write tool + wrapper read
-          # verbs + read-only file tools + assessor deny backstop + dontAsk +
-          # show_full_output (see its comment for why it is exactly this).
-          show_full_output: "true"
+          # verbs + read-only file tools + assessor deny backstop + dontAsk. Full
+          # transcript kept off the public Actions log for the same reason as the
+          # Anthropic step above.
+          show_full_output: "false"
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/adoption-assessor-settings.json --mcp-config .claude/skills/adoption-assessor/assessor-mcp.json --allowedTools "mcp__assessor__post_adoption_disposition,Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*),Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*),Read,Grep,Glob"
           prompt: "/adoption-assessor ${{ steps.select.outputs.issues }}"
 

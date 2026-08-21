@@ -28,9 +28,10 @@
 # dangerous allow it must neutralize. Because assessor-helper.sh is NOT on
 # settings.json's allow-list, the coverage rule below ("every non-wrapper Bash
 # allow in settings.json must be denied") already forces chunk-helper.sh to be
-# denied; scout-helper.sh and label-helper.sh are denied explicitly as extras
-# (they are not on settings.json's allow-list but are still surfaces the
-# assessor must never inherit) — no special-case needed for the coverage proof.
+# denied; scout-helper.sh and label-helper.sh are NOT on that allow-list, so
+# coverage alone would not require them — the check therefore pins all three
+# sibling wrappers (both path spellings) plus Write/Edit/NotebookEdit in an
+# explicit REQUIRED_DENIES set, so dropping any one of them fails loudly.
 #
 # That backstop is only as good as its coverage. Add a Bash allow to
 # settings.json tomorrow and, unless it is also denied here, the assessor
@@ -95,10 +96,28 @@ allow = load(settings_path).get("permissions", {}).get("allow", [])
 deny  = load(assessor_path).get("permissions", {}).get("deny", [])
 deny_set = set(deny)
 
+# Required denies the backstop must ALWAYS carry, whatever settings.json allows
+# today. The coverage rule below only forces denying what is CURRENTLY on
+# settings.json's allow-list — so it catches chunk-helper.sh (which is on it) but
+# NOT label-helper.sh / scout-helper.sh (which are not), and would let their deny,
+# or the Write/Edit/NotebookEdit denies, be dropped silently. The "widest backstop
+# in the family" invariant is that ALL THREE sibling wrappers (both path spellings)
+# and the file-mutating tools stay denied regardless — so require them explicitly.
+REQUIRED_DENIES = {
+    "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)",
+    "Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)",
+    "Bash(.claude/skills/label-issues/label-helper.sh:*)",
+    "Bash(./.claude/skills/label-issues/label-helper.sh:*)",
+    "Bash(.claude/skills/product-scout/scout-helper.sh:*)",
+    "Bash(./.claude/skills/product-scout/scout-helper.sh:*)",
+    "Write", "Edit", "NotebookEdit",
+}
+missing_required = sorted(REQUIRED_DENIES - deny_set)
+
 # Coverage: every non-wrapper Bash allow must be denied verbatim. assessor-helper.sh
-# is not on settings.json's allow-list, so this covers chunk-helper.sh too — and
-# the backstop denies label-helper.sh and scout-helper.sh as extras (neither is the
-# assessor's surface), which is the whole point of the widest backstop in the family.
+# is not on settings.json's allow-list, so this covers chunk-helper.sh too; the
+# sibling wrappers and file-mutating tools are additionally pinned by
+# REQUIRED_DENIES above so their deny cannot be dropped without failing this check.
 missing = [r for r in allow
            if r.startswith("Bash(") and r not in WRAPPER_RULES and r not in deny_set]
 # Safety: no deny rule may match the wrapper command, wildcards included.
@@ -121,6 +140,14 @@ if missing:
         sys.stderr.write(f"    {r}\n")
     sys.stderr.write(
         "  → add each to .claude/adoption-assessor-settings.json permissions.deny.\n")
+if missing_required:
+    ok = False
+    sys.stderr.write(
+        f"required assessor deny rules are missing from {assessor_path} — the "
+        "widest backstop must deny all three sibling wrappers (both spellings) and "
+        "Write/Edit/NotebookEdit regardless of settings.json:\n")
+    for r in missing_required:
+        sys.stderr.write(f"    {r}\n")
 
 sys.exit(0 if ok else 1)
 PY
@@ -137,7 +164,7 @@ selftest() {
 {"permissions":{"allow":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)"]}}
 EOF
   cat > "$tmp/good-assessor.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Write"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-assessor.json" 2>/dev/null; then
     echo "ok    selftest: complete deny coverage passes"
@@ -182,6 +209,21 @@ EOF
     echo "FAIL  selftest: a wildcard deny blocking the wrapper was NOT caught"; return 1
   else
     echo "ok    selftest: a wildcard deny blocking the wrapper fails the check"
+  fi
+
+  # BAD 4: a REQUIRED sibling-wrapper deny is dropped (here scout-helper's ./-form)
+  # even though settings.json does not allow it — coverage alone would pass, so the
+  # explicit REQUIRED_DENIES set must catch it (the widest-backstop invariant).
+  cat > "$tmp/bad4-settings.json" <<'EOF'
+{"permissions":{"allow":["Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)"]}}
+EOF
+  cat > "$tmp/bad4-assessor.json" <<'EOF'
+{"permissions":{"deny":["Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Write","Edit","NotebookEdit"]}}
+EOF
+  if check_pair "$tmp/bad4-settings.json" "$tmp/bad4-assessor.json" 2>/dev/null; then
+    echo "FAIL  selftest: a dropped required sibling-wrapper deny was NOT caught"; return 1
+  else
+    echo "ok    selftest: a dropped required sibling-wrapper deny fails the check"
   fi
 }
 

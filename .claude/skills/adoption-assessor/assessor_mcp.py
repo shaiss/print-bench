@@ -123,7 +123,25 @@ def _get_issue(number):
 def _get_comments(number):
     if os.environ.get("ASSESSOR_MCP_FAKE"):
         return list(_FAKE_COMMENTS.get(number, []))
-    return _api("GET", f"/repos/{_repo()}/issues/{number}/comments?per_page=100")
+    # Walk EVERY page. The duplicate guard scans the returned comments for the
+    # assessor's MARKER, and on a long study thread an earlier assessor comment
+    # can fall past the first 100 — a single page would miss it and post twice.
+    out = []
+    page = 1
+    while True:
+        batch = _api(
+            "GET",
+            f"/repos/{_repo()}/issues/{number}/comments?per_page=100&page={page}",
+        )
+        if not isinstance(batch, list) or not batch:
+            break
+        out.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+        if page > 50:  # bound the walk; a study thread is never this long
+            break
+    return out
 
 
 def _post_comment(number, body):
@@ -384,6 +402,10 @@ def selftest():
     check("non-numeric number is rejected",
           err(_post_adoption_disposition({"number": "abc", "body": "x"})))
     check("missing body is rejected", err(_post_adoption_disposition({"number": 1})))
+    check("a boolean number is rejected (bool is an int subclass in Python)",
+          err(_post_adoption_disposition({"number": True, "body": "x"})))
+    check("a non-positive number is rejected",
+          err(_post_adoption_disposition({"number": 0, "body": "x"})))
 
     # A valid post succeeds and stamps the advisory framing + marker.
     _posted_this_run = 0
