@@ -588,8 +588,13 @@ def _outcome_expressions(text: str) -> dict[str, list[str]]:
     simulation checks every occurrence.
     """
     exprs: dict[str, list[str]] = {}
-    for m in re.finditer(r"^(\s+)(AGENT_OUTCOME|RUN|SHIP):\s*\$\{\{(.+?)\}\}\s*$",
-                         text, re.MULTILINE | re.DOTALL):
+    # Horizontal-whitespace-only classes: `\s` also matches `\n`, which would
+    # let a repetition span lines and partition a whitespace run ambiguously
+    # (the CodeQL ReDoS finding on the original pattern) — one `\n` per line,
+    # matched explicitly, keeps each repetition deterministic.
+    for m in re.finditer(
+            r"^([ \t]+)(AGENT_OUTCOME|RUN|SHIP):[ \t]*\$\{\{(.+?)\}\}[ \t]*$",
+            text, re.MULTILINE | re.DOTALL):
         exprs.setdefault(m.group(2), []).append(m.group(3))
     return exprs
 
@@ -807,9 +812,14 @@ def test_routine_red_on_death_gates_on_whole_chain_failure():
         provider = _routine_provider(conf)
         text = _routine_text(workflow)
         block_ids = _provider_block_ids(text, provider)
+        # Horizontal whitespace only (`[ \t]`, one explicit \n per repetition):
+        # a `\s` class also matches `\n`, which lets a repetition span lines
+        # and partition a run of blank/indented lines ambiguously — the
+        # exponential-backtracking shape CodeQL flagged on the original.
         m = re.search(
-            r"name:\s*Turn a dead agentic run red(?:\s*#.*)?\n(?:\s*#.*\n)*"
-            r"\s*if: >-\n((?:\s+.+\n)+?)(?=\s*\w+:)",
+            r"name:[ \t]*Turn a dead agentic run red(?:[ \t]*#.*)?\n"
+            r"(?:[ \t]*#.*\n)*"
+            r"[ \t]*if: >-\n((?:[ \t]+.*\n)+?)(?=[ \t]*\w+:)",
             text)
         assert m, (
             f"{workflow}: the 'Turn a dead agentic run red' step's if-condition "
