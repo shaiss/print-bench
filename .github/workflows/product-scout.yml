@@ -104,7 +104,7 @@ jobs:
       # it to let one run seed more of the backlog; the human still culls.
       SCOUT_MAX_BRIEFS: '3'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           # Belt-and-braces with the job `if:` above: always check out the
@@ -112,7 +112,7 @@ jobs:
           # skill — never a dispatched branch's version.
           ref: ${{ github.event.repository.default_branch }}
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -234,7 +234,7 @@ jobs:
           # GITHUB_RUN_ID are set by Actions automatically, SCOUT_MAX_BRIEFS from
           # the job env.
           GITHUB_TOKEN: ${{ github.token }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -274,7 +274,7 @@ jobs:
           # Same reason as the Z.AI step: the MCP filing tool inherits this env
           # and authenticates with it.
           GITHUB_TOKEN: ${{ github.token }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}

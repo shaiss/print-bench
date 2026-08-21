@@ -82,7 +82,7 @@ jobs:
       # disabled; flip the conf in a reviewed PR to re-enable it.
       designs: ${{ steps.gate.outputs.enabled == 'true' && steps.pick.outputs.designs || '[]' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           # Full history: a push can carry many commits, and the range below
@@ -195,7 +195,7 @@ jobs:
     # multi-shot manifest must fit shots x ZAI_POLL_DEADLINE in here.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Don't leave the token in .git/config for the later steps that
           # process API-supplied video bytes; the push below supplies it

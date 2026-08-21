@@ -78,7 +78,7 @@ jobs:
       # disabled; flip the conf in a reviewed PR to re-enable it.
       designs: ${{ steps.gate.outputs.enabled == 'true' && steps.pick.outputs.designs || '[]' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           # Full history: a push can carry many commits, and the range below
@@ -190,7 +190,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20   # backstop: a stalled API call can't hold the runner
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Don't leave the token in .git/config for the later steps that
           # process API-supplied image bytes; the push below supplies it

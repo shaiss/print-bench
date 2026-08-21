@@ -86,7 +86,7 @@ jobs:
     steps:
       - name: Authorize and parse the command
         id: parse
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' }}
         with:
@@ -202,11 +202,11 @@ jobs:
       # The PR head is never checked out.
       - name: Check out trusted tooling
         if: steps.parse.outputs.valid == 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: steps.parse.outputs.valid == 'true'
         with:
           python-version: '3.12'
@@ -220,7 +220,7 @@ jobs:
       - name: Fetch target files (as data)
         id: fetch
         if: steps.parse.outputs.valid == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           TARGET_REF: ${{ steps.parse.outputs.target_ref }}
           KEY: ${{ steps.parse.outputs.key }}
@@ -296,7 +296,7 @@ jobs:
           steps.apply.outputs.ok == 'true' &&
           steps.apply.outputs.conf_changed == 'true' &&
           steps.parse.outputs.have_pat == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           TARGET_REF:  ${{ steps.parse.outputs.target_ref }}
           KEY:         ${{ steps.parse.outputs.key }}
@@ -374,7 +374,7 @@ jobs:
 
       - name: Reply with the result
         if: steps.parse.outputs.valid == 'true' && !cancelled()
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           KEY:          ${{ steps.parse.outputs.key }}
           VALUE:        ${{ steps.parse.outputs.value }}

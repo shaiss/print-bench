@@ -75,7 +75,7 @@ jobs:
             echo "::notice::PRINT_FEEDBACK_ENABLED is not 'true' — the print-feedback Action is off. Set the repo variable to enable it."
           fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: steps.gate.outputs.enabled == 'true'
         with:
           # Check out the default branch, not the workflow_dispatch ref: this job

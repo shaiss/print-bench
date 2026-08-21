@@ -121,7 +121,7 @@ jobs:
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           # Belt-and-braces with the job `if:` above: always check out the
@@ -129,7 +129,7 @@ jobs:
           # merged skill — never a dispatched branch's version.
           ref: ${{ github.event.repository.default_branch }}
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -252,7 +252,7 @@ jobs:
           # label-helper.sh refuses to write to any issue not in this set, so a
           # prompt-injected agent cannot touch an issue it was never handed.
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -272,7 +272,7 @@ jobs:
         env:
           # Same trusted selection bound as the Z.AI step (see its comment).
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
