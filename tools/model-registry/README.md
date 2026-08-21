@@ -81,10 +81,13 @@ the ship step land together.
 read those instead of hardcoding `--model`. `tests/test_workflow_drift.py` pins the
 registry and the workflow together so they cannot silently diverge.
 
-The `review` chain's Anthropic backstop is itself a chain — Opus 5 → Sonnet 5 →
-Haiku 4.5 — rather than a single model (issue #298): the lone `claude-opus-4-8`
-link proved unservable by the `ANTHROPIC_API_KEY` on its first live call, so one
-unservable id must never again be the whole "never lose a review" backstop.
+The `review` chain's Anthropic backstop is itself a chain — Opus 4.8 → Sonnet 5
+→ Haiku 4.5 — rather than a single model (issue #298): a single hardcoded id can
+be unservable by a key (a deprecation, an access tier), so one dead id must never
+be the whole "never lose a review" backstop, and `model-smoke` proves each link
+live. (The tail now leads with `claude-opus-4-8` — the Anthropic model the team's
+design work rates highest and the ship-routine default; whether a given key can
+serve it is exactly what the live smoke confirms, rather than a static claim.)
 
 ## Layout
 
