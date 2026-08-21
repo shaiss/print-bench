@@ -138,15 +138,22 @@ purpose).
 
 ### Choosing the LLM provider
 
-`provider:` selects which model runs `/ship-issue`. Each known provider
-(`KNOWN_PROVIDERS`) has an explicit ship step in the workflow — a provider is a
-reviewed, git-tracked step because GitHub Actions can only reference a secret
-by its literal name, so a runtime label can't pick the secret on its own:
+`provider:` selects which PROVIDER runs `/ship-issue` — not which model. Each
+known provider (`KNOWN_PROVIDERS`) has an explicit ship step in the workflow —
+a provider is a reviewed, git-tracked step because GitHub Actions can only
+reference a secret by its literal name, so a runtime label can't pick the
+secret on its own:
 
 - `anthropic` — Claude via `api.anthropic.com`, secret `ANTHROPIC_API_KEY` (default).
 - `zai` — Z.AI GLM via its Anthropic-compatible endpoint
-  (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, `--model glm-5.2`),
-  secret `ZAI_KEY`.
+  (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`), secret `ZAI_KEY`.
+
+Which MODEL the run uses is the registry's call (issue #326): the workflow
+resolves `[chain:backlog-burn]` from `.github/models/registry.conf` and walks
+its links — the design-run, chunker and labeler siblings each resolve their own
+chain the same way — so swapping a model is a registry edit, not a workflow
+edit. The chain's links must sit on the provider this conf names; the
+workflow's resolve step cross-checks that before any key is spent.
 
 Switching is this one line in the config. Adding a new provider is a new ship
 step in the workflow plus its label in `KNOWN_PROVIDERS`. Note: `/ship-issue`

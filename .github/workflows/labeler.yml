@@ -161,6 +161,42 @@ jobs:
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
+      # Resolve the labeler's model from the committed provider/model registry
+      # (issue #326) — the same resolve step auto-review.yml and
+      # product-scout.yml run, stdlib-only so it needs no install in front of
+      # it. A malformed registry, or one whose `labeler` chain went missing,
+      # fails this step loudly BEFORE any key is spent; the same mismatch is
+      # caught pre-merge by the model-registry drift-guard tests, which fire on
+      # this workflow and on registry.conf.
+      #
+      # The cross-check guards the one way the conf/chain split can mis-run:
+      # the conf's `provider:` label picks which run step (and so which
+      # endpoint + literal secret) runs, while the registry picks the model —
+      # a model hosted elsewhere (glm-* on the Anthropic step, claude-* on the
+      # Z.AI step) would fail at request time with a key already spent. Every
+      # link must agree with the conf, not just the first: the walk below
+      # reaches link2, link3… only after link1 died, so a tail on another
+      # provider would spend its key against the wrong endpoint mid-walk.
+      - name: Resolve the labeler's model chain (issue #326)
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve labeler --gh-output "$GITHUB_OUTPUT"
+          conf_provider="$(backlog-burn config --get provider --path .github/labeler.conf)"
+          n="$(sed -n 's/^link_count=//p' "$GITHUB_OUTPUT" | head -1)"
+          i=1
+          while [ "$i" -le "$n" ]; do
+            link_provider="$(sed -n "s/^link${i}_provider=//p" "$GITHUB_OUTPUT" | head -1)"
+            if [ "$link_provider" != "$conf_provider" ]; then
+              echo "::error::link ${i} of the registry's 'labeler' chain resolves to provider '$link_provider' but .github/labeler.conf says provider '$conf_provider' — the walk would spend that link's key against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/labeler.conf."
+              exit 1
+            fi
+            i=$((i + 1))
+          done
+
+
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
         run: echo "::notice::.github/labeler.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
@@ -194,22 +230,31 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # One explicit run step per provider — a provider is a reviewed,
-      # git-tracked step because GitHub Actions can only reference a secret by
-      # its literal name (secrets can't be selected by a runtime variable). The
-      # committed `provider:` label picks which one runs; adding a provider is a
-      # new step here. Both share the pin, the write permission, the
-      # `github_token` that authenticates the action's own GitHub calls, and the
-      # same /label-issues prompt. The default GITHUB_TOKEN is fine: the labeler
-      # opens no PR (issue writes run no CI), so the REGEN_TOKEN/PAT reasoning the
-      # backlog burn and design run carry does not apply.
+      # One explicit run step per CHAIN LINK, inside one block per provider —
+      # a provider is a reviewed, git-tracked step because GitHub Actions can
+      # only reference a secret by its literal name (secrets can't be selected
+      # by a runtime variable). The committed `provider:` label picks which
+      # BLOCK runs; the registry's `labeler` chain (steps.chain.outputs) picks
+      # which MODEL each link in it runs, so swapping the labeler to another
+      # model is a registry edit, not a workflow edit (#326). The links walk in
+      # chain order: each is gated on the earlier links NOT having succeeded,
+      # so the first success short-circuits the rest and a dead model falls
+      # through to the next instead of killing the run. Deepening the chain is
+      # #327: add the model to the registry AND the matching run step here in
+      # the same PR — the drift guard fails either half shipped alone.
+      #
+      # Both blocks share the pin, the write permission, the `github_token`
+      # that authenticates the action's own GitHub calls, and the same
+      # /label-issues prompt. The default GITHUB_TOKEN is fine here: the labeler
+      # opens no PR (issue writes run no CI), so the REGEN_TOKEN/PAT reasoning
+      # the backlog burn and design run carry does not apply.
       #
       # Tool surface: the skill drives every GitHub write through ONE committed
       # wrapper, .claude/skills/label-issues/label-helper.sh (list/read/add-label
       # /ensure-label/comment), so the CLI allow-list is that wrapper plus the
       # READ-ONLY file tools. It is NOT unrestricted `Bash`, and NOT `Write`: the
       # run reads untrusted issue text while holding a provider key, so a general
-      # shell — or a file-write that could overwrite the wrapper and run it —
+      # shell — or a file-write tool that could overwrite the wrapper and run it —
       # would turn prompt-injection into arbitrary commands / key exfiltration.
       # `--permission-mode dontAsk` makes that surface exclusive: any tool not on
       # the allow-list is DENIED (never prompted — there is no human in an
@@ -229,8 +274,8 @@ jobs:
       # be, or the labeler fails closed). The pin is the immutable commit behind
       # the v1 tag.
 
-      - name: Run via Z.AI (GLM)
-        id: run_zai
+      - name: Run via Z.AI (GLM, chain link 1)
+        id: run_zai_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
@@ -242,8 +287,8 @@ jobs:
         # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the same
         # ZAI_KEY is also passed as anthropic_api_key to satisfy the action's
         # credential check. Labelling is light and every label a human can
-        # remove, so the cheap GLM tier is the right default here. Change the
-        # model on the --model line to trade cost for quality.
+        # remove, so the cheap GLM tier is the right default here; which model
+        # exactly is the registry's call.
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -256,11 +301,11 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --model glm-5.2 --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
           prompt: "/label-issues ${{ steps.select.outputs.issues }}"
 
-      - name: Run via Anthropic (Claude)
-        id: run_anthropic
+      - name: Run via Anthropic (Claude, chain link 1)
+        id: run_anthropic_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
@@ -269,6 +314,7 @@ jobs:
           && github.event.inputs.dry_run != 'true'
         # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
         # right fit for an unattended bot — no OAuth token / subscription seat.
+        # Which model runs is the registry's call.
         env:
           # Same trusted selection bound as the Z.AI step (see its comment).
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
@@ -277,8 +323,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           # Same narrow tool grant + labeler deny backstop + dontAsk as the Z.AI step.
-          claude_args: --model claude-opus-4-8 --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
-          prompt: "/label-issues ${{ steps.select.outputs.issues }}"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
 
       - name: Explain a skipped agentic run
         if: >-
@@ -309,7 +354,7 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic_1.outcome || steps.run_zai_1.outcome }}
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
         run: |

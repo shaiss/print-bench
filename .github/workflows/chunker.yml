@@ -170,6 +170,42 @@ jobs:
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
+      # Resolve the chunker's model from the committed provider/model registry
+      # (issue #326) — the same resolve step auto-review.yml and
+      # product-scout.yml run, stdlib-only so it needs no install in front of
+      # it. A malformed registry, or one whose `chunker` chain went missing,
+      # fails this step loudly BEFORE any key is spent; the same mismatch is
+      # caught pre-merge by the model-registry drift-guard tests, which fire on
+      # this workflow and on registry.conf.
+      #
+      # The cross-check guards the one way the conf/chain split can mis-run:
+      # the conf's `provider:` label picks which run step (and so which
+      # endpoint + literal secret) runs, while the registry picks the model —
+      # a model hosted elsewhere (glm-* on the Anthropic step, claude-* on the
+      # Z.AI step) would fail at request time with a key already spent. Every
+      # link must agree with the conf, not just the first: the walk below
+      # reaches link2, link3… only after link1 died, so a tail on another
+      # provider would spend its key against the wrong endpoint mid-walk.
+      - name: Resolve the chunker's model chain (issue #326)
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve chunker --gh-output "$GITHUB_OUTPUT"
+          conf_provider="$(backlog-burn config --get provider --path .github/chunker.conf)"
+          n="$(sed -n 's/^link_count=//p' "$GITHUB_OUTPUT" | head -1)"
+          i=1
+          while [ "$i" -le "$n" ]; do
+            link_provider="$(sed -n "s/^link${i}_provider=//p" "$GITHUB_OUTPUT" | head -1)"
+            if [ "$link_provider" != "$conf_provider" ]; then
+              echo "::error::link ${i} of the registry's 'chunker' chain resolves to provider '$link_provider' but .github/chunker.conf says provider '$conf_provider' — the walk would spend that link's key against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/chunker.conf."
+              exit 1
+            fi
+            i=$((i + 1))
+          done
+
+
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
         run: echo "::notice::.github/chunker.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
@@ -189,22 +225,31 @@ jobs:
           # backlog burn uses, pointed at the declined-too-big label.
           backlog-burn run --repo "$GITHUB_REPOSITORY" --label "$LABEL" --summary-title 'Chunker'
 
-      # One explicit run step per provider — a provider is a reviewed,
-      # git-tracked step because GitHub Actions can only reference a secret by
-      # its literal name (secrets can't be selected by a runtime variable). The
-      # committed `provider:` label picks which one runs; adding a provider is a
-      # new step here. Both share the pin, the write permission, the
-      # `github_token` that authenticates the action's own GitHub calls, and the
-      # same /chunk-issue prompt. The default GITHUB_TOKEN is fine here: the
-      # chunker opens no PR (issues alone run no CI), so the REGEN_TOKEN/PAT
-      # reasoning that the backlog burn and design run carry does not apply.
+      # One explicit run step per CHAIN LINK, inside one block per provider —
+      # a provider is a reviewed, git-tracked step because GitHub Actions can
+      # only reference a secret by its literal name (secrets can't be selected
+      # by a runtime variable). The committed `provider:` label picks which
+      # BLOCK runs; the registry's `chunker` chain (steps.chain.outputs) picks
+      # which MODEL each link in it runs, so swapping the chunker to another
+      # model is a registry edit, not a workflow edit (#326). The links walk in
+      # chain order: each is gated on the earlier links NOT having succeeded,
+      # so the first success short-circuits the rest and a dead model falls
+      # through to the next instead of killing the run. Deepening the chain is
+      # #327: add the model to the registry AND the matching run step here in
+      # the same PR — the drift guard fails either half shipped alone.
+      #
+      # Both blocks share the pin, the write permission, the `github_token`
+      # that authenticates the action's own GitHub calls, and the same
+      # /chunk-issue prompt. The default GITHUB_TOKEN is fine here: the chunker
+      # opens no PR (issues alone run no CI), so the REGEN_TOKEN/PAT reasoning
+      # that the backlog burn and design run carry does not apply.
       #
       # The pin is the immutable commit behind the v1 tag; a moved tag must not
       # silently change what runs with a write scope + a secret. Re-pin
       # deliberately to adopt a new release.
 
-      - name: Run via Anthropic (Claude)
-        id: run_anthropic
+      - name: Run via Anthropic (Claude, chain link 1)
+        id: run_anthropic_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
@@ -213,41 +258,42 @@ jobs:
           && github.event.inputs.dry_run != 'true'
         # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
         # right fit for an unattended bot — no OAuth token / subscription seat.
+        # Which model runs is the registry's call. Grant ONLY the tools
+        # /chunk-issue needs, through a single narrow surface. The skill drives
+        # every GitHub read/write via one committed wrapper,
+        # .claude/skills/chunk-issue/chunk-helper.sh (create issue + link
+        # native sub-issue, comment, add/remove label, ensure label), so the
+        # CLI allow-list is that wrapper plus the READ-ONLY file tools. It is
+        # NOT unrestricted `Bash`, and deliberately does NOT grant `Write`: the
+        # run reads untrusted issue text while holding provider-key secrets, so
+        # a general shell — or a file-write tool that could overwrite this very
+        # wrapper and then run it — would turn prompt-injection into arbitrary
+        # commands / key exfiltration.
+        #
+        # But --allowedTools ADDS allows; it does not make the surface
+        # exclusive. claude-code-action runs the SDK with
+        # settingSources:[user,project,local] (visible in the run log), so it
+        # ALSO loads this repo's .claude/settings.json permissions.allow —
+        # which carries dev entries like Bash(xvfb-run:*) (arbitrary command
+        # execution) needed by the interactive/backlog-burn/design-run agents.
+        # Allow rules merge additively across sources, so those would leak into
+        # this run and defeat the narrow list. --settings closes that: deny
+        # rules beat allow rules from EVERY source (and even beat an
+        # --allowedTools grant), so .claude/chunker-settings.json denies every
+        # non-wrapper Bash allow from settings.json (kept in sync by
+        # scripts/chunker-perms-check.sh). Net effect: the chunker's real tool
+        # surface is exactly the wrapper + Read/Grep/Glob, regardless of
+        # workspace trust. The quotes protect the `(...)` from the action's arg
+        # parser. The job's issues:write token still bounds the effect.
         uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          # Grant ONLY the tools /chunk-issue needs, through a single narrow
-          # surface. The skill drives every GitHub read/write via one committed
-          # wrapper, .claude/skills/chunk-issue/chunk-helper.sh (create issue +
-          # link native sub-issue, comment, add/remove label, ensure label), so
-          # the CLI allow-list is that wrapper plus the READ-ONLY file tools. It
-          # is NOT unrestricted `Bash`, and deliberately does NOT grant `Write`:
-          # the run reads untrusted issue text while holding provider-key
-          # secrets, so a general shell — or a file-write tool that could
-          # overwrite this very wrapper and then run it — would turn
-          # prompt-injection into arbitrary commands / key exfiltration.
-          #
-          # But --allowedTools ADDS allows; it does not make the surface
-          # exclusive. claude-code-action runs the SDK with
-          # settingSources:[user,project,local] (visible in the run log), so it
-          # ALSO loads this repo's .claude/settings.json permissions.allow —
-          # which carries dev entries like Bash(xvfb-run:*) (arbitrary command
-          # execution) needed by the interactive/backlog-burn/design-run agents.
-          # Allow rules merge additively across sources, so those would leak into
-          # this run and defeat the narrow list. --settings closes that: deny
-          # rules beat allow rules from EVERY source (and even beat an
-          # --allowedTools grant), so .claude/chunker-settings.json denies every
-          # non-wrapper Bash allow from settings.json (kept in sync by
-          # scripts/chunker-perms-check.sh). Net effect: the chunker's real tool
-          # surface is exactly the wrapper + Read/Grep/Glob, regardless of
-          # workspace trust. The quotes protect the `(...)` from the action's arg
-          # parser. The job's issues:write token still bounds the effect.
-          claude_args: --model claude-opus-4-8 --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
           prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
 
-      - name: Run via Z.AI (GLM)
-        id: run_zai
+      - name: Run via Z.AI (GLM, chain link 1)
+        id: run_zai_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
@@ -261,7 +307,7 @@ jobs:
         # credential check (the endpoint uses whichever header it validates).
         # Best-effort: Anthropic doesn't officially support routing Claude Code
         # to non-Claude models, and /chunk-issue is a Claude Code skill, so
-        # quality may vary. Change the model on the --model line.
+        # quality may vary. Which model runs is the registry's call.
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -271,10 +317,9 @@ jobs:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           # Same narrow tool grant + deny backstop as the Anthropic step (see
-          # its comment for why --settings is load-bearing); the --model flag
-          # stays first.
-          claude_args: --model glm-5.2 --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
-          prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
+          # its comment for why --settings is load-bearing); the model
+          # reference stays first.
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
 
       - name: Explain a skipped agentic run
         if: >-
@@ -321,7 +366,7 @@ jobs:
           SELECT_OUTCOME: ${{ steps.select.outcome }}
           # Only the step matching the configured provider runs; the other is
           # 'skipped'. Report the one that actually ran.
-          RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome }}
+          RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai_1.outcome || steps.run_anthropic_1.outcome }}
           # $GITHUB_STEP_SUMMARY does not auto-link a bare #N — build a real link.
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
