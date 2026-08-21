@@ -195,7 +195,17 @@ jobs:
           mkdir -p .oracle-context
 
           # 1. The diff — merge-base(base, head)..head, the PR's actual change.
-          git fetch --no-tags origin "$HEAD_SHA"
+          # The checkout is `persist-credentials: false`, so it stripped the
+          # git auth header, and a plain `git fetch` ignores GH_TOKEN — an
+          # unauthenticated fetch of the head SHA works on a public repo only
+          # because GitHub serves anonymous reachable-SHA fetches, and fails
+          # outright (403) the moment the repo is private. Authenticate this
+          # one fetch explicitly with the job token (basic auth, the very
+          # scheme actions/checkout uses) so the blind context assembles
+          # regardless of repo visibility.
+          FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+            fetch --no-tags origin "$HEAD_SHA"
           git diff "${BASE_SHA}...${HEAD_SHA}" > .oracle-context/pr.diff
 
           {
