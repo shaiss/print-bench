@@ -183,8 +183,19 @@ test("llms.txt: indexes every served source with root-relative paths", () => {
   assert.ok(txt.includes("- [Architecture](/docs/architecture/README.md): What."));
   assert.ok(txt.includes("- [Foo](/designs/foo/README.md): A foo."));
   assert.ok(txt.includes("- [Bar](/styles/bar/STYLE.md): A bar."));
-  assert.ok(txt.includes("(/llms-full.txt)"));
-  assert.ok(txt.includes("https://github.example/r"));
+  // Exact-line membership, not substring matching: stronger assertions, and
+  // a URL substring check is the shape CodeQL rightly flags elsewhere.
+  const txtLines = txt.split("\n");
+  assert.ok(
+    txtLines.includes(
+      "- [llms-full.txt](/llms-full.txt): the platform docs above, concatenated into one file"
+    )
+  );
+  assert.ok(
+    txtLines.includes(
+      "- [Source repository](https://github.example/r): every file this site is generated from"
+    )
+  );
   assert.ok(!txt.includes("undefined"), "no undefined leaked into the index");
 });
 
