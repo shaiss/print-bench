@@ -130,13 +130,22 @@ The toggle and easel stay. Slice data, not vibes, picks the step.
 
 ## Print this first
 
-`pop-fidget-card-coupon.scad` — a 66 × 46 tile with one spinner, a short
-slider track, and the easel hinge (the three tuned fits; the pop button has no
-clearance to tune). Tune in this order, ±0.05 steps:
+`pop-fidget-card-coupon.scad` — a 72 × 56 tile with **all four mechanisms**:
+one spinner, a short slider track, the easel hinge, and the pop button (Drik
+round: the button has no clearance to tune, but *feel isn't clearance* — the
+arch lives near its bistability floor, and a fat first layer can turn the
+snap mushy; the coupon is where that surfaces). Tune in this order, ±0.05
+steps:
 
 1. `xy_tol` (0.2): rotor fused → raise; rotor rattles → lower.
 2. `slide_tol` (0.25): bead stiff after the first-slide shear → raise.
 3. `hinge_clear` (0.4): flap stiff → raise; flap floppy → lower (0.3 floor).
+4. Button feel (no parameter): pop it a few times — a crisp two-state click
+   is right; mushy or single-stable means first-layer squish widened the
+   arch — drop first-layer flow/width a step and reprint the coupon.
+
+The card's square side edges are intentional: at 2.4 mm plate thickness a
+side chamfer buys nothing a thumb can feel and costs face area.
 
 ## Field test log
 

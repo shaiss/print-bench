@@ -7,7 +7,8 @@ bistable **"pop" button** that snaps between two states, a captive **bubble
 bead** gliding on a slider track, and a punched **easel flap** (the big "1")
 that folds out on a print-in-place piano hinge to stand the card on a shelf.
 Personalise it at slice time — the child's name is one parameter — and print
-the whole thing in about an hour on a modern machine.
+the whole thing in ~80 minutes on an MK4-class machine, closer to an hour on
+a fast Bambu.
 
 ![Studio product shot of the bubble-pink 3D-printed pop-fidget-card](previews/hero.png)
 
@@ -21,8 +22,10 @@ the whole thing in about an hour on a modern machine.
 
 - `pop-fidget-card` — the card, one print-in-place piece (112 × 80 × 2.4 mm
   plate; fidgets rise ≤ 8 mm above the face).
-- `pop-fidget-card-coupon` — a 66 × 46 mm "print this first" tile with one of
-  each tuned fit (spinner, slider, hinge) so you dial clearances in minutes.
+- `pop-fidget-card-coupon` — a 72 × 56 mm "print this first" tile with **all
+  four mechanisms** (spinner, slider, hinge, pop button): a ~45-minute tile
+  that saves an ~80-minute reprint, and the only way to feel the button's
+  snap before the card commits.
 
 ## Print settings
 
@@ -33,9 +36,11 @@ the whole thing in about an hour on a modern machine.
 - **Supports:** none needed — every overhang is 45° by construction
 - **Brim:** none — the moving parts are bed-anchored islands
 - **Orientation:** as modeled, face up
-- **First motion:** spin both rotors and push the bead firmly once (this
-  shears the deliberate break-free welds), pop the button, fold the easel out
-  until it stops (~72° shelf prop)
+- **First motion — break it in before you gift it:** spin both rotors and
+  push the bead firmly once (this shears the deliberate break-free welds),
+  pop the button a few times, fold the easel out to its stop (~72° shelf
+  prop). Doing this the night before means the parents receive a working
+  toy, and a mushy button surfaces at your desk, not at the party
 
 A note for gift-givers: this is a keepsake for the grown-ups' shelf. It is
 print-in-place, so nothing detaches by design, but it is **not a teether** —
@@ -45,7 +50,7 @@ don't hand it to the birthday kid unsupervised.
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `card_name` | `""` | The child's name, appended to the greeting — set at slice time with `-D 'card_name="ALEX"'`; empty prints the generic card |
+| `card_name` | `""` | The child's name, appended to the greeting — set at slice time with `-D 'card_name="ALEX"'`; empty prints the generic card. Names ≲ 10 letters fit; longer fails the render with a clear error rather than printing hairline strokes |
 | `greeting` | `HAPPY 1st BIRTHDAY` | Bottom line text (name and `!` are appended) |
 | `spinner_count` | 2 | Bubble spinners (0–2) — drop to 1 to shave minutes |
 | `xy_tol` | 0.2 mm | Spinner bore ↔ post radial gap — tune on the coupon |
@@ -65,4 +70,5 @@ spinners flick from the rim scallops, the pop button clicks between its two
 states, the bead glides between the track ends, and the easel flap folds out
 to its built-in stop so the card stands leaning back ~18° on a shelf. If a
 fit is off, retune its parameter on the coupon and reprint — the card itself
-rarely needs a second attempt.
+should rarely need a second attempt (unfielded claim; the field-test log in
+NOTES.md is where it becomes fact).

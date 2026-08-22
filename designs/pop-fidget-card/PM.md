@@ -52,7 +52,7 @@ immediately want to flick something.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | Field-test the three tuned fits on a real printer, log FIELD-TEST | clearances are theory until one print | one coupon print |
+| B1 | Field-test **all four mechanisms work and feel right** on a real printer (coupon now carries the button), incl. a shelf-height face-down drop check; log FIELD-TEST | clearances and the button's snap are theory until one print; Drik round promoted this | one coupon print |
 | B2 | Tier-2 lifestyle scene (shelf with party detritus) | page warmth, after v1 | one manifest + CI run |
 | B3 | Second greeting line (age/date) | reuse for later birthdays | small text-layout work |
 

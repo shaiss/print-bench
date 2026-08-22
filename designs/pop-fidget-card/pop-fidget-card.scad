@@ -147,23 +147,25 @@ easel_test_angle = 104;
 $fn = 96;
 
 // ---- layout (coupon compacts to one of each tuned fit) --------------------
-cw       = coupon ? 66 : card_w;
-chh      = coupon ? 46 : card_h;
+cw       = coupon ? 72 : card_w;
+chh      = coupon ? 56 : card_h;
 n_spin   = coupon ? 1  : spinner_count;
-use_tog  = coupon ? false : with_toggle;
+use_tog  = with_toggle;             // Drik round: the button is the #2
+                                    // lifetime-cycle mechanism — it feel-
+                                    // checks on the coupon like the fits
 use_slid = with_slider;
 use_ease = with_easel;
 
-spin1_pos = coupon ? [39, 31] : [20, 40];
+spin1_pos = coupon ? [40, 44] : [20, 40];
 spin2_pos = [cw - 27, chh - 13];
 
 // pop button (window centre)
-tog_pos   = [cw - 31, 30];
+tog_pos   = coupon ? [41, 16] : [cw - 31, 30];
 
 // slider track: vertical, x centre / slot y span
-track_x   = coupon ? 57 : cw - 9;
-track_y0  = coupon ? 12 : 18;
-track_y1  = coupon ? 38 : 58;
+track_x   = coupon ? 63 : cw - 9;
+track_y0  = coupon ? 12 : 18;   // bar cap reaches y0-12 — keep >= 0
+track_y1  = coupon ? 42 : 58;   // bar cap reaches y1+12 — keep <= chh
 
 // easel window: x span, window bottom edge y, flap top y
 fx1  = coupon ? 24 : cw - 50;
