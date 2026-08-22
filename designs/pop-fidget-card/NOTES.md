@@ -65,7 +65,7 @@ constrains the card — resize freely against the slice clock):
   hinge line sweeps into the card barrels and webs mid-swing (derived by
   sweep-radius analysis, confirmed by the fitcheck angles). The hinge slot
   this opens is visually filled by the knuckle bar.
-- **Per-mechanism fitchecks (post-signoff round).** `fitcheck`/`fitcheck_neg`
+- **Per-mechanism fit checks (post-signoff round).** `fitcheck`/`fitcheck_neg`
   proved only the easel; the spinner and slider clearances rested on asserts,
   and a formula that asserts itself proves nothing about the built mesh
   (issue #37) — the sweep above found real emboss-into-rotor interference
@@ -190,11 +190,14 @@ carries, and a preview set would double the regen cost of a part whose whole
 job is to be printed, tuned and recycled.
 
 The easel dwelling at its stop for months is a considered non-issue (Drik
-round 3 hunch, answered): unlike the button — a sprung member storing
-bending strain in both states — the flap at its stop is a rigid body against
-a rigid ramp. The ~24 g card puts micro-scale contact stress on the ramp,
-nothing for PLA creep to work with; if the lean ever eases a degree over a
-year, it is cosmetic and the flap re-seats on the next fold.
+round 3 hunch, answered) — by reasoning, not yet by test: unlike the button
+— a sprung member storing bending strain in both states — the flap at its
+stop is a rigid body against a rigid ramp, and the ~24 g card puts
+micro-scale contact stress on the ramp, little for PLA creep to work with.
+The fit checks prove clearance and the stop, not long-term angle retention;
+the dwell claim stays an engineering assumption until a shelf-months
+FIELD-TEST entry speaks. Expected worst case if it is wrong: the lean eases
+a degree or two, cosmetically, and the flap re-seats on the next fold.
 
 ## Field test log
 
