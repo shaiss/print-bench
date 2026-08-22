@@ -507,8 +507,9 @@ module guards() {
     assert(coupon || line_size >= 4.5,
            "card_name too long — greeting strokes would drop under 0.8 mm");
     if (use_ease)
-        echo(str("easel: stop ~", easel_deploy + 4, " deg -> shelf prop ~",
-                 180 - (easel_deploy + 4), " deg (brief: 70-75)"));
+        // measured on the export with the pairwise matrix (NOTES.md): flap
+        // free through 104 deg, first stop contact 108, solid by 116
+        echo("easel: stop engages 108-116 deg (measured) -> shelf prop ~70-74 deg (brief: 70-75)");
     if (use_tog) echo(str("pop button: predicted travel ~", tog_travel, " mm"));
     if (use_slid) echo(str("slider travel: ", travel, " mm (brief: >= 40)"));
 }
