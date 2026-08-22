@@ -79,6 +79,27 @@ constrains the card — resize freely against the slice clock):
 - **Layout is edge-derived** (round 2): track/toggle/spinner-2/easel window
   positions are expressions of `card_w`/`card_h`, so the face can shrink
   against the slice clock as one knob without re-placing every feature.
+- **The pairwise interference matrix (round 3).** CI's fitcheck reported 400
+  facets of interference that local CGAL sweeps could not localize in
+  reasonable time. Method that worked: export each body once
+  (`part="body_*"`), then compute every pairwise boolean intersection in
+  Python with trimesh + manifold3d — the same engine as CI's nightly gate —
+  rotating the flap about the hinge axis in Python (seconds per angle vs
+  minutes per CGAL probe). Findings, all confirmed by bounding box:
+  1. **"POP!" at size 20 is ~64 mm wide, not the ~50 the flat 0.62-em factor
+     predicted** — the "!" landed under spinner 2's rotor, whose float gap
+     (0.4 mm) is less than the emboss height (0.8 mm). Glyph widths now come
+     from a per-glyph advance table, POP! dropped to size 17, and the matrix
+     is the verifier, not the estimate.
+  2. **`teardrop_hole`'s point faces DOWN in this hinge's frame** (measured
+     on the export: pin tail to `z_ax − 0.8·pin_d`, not the circle bottom).
+     Pin and bore agree (both built from the same profile, so the joint is
+     fine), but the flap tongue was built to plate height straight under the
+     tail. Tongue root retracted to `y_ax + 1.9`, outside the tail envelope;
+     the flap web carries the plate-to-barrel connection.
+  3. **The rotation stop engages at ~104°** (first contact 0.15 mm³, solid by
+     ~112°), not the ~108° the guard's echo estimated — fitcheck angles are
+     set from the measured boundary, prop angle claimed from measurement.
 
 ## Time budget & drop order
 

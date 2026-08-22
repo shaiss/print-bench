@@ -115,9 +115,9 @@ ramp_run = 5.75;
 root_chamfer = 2.5;
 // Deployed fit-check angle (deg past stowed) — must clear; the stop must
 // catch by easel_deploy + easel_overshoot (the fitcheck_neg)
-easel_deploy = 104;
+easel_deploy = 98;
 // Over-rotation used by fitcheck_neg (deg past easel_deploy)
-easel_overshoot = 14;
+easel_overshoot = 18;
 // Preview-only: fold the easel flap out (deg). PRINT AT 0.
 demo_easel = 0; // [0:4:108]
 
@@ -168,8 +168,8 @@ track_y1  = coupon ? 38 : 58;
 // easel window: x span, window bottom edge y, flap top y
 fx1  = coupon ? 24 : cw - 50;
 fx0  = coupon ? 6  : fx1 - 28;
-wlo  = coupon ? 6    : 10;
-ftop = coupon ? 35.5 : 47.5;
+wlo  = coupon ? 6    : 12;
+ftop = coupon ? 35.5 : 49.5;
 
 // ---- derived: shared -------------------------------------------------------
 z_tol   = z_layers * layer_h;         // axial float, whole layers
@@ -203,7 +203,10 @@ engage    = roof_rise - foot_side_clear;           // capture per side
 R_k       = 0.8 * pin_d + hinge_clear + knuckle_wall;  // knuckle outer radius
 y_ax      = wlo + R_k + 0.55;                      // hinge axis y (swing relief)
 z_ax      = R_k;                                   // barrel bottoms rest on bed
-tongue_root = y_ax + 0.25;                         // tongue root edge
+tongue_root = y_ax + 1.9;                          // tongue root edge —
+                                    // clear of the pin's teardrop TAIL,
+                                    // which points DOWN (measured on the
+                                    // export: tail to z_ax-2.0, y_ax+1.5)
 plate_root  = y_ax + R_k + 0.4;                    // castellated main-plate root
 hx0       = fx0 + flap_gap;                        // hinge span = flap width
 hx1       = fx1 - flap_gap;
@@ -213,10 +216,23 @@ barrel_len = slot_k - axial_gap;
 function kx(k) = hx0 + (k + 0.5) * slot_k;         // knuckle centres
 wtop      = ftop + flap_gap;                       // window top edge
 
-// greeting auto-size (no textmetrics in 2021.01 — 0.62 em width factor)
+// greeting auto-size. No textmetrics in 2021.01, so widths come from a
+// per-glyph advance table (ems, Liberation Sans Bold, deliberately a touch
+// wide) — the flat 0.62 factor under-measured "POP!" by ~25% and planted
+// its "!" under spinner 2 (caught by the pairwise interference matrix).
 line_txt  = card_name == "" ? str(greeting, "!")
                             : str(greeting, ", ", card_name, "!");
-line_size = min(6, (cw - 14) / (0.62 * len(line_txt)));
+function chr_w(c) =
+    c == " " ? 0.38 :
+    (c == "I" || c == "!" || c == "1" || c == "i" || c == "l" || c == "j"
+     || c == "." || c == "," || c == "'") ? 0.45 :
+    (c == "M" || c == "W" || c == "m" || c == "w") ? 0.98 : 0.76;
+function line_ems(k) = k <= 0 ? 0 : line_ems(k - 1) + chr_w(line_txt[k - 1]);
+line_size = min(5.4, (cw - 16) / line_ems(len(line_txt)));
+greet_base  = 3.4;    // centre baseline y (mm)
+greet_arc_r = 320;    // smile-arc radius (mm)
+function greet_x(i) = cw / 2 - line_ems(len(line_txt)) * line_size / 2
+                      + (line_ems(i) + chr_w(line_txt[i]) / 2) * line_size;
 font      = "Liberation Sans:style=Bold";
 
 // ---------------------------------------------------------------------------
@@ -247,13 +263,22 @@ module plate_with_bar() {
 module face_embosses() {
     if (!coupon) {
         // POP! headline
-        translate([16, chh - 26, face - 0.3]) linear_extrude(emboss_h + 0.3)
-            text("POP!", size = 20, font = font);
-        // greeting line (+ name parameter)
-        translate([cw / 2, 4.5, face - 0.3]) linear_extrude(emboss_h + 0.3)
-            text(line_txt, size = line_size, font = font, halign = "center");
+        translate([16, chh - 24, face - 0.3]) linear_extrude(emboss_h + 0.3)
+            text("POP!", size = 17, font = font);
+        // greeting: arced "smile" baseline, per-letter tangent tilt and a
+        // small alternating bounce — pulled clear of the kickstand hinge
+        // (the filer's art direction, PM.md decision log)
+        for (i = [0 : len(line_txt) - 1])
+            let (dx   = greet_x(i) - cw / 2,
+                 gy   = greet_base + dx * dx / (2 * greet_arc_r)
+                        + (i % 2 == 0 ? 0.3 : -0.3),
+                 tilt = atan(dx / greet_arc_r) + (i % 2 == 0 ? 2.5 : -2.5))
+            translate([greet_x(i), gy, face - 0.3]) rotate([0, 0, tilt])
+                linear_extrude(emboss_h + 0.3)
+                    text(line_txt[i], size = line_size, font = font,
+                         halign = "center");
         // bubble cluster drifting out of the "!" toward the small spinner
-        for (b = [[cw - 44, chh - 9, 3.5], [cw - 39, chh - 15, 2.5], [cw - 36, chh - 4, 2],
+        for (b = [[cw - 44, chh - 9, 3.5], [cw - 41, chh - 17, 2.5], [cw - 36, chh - 4, 2],
                   [cw - 70, chh - 7, 2], [cw - 56, chh - 8, 1.7]])
             translate([b[0], b[1], face]) scale([1, 1, 0.45]) sphere(b[2]);
     }
