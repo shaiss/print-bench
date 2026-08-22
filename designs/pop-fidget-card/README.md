@@ -39,7 +39,9 @@ a fast Bambu.
 
 - **Material:** PLA (any color; pastels suit the theme — an optional filament
   swap at the first text layer two-tones the lettering — and every other
-  raised feature with it, which is the charm)
+  raised feature with it, which is the charm; set the color change at
+  **2.4 mm = layer 13** on the 0.20 profile, since everything raised lifts
+  off the face together)
 - **Layer height:** 0.20 mm (the axial clearances are quantized to it)
 - **Infill:** 15 % (the plate is mostly top/bottom skins)
 - **Supports:** none needed — every overhang is 45° by construction
@@ -82,7 +84,11 @@ a printer (tuning order and steps are in NOTES.md "Print this first"), then
 the card. After the break-free first motions everything runs free: the
 spinners flick from the rim scallops, the pop button clicks between its two
 states, the bead glides between the track ends, and the easel flap folds out
-to its built-in stop so the card stands leaning back ~18° on a shelf. If a
+to its built-in stop so the card stands leaning back ~18° on a shelf. One
+shelf habit: **park the button flat** (its as-printed state) — a PLA arch
+left popped for months slowly creeps and the snap softens; parked flat it
+will still snap for the second birthday. Printing it "stronger" doesn't
+help: a deeper dome raises snap force and stored strain together. If a
 fit is off, retune its parameter on the coupon and reprint — the card itself
 should rarely need a second attempt (unfielded claim; the field-test log in
 NOTES.md is where it becomes fact).
