@@ -66,6 +66,7 @@ immediately want to flick something.
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-08-22 | Greeting re-set as an arced, per-letter bounced line pulled clear of the kickstand hinge | filer's direction mid-run: "letters a bit too close to the kickstand — be more creative with those" |
 | 2026-08-22 | Slider re-based from the lib rail stack to a linear captive-spinner channel | rail stack needs 5.7 mm of wall a 2.4 mm card cannot host; NOTES.md has the math |
 | 2026-08-22 | Card slimmed to 112 × 80 × 2.4, layout edge-derived | slice-clock data (CI round 1: 2 h 54 m on the gate's conservative meter) |
 | 2026-08-22 | N2 evidenced by two meters (gate default + MK4-stock speeds) | the gate's bare-default profile is no printer's stock profile; brief names the printer class |
