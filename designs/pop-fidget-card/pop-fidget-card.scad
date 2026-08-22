@@ -23,11 +23,11 @@ use <print-in-place.scad>
 
 /* [Card] */
 // Card face width, X (mm)
-card_w = 120;
+card_w = 112;
 // Card face height, Y (mm)
-card_h = 85;
-// Card plate thickness (mm) — 14 layers at 0.2
-card_t = 2.8;
+card_h = 80;
+// Card plate thickness (mm) — 12 layers at 0.2
+card_t = 2.4;
 // Corner radius (mm)
 corner_r = 6;
 // 45° chamfer on bed-contact edges (mm)
@@ -58,7 +58,7 @@ coupon = false;
 
 /* [Spinners] */
 // Big bubble rotor outer radius (mm)
-spin1_or = 13;
+spin1_or = 12;
 // Small bubble rotor outer radius (mm)
 spin2_or = 9.5;
 // Rotor thickness (mm)
@@ -91,8 +91,9 @@ ch_w = 10;
 foot_t = 1.2;
 // Raised track bar width on the face (mm)
 bar_w = 12;
-// Raised track bar height above the face (mm)
-bar_h = 1.6;
+// Raised track bar height above the face (mm) — sized so card_t + bar_h
+// keeps >= 0.8 of slot wall above the channel roof (the guard checks)
+bar_h = 2.0;
 
 /* [Easel] */
 // Hinge pin diameter (mm)
@@ -107,7 +108,7 @@ axial_gap = 0.6;
 flap_gap = 0.5;
 // Tongue relief ramp rise at the flap root (mm) — with ramp_run this sets the
 // rotation stop, i.e. the shelf prop angle (see NOTES.md)
-ramp_h = 2.0;
+ramp_h = 1.6;
 // Tongue relief ramp run from the root (mm)
 ramp_run = 5.75;
 // 45° relief chamfer on the main plate's root underside (mm)
@@ -153,20 +154,20 @@ use_tog  = coupon ? false : with_toggle;
 use_slid = with_slider;
 use_ease = with_easel;
 
-spin1_pos = coupon ? [39, 31] : [26, 40];
-spin2_pos = [93, 72];
+spin1_pos = coupon ? [39, 31] : [20, 40];
+spin2_pos = [cw - 27, chh - 13];
 
 // pop button (window centre)
-tog_pos   = [89, 30];
+tog_pos   = [cw - 31, 30];
 
 // slider track: vertical, x centre / slot y span
-track_x   = coupon ? 57 : 111;
-track_y0  = coupon ? 12 : 20;
-track_y1  = coupon ? 42 : 62;
+track_x   = coupon ? 57 : cw - 9;
+track_y0  = coupon ? 12 : 18;
+track_y1  = coupon ? 38 : 58;
 
 // easel window: x span, window bottom edge y, flap top y
-fx0  = coupon ? 6    : 42;
-fx1  = coupon ? 24   : 70;
+fx1  = coupon ? 24 : cw - 50;
+fx0  = coupon ? 6  : fx1 - 28;
 wlo  = coupon ? 6    : 10;
 ftop = coupon ? 35.5 : 47.5;
 
@@ -236,9 +237,9 @@ module plate_with_bar() {
     rounded_box([cw, chh, card_t], r = corner_r, bottom_chamfer = bottom_chamfer);
     if (use_slid)                                  // raised track bar, chamfered top
         translate([track_x, 0, 0]) hull() {
-            translate([0, 0, face - 0.01]) linear_extrude(bar_h - 0.6 + 0.01)
+            translate([0, 0, face - 0.3]) linear_extrude(bar_h - 0.6 + 0.3)
                 stadium(track_y0 - 6, track_y1 + 6, bar_w);
-            translate([0, 0, face - 0.01]) linear_extrude(bar_h + 0.01)
+            translate([0, 0, face - 0.3]) linear_extrude(bar_h + 0.3)
                 stadium(track_y0 - 6, track_y1 + 6, bar_w - 1.2);
         }
 }
@@ -246,13 +247,14 @@ module plate_with_bar() {
 module face_embosses() {
     if (!coupon) {
         // POP! headline
-        translate([16, 59, face - 0.01]) linear_extrude(emboss_h + 0.01)
+        translate([16, chh - 26, face - 0.3]) linear_extrude(emboss_h + 0.3)
             text("POP!", size = 20, font = font);
         // greeting line (+ name parameter)
-        translate([cw / 2, 4.5, face - 0.01]) linear_extrude(emboss_h + 0.01)
+        translate([cw / 2, 4.5, face - 0.3]) linear_extrude(emboss_h + 0.3)
             text(line_txt, size = line_size, font = font, halign = "center");
         // bubble cluster drifting out of the "!" toward the small spinner
-        for (b = [[64, 74, 3.5], [70, 68, 2.5], [76, 75, 2], [42, 77, 2], [57, 77, 1.7]])
+        for (b = [[cw - 44, chh - 9, 3.5], [cw - 39, chh - 15, 2.5], [cw - 36, chh - 4, 2],
+                  [cw - 70, chh - 7, 2], [cw - 56, chh - 8, 1.7]])
             translate([b[0], b[1], face]) scale([1, 1, 0.45]) sphere(b[2]);
     }
 }
@@ -260,7 +262,7 @@ module face_embosses() {
 module face_engraves() {                           // burst rays, top-left corner
     if (!coupon)
         for (a = [100, 135, 170])
-            translate([12, 72, face - engrave_d]) rotate([0, 0, a])
+            translate([12, chh - 13, face - engrave_d]) rotate([0, 0, a])
                 translate([4, -0.6, 0]) cube([7, 1.2, engrave_d + 0.02]);
 }
 
@@ -302,7 +304,7 @@ module slider_channel_cut() {
 // ---------------------------------------------------------------------------
 module spinner_fixed(p, ror) {
     translate([p[0], p[1], 0]) {
-        translate([0, 0, face - 0.4]) cylinder(r = post_r, h = spin_cone0(rotor_h) - face + 0.41);
+        translate([0, 0, face - 0.4]) cylinder(r = post_r, h = spin_cone0(rotor_h) - face + 0.6);
         translate([0, 0, spin_cone0(rotor_h)]) cylinder(r1 = post_r, r2 = r_cap, h = cone_h);
     }
 }
@@ -352,7 +354,7 @@ module bead() {
     translate([track_x, bead_y, 0]) {
         cylinder(d1 = foot_d - 0.6, d2 = foot_d, h = 0.3);          // elephant-foot relief
         translate([0, 0, 0.29]) cylinder(d = foot_d, h = foot_t - 0.29);
-        cylinder(d = stem_d, h = dome_z + 0.01);                     // stem
+        cylinder(d = stem_d, h = dome_z + 0.2);                     // stem
         translate([0, 0, dome_z]) {
             cylinder(d1 = stem_d, d2 = 10, h = 2.25);                // 45° dome base
             translate([0, 0, 2.25]) cylinder(d = 10, h = 0.6);
@@ -396,15 +398,15 @@ module flap_body() {
                     polygon([[fw0, plate_root], [fw1, plate_root], [fw1, ftop], [fw0, ftop]]);
             // hinge tongue (knuckle 1 span) reaching to the axis line
             translate([kx(1) - barrel_len / 2, tongue_root, 0])
-                cube([barrel_len, plate_root - tongue_root + 0.02, card_t]);
+                cube([barrel_len, plate_root - tongue_root + 0.5, card_t]);
             // flap knuckle barrel + web tying it to the tongue (outside the bore)
             translate([kx(1), y_ax, z_ax]) rotate([0, 0, 90])
                 pip_hinge(pin_d, hinge_clear, knuckle_wall, barrel_len);
             translate([kx(1) - barrel_len / 2, y_ax + pin_d / 2 + hinge_clear + 0.15, 0])
-                cube([barrel_len, R_k - (pin_d / 2 + hinge_clear + 0.15) + 0.4, z_ax]);
+                cube([barrel_len, R_k - (pin_d / 2 + hinge_clear + 0.15) + 0.8, z_ax]);
             // big "1" embossed on the flap face
-            translate([(fw0 + fw1) / 2, (plate_root + ftop) / 2 - 8.5, face - 0.01])
-                linear_extrude(emboss_h + 0.01)
+            translate([(fw0 + fw1) / 2, (plate_root + ftop) / 2 - 8.5, face - 0.3])
+                linear_extrude(emboss_h + 0.3)
                     text("1", size = coupon ? 14 : 24, font = font, halign = "center");
         }
         // tongue relief ramp: the underside rise whose contact with the window
@@ -427,7 +429,10 @@ module flap(a = 0) {                                // rotated about the hinge a
 
 module hinge_pin() {
     translate([(hx0 + hx1) / 2, y_ax, z_ax]) rotate([0, 0, 90])
-        pip_hinge_pin(pin_d, hinge_len - 0.6);
+        pip_hinge_pin(pin_d, hinge_len - 1.6);   // 0.5 end gap past the 0.3 barrel
+                                                 // inset: coplanar pin/barrel end
+                                                 // faces are a kiss Manifold
+                                                 // exports as a bad shell
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +509,13 @@ module main() {
         // that the interference check can fail
         intersection() { flap(easel_deploy + easel_overshoot); fixed_body(); }
     } else if (part == "flapsweep") {
-        intersection() { flap(easel_test_angle); fixed_body(); }
+        // tuning probe only (the committed fitchecks intersect the FULL body):
+        // cropped to the hinge/window region every possible contact lives in
+        intersection() {
+            flap(easel_test_angle);
+            fixed_body();
+            translate([fx0 - 2, -1, -16]) cube([fx1 - fx0 + 4, wtop + 3, 30]);
+        }
     } else {
         fixed_body();
         movings();

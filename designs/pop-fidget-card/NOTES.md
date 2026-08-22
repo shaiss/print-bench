@@ -13,7 +13,9 @@ constraint: test-slice under 2 h; target 60 min on a fast modern printer.
 Everything is **assumed** (stated defaults from the brief; nothing external
 constrains the card — resize freely against the slice clock):
 
-- Card 120 × 85 × 2.8 mm landscape, corner r 6, bottom chamfer 0.5.
+- Card 112 × 80 × 2.4 mm landscape, corner r 6, bottom chamfer 0.5 (brief
+  said 120 × 85 × 2.8 assumed; slimmed one step against the slice clock per
+  the brief's own "resize freely" — see Time budget below).
 - Feature height above the face ≤ 8 mm (shelf profile + print time).
 - Slider travel ≥ 40 mm (ships 42).
 - Shelf prop angle 70–75° (ships ~72°, set by the easel's rotation stop).
@@ -67,12 +69,33 @@ constrains the card — resize freely against the slice clock):
   name stay OUT of the repo.
 - **Multi-part choice:** single entry `.scad`; `part` selects fitchecks only.
   The coupon is `coupon = true` re-layout of the same modules (wrapper file).
+- **Pin end inset (round 2).** `hinge_len − 0.6` centered put the pin's end
+  faces EXACTLY coplanar with the outer barrel end faces (both reduce to
+  `hx0 + 0.3`) — a kiss contact CGAL coin-flips (the coupon fused it, the
+  card didn't) and Manifold exports as a bad shell: CI's first run scored
+  both parts 59/100 with a watertightness critical. Pin is now
+  `hinge_len − 1.6` (0.5 real gap past each barrel face); every emboss/boss
+  bury was also deepened from 0.01 to ≥ 0.2 for the same sliver reason.
+- **Layout is edge-derived** (round 2): track/toggle/spinner-2/easel window
+  positions are expressions of `card_w`/`card_h`, so the face can shrink
+  against the slice clock as one knob without re-placing every feature.
 
 ## Time budget & drop order
 
-Test-slice (PrusaSlicer, 0.2 mm) is the G4 measure: ≤ 120 min hard, 60 min
-target. Drop order from the brief if over: spinner #2 (`spinner_count=1`) →
-shorter track (`track_y1`) → shrink card face. The toggle and easel stay.
+The brief's cap is "under 2 hours on a stock profile" of a **Bambu/MK4-class
+machine**. Two meters, both reported:
+
+- **Gate meter** (surfaced by `gate.sh --slice`): PrusaSlicer with bare CLI
+  defaults — no real printer's stock profile, and ~2.5–3× slower than one.
+  CI's first run read 2 h 54 m at 120 × 85 × 2.8; the round-2 slimming
+  (112 × 80 × 2.4) exists to pull this number down.
+- **Brief meter** (G4's hard cap): the same STL sliced at MK4-class stock
+  speeds (perimeter/infill/travel overrides recorded in the PR) — this is
+  the "stock profile" the brief names, and must be ≤ 120 min (target 60).
+
+Drop order from the brief if the brief meter busts: spinner #2
+(`spinner_count=1`) → shorter track (`track_y1`) → shrink card face further.
+The toggle and easel stay. Slice data, not vibes, picks the step.
 
 ## Print settings
 

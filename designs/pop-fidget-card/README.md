@@ -19,7 +19,7 @@ the whole thing in about an hour on a modern machine.
 
 ## What you get
 
-- `pop-fidget-card` — the card, one print-in-place piece (120 × 85 × 2.8 mm
+- `pop-fidget-card` — the card, one print-in-place piece (112 × 80 × 2.4 mm
   plate; fidgets rise ≤ 8 mm above the face).
 - `pop-fidget-card-coupon` — a 66 × 46 mm "print this first" tile with one of
   each tuned fit (spinner, slider, hinge) so you dial clearances in minutes.
@@ -51,7 +51,7 @@ don't hand it to the birthday kid unsupervised.
 | `xy_tol` | 0.2 mm | Spinner bore ↔ post radial gap — tune on the coupon |
 | `slide_tol` | 0.25 mm | Bead stem ↔ slot sliding gap per side |
 | `hinge_clear` | 0.4 mm | Easel hinge pin clearance on every bore surface |
-| `card_w` / `card_h` | 120 / 85 mm | Card face size |
+| `card_w` / `card_h` | 112 / 80 mm | Card face size |
 
 All parameters are at the top of `pop-fidget-card.scad`, grouped in
 Customizer sections; override on the command line with `-D 'name=value'`.
