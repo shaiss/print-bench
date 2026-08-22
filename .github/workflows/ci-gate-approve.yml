@@ -53,7 +53,7 @@ jobs:
     steps:
       - name: Authorize and parse the command
         id: parse
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           # Surfaced as an output because secrets are not readable in step `if:`
           # conditions (the regen job exposes REGEN_TOKEN presence the same way).
@@ -134,10 +134,10 @@ jobs:
       # checked out.
       - name: Check out trusted tooling
         if: steps.parse.outputs.valid == 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: steps.parse.outputs.valid == 'true'
         with:
           python-version: '3.12'
@@ -145,7 +145,7 @@ jobs:
       - name: Fetch the PR branch's registry (as data)
         id: fetch
         if: steps.parse.outputs.valid == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           HEAD_REF: ${{ steps.parse.outputs.head_ref }}
         with:
@@ -214,7 +214,7 @@ jobs:
           steps.apply.outputs.ok == 'true' &&
           steps.apply.outputs.changed == 'true' &&
           steps.parse.outputs.have_pat == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           HEAD_REF: ${{ steps.parse.outputs.head_ref }}
           FILE_SHA: ${{ steps.fetch.outputs.sha }}
@@ -236,7 +236,7 @@ jobs:
 
       - name: Reply with the result
         if: steps.parse.outputs.valid == 'true' && !cancelled()
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           ACTION: ${{ steps.parse.outputs.action }}
           GATE_ID: ${{ steps.parse.outputs.gate_id }}

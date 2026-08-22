@@ -117,7 +117,7 @@ jobs:
       # absent — see the note on the ship steps below.
       HAS_GH_TOKEN: ${{ secrets.GH_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           # Belt-and-braces with the job `if:` above: always check out the
@@ -126,7 +126,7 @@ jobs:
           # (matches design-run.yml and chunker.yml).
           ref: ${{ github.event.repository.default_branch }}
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -261,7 +261,7 @@ jobs:
         # right fit for an unattended bot — no OAuth token / subscription seat.
         # Maximum reasoning effort: an unattended ship run is exactly the
         # correctness-over-cost case. Which model runs is the registry's call.
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
@@ -293,7 +293,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
@@ -319,7 +319,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
@@ -342,7 +342,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}

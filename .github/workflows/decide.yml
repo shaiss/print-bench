@@ -64,7 +64,7 @@ jobs:
     steps:
       - name: Authorize and parse the command
         id: parse
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const body = context.payload.comment.body.trim();
@@ -138,7 +138,7 @@ jobs:
 
       - name: Resolve the decision
         if: steps.parse.outputs.valid == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           BRANCH: ${{ steps.parse.outputs.default_branch }}
           VERB: ${{ steps.parse.outputs.verb }}

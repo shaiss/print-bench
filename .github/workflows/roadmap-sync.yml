@@ -42,7 +42,7 @@ jobs:
     steps:
       - name: Decide whether to sync
         id: guard
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           # Secrets aren't readable in a step `if:`, so surface presence here.
           HAVE_TOKEN: ${{ secrets.PROJECT_TOKEN != '' }}
@@ -90,7 +90,7 @@ jobs:
 
       - name: Check out trusted tooling
         if: steps.guard.outputs.act == 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 

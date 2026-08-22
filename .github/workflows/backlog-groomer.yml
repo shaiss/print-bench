@@ -65,12 +65,12 @@ jobs:
       # degrade — grant the read explicitly (the chunker's reasoning)
       pull-requests: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           ref: ${{ github.event.repository.default_branch }}
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -218,7 +218,7 @@ jobs:
       - name: Upsert the sticky report issue
         id: upsert
         if: steps.policy.outputs.armed == 'true' && !inputs.dry_run
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             // The one write surface of the whole routine. The report issue

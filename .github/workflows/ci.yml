@@ -74,7 +74,7 @@ jobs:
       regen_designs: ${{ steps.filter.outputs.regen_designs }}
       docs_standards: ${{ steps.filter.outputs.docs_standards }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -156,7 +156,7 @@ jobs:
       # committed redirects them onto the updated head.
       sha: ${{ steps.commit.outputs.sha }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Don't leave the push credential in .git/config: between checkout
           # and push this job runs five generators out of the PR branch, and
@@ -358,7 +358,7 @@ jobs:
 
       - name: Set up Python 3.11 (the interpreter bpy ships wheels for)
         if: steps.plan.outputs.shots == 'true'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           # 3.11 exactly: bpy 4.5 publishes wheels for 3.11 only, which is the
           # same constraint .claude/hooks/session-start.sh documents. The
@@ -506,7 +506,7 @@ jobs:
     name: Lint scripts and workflows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: shellcheck
@@ -554,10 +554,10 @@ jobs:
     if: needs.changes.outputs.printcheck_tests == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -572,10 +572,10 @@ jobs:
     if: needs.changes.outputs.stylelift_tests == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -590,10 +590,10 @@ jobs:
     if: needs.changes.outputs.lineage_tests == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -611,10 +611,10 @@ jobs:
     if: needs.changes.outputs.backlog_burn_tests == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -631,10 +631,10 @@ jobs:
     if: needs.changes.outputs.backlog_groomer_tests == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -651,10 +651,10 @@ jobs:
     if: needs.changes.outputs.reeve_tests == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -671,10 +671,10 @@ jobs:
     if: needs.changes.outputs.model_registry_tests == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -691,10 +691,10 @@ jobs:
     if: needs.changes.outputs.telemetry_tests == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -711,10 +711,10 @@ jobs:
     if: needs.changes.outputs.ci_gates_tests == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -741,7 +741,7 @@ jobs:
     if: needs.changes.outputs.docs_standards == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Prove the gate still fires, then run it
@@ -761,11 +761,11 @@ jobs:
     if: needs.changes.outputs.styles == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install xvfb (cached)
-        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
         with:
           # No ImageMagick: style-check.sh refreshes the swatch preview only
           # when montage is present, and this job is here to judge conformance.
@@ -778,7 +778,7 @@ jobs:
         # Same engine as render-gate, so a swatch measures the same here as
         # it does in the gate that judges the printable parts.
         uses: ./.github/actions/setup-openscad-nightly
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -804,7 +804,7 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           ref: ${{ needs.regen.outputs.sha }}
@@ -840,11 +840,11 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           ref: ${{ needs.regen.outputs.sha }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
@@ -863,7 +863,7 @@ jobs:
         run: node site/build.mjs --out build/site
       - name: Upload the built site
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: site
           path: build/site
@@ -881,11 +881,11 @@ jobs:
     if: needs.changes.outputs.scad == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install OpenSCAD (cached)
-        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
         with:
           # Postinst-free packages only (no update-alternatives) — a cache
           # restore skips postinst, see issue #85; docs-check.sh enforces.
@@ -909,11 +909,11 @@ jobs:
     if: needs.changes.outputs.scad == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install xvfb (cached)
-        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
         with:
           # Postinst-free packages only (no update-alternatives) — a cache
           # restore skips postinst, see issue #85; docs-check.sh enforces.
@@ -941,7 +941,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       # "Run but gate nothing" mode: gate=true with an EMPTY gate_designs is
@@ -960,7 +960,7 @@ jobs:
           echo "note in the 'Detect changed paths' job."
       - name: Install xvfb, PrusaSlicer and f3d (cached)
         if: needs.changes.outputs.gate_designs != ''
-        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
         with:
           # PrusaSlicer stays on the Ubuntu package: upstream stopped
           # shipping Linux binaries after 2.9.0 (Flatpak-only now), so
@@ -978,7 +978,7 @@ jobs:
         # binary remains covered by the scad-check job.
         if: needs.changes.outputs.gate_designs != ''
         uses: ./.github/actions/setup-openscad-nightly
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: needs.changes.outputs.gate_designs != ''
         with:
           python-version: '3.12'
@@ -1054,7 +1054,7 @@ jobs:
         # never accumulates in history.
         if: always() && needs.changes.outputs.gate_designs != ''
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: telemetry-record
           path: telemetry-record.ndjson
@@ -1116,7 +1116,7 @@ jobs:
           !cancelled() && github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository &&
           needs.changes.outputs.gate_designs != ''
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -1199,7 +1199,7 @@ jobs:
       - name: Upload STL renders
         if: always() && needs.changes.outputs.gate_designs != ''
         continue-on-error: true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: stl-renders
           path: stl-renders/*.png
@@ -1209,7 +1209,7 @@ jobs:
         # "run but gate nothing" mode no STL exists, and if-no-files-found:
         # error would fail the job for having correctly done nothing.
         if: always() && needs.changes.outputs.gate_designs != ''
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: stls
           path: build/*.stl
@@ -1237,7 +1237,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           # full history so the merge base with the base branch is reachable
@@ -1255,7 +1255,7 @@ jobs:
           echo "diffing against merge base ${base_sha}"
           git worktree add base "$base_sha"
       - name: Install xvfb (cached)
-        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
         with:
           # Postinst-free packages only (no update-alternatives) — a cache
           # restore skips postinst, see issue #85; docs-check.sh enforces.
@@ -1264,7 +1264,7 @@ jobs:
       - name: Install OpenSCAD nightly (cached)
         # Same engine as render-gate so base and head render identically.
         uses: ./.github/actions/setup-openscad-nightly
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -1363,7 +1363,7 @@ jobs:
           done <<<"$designs"
       - name: Upload diff renders
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: argus-diff-renders
           path: argus-renders/*.png
@@ -1377,7 +1377,7 @@ jobs:
         if: >-
           !cancelled() &&
           github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -1451,11 +1451,11 @@ jobs:
       # classifier calls tools/lineage uninstalled.
       PYTHONPATH: ${{ github.workspace }}/tools/ci-gates/src
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0  # need the merge base (PR) / previous commit (push)
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Compute the changed-file list
@@ -1494,7 +1494,7 @@ jobs:
         if: >-
           !cancelled() && github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           # 'true' when the selector has something to say (a gate active,
           # proposed or declined), 'false' when it ran and found nothing, '' if

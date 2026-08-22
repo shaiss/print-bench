@@ -51,7 +51,7 @@ jobs:
     name: Build gated STL bundles and publish a GitHub Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # A tag push (push event) builds the tagged commit — that is the whole
           # point of a release. A manual workflow_dispatch, by contrast, must
@@ -65,7 +65,7 @@ jobs:
                 || github.ref }}
 
       - name: Install xvfb and PrusaSlicer (cached)
-        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
         with:
           # Postinst-free packages only (docs-check.sh enforces the allowlist):
           # a cache restore skips postinst, so alternatives-managed binaries
@@ -78,7 +78,7 @@ jobs:
         # magnitude faster than 2021.01's CGAL on these models.
         uses: ./.github/actions/setup-openscad-nightly
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
