@@ -10,7 +10,8 @@
 #
 # Why it exists: the static site (site/build.mjs) is a pure function of a
 # specific slice of the repo — designs/, styles/, people/, site/, the
-# architecture docs, telemetry, a couple of root files, and the include
+# architecture and contributor docs (served raw and indexed by /llms.txt),
+# telemetry, a couple of root files, and the include
 # closure of each design's .scad (which resolves through lib/, so lib/ counts).
 # A pull request that touches only CI/tooling/scripts/libs-the-site-doesn't-use
 # produces a byte-identical site, so its preview deployment is wasted spend.
@@ -40,7 +41,8 @@ log() { printf '[vercel-ignore] %s\n' "$*" >&2; }
 path_is_irrelevant() {
   case "$1" in
     # Site inputs that live inside otherwise-skippable trees — guard first.
-    docs/architecture/*)       return 1 ;;  # source of the How-it-works page
+    docs/architecture/*)       return 1 ;;  # source of the How-it-works page; served raw for llms.txt
+    docs/contributing/*)       return 1 ;;  # served raw + indexed by /llms.txt (site/lib/llms.mjs)
     .github/ai-lifestyle.conf) return 1 ;;  # site/lib/media.mjs reads this flag
     # Trees the served site never reads.
     .github/*)    return 0 ;;
@@ -49,8 +51,9 @@ path_is_irrelevant() {
     templates/*)  return 0 ;;
     audits/*)     return 0 ;;
     docs/*)       return 0 ;;
-    CLAUDE.md)    return 0 ;;
-    .gitignore)   return 0 ;;
+    CLAUDE.md)       return 0 ;;
+    CONTRIBUTING.md) return 0 ;;  # nothing under site/ reads it
+    .gitignore)      return 0 ;;
     # Everything else is site-relevant: designs/ styles/ people/ lib/ site/
     # PM.md README.md telemetry/ vercel.json — and any path not named above.
     # printer.conf lands here on purpose: lib/printer-conf.scad does
@@ -141,7 +144,7 @@ selftest() {
   check 0 tooling-only        ".github/workflows/ci.yml" "tools/reeve/src/reeve/cli.py" "scripts/check.sh"
   check 0 docs-nonarch        "docs/metamaterials-4d.md"
   check 0 templates-audits    "templates/design.scad" "audits/pr3/before.png"
-  check 0 root-noise          "CLAUDE.md" ".gitignore"
+  check 0 root-noise          "CLAUDE.md" ".gitignore" "CONTRIBUTING.md"
   check 0 empty-diff          # no paths -> identical to base
 
   # BUILD (1): at least one site-relevant file, incl. the guarded exceptions.
@@ -152,6 +155,7 @@ selftest() {
   check 1 people              "people/reeve.md"
   check 1 site                "site/build.mjs"
   check 1 docs-architecture   "docs/architecture/ci-platform.md"
+  check 1 docs-contributing   "docs/contributing/ci-and-gates.md"
   check 1 ai-lifestyle-conf   ".github/ai-lifestyle.conf"
   check 1 root-pm             "PM.md"
   check 1 vercel-json         "vercel.json"
