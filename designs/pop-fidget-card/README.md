@@ -41,7 +41,9 @@ a fast Bambu.
 
 ## Print settings
 
-- **Material:** PLA (any color; pastels suit the theme — an optional filament
+- **Material:** plain or matte PLA (any color; pastels suit the theme — but
+  skip silk and glitter fills: their strings land exactly in the 0.2 mm rotor
+  gap and the bead slot; an optional filament
   swap at the first text layer two-tones the lettering — and every other
   raised feature with it, which is the charm; set the color change at
   **2.4 mm = layer 13** on the 0.20 profile, since everything raised lifts
