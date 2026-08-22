@@ -181,6 +181,43 @@ jobs:
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
+      # Resolve the design run's model from the committed provider/model
+      # registry (issue #326) — the same resolve step auto-review.yml and
+      # product-scout.yml run, stdlib-only so it needs no install in front of
+      # it. A malformed registry, or one whose `design-run` chain went missing,
+      # fails this step loudly BEFORE any key is spent; the same mismatch is
+      # caught pre-merge by the model-registry drift-guard tests, which fire on
+      # this workflow and on registry.conf.
+      #
+      # The cross-check guards the one way the conf/chain split can mis-run:
+      # the conf's `provider:` label picks which ship step (and so which
+      # endpoint + literal secret) runs, while the registry picks the model —
+      # a model hosted elsewhere (glm-* on the Anthropic step, claude-* on the
+      # Z.AI step) would fail at request time with a key already spent. Every
+      # link must agree with the conf, not just the first: the walk below
+      # reaches link2, link3… only after link1 died, so a tail on another
+      # provider would spend its key against the wrong endpoint mid-walk.
+      # Saying so HERE, loudly, beats discovering it in the hourly run's logs.
+      - name: Resolve the design run's model chain (issue #326)
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve design-run --gh-output "$GITHUB_OUTPUT"
+          conf_provider="$(backlog-burn config --get provider --path .github/design-run.conf)"
+          n="$(sed -n 's/^link_count=//p' "$GITHUB_OUTPUT" | head -1)"
+          i=1
+          while [ "$i" -le "$n" ]; do
+            link_provider="$(sed -n "s/^link${i}_provider=//p" "$GITHUB_OUTPUT" | head -1)"
+            if [ "$link_provider" != "$conf_provider" ]; then
+              echo "::error::link ${i} of the registry's 'design-run' chain resolves to provider '$link_provider' but .github/design-run.conf says provider '$conf_provider' — the walk would spend that link's key against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/design-run.conf."
+              exit 1
+            fi
+            i=$((i + 1))
+          done
+
+
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
         run: echo "::notice::.github/design-run.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
@@ -200,47 +237,45 @@ jobs:
           # backlog burn uses, pointed at the design-brief label.
           backlog-burn run --repo "$GITHUB_REPOSITORY" --label "$LABEL" --summary-title 'Design run'
 
-      # One explicit ship step per provider — a provider is a reviewed,
-      # git-tracked step because GitHub Actions can only reference a secret by
-      # its literal name (secrets can't be selected by a runtime variable). The
-      # committed `provider:` label picks which one runs; adding a provider is a
-      # new step here. Both share the pin, the write permissions, the
-      # `github_token` that authenticates the action's own git push / PR
-      # creation, and the same /design-run prompt. The `github_token` is wired
-      # to the GH_TOKEN secret (a PAT) ON PURPOSE — and it matters MORE here
-      # than for the backlog burn: a PR opened with the default GITHUB_TOKEN does
-      # not itself trigger CI (the reason regen uses REGEN_TOKEN), so `regen`
-      # would not fire and the design's previews wouldn't be generated — and a
-      # design page WITHOUT its previews fails readme-gate.sh. With the PAT the
-      # draft PR triggers CI and the product shots regenerate. So for this
-      # pipeline a PAT as `github_token` is effectively required, to reach
-      # a mergeable state unattended: readme-gate needs a preview, and a
-      # path-traced product shot only comes from CI regen. Without a PAT,
-      # /design-run first generates what it can locally (cameras.conf previews
-      # via `render.sh --previews`); if the gate still needs a CI-only shot it
-      # stops and reports rather than opening an image-less PR that fails its own
-      # gate (see its §5 regen handoff).
+      # One explicit run step per CHAIN LINK, inside one block per provider —
+      # a provider is a reviewed, git-tracked step because GitHub Actions can
+      # only reference a secret by its literal name (secrets can't be selected
+      # by a runtime variable). The committed `provider:` label picks which
+      # BLOCK runs; the registry's `design-run` chain (steps.chain.outputs)
+      # picks which MODEL each link in it runs, so swapping the design run to
+      # another model is a registry edit, not a workflow edit (#326). The
+      # links walk in chain order (#327): each is continue-on-error and gated
+      # on the earlier links NOT having succeeded, so the first success
+      # short-circuits the rest and a dead model falls through to the next
+      # instead of killing the run — the job goes red on the agent only when
+      # EVERY link failed — the red-on-death step fires unless the walk
+      # produced a success. Deepening the chain is still a same-PR pair: add
+      # the model to the registry AND the matching run step here — the drift
+      # guard fails either half shipped alone.
+      #
+      # Both blocks share the pin, the write permissions, the `github_token`
+      # that authenticates the action's own git push / PR creation, and the
+      # same /design-run prompt. The `github_token` is wired to the GH_TOKEN
+      # secret (a PAT) ON PURPOSE — and it matters MORE here than for the
+      # backlog burn: a PR opened with the default GITHUB_TOKEN does not itself
+      # trigger CI (the reason regen uses REGEN_TOKEN), so `regen` would not
+      # fire and the design's previews wouldn't be generated — and a design
+      # page WITHOUT its previews fails readme-gate.sh. With the PAT the draft
+      # PR triggers CI and the product shots regenerate. So for this pipeline a
+      # PAT as `github_token` is effectively required, to reach a mergeable
+      # state unattended: readme-gate needs a preview, and a path-traced
+      # product shot only comes from CI regen. Without a PAT, /design-run first
+      # generates what it can locally (cameras.conf previews via `render.sh
+      # --previews`); if the gate still needs a CI-only shot it stops and
+      # reports rather than opening an image-less PR that fails its own gate
+      # (see its §5 regen handoff).
       #
       # The pin is the immutable commit behind the v1 tag; a moved tag must not
       # silently change what runs with write perms + a secret. Re-pin
       # deliberately to adopt a new release.
 
-      - name: Warn if the CI-triggering PAT is missing
-        # The draft PR must carry CI for the design to reach a mergeable state
-        # (readme-gate needs a CI-regenerated preview), so GH_TOKEN is
-        # effectively required here. Surface it before the run instead of failing
-        # deep in the action with an empty github_token.
-        if: >-
-          steps.policy.outputs.enabled == 'true'
-          && steps.select.outputs.issue != ''
-          && steps.policy.outputs.key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-          && env.HAS_GH_TOKEN != 'true'
-        run: |
-          echo "::warning::GH_TOKEN (a PAT with contents + pull-requests + issues write) is not set — the /design-run draft PR for #${{ steps.select.outputs.issue }} will not trigger CI, so its product-shot regen won't run and readme-gate will fail. Set the GH_TOKEN repo secret before relying on the unattended run."
-
-      - name: Run via Anthropic (Claude)
-        id: run_anthropic
+      - name: Run via Anthropic (Claude, chain link 1)
+        id: run_anthropic_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
@@ -255,25 +290,30 @@ jobs:
         continue-on-error: true
         # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
         # right fit for an unattended bot — no OAuth token / subscription seat.
+        # Maximum reasoning effort: an unattended design run is exactly the
+        # correctness-over-cost case. Which model runs is the registry's call.
+        # registry-secret-alias: CLAUDE_KEY=ANTHROPIC_API_KEY — design-run's
+        # anthropic link wires secrets.CLAUDE_KEY, a historical alias for the
+        # same credential as the registry's ANTHROPIC_API_KEY (both exist as
+        # repo secrets; the motivating run 31967535913 authenticated with
+        # CLAUDE_KEY). The drift guard reads <alias>=<registry-secret> here and
+        # pins the step to that provider's endpoint.
         uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
-          # Pin the model explicitly (Opus 4.8, the maintainer's pick — PR #172
-          # review) and run at maximum reasoning effort: an unattended design
-          # run is exactly the correctness-over-cost case.
-          claude_args: --permission-mode bypassPermissions --model claude-opus-4-8 --effort max
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link1_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
-      - name: Run via Z.AI (GLM)
-        id: run_zai
+      - name: Run via Z.AI (GLM, chain link 1)
+        id: run_zai_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.provider == 'zai'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-        # Same as the Anthropic step: die inside a live job so the lock
+        # Same as the Anthropic link: die inside a live job so the lock
         # cleanup below runs as a normal step; continue-on-error keeps the
         # job alive for it (the red-on-death step restores the failure).
         timeout-minutes: 220
@@ -285,7 +325,7 @@ jobs:
         # credential check (the endpoint uses whichever header it validates).
         # Best-effort: Anthropic doesn't officially support routing Claude Code
         # to non-Claude models, and /design-run is a Claude Code skill, so
-        # quality may vary. Change the model on the --model line.
+        # quality may vary. Which model runs is the registry's call.
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -294,7 +334,59 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model glm-5.2 --effort max
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link1_model }} --effort max
+
+      # The walk's tail (#327): link 2 and 3 of the registry's `design-run`
+      # chain, reached only when every earlier link of this block failed — the
+      # same env/secret/pin/prompt as link 1, only the model differs. The
+      # anthropic block above stays single-step: design-run.conf says zai, so
+      # that block is latent (the resolve step's cross-check refuses a conf
+      # flip without the chain moving with it), and a latent block carrying
+      # dead steps nobody can run would be noise; if the conf ever flips to
+      # anthropic the chain must be re-tailored there in the same PR anyway.
+      - name: Run via Z.AI (GLM, chain link 2)
+        id: run_zai_2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+        timeout-minutes: 220
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ secrets.GH_TOKEN }}
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link2_model }} --effort max
+          prompt: "/design-run ${{ steps.select.outputs.issue }}"
+
+      - name: Run via Z.AI (GLM, chain link 3)
+        id: run_zai_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_zai_2.outcome != 'success'
+        timeout-minutes: 220
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ secrets.GH_TOKEN }}
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link3_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       - name: Withdraw a dead run's SHIP-LOCK
@@ -318,7 +410,13 @@ jobs:
           ISSUE: ${{ steps.select.outputs.issue }}
           # .outcome, never .conclusion — continue-on-error rewrites a failed
           # step's conclusion to success; outcome keeps the real result.
-          AGENT_OUTCOME: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome }}
+          # The walk's outcome (#327): success if ANY link of the block the
+          # conf's provider label selected succeeded; the LAST link's outcome
+          # otherwise — which is what a total-walk failure means, since every
+          # earlier link died to reach it. The drift guard
+          # (test_routine_walk_outcome_covers_every_link) pins the disjunct to
+          # the chain's link count.
+          AGENT_OUTCOME: ${{ steps.policy.outputs.provider == 'zai' && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome) || steps.run_anthropic_1.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
@@ -363,9 +461,10 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          # Only the step matching the configured provider runs; the other is
-          # 'skipped'. Report the one that actually ran.
-          RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome }}
+          # Only the steps of the block matching the configured provider run;
+          # the other block's are 'skipped'. Report the walk's outcome — any
+          # link succeeding means the run succeeded (#327).
+          RUN: ${{ steps.policy.outputs.provider == 'zai' && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome) || steps.run_anthropic_1.outcome }}
           LOCK_WITHDRAWN: ${{ steps.lock_cleanup.outputs.withdrawn }}
           # $GITHUB_STEP_SUMMARY does not auto-link a bare #N — build a real link.
           SERVER: ${{ github.server_url }}
@@ -403,10 +502,13 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome) != 'success'
+          && (steps.policy.outputs.provider == 'zai' && (steps.run_zai_1.outcome == 'success' || steps.run_zai_2.outcome == 'success' || steps.run_zai_3.outcome == 'success') || steps.run_anthropic_1.outcome == 'success') != 'success'
         env:
           ISSUE: ${{ steps.select.outputs.issue }}
-          AGENT_OUTCOME: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai.outcome || steps.run_anthropic.outcome }}
+          # The walk's outcome (#327) — same shape as AGENT_OUTCOME above: any
+          # link succeeding means the run succeeded, so cleanup and this gate
+          # agree on what "the agent step succeeded" means across the walk.
+          AGENT_OUTCOME: ${{ steps.policy.outputs.provider == 'zai' && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome) || steps.run_anthropic_1.outcome }}
         run: |
           echo "::error::the /design-run agent step for #${ISSUE} did not succeed (outcome: ${AGENT_OUTCOME}) — its SHIP-LOCK cleanup ran above; failing the job so the death is visible"
           exit 1

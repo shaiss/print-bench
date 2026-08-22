@@ -100,7 +100,7 @@ jobs:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           # Full history: the context step diffs base...head below.
@@ -321,7 +321,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -340,7 +340,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -360,7 +360,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -381,7 +381,7 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -403,7 +403,7 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -426,7 +426,7 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -450,7 +450,7 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}

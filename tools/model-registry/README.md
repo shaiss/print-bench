@@ -78,8 +78,20 @@ the ship step land together.
 
 `auto-review.yml` is the first consumer: its `design-changes` job resolves the
 `review` chain into `model1..model6` outputs, and the Jane/Drik/PM-triage/coach ship steps
-read those instead of hardcoding `--model`. `tests/test_workflow_drift.py` pins the
-registry and the workflow together so they cannot silently diverge.
+read those instead of hardcoding `--model`. `product-scout.yml` and the four
+scheduled routines — `design-run.yml`, `backlog-burn.yml`, `chunker.yml`,
+`labeler.yml` (issue #326) — resolve their own chains in the job that consumes
+them and walk the links, one ship step per link per provider, so a dead model
+falls through to the next instead of killing the run. Since #327 each routine
+chain carries a multi-model tail *within its routine's provider* (the GLM
+routines walk glm-5.2 → 5.1 → 4.6; the chunker walks Opus 4.8 → Sonnet 5 →
+Haiku 4.5), so no routine bottoms out on a single id. Each routine's chain must
+sit on the provider its `.github/<routine>.conf` declares; the workflow's
+resolve step cross-checks that before any key is spent.
+`tests/test_workflow_drift.py` pins the registry and every consumer workflow
+together so they cannot silently diverge — including, since #327, that the
+expressions reading the walk's *outcome* cover every link (an expression still
+on link 1 after a chain deepened would send a healthy link-2 run red).
 
 The `review` chain's Anthropic backstop is itself a chain — Opus 4.8 → Sonnet 5
 → Haiku 4.5 — rather than a single model (issue #298): a single hardcoded id can
