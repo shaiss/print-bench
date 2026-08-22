@@ -54,7 +54,7 @@ paper over.
 | Check | Method | Flags |
 |---|---|---|
 | Mesh integrity | topology via trimesh | holes/naked edges, non-manifold edges, inverted or inconsistent normals, duplicate & degenerate faces, stray shells |
-| Overhangs | face-normal angle vs build direction (default 45°), bed-touching faces excluded | area needing support |
+| Overhangs | face-normal angle vs build direction (default 45°), bed-touching faces excluded, then **bridgeable regions removed** | area that is too wide to bridge and needs support |
 | Wall thickness | inward ray-casting from area-weighted surface samples | walls under 2× nozzle (default 0.8 mm) |
 | Bed adhesion & stability | first-layer contact area, center-of-mass vs contact patch | point/edge contact, tiny contact patch, tip-over risk |
 | Size | bounding box vs build volume; unit-mix-up detection | oversize, microscopic (meters/inches-as-mm), sub-nozzle features |
@@ -62,6 +62,17 @@ paper over.
 
 Wall-thickness rays are skipped on non-watertight meshes (inside/outside
 is undefined on an open surface) — fix the holes first, re-run.
+
+**Overhang = support need, not raw downward area.** A downward face steeper
+than 45° only needs support if a bridge cannot span it. So the overhang check
+groups the downward faces into connected regions and drops any region that is
+everywhere narrower than `--bridge-max` (default 5 mm, the widest span FDM
+bridges cleanly) — tested by morphologically eroding the region's footprint,
+which handles strokes, rings and annular chamfers correctly, not just boxes. A
+debossed letter's ceiling, a thin relief chamfer, and a print-in-place socket
+roof are self-supporting and do not score as overhangs; a wide flat shelf still
+does. The metrics report both the raw downward area (`raw_overhang_area_mm2`)
+and the support-needing remainder (`overhang_area_mm2`).
 
 ## The optional AI layer
 
