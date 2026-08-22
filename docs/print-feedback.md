@@ -71,6 +71,7 @@ not a tool and not a gate — nothing content-judges an entry.
 ## Field test log
 
 ### 2026-08-08 — Bambu A1
+- **Printed from:** v0.2
 - **Part(s):** slot coupon
 - **Slicer settings:** 0.20 mm layer · 0.4 nozzle · PLA · 15% infill · no supports
 - **Result:** slot fit snug after tuning
@@ -81,6 +82,40 @@ not a tool and not a gate — nothing content-judges an entry.
 Keep the section **last** in NOTES.md — entries append to the end (newest at
 the bottom). When a measured deviation is worth carrying across designs, copy
 it into `printer.conf` under **Carry forward** so opted-in designs pick it up.
+
+**Printed from** anchors a print to the design version it came from, so a
+result is traceable to the exact geometry that produced it — the
+missing link that made "which version did this print test?" unanswerable. It
+pairs with the changelog below.
+
+## 2a. The changelog convention — in-place version lineage
+
+A **derivative** design gets its lineage from `derives.conf` (a new design
+built on a parent). A design iterated **in place** — v1 → v2, same directory,
+same name — records its lineage in a `## Changelog` section in `NOTES.md`:
+
+```markdown
+## Changelog
+
+### v0.2 — 2026-08-20 — field-driven refinement
+Driven by the first two field prints. Loop tab derived from the bore …
+
+### v0.1 — 2026-08-18 — first shipped version
+Two-sided coin + print-in-place flipper …
+```
+
+Each version is a `### <version> — <YYYY-MM-DD> — <title>` subheading
+(em-dashes separate the three fields so a hyphenated title stays
+unambiguous), newest first, with the prose saying **what changed and why**
+and citing the field prints that drove it. A version is *cut* as a release
+(`scripts/release-bundle.sh`, whose `manifest.json` carries the version); this
+section is the human-read "why" beside those bytes.
+
+Like the field-test log this is a **convention, not a gate** — but it is
+*rendered*: `site/lib/timeline.mjs`'s `changelogSource` parses it, so a
+rostered design's product page shows its version history on one timeline
+beside the field-test prints and the git history. That is the design →
+print → iterate lineage made visible: the process, not just the latest STL.
 
 ## 3. The "Log a print result" Action
 
