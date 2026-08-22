@@ -469,7 +469,16 @@ jobs:
         run: |
           echo "::notice::the opposite vendor's key (${{ steps.vendor.outputs.oracle_chain == 'oracle-anthropic' && 'ANTHROPIC_API_KEY' || 'ZAI_KEY' }}) is not set — skipping the Oracle review rather than falling back to the shipping vendor (a same-vendor review would not be independent)"
 
-      - name: Every configured link failed
+      # Every configured link failed. Rather than a blunt red on every PR
+      # (issue #347), diagnose WHY the chain is unusable and act on the cause.
+      # The ship steps hide their own error, so this probes each link with a live
+      # 1-token request to learn the HTTP cause, then emits one aggregate class:
+      #   needs-human → out of credit / bad key: escalate through the HITL gate.
+      #   dead        → an unservable model id (#298): a registry defect — red.
+      #   transient   → a retryable outage: retry next PR, no human.
+      #   servable    → a link works, so the failure was not the provider.
+      - name: Classify why every configured link failed
+        id: classify
         if: >-
           steps.ready.outputs.ready == 'true'
           && ((steps.vendor.outputs.oracle_chain == 'oracle-anthropic'
@@ -483,6 +492,113 @@ jobs:
                   && steps.g2.outcome != 'success'
                   && steps.g3.outcome != 'success'
                   && steps.g4.outcome != 'success'))
+        env:
+          PYTHONPATH: tools/model-registry/src
+          CHAIN: ${{ steps.vendor.outputs.oracle_chain }}
+          ZAI_KEY: ${{ secrets.ZAI_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          echo "::error::the Oracle review failed on every link of the ${{ steps.vendor.outputs.oracle_chain }} chain. Advisory only — this does not block the merge — but see the failed step logs above."
+          set -uo pipefail
+          python3 -m model_registry classify "$CHAIN" --gh-output "$GITHUB_OUTPUT"
+
+      # needs-human: the account is out of funds, or the key is invalid/missing —
+      # a person must fund or rotate it, which CI cannot. Raise it ONCE through
+      # the decision gate (a single deduped needs-decision tracking issue keyed by
+      # a per-chain marker) instead of reddening every PR; the Oracle is advisory,
+      # so this warns rather than fails. Trusted base-branch github-script, no PR
+      # head code (the workflow's standing posture); issues:write is already held.
+      - name: Escalate a human-fixable provider failure (HITL needs-decision)
+        id: escalate
+        if: steps.ready.outputs.ready == 'true' && steps.classify.outputs.class == 'needs-human'
+        uses: actions/github-script@v9
+        env:
+          ORACLE_CHAIN: ${{ steps.vendor.outputs.oracle_chain }}
+          ORACLE_CLASS: ${{ steps.classify.outputs.class }}
+        with:
+          script: |
+            const chain = process.env.ORACLE_CHAIN;
+            const klass = process.env.ORACLE_CLASS;
+            const marker = `<!-- oracle-provider-escalation:${chain} -->`;
+            const decisionId = `oracle-provider-${chain}`;
+            const label = 'needs-decision';
+
+            // Ensure the decision-gate label exists (create-on-demand, tolerate a
+            // race with a sibling run) — docs/decision-gate.md's ensure-label idiom.
+            try {
+              await github.rest.issues.getLabel({ ...context.repo, name: label });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              try {
+                await github.rest.issues.createLabel({
+                  ...context.repo, name: label, color: 'D93F0B',
+                  description: 'A human decision is required before an agentic run can proceed',
+                });
+              } catch (_) { /* raced: another run created it first */ }
+            }
+
+            // One escalation per chain: reuse the OPEN needs-decision issue whose
+            // body carries this chain's marker rather than filing a duplicate on
+            // every PR. When a human resolves it (/decide clears the label, or the
+            // issue is closed) the next exhaustion is free to re-escalate.
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: label, per_page: 100,
+            });
+            const existing = open.find((i) => (i.body || '').includes(marker));
+            if (existing) {
+              core.warning(
+                `Oracle: ${chain} still unusable (${klass}). Open escalation: ` +
+                `${existing.html_url} — not filing a duplicate.`);
+              return;
+            }
+
+            const body = [
+              marker,
+              `🚦 DECISION NEEDED — \`${decisionId}\``,
+              ``,
+              `The Oracle's opposite-vendor chain \`${chain}\` failed on **every** link, and the ` +
+              `model-registry classifier read the cause as **${klass}** — an account/config problem ` +
+              `CI cannot fix (out of credit, or an invalid/missing key), not a transient outage or a ` +
+              `bad model id.`,
+              ``,
+              `Until it is resolved the cross-vendor Oracle review is skipped on every autonomy PR. ` +
+              `The Oracle is advisory, so nothing is blocked — but the independent second opinion is off.`,
+              ``,
+              `**yes** → the key is funded / rotated and working. Confirm by dispatching ` +
+              `\`model-smoke.yml\` with input \`${chain}\`, then resolve.`,
+              `**no**  → accept the Oracle staying dark on this vendor for now; this closes the ` +
+              `escalation without a code change.`,
+              ``,
+              `**Context:** classifier verdict \`${klass}\` on chain \`${chain}\`. Fund or rotate the ` +
+              `provider secret (\`ANTHROPIC_API_KEY\` for \`oracle-anthropic\`, \`ZAI_KEY\` for ` +
+              `\`oracle-glm\`). This is behaviour from issue #347; the registry itself is correct.`,
+              ``,
+              `Resolve with \`/decide yes ${decisionId}\` or \`/decide no ${decisionId}\`.`,
+            ].join('\n');
+
+            const created = await github.rest.issues.create({
+              ...context.repo,
+              title: `🚦 Oracle provider unusable: ${chain} (${klass})`,
+              body,
+              labels: [label],
+            });
+            core.warning(
+              `Oracle: filed HITL escalation for ${chain} (${klass}): ${created.data.html_url}`);
+
+      # dead: a model id the key genuinely cannot serve (#298). This IS fixable
+      # in-repo (edit .github/models/registry.conf), so keep reddening loudly.
+      - name: A registry defect — an unservable model id
+        if: steps.ready.outputs.ready == 'true' && steps.classify.outputs.class == 'dead'
+        run: |
+          echo "::error::the Oracle's ${{ steps.vendor.outputs.oracle_chain }} chain names a model id the key cannot serve (see the classifier output above) — a registry defect (#298). Fix .github/models/registry.conf."
           exit 1
+
+      # transient (retry next PR) or servable (a link works, so the exhaustion was
+      # not the provider — an agent error or timeout in the real review). Neither
+      # is human-fixable now and the Oracle is advisory, so warn without reddening.
+      - name: A transient or non-provider failure — retry next PR
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && (steps.classify.outputs.class == 'transient'
+              || steps.classify.outputs.class == 'servable')
+        run: |
+          echo "::warning::the Oracle review failed but the ${{ steps.vendor.outputs.oracle_chain }} chain is not the proven cause (classifier: ${{ steps.classify.outputs.class }}) — advisory only, retries on the next PR. See the ship-step logs above."

@@ -311,3 +311,161 @@ def test_post_is_the_packages_only_network_seam():
         else:
             assert "urllib" not in text and "http.client" not in text, (
                 f"{src.name} gained network I/O outside the smoke seam")
+
+
+# ── classify_chain: the escalation-facing diagnosis (issue #347) ──────────────
+#
+# Where smoke_chain answers "is any id a registry defect?" (its exit code),
+# classify_chain answers "what should a human/CI do about a chain that failed on
+# EVERY link?" — servable / dead / needs-human / transient. The Oracle's HITL
+# escalation branches on it: needs-human raises a decision, dead reds, transient
+# retries. A positive case and a negative control per class, plus the precedence
+# a mixed chain resolves to, and the property that the finer verdict never drifts
+# from the coarse one the smoke gate still exits on.
+
+def _post_status(status, body):
+    def post(url, headers, payload):
+        return status, body
+    return post
+
+
+def test_classify_credit_too_low_is_needs_human(tmp_path):
+    # The live signature that surfaced #347: every anthropic link 400s with
+    # "credit balance too low". Funding is a HUMAN problem (fund/rotate the key),
+    # so it must classify needs-human — not transient (no retry clears it) and
+    # not a dead id (the model is fine).
+    post = _post_status(400, '{"error":{"message":"Your credit balance is too low"}}')
+    lines, klass = smoke.classify_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert klass == "needs-human"
+    assert lines[-1] == "CLASS review: needs-human"
+
+
+def test_classify_401_is_needs_human_not_transient(tmp_path):
+    # An invalid/revoked key is the other needs-human case: a person must rotate
+    # it. Negative control against transient — a retry never fixes a bad key.
+    post = _post_status(401, '{"error":{"message":"invalid x-api-key"}}')
+    _, klass = smoke.classify_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert klass == "needs-human"
+
+
+def test_classify_rate_limit_is_transient_not_needs_human(tmp_path):
+    # 429 is retryable — nobody needs to act, the next run clears it. The
+    # negative control for needs-human: a rate limit must NOT be read as funding.
+    post = _post_status(429, '{"error":{"type":"rate_limit_error","message":"slow down"}}')
+    _, klass = smoke.classify_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
+    assert klass == "transient"
+
+
+def test_classify_5xx_is_transient(tmp_path):
+    # A provider outage (Cloudflare 520) is retryable, not a human problem.
+    _, klass = smoke.classify_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"}, _post_status(520, "outage"))
+    assert klass == "transient"
+
+
+def test_classify_network_error_is_transient(tmp_path):
+    def post(url, headers, payload):
+        raise OSError("connection refused")
+    lines, klass = smoke.classify_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
+    assert klass == "transient"
+    assert any("connection refused" in l for l in lines)
+
+
+def test_classify_404_is_dead(tmp_path):
+    # A proven-unservable id (#298) is an in-repo registry defect, not a human
+    # account problem — it must red, so it classifies dead.
+    _, klass = smoke.classify_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(404, '{"error":{"message":"model not found"}}'))
+    assert klass == "dead"
+
+
+def test_classify_invalid_model_400_is_dead(tmp_path):
+    _, klass = smoke.classify_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(400, '{"error":{"message":"invalid model id: nope"}}'))
+    assert klass == "dead"
+
+
+def test_classify_a_servable_link_makes_the_chain_servable(tmp_path):
+    # Precedence, positive: one link serves, so the chain is fine — the caller's
+    # exhaustion had a non-provider cause. servable wins over the broke anthropic
+    # links, so no HITL escalation fires for a working provider.
+    def post(url, headers, payload):
+        if b"glm-5.2" in payload:
+            return 200, "{}"
+        return 400, '{"error":{"message":"credit balance too low"}}'
+    _, klass = smoke.classify_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert klass == "servable"
+
+
+def test_classify_dead_id_beats_a_broke_key(tmp_path):
+    # Precedence, negative control: a proven-dead id outranks a co-occurring
+    # funding failure — the registry defect is the more actionable signal, so it
+    # reds rather than escalating a key nobody needs to touch to see the defect.
+    def post(url, headers, payload):
+        if b"claude-opus-5" in payload:
+            return 404, '{"error":{"message":"model not found"}}'
+        return 400, '{"error":{"message":"credit balance too low"}}'
+    _, klass = smoke.classify_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert klass == "dead"
+
+
+def test_classify_no_secret_is_needs_human(tmp_path):
+    # No key configured for any link is a human problem too (set the key) — the
+    # same class as an invalid one, so the Oracle escalates rather than silently
+    # doing nothing.
+    lines, klass = smoke.classify_chain(load(tmp_path), "review", {}, _post_status(200, "{}"))
+    assert klass == "needs-human"
+    assert any("no provider secret is set" in l for l in lines)
+
+
+def test_classify_fine_never_drifts_from_the_coarse_verdict():
+    # The refactor's load-bearing invariant: _classify is DERIVED from
+    # _classify_fine, so every needs_human/transient is exactly a coarse
+    # "inconc", every dead stays dead, every ok stays ok. If a future edit splits
+    # them, this fails before the smoke gate can green an unservable id.
+    cases = [
+        (200, "{}"), (429, "slow"), (408, "timeout"), (503, "down"), (520, "cf"),
+        (401, "invalid x-api-key"), (400, "credit balance too low"),
+        (400, "quota exceeded"), (400, "rate limit exceeded"),
+        (404, "model not found"),
+        (403, "insufficient permissions to access this model"),
+        (400, "invalid model id: nope"),
+    ]
+    for status, body in cases:
+        fine = smoke._classify_fine(status, body)
+        coarse = smoke._classify(status, body)
+        if fine in ("needs_human", "transient"):
+            assert coarse == "inconc", (status, body, fine, coarse)
+        else:
+            assert coarse == fine, (status, body, fine, coarse)
+
+
+def test_classify_secret_values_never_reach_the_report(tmp_path):
+    lines, _ = smoke.classify_chain(
+        load(tmp_path), "review",
+        {"ZAI_KEY": "sec-zai-value", "ANTHROPIC_API_KEY": "sec-an-value"},
+        _post_status(400, "credit balance too low"))
+    joined = "\n".join(lines)
+    assert "sec-zai-value" not in joined and "sec-an-value" not in joined
+
+
+def test_cli_classify_writes_class_to_gh_output(tmp_path, capsys, monkeypatch):
+    # The workflow contract: `classify <chain> --gh-output` appends
+    # `class=<token>` (the resolve shape) and prints the CLASS line, exit 0.
+    p = tmp_path / "registry.conf"
+    p.write_text(textwrap.dedent(REG), encoding="utf-8")
+    gh = tmp_path / "gh_output"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ak")
+    monkeypatch.delenv("ZAI_KEY", raising=False)
+    monkeypatch.setattr(
+        smoke, "_post",
+        lambda url, headers, payload: (400, '{"error":{"message":"credit balance too low"}}'))
+    assert main(["--path", str(p), "classify", "review", "--gh-output", str(gh)]) == 0
+    assert "class=needs-human\n" in gh.read_text(encoding="utf-8")
+    assert "CLASS review: needs-human" in capsys.readouterr().out

@@ -151,6 +151,20 @@ a mergeable PR are documented in [`actions-security.md`](actions-security.md)
   would gate the whole catalog on every decision); the async selector re-reads
   the state on its own schedule regardless.
 
+## Automated raisers
+
+The first automated consumer that **raises** a decision through this gate is the
+Oracle (issue #347). When its opposite-vendor model chain is exhausted by a
+human-fixable cause — the account out of credit, or an invalid/missing key
+(`model-registry classify` verdict `needs-human`) — `oracle.yml` files a single
+deduped `needs-decision` tracking issue keyed by a `<!--
+oracle-provider-escalation:<chain> -->` marker, carrying the `🚦 DECISION NEEDED`
+body a maintainer resolves with `/decide`. It follows every rule above: the
+label is created on demand, the escalation is deduped so repeated PRs never spam
+new issues, and it runs as trusted base-branch `github-script` (no PR head code).
+It is a workflow raiser, not one of the agent skills below — those stay
+follow-ups.
+
 ## Follow-ups (not in this slice)
 
 - Wiring the raise-a-decision step **and the verdict-consumption** (read the

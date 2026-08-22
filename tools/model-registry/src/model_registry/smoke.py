@@ -63,8 +63,8 @@ def _is_transient(status: int) -> bool:
     return status in (408, 429) or 500 <= status < 600
 
 # Substrings marking an account-funding / quota rejection (any status) — the
-# request reached the model but the account could not pay for it. External to
-# the registry, so inconclusive, not a defect.
+# request reached the model but the account could not PAY for it. A human must
+# fund or raise the limit, so ``classify_chain`` reads these as ``needs_human``.
 #
 # Every marker must be UNAMBIGUOUSLY about funding/quota. A bare "insufficient"
 # is NOT: a 403 permission denial phrased "insufficient permissions" (or
@@ -74,32 +74,68 @@ def _is_transient(status: int) -> bool:
 # senses ("insufficient credit/balance/quota/funds") are already covered by the
 # specific tokens, so the bare word is dropped and "funds" added to keep
 # "insufficient funds" caught.
-_ACCOUNT_MARKERS = (
+_FUNDING_MARKERS = (
     "credit", "billing", "balance", "quota", "payment", "funds",
-    "exhausted", "too low", "rate limit", "rate_limit",
+    "exhausted", "too low",
 )
 
+# Rate-limit wording (any status) — the account is momentarily over its rate, a
+# TRANSIENT condition a retry clears, so ``classify_chain`` reads these as
+# ``transient``, never ``needs_human``. Kept separate from the funding markers
+# precisely because the escalation split turns on that difference: funding needs
+# a person; a rate limit needs only patience.
+_RATE_LIMIT_MARKERS = ("rate limit", "rate_limit")
 
-def _classify(status: int, body: str) -> str:
-    """Map an HTTP ``(status, body)`` to ``ok`` / ``dead`` / ``inconc``.
+# The union is what ``_classify`` (the coarse ok/dead/inconc verdict the smoke
+# gate exits on) treats as an account/quota rejection — external to the registry,
+# so inconclusive either way. The funding/rate-limit split above matters only to
+# ``classify_chain``'s finer needs_human-vs-transient escalation decision, and
+# ``_classify`` is derived from ``_classify_fine`` below so the two never drift.
+_ACCOUNT_MARKERS = _FUNDING_MARKERS + _RATE_LIMIT_MARKERS
 
-    ``dead`` is reserved for positive evidence the registry named a model id the
-    key cannot serve (the #298 defect: 404/not-found, permission denial, an
-    invalid-model 400). ``inconc`` covers everything the registry is not to
-    blame for — rate limits, account funding, auth, provider outages — so an
-    automatic gate does not fail on a transient or a broke key.
+
+def _classify_fine(status: int, body: str) -> str:
+    """Map an HTTP ``(status, body)`` to ``ok`` / ``dead`` / ``needs_human`` /
+    ``transient`` — the four outcomes a chain-exhaustion escalation must tell
+    apart (``classify_chain``).
+
+    It splits ``_classify``'s single ``inconc`` bucket in two, on the one
+    distinction the HITL escalation turns on: a ``transient`` outage (a retry
+    clears it — rate limit, timeout, provider 5xx, network blip; no human
+    needed) versus a ``needs_human`` account/config problem (the account is out
+    of funds, or the key is invalid/missing — a person must fund or rotate it).
+    ``dead`` stays the #298 registry defect (a model id the key genuinely cannot
+    serve); ``ok`` stays a served request. The status/marker ORDER matches
+    ``_classify`` exactly so the two verdicts stay consistent by construction.
     """
     if status == 200:
         return "ok"
-    if _is_transient(status):
-        return "inconc"
-    if status == 401:                       # missing/invalid key: config, not id
-        return "inconc"
+    if _is_transient(status):               # 408/429/5xx: provider-side, retry
+        return "transient"
+    if status == 401:                       # missing/invalid key: a human fixes
+        return "needs_human"
     low = body.lower()
-    if any(marker in low for marker in _ACCOUNT_MARKERS):
-        return "inconc"                     # "credit balance too low", quota, …
+    if any(marker in low for marker in _RATE_LIMIT_MARKERS):
+        return "transient"                  # worded rate limit at a non-429 status
+    if any(marker in low for marker in _FUNDING_MARKERS):
+        return "needs_human"                # "credit balance too low", quota, …
     # 404 not-found, 403 permission, invalid-model 400, …: the id is the problem.
     return "dead"
+
+
+def _classify(status: int, body: str) -> str:
+    """Coarse ``ok`` / ``dead`` / ``inconc`` verdict the smoke gate exits on.
+
+    Derived from ``_classify_fine`` so the two cannot drift: ``dead`` is positive
+    evidence of a #298 registry defect (a model id the key cannot serve), ``ok``
+    is a served request, and everything the registry is not to blame for — rate
+    limits, account funding, auth, provider outages — collapses to ``inconc`` so
+    an automatic gate does not fail on a transient or a broke key.
+    """
+    fine = _classify_fine(status, body)
+    if fine in ("needs_human", "transient"):
+        return "inconc"
+    return fine                             # "ok" or "dead"
 
 
 def _post(url: str, headers: dict[str, str], payload: bytes) -> tuple[int, str]:
@@ -115,6 +151,30 @@ def _post(url: str, headers: dict[str, str], payload: bytes) -> tuple[int, str]:
             return resp.status, resp.read(_BODY_SNIPPET).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read(_BODY_SNIPPET).decode("utf-8", "replace")
+
+
+def _ping(link, key: str, post) -> tuple[int, str]:
+    """Build and send the one 1-token servability request for ``link``.
+
+    The single request shape ``smoke_chain`` and ``classify_chain`` both rely on
+    — one place so the two can never send a different probe. Sends both auth
+    header forms (native ``x-api-key`` and Bearer) so one request serves the
+    native and Anthropic-compatible endpoints alike; ``post`` is the injectable
+    seam. Raises ``OSError`` on a network-level failure, like ``_post``.
+    """
+    url = (link.base_url or NATIVE_BASE_URL).rstrip("/") + "/v1/messages"
+    headers = {
+        "content-type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "x-api-key": key,
+        "authorization": f"Bearer {key}",
+    }
+    payload = json.dumps({
+        "model": link.model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "ping"}],
+    }).encode("utf-8")
+    return post(url, headers, payload)
 
 
 def smoke_chain(
@@ -142,23 +202,8 @@ def smoke_chain(
             lines.append(f"skip  {where}: secret {link.secret} not set")
             continue
         attempted += 1
-        url = (link.base_url or NATIVE_BASE_URL).rstrip("/") + "/v1/messages"
-        # Both auth header forms: Anthropic's native endpoint reads x-api-key,
-        # Anthropic-compatible endpoints (Z.AI) read the Bearer token — each
-        # ignores the one it doesn't use, so one request shape serves both.
-        headers = {
-            "content-type": "application/json",
-            "anthropic-version": "2023-06-01",
-            "x-api-key": key,
-            "authorization": f"Bearer {key}",
-        }
-        payload = json.dumps({
-            "model": link.model,
-            "max_tokens": 1,
-            "messages": [{"role": "user", "content": "ping"}],
-        }).encode("utf-8")
         try:
-            status, body = post(url, headers, payload)
+            status, body = _ping(link, key, post)
         except OSError as exc:
             # A network-level failure proves nothing about the model id.
             lines.append(f"INCONC  {where}: network error — {exc} (not a registry defect)")
@@ -191,3 +236,88 @@ def smoke_chain(
             "none was proven unservable, so this is not a registry defect"
         )
     return lines, 0
+
+
+# The aggregate classes classify_chain reports, in the precedence a mixed chain
+# resolves to (highest first). `servable` wins because a single working link
+# means the chain itself is fine — the caller's exhaustion had a non-provider
+# cause. `dead` next: a proven-unservable id is an in-repo registry defect worth
+# surfacing over a co-occurring broke key. Then `needs-human` (fund/rotate the
+# key) over `transient` (retry later): only a person clears the former.
+_CLASS_PRECEDENCE = ("servable", "dead", "needs-human", "transient")
+
+# _classify_fine's verdict tokens -> the aggregate class label they contribute.
+_FINE_TO_CLASS = {
+    "ok": "servable",
+    "dead": "dead",
+    "needs_human": "needs-human",
+    "transient": "transient",
+}
+
+
+def classify_chain(
+    reg: Registry,
+    chain_id: str,
+    env: Mapping[str, str],
+    post: Optional[Callable[[str, dict[str, str], bytes], tuple[int, str]]] = None,
+) -> tuple[list[str], str]:
+    """Diagnose WHY a chain is unusable, for a caller whose own walk exhausted it.
+
+    Where ``smoke_chain`` answers "is any id a registry defect?" (its exit code),
+    this answers "what should a human/CI do about a chain that just failed on
+    every link?" — the finer question the Oracle's HITL escalation turns on. It
+    probes each configured link (the same 1-token ``_ping``) and reduces the
+    per-link ``_classify_fine`` verdicts to one aggregate class by
+    ``_CLASS_PRECEDENCE``:
+
+      * ``servable``    — a link served: the chain is fine, so the exhaustion had
+                          a non-provider cause (agent error, timeout in the real
+                          review). Not an escalation.
+      * ``dead``        — a link is a proven-unservable id (#298): a registry
+                          defect to fix in-repo. Red it.
+      * ``needs-human`` — the account is out of funds, or the key is invalid /
+                          missing: a person must fund or rotate it. Escalate via
+                          the HITL gate, do not red every PR.
+      * ``transient``   — every attempt was a retryable outage (rate limit /
+                          timeout / 5xx / network). Retry next run, no human.
+
+    Returns ``(report_lines, aggregate_class)``. Unlike ``smoke_chain`` there is
+    no exit code: the aggregate class IS the signal the caller branches on. A
+    chain with no configured secret reduces to ``needs-human`` — a human must set
+    the key — which is also why the funding and auth cases share that class.
+    """
+    if post is None:
+        post = _post   # resolved at call time so tests can patch the seam
+    lines: list[str] = []
+    seen: set[str] = set()
+    attempted = 0
+    for link in reg.resolve(chain_id):
+        where = f"link {link.position} {link.model} ({link.provider})"
+        key = env.get(link.secret, "")
+        if not key:
+            lines.append(f"skip  {where}: secret {link.secret} not set")
+            continue
+        attempted += 1
+        try:
+            status, body = _ping(link, key, post)
+        except OSError as exc:
+            seen.add("transient")
+            lines.append(f"transient   {where}: network error — {exc}")
+            continue
+        cls = _FINE_TO_CLASS[_classify_fine(status, body)]
+        seen.add(cls)
+        if cls == "servable":
+            lines.append(f"servable    {where}: served a 1-token request")
+        else:
+            lines.append(f"{cls:<11} {where}: HTTP {status} — {body}")
+    if attempted == 0:
+        # No secret set for any link: a human must configure the key — the same
+        # bucket as an invalid one, and the class the funding/auth cases share.
+        seen.add("needs-human")
+        lines.append(
+            f"needs-human chain {chain_id}: no provider secret is set — a human "
+            "must configure the key before this chain can be used"
+        )
+    aggregate = next(c for c in _CLASS_PRECEDENCE if c in seen)
+    lines.append(f"CLASS {chain_id}: {aggregate}")
+    return lines, aggregate
