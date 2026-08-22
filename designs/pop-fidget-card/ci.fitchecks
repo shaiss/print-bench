@@ -1,0 +1,10 @@
+# Print-in-place fit proofs. `fitcheck` renders every moving/fixed pairwise
+# interference — both spinner rotors vs the card+posts, the bead vs the card,
+# the hinge pin vs card and flap, and the easel flap vs the card at 0/35/70 deg
+# and at the deployed angle — and must be EMPTY (all clearances real on the
+# built mesh). `fitcheck_neg` over-rotates the flap past its designed stop and
+# MUST interfere: it proves the rotation stop exists AND that the check can
+# fail. The bead's breakaway anchor nib is a declared weld (CC2) drawn outside
+# the fitcheck bodies — see NOTES.md.
+fitcheck      empty
+fitcheck_neg  interferes
