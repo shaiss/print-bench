@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "oracle": {
+      "command": "python3",
+      "args": [".claude/skills/oracle-review/oracle_mcp.py"]
+    }
+  }
+}
