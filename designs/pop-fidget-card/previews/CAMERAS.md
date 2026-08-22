@@ -9,8 +9,10 @@
   window with the "1" flap, greeting line.
 - **hero-iso** — 3/4 view showing feature heights: spinner cones, bubble
   dome, track bar, knuckle rail.
-- **easel-open** — the flap folded out to its measured stop onset
-  (`demo_easel=108`, preview-only pose; the printed pose is 0°), close on
+- **easel-open** — the flap folded out near its measured stop onset
+  (`demo_easel=100`, preview-only pose; the printed pose is 0°), close on
   the hinge so the barrels, tongue and folded flap star (card extremities
-  crop by design). Re-framed once in review round 2 at Jane's `[saw-it]`,
-  inside the pre-freeze window; the `easel-fold` GIF shares this camera.
+  crop by design). The fold pose dropped 108° → 100° with the v0.2 hinge
+  field fix (the stop moved in); the camera is unchanged (re-framed once in
+  review round 2 at Jane's `[saw-it]`, inside the pre-freeze window). The
+  `easel-fold` GIF shares this camera.
