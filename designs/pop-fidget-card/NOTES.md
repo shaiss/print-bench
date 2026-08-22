@@ -56,8 +56,10 @@ constrains the card — resize freely against the slice clock):
   tongue's underside relief ramp (ramp_h/ramp_run) contacts the card's
   window-bottom edge at the stop angle. Flap flat-on-ground + stop ⇒ shelf
   prop angle = 180° − stop ≈ 72° (brief band 70–75). `fitcheck` proves the
-  swing is FREE at 0/35/70/104°; **`fitcheck_neg` proves the stop EXISTS**
-  (118° must interfere) — the negative control is the mechanism's own proof.
+  swing is FREE at six sampled angles 0/25/50/75/90/100° (4° margin below
+  the measured 104° free boundary); **`fitcheck_neg` proves the stop
+  EXISTS** (118° must interfere) — the negative control is the mechanism's
+  own proof.
 - **Flap root castellation.** The main plate's root sits R_k + 0.4 beyond the
   axis with a 2.5 mm 45° underside chamfer, because a full-width root at the
   hinge line sweeps into the card barrels and webs mid-swing (derived by
@@ -97,9 +99,11 @@ constrains the card — resize freely against the slice clock):
      fine), but the flap tongue was built to plate height straight under the
      tail. Tongue root retracted to `y_ax + 1.9`, outside the tail envelope;
      the flap web carries the plate-to-barrel connection.
-  3. **The rotation stop engages at ~104°** (first contact 0.15 mm³, solid by
-     ~112°), not the ~108° the guard's echo estimated — fitcheck angles are
-     set from the measured boundary, prop angle claimed from measurement.
+  3. **The measured envelope (round-3 geometry): free through 104°, first
+     stop contact at 108° (0.17 mm³), solid by 116°** — the committed empty
+     sweep stays at 100° with margin because a tessellation-sensitive
+     boundary angle is not a stable CI assertion; the prop angle is claimed
+     from measurement, not the guard's estimate.
 
 ## Time budget & drop order
 
