@@ -22,9 +22,13 @@ a fast Bambu.
 
 *The easel fold in motion — out to its ~108° built-in stop and back; the printed pose is flat (0°).*
 
+![Both bubble spinners turning](previews/spinner-flick.gif)
+
+*The hot path: the bubble spinners a thumb will work thousands of times, turning.*
+
 ![Full-card turntable](previews/turntable.gif)
 
-*Turntable spin of the whole card.*
+*All the way around the bubble — the whole card, edge-on and slim, from every side.*
 
 ## What you get
 

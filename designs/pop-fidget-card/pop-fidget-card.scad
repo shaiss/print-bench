@@ -492,8 +492,18 @@ module fixed_body() {
 }
 
 module movings() {
-    for (s = [0 : n_spin - 1])
-        spinner_rotor(s == 0 ? spin1_pos : spin2_pos, s == 0 ? spin1_or : spin2_or);
+    for (s = [0 : n_spin - 1]) {
+        // anim="spin" (animate.sh): counter-rotate the rotors one full turn
+        // per loop from $t (integer turns = seamless loop; the scallops are
+        // what read as motion). Same in-block $t rule as the easel below; at
+        // the default anim="" the transform is the exact identity, so the
+        // printable geometry is untouched.
+        p = s == 0 ? spin1_pos : spin2_pos;
+        spin_a = anim == "spin" ? 360 * $t * (s == 0 ? 1 : -1) : 0;
+        translate([p.x, p.y, 0]) rotate([0, 0, spin_a])
+            translate([-p.x, -p.y, 0])
+            spinner_rotor(p, s == 0 ? spin1_or : spin2_or);
+    }
     if (use_slid) bead();
     if (use_ease) {
         // anim="easel" (animate.sh): triangle-wave the fold from $t so the

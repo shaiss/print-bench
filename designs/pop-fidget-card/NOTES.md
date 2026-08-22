@@ -189,6 +189,13 @@ tile, not a product — the card's previews show every mechanism the tile
 carries, and a preview set would double the regen cost of a part whose whole
 job is to be printed, tuned and recycled.
 
+The easel dwelling at its stop for months is a considered non-issue (Drik
+round 3 hunch, answered): unlike the button — a sprung member storing
+bending strain in both states — the flap at its stop is a rigid body against
+a rigid ramp. The ~24 g card puts micro-scale contact stress on the ramp,
+nothing for PLA creep to work with; if the lean ever eases a degree over a
+year, it is cosmetic and the flap re-seats on the next fold.
+
 ## Field test log
 
 (none yet)
