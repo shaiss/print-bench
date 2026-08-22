@@ -147,6 +147,11 @@ steps:
 The card's square side edges are intentional: at 2.4 mm plate thickness a
 side chamfer buys nothing a thumb can feel and costs face area.
 
+The coupon ships no committed preview, also intentionally: it is a utility
+tile, not a product — the card's previews show every mechanism the tile
+carries, and a preview set would double the regen cost of a part whose whole
+job is to be printed, tuned and recycled.
+
 ## Field test log
 
 (none yet)
