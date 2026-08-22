@@ -6,9 +6,13 @@
 #
 # Usage:
 #   scripts/field-test.sh --design <name> --printer <p> --result <r> \
-#       [--settings <s>] [--deviations <d>] [--carry <c>] \
-#       [--parts <what>] [--date <YYYY-MM-DD>]
+#       [--printed-from <version>] [--settings <s>] [--deviations <d>] \
+#       [--carry <c>] [--parts <what>] [--date <YYYY-MM-DD>]
 #   scripts/field-test.sh --selftest
+#
+# --printed-from anchors the print to the design version/commit it came from
+# (e.g. "v0.2"), so a result is traceable to the exact geometry that produced
+# it — the design→print→iterate lineage.
 #
 # Required: --design, --printer, --result. The design must exist
 # (designs/<name>/<name>.scad). The "## Field test log" section is created at
@@ -33,13 +37,14 @@ need_val() { [ "$#" -ge 2 ] || die "$1 requires a value"; }
 
 # One entry block on stdout. Unset optional fields render as an em dash (or
 # "none" for carry-forward) so the shape is always complete.
-format_entry() {  # date printer parts settings result deviations carry
+format_entry() {  # date printer printed_from parts settings result deviations carry
   printf '### %s — %s\n' "$1" "$2"
-  printf -- '- **Part(s):** %s\n' "${3:-—}"
-  printf -- '- **Slicer settings:** %s\n' "${4:-—}"
-  printf -- '- **Result:** %s\n' "$5"
-  printf -- '- **Measured deviations:** %s\n' "${6:-—}"
-  printf -- '- **Carry forward:** %s\n' "${7:-none}"
+  printf -- '- **Printed from:** %s\n' "${3:-—}"
+  printf -- '- **Part(s):** %s\n' "${4:-—}"
+  printf -- '- **Slicer settings:** %s\n' "${5:-—}"
+  printf -- '- **Result:** %s\n' "$6"
+  printf -- '- **Measured deviations:** %s\n' "${7:-—}"
+  printf -- '- **Carry forward:** %s\n' "${8:-none}"
 }
 
 # Append an entry to a NOTES.md. When the "## Field test log" section is absent,
@@ -49,7 +54,7 @@ format_entry() {  # date printer parts settings result deviations carry
 # when the log is not the last thing in the file (Copilot review on #110). The
 # convention still asks for the section to be kept last; this just stops the
 # tool from placing an entry in the wrong place when it is not.
-append_entry() {  # notes date printer parts settings result deviations carry
+append_entry() {  # notes date printer printed_from parts settings result deviations carry
   local notes="$1"; shift
   [ -f "$notes" ] || die "no such NOTES.md: $notes"
   local entry; entry="$(format_entry "$@")"
@@ -97,10 +102,11 @@ selftest() {
   # 1. First entry creates the section and lands the fields.
   "$SELF" --notes-file "$notes" --printer "Bambu A1" \
     --result "slot fit snug" --deviations "slot 0.15 mm tight" \
-    --date 2026-01-02 >/dev/null || die "selftest: first append failed"
+    --printed-from v0.2 --date 2026-01-02 >/dev/null || die "selftest: first append failed"
   grep -qF '## Field test log' "$notes" || die "selftest: section not created"
   grep -qF '### 2026-01-02 — Bambu A1' "$notes" || die "selftest: entry header missing"
   grep -qF 'slot 0.15 mm tight' "$notes" || die "selftest: deviations not written"
+  grep -qF '**Printed from:** v0.2' "$notes" || die "selftest: printed-from not written"
 
   # 2. Second entry reuses the one section and adds a second entry.
   "$SELF" --notes-file "$notes" --printer "Prusa MK4" \
@@ -152,12 +158,13 @@ selftest() {
 
 # --- argument parsing -------------------------------------------------------
 design="" printer="" result="" settings="" deviations="" carry="" parts=""
-date="" notes_override=""
+printed_from="" date="" notes_override=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --selftest)    selftest; exit 0 ;;
     --design)      need_val "$@"; design="$2"; shift 2 ;;
     --printer)     need_val "$@"; printer="$2"; shift 2 ;;
+    --printed-from) need_val "$@"; printed_from="$2"; shift 2 ;;
     --result)      need_val "$@"; result="$2"; shift 2 ;;
     --settings)    need_val "$@"; settings="$2"; shift 2 ;;
     --deviations)  need_val "$@"; deviations="$2"; shift 2 ;;
@@ -182,6 +189,6 @@ else
   notes="designs/$design/NOTES.md"
 fi
 
-append_entry "$notes" "$date" "$printer" "$parts" "$settings" "$result" \
-  "$deviations" "$carry"
+append_entry "$notes" "$date" "$printer" "$printed_from" "$parts" "$settings" \
+  "$result" "$deviations" "$carry"
 echo "field-test: appended a ${date} entry to $notes"

@@ -27,6 +27,7 @@ _Real prints of this design, newest at the bottom. See templates/FIELD-TEST.md
 and docs/print-feedback.md for the convention._
 
 ### YYYY-MM-DD — <printer>
+- **Printed from:** <design version / commit this print came from, e.g. v0.2>
 - **Part(s):** <what was printed>
 - **Slicer settings:** <profile · layer height · nozzle · material · infill · supports>
 - **Result:** <what fit, what didn't, print-quality notes>

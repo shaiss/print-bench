@@ -186,13 +186,16 @@ classify() {
       esac
       case "$f" in
         # The model registry (issue #206). auto-review.yml, product-scout.yml
-        # and the four scheduled routines (design-run, backlog-burn, chunker,
-        # labeler — issue #326) are here because the drift-guard test reads
-        # them — a change to any of those workflows' chain wiring must re-run
-        # the guard that pins it to .github/models/registry.conf, or a
-        # reintroduced hardcoded model literal could ship unguarded.
+        # oracle.yml (issue #333) and the four scheduled routines (design-run,
+        # backlog-burn, chunker, labeler — issue #326) are here because the
+        # drift-guard test reads them — a change to any of those workflows' chain
+        # wiring must re-run the guard that pins it to
+        # .github/models/registry.conf, or a reintroduced hardcoded model literal
+        # could ship unguarded. (As workflows they are already soft-infra via the
+        # .github/workflows/* case above — this adds only the drift-guard selection.)
         tools/model-registry/*|.github/models/registry.conf|\
         .github/workflows/auto-review.yml|.github/workflows/product-scout.yml|\
+        .github/workflows/oracle.yml|\
         .github/workflows/design-run.yml|.github/workflows/backlog-burn.yml|\
         .github/workflows/chunker.yml|.github/workflows/labeler.yml|\
         .github/workflows/ci.yml) mrtests=true ;;
@@ -466,6 +469,13 @@ selftest() {
   check "auto-review-runs-drift-guard" "$out" "model_registry_tests=true"
   out="$(run ".github/workflows/product-scout.yml")"
   check "scout-workflow-runs-drift-guard" "$out" "model_registry_tests=true"
+  # The Oracle workflow (issue #333) is the drift guard's third consumer: an
+  # oracle.yml-only change must re-run the model-registry tests (which pin its
+  # ship steps to the oracle-* chains) and, as a workflow, is soft-infra —
+  # required contexts RUN with an empty design list.
+  out="$(run ".github/workflows/oracle.yml")"
+  check "oracle-workflow-runs-drift-guard" "$out" \
+    "model_registry_tests=true" "gate=true" "gate_designs=" "scad=true"
   # The four scheduled routines (issue #326) resolve their models from the
   # registry and are pinned by the same drift guard — each workflow path must
   # route into the model-registry test job, or a reintroduced hardcoded model
