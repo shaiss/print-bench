@@ -1,0 +1,78 @@
+name: Auto-arm auto-merge
+
+# Arms GitHub-native auto-merge (squash) on same-repo autonomy PRs the moment a
+# human marks one ready for review, so the PR merges itself once the single
+# required check (CI OK) goes green — no hand-merging, no watching CI tick over.
+#
+# Why this is safe, and why it is shaped this way:
+#
+#   * The human's act of marking the draft ready IS the merge decision. For a
+#     design PR that is exactly the shape approval the charter reserves for the
+#     human (/design-run converges on gates, hands off on taste). This workflow
+#     only reacts to that act — it never marks a draft ready, never approves,
+#     and never bypasses a check. Branch protection's required "CI OK" context
+#     is what actually gates the merge, so a red PR physically cannot merge.
+#
+#   * Enabling is done with the REGEN_TOKEN PAT, not GITHUB_TOKEN, for the same
+#     reason regen commits back with the PAT: a push made with GITHUB_TOKEN
+#     triggers no workflow. An auto-merge enabled by GITHUB_TOKEN merges to main
+#     as github-actions[bot], whose push would fire nothing — so the
+#     default-branch full-catalog gate and the telemetry append (ci.yml's
+#     on: push: branches: [main]) would silently stop running on auto-merged
+#     PRs. A PAT-enabled merge triggers the main-push run, keeping that pipeline
+#     whole. When REGEN_TOKEN is absent the job skips with a ::notice:: rather
+#     than falling back to a GITHUB_TOKEN arm that would break that invariant.
+#
+#   * This job never checks out or runs the PR head — it calls the API with
+#     event-payload data only, so the untrusted-checkout ("pwn request") class
+#     does not apply. It is scoped to same-repo claude/* heads; under the
+#     pull_request trigger a fork PR gets a read-only token and no secrets, and
+#     the same-repo guard means the PAT is only ever used on trusted branches.
+#
+#   * Escape hatch: apply the `no-auto-merge` label to hold a specific PR (the
+#     label need not exist in advance — its absence simply means "arm").
+#
+# Advisory by construction: this workflow is not one of ci-ok's needs, so a
+# failure here never blocks a merge.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+concurrency:
+  group: auto-arm-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  arm:
+    name: Arm auto-merge
+    runs-on: ubuntu-latest
+    # Same-repo claude/* heads targeting the default branch, not draft, not held.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && startsWith(github.event.pull_request.head.ref, 'claude/')
+      && github.event.pull_request.base.ref == github.event.repository.default_branch
+      && !github.event.pull_request.draft
+      && !contains(github.event.pull_request.labels.*.name, 'no-auto-merge')
+    env:
+      HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' }}
+      GH_TOKEN: ${{ secrets.REGEN_TOKEN }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Enable auto-merge (squash)
+        run: |
+          set -uo pipefail
+          if [ "$HAVE_PAT" != "true" ]; then
+            echo "::notice::REGEN_TOKEN is not set — skipping auto-merge arm. Enabling auto-merge with GITHUB_TOKEN would merge to main without triggering the default-branch gate/telemetry, so this workflow only arms with the PAT."
+            exit 0
+          fi
+          if gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --squash; then
+            echo "::notice::auto-merge armed (squash) on #$PR_NUMBER — it will merge once the required CI OK check is green"
+          else
+            echo "::warning::could not arm auto-merge on #$PR_NUMBER (it may already be mergeable with no pending checks, or REGEN_TOKEN lacks permission) — merge it by hand, or re-run this workflow while CI is pending"
+          fi
