@@ -109,3 +109,27 @@ Oracle job as a required status check in branch protection — the same
 posture `security-scan.yml` (gitleaks) documents. Do not wire it into
 `ci-ok.needs`; promotion is a human's branch-protection decision, made after
 the verdicts have earned trust.
+
+## When the opposite vendor is unusable (issue #347)
+
+This is the workflow's job, not yours — you never run when it happens, because
+every link of the opposite-vendor chain failed before an agent could start. But
+know the shape, because it decides whether a PR gets a red Oracle or a quiet
+one. On chain exhaustion `oracle.yml` runs `model-registry classify <chain>` (a
+live 1-token probe — the ship steps hide their own error, so this is the one
+step that learns the HTTP cause) and branches on the aggregate class:
+
+- **`needs-human`** — the account is out of credit, or the key is invalid /
+  missing. CI cannot fix it, so it is raised **once** through the HITL
+  `needs-decision` gate (`docs/decision-gate.md`): a single deduped tracking
+  issue keyed by a `<!-- oracle-provider-escalation:<chain> -->` marker, carrying
+  a `🚦 DECISION NEEDED` body a maintainer resolves with `/decide`. Every later
+  PR points at that one issue and does **not** re-red — the Oracle stays
+  advisory, so this warns rather than fails.
+- **`dead`** — a model id the key genuinely cannot serve (#298): an in-repo
+  registry defect, so it still reds loudly (fix `.github/models/registry.conf`).
+- **`transient`** / **`servable`** — a retryable outage, or a link that works so
+  the failure was not the provider: a `::warning::`, retry next PR, no human.
+
+The point is that a merely-unfunded key surfaces in **one findable place** a
+person acts on, instead of a wall of red Oracle checks nobody can action.

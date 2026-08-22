@@ -5,6 +5,7 @@
     model-registry chain <chain>         # the ordered model ids, one per line
     model-registry show                  # human summary of providers/models/chains
     model-registry smoke <chain>         # live 1-token ping of each configured link
+    model-registry classify <chain>      # diagnose an exhausted chain -> one class
 
 ``resolve`` is what a workflow calls: it appends ``link_count`` plus
 ``link<N>_model`` / ``link<N>_provider`` lines to ``$GITHUB_OUTPUT`` (the same
@@ -127,6 +128,31 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     return code
 
 
+def cmd_classify(args: argparse.Namespace) -> int:
+    """`classify <chain>`: diagnose an exhausted chain into one aggregate class.
+
+    Where `smoke` answers "is any id a registry defect?" (its exit code), this
+    answers "what should be done about a chain that just failed on every link?"
+    — `servable` / `dead` / `needs-human` / `transient` — the finer question the
+    Oracle's HITL escalation branches on (issue #347). It probes each configured
+    link with the same live 1-token request, prints the per-link report and the
+    aggregate to stdout, and — when a sink is available — appends `class=<token>`
+    to $GITHUB_OUTPUT (the same key=value shape `resolve` uses) so a workflow
+    step reads the verdict without a JSON parse. Exit 0 regardless of the class:
+    the class IS the signal, not the exit code (a malformed registry or unknown
+    chain still errors via main()).
+    """
+    reg = _load(args)
+    lines, klass = smoke_mod.classify_chain(reg, args.chain, os.environ)
+    for line in lines:
+        print(line)
+    gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a", encoding="utf-8") as fh:
+            fh.write(f"class={klass}\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="model-registry", description=__doc__)
     parser.add_argument("--path", default=None,
@@ -153,6 +179,15 @@ def build_parser() -> argparse.ArgumentParser:
         "smoke", help="live 1-token ping of each chain link whose secret is set")
     p_smoke.add_argument("chain", help="the chain id to smoke-test")
     p_smoke.set_defaults(func=cmd_smoke)
+
+    p_classify = sub.add_parser(
+        "classify",
+        help="diagnose an exhausted chain -> servable/dead/needs-human/transient")
+    p_classify.add_argument("chain", help="the chain id to classify")
+    p_classify.add_argument(
+        "--gh-output",
+        help="path to append `class=<token>` (defaults to $GITHUB_OUTPUT)")
+    p_classify.set_defaults(func=cmd_classify)
 
     return parser
 
