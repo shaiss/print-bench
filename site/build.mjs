@@ -46,6 +46,7 @@ import {
 } from "./lib/decisions.mjs";
 import { decisionsToNotifications } from "./lib/notifications.mjs";
 import { renderMarkdown, tocHtml } from "./lib/markdown.mjs";
+import { readServableDocs, llmsTxt, llmsFullTxt } from "./lib/llms.mjs";
 import {
   stripReadmeMedia,
   designMedia,
@@ -246,6 +247,13 @@ async function main() {
   const onAsset = (p) => assets.add(p);
   const onError = (m) => errors.push(m);
 
+  // The AI-native serving layer (llms.txt + raw markdown, see lib/llms.mjs):
+  // the contributor and architecture docs are served verbatim, each rendered
+  // page gets its markdown source served beside it, and /llms.txt indexes the
+  // lot. The docs are structured sources like rosters and lineage — a missing
+  // H1 or a broken local reference fails the build here, not a reader later.
+  const servedDocs = readServableDocs(REPO_ROOT, { onError });
+
   // Lineage credits are emitted as raw markup by the templates, so unlike
   // every link inside a product page they never pass through the markdown
   // reference checker. Check them here, or a derivative would ship a dead
@@ -442,6 +450,10 @@ async function main() {
       contents: JSON.stringify(model),
     });
 
+    // The page's markdown source, served beside the rendered page (indexed
+    // by /llms.txt) — verbatim, so an LLM reads exactly what CI gated.
+    rendered.push({ path: `${design.relDir}/README.md`, contents: design.readme });
+
     const downloads = manifestToDownloads(releaseManifests.get(design.name), {
       owner: OWNER,
       repo: REPO,
@@ -483,7 +495,23 @@ async function main() {
         users: designs.filter((d) => d.style === style.name),
       }),
     });
+    rendered.push({ path: `${style.relDir}/STYLE.md`, contents: style.spec });
   }
+
+  // The served docs (verbatim) and the llms.txt index over everything above.
+  for (const doc of servedDocs) {
+    rendered.push({ path: doc.relPath, contents: doc.text });
+  }
+  rendered.push({
+    path: "llms.txt",
+    contents: llmsTxt({
+      docs: servedDocs,
+      designs,
+      styles,
+      repoUrl: `https://github.com/${OWNER}/${REPO}`,
+    }),
+  });
+  rendered.push({ path: "llms-full.txt", contents: llmsFullTxt(servedDocs) });
 
   // The gallery needs its card media even though no rendered markdown
   // references them: the cards are built from structured data, not prose.
@@ -600,7 +628,10 @@ async function main() {
   }
 
   const models = rendered.filter((p) => p.path.endsWith("model.json")).length;
-  const pageCount = rendered.length - models + 1 + (styles.length ? 1 : 0);
+  const mdFiles = rendered.filter(
+    (p) => p.path.endsWith(".md") || p.path.endsWith(".txt")
+  ).length;
+  const pageCount = rendered.length - models - mdFiles + 1 + (styles.length ? 1 : 0);
   console.log(
     `site: ${pageCount} pages, ${assets.size} assets ` +
       `(${(assetBytes / 1024 / 1024).toFixed(1)} MB) → ${relative(REPO_ROOT, out) || out}`
@@ -623,6 +654,10 @@ async function main() {
   console.log(
     `      avatar studio: DiceBear ${(dicebearBytes / 1024 / 1024).toFixed(1)} MB, ` +
       `${DICEBEAR_PKGS.length - 1} styles (vendored, MIT, lazy-loaded)`
+  );
+  console.log(
+    `      llms: /llms.txt + /llms-full.txt, ${mdFiles} markdown/txt sources served ` +
+      `(${servedDocs.length} docs verbatim)`
   );
 }
 

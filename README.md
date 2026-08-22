@@ -133,6 +133,17 @@ For how the system is put together — the generic CI/automation platform
 separated from the 3D-print design layer, written as the basis for a reusable
 template — see [docs/architecture/](docs/architecture/README.md).
 
+## Want to work on the platform?
+
+The contributor guide lives in [docs/contributing/](docs/contributing/README.md)
+(entry point: [CONTRIBUTING.md](CONTRIBUTING.md)) — environment setup, the gate
+system, the house conventions, recipes for each kind of change, and how a PR
+lands here. The guide is AI-native by design: plain markdown in the repo,
+served machine-readably by the product site with an
+[llms.txt](https://llmstxt.org/) index at the site root — the routes table in
+[site/README.md](site/README.md) is the authoritative list of what is served
+where.
+
 ## Operating the automation
 
 Most of this repo's CI drives itself, but a few controls are exposed to

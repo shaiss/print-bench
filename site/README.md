@@ -26,6 +26,10 @@ install and build commands), so a green local build means the deploy builds.
 | `/people/` | every `people/<handle>.md` — the product cores and the `shared: true` review specialists — as full member profiles with the product teams each has been on |
 | `/how-it-works/` | a behind-the-scenes of the pipeline, presented from the committed architecture docs (`docs/architecture/*.md`); every mechanism links to the file that implements it |
 | `/designs/<name>/` (team section) | for a design with a committed `team.conf`, the product page also carries a "team contributions" section: who built it (identity, linking to their `/people/` profile), a light reviewed-by reference, and the build-history timeline (its `PM.md` decision log and `NOTES.md` field tests, plus — on the Vercel deploy — its own git commits) |
+| `/llms.txt` | the machine-readable index of every markdown source the site serves ([llms.txt](https://llmstxt.org/) convention), derived from the docs' own titles and summaries — never hand-maintained (`lib/llms.mjs`) |
+| `/llms-full.txt` | the platform docs (contributing + architecture) concatenated into one fetch |
+| `/docs/contributing/*.md`, `/docs/architecture/*.md` | the contributor and architecture docs, served **verbatim** as raw markdown (so their repo-relative links resolve in the repo, not necessarily on this host — see the scoped exception under "Two decisions worth knowing") |
+| `/designs/<name>/README.md`, `/styles/<name>/STYLE.md` | the markdown source of each rendered page, served beside it |
 
 Adding a design requires no edit here — the generator finds it by the same
 entry-point rule `gate.sh` and `gallery.sh` use.
@@ -42,7 +46,13 @@ to GitHub, where they really live.
 **A broken local reference fails the build.** Every non-external link and
 image is resolved against the filesystem; anything missing is collected and
 reported, and the build exits non-zero. A link that would 404 in production
-stops the deploy instead.
+stops the deploy instead. One scoped exception: markdown served **verbatim**
+(the `/docs/**.md` routes and the per-page `.md` sources below) is by
+definition never rewritten, so its repo-relative links are checked against
+the **repo tree** — they resolve in a checkout or on GitHub, and a link to a
+file the site doesn't serve (`CLAUDE.md`, a script) 404s on the served host
+by design. The no-404 rule governs rendered pages; verbatim sources trade it
+for byte-fidelity with the repo.
 
 **Lineage is ported, not re-derived — and the port is cross-checked.** Index
 order and nesting come from the lineage record, so a derivative appears under
@@ -229,6 +239,13 @@ things keep it consistent with the rest of the site:
 - `lib/content.mjs` — what exists: designs, styles, pitches, parts, previews
 - `lib/lineage.mjs` — `derives.conf` → gallery order and parentage, ported from `tools/lineage`
 - `lib/markdown.mjs` — markdown → HTML, link resolution and rewriting
+- `lib/llms.mjs` — the AI-native serving layer: discovers the docs served
+  verbatim (`docs/contributing/`, `docs/architecture/`), checks their local
+  references against the repo tree (served raw means nothing rewrites them,
+  so a broken link must fail the build here), and derives `/llms.txt` +
+  `/llms-full.txt` from the served set — the index cannot drift from the tree
+  because it is a function of it; `test/llms.test.mjs` pins the rules and
+  censuses the real repo's doc set
 - `lib/scadparams.mjs` — Customizer parameters and include closure from a `.scad`
 - `lib/team.mjs` — the roster layer (issue #123): `people/<handle>.md` + `designs/<name>/team.conf` + the interim `people/work.conf` recent-work manifest (issue #124) → resolved member records, agent mandates read from their charters at build time; an unresolvable handle, mandate source, or cited work artifact fails the build
 - `lib/profile.mjs` — the reusable member profile component (issue #124): identity, cited mandate, team chips, scope-filtered recent work; the People page renders it in the cross-team scope
