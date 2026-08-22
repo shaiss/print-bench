@@ -54,13 +54,13 @@ constrains the card — resize freely against the slice clock):
   weak fusion you shear on the first slide, exactly the captive-spinner's
   break-free move. It is drawn OUTSIDE the fitcheck bodies as a declared weld,
   so the clearance proof stays honest.
-- **Easel stop = root relief ramp.** The flap swings out the back; nothing
-  external limits it, so the flap's own root geometry is the stop: the hinge
-  tongue's underside relief ramp (ramp_h/ramp_run) contacts the card's
-  window-bottom edge at the stop angle. Flap flat-on-ground + stop ⇒ shelf
-  prop angle = 180° − stop. After the v0.2 hinge field fix (below) the stop
-  engages ~98–104° ⇒ prop ~76–80°. `fitcheck` proves the swing is FREE at six
-  sampled angles 0/25/50/75/90/**92°** (below the ~96° free boundary);
+- **Easel stop = plate-root chamfer corner.** The flap swings out the back;
+  nothing external limits it, so the flap's own root geometry is the stop.
+  Since v0.3 (below) that stop is the **plate-root chamfer corner** contacting
+  the card's window-bottom edge — the tongue relief ramp is gone. Flap
+  flat-on-ground + stop ⇒ shelf prop angle = 180° − stop. The stop engages
+  ~97–99° ⇒ prop ~76–80°. `fitcheck` proves the swing is FREE at six sampled
+  angles 0/25/50/75/90/**92°** (below the ~96° free boundary);
   **`fitcheck_neg` proves the stop EXISTS** (`easel_deploy + easel_overshoot`
   = 110° must interfere) — the negative control is the mechanism's own proof.
 - **Hinge field fix (v0.2 — the living-hinge/mid-air failure).** The first
@@ -89,6 +89,29 @@ constrains the card — resize freely against the slice clock):
   degrees steeper beats a flexure that cracks. Config-off is unchanged and
   clean: `with_easel = false` drops the window, knuckles, flap and pin, and
   the card fills solid where the window was.
+- **Hinge field fix v0.3 — kill the residual living hinge (owner call).** v0.2
+  *grounded* the plate-side neck but only *shortened* the tongue relief ramp
+  (`ramp_run 5.75 → 2.0`); it left the ramp cutting `ramp_h = 1.6` deep at the
+  tongue root (y ≈ 18.15), so the tongue still had a **~0.8 mm ramped section**
+  there — a living-hinge flexure sitting in *series* with the real pin hinge.
+  The owner, reprinting, flagged exactly this: *"we have a real hinge; we don't
+  need a living hinge too."* Correct — a thin PLA flexure across the fold line
+  is the crack-prone part, and it does a job the swivel pin already does. Fix:
+  **remove the tongue relief ramp entirely** (`ramp_h`/`ramp_run` deleted). The
+  tongue is now a **full-thickness (card_t = 2.4 mm) rigid link**; all folding
+  is the pin hinge. Re-proven on the interference sweep (flap ∩ fixed body, the
+  Manifold engine): with the ramp gone the flap is **free through 96°**, first
+  contacts the plate-root chamfer stop at **97°** (0.006 mm³), firm by 98–99°.
+  So the ramp was **vestigial** — the plate-root chamfer corner, not the ramp,
+  was always the actual stop (v0.2's own comment admitted "the plate-root
+  corner *is* the fold limiter"). Net: same stop (~97–99° vs ~98–104°), same
+  prop (~76–80°), a rigid tongue with no thin flexure anywhere. Also nudged the
+  embossed **"1" down 1 mm** (`(plate_root+ftop)/2 − 8.5 → − 9.5`) so its base
+  sits clear of the fold line — the "1" already cleared the hinge by ~6 mm in
+  the mesh, so what read as *the "1" fusing the kickstand* on the v0.1 print was
+  the living-hinge blob, now removed; the nudge is cosmetic margin. `easel-open`
+  preview pose and the `easel-fold` animation retimed 100° → 96°/95° to track
+  the new stop (camera frozen; only the pose angle moved).
 - **Flap root castellation.** The main plate's root sits R_k + 0.4 beyond the
   axis with the (now 0.6 mm) bottom-corner chamfer, because a full-width root
   at the hinge line sweeps into the card barrels and webs mid-swing (derived

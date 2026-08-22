@@ -37,7 +37,9 @@ a fast Bambu.
 - `pop-fidget-card-coupon` — a 72 × 56 mm "print this first" tile with **all
   four mechanisms** (spinner, slider, hinge, pop button): a ~45-minute tile
   that saves an ~80-minute reprint, and the only way to feel the button's
-  snap before the card commits.
+  snap before the card commits. **The hinge is why this matters** — it's what
+  failed the first real print, so fold the coupon's easel once and confirm it
+  swings clean before you commit the full card.
 
 ## Print settings
 
@@ -52,17 +54,19 @@ a fast Bambu.
 - **Infill:** 15 % (the plate is mostly top/bottom skins)
 - **Supports:** none needed — every overhang is 45° by construction
 - **Brim:** none — the moving parts are bed-anchored islands
-- **Seam:** Back or scarf, not Aligned — the rotor bores are a mating
-  surface, and an aligned seam stacks a ridge on both walls of the 0.2 mm
-  gap. If a rotor stays stiff after break-in, also set gap-closing to
+- **Seam:** Back or scarf, not Aligned — the rotor bores **and the hinge
+  barrels** are mating surfaces (the pin rotates inside the barrels), and an
+  aligned seam stacks a ridge down the bore that stiffens the spin or the
+  fold. If a rotor stays stiff after break-in, also set gap-closing to
   0.1 mm (the 0.2 mm default merges exactly this clearance) and re-check on
   the coupon
 - **Orientation:** as modeled, face up
 - **First motion — break it in before you gift it:** spin both rotors and
   push the bead firmly once (this shears the deliberate break-free welds),
-  pop the button a few times, fold the easel out to its stop (~76–80° shelf
-  prop). Doing this the night before means the parents receive a working
-  toy, and a mushy button surfaces at your desk, not at the party
+  pop the button a few times, fold the easel out to its stop (~76–80° leg
+  angle → the card leans ~12–15° back off vertical). Doing this the night
+  before means the parents receive a working toy, and a mushy button
+  surfaces at your desk, not at the party
 
 A note for gift-givers: this is a keepsake for the grown-ups' shelf. It is
 print-in-place, so nothing detaches by design, but it is **not a teether** —
@@ -72,7 +76,7 @@ don't hand it to the birthday kid unsupervised.
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `card_name` | `""` | The child's name — set at slice time with `-D 'card_name="ALEX"'`; empty prints the generic card. Setting a name **auto-shortens** the greeting (drops "BIRTHDAY") so `HAPPY 1st, <name>!` fits at full stroke width for names up to ~15 letters; a longer name fails the render with a clear error (shorten the name, or set `greeting_named`) |
+| `card_name` | `""` | The child's name — set at slice time with `-D 'card_name="ALEX"'`; empty prints the generic card. Setting a name **auto-shortens** the greeting (drops "BIRTHDAY") so `HAPPY 1st, <name>!` fits at full stroke width for names up to ~15 letters; a longer name fails the render with a clear error (shorten the name, or set `greeting_named`). The committed previews are all the generic card, so **slice-preview your name once** before committing the 2½-hour print — it's the one line no preview here can show you |
 | `greeting` | `HAPPY 1st BIRTHDAY` | Bottom line on the **unnamed** card (`!` appended) |
 | `greeting_named` | `HAPPY 1st` | Bottom line on the **named** card — the name and `!` are appended (`HAPPY 1st, ALEX!`) |
 | `spinner_count` | 2 | Bubble spinners (0–2) — drop to 1 to shave a measured ~11 minutes, the only time lever that pays (NOTES.md has the sweep; infill and card size barely move the meter) |
@@ -100,6 +104,8 @@ will still snap for the second birthday. Printing it "stronger" doesn't
 help: a deeper dome raises snap force and stored strain together. If a
 fit is off, retune its parameter on the coupon and reprint. This design has
 one real print behind it (2026-08-22, PLA) — the field-test log in NOTES.md
-records what it found and what v0.2 changed (a hinge robustness fix, a
-PLA-softer button beam, a sliceable bubble-shine, and an auto-shortened
-named greeting).
+records what it found and what changed since. v0.2 addressed a PLA-softer
+button beam, a sliceable bubble-shine, and an auto-shortened named greeting;
+**v0.3 finished the hinge fix** — the fold-out tongue is now a full-thickness
+rigid link (the pin hinge does all the folding), so there is no thin living
+hinge to crack in PLA.
