@@ -123,31 +123,25 @@ hinge_clear = 0.4;
 axial_gap = 0.6;
 // Flap-to-window perimeter gap (mm)
 flap_gap = 0.5;
-// Tongue relief ramp rise at the flap root (mm) — with ramp_run this sets the
-// rotation stop, i.e. the shelf prop angle (see NOTES.md)
-ramp_h = 1.6;
-// Tongue relief ramp run from the root (mm). FIELD FIX: was 5.75, which tapered
-// the relief all the way UP into the plate-to-tongue neck at y~20.8, leaving a
-// 0.36 mm ligament floating ~2 mm off the bed — the "very thin living hinge"
-// that cracked in PLA, printed as a sagging mid-air bridge. The fold collision
-// is only at the window bottom edge (y~12), never at the neck, so the ramp only
-// needs to reach the barrel side; tapering to zero by y~20.1 keeps the neck a
-// grounded 2.15 mm solid (measured — NOTES.md "Hinge field fix").
-ramp_run = 2.0;
-// 45° relief chamfer on the main plate's root underside (mm). FIELD FIX: was
-// 2.5 (> card_t, i.e. it cut the FULL plate thickness at the root edge and was
-// the primary neck-killer). The swing collision is only 0.9 mm deep at the bed,
-// so a modest 0.6 mm bottom-corner chamfer clears it while the neck stays thick.
+// (v0.3 removed the tongue relief ramp — ramp_h / ramp_run — outright. It was a
+// living-hinge flexure in series with the real pin hinge and had no job the pin
+// doesn't do; the tongue is now a full-thickness rigid link. See flap_body() and
+// NOTES.md "Hinge field fix v0.3".)
+// 45° relief chamfer on the main plate's root underside (mm) — the ONLY hinge
+// relief left. Its bottom-corner bevel clears the 0.9 mm-deep swing collision at
+// the window edge, and that same corner meeting the window edge sets the rotation
+// stop (the shelf prop angle). Keep small: it bevels one edge, it must not thin
+// the neck (v0.2's 2.5 mm value cut the full plate thickness — the original bug).
 root_chamfer = 0.6;
 // Deployed fit-check angle (deg past stowed) — must clear; the stop must
-// catch by easel_deploy + easel_overshoot (the fitcheck_neg). Lowered from 100
-// with the shallower relief (the grounded neck trades ~10° of fold): the flap
-// is free through ~96° and the stop catches by ~104° (measured, NOTES.md).
+// catch by easel_deploy + easel_overshoot (the fitcheck_neg). With the tongue
+// ramp gone (v0.3), the plate-root chamfer alone stops the fold: the flap is
+// free through ~96° and first contacts the stop at ~97° (measured, NOTES.md).
 easel_deploy = 92;
 // Over-rotation used by fitcheck_neg (deg past easel_deploy)
 easel_overshoot = 18;
 // Preview-only: fold the easel flap out (deg). PRINT AT 0.
-demo_easel = 0; // [0:4:100]
+demo_easel = 0; // [0:4:96]
 
 /* [Clearances — CC3 anisotropy] */
 // Layer height axial gaps are quantized to (mm)
@@ -475,18 +469,22 @@ module flap_body() {
                 pip_hinge(pin_d, hinge_clear, knuckle_wall, barrel_len);
             translate([kx(1) - barrel_len / 2, y_ax + pin_d / 2 + hinge_clear + 0.15, 0])
                 cube([barrel_len, R_k - (pin_d / 2 + hinge_clear + 0.15) + 0.8, z_ax]);
-            // big "1" embossed on the flap face
-            translate([(fw0 + fw1) / 2, (plate_root + ftop) / 2 - 8.5, face - 0.3])
+            // big "1" embossed on the flap face. v0.3: dropped 1 mm off the
+            // fold line (field note) so its base sits clear of the tongue/hinge.
+            translate([(fw0 + fw1) / 2, (plate_root + ftop) / 2 - 9.5, face - 0.3])
                 linear_extrude(emboss_h + 0.3)
                     text("1", size = coupon ? 14 : 24, font = font, halign = "center");
         }
-        // tongue relief ramp: the underside rise whose contact with the window
-        // edge IS the rotation stop (sets the prop angle — NOTES.md)
-        translate([kx(1) - barrel_len / 2 - 0.01, tongue_root - 0.01, 0])
-            rotate([0, 90, 0])
-                linear_extrude(barrel_len + 0.02)
-                    polygon([[0.01, 0], [0.01, ramp_run + 0.01], [-ramp_h, 0]]);
-        // 45° root chamfer on the main plate underside (swing relief)
+        // v0.3 FIELD FIX — removed the tongue relief ramp entirely. It thinned
+        // the tongue root to ~0.8 mm: a living-hinge flexure sitting in SERIES
+        // with the real pin hinge, and PLA living hinges crack. We have a swivel
+        // hinge, so the fold is wholly the pin's job and the tongue is now a
+        // full-thickness (card_t) rigid link. The interference sweep proves the
+        // ramp was vestigial — with it gone the flap is still free through ~96°
+        // and the plate-root chamfer below (not the ramp) is what stops it.
+        //
+        // 45° root chamfer on the main plate underside — the swing relief whose
+        // corner meets the window edge and IS the rotation stop (prop angle).
         translate([fw0 - 0.01, plate_root - 0.01, 0]) rotate([0, 90, 0])
             linear_extrude(fw1 - fw0 + 0.02)
                 polygon([[0.01, 0], [0.01, root_chamfer + 0.01], [-root_chamfer, 0]]);
@@ -541,13 +539,13 @@ module movings() {
     if (use_slid) bead();
     if (use_ease) {
         // anim="easel" (animate.sh): triangle-wave the fold from $t so the
-        // GIF loops seamlessly — 0 at $t=0, ~100 deg (just shy of the measured
-        // stop onset) at $t=0.5, back to 0 as $t -> 1. Mapped HERE, inside the
-        // geometry block, never in a top-level assignment: top-level
-        // assignments evaluate before a -D '$t=...' override lands (CLAUDE.md).
-        // At the default anim="" this is exactly flap(demo_easel), so the
-        // printable geometry is untouched.
-        ease_a = anim == "easel" ? 100 * (1 - abs(2 * $t - 1)) : demo_easel;
+        // GIF loops seamlessly — 0 at $t=0, ~95 deg (just shy of the measured
+        // ~97 deg stop onset — v0.3) at $t=0.5, back to 0 as $t -> 1. Mapped
+        // HERE, inside the geometry block, never in a top-level assignment:
+        // top-level assignments evaluate before a -D '$t=...' override lands
+        // (CLAUDE.md). At the default anim="" this is exactly flap(demo_easel),
+        // so the printable geometry is untouched.
+        ease_a = anim == "easel" ? 95 * (1 - abs(2 * $t - 1)) : demo_easel;
         flap(ease_a);
         hinge_pin();
     }
@@ -576,10 +574,11 @@ module guards() {
     assert(shine_d == 0 || shine_d >= 1.2,
            "bubble-shine dot under 3 nozzle widths — the slicer will drop it (the field-test crescent failure). Use 0 to disable, or >= 1.2");
     if (use_ease)
-        // measured on the export with the pairwise matrix (NOTES.md): flap
-        // free through ~96 deg, first stop contact ~98-100, solid by ~104 —
-        // the grounded-neck field fix traded ~10 deg of fold for a rigid hinge
-        echo("easel: stop engages ~98-104 deg (measured) -> shelf prop ~76-80 deg (brief: 70-75; +~5 deg from the hinge field fix, see NOTES.md)");
+        // measured on the export with the interference sweep (NOTES.md): with
+        // the tongue ramp removed (v0.3) the flap is free through ~96 deg, first
+        // contacts the plate-root stop at ~97 deg, firm by ~99 — a rigid tongue,
+        // no living-hinge flexure; the shelf prop is unchanged
+        echo("easel: stop engages ~97-99 deg (measured) -> shelf prop ~76-80 deg (brief: 70-75; see NOTES.md 'Hinge field fix v0.3')");
     if (use_tog) echo(str("pop button: predicted travel ~", tog_travel, " mm"));
     if (use_slid) echo(str("slider travel: ", travel, " mm (brief: >= 40)"));
 }
@@ -595,8 +594,8 @@ module main() {
             }
         if (use_slid) intersection() { bead(); fixed_body(); }
         if (use_ease) {
-            // sampled through the swing (offline matrix: free at every step
-            // through ~96; first stop contact ~98-100; solid by ~104)
+            // sampled through the swing (offline sweep: free at every step
+            // through ~96; first stop contact ~97; firm by ~99 — v0.3)
             for (a = [0, 25, 50, 75, 90, easel_deploy])
                 intersection() { flap(a); fixed_body(); }
             intersection() { hinge_pin(); fixed_body(); }
