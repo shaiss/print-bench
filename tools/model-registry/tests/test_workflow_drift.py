@@ -482,3 +482,298 @@ def test_oracle_drift_guard_catches_a_dropped_backstop():
         step, step.replace("--settings .claude/oracle-settings.json ", "", 1), 1)
     with pytest.raises(AssertionError):
         _assert_oracle_chain_pinned(tampered, "oracle-anthropic", "anth")
+
+
+# ── The four scheduled routines (issue #326) ─────────────────────────────────
+#
+# The burn, the design run, the chunker and the labeler are the registry's
+# third consumer group, migrated in #326. Their shape is the scout's
+# (a per-routine chain resolved in the same job that consumes it,
+# steps.chain.outputs) with one walk-specific addition: a ship step per LINK
+# per provider, so the chain can deepen (#327) without the provider split
+# (the Actions literal-secret constraint) changing shape.
+#
+# What the guard below proves, derived from the registry — never restated:
+#
+# * each routine's chain exists and every link's provider equals the provider
+#   its .github/<routine>.conf declares (the run-time cross-check's subject —
+#   caught here pre-merge so the workflow never spends a key against the
+#   wrong endpoint);
+# * every claude-code-action step in the workflow takes --model from
+#   steps.chain.outputs.link<N>_model for a real link N of that chain — a
+#   hardcoded literal, or a reference to a link the chain doesn't have, fails;
+# * each step's literal secret matches its provider's registry secret (with
+#   design-run's documented CLAUDE_KEY alias marker), and each Z.AI step
+#   carries the registry's base_url — so a step can't be rewired to another
+#   provider's auth silently;
+# * the walk is real: each link-N step (N>1) must be gated on the earlier
+#   links of its block NOT having succeeded, so a deepened chain actually
+#   walks rather than running every link unconditionally;
+# * the run steps still gate on key_present (the #326 constraint that the
+#   secret-absent path stays a ::notice:: skip, verbatim from before).
+#
+# The ROUTINES table drives everything; adding a fifth routine is a row here
+# plus its chain in the registry.
+
+ROUTINES = {
+    # workflow file → (chain id, conf file, provider the conf declares)
+    "design-run.yml":   ("design-run",   ".github/design-run.conf"),
+    "backlog-burn.yml": ("backlog-burn", ".github/backlog-burn.conf"),
+    "chunker.yml":      ("chunker",      ".github/chunker.conf"),
+    "labeler.yml":      ("labeler",      ".github/labeler.conf"),
+}
+
+# An explicit in-workflow marker naming a step's secret as an alias for a
+# registry provider's declared secret: `registry-secret-alias:
+# <alias>=<registry-secret>` (design-run's anthropic link wires CLAUDE_KEY, a
+# historical alias for the same credential as ANTHROPIC_API_KEY; both exist as
+# repo secrets). Rewiring the secret would be a behavior change beyond #326's
+# scope, so the marker is the accepted evidence instead — and the named
+# registry secret is what identifies the provider (so the endpoint check still
+# pins the step to a real provider's base_url).
+_ALIAS_MARKER = "registry-secret-alias:"
+
+
+def _routine_text(workflow: str) -> str:
+    return (REPO_ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+
+
+def _routine_provider(conf: str) -> str:
+    """The `provider:` value the routine's conf declares (last assignment wins)."""
+    text = (REPO_ROOT / conf).read_text(encoding="utf-8")
+    values = re.findall(r"^provider:\s*(\S+)\s*$", text, re.MULTILINE)
+    assert values, f"{conf} declares no provider:"
+    return values[-1]
+
+
+def _routine_ship_steps(text: str) -> list[dict]:
+    """The routine job's claude-code-action steps, in order, as parsed wiring."""
+    steps: list[dict] = []
+    for chunk in re.split(r"\n      - ", text):
+        if "uses: anthropics/claude-code-action" not in chunk:
+            continue
+        model = re.search(
+            r"--model \$\{\{ steps\.chain\.outputs\.link(\d+)_model \}\}", chunk)
+        secret = re.search(r"anthropic_api_key: \$\{\{ secrets\.(\w+) \}\}", chunk)
+        base = re.search(r"ANTHROPIC_BASE_URL: (\S+)", chunk)
+        steps.append({
+            "link": int(model.group(1)) if model else None,
+            "secret": secret.group(1) if secret else None,
+            "base_url": base.group(1) if base else "",
+            "alias": _ALIAS_MARKER in chunk,
+            "gates_on_key": "key_present == '1'" in chunk,
+            "chunk": chunk,
+        })
+    return steps
+
+
+def _marker_registry_secret(step: dict) -> str:
+    """The registry secret a step's alias marker names it equivalent to."""
+    m = re.search(re.escape(_ALIAS_MARKER) + r"\s*(\w+)=([A-Za-z0-9_]+)",
+                  step["chunk"])
+    assert m, (
+        f"a step carries {_ALIAS_MARKER!r} but not in the "
+        "'<alias>=<registry-secret>' form — the named registry secret is what "
+        "pins the step's provider/endpoint")
+    return m.group(2)
+
+
+def test_routine_chains_exist_and_match_their_confs():
+    # Each routine's chain must exist AND sit on the provider its conf
+    # declares — the run-time cross-check's subject, caught pre-merge. A chain
+    # on another provider would make the workflow's resolve step fail before
+    # any key is spent, so a routine would never run at all: fail here first.
+    reg = Registry.load(str(REGISTRY))
+    for workflow, (chain_id, conf) in ROUTINES.items():
+        assert chain_id in reg.chains, (
+            f"the `{chain_id}` chain (consumed by {workflow}) is missing from "
+            "the registry — the workflow's resolve step would fail at run time")
+        conf_provider = _routine_provider(conf)
+        for link in reg.resolve(chain_id):
+            assert link.provider == conf_provider, (
+                f"{workflow}: link {link.position} of `{chain_id}` is on provider "
+                f"{link.provider!r} but {conf} declares provider {conf_provider!r} — "
+                "the walk would spend that link's key against the wrong endpoint")
+
+
+def test_every_routine_ship_step_is_pinned_to_its_chain():
+    """Every ship step sources --model from a real link of its routine's chain,
+    and the step that can actually run is pinned to the conf's provider exactly.
+
+    Two tiers, the scout guard's split: the conf's `provider:` label picks
+    which BLOCK runs, so the block on that provider must match the chain's
+    wiring exactly (secret + endpoint). The OTHER provider's block is latent —
+    it runs only after someone flips the conf AND the registry chain together
+    (the resolve step's cross-check refuses anything else) — so it is checked
+    structurally: its model must still be a real chain link, and its
+    secret/endpoint must identify exactly one declared registry provider, so
+    the latent step cannot rot while nobody runs it.
+    """
+    reg = Registry.load(str(REGISTRY))
+    for workflow, (chain_id, conf) in ROUTINES.items():
+        links = reg.resolve(chain_id)
+        link_positions = {link.position for link in links}
+        conf_provider = _routine_provider(conf)
+        secrets_by_provider = {p.id: p.secret for p in reg.providers.values()}
+        bases_by_provider = {p.id: p.base_url for p in reg.providers.values()}
+        steps = _routine_ship_steps(_routine_text(workflow))
+        assert steps, f"no claude-code-action ship step found in {workflow}"
+        matched_current = False
+        for step in steps:
+            assert step["link"] in link_positions, (
+                f"{workflow}: a ship step references link{step['link']}_model, "
+                f"but the `{chain_id}` chain has links {sorted(link_positions)} "
+                "— add the registry link or fix the reference")
+            assert step["secret"] is not None, (
+                f"{workflow}: a ship step wires no literal anthropic_api_key secret")
+            # Which provider does this step's wiring identify? An alias marker
+            # names the registry secret (and so the provider) explicitly; a
+            # plain secret identifies it by uniqueness among declared providers.
+            if step["alias"]:
+                named = _marker_registry_secret(step)
+                named_providers = [pid for pid, s in secrets_by_provider.items()
+                                   if s == named]
+                assert len(named_providers) == 1, (
+                    f"{workflow}: a step's {_ALIAS_MARKER} names {named}, which "
+                    f"matches no single registry provider ({named_providers})")
+                step_provider = named_providers[0]
+            else:
+                providers_with_secret = [pid for pid, s in secrets_by_provider.items()
+                                         if s == step["secret"]]
+                assert len(providers_with_secret) == 1, (
+                    f"{workflow}: a ship step wires secrets.{step['secret']}, which "
+                    f"matches no single registry provider (matches: "
+                    f"{providers_with_secret})")
+                step_provider = providers_with_secret[0]
+            # Either way the endpoint must be that provider's, exactly — a
+            # step wired for one provider's secret against another's endpoint
+            # is the wrong-endpoint spend this guard exists to prevent.
+            assert step["base_url"] == bases_by_provider[step_provider], (
+                f"{workflow}: a ship step for provider {step_provider!r} carries "
+                f"ANTHROPIC_BASE_URL {step['base_url']!r} but the registry "
+                f"endpoint is {bases_by_provider[step_provider]!r}")
+            if step_provider == conf_provider:
+                # The step that will actually run (the resolve step's
+                # cross-check already proved every chain link is on this
+                # provider) must exist — a missing one would leave the
+                # routine with no runnable step.
+                matched_current = True
+        assert matched_current, (
+            f"{workflow}: no ship step is wired for provider {conf_provider!r} "
+            f"(the provider {conf} declares) — the routine would have no step "
+            "to run, or would run one wired for another provider's endpoint")
+
+
+
+def test_routine_walks_its_chain_in_order():
+    # A deepened chain (#327) must actually WALK: every link-N step with N>1
+    # is gated on the earlier links of its block not having succeeded, so the
+    # first success short-circuits the rest. Single-link chains (today's
+    # #326 state) trivially pass — there is no second link to gate.
+    reg = Registry.load(str(REGISTRY))
+    for workflow, (chain_id, _conf) in ROUTINES.items():
+        links = reg.resolve(chain_id)
+        steps = _routine_ship_steps(_routine_text(workflow))
+        by_link: dict[int, list[dict]] = {}
+        for step in steps:
+            by_link.setdefault(step["link"], []).append(step)
+        for n in range(2, len(links) + 1):
+            assert n in by_link, (
+                f"{workflow}: the `{chain_id}` chain has a link {n} but no ship "
+                "step references it — a registry edit landed without its "
+                "workflow half (the walk stops at link 1)")
+            for step in by_link[n]:
+                for earlier in range(1, n):
+                    block = _step_block_id(steps, earlier, step)
+                    assert block is not None, (
+                        f"{workflow}: link {n} has no same-block link {earlier} "
+                        "step to gate on")
+                    assert f"steps.{block}.outcome != 'success'" in step["chunk"], (
+                        f"{workflow}: the link-{n} step is not gated on "
+                        f"steps.{block}.outcome != 'success' — the walk would run "
+                        "every link unconditionally instead of stopping at the "
+                        "first success")
+
+
+def _step_block_id(steps: list[dict], link: int, sibling: dict) -> str | None:
+    """The step id of the link-`link` step in `sibling`'s provider block."""
+    m = re.search(r"^\s*id:\s*(\S+)", sibling["chunk"], re.MULTILINE)
+    own_id = m.group(1) if m else ""
+    for step in steps:
+        if step["link"] != link:
+            continue
+        s = re.search(r"^\s*id:\s*(\S+)", step["chunk"], re.MULTILINE)
+        other = s.group(1) if s else ""
+        # Same block ⇔ the ids share their provider suffix family (e.g.
+        # ship_zai_1 / ship_zai_2). Match on the longest common prefix ending
+        # at the link digit.
+        base_own = re.sub(r"_\d+$", "", own_id)
+        base_other = re.sub(r"_\d+$", "", other)
+        if base_own == base_other:
+            return other
+    return None
+
+
+def test_routine_run_steps_gate_on_key_presence():
+    # #326 requires the degraded path preserved verbatim: the run steps gate
+    # on key_present (an absent key skips them with a ::notice::, never a hard
+    # fail), exactly as before the migration.
+    for workflow in ROUTINES:
+        steps = _routine_ship_steps(_routine_text(workflow))
+        assert steps, f"no ship steps in {workflow}"
+        for step in steps:
+            assert step["gates_on_key"], (
+                f"{workflow}: a ship step does not gate on key_present == '1' — "
+                "an absent provider key would not skip it")
+
+
+def test_no_hardcoded_model_literal_in_any_routine():
+    # The #326 acceptance criterion as a test: no --model literal of ANY
+    # provider may appear in any of the four routine workflows.
+    for workflow in ROUTINES:
+        text = _routine_text(workflow)
+        literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
+                    if not tok.startswith("${{")]
+        assert not literals, (
+            f"hardcoded --model literal(s) in {workflow}: {literals}")
+
+
+def test_routine_guards_fire_on_a_reintroduced_literal(tmp_path, monkeypatch):
+    """The negative control AC6 asks for: prove the guard can fail, not just pass.
+
+    Reintroduces a hardcoded --model literal into a copy of the routine
+    workflows and re-runs the real assertions against the mutated tree,
+    which must FAIL — so the guard cannot be weakened into an always-green
+    restatement without this test going red with it.
+    """
+    import shutil
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    for workflow in ROUTINES:
+        shutil.copy(REPO_ROOT / ".github" / "workflows" / workflow, workflows_dir)
+    victim = workflows_dir / "labeler.yml"
+    text = victim.read_text(encoding="utf-8")
+    assert "--model ${{ steps.chain.outputs.link1_model }}" in text
+    victim.write_text(text.replace(
+        "--model ${{ steps.chain.outputs.link1_model }}",
+        "--model glm-5.2", 1), encoding="utf-8")
+
+    # Point the guard's own path helper at the mutated tree, then re-run the
+    # real assertions: with a literal present, at least one must fail.
+    original = _routine_text
+
+    def _mutated(workflow: str) -> str:
+        mutated = workflows_dir / workflow
+        if mutated.exists():
+            return mutated.read_text(encoding="utf-8")
+        return original(workflow)
+
+    monkeypatch.setitem(globals(), "_routine_text", _mutated)
+    try:
+        test_no_hardcoded_model_literal_in_any_routine()
+    except AssertionError:
+        return  # the guard fired — the control passes
+    raise AssertionError(
+        "the no-literal guard passed on a workflow carrying a hardcoded "
+        "--model glm-5.2 — it has been weakened into a restatement")
+

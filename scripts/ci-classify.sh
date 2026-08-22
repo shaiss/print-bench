@@ -186,14 +186,18 @@ classify() {
       esac
       case "$f" in
         # The model registry (issue #206). auto-review.yml, product-scout.yml
-        # and oracle.yml are here because the drift-guard test reads them — a
-        # change to any of those workflows' chains must re-run the guard that
-        # pins it to .github/models/registry.conf. (As workflows they are
-        # already soft-infra via the .github/workflows/* case above — this adds
-        # only the drift-guard selection.)
+        # oracle.yml (issue #333) and the four scheduled routines (design-run,
+        # backlog-burn, chunker, labeler — issue #326) are here because the
+        # drift-guard test reads them — a change to any of those workflows' chain
+        # wiring must re-run the guard that pins it to
+        # .github/models/registry.conf, or a reintroduced hardcoded model literal
+        # could ship unguarded. (As workflows they are already soft-infra via the
+        # .github/workflows/* case above — this adds only the drift-guard selection.)
         tools/model-registry/*|.github/models/registry.conf|\
         .github/workflows/auto-review.yml|.github/workflows/product-scout.yml|\
         .github/workflows/oracle.yml|\
+        .github/workflows/design-run.yml|.github/workflows/backlog-burn.yml|\
+        .github/workflows/chunker.yml|.github/workflows/labeler.yml|\
         .github/workflows/ci.yml) mrtests=true ;;
       esac
       case "$f" in
@@ -472,6 +476,18 @@ selftest() {
   out="$(run ".github/workflows/oracle.yml")"
   check "oracle-workflow-runs-drift-guard" "$out" \
     "model_registry_tests=true" "gate=true" "gate_designs=" "scad=true"
+  # The four scheduled routines (issue #326) resolve their models from the
+  # registry and are pinned by the same drift guard — each workflow path must
+  # route into the model-registry test job, or a reintroduced hardcoded model
+  # literal in any of them could ship without the guard running.
+  out="$(run ".github/workflows/design-run.yml")"
+  check "design-run-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/workflows/backlog-burn.yml")"
+  check "backlog-burn-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/workflows/chunker.yml")"
+  check "chunker-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/workflows/labeler.yml")"
+  check "labeler-runs-drift-guard" "$out" "model_registry_tests=true"
 
   # 4f. Reeve (issue #272) is soft-infra like its groomer sibling: its own tests
   #     run and the required contexts RUN with an empty design list — it reads
