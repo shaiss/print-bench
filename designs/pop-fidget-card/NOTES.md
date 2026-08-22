@@ -18,7 +18,9 @@ constrains the card — resize freely against the slice clock):
   the brief's own "resize freely" — see Time budget below).
 - Feature height above the face ≤ 8 mm (shelf profile + print time).
 - Slider travel ≥ 40 mm (ships 40: `track_y1 − track_y0` = 58 − 18).
-- Shelf prop angle 70–75° (ships ~72°, set by the easel's rotation stop).
+- Shelf prop angle 70–75° (**now ships ~76–80°** — the v0.2 hinge field fix
+  traded ~5–8° of prop for a rigid, grounded hinge neck; see "Hinge field
+  fix" below and the Field test log).
 - Printer: Bambu/MK4-class, 0.4 mm nozzle, 0.20 mm layers, PLA.
 
 ## Key decisions
@@ -26,7 +28,8 @@ constrains the card — resize freely against the slice clock):
 - **Mechanism sourcing.** The spinner and pop-button geometries are re-hosted
   on the card **without including** the source designs (an include would make
   this a derivative and drag in lineage machinery for what is really a
-  clearance-discipline reuse). Values kept verbatim: spinner xy_tol 0.2 /
+  clearance-discipline reuse). Values kept verbatim: spinner xy_tol (now 0.21,
+  field-bumped +0.01 — see field log) /
   z gaps in whole layers / 45° cone cap (captive-spinner, CC3+CC2); arch
   rise/t ≥ 2.3 bistability floor (bistable-toggle). The easel hinge DOES
   consume `lib/print-in-place.scad` directly (`pip_hinge`/`pip_hinge_pin` —
@@ -55,15 +58,41 @@ constrains the card — resize freely against the slice clock):
   external limits it, so the flap's own root geometry is the stop: the hinge
   tongue's underside relief ramp (ramp_h/ramp_run) contacts the card's
   window-bottom edge at the stop angle. Flap flat-on-ground + stop ⇒ shelf
-  prop angle = 180° − stop ≈ 72° (brief band 70–75). `fitcheck` proves the
-  swing is FREE at six sampled angles 0/25/50/75/90/100° (4° margin below
-  the measured 104° free boundary); **`fitcheck_neg` proves the stop
-  EXISTS** (118° must interfere) — the negative control is the mechanism's
-  own proof.
+  prop angle = 180° − stop. After the v0.2 hinge field fix (below) the stop
+  engages ~98–104° ⇒ prop ~76–80°. `fitcheck` proves the swing is FREE at six
+  sampled angles 0/25/50/75/90/**92°** (below the ~96° free boundary);
+  **`fitcheck_neg` proves the stop EXISTS** (`easel_deploy + easel_overshoot`
+  = 110° must interfere) — the negative control is the mechanism's own proof.
+- **Hinge field fix (v0.2 — the living-hinge/mid-air failure).** The first
+  real print (field log) showed the flap's plate-to-tongue root as *a very
+  thin living hinge that printed in mid air*: it cracked at the fold in PLA.
+  Measured on the export at the flap-knuckle centreline (x=48): the root
+  neck was **0.36 mm thick, floating ~1.8–2.1 mm off the bed** — a flexure
+  where a rigid link belongs, printed as an unsupported sagging bridge. Root
+  cause: the pivot is elevated (`z_ax = R_k = 3.7`, the Ø7.4 barrel is 3× the
+  2.4 card, so it rests on the bed *above* the plate), and the swing reliefs
+  compensated by cutting the whole root underside — `root_chamfer = 2.5`
+  (> `card_t`, so it removed the full plate thickness at the root edge) and
+  `ramp_run = 5.75` (tapered the ramp all the way up into the neck). But the
+  fold collision is entirely at the *window-bottom edge* (y ≈ 12), never at
+  the neck (y ≈ 21) — proven by sweeping the flap over the card with reliefs
+  off: no contact through 96°, first contact only at ~100°, and only in the
+  bottom 0.9 mm near the bed. So the neck needs *no* relief. Fix:
+  `root_chamfer 2.5 → 0.6` (a modest bottom-corner chamfer that clears the
+  0.9 mm-deep collision) and `ramp_run 5.75 → 2.0` (the ramp tapers to zero
+  *before* the neck at y ≈ 20.1). Result, re-measured on the export: neck
+  **2.15 mm thick, grounded (bottom 0.08 mm off the bed)** — a rigid link, no
+  flexure, no mid-air bridge. The cost is ~10° of fold (stop 108° → ~100°),
+  i.e. ~5–8° more upright prop (76–80° vs 72°): the plate-root corner *is*
+  the fold limiter with this pivot, so reaching 108° requires relieving it,
+  and relieving it is what thinned the neck. A rigid hinge that props a few
+  degrees steeper beats a flexure that cracks. Config-off is unchanged and
+  clean: `with_easel = false` drops the window, knuckles, flap and pin, and
+  the card fills solid where the window was.
 - **Flap root castellation.** The main plate's root sits R_k + 0.4 beyond the
-  axis with a 2.5 mm 45° underside chamfer, because a full-width root at the
-  hinge line sweeps into the card barrels and webs mid-swing (derived by
-  sweep-radius analysis, confirmed by the fitcheck angles). The hinge slot
+  axis with the (now 0.6 mm) bottom-corner chamfer, because a full-width root
+  at the hinge line sweeps into the card barrels and webs mid-swing (derived
+  by sweep-radius analysis, confirmed by the fitcheck angles). The hinge slot
   this opens is visually filled by the knuckle bar.
 - **Per-mechanism fit checks (post-signoff round).** `fitcheck`/`fitcheck_neg`
   proved only the easel; the spinner and slider clearances rested on asserts,
@@ -109,9 +138,61 @@ constrains the card — resize freely against the slice clock):
      the flap web carries the plate-to-barrel connection.
   3. **The measured envelope (round-3 geometry): free through 104°, first
      stop contact at 108° (0.17 mm³), solid by 116°** — the committed empty
-     sweep stays at 100° with margin because a tessellation-sensitive
-     boundary angle is not a stable CI assertion; the prop angle is claimed
-     from measurement, not the guard's estimate.
+     sweep stayed at 100° with margin because a tessellation-sensitive
+     boundary angle is not a stable CI assertion; the prop angle was claimed
+     from measurement, not the guard's estimate. **(Superseded by the v0.2
+     hinge field fix: envelope now free through ~96°, first contact ~98–100°,
+     solid by ~104°; the committed empty sweep terminal dropped to 92°.)**
+
+- **Bubble-shine: crescent → dot (v0.2 field fix).** The rotor tops and bead
+  cap carried an engraved *crescent* bubble-highlight (two offset circles).
+  A crescent tapers to zero-width horns at its tips; below the nozzle line
+  (0.4 mm) the slicer silently drops that material, so on the real print the
+  cutout "gets hidden and doesn't work". Replaced with a constant-width
+  engraved **dot** (`shine_d = 1.6`, guard `shine_d == 0 || shine_d >= 1.2`,
+  0 disables) — a circle has no sub-nozzle region by construction. The
+  deterministic lesson: cosmetic engravings must be constant-width; a
+  tapering profile (crescent, sharp wedge) is the anti-pattern, and the
+  general guard is "the feature must survive a morphological open at one
+  nozzle width" — the dot passes trivially; a future geometric min-width
+  check (render the feature, erode/dilate, compare) would catch a *new*
+  tapering shape the parameter assert can't.
+- **Pop-button beam thinned for PLA (v0.2 field fix).** `tog_beam_t 1.5 → 1.3`.
+  The bistable snap worked at 1.5 but was too stiff in PLA (field note: "in
+  pla needed a bit thinner"; PLA is ~2× PETG modulus and snap force scales
+  ~t³, so 1.3 softens it ~35%). Still above the 1.2 mm 3-perimeter floor, and
+  thinner *raises* `rise/beam_t` so the ≥ 2.3 bistability guard only gets
+  safer. It is a tunable parameter: PETG can return to 1.5.
+- **Greeting v2: auto-shorten when named (v0.2 field fix — PM.md B2 decision,
+  field-validated).** The named card used the full greeting + name
+  ("HAPPY 1st BIRTHDAY, <name>!"), which overran the readable width on the
+  real print for a **6-letter** name — the owner hand-shortened it to
+  "HAPPY 1st, <name>!" to make it fit. That workaround *is* the fix: the
+  named card now auto-uses a short greeting (`greeting_named = "HAPPY 1st"`),
+  so "HAPPY 1st, <name>!" holds the full 5.4 mm stroke for names up to ~13
+  letters (the unnamed card keeps the full "HAPPY 1st BIRTHDAY!"). The fit
+  guard tightened from `line_size ≥ 4.5` to `≥ 5.0` — the old floor passed a
+  line the owner couldn't fit (5.32 mm), so the readable floor is now higher
+  and the failure message names the two levers (shorten the name, or set
+  `greeting_named`). See "Greeting fit" below.
+
+### Greeting fit (v2)
+
+`line_size = min(5.4, (card_w − 16) / line_ems)` with a per-glyph advance
+table (`chr_w`); the guard is `line_size ≥ 5.0`. Because dropping "BIRTHDAY"
+from the named line frees ~5.8 ems, the named greeting stays pinned at the
+5.4 mm cap for realistic names:
+
+| Named line | ems | line_size |
+|---|---|---|
+| `HAPPY 1st, MARLEY!` (6-letter, field) | 12.2 | 5.4 (cap) |
+| `HAPPY 1st, ALEXANDER!` (9-letter) | 14.3 | 5.4 (cap) |
+| ~15-letter name | ~19.2 | ~5.0 (floor — the guard's edge) |
+
+The old full-greeting named line (`HAPPY 1st BIRTHDAY, MARLEY!`) measured
+18.4 ems → line_size 5.23, which *passed* the old 4.5 guard yet did not fit
+on the card in practice — the reason the guard was tightened and the greeting
+auto-shortened rather than just re-floored.
 
 ## Time budget & drop order
 
@@ -174,7 +255,7 @@ arch lives near its bistability floor, and a fat first layer can turn the
 snap mushy; the coupon is where that surfaces). Tune in this order, ±0.05
 steps:
 
-1. `xy_tol` (0.2): rotor fused → raise; rotor rattles → lower.
+1. `xy_tol` (0.21): rotor fused → raise; rotor rattles → lower.
 2. `slide_tol` (0.25): bead stiff after the first-slide shear → raise.
 3. `hinge_clear` (0.4): flap stiff → raise; flap floppy → lower (0.3 floor).
 4. Button feel (no parameter): pop it a few times — a crisp two-state click
@@ -201,4 +282,42 @@ a degree or two, cosmetically, and the flap re-seats on the next fold.
 
 ## Field test log
 
-(none yet)
+_Real prints of this design, newest at the bottom. See templates/FIELD-TEST.md
+and docs/print-feedback.md for the convention._
+
+### 2026-08-22 — Bambu-class printer (owner), PLA
+- **Printed from:** v0.1 (merged PR #343). Two cards printed, one two-tone
+  (filament swap at the text layer), personalised via `-D card_name=...` at
+  slice time (a 6-letter name).
+- **Part(s):** the full card (all four mechanisms), face-up, no supports.
+- **Slicer settings:** ~stock 0.20 mm profile · 0.4 nozzle · PLA · ~15 % infill
+  · no supports.
+- **Result:**
+  - **Spinners — great.** Both captive rotors came free and spin. Tolerance
+    on the H2C was "just right, could use .005–.01 more." Called out as proof
+    that vertically-separated print-in-place layers reliably come apart.
+  - **Slider — perfect tolerance.** Bead glides, came free on the first slide.
+  - **Easel hinge — FAILED (the big one).** The flap's plate-to-tongue root
+    printed as *a very thin living hinge, partly in mid air*, in addition to
+    the intended swivel (pin) hinge. PLA living hinges crack where PETG would
+    flex — QA that should have been caught before shipping. (Root-caused and
+    fixed in v0.2 — see "Hinge field fix" above: the root neck went from a
+    0.36 mm floating flexure to a grounded 2.15 mm rigid link.)
+  - **Pop button — worked, but stiff in PLA.** Demonstrated the bistable
+    snap; would likely have been right in PETG, but in PLA needed a thinner
+    beam. (v0.2: `tog_beam_t 1.5 → 1.3`.)
+  - **Cap-top bubble-shine — sliced away.** The tiny engraved crescent on a
+    knob top got hidden when sliced (sub-nozzle horns) and didn't render —
+    a class our deterministic checks should catch. (v0.2: crescent → a
+    constant-width dot; guard added.)
+  - **Name fit — the full greeting overran.** With "HAPPY 1st BIRTHDAY" +
+    the 6-letter name the line didn't fit; the owner hand-shortened it to
+    "HAPPY 1st, <name>!" to make it work. Field data: a 5-letter name might
+    fit, 6 does not, with the full greeting. (v0.2: named cards auto-shorten
+    the greeting; fit guard tightened.)
+- **Measured deviations:** spinner `xy_tol` 0.20 slightly tight (owner:
+  "+0.005–0.01") → bumped to 0.21. Button beam too stiff in PLA at 1.5 mm →
+  1.3 mm. (Slider `slide_tol` 0.25 spot-on — no change.)
+- **Carry forward:** the spinner radial clearance runs a touch tight on a
+  Bambu-class H2C in PLA (0.20 → 0.21). Not yet promoted to `printer.conf`
+  (single data point); revisit if a second print agrees.

@@ -20,7 +20,7 @@ a fast Bambu.
 
 ![Easel flap folding out and back on its print-in-place hinge](previews/easel-fold.gif)
 
-*The easel fold in motion — out to its ~108° built-in stop and back; the printed pose is flat (0°).*
+*The easel fold in motion — out to its ~100° built-in stop and back; the printed pose is flat (0°).*
 
 ![Both bubble spinners turning](previews/spinner-flick.gif)
 
@@ -60,7 +60,7 @@ a fast Bambu.
 - **Orientation:** as modeled, face up
 - **First motion — break it in before you gift it:** spin both rotors and
   push the bead firmly once (this shears the deliberate break-free welds),
-  pop the button a few times, fold the easel out to its stop (~72° shelf
+  pop the button a few times, fold the easel out to its stop (~76–80° shelf
   prop). Doing this the night before means the parents receive a working
   toy, and a mushy button surfaces at your desk, not at the party
 
@@ -72,10 +72,13 @@ don't hand it to the birthday kid unsupervised.
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `card_name` | `""` | The child's name, appended to the greeting — set at slice time with `-D 'card_name="ALEX"'`; empty prints the generic card. Up to ~7 letters prints at full stroke width; 8–10 letters still passes the guard but the whole line thins toward ~0.7 mm strokes (soft corners on a 0.4 nozzle); longer fails the render with a clear error |
-| `greeting` | `HAPPY 1st BIRTHDAY` | Bottom line text (name and `!` are appended) |
+| `card_name` | `""` | The child's name — set at slice time with `-D 'card_name="ALEX"'`; empty prints the generic card. Setting a name **auto-shortens** the greeting (drops "BIRTHDAY") so `HAPPY 1st, <name>!` fits at full stroke width for names up to ~15 letters; a longer name fails the render with a clear error (shorten the name, or set `greeting_named`) |
+| `greeting` | `HAPPY 1st BIRTHDAY` | Bottom line on the **unnamed** card (`!` appended) |
+| `greeting_named` | `HAPPY 1st` | Bottom line on the **named** card — the name and `!` are appended (`HAPPY 1st, ALEX!`) |
 | `spinner_count` | 2 | Bubble spinners (0–2) — drop to 1 to shave a measured ~11 minutes, the only time lever that pays (NOTES.md has the sweep; infill and card size barely move the meter) |
-| `xy_tol` | 0.2 mm | Spinner bore ↔ post radial gap — tune on the coupon |
+| `xy_tol` | 0.21 mm | Spinner bore ↔ post radial gap — tune on the coupon (field-set from 0.20) |
+| `with_easel` | `true` | The punched "1" easel flap + hinge. Set `false` to print the card with no fold-out stand (the window fills solid) |
+| `tog_beam_t` | 1.3 mm | Pop-button snap-beam thickness — 1.3 is PLA-tuned (softer snap); PETG can use 1.5 |
 | `slide_tol` | 0.25 mm | Bead stem ↔ slot sliding gap per side |
 | `hinge_clear` | 0.4 mm | Easel hinge pin clearance on every bore surface |
 | `card_w` / `card_h` | 112 / 80 mm | Card face size |
@@ -90,11 +93,13 @@ a printer (tuning order and steps are in NOTES.md "Print this first"), then
 the card. After the break-free first motions everything runs free: the
 spinners flick from the rim scallops, the pop button clicks between its two
 states, the bead glides between the track ends, and the easel flap folds out
-to its built-in stop so the card stands leaning back ~18° on a shelf. One
+to its built-in stop so the card stands leaning back ~12–15° on a shelf. One
 shelf habit: **park the button flat** (its as-printed state) — a PLA arch
 left popped for months slowly creeps and the snap softens; parked flat it
 will still snap for the second birthday. Printing it "stronger" doesn't
 help: a deeper dome raises snap force and stored strain together. If a
-fit is off, retune its parameter on the coupon and reprint — the card itself
-should rarely need a second attempt (unfielded claim; the field-test log in
-NOTES.md is where it becomes fact).
+fit is off, retune its parameter on the coupon and reprint. This design has
+one real print behind it (2026-08-22, PLA) — the field-test log in NOTES.md
+records what it found and what v0.2 changed (a hinge robustness fix, a
+PLA-softer button beam, a sliceable bubble-shine, and an auto-shortened
+named greeting).

@@ -37,12 +37,25 @@ bottom_chamfer = 0.5;
 // Child's name — appended to the greeting. Default EMPTY on purpose: committed
 // previews stay generic; set at slice time with -D 'card_name="ALEX"'.
 card_name = "";
-// Greeting line along the bottom (name and "!" are appended)
+// Greeting line, UNNAMED card (the "!" is appended)
 greeting = "HAPPY 1st BIRTHDAY";
+// Greeting line, NAMED card — auto-shortened so the name fits. Field test:
+// "HAPPY 1st BIRTHDAY" + a 6-letter name overran the readable width on the
+// real print (the owner hand-shortened it to "HAPPY 1st, <name>!"). Dropping
+// "BIRTHDAY" when a name is present is the greeting-v2 decision (PM.md B2),
+// field-validated by that workaround — names up to ~13 letters then hold the
+// full 5.4 mm stroke (NOTES.md "Greeting fit").
+greeting_named = "HAPPY 1st";
 // Raised height of embossed text and bubbles (mm)
 emboss_h = 0.8;
-// Depth of engraved burst rays and crescents (mm)
+// Depth of engraved burst rays and bubble-shine dots (mm)
 engrave_d = 0.6;
+// Bubble-shine dot diameter engraved on rotor tops and the bead cap (mm).
+// Field test: the old tapering crescent narrowed to sub-nozzle horns that the
+// slicer silently dropped ("gets hidden when sliced"). A constant-width dot
+// has no sub-nozzle region by construction; 0 disables the shine. The guard
+// holds it at/above 3 nozzle widths so it always slices (NOTES.md).
+shine_d = 1.6;
 
 /* [Fidget set] */
 // Number of bubble spinners (0-2) — drop order says lose #2 first
@@ -77,8 +90,12 @@ scallop_r = 2.2;
 tog_span = 26;
 // Arch mid-rise (mm) — bistable needs rise/beam_t >= 2.3
 tog_rise = 4;
-// Arch beam thickness (mm)
-tog_beam_t = 1.5;
+// Arch beam thickness (mm) — field-tuned for PLA. At 1.5 the snap was too
+// stiff in PLA (worked, but hard); PLA is ~2x PETG modulus, and snap force
+// scales ~t^3, so 1.3 softens it ~35% while staying above the 3-perimeter
+// floor. PETG can go back to 1.5. Thinner RAISES rise/beam_t, so the >=2.3
+// bistable guard only gets safer (NOTES.md field-test).
+tog_beam_t = 1.3;
 // Bubble nub diameter (mm)
 tog_nub_d = 9;
 
@@ -109,23 +126,36 @@ flap_gap = 0.5;
 // Tongue relief ramp rise at the flap root (mm) — with ramp_run this sets the
 // rotation stop, i.e. the shelf prop angle (see NOTES.md)
 ramp_h = 1.6;
-// Tongue relief ramp run from the root (mm)
-ramp_run = 5.75;
-// 45° relief chamfer on the main plate's root underside (mm)
-root_chamfer = 2.5;
+// Tongue relief ramp run from the root (mm). FIELD FIX: was 5.75, which tapered
+// the relief all the way UP into the plate-to-tongue neck at y~20.8, leaving a
+// 0.36 mm ligament floating ~2 mm off the bed — the "very thin living hinge"
+// that cracked in PLA, printed as a sagging mid-air bridge. The fold collision
+// is only at the window bottom edge (y~12), never at the neck, so the ramp only
+// needs to reach the barrel side; tapering to zero by y~20.1 keeps the neck a
+// grounded 2.15 mm solid (measured — NOTES.md "Hinge field fix").
+ramp_run = 2.0;
+// 45° relief chamfer on the main plate's root underside (mm). FIELD FIX: was
+// 2.5 (> card_t, i.e. it cut the FULL plate thickness at the root edge and was
+// the primary neck-killer). The swing collision is only 0.9 mm deep at the bed,
+// so a modest 0.6 mm bottom-corner chamfer clears it while the neck stays thick.
+root_chamfer = 0.6;
 // Deployed fit-check angle (deg past stowed) — must clear; the stop must
-// catch by easel_deploy + easel_overshoot (the fitcheck_neg)
-easel_deploy = 100;
+// catch by easel_deploy + easel_overshoot (the fitcheck_neg). Lowered from 100
+// with the shallower relief (the grounded neck trades ~10° of fold): the flap
+// is free through ~96° and the stop catches by ~104° (measured, NOTES.md).
+easel_deploy = 92;
 // Over-rotation used by fitcheck_neg (deg past easel_deploy)
 easel_overshoot = 18;
 // Preview-only: fold the easel flap out (deg). PRINT AT 0.
-demo_easel = 0; // [0:4:108]
+demo_easel = 0; // [0:4:100]
 
 /* [Clearances — CC3 anisotropy] */
 // Layer height axial gaps are quantized to (mm)
 layer_h = 0.2;
-// Radial gap, spinner bore <-> post (mm) — spread-limited, >= 0.15
-xy_tol = 0.2;
+// Radial gap, spinner bore <-> post (mm) — spread-limited, >= 0.15. Field test
+// on an H2C: 0.20 was "just right, could use .005-.01 more" — bumped to 0.21
+// (N5 reopen clause: a coupon/field test says otherwise). Tune on the coupon.
+xy_tol = 0.21;
 // Radial gap, bead stem <-> slot wall, per side (mm)
 slide_tol = 0.25;
 // Bead foot <-> channel wall side gap (mm) — first-layer squish safe
@@ -144,11 +174,11 @@ z_layers = 2;
 // "flapsweep" with easel_test_angle = one interference probe for tuning.
 part = "";
 // Angle for part="flapsweep" (deg)
-easel_test_angle = 104;
+easel_test_angle = 100;
 
 /* [Preview animation — not a print parameter] */
 // Animation hook for scripts/animate.sh: "" (default) = no effect on the
-// printable geometry; "easel" folds the easel flap 0 -> 108 -> 0 deg from $t
+// printable geometry; "easel" folds the easel flap 0 -> 100 -> 0 deg from $t
 // (mapped inside movings(), never top-level — see animations.conf).
 anim = "";
 
@@ -233,7 +263,7 @@ wtop      = ftop + flap_gap;                       // window top edge
 // wide) — the flat 0.62 factor under-measured "POP!" by ~25% and planted
 // its "!" under spinner 2 (caught by the pairwise interference matrix).
 line_txt  = card_name == "" ? str(greeting, "!")
-                            : str(greeting, ", ", card_name, "!");
+                            : str(greeting_named, ", ", card_name, "!");
 function chr_w(c) =
     c == " " ? 0.38 :
     (c == "I" || c == "!" || c == "1" || c == "i" || c == "l" || c == "j"
@@ -254,8 +284,12 @@ module stadium(y0, y1, w) {                        // vertical stadium at x=0
     hull() { translate([0, y0]) circle(d = w); translate([0, y1]) circle(d = w); }
 }
 
-module crescent(r) {                               // bubble-highlight moon
-    difference() { circle(r); translate([r * 0.45, -r * 0.45]) circle(r); }
+module bubble_shine() {                            // bubble-highlight dot
+    // A plain constant-width circle. The old crescent (two offset circles)
+    // tapered to zero-width horns below the nozzle line, which the slicer
+    // silently dropped on the real print (field test) — a dot has no
+    // sub-nozzle region by construction, and the guard holds shine_d >= 1.2.
+    if (shine_d > 0) circle(d = shine_d);
 }
 
 // ---------------------------------------------------------------------------
@@ -353,9 +387,9 @@ module spinner_rotor(p, ror, ir = rotor_ir) {
         for (i = [0 : scallops - 1])
             rotate([0, 0, i * 360 / scallops])
                 translate([ror, 0, -0.01]) cylinder(r = scallop_r, h = rotor_h + 0.02);
-        // bubble-highlight crescent on the rotor top
+        // bubble-shine dot on the rotor top (constant width — slices cleanly)
         translate([-ror * 0.35, ror * 0.35, rotor_h - engrave_d + 0.01])
-            linear_extrude(engrave_d) crescent(ror * 0.28);
+            linear_extrude(engrave_d) bubble_shine();
     }
 }
 
@@ -398,7 +432,7 @@ module bead() {
             translate([0, 0, 2.85]) difference() {
                 scale([1, 1, 0.5]) sphere(d = 10);                   // bubble cap
                 translate([-1.8, 1.8, 2.5 - engrave_d])
-                    linear_extrude(engrave_d + 0.01) crescent(1.6);
+                    linear_extrude(engrave_d + 0.01) bubble_shine();
             }
         }
     }
@@ -507,13 +541,13 @@ module movings() {
     if (use_slid) bead();
     if (use_ease) {
         // anim="easel" (animate.sh): triangle-wave the fold from $t so the
-        // GIF loops seamlessly — 0 at $t=0, the 108 deg measured stop onset
-        // at $t=0.5, back to 0 as $t -> 1. Mapped HERE, inside the geometry
-        // block, never in a top-level assignment: top-level assignments
-        // evaluate before a -D '$t=...' override lands (CLAUDE.md). At the
-        // default anim="" this is exactly flap(demo_easel), so the printable
-        // geometry is untouched.
-        ease_a = anim == "easel" ? 108 * (1 - abs(2 * $t - 1)) : demo_easel;
+        // GIF loops seamlessly — 0 at $t=0, ~100 deg (just shy of the measured
+        // stop onset) at $t=0.5, back to 0 as $t -> 1. Mapped HERE, inside the
+        // geometry block, never in a top-level assignment: top-level
+        // assignments evaluate before a -D '$t=...' override lands (CLAUDE.md).
+        // At the default anim="" this is exactly flap(demo_easel), so the
+        // printable geometry is untouched.
+        ease_a = anim == "easel" ? 100 * (1 - abs(2 * $t - 1)) : demo_easel;
         flap(ease_a);
         hinge_pin();
     }
@@ -537,12 +571,15 @@ module guards() {
     assert(!use_tog || !use_slid || coupon
            || track_x - ch_w / 2 - (tog_pos[0] + tog_span / 2) >= 3.5,
            "pop-button clamp anchor would reach into the slider channel");
-    assert(coupon || line_size >= 4.5,
-           "card_name too long — greeting strokes would drop under 0.8 mm");
+    assert(coupon || line_size >= 5.0,
+           "card_name too long even for the short named greeting — shorten the name (or greeting_named). Field test: the full greeting + a 6-letter name overran; the floor is now 5.0 mm, ~15 letters at the auto-shortened greeting");
+    assert(shine_d == 0 || shine_d >= 1.2,
+           "bubble-shine dot under 3 nozzle widths — the slicer will drop it (the field-test crescent failure). Use 0 to disable, or >= 1.2");
     if (use_ease)
         // measured on the export with the pairwise matrix (NOTES.md): flap
-        // free through 104 deg, first stop contact 108, solid by 116
-        echo("easel: stop engages 108-116 deg (measured) -> shelf prop ~70-74 deg (brief: 70-75)");
+        // free through ~96 deg, first stop contact ~98-100, solid by ~104 —
+        // the grounded-neck field fix traded ~10 deg of fold for a rigid hinge
+        echo("easel: stop engages ~98-104 deg (measured) -> shelf prop ~76-80 deg (brief: 70-75; +~5 deg from the hinge field fix, see NOTES.md)");
     if (use_tog) echo(str("pop button: predicted travel ~", tog_travel, " mm"));
     if (use_slid) echo(str("slider travel: ", travel, " mm (brief: >= 40)"));
 }
@@ -558,8 +595,8 @@ module main() {
             }
         if (use_slid) intersection() { bead(); fixed_body(); }
         if (use_ease) {
-            // sampled densely through the swing (offline matrix: free at
-            // every 4-10 deg step through 104; first stop contact 108)
+            // sampled through the swing (offline matrix: free at every step
+            // through ~96; first stop contact ~98-100; solid by ~104)
             for (a = [0, 25, 50, 75, 90, easel_deploy])
                 intersection() { flap(a); fixed_body(); }
             intersection() { hinge_pin(); fixed_body(); }

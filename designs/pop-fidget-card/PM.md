@@ -34,7 +34,8 @@ rail/hinge clearances upward for looks (the acoustic-property lesson).
 - [x] `gate.sh --slice` green: card + coupon + fitchecks (stop-angle negative control included)
 - [x] N2 evidenced with both slice meters recorded in the PR
 - [x] Previews committed (contact sheet, face, hero-iso, easel-open) + CI hero shot embedded
-- [x] Easel props the card at 70–75° measured from the stop angle
+- [x] Easel props the card from the stop angle (v0.1: ~72°; v0.2 hinge field
+      fix: ~76–80°, a deliberate trade for a rigid, grounded hinge — see log)
 - [x] Coupon ships with the "print this first" tuning ladder in NOTES.md
 
 ## Product page & shots (art direction)
@@ -52,15 +53,16 @@ immediately want to flick something.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | Field-test **all four mechanisms work and feel right** on a real printer (coupon now carries the button), incl. a shelf-height face-down drop check; log FIELD-TEST | clearances and the button's snap are theory until one print; Drik round promoted this | one coupon print |
-| B2 | **Greeting line v2** (was B3, promoted; absorbs Jane's stroke-floor finding) — resolve the open decision below, plus the second age/date line | personalization quality sits closer to "every fidget works" than page warmth; the name is the emotional payload | text-layout rework + re-gate |
-| B3 | Tier-2 lifestyle scene (shelf with party detritus) (was B2, demoted one) | page warmth, after v1 | one manifest + CI run |
+| B1 | ✅ **Done (2026-08-22 field test).** All four mechanisms printed and were assessed on a real Bambu-class PLA print. Spinners + slider: pass (spinner clearance +0.01). Button: worked, softened for PLA. Hinge: FAILED (living hinge) → fixed v0.2. Bubble-shine + named-greeting fit: failed → fixed v0.2. Log in NOTES.md. | clearances and the button's snap were theory until this print | done |
+| B2 | ✅ **Done (2026-08-22).** Greeting v2 = auto-shorten when named + fit floor 4.5 → 5.0, field-validated by the owner's own workaround. Remaining sub-item (a second age/date line) deferred. | the name is the emotional payload; the field print forced the decision | done |
+| B3 | Tier-2 lifestyle scene (shelf with party detritus) | page warmth, after v1 | one manifest + CI run |
+| B4 | Second real print to confirm the v0.2 fixes (hinge, button, shine, greeting) and the +0.01 spinner clearance; promote to `printer.conf` if it agrees | v0.2 is one-print-validated on diagnosis but the fixes themselves are unfielded | one card print |
 
 ## Open decisions
 
 | Question | Blocking? | Assumption if unanswered |
 |---|---|---|
-| Greeting-line stroke floor (Jane, bench-sense): the 4.5 size guard stops hairlines, not mush — a 10-letter name thins the line to ~0.7 mm strokes. Raise the floor to ~5.2 (≈ 8-letter names) / give the name its own tier / auto-shorten the greeting when a name is set? | No — v1 ships; the default no-name card sits at 0.78–0.82 mm (on the 0.8 convention, zero headroom) | Guard stays 4.5; the README row now states the legibility bound honestly. Context for the rework: the rendered "POP!" measures 52.7 mm wide (the advance table under-measures), and the emboss layout is clean at `card_h=78`, colliding by 74 (NOTES sweep) |
+| _(resolved 2026-08-22 by the field test — see decision log)_ Greeting-line stroke floor: **auto-shorten** was chosen. The field print showed the full greeting + a 6-letter name did not fit, and the owner's own workaround was to shorten it — so the named card now auto-drops "BIRTHDAY" (`greeting_named = "HAPPY 1st"`) and the fit floor rose 4.5 → 5.0. | — | — |
 
 ## Decision log
 
@@ -73,3 +75,9 @@ immediately want to flick something.
 | 2026-08-22 | Owner-directed post-signoff round: per-mechanism CI fitchecks (spin/slide + falsifiers), animated previews (easel-fold, turntable), and an 8-config time sweep | owner asked to keep working the design in parallel experiments; every addition gate-checked |
 | 2026-08-22 | 60-min bonus target closed as **measured-not-reachable** on the 0.2 stock profile with all four mechanisms (floor ≈ 67 min at `spinner_count=1`; NOTES has the sweep) | slice data across 8 configs, matrix-verified; the charter's "fidget set not gutted for the bonus" stands |
 | 2026-08-22 | Jane's crescent-horn finding declined (soft horns are on-theme for bubbles) | triage ruling; re-enters with B1 field-test evidence |
+| 2026-08-22 | **Crescent finding re-opened and fixed (v0.2)** — the field print confirmed the sub-nozzle horns slice away ("gets hidden and doesn't work"). Crescent → constant-width dot; guard added | the decline's own clause fired: field evidence overrode the on-theme ruling |
+| 2026-08-22 | **Hinge field fix (v0.2):** grounded the flap root neck (0.36 mm floating flexure → 2.15 mm grounded rigid link) by shrinking the swing reliefs; accepted ~5–8° more upright prop (76–80° vs 72°) | field print cracked the unintended living hinge in PLA; a rigid hinge that props slightly steeper beats a flexure that fails. N5 held — the fix stayed inside the proven pip_hinge clearances, only the flap's own relief geometry moved |
+| 2026-08-22 | **Spinner clearance N5 reopen (v0.2):** `xy_tol 0.20 → 0.21` | N5's "a coupon field test says otherwise" clause: the H2C print ran 0.20 slightly tight (+0.005–0.01) |
+| 2026-08-22 | **Pop-button beam PLA-tuned (v0.2):** `tog_beam_t 1.5 → 1.3` | field print: bistable snap too stiff in PLA; PETG can return to 1.5. Bistability guard only gets safer as the beam thins |
+| 2026-08-22 | **Greeting v2 (v0.2):** named cards auto-shorten to "HAPPY 1st, <name>!"; fit floor 4.5 → 5.0 | field print: full greeting + 6-letter name overran; owner's hand-shortening was the fix |
+| 2026-08-22 | Kept `with_easel` default ON (fixed), not flipped to OFF | the easel is the headline "1" feature and the living-hinge failure is now fixed; the toggle exists and cleanly removes it for anyone who wants a plain card (owner's "defaultable off like any variable" — it is) |
