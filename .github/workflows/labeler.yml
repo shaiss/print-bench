@@ -241,7 +241,8 @@ jobs:
       # so the first success short-circuits the rest and a dead model falls
       # through to the next instead of killing the run. Deepening the chain is
       # #327: add the model to the registry AND the matching run step here in
-      # the same PR — the drift guard fails either half shipped alone.
+      # the same PR — the drift guard fails either half shipped alone. (The
+      # tail landed with #327; the comment stays as the standing rule.)
       #
       # Both blocks share the pin, the write permission, the `github_token`
       # that authenticates the action's own GitHub calls, and the same
@@ -304,6 +305,61 @@ jobs:
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
           prompt: "/label-issues ${{ steps.select.outputs.issues }}"
 
+      # The walk's tail (#327): links 2 and 3 of the registry's `labeler`
+      # chain, reached only when every earlier link of this block failed — the
+      # same env/selection/pin/prompt as link 1, only the model differs. Like
+      # the chunker, the labeler carries no SHIP-LOCK lifecycle (#326
+      # constraint): non-terminal links are continue-on-error so a dead id
+      # falls through, and the TERMINAL link keeps none, so a total-walk
+      # failure fails the job exactly as a single failing step did before.
+      # The anthropic block below stays single-step (labeler.conf says zai, so
+      # that block is latent; see the design-run tail comment for the reason).
+      - name: Run via Z.AI (GLM, chain link 2)
+        id: run_zai_2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model ${{ steps.chain.outputs.link2_model }} --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          prompt: "/label-issues ${{ steps.select.outputs.issues }}"
+
+      - name: Run via Z.AI (GLM, chain link 3)
+        id: run_zai_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_zai_2.outcome != 'success'
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over.
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          prompt: "/label-issues ${{ steps.select.outputs.issues }}"
+
       - name: Run via Anthropic (Claude, chain link 1)
         id: run_anthropic_1
         if: >-
@@ -354,7 +410,12 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic_1.outcome || steps.run_zai_1.outcome }}
+          # The walk's outcome (#327): success if ANY link of the block the
+          # conf's provider label selected succeeded (anthropic-first ternary
+          # preserved — the anthropic block is the latent single-step one);
+          # the last zai link's outcome otherwise. No SHIP-LOCK lifecycle
+          # here, so the terminal link failing IS the failure.
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic_1.outcome || (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome) }}
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
         run: |

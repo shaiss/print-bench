@@ -234,9 +234,10 @@ jobs:
       # model is a registry edit, not a workflow edit (#326). The links walk in
       # chain order: each is gated on the earlier links NOT having succeeded,
       # so the first success short-circuits the rest and a dead model falls
-      # through to the next instead of killing the run. Deepening the chain is
-      # #327: add the model to the registry AND the matching run step here in
-      # the same PR — the drift guard fails either half shipped alone.
+      # through to the next instead of killing the run. Deepening the chain
+      # (#327) is a same-PR pair: add the model to the registry AND the
+      # matching run step here — the drift guard fails either half shipped
+      # alone.
       #
       # Both blocks share the pin, the write permission, the `github_token`
       # that authenticates the action's own GitHub calls, and the same
@@ -290,6 +291,54 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
+          prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
+
+      # The walk's tail (#327): links 2 and 3 of the registry's `chunker`
+      # chain, reached only when every earlier link of this block failed. The
+      # chunker carries no SHIP-LOCK lifecycle (#326 constraint), so there is
+      # no red-on-death step to keep alive for: non-terminal links are
+      # continue-on-error so a dead id falls through, and the TERMINAL link
+      # keeps none — a total-walk failure then fails the step, and the job,
+      # exactly as a single failing step did before the tail existed. The zai
+      # block below stays single-step (chunker.conf says anthropic, so that
+      # block is latent; see the design-run tail comment for the reason).
+      - name: Run via Anthropic (Claude, chain link 2)
+        id: run_anthropic_2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_anthropic_1.outcome != 'success'
+        # Same narrow tool grant + deny backstop as link 1 (see its comment);
+        # continue-on-error lets the walk reach link 3 when this id is dead.
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model ${{ steps.chain.outputs.link2_model }} --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
+          prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Run via Anthropic (Claude, chain link 3)
+        id: run_anthropic_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_anthropic_1.outcome != 'success'
+          && steps.run_anthropic_2.outcome != 'success'
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over, and that failure is the
+        # correct verdict.
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
           prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
 
       - name: Run via Z.AI (GLM, chain link 1)
@@ -366,7 +415,11 @@ jobs:
           SELECT_OUTCOME: ${{ steps.select.outcome }}
           # Only the step matching the configured provider runs; the other is
           # 'skipped'. Report the one that actually ran.
-          RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai_1.outcome || steps.run_anthropic_1.outcome }}
+          # The walk's outcome (#327): success if ANY link of the block the
+          # conf's provider label selected succeeded; the last link's outcome
+          # otherwise. With no SHIP-LOCK lifecycle there is no separate
+          # red-on-death gate here — the terminal link failing IS the failure.
+          RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai_1.outcome || (steps.run_anthropic_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome) }}
           # $GITHUB_STEP_SUMMARY does not auto-link a bare #N — build a real link.
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
