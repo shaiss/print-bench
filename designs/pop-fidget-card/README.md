@@ -18,6 +18,14 @@ a fast Bambu.
 
 ![Easel flap folded out to its stop](previews/easel-open.png)
 
+![Easel flap folding out and back on its print-in-place hinge](previews/easel-fold.gif)
+
+*The easel fold in motion — out to its ~108° built-in stop and back; the printed pose is flat (0°).*
+
+![Full-card turntable](previews/turntable.gif)
+
+*Turntable spin of the whole card.*
+
 ## What you get
 
 - `pop-fidget-card` — the card, one print-in-place piece (112 × 80 × 2.4 mm
@@ -30,11 +38,17 @@ a fast Bambu.
 ## Print settings
 
 - **Material:** PLA (any color; pastels suit the theme — an optional filament
-  swap at the first text layer two-tones the lettering)
+  swap at the first text layer two-tones the lettering — and every other
+  raised feature with it, which is the charm)
 - **Layer height:** 0.20 mm (the axial clearances are quantized to it)
 - **Infill:** 15 % (the plate is mostly top/bottom skins)
 - **Supports:** none needed — every overhang is 45° by construction
 - **Brim:** none — the moving parts are bed-anchored islands
+- **Seam:** Back or scarf, not Aligned — the rotor bores are a mating
+  surface, and an aligned seam stacks a ridge on both walls of the 0.2 mm
+  gap. If a rotor stays stiff after break-in, also set gap-closing to
+  0.1 mm (the 0.2 mm default merges exactly this clearance) and re-check on
+  the coupon
 - **Orientation:** as modeled, face up
 - **First motion — break it in before you gift it:** spin both rotors and
   push the bead firmly once (this shears the deliberate break-free welds),
@@ -50,9 +64,9 @@ don't hand it to the birthday kid unsupervised.
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `card_name` | `""` | The child's name, appended to the greeting — set at slice time with `-D 'card_name="ALEX"'`; empty prints the generic card. Names ≲ 10 letters fit; longer fails the render with a clear error rather than printing hairline strokes |
+| `card_name` | `""` | The child's name, appended to the greeting — set at slice time with `-D 'card_name="ALEX"'`; empty prints the generic card. Up to ~7 letters prints at full stroke width; 8–10 letters still passes the guard but the whole line thins toward ~0.7 mm strokes (soft corners on a 0.4 nozzle); longer fails the render with a clear error |
 | `greeting` | `HAPPY 1st BIRTHDAY` | Bottom line text (name and `!` are appended) |
-| `spinner_count` | 2 | Bubble spinners (0–2) — drop to 1 to shave minutes |
+| `spinner_count` | 2 | Bubble spinners (0–2) — drop to 1 to shave a measured ~11 minutes, the only time lever that pays (NOTES.md has the sweep; infill and card size barely move the meter) |
 | `xy_tol` | 0.2 mm | Spinner bore ↔ post radial gap — tune on the coupon |
 | `slide_tol` | 0.25 mm | Bead stem ↔ slot sliding gap per side |
 | `hinge_clear` | 0.4 mm | Easel hinge pin clearance on every bore surface |

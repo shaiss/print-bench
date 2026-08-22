@@ -17,7 +17,7 @@ constrains the card — resize freely against the slice clock):
   said 120 × 85 × 2.8 assumed; slimmed one step against the slice clock per
   the brief's own "resize freely" — see Time budget below).
 - Feature height above the face ≤ 8 mm (shelf profile + print time).
-- Slider travel ≥ 40 mm (ships 42).
+- Slider travel ≥ 40 mm (ships 40: `track_y1 − track_y0` = 58 − 18).
 - Shelf prop angle 70–75° (ships ~72°, set by the easel's rotation stop).
 - Printer: Bambu/MK4-class, 0.4 mm nozzle, 0.20 mm layers, PLA.
 
@@ -65,6 +65,14 @@ constrains the card — resize freely against the slice clock):
   hinge line sweeps into the card barrels and webs mid-swing (derived by
   sweep-radius analysis, confirmed by the fitcheck angles). The hinge slot
   this opens is visually filled by the knuckle bar.
+- **Per-mechanism fitchecks (post-signoff round).** `fitcheck`/`fitcheck_neg`
+  proved only the easel; the spinner and slider clearances rested on asserts,
+  and a formula that asserts itself proves nothing about the built mesh
+  (issue #37) — the sweep above found real emboss-into-rotor interference
+  that no guard fired on. `fitcheck_spin` / `fitcheck_slide` now intersect
+  each rotor and the weld-free bead against the whole fixed body in CI, each
+  with a deliberately-broken `_neg` falsifier (rotor raised past its axial
+  float; bead shoved past both side gaps).
 - **Name privacy.** `card_name` defaults to "" — committed previews and CI
   renders stay generic ("HAPPY 1st BIRTHDAY!"). The real name is a slice-time
   `-D` override. Per the brief, the family's invitation image and the child's
@@ -120,7 +128,36 @@ machine**. Two meters, both reported:
 
 Drop order from the brief if the brief meter busts: spinner #2
 (`spinner_count=1`) → shorter track (`track_y1`) → shrink card face further.
-The toggle and easel stay. Slice data, not vibes, picks the step.
+The toggle and easel stay. Slice data, not vibes, picks the step — and the
+sweep below is that data.
+
+### The 60-minute question, measured (post-signoff sweep)
+
+An 8-config sweep — every config sliced with the same MK4-stock flags on one
+machine, every size change verified with the pairwise manifold matrix, one
+baseline control re-slice to normalise the harness (this box's slicer reads
+~7 % above the PR's canonical meter; ratios below are harness-internal):
+
+| Config | Time | Clean? |
+|---|---|---|
+| baseline 112 × 80, 2 spinners, 15 % | 1 h 24 m | ✓ (control) |
+| 10 % infill | 1 h 23 m | ✓ — infill is nearly free already (plate is skins) |
+| `spinner_count=1` | 1 h 13 m | ✓ — **the one lever that pays: −11 min** |
+| `spinner_count=1` + 10 % | 1 h 12 m | ✓ — the measured floor, ≈ 67 min canonical |
+| 108 × 78 | 1 h 22 m | ✓ — size barely pays (−2 min) |
+| 104 × 74 | — | ✗ POP! emboss into rotor 1 (0.45 mm³) AND rotor 2 (5.5 mm³) |
+| 100 × 70 | — | ✗ worse (5.8 + 11.6 mm³ — the rendered "POP!" is 52.7 mm wide, wider than the advance table predicts) |
+| `card_t=2.2` | — | ✗ guard-refused (slot-wall assert), as designed |
+
+Verdict: **the 60-minute bonus is not reachable on the brief's 0.2 mm stock
+profile without changing the card's content.** The face-size lever dies at
+the POP!-vs-spinner-1 collision (clean at `card_h=78`, colliding by 74 —
+POP! sits at `[16, card_h−24]` while spinner 1 is fixed at `[20, 40]`, so
+shrinking the face walks the headline into the rotor), and size barely moves
+the meter anyway. Nearest honest fast config: `spinner_count=1` at ~67 min.
+No assert covers the emboss-vs-rotor class — which is why `fitcheck_spin`
+(below) now measures it in CI. The collision numbers also feed the
+greeting-line-v2 open decision in PM.md.
 
 ## Print settings
 

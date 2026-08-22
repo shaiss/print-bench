@@ -137,10 +137,20 @@ z_layers = 2;
 // "" = the card. "fitcheck" = every moving/fixed pairwise interference (must
 // render EMPTY). "fitcheck_neg" = the flap over-rotated past its stop (must
 // render NON-EMPTY — proves the stop exists and the check can fail).
+// "fitcheck_spin"/"fitcheck_slide" isolate the spinner and slider clearances
+// (must render EMPTY); "fitcheck_spin_neg"/"fitcheck_slide_neg" are their
+// deliberately-broken poses (must render NON-EMPTY — each empty proof keeps
+// its own falsifier, issue #37).
 // "flapsweep" with easel_test_angle = one interference probe for tuning.
 part = "";
 // Angle for part="flapsweep" (deg)
 easel_test_angle = 104;
+
+/* [Preview animation — not a print parameter] */
+// Animation hook for scripts/animate.sh: "" (default) = no effect on the
+// printable geometry; "easel" folds the easel flap 0 -> 108 -> 0 deg from $t
+// (mapped inside movings(), never top-level — see animations.conf).
+anim = "";
 
 /* [Quality] */
 // Captive bores are $fn-sensitive; production 96+.
@@ -485,7 +495,18 @@ module movings() {
     for (s = [0 : n_spin - 1])
         spinner_rotor(s == 0 ? spin1_pos : spin2_pos, s == 0 ? spin1_or : spin2_or);
     if (use_slid) bead();
-    if (use_ease) { flap(demo_easel); hinge_pin(); }
+    if (use_ease) {
+        // anim="easel" (animate.sh): triangle-wave the fold from $t so the
+        // GIF loops seamlessly — 0 at $t=0, the 108 deg measured stop onset
+        // at $t=0.5, back to 0 as $t -> 1. Mapped HERE, inside the geometry
+        // block, never in a top-level assignment: top-level assignments
+        // evaluate before a -D '$t=...' override lands (CLAUDE.md). At the
+        // default anim="" this is exactly flap(demo_easel), so the printable
+        // geometry is untouched.
+        ease_a = anim == "easel" ? 108 * (1 - abs(2 * $t - 1)) : demo_easel;
+        flap(ease_a);
+        hinge_pin();
+    }
 }
 
 module guards() {
@@ -538,6 +559,35 @@ module main() {
         // over-rotated flap MUST hit its stop — proves the stop exists and
         // that the interference check can fail
         intersection() { flap(easel_deploy + easel_overshoot); fixed_body(); }
+    } else if (part == "fitcheck_spin") {
+        // each captive rotor vs the whole fixed body (post, cone cap, plate,
+        // embosses) — must be EMPTY: the ASSERTed spinner clearances measured
+        // on the built mesh instead of restated by their own formulas (#37)
+        for (s = [0 : n_spin - 1])
+            intersection() {
+                spinner_rotor(s == 0 ? spin1_pos : spin2_pos, s == 0 ? spin1_or : spin2_or);
+                fixed_body();
+            }
+    } else if (part == "fitcheck_spin_neg") {
+        // rotor 1 raised past its axial float (z_tol + 0.2) so the cone cap
+        // bites its bore rim — MUST interfere: proves the spin check can fail
+        intersection() {
+            translate([0, 0, z_tol + 0.2]) spinner_rotor(spin1_pos, spin1_or);
+            fixed_body();
+        }
+    } else if (part == "fitcheck_slide") {
+        // the bead vs the whole fixed body (channel walls, roof, slot, bar) —
+        // must be EMPTY. bead() is the declared-weld-free body: the breakaway
+        // anchor nib (bead_anchor, CC2) stays outside the fitcheck on purpose
+        intersection() { bead(); fixed_body(); }
+    } else if (part == "fitcheck_slide_neg") {
+        // bead shoved sideways past both side gaps (slide_tol +
+        // foot_side_clear + 0.2) so stem and foot bite the slot and channel
+        // walls — MUST interfere: proves the slide check can fail
+        intersection() {
+            translate([slide_tol + foot_side_clear + 0.2, 0, 0]) bead();
+            fixed_body();
+        }
     } else if (part == "flapsweep") {
         // tuning probe only (the committed fitchecks intersect the FULL body):
         // cropped to the hinge/window region every possible contact lives in

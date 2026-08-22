@@ -8,3 +8,14 @@
 # the fitcheck bodies — see NOTES.md.
 fitcheck      empty
 fitcheck_neg  interferes
+# Standing per-mechanism proofs (issue #37: a formula that ASSERTs itself
+# proves nothing about the built mesh). `fitcheck_spin` intersects each rotor
+# with the fixed body (post, cone cap, plate, embosses); its neg raises rotor
+# 1 past the axial float (z_tol + 0.2) so the cone cap bites the bore rim.
+# `fitcheck_slide` intersects the weld-free bead (the CC2 anchor nib stays
+# outside, as in `fitcheck`) with the channel walls, roof, slot and bar; its
+# neg shoves the bead sideways by slide_tol + foot_side_clear + 0.2.
+fitcheck_spin       empty
+fitcheck_spin_neg   interferes
+fitcheck_slide      empty
+fitcheck_slide_neg  interferes
