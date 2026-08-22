@@ -115,7 +115,7 @@ ramp_run = 5.75;
 root_chamfer = 2.5;
 // Deployed fit-check angle (deg past stowed) — must clear; the stop must
 // catch by easel_deploy + easel_overshoot (the fitcheck_neg)
-easel_deploy = 98;
+easel_deploy = 100;
 // Over-rotation used by fitcheck_neg (deg past easel_deploy)
 easel_overshoot = 18;
 // Preview-only: fold the easel flap out (deg). PRINT AT 0.
@@ -525,7 +525,9 @@ module main() {
             }
         if (use_slid) intersection() { bead(); fixed_body(); }
         if (use_ease) {
-            for (a = [0, 35, 70, easel_deploy])
+            // sampled densely through the swing (offline matrix: free at
+            // every 4-10 deg step through 104; first stop contact 108)
+            for (a = [0, 25, 50, 75, 90, easel_deploy])
                 intersection() { flap(a); fixed_body(); }
             intersection() { hinge_pin(); fixed_body(); }
             intersection() { hinge_pin(); flap(0); }
