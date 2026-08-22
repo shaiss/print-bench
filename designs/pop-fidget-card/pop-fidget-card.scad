@@ -516,6 +516,18 @@ module main() {
             fixed_body();
             translate([fx0 - 2, -1, -16]) cube([fx1 - fx0 + 4, wtop + 3, 30]);
         }
+    } else if (part == "body_fixed") {
+        fixed_body();                   // single-body exports for offline
+    } else if (part == "body_rotor1") { // pairwise interference analysis
+        spinner_rotor(spin1_pos, spin1_or);   // (tools/printcheck's manifold3d
+    } else if (part == "body_rotor2") { // backend — same engine as CI's
+        spinner_rotor(spin2_pos, spin2_or);   // nightly gate)
+    } else if (part == "body_bead") {
+        bead();
+    } else if (part == "body_flap") {
+        flap(easel_test_angle);
+    } else if (part == "body_pin") {
+        hinge_pin();
     } else {
         fixed_body();
         movings();
