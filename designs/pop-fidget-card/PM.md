@@ -31,11 +31,11 @@ rail/hinge clearances upward for looks (the acoustic-property lesson).
 
 ## v1 — definition of done
 
-- [ ] `gate.sh --slice` green: card + coupon + fitchecks (stop-angle negative control included)
-- [ ] N2 evidenced with both slice meters recorded in the PR
-- [ ] Previews committed (contact sheet, face, hero-iso, easel-open) + CI hero shot embedded
-- [ ] Easel props the card at 70–75° measured from the stop angle
-- [ ] Coupon ships with the "print this first" tuning ladder in NOTES.md
+- [x] `gate.sh --slice` green: card + coupon + fitchecks (stop-angle negative control included)
+- [x] N2 evidenced with both slice meters recorded in the PR
+- [x] Previews committed (contact sheet, face, hero-iso, easel-open) + CI hero shot embedded
+- [x] Easel props the card at 70–75° measured from the stop angle
+- [x] Coupon ships with the "print this first" tuning ladder in NOTES.md
 
 ## Product page & shots (art direction)
 

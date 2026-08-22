@@ -11,7 +11,7 @@ the whole thing in about an hour on a modern machine.
 
 ![Studio product shot of the bubble-pink 3D-printed pop-fidget-card](previews/hero.png)
 
-![Straight-on face view of the card layout](previews/face.png)
+![Tilted near-face view of the card layout](previews/face.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
