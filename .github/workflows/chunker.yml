@@ -369,6 +369,7 @@ jobs:
           # its comment for why --settings is load-bearing); the model
           # reference stays first.
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
+          prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
 
       - name: Explain a skipped agentic run
         if: >-

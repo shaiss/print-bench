@@ -1018,13 +1018,18 @@ def test_routine_red_on_death_gates_on_whole_chain_failure():
         for state in _walk_states(len(links)):
             outcomes = dict(zip(block_ids, state))
             walk = _eval_github_expression(inner, outcomes)
-            # `inner` is the walk-success TEST, so it evaluates to a boolean
-            # (each leg is `outcome == 'success'`); the gate fires on its
-            # negation.
-            assert isinstance(walk, bool), (
-                f"{workflow}: the red-on-death walk clause does not reduce to "
-                f"a boolean test: {inner!r} → {walk!r}")
-            fired = not walk
+            # `inner` is the walk-OUTCOME expression (the same string form as
+            # AGENT_OUTCOME): it yields the string 'success' when any link
+            # succeeded, else a non-'success' string ('failure'/'skipped'/'').
+            # The gate is `(inner) != 'success'`, a STRING comparison — it must
+            # NOT reduce to a bool, because GitHub coerces `(bool) != 'success'`
+            # to numbers (true→1, 'success'→NaN) so it is ALWAYS true: the
+            # always-red bug this shape must avoid, and did not before this fix.
+            assert isinstance(walk, str), (
+                f"{workflow}: the red-on-death walk clause must reduce to a "
+                f"string outcome, so `!= 'success'` is a string compare rather "
+                f"than an always-true bool-vs-string: {inner!r} → {walk!r}")
+            fired = walk != "success"
             any_success = "success" in state
             assert fired == (not any_success), (
                 f"{workflow}: the red-on-death gate fired={fired} under link "
@@ -1096,18 +1101,18 @@ def test_red_on_death_guard_fires_on_a_stale_link1_gate(tmp_path, monkeypatch):
         shutil.copy(REPO_ROOT / ".github" / "workflows" / workflow, workflows_dir)
     victim = workflows_dir / "backlog-burn.yml"
     text = victim.read_text(encoding="utf-8")
-    stale = ("(steps.ship_zai_1.outcome == 'success' || "
-             "steps.ship_zai_2.outcome == 'success' || "
-             "steps.ship_zai_3.outcome == 'success')")
-    # EVERY occurrence — the same walk test is quoted by the checkless-draft
-    # notice's `if:` and the red-on-death gate's `if:`; a stale gate means all
-    # its copies are stale, and mutating only the first would leave the gate
-    # the simulation reads untouched (the control would pass vacuously).
+    stale = ("(steps.ship_zai_1.outcome == 'success' && 'success' || "
+             "steps.ship_zai_2.outcome == 'success' && 'success' || "
+             "steps.ship_zai_3.outcome)")
+    # EVERY occurrence — the string-form walk-outcome expression is quoted by
+    # the red-on-death gate's `if:` AND both AGENT_OUTCOME envs (the lock
+    # cleanup and the red-on-death step); a stale gate means all its copies are
+    # stale, and mutating only one would leave the gate the simulation reads
+    # untouched (the control would pass vacuously).
     assert text.count(stale) >= 2, (
         "the live walk-test expression changed shape — update the mutation")
-    victim.write_text(text.replace(
-        stale, "steps.ship_zai_1.outcome == 'success'"),
-        encoding="utf-8")
+    victim.write_text(text.replace(stale, "(steps.ship_zai_1.outcome)"),
+                      encoding="utf-8")
 
     original = _routine_text
 
