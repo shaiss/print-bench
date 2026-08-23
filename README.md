@@ -38,6 +38,7 @@ co-designer, and gated by automated printability checks before they ship.
 | <a href="designs/support-free-bracket/"><img src="designs/support-free-bracket/previews/contact-sheet.png" width="320" alt="support-free-bracket previews"></a> | **[support-free-bracket](designs/support-free-bracket/)** — A wall/desk bracket that holds a rod (≤10 mm) in a horizontal bore, mounted with two screws. The point of the design is not the bracket; it is that the same part that would need supports in a naive orientation needs none here. |
 | <a href="designs/sushi-battleship/"><img src="designs/sushi-battleship/previews/contact-sheet.png" width="320" alt="sushi-battleship previews"></a> | **[sushi-battleship](designs/sushi-battleship/)** — Battleship played with real sushi. |
 | <a href="designs/sushi-battleship-tracker/"><img src="designs/sushi-battleship-tracker/previews/contact-sheet.png" width="320" alt="sushi-battleship-tracker previews"></a> | ↳ **[sushi-battleship-tracker](designs/sushi-battleship-tracker/)** — The parent tracks hits structurally (an opened door is an eaten cell) but leaves **misses** to memory, and "did we already call B3?" is the real failure mode of a leisurely dinner game. The refit adds a shallow spherical **miss-marker seat** to the top face of every print-in-place shutter door: park any small round marker (dried soybean, 6 mm airsoft BB, peppercorn) on a called cell and nobody re-calls it. The product charter lives in PM.md beside this file.<br>_derived from [sushi-battleship](designs/sushi-battleship/)_ |
+| <a href="designs/sweetheart-hamster/"><img src="designs/sweetheart-hamster/previews/contact-sheet.png" width="320" alt="sweetheart-hamster previews"></a> | **[sweetheart-hamster](designs/sweetheart-hamster/)** — A palm-sized (~60 mm) jewelry box shaped like a chibi hamster **cradling a heart**. It splits down the sagittal midline so the heart parts between the two halves — "hamster together, heart when the pieces are apart." It is a print-in-place clamshell: the two halves come off the bed as one piece, joined along the dorsal seam by a living-hinge web, and fold shut into the hamster. A heart-shaped pocket straddling the seam is the ring nest. |
 <!-- gallery:end -->
 
 ## Want to print one?
@@ -281,12 +282,26 @@ surfaces studies awaiting a read live in
     RED while `ci-ok` stays green and the PR merges anyway. The exemption is
     read from each job's own flag, so a new advisory job is exempt
     automatically and a new blocking one is not; with a `--selftest`
+  - `reviewer-signoff.sh` — the pass/block decision behind the
+    `reviewer-signoff` required commit status (posted by `auto-review.yml`), the
+    second required context that makes Jane and Drik actually run and sign off
+    before a design PR merges. Fail-closed: a design PR without two clean,
+    current sign-offs blocks (a sign-off survives a non-design push via
+    design-tree currency, and must acknowledge a live `fusecheck` STRONG WARN);
+    a non-design PR and the `no-auto-review`/`signoff-override` labels pass so a
+    required check never strands a PR it wasn't meant to gate. All the policy
+    lives here behind a `--selftest` with a negative control per row
   - `routine-lock-cleanup.sh` — withdraws a dead scheduled run's SHIP-LOCK (a
     run killed by its timeout cannot run the skill's own release step) and
     escalates to `needs-decision` after 3 run-deaths on one issue; invoked by
     `design-run.yml` and `backlog-burn.yml` (issues #312/#313)
   - `gate.sh` — render printable parts and gate the STLs with printcheck;
     `--slice` adds a PrusaSlicer test-slice (this is what CI enforces)
+  - `plate.sh` — the multi-part deliverable: merges a design's per-part STLs
+    into a multi-object 3MF (`build/<name>-plate.3mf`, N separate objects a
+    slicer imports as N parts) from a `ci.plate` manifest, so a two-part
+    design isn't handed over as one fused STL; `--check` gates the object
+    count, `--selftest` proves it discriminates a fused body
   - `gate-summary.py` — turns a gate log into the CI results table
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and

@@ -469,6 +469,161 @@ gate_one() {
     fi
   done
 
+  # Deterministic fuse check (designs/<name>/ci.fusecheck). A print-in-place
+  # mechanism that welds shut still exports watertight and — for a living hinge —
+  # as ONE connected body, so printcheck cannot see it; and a hand-written
+  # interference fitcheck only sees the pose its author intersects, which can be
+  # the wrong one (the first sweetheart-hamster shipped a fitcheck that tested
+  # the CLOSED pose while CI sliced the FLAT pose, and missed a 1378-facet weld
+  # at the hinge). fusecheck answers the un-mis-aimable question on the SLICED
+  # STL, never a -D pose: remove the declared thin-flexure zone(s) and count the
+  # separable bodies that remain — a living hinge that joins the halves only
+  # through its flexure splits into 2, a large-area weld stays 1. Manifest lines
+  # (coordinates in printcheck's rested frame — lowest point at z=0):
+  #   flexure X0,Y0,Z0:X1,Y1,Z1     global, repeatable — faces whose centroid is
+  #                                 inside are dropped before counting
+  #   assert  <stl-basename> <min>  that sliced STL, minus the flexure zones,
+  #                                 must split into >= <min> bodies
+  #   control <part>         <max>  MANDATORY negative control: the KNOWN-FUSED
+  #                                 pose (-D part="<part>", a real dispatch
+  #                                 branch), same flexure zones, must stay <=<max>
+  # A detected fuse (assert bodies < min) is a STRONG WARN, not a hard fail — the
+  # reviewers (Jane/Drik) must consciously sign it off. A broken check is a hard
+  # FAIL: no assert or no control (issue #37 — a check that cannot fail is
+  # worthless), a malformed line, a control part with no dispatch branch, an
+  # assert STL the gate never rendered (a fuse check on an unsliced part proves
+  # nothing), or a control that no longer fuses (an over-large flexure AABB that
+  # would mask a real fuse also splits the fused control, and is caught here).
+  local fusef="designs/${name}/ci.fusecheck"
+  if [[ -f "$fusef" ]]; then
+    local uline ukey uarg1 uarg2 urest
+    local fz_args=() n_assert=0 n_control=0
+    # First pass: collect the global flexure zones (an assert may precede the
+    # flexure line that applies to it, so the zones must be gathered up front).
+    while IFS= read -r uline || [[ -n "$uline" ]]; do
+      uline="${uline%%#*}"
+      ukey="" uarg1="" urest=""
+      read -r ukey uarg1 urest <<<"$uline" || true
+      [[ -z "$ukey" ]] && continue
+      if [[ "$ukey" == "flexure" ]]; then
+        if [[ -z "$uarg1" || -n "$urest" ]]; then
+          echo "FAIL  fusecheck ${name}: malformed flexure line \"${uline}\" — expected 'flexure x0,y0,z0:x1,y1,z1'"
+          fail=1
+          continue
+        fi
+        fz_args+=("--ignore-aabb=${uarg1}")
+      fi
+    done < "$fusef"
+    # Second pass: run the asserts and controls, applying the collected zones.
+    while IFS= read -r uline || [[ -n "$uline" ]]; do
+      uline="${uline%%#*}"
+      ukey="" uarg1="" uarg2="" urest=""
+      read -r ukey uarg1 uarg2 urest <<<"$uline" || true
+      [[ -z "$ukey" ]] && continue
+      case "$ukey" in
+        flexure) : ;;   # gathered in the first pass
+        assert)
+          if [[ -z "$uarg1" || -z "$uarg2" || -n "$urest" \
+                || ! "$uarg2" =~ ^[0-9]+$ ]]; then
+            echo "FAIL  fusecheck ${name}: malformed assert line \"${uline}\" — expected 'assert <stl-basename> <min_bodies>'"
+            fail=1
+            continue
+          fi
+          n_assert=$((n_assert + 1))
+          local astl="build/${uarg1}" matched=0 s
+          for s in ${stls[@]+"${stls[@]}"}; do
+            if [[ "$s" == "$astl" ]]; then matched=1; break; fi
+          done
+          if [[ "$matched" -eq 0 ]]; then
+            echo "FAIL  fusecheck ${name}: assert names ${uarg1}, which the gate never rendered — a fuse check on an unsliced STL proves nothing"
+            fail=1
+            continue
+          fi
+          local ubodies
+          if ! ubodies="$(python3 -m printcheck.fusecheck "$astl" \
+                          ${fz_args[@]+"${fz_args[@]}"})"; then
+            echo "FAIL  fusecheck ${name}: fusecheck failed on ${astl}"
+            fail=1
+            continue
+          fi
+          if [[ "$ubodies" -ge "$uarg2" ]]; then
+            echo "ok    fusecheck ${name}: ${uarg1} splits into ${ubodies} bodies (>= ${uarg2}) once the flexure is removed — the mechanism separates"
+          else
+            echo "warn  fusecheck ${name}: ${uarg1} splits into only ${ubodies} body/bodies (< ${uarg2}) once the flexure is removed — likely FUSED; reviewer signoff required"
+          fi ;;
+        control)
+          if [[ -z "$uarg1" || -z "$uarg2" || -n "$urest" \
+                || ! "$uarg2" =~ ^[0-9]+$ ]]; then
+            echo "FAIL  fusecheck ${name}: malformed control line \"${uline}\" — expected 'control <part> <max_bodies>'"
+            fail=1
+            continue
+          fi
+          # The part must be a real DISPATCH selector, not merely a quoted
+          # string somewhere in the file — a part with no branch renders empty,
+          # counts 0 bodies, and would satisfy any <max> vacuously.
+          if ! [[ "$uarg1" =~ ^[A-Za-z0-9_-]+$ ]] \
+             || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${uarg1}\"" "$src"; then
+            echo "FAIL  fusecheck ${name}: no 'part == \"${uarg1}\"' dispatch branch in ${src} — a control with no branch renders empty and can never fuse"
+            fail=1
+            continue
+          fi
+          n_control=$((n_control + 1))
+          local cstl="build/${name}-${uarg1}.stl"
+          echo "== ${name} (fusecheck control=${uarg1}): render =="
+          if ! lineage_render_binstl "$src" "$cstl" -D "part=\"${uarg1}\""; then
+            echo "FAIL  fusecheck ${name}: control ${uarg1} render failed"
+            fail=1
+            continue
+          fi
+          local cbodies
+          if ! cbodies="$(python3 -m printcheck.fusecheck "$cstl" \
+                          ${fz_args[@]+"${fz_args[@]}"})"; then
+            echo "FAIL  fusecheck ${name}: fusecheck failed on control ${cstl}"
+            fail=1
+            continue
+          fi
+          if [[ "$cbodies" -le "$uarg2" ]]; then
+            echo "ok    fusecheck ${name}: control ${uarg1} stays ${cbodies} body/bodies (<= ${uarg2}) — the known-fused pose still reads fused, so the check can fire"
+          else
+            echo "FAIL  fusecheck ${name}: control ${uarg1} split into ${cbodies} bodies (> ${uarg2}) — the negative control no longer fuses (flexure AABB too large?); the fuse check is unfalsifiable"
+            fail=1
+          fi ;;
+        *)
+          echo "FAIL  fusecheck ${name}: unknown key \"${ukey}\" in \"${uline}\" — use flexure | assert | control"
+          fail=1 ;;
+      esac
+    done < "$fusef"
+    if [[ "$n_assert" -eq 0 ]]; then
+      echo "FAIL  fusecheck ${name}: ci.fusecheck names no 'assert' — a manifest that never checks a sliced part proves nothing about the fit it exists to gate"
+      fail=1
+    fi
+    if [[ "$n_control" -eq 0 ]]; then
+      echo "FAIL  fusecheck ${name}: ci.fusecheck carries no 'control' negative case — without a known-fused pose the fuse check is unfalsifiable"
+      fail=1
+    fi
+  fi
+
+  # Multi-object 3MF plate (designs/<name>/ci.plate). A design whose parts print
+  # SEPARATELY (a wall boss + a screw-on collar) has no single sliceable STL:
+  # STL carries no object separation, so the assembled/default render slices as
+  # ONE fused body and the user prints a welded lump (the multi-part fuse field
+  # test). ci.plate lists the production parts; plate.sh merges their gated STLs
+  # into build/<name>-plate.3mf — N distinct objects a slicer imports as N parts
+  # — and asserts the object count equals the declared part count. Needs
+  # prusa-slicer (the same --merge --export-3mf path as --slice); when it is
+  # absent (a bare local run) the check is skipped with a WARN rather than a
+  # spurious fail — CI always has it (session-start installs prusa-slicer).
+  if [[ -f "designs/${name}/ci.plate" ]]; then
+    if command -v prusa-slicer >/dev/null; then
+      echo "== ${name}: plate (multi-object 3MF deliverable) =="
+      if ! "$(dirname "$0")/plate.sh" --check "$name"; then
+        fail=1
+      fi
+    else
+      echo "WARN  ${name}: ci.plate present but prusa-slicer not on PATH — plate 3MF check skipped"
+    fi
+  fi
+
   # Last, so the printcheck rows above stay one contiguous block in the log
   # and in the summary table. A no-op for every design without a derives.conf.
   derivative_gate "$name"

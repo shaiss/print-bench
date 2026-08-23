@@ -170,6 +170,21 @@ if ! ./scripts/mate-check.sh; then
   fail=1
 fi
 
+# And this proves the multi-part-deliverable object counter still discriminates:
+# two separate part STLs merge to 2 objects, a fused single body to 1, so a
+# fused deliverable is detectable as fewer than N (the multi-part-fuse field
+# test — plate.sh, ci.plate). The falsifiable half of the plate gate; it needs
+# prusa-slicer (the --merge --export-3mf path), so skip with a note when a bare
+# environment lacks it — CI installs it (session-start).
+if command -v prusa-slicer >/dev/null; then
+  echo "-- plate selftest: scripts/plate.sh --selftest"
+  if ! ./scripts/plate.sh --selftest; then
+    fail=1
+  fi
+else
+  echo "-- plate selftest: skipped (prusa-slicer not on PATH)"
+fi
+
 # And this proves the printer.conf mechanism still resolves the default when
 # nothing is measured and the profile's value when one is — reaching the
 # exported geometry, not just an echo. Same family as the two checks above: a
@@ -365,6 +380,16 @@ if ! ./scripts/ci-ok-guard.sh --selftest; then
 fi
 echo "-- ci-ok-guard check: scripts/ci-ok-guard.sh"
 if ! ./scripts/ci-ok-guard.sh; then
+  fail=1
+fi
+
+# reviewer-signoff decision helper (scripts/reviewer-signoff.sh): the pass/block
+# logic behind the `reviewer-signoff` required status (auto-review.yml, W2). The
+# gate is fail-closed — a design PR without two clean, current sign-offs blocks —
+# so the selftest is the only thing that proves it both passes clean AND fails
+# closed (missing/malformed/stale/blocking/fuse-unacked markers each block).
+echo "-- reviewer-signoff selftest: scripts/reviewer-signoff.sh --selftest"
+if ! ./scripts/reviewer-signoff.sh --selftest; then
   fail=1
 fi
 

@@ -27,6 +27,8 @@ trivial 0.6 mm bridge onto solid material. Snap it closed after printing.
 
 ![How it prints — gate parked open over the pedestal, 45° support skirt underneath](previews/print-pose.png)
 
+![Print layout, all four sides — the exact geometry CI slices (iso / top / front / bottom-iso)](previews/contact-sheet.png)
+
 ## Print settings
 
 - **Print this first:** `nuggs-shutter-valve-coupon.scad` — a small fixture
