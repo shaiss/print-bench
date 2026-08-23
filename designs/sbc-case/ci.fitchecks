@@ -1,0 +1,14 @@
+# Boolean fit gates (scripts/gate.sh): `<part> empty` must render zero
+# facets; `<part> interferes` must render some — the mandatory negative
+# control proving the check can fail.
+#
+# fit-pins / fit-pins-shift: pins at pcb_screw_positions(RPI4) rise through
+#   the printed standoff pilots — empty proves the standoff pattern is
+#   generated from the vitamin's hole list, and the 0.6 mm shifted copy must
+#   interfere with the pilot walls.
+# fit-lid / fit-lid-crush: the lid seated 0.05 mm high must clear every wall
+#   and post; seated 1 mm low (a crushed seat) must overlap the wall tops.
+fit-pins empty
+fit-pins-shift interferes
+fit-lid empty
+fit-lid-crush interferes

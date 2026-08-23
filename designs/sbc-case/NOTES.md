@@ -1,0 +1,201 @@
+# sbc-case — engineering log
+
+## Goal
+
+A hardware-rich single-board-computer case (Raspberry Pi 4 primary target) that
+is deliberately the **reference / stress-test design for the
+assembly-instructions feature** (issue #158): it ships an `assembly.conf`
+declaring real `vitamin:` entries — board, inserts, three screw types, washers,
+fan — so it exercises the NopSCADlib vitamin path, the BOM collection pass, and
+the GPL-3.0 product-page disclosure no existing design carries.
+
+Second goal, from the brief: the board standoff pattern is **generated from
+`pcb_screw_positions(RPI4)` at build time**, never hand-typed — proven by a
+boolean fitcheck (`fit-pins`), not by restating the formula.
+
+## Given / assumed measurements
+
+**Given** — everything the case is sized *around* comes from the vendored
+NopSCADlib vitamins (the brief's named source), read at build time:
+
+| item | value (from the vitamin) |
+|---|---|
+| RPI4 outline | 85 × 56 × 1.4 mm |
+| RPI4 mounting holes | Ø2.75, at x = −39 / +19, y = ±24.5 (58 × 49 pitch, pattern centred at x = −10 — verified by the render echo, not assumed) |
+| usb_Ax2 (stacked USB-A) | body to x = +44.5 (2.0 past the board edge), 15.6 tall |
+| rj45 (Ethernet) | body to x = +44.5, 13.5 tall |
+| usb_C (power) | body to y = −29.575 (1.6 past the board edge) |
+| 2×20 GPIO header | at (−10, +24.5), ~8.5 above the board |
+| `fan40x11` | 40 × 40 × 11, bore Ø37, hole pitch 16 mm (32 mm across), M3 screws |
+| `F1BM3` insert | Ø4.0 melt-in hole × 5.8 long, M3 thread |
+| `M2p5_cap_screw` | pilot (tap) radius from `screw_pilot_hole()` |
+
+**Assumed** (stated defaults, tunable in the Customizer):
+
+- wall 2.0, floor 2.0, lid plate 2.5 mm — a rigid case, 3–4 perimeters at 0.4 nozzle
+- `board_clr` 0.75 mm board-to-wall clearance
+- `standoff_h` 5 mm (brief allows 4–6; 5 clears under-board pin headers)
+- `interior_h` 24 mm = standoff 5 + board 1.4 + tallest connector 15.6 + ~2 spare
+- `fit_clearance` 0.25 mm on the lid register lip — the number the coupon tunes
+- fan centred at (−10, 0), biased toward the RPI4 SoC (the hot part)
+- `fan40x11` (the vendored catalog's 40 mm fan; the brief's "40×10" was an
+  assumption the brief explicitly allowed swapping for the catalog value)
+
+## Key decisions
+
+1. **Standoffs from the vitamin, not typed.** `translate([0,0,board_z])
+   pcb_screw_positions(board) standoff();` — retargeting `board` re-generates
+   the pattern. `ci.fitchecks` proves it on the export: pins at the same
+   generated positions pass through the printed pilots (`fit-pins` empty);
+   the same pins shifted 0.6 mm must interfere (`fit-pins-shift`).
+2. **Board fastener: M2.5 cap screws into printed pilots, not inserts.**
+   `F1BM2p5` exists in the vendored tree (the brief assumed it didn't) but is
+   5.8 mm long — taller than the 5 mm standoff it would live in. The brief left
+   the choice open ("screw into boss" vs "insert"); the boss won on that
+   measurement. Noted here because it contradicts a factual claim in the brief.
+3. **Three open edges above a 6.5 mm skirt.** +X (USB-A ×2 / Ethernet), −X
+   (micro-SD), −Y (USB-C / 2× micro-HDMI / audio jack) are open above the
+   skirt, so every cable connector — which overhangs the board edge by up to
+   2.0 mm — enters through a gap, not a tight hole. The skirt top (6.5) sits
+   below the board underside (7.0), so the open edges never weaken the board
+   mounting, and nothing anywhere needs support: the skirt's top face is a
+   bridgeable 2 mm-wall span.
+4. **GPIO access is a notch down from the +Y wall's top edge** (55 mm wide
+   over the 2×20 header), not a window — no bridging, and the wall keeps its
+   bottom half for stiffness.
+5. **Fan bolts flush to the lid's outer face; the insert bosses are on the
+   inner face.** Aperture = the fan's own Ø37 bore (from `fan_bore(fan_type)`).
+   Fan screws (M3 dome ×20, washer under each head) pass through the fan frame
+   and the plate into the inner bosses — 11 + 2.5 + 5.8 = 19.3 mm of stack, so
+   ×20. The bosses hang 7 mm into the cavity at the fan's corner pitch
+   (±16 about (−10, 0)), clear of the board's connector envelope (the `fit-lid`
+   fitcheck proves it against every solid in the base). The brief's "intake"
+   duty: airflow blows into the case.
+6. **Lid-screw posts at (±40, ±32.75), merged into the side walls.** The
+   constraint set: posts must clear the board's mounting-hole band
+   (y ±24.5 + standoff radius → |y| ≥ 28), must not block the ±X or −Y cable
+   entry bands, and must be reachable by a screwdriver through the lid. Posts
+   at the ±X ends collide with the USB/Ethernet cable bodies; wall pilasters
+   on ±X can't clear the board footprint in a snug cavity. Widening the cavity
+   in Y by one post diameter puts the posts in the walls' corners at
+   (±40, ±32.75) — clear of everything, 0.25 mm fused into the wall.
+   Their insert holes are **through-bored** so an M3×10's tip bottoms out in
+   free space below the post, not in plastic.
+7. **Lid prints outer-face-down; the register lip is notched around the four
+   lid-screw posts.** The first draft printed lip-face-down and the gate
+   rejected it for the reason worth logging: the lip is a *ring*, so the plate
+   would bridge the ring's whole ~86 × 68 mm interior 2.5 mm above the bed —
+   4716 mm² of unbridgeable overhang, printcheck 75/100, and the same pose put
+   the lip 2.5 mm *below* z=0 in the export (the coupon's "empty layer" slice
+   warning). With the bosses inside (decision 5) the flip is free: the bed face
+   is the flat outer plate, the lip ring and the four boss cylinders print as
+   standing features, insert holes opening up, nothing bridging anywhere. The
+   posts rise to the lid's underside, so the lip is notched around them
+   (Ø7.7 vs the Ø7.2 posts) — post + notch is what locates the lid in x/y,
+   proven by the `fit-lid` fitcheck (empty at +0.05 seated) and its `fit-lid-crush`
+   negative control (1 mm low still interferes on the wall tops).
+8. **Coupon = two crops of the same corner that nest.** The base's −X,+Y
+   corner in place (real wall the lid lip registers against, skirt profile,
+   through-insert post, one generated board standoff — the RPI4 hole pattern
+   centres at x = −10, so the −X corner is the one that carries a standoff)
+   and the lid's −X,+Y corner at print pose, which the flip lands on the far
+   side of the plate. Flip the lid crop over and drop it on the base crop:
+   the lip notch engages the post, the lip face meets the wall — feel the
+   register before committing to the full lid. (Measured on the export: the
+   lid crop's cube must reach `lid_top_z`, not `base_top_z` — the plate sits
+   *above* `base_top_z`, and a base-height crop left the lip ring standing on
+   a 0.5 mm plate sliver, which the pre-ship audit caught as coupon 84/100
+   with slicer stability warnings; fixed, the coupon measures 100/100.)
+9. **GPL-3.0 combined work, by design.** The entry `.scad` includes
+   NopSCADlib for the vitamins and the assembly manifest declares them, which
+   is exactly the design-layer opt-in `docs/licensing.md` describes: disclosed
+   on the product page (readme-gate requirement 11), isolated to this design,
+   shared core untouched (`license-boundary-check.sh` enforces that part).
+10. **Vents: five 12 × 4.5 stadium slots** in the +Y wall at z = 12 — tops are
+    12 mm bridges inside the bridgeable band; they sit opposite the fan's
+    exhaust path across the board.
+11. **`rounded_box` is corner-anchored — the shell needed a translate.** The
+    first base render passed every presence-only gate with the shell
+    displaced (+47.25, +38.10) from the origin-centred frame every other
+    feature speaks: `rounded_box` spans `[0, size]` like `cube`, so an
+    un-translated call put the walls around (+X, +Y) while the posts,
+    standoffs, skirt cuts and lid stayed centred. Measured on the export
+    (STL body decomposition): **7 disjoint bodies** — the shifted shell
+    absorbing one post and one standoff, 3 posts and 3 standoffs floating
+    free — yet printcheck scored 92/100 ("multiple bodies … fine if
+    intentional"), the test-slice passed, and both fitchecks rendered
+    empty because the interference regions landed outside the crops. The
+    frozen previews *showed* it and the iteration-2 vision checks
+    mis-read them. What caught it was the pre-ship "measure the export"
+    audit — the same class as issue #69: presence-only gates cannot see a
+    frame defect. Fix: `translate([-outer_l/2, -outer_w/2, 0])` around the
+    `rounded_box` call (the house idiom — snap-clamshell-box does the
+    same). After: **1 connected body**, bounds x[−47.25, 47.25]
+    y[−38.10, 38.10] z[0, 26], printcheck 100/100 with no issues. The
+    coupon moved 92 → 84 for an honest reason: the 92 was measuring two
+    floating cylinders; the 84 was a real corner crop whose lid half was a
+    lip ring standing on a 0.5 mm plate sliver (decision 8's measured fix) —
+    with the crop corrected the coupon is 100/100.
+12. **assembly.conf names wrapper modules, not raw vitamin constants.**
+    `scripts/assembly.sh`'s generated preview `use`s the design file and
+    includes only `NopSCADlib/core.scad`; `use` re-exports this file's
+    *modules* (the whole include chain's, so `pcb` itself resolves) but **not
+    its top-level variables** — a manifest line like `pcb(RPI4)` reaches
+    `pcb()` with `RPI4` undefined and aborts inside the vitamin (measured:
+    `rounded_rectangle.scad` line 25 assert; a constants probe confirmed
+    `RPI4`/`F1BM3`/`fan40x11` undefined through core alone while
+    `M3_cap_screw`/`M3_washer` resolve). The seven `vitamin_*()` origin-only
+    wrappers close over this file's scope, where every catalog constant
+    resolves, and the manifest names those. Screw lengths in the wrappers and
+    the BOM descriptions in assembly.conf state the same hardware — keep them
+    in sync. Generator-side fix (emit `include` of the design file, or document
+    the wrapper requirement) is a follow-up issue, not this design's diff.
+
+## Print settings
+
+- **Material:** PETG or ASA (ASA if the case lives near a heat source —
+  electronics enclosures are its use case)
+- **Layer height:** 0.2 mm
+- **Perimeters:** 3 (walls are 2.0 mm ≈ 5 perimeters; the value just ensures
+  the pilots and insert holes keep their walls solid)
+- **Infill:** 15 %, gyroid
+- **Supports:** none — both parts are oriented support-free by design
+  (`base` floor-down as modeled; `lid` outer-face-down, which is the rendered
+  `part="lid"` orientation)
+- **Orientation:** as rendered per part; no rotation needed in the slicer
+- **Coupon:** print with a **brim** — it is cropped corners of a 26 mm-tall
+  wall, so the bed patch is small relative to the height
+
+## Print this first
+
+Print `sbc-case-coupon.scad` (the `coupon` part) before the full case — it is
+two cropped corners of the real parts, ~40 min:
+
+1. **Insert fit:** an F1BM3 should press into the post's Ø4.0 hole and grab.
+   Loose → drop `post_d` shell or check hole size first; the hole diameter is
+   `2 * insert_hole_radius(F1BM3)` from the vitamin, so tune by printer, not
+   by editing the vitamin value.
+2. **Register fit:** flip the lid corner over and drop it onto the base
+   corner — the lip notch should pass the post and the lip face seat against
+   the wall with light friction, no force. Tight → `fit_clearance` +0.05
+   steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
+3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
+   the standoff sample and hold firm.
+4. Only then print `base` (~5 h) and `lid` (~2.5 h).
+
+## Derivations worth keeping
+
+- `cavity_x_half = 45.25`: board half 42.5 + usb_A/rj45 overhang 2.0 + 0.75
+  clearance — the connectors physically pass the board edge, so the cavity
+  must clear *their* extent, not the board's.
+- `cavity_y_half = 36.1`: board half 28 + clearance 0.75 + post diameter 7.2 +
+  0.15 — widened by exactly one post so the lid-screw posts live in the walls
+  (decision 6). The −Y usb_C overhang (1.6) is inside this by a wide margin;
+  the −Y wall is open above the skirt anyway.
+- `skirt_top = 6.5` = floor 2 + standoff 5 − 0.5 margin: the highest open edge
+  that still leaves full wall below the board plane.
+- `interior_h = 24` ≥ 5 + 1.4 + 15.6 + 2 = 24.0 measured against usb_Ax2, the
+  tallest RPI4 connector in the vendored layout.
+- Fan screw length M3 × 20 = fan frame 11 + plate 2.5 + insert 5.8: the screw
+  passes through the fan and the plate into the inner-face bosses (×10, the
+  first draft's length, bottomed out in the plate before reaching the insert).
