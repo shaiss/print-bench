@@ -129,8 +129,10 @@ preview are not plate parts.
   `--check` (object count == declared parts). The slicer then auto-arranges the
   two objects flat and side by side, so the fix removes the stacking too — the
   spaghetti and the fuse both go away. **No `.scad` change**: v1 geometry is
-  frozen; stacking to save bed space stays a valid choice because the 3MF keeps
-  the objects separate. A brim is recommended for the collar (README) as
+  frozen; saving bed space stays a valid goal, and the plate's side-by-side,
+  both-flat layout is the safe way to reach it — the 3MF cures the *fuse*, not
+  the *spaghetti*, so two separate objects re-stacked *vertically* would still
+  spaghetti (never do that). A brim is recommended for the collar (README) as
   first-layer insurance, kept a slicer setting rather than baked geometry.
 
 ## Print settings

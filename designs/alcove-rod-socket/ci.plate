@@ -7,6 +7,7 @@
 # objects the slicer imports as N parts; the assembled render stays a preview.
 #
 # A subset of ci.parts: the coupons and the assembled preview are NOT plate
-# parts. Stacking to save bed space is fine — the 3MF keeps the objects separate.
+# parts. Saving bed space is fine — the plate lays them side by side and flat;
+# don't re-stack them vertically (that welds/spaghettis, the v1 field failure).
 boss
 collar
