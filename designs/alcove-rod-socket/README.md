@@ -5,9 +5,9 @@ closet rod that spans a recess or alcove. A wall boss screws flat to each
 facing wall; the rod's ends plug into knurled collars that hand-thread onto
 the bosses. Curtains down for washing = unthread two collars, no tools.
 
-> **v0.2** — ships the separable multi-object plate deliverable. v1 (#361)
+> **v2** — ships the separable multi-object plate deliverable. v1 (#361)
 > printed **fused** in the field (a single STL of the two parts slices as one
-> welded body); v0.2 fixes the packaging, geometry unchanged. See *Deliverable*
+> welded body); v2 fixes the packaging, geometry unchanged. See *Deliverable*
 > below and the field test log in NOTES.md.
 
 ![Product shot](previews/product-hero.png)
@@ -28,25 +28,29 @@ Printed **in pairs** (one holder per wall, one pair per rod):
 - `thread-coupon` / `bore-coupon` — the "print this first" fit checks (see
   Print settings).
 
-**Deliverable — slice the plate, not a single STL.** `boss` and `collar` print
-as separate parts, so the printable file is the multi-object 3MF plate
-**`build/alcove-rod-socket-plate.3mf`** (`./scripts/plate.sh alcove-rod-socket`)
-— the slicer imports it as two distinct objects. Do **not** export the two into
-one STL: STL carries no object separation, so a slicer treats them as one fused
-body and the print welds them together (that was v1's field-test failure — see
-NOTES.md). Saving bed space is fine — the plate already does it: `--merge` lays
-`boss` and `collar` **side by side, both flat on the bed**, as separate objects.
-Don't rearrange them **one on top of the other**: two separate objects stacked
-vertically still print the upper one over open air — the ~10-layers-in spaghetti
-from v1 (NOTES.md). Side by side and flat, the fuse and the spaghetti both go
-away. (Downloaded the per-part STLs from a Release instead? You already have two
-files — import both and keep them separate.)
+**Deliverable — two objects, never one fused STL.** `boss` and `collar` print as
+**separate parts**, and the one rule is: keep them as two distinct objects in the
+slicer. STL carries no object separation, so exporting the two into a *single*
+STL imports as one fused body and welds them together — v1's field-test failure
+(NOTES.md). Two ways to get the parts, both give the separation:
 
-The plate is **one holder** at the default `engagement_depth`. A rod takes a
-**pair**: print the plate twice for two matched holders, or — for the
-push-in-deep / drop-in-shallow install (Assembly step 3, and the Parameters
-table) — print the plate for the near holder and render the far collar shallow
-(`engagement_depth=12`); its boss is identical.
+- **Downloaded a Release** (the usual path): you already have two files, `boss`
+  and `collar` — import **both** and keep them as separate objects. Done.
+- **Cloned the repo:** `./scripts/plate.sh alcove-rod-socket` bundles the two
+  into one multi-object 3MF (`build/alcove-rod-socket-plate.3mf`) — the same two
+  objects in one file. (The 3MF is a local build artifact; it isn't attached to
+  the GitHub Release yet — that's a tracked follow-up.)
+
+Either way, saving bed space is fine — lay the two parts **side by side and
+flat** (the plate's `--merge` does exactly that). Don't stack them **one on top
+of the other**: two separate objects stacked vertically still print the upper one
+over open air — the ~10-layers-in spaghetti from v1.
+
+**A rod takes a pair — two holders**, so print (or import) the set **twice**. For
+the push-in-deep / drop-in-shallow install (Assembly step 3, Parameters table)
+the two holders share the **same boss**; only the far holder's collar differs —
+render it shallow with `engagement_depth=12`. So a deep+shallow pair is two
+bosses + one default collar + one shallow collar.
 
 ![The collar in its print orientation](previews/collar-print.png)
 

@@ -1,6 +1,6 @@
 # alcove-rod-socket — engineering notes
 
-**Version: v0.2.** v1 (#361) shipped with the multi-part-fuse defect — `boss`
+**Version: v2.** v1 (#361) shipped with the multi-part-fuse defect — `boss`
 and `collar` are separate parts, but a single STL of both imports as one fused
 body and prints welded (the field test log below). v2 keeps the v1 geometry
 unchanged and fixes the *deliverable*: it ships the two parts as a multi-object
@@ -116,7 +116,7 @@ preview are not plate parts.
   changing the family's rule applicability is a pack-owner decision, not
   this design's. Re-adding `style.conf` needs that upstream call (follow-up
   issue on the PR).
-- **D11 — (v0.2) Deliverable is the multi-object 3MF plate, not the assembled
+- **D11 — (v2) Deliverable is the multi-object 3MF plate, not the assembled
   STL.** The field test (log below) failed two ways on one root cause: STL
   carries no object separation, so a single file of `boss` + `collar` imports as
   **one fused body** and prints welded, and — because the two were stacked on
@@ -184,7 +184,7 @@ and docs/print-feedback.md for the convention._
 - **Carry forward:** none for `printer.conf`. Root cause is *packaging*, not a
   clearance: STL carries no object separation, so a multi-part export slices as
   one body, and the stack put the extruder over a mid-air discontinuity. Fixed
-  in **v0.2** — ship the multi-object 3MF plate (D11, `ci.plate` →
+  in **v2** — ship the multi-object 3MF plate (D11, `ci.plate` →
   `build/alcove-rod-socket-plate.3mf`), which imports as two distinct objects
   and lays them out flat and separate (no stacking → no spaghetti). A brim on
   the collar's first layer is recommended as insurance.
