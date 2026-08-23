@@ -1,9 +1,12 @@
 # Print-in-place fit proof for the sweetheart-hamster clamshell locket.
-# `fitcheck` intersects the two CLOSED halves (folded to assembled) — it must
-# render EMPTY: the sagittal parting gap is real, so the two halves clear and
-# the locket opens instead of printing welded shut. `fitcheck_neg` forces the
-# parting gap NEGATIVE (the halves overlap) and MUST interfere — the mandatory
-# negative control proving the empty check can actually fail. The living-hinge
-# web is drawn outside these bodies, so it never masks the seam clearance.
+# `fitcheck` intersects the two halves in the FLAT print pose — the pose CI
+# actually slices — and it must render EMPTY: the halves clear, so the locket
+# prints as two bodies bridged only by the hinge web, not welded shut.
+# v0.1 shipped this check against the CLOSED pose (fold=90), which is exactly
+# why the flat-pose weld passed green; v0.2 tests the sliced pose.
+# `fitcheck_neg` drops the fold axis below the model top (the v0.1 geometry),
+# so the two halves overlap and the intersection MUST interfere — the mandatory
+# negative control proving the empty check can actually fail. (Separability is
+# additionally gated by ci.fusecheck; this proves boolean clearance.)
 fitcheck      empty
 fitcheck_neg  interferes

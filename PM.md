@@ -130,17 +130,19 @@ interesting the build is.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | Reeve's "hands": the LLM step that files/labels follow-up issues from the pulse, behind the labeler's wrapper + deny-backstop | The v1 reporter surfaces drift; acting on it is still manual | medium |
-| B2 | Team timeline (#126) retires the interim `work.conf` | Provenance of who-did-what is currently a hand-maintained manifest | medium |
-| B3 | First real `assembly.conf` design (assembly-docs stage 4) | A whole feature (#98/#156) is unexercised by any design — N6 risk | medium |
-| B4 | LLM router + task proposal layer (#206 stretch) | Real leverage, but no session is blocked on it today | large |
+| B1 | Categorize the design catalog — NUGGS collection + technique-domain grouping in the README gallery and site index (#374) | By the "blocked **or misled**" criterion this is the top item: a flat 29-design list misleads the lead and every site visitor *now*, and worsens weekly as the scout + burn add designs. NUGGS (10/29) collapses ~free from the include graph | medium |
+| B2 | Reeve's "hands": the LLM step that files/labels follow-up issues from the pulse, behind the labeler's wrapper + deny-backstop | The v1 reporter surfaces drift; acting on it is still manual | medium |
+| B3 | Team timeline (#126) retires the interim `work.conf` | Provenance of who-did-what is currently a hand-maintained manifest | medium |
+| B4 | First real `assembly.conf` design (assembly-docs stage 4) | A whole feature (#98/#156) is unexercised by any design — N6 risk | medium |
+| B5 | LLM router + task proposal layer (#206 stretch) | Real leverage, but no session is blocked on it today | large |
 
 ## Open decisions
 
 | Question | Blocking? | Assumption if unanswered |
 |---|---|---|
 | Arm Reeve (set the `REEVE_ENABLED` repo variable) once the first sticky report reads right? | No | Ships disarmed; the human arms it when ready |
-| When Reeve gains its "hands" (B1), does it also open PRs, or only file/label issues? | No | Issues/labels only — the ambient `GITHUB_TOKEN`, no PAT, matching the labeler |
+| When Reeve gains its "hands" (B2), does it also open PRs, or only file/label issues? | No | Issues/labels only — the ambient `GITHUB_TOKEN`, no PAT, matching the labeler |
+| Where the non-NUGGS `category:` signal lives — a CI-gated closed-vocab key (a `catalog.conf`) vs derived from lib usage (B1, #374) | No | A small gated `category:` key per design; the implementing session proposes bucket assignments for `/pm` review |
 | When Reeve and a design PM conflict on taste, not ops? | No | Escalate to the human lead — "customer of last resort" per `people/shai.md` |
 
 ## Decision log
@@ -154,3 +156,4 @@ Append-only. A later session must be able to tell a considered choice from an ac
 | 2026-08-16 | Ship v1 as a deterministic bench-health reporter in the backlog-groomer mold; stage the LLM "hands" behind the labeler's deny-backstop | The safe, repo-native path: no agent + no secret + one trusted write needs no backstop; hands do |
 | 2026-08-16 | Lead the non-negotiables with N6 (tooling must not outgrow its designs) as Reeve's core instinct | It is the failure mode no single PR looks guilty of, and the one the ops data shows first |
 | 2026-08-17 | Tie the SHIP-LOCK lifecycle to the run lifecycle — step-level agent timeouts + cleanup withdrawal + red-on-death in design-run/backlog-burn (run budgets 240/120 min) — and give Reeve GET-only run-health detectors (routine-dead, lock-leak) via a groomer-mirrored github.py | The design-run livelock: timeout-killed runs left ghost locks, and the starved routine rendered green (#312/#313) |
+| 2026-08-23 | Adopt an **ecosystem-first + technique-domain** catalog taxonomy (#374): one derivable NUGGS collection (name-prefix / `nuggs-coupling` include) + the rest grouped by the `docs/advanced-techniques.md` Domains plus an everyday-functional bucket; the gallery stays generated (N1) and every grouping traces to committed source (N5). Ranked B1 | The catalog outgrew its flat presentation at ~29 designs and the lead flagged it; this class of drift (no single PR looks guilty) is exactly Reeve's beat and should have surfaced from the pulse. Ecosystem+technique is the cheapest high-value cut and reuses vocabulary the repo already has |

@@ -49,20 +49,39 @@ nest_on = true;
 /* [Split & hinge] */
 // Sagittal parting clearance, total across the seam (mm)
 part_gap = 0.5;
-// Dorsal hinge height in the assembled frame (mm, pre-scale) — the fold axis
-hinge_z = 30;
+// Dorsal hinge height in the assembled frame (mm, pre-scale) — the fold axis the
+// two halves rotate flat about. v0.2 FIX (the fused-hinge bug): this MUST sit
+// above the model's true top. The flat-pose transform maps a point at assembled
+// height z to flat-x = z − hinge_z*S, so ANY material above the fold axis
+// (z > hinge_z*S) lands on the far side of the seam and welds into the other
+// half. v0.1 used hinge_z=30 (→51 mm), but the ears top out at 60.13 mm, so the
+// 9 mm above the axis crossed the seam — a 1378-facet weld that printed as one
+// solid, watertight body the hinge could not open (printcheck saw nothing, the
+// fitcheck tested the wrong pose). hinge_z=36 (→61.2 mm) clears the ear-top, so
+// each half stays on its own side and the halves connect ONLY through the web.
+hinge_z = 36;
 // Living-hinge web thickness (flexure) (mm) — thin; PETG/PP fold, PLA cracks
 web_t = 0.7;
 // Living-hinge web length along the dorsal seam (mm)
 web_len = 16;
-// Web overlap into each half's skin (mm)
-web_ov = 3;
+// Web overlap into each half's skin (mm). v0.2: widened from 3 → 6. With the
+// fold axis above the ear-top the two halves' dorsal ridges sit ~4 mm either
+// side of the seam centre (the ears are higher than the spine, so the spine
+// ridge — where the web must bridge — lands a few mm out); the web has to reach
+// both ridges to make the print one foldable piece, so it spans ±(g+web_ov).
+web_ov = 6;
 
 /* [CI fit-check — not a print parameter] */
-// "" = the model. "fitcheck" = boolean between the two closed halves (must be
-// EMPTY: the parting gap is real). "fitcheck_neg" = the same with gap forced
-// to 0 (must INTERFERE: proves the check can fail). Wired by ci.fitchecks.
+// "" = the model (flat PRINT pose). "fitcheck" = boolean intersection of the two
+// halves in the FLAT pose CI slices (must be EMPTY: they clear). "fitcheck_neg"
+// and "fused" reproduce the v0.1 WELD by dropping the fold axis back below the
+// top (fold_hz): the intersection INTERFERES (proves the empty check can fail),
+// and the union is one connected body that fusecheck's control catches. Wired by
+// ci.fitchecks and ci.fusecheck.
 part = "";
+// Fold axis for the deliberately-welded controls (pre-scale) — v0.1's value,
+// which welds because it sits below the 60.13 mm top. Not a print parameter.
+fused_hz = 30;
 
 /* [Quality] */
 $fn = 64;   // production 96 for the hero renders (cameras.conf overrides)
@@ -154,11 +173,24 @@ module half_solid(side, gg = g) {
 
 // A half laid FLAT on the bed (native print pose): the assembled half rotated so
 // its dorsal seam edge sits on the fold axis (x=0, z=0) and its cut face lies on
-// the bed (z=0), dome up. Left splays −X, right +X.
-module half_flat(side, gg = g) {
-    rotate([0, side < 0 ? 90 : -90, 0])
-        translate([0, 0, -hinge_z*S])
-            half_solid(side, gg);
+// the bed (z=0), dome up. Left splays −X, right +X. `hz` is the fold-axis height
+// (pre-scale): the production default `hinge_z` clears the top so the halves
+// don't weld; the welded controls pass `fused_hz` to reproduce the v0.1 bug.
+//
+// The outer `translate([0,0,-gg])` LANDS the cut face on the bed. Without it the
+// rotate maps the cut plane (x = -gg) to flat-z = +gg = 0.25 mm, so each half
+// hovers a quarter-millimetre above the plate and only the 0.7 mm web touches
+// z=0: the ~47 cm² of intended first-layer contact prints over bare glass and
+// the domes never adhere. No gate caught it (printcheck counts a face under
+// 0.3 mm as on-plate; the slicer slices floating geometry silently) — the print
+// fails at layer 1 while every check is green. Dropping by gg puts the cut faces
+// on the plate; the web (drawn separately in model(), z ∈ [0, web_t]) is
+// untouched and still bridges the now-lower dorsal ridges.
+module half_flat(side, gg = g, hz = hinge_z) {
+    translate([0, 0, -gg])
+        rotate([0, side < 0 ? 90 : -90, 0])
+            translate([0, 0, -hz*S])
+                half_solid(side, gg);
 }
 
 // Living-hinge web: thin flexure bridging the two halves at the dorsal seam,
@@ -170,9 +202,10 @@ module hinge_web() {
 }
 
 // Place a half at the given fold about the bed hinge line (x=0, z=0, axis Y):
-// fold=0 = FLAT print pose (default), fold=90 = folded up to assembled.
-module place(side, f, gg = g) {
-    rotate([0, side < 0 ? -f : f, 0]) half_flat(side, gg);
+// fold=0 = FLAT print pose (default), fold=90 = folded up to assembled. `hz`
+// selects the fold-axis height (production default, or fused_hz for a control).
+module place(side, f, gg = g, hz = hinge_z) {
+    rotate([0, side < 0 ? -f : f, 0]) half_flat(side, gg, hz);
 }
 
 // ===========================================================================
@@ -185,16 +218,27 @@ module model() {
     if (fold < 60) hinge_web();
 }
 
-// --- part dispatch (ci.fitchecks) -----------------------------------------
+// --- part dispatch (ci.fitchecks + ci.fusecheck) --------------------------
 if (part == "" || part == undef) {
     model();
 } else if (part == "fitcheck") {
-    // closed pose: the two halves must not interfere (the parting gap is real)
-    intersection() { place(-1, 90); place(1, 90); }
+    // FLAT (printed) pose — the pose CI actually slices: do the two half-bodies
+    // overlap where they shouldn't? Must be EMPTY. v0.1 tested the CLOSED pose
+    // (fold=90) here, which is exactly why the flat-pose weld shipped green.
+    intersection() { place(-1, 0); place(1, 0); }
 } else if (part == "fitcheck_neg") {
-    // parting gap forced NEGATIVE (halves overlap) -> MUST interfere: proves
-    // the empty check above can actually fail
-    intersection() { place(-1, 90, -0.5); place(1, 90, -0.5); }
+    // The v0.1 welded flat pose (fold axis dropped below the top): the halves
+    // overlap, so the intersection INTERFERES — proving the empty check above
+    // can actually fail.
+    intersection() { place(-1, 0, g, fused_hz); place(1, 0, g, fused_hz); }
+} else if (part == "fused") {
+    // The v0.1 WELD as one solid — both halves plus the web at the low fold
+    // axis. fusecheck's negative control: removing the web AABB still leaves
+    // ONE connected body, because the halves weld to each other beyond the web.
+    // This is what shipped in v0.1; it proves fusecheck can fire.
+    place(-1, 0, g, fused_hz);
+    place( 1, 0, g, fused_hz);
+    hinge_web();
 } else {
     assert(false, str("unknown part: ", part));
 }
