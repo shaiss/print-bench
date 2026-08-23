@@ -20,7 +20,7 @@ thin living-hinge web along the dorsal seam, so it prints already assembled and
 folds shut.
 
 - `sweetheart-hamster` — the hamster locket, **~53 × 61 × 60 mm** assembled;
-  ring nest ~22 mm across. Prints flat/open, ~120 mm wide on the bed.
+  ring nest ~22 mm across. Prints flat/open, ~126 mm wide on the bed.
 - `sweetheart-hamster-coupon` — a smaller "print this first" copy to dial in the
   hinge and seam fit before committing to the full print.
 
