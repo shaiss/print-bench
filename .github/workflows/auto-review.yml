@@ -1024,7 +1024,9 @@ jobs:
           tree_current="$(git rev-parse "${HEAD_SHA}:designs" 2>/dev/null || true)"
           tree_of() {   # echo the designs tree object at a marker's sha, or empty
             local sha; sha="$(grep -oiE 'sha=[0-9a-f]+' <<<"$1" | head -1 | cut -d= -f2)"
-            [[ -n "$sha" ]] && git rev-parse "${sha}:designs" 2>/dev/null || true
+            if [[ -n "$sha" ]]; then
+              git rev-parse "${sha}:designs" 2>/dev/null || true
+            fi
           }
           jane_tree="$(tree_of "$jane")"
           drik_tree="$(tree_of "$drik")"
