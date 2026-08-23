@@ -129,7 +129,15 @@ All commands run from the repo root.
 # STLs with tools/printcheck; --slice adds a PrusaSlicer test-slice. A
 # designs/<name>/ci.fitchecks manifest additionally gates boolean fit parts:
 # `<part> empty` must render zero facets, `<part> interferes` is the mandatory
-# negative control proving the check can fail. CI runs this.
+# negative control proving the check can fail. A designs/<name>/ci.fusecheck
+# manifest additionally runs the deterministic fuse detector (tools/printcheck's
+# `fusecheck`) on the SLICED STL — never a -D pose — to catch a print-in-place
+# mechanism that welds shut (a living hinge stays watertight and one body, so
+# printcheck can't see it): `flexure <aabb>` drops the thin hinge zone,
+# `assert <stl> <min>` requires the rest to split into >= min separable bodies
+# (a fuse is a STRONG WARN needing reviewer signoff, not a hard fail), and
+# `control <part> <max>` is the mandatory known-fused negative control proving
+# the check can still fire. CI runs this.
 ./scripts/gate.sh [--slice] [<name>...]
 
 # Lineage of derivative designs (designs/<name>/derives.conf): `check`
