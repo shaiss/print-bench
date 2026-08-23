@@ -98,7 +98,17 @@ moment it matters.
 2. **Before a preview goes to the human** *(design targets only — the
    platform charter has no preview round)* — is this the thing they asked
    to see, and does it answer the question that is actually open? A
-   preview that shows a solved problem wastes the round.
+   preview that shows a solved problem wastes the round. **For a mechanism
+   (anything that folds, snaps, slides or prints in place): does the set
+   show the as-printed pose, and could a chosen angle hide a defect?** A
+   posed/assembled hero must never be the *only* geometry-true view — the
+   default `contact-sheet` (what CI slices) has to be in the set too. This
+   is the sweetheart-hamster miss: a `fold=90` hero hid a hinge that shipped
+   fused solid, because the pose it showed could never expose the weld.
+   Choosing angles that can hide a print-pose defect is a PM miss, not a
+   reviewer's or CI's — you own the shot list. (`readme-gate.sh` req 12
+   forces the contact-sheet's *presence*; `fusecheck` STRONG-WARNs a fused
+   mechanism — but neither picks honest angles. That is this checkpoint.)
 3. **Before a push or PR** — does the change advance a ranked item? Is any
    non-negotiable now weaker than the charter says? Does the PR describe
    the state honestly, including what still fails?
