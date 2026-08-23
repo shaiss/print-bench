@@ -34,8 +34,19 @@ as separate parts, so the printable file is the multi-object 3MF plate
 — the slicer imports it as two distinct objects. Do **not** export the two into
 one STL: STL carries no object separation, so a slicer treats them as one fused
 body and the print welds them together (that was v1's field-test failure — see
-NOTES.md). Stacking the two on the bed to save space is fine; the 3MF keeps them
-separate objects.
+NOTES.md). Saving bed space is fine — the plate already does it: `--merge` lays
+`boss` and `collar` **side by side, both flat on the bed**, as separate objects.
+Don't rearrange them **one on top of the other**: two separate objects stacked
+vertically still print the upper one over open air — the ~10-layers-in spaghetti
+from v1 (NOTES.md). Side by side and flat, the fuse and the spaghetti both go
+away. (Downloaded the per-part STLs from a Release instead? You already have two
+files — import both and keep them separate.)
+
+The plate is **one holder** at the default `engagement_depth`. A rod takes a
+**pair**: print the plate twice for two matched holders, or — for the
+push-in-deep / drop-in-shallow install (Assembly step 3, and the Parameters
+table) — print the plate for the near holder and render the far collar shallow
+(`engagement_depth=12`); its boss is identical.
 
 ![The collar in its print orientation](previews/collar-print.png)
 
