@@ -122,7 +122,9 @@ preview are not plate parts.
   **one fused body** and prints welded, and — because the two were stacked on
   the bed to save space — the extruder ran over a mid-air discontinuity and
   spaghettied ~10 layers in. Both are packaging, not geometry: the parts are
-  each individually sound (v1 gated 92/92/100/92). Fix, from the platform
+  each individually sound (92/92/100/92 at v1's merge; the printcheck estimator
+  has since nudged the boss to 100/100 — geometry unchanged, only the estimate
+  moved). Fix, from the platform
   support added in #373: `ci.plate` lists `boss` + `collar`, and `gate.sh` packs
   them via `scripts/plate.sh` (`prusa-slicer --merge --export-3mf`) into
   `build/alcove-rod-socket-plate.3mf` as **2 distinct objects**, gated by

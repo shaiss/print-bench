@@ -34,8 +34,10 @@ slicer. STL carries no object separation, so exporting the two into a *single*
 STL imports as one fused body and welds them together — v1's field-test failure
 (NOTES.md). Two ways to get the parts, both give the separation:
 
-- **Downloaded a Release** (the usual path): you already have two files, `boss`
-  and `collar` — import **both** and keep them as separate objects. Done.
+- **Downloaded a Release:** you get two files, `boss` and `collar` — import
+  **both** and keep them as separate objects. (No v2 Release is tagged yet —
+  releases are cut on a tag, not on merge — so until one exists, use the clone
+  path below.)
 - **Cloned the repo:** `./scripts/plate.sh alcove-rod-socket` bundles the two
   into one multi-object 3MF (`build/alcove-rod-socket-plate.3mf`) — the same two
   objects in one file. (The 3MF is a local build artifact; it isn't attached to
@@ -50,7 +52,10 @@ over open air — the ~10-layers-in spaghetti from v1.
 the push-in-deep / drop-in-shallow install (Assembly step 3, Parameters table)
 the two holders share the **same boss**; only the far holder's collar differs —
 render it shallow with `engagement_depth=12`. So a deep+shallow pair is two
-bosses + one default collar + one shallow collar.
+bosses + one default collar + one shallow collar. **Neither shipped set — the
+Release nor the plate — carries that shallow collar yet**; it's a clone-and-render
+(`-D 'engagement_depth=12'`) before install day (shipping it as a gated part is
+tracked in #379).
 
 ![The collar in its print orientation](previews/collar-print.png)
 
@@ -66,8 +71,9 @@ bosses + one default collar + one shallow collar.
   lifting; it helps the boss too. Cheap insurance on the rim's own merits (the v1
   field failure was *packaging*, not adhesion — see NOTES.md — so the plate is
   what fixes that; the brim is separate). On the plate the two parts sit ~5.7 mm
-  apart, so stock brims may bridge the gap into one web spanning both — harmless,
-  it peels off clean (not the v1 fuse).
+  apart, so stock brims may bridge the gap into one web spanning both — it should
+  peel off clean (*untested; the proving print will confirm — worst case is a
+  knife against the web, not a reprint*), and it is not the v1 fuse.
 - **Orientation:** print every part as rendered — boss flange-down, collar
   rod-mouth-down (the internal thread prints at the top of the collar, never
   on the first layer).
