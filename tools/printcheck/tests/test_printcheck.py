@@ -196,6 +196,61 @@ def test_point_contact_is_critical(tmp_path):
                for f in report.findings)
 
 
+def test_floating_first_layer_is_critical(tmp_path):
+    # A large flat slab hovering ~one layer above the bed, anchored to z=0 only
+    # by a small post — the sweetheart-hamster v0.2 signature. The slab's whole
+    # ~1600 mm² underside floats at 0.25 mm; only the 4 mm² post touches the
+    # plate. plate_contact_faces is fooled (the underside's max vertex is under
+    # 1.5 layers, so it reads as contact); check_bed_contact keys on the lowest
+    # vertex and catches it.
+    slab = trimesh.creation.box(extents=(40, 40, 5))
+    slab.apply_translation([0, 0, 5 / 2 + 0.25])   # underside at z=0.25
+    post = trimesh.creation.box(extents=(2, 2, 0.25))
+    post.apply_translation([0, 0, 0.25 / 2])        # z from 0 to 0.25
+    mesh = trimesh.boolean.union([slab, post])      # watertight single body
+    report = analyze(_save(tmp_path, mesh, "floating.stl"))
+    assert report.mesh_summary["watertight"]
+    assert any(f.check == "bed_contact" and f.severity is Severity.CRITICAL
+               for f in report.findings)
+    assert report.verdict == "NOT PRINTABLE AS-IS"
+
+
+def test_flush_slab_is_not_floating(tmp_path):
+    # The same slab resting flush on the bed: its underside IS the first layer.
+    # The check must NOT read that as floating — it is about a *lifted* surface,
+    # not merely a large flat bottom.
+    slab = trimesh.creation.box(extents=(40, 40, 5))
+    slab.apply_translation([0, 0, 5 / 2])           # underside at z=0
+    report = analyze(_save(tmp_path, slab, "flush.stl"))
+    assert not any(f.check == "bed_contact" for f in report.findings)
+    assert report.verdict == "PRINTABLE"
+
+
+def test_sphere_does_not_trip_bed_contact(tmp_path):
+    # A sphere on the plate has small contact and a smoothly rising underside —
+    # check_stability's domain (real/floating area stays comparable, ratio well
+    # above the threshold). The floating-first-layer check must stay specific to
+    # a lifted flat slab and not fire here.
+    ball = trimesh.creation.icosphere(subdivisions=3, radius=10)
+    report = analyze(_save(tmp_path, ball, "ball.stl"))
+    assert not any(f.check == "bed_contact" for f in report.findings)
+
+
+def test_bed_contact_floor_is_configurable(tmp_path):
+    # The same floating slab, but with the minimum-area floor raised above the
+    # slab's area, is silenced — proving the Config knob gates the check and
+    # small lifted slivers below the floor stay quiet.
+    slab = trimesh.creation.box(extents=(40, 40, 5))
+    slab.apply_translation([0, 0, 5 / 2 + 0.25])
+    post = trimesh.creation.box(extents=(2, 2, 0.25))
+    post.apply_translation([0, 0, 0.25 / 2])
+    path = _save(tmp_path, trimesh.boolean.union([slab, post]), "floating2.stl")
+    assert any(f.check == "bed_contact"
+               for f in analyze(path).findings)                       # default fires
+    quiet = analyze(path, Config(bed_float_min_mm2=5000.0))           # floor above slab
+    assert not any(f.check == "bed_contact" for f in quiet.findings)
+
+
 def test_json_roundtrip(tmp_path):
     cube = trimesh.creation.box(extents=(10, 10, 10))
     report = analyze(_save(tmp_path, cube, "cube.stl"))

@@ -57,6 +57,7 @@ paper over.
 | Overhangs | face-normal angle vs build direction (default 45°), bed-touching faces excluded, then **bridgeable regions removed** | area that is too wide to bridge and needs support |
 | Wall thickness | inward ray-casting from area-weighted surface samples | walls under 2× nozzle (default 0.8 mm) |
 | Bed adhesion & stability | first-layer contact area, center-of-mass vs contact patch | point/edge contact, tiny contact patch, tip-over risk |
+| Floating first layer | each down-face's **lowest** vertex vs the bed; lifted flat area vs true z=0 contact | a large flat contact surface hovering one-to-three layers above the plate (prints over air) |
 | Size | bounding box vs build volume; unit-mix-up detection | oversize, microscopic (meters/inches-as-mm), sub-nozzle features |
 | Orientation | scores 6 axis-aligned poses by support need | suggests a rotation when it clearly wins |
 
@@ -73,6 +74,24 @@ debossed letter's ceiling, a thin relief chamfer, and a print-in-place socket
 roof are self-supporting and do not score as overhangs; a wide flat shelf still
 does. The metrics report both the raw downward area (`raw_overhang_area_mm2`)
 and the support-needing remainder (`overhang_area_mm2`).
+
+**Floating first layer — the one the bed-adhesion check can't see.** Stability
+keys plate contact on each down-face's *highest* vertex (under 1.5 layers reads
+as "on the plate"), so a flat face sitting *whole* a quarter-millimetre up is
+counted as contact and even exempted from the overhang check — while in reality
+its entire area prints over air and never adheres. The floating-first-layer
+check keys on each down-face's *lowest* vertex instead: it measures the
+near-horizontal down-area that genuinely reaches z=0 against the area stranded
+one-to-three layers above it, and fires **CRITICAL** when a substantial lifted
+slab (over `bed_float_min_mm2`, default 10 mm²) has almost no real contact
+beneath it (`real < bed_float_ratio × floating`, default 0.2). A flat slab
+lifted whole drives that ratio to ~0; a sphere, cone or any smoothly-curved or
+angled contact keeps comparable area in both bands and stays well clear, so it
+does not fire — the check is specific to a *lifted flat surface*, and is kept
+separate from the stability band on purpose (that band's leniency is intended
+for socket roofs and debossed ceilings). This is the defect `sweetheart-hamster`
+v0.2 shipped green — both hamster halves' ~47 cm² of cut faces floated at
+0.25 mm while only a 0.7 mm hinge web touched the bed.
 
 ## The optional AI layer
 

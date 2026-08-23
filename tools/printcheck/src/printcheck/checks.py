@@ -41,6 +41,16 @@ class Config:
     build_volume_mm: tuple = (250.0, 210.0, 220.0)
     # count, face samples for the wall-thickness ray casts
     thickness_samples: int = 2000
+    # mm², minimum near-horizontal down-facing area stranded just above the
+    # bed before the floating-first-layer check (check_bed_contact) speaks.
+    # Below this it is sliver noise, not an intended print surface.
+    bed_float_min_mm2: float = 10.0
+    # the floating-first-layer check fires when the area truly touching z=0 is
+    # below this fraction of the area stranded one-to-three layers above it —
+    # i.e. the intended contact surface is mostly in the air, not on the plate.
+    # A flat slab lifted whole drives this to ~0; a curved or angled real
+    # contact keeps comparable area in both bands and stays well above it.
+    bed_float_ratio: float = 0.2
 
 
 # --------------------------------------------------------------------------
@@ -398,6 +408,78 @@ def check_stability(mesh: trimesh.Trimesh, cfg: Config):
                 )
 
 
+def check_bed_contact(mesh: trimesh.Trimesh, cfg: Config):
+    """Catch a 'floating first layer': a large, near-horizontal down-facing
+    surface hovering one-to-three layers above the bed while almost nothing
+    truly touches z=0.
+
+    This is the failure mode plate_contact_faces (used by check_stability)
+    cannot see. That mask keys plate contact on each face's *highest* vertex
+    (< 1.5 layers), so a flat face sitting whole at a uniform 0.25 mm reads as
+    "on the plate" — its area is counted as contact and it is exempted from the
+    overhang check — when in fact its entire area is a layer up in the air. The
+    slicer then lays the intended first-layer surface down over nothing and the
+    part never adheres. sweetheart-hamster v0.2 shipped exactly this: both
+    hamster halves' ~47 cm² of cut faces floated at 0.25 mm while only a 0.7 mm
+    hinge web touched the bed, and every gate passed it green (issue: the fuse
+    work's floating-first-layer sibling).
+
+    We key on each face's *lowest* vertex instead, so a uniformly-lifted face
+    no longer counts as contact, and compare the area that genuinely reaches
+    the bed against the area stranded just above it. A flat slab lifted whole
+    puts ~all of its area in the "just above" band and ~none at the bed
+    (ratio -> 0); a curved or angled real contact transitions smoothly and
+    keeps comparable area in both bands (ratio well above the threshold), so it
+    does not fire. Deliberately left separate from plate_contact_faces, whose
+    1.5-layer leniency is intended for socket roofs and debossed ceilings —
+    this check must not weaken that band, only add a signature it misses.
+    """
+    if len(mesh.faces) == 0:
+        return
+    lh = cfg.layer_height_mm
+    down = -mesh.face_normals[:, 2]          # 1.0 = facing straight down
+    near_horiz = down > 0.9                  # within ~26° of straight down: a
+                                             # flat-ish face meant to lie down
+    face_min_z = mesh.triangles[:, :, 2].min(axis=1)   # lowest vertex, not max
+    areas = mesh.area_faces
+
+    # Area that genuinely reaches the bed: a near-horizontal down-face whose
+    # lowest vertex is within one layer (first-layer squish closes a sub-layer
+    # gap, so a face under one layer up still adheres).
+    real_mask = near_horiz & (face_min_z < lh)
+    real_contact = float(areas[real_mask].sum())
+
+    # Area stranded just above the bed: near-horizontal down-faces whose lowest
+    # vertex sits one-to-three layers up. Under one layer is contact (above);
+    # over three layers is a genuine recess/gap, not an accidentally-lifted
+    # contact surface.
+    band_hi = 3.0 * lh
+    float_mask = near_horiz & (face_min_z >= lh) & (face_min_z < band_hi)
+    floating = float(areas[float_mask].sum())
+
+    if floating < cfg.bed_float_min_mm2:
+        return                               # no substantial lifted surface
+    if real_contact >= cfg.bed_float_ratio * floating:
+        return                               # enough of the intended surface
+                                             # reaches the bed (normal contact)
+
+    fz = face_min_z[float_mask]
+    yield Finding(
+        "bed_contact", Severity.CRITICAL, "Floating first layer",
+        f"{floating:.0f} mm² of near-horizontal down-facing surface hovers "
+        f"{fz.min():.2f}–{fz.max():.2f} mm above the bed while only "
+        f"{real_contact:.0f} mm² truly reaches z=0. The intended first-layer "
+        "surface floats a layer up, so it would print over air and not "
+        "adhere. Drop the geometry so the flat faces land on the plate (or "
+        "reorient).",
+        {"floating_area_mm2": floating,
+         "real_contact_mm2": real_contact,
+         "float_height_min_mm": float(fz.min()),
+         "float_height_max_mm": float(fz.max()),
+         "layer_height_mm": lh},
+    )
+
+
 # --------------------------------------------------------------------------
 # Size: build volume and fine detail
 # --------------------------------------------------------------------------
@@ -439,4 +521,4 @@ def check_size(mesh: trimesh.Trimesh, cfg: Config):
 
 
 ALL_CHECKS = [check_integrity, check_size, check_overhangs,
-              check_walls, check_stability]
+              check_walls, check_stability, check_bed_contact]
