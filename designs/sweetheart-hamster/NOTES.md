@@ -12,6 +12,51 @@ print-in-place clamshell: the two halves come off the bed as one piece, joined
 along the dorsal seam by a living-hinge web, and fold shut into the hamster. A
 heart-shaped pocket straddling the seam is the ring nest.
 
+## v0.2 — living-hinge fuse fix (why this version exists)
+
+**The bug (v0.1, [#359](https://github.com/shaiss/print-bench/pull/359)).** The
+sliced STL shipped with the living hinge **fused solid** — the halves could not
+open. The printed part was watertight and a single connected body, so it looked
+perfect to every gate.
+
+**Root cause.** The flat-pose transform maps a point at assembled height `z` to
+`flat-x = z − hinge_z*S`, so any material *above* the fold axis (`z > hinge_z*S`)
+lands on the far side of the seam and welds into the other half. v0.1 set
+`hinge_z = 30` (axis at `51 mm`), but the assembled model tops out at
+**60.13 mm** (the ears), so the ~9 mm above the axis crossed the seam — a
+**1378-facet weld** at the hinge. Two safety nets both missed it:
+- `printcheck` structurally cannot see a fuse — a weld is watertight and (for a
+  living hinge, which is legitimately one body) reads as a clean single body.
+- the design's own `fitcheck` intersected the **closed** pose (`fold=90`), while
+  CI slices the **flat** pose (`fold=0`). It verified a pose that never ships,
+  so it passed green. (Reviewers never ran either — the platform-side holes are
+  fixed in the fusecheck / reviewer-signoff / preview-honesty work.)
+
+**The geometry fix.**
+- `hinge_z 30 → 36` (`61.2 mm`), so the fold axis clears the **60.13 mm** ear
+  top. Nothing sits above the axis, so each half stays on its own side of the
+  seam and the halves connect **only** through the web. The margin is
+  `(36 − 35.37)·S`, positive at every scale, so the coupon (small `S`) separates
+  too.
+- `web_ov 3 → 6`. With the axis above the ear top, the ears (higher than the
+  spine) become the closest-to-seam material, and the **spine ridge** — where
+  the web must actually bridge — lands ~4 mm either side of centre. The web now
+  spans `±(g+web_ov)=±6.25 mm` so it reaches both ridges and the print is one
+  foldable piece (verified: raw body-count 1 = connected; remove the web zone
+  and it splits into exactly 2).
+
+**The new gates that would have caught it** (both ship with this design):
+- `ci.fusecheck` — removes the dorsal web zone from the sliced STL and asserts
+  it splits into **2** bodies; the `part="fused"` control reproduces the v0.1
+  weld and must stay **1**, proving the check can fire.
+- `ci.fitchecks` — `fitcheck` now intersects the **flat** (sliced) pose and must
+  be empty; `fitcheck_neg` drops the axis back below the top so the halves
+  overlap and it interferes.
+
+Measured on the fix: flat pose splits into 2 (fusecheck), `fitcheck` 0 facets,
+`fitcheck_neg` 4856 facets, `fused` control 1 body, main printcheck 84/100
+watertight, flat footprint ~126 mm wide.
+
 ## Given / assumed measurements
 
 All **assumed** (the brief supplied no measured constraint) with the brief's

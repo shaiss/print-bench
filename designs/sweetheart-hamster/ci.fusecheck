@@ -1,0 +1,24 @@
+# Deterministic fuse check for the print-in-place living hinge (v0.2 fix, W1).
+# A living hinge legitimately makes the printed part ONE watertight body, so
+# printcheck cannot see a weld and the CLOSED-pose fitcheck v0.1 shipped never
+# tested the sliced FLAT pose — a 1378-facet hinge weld merged green and the
+# locket could not open. fusecheck answers the un-mis-aimable question on the
+# sliced STL: remove the dorsal hinge-web zone and the part must still split
+# into the two halves it is supposed to be.
+#
+# Coordinates are in printcheck's rested frame (lowest point at z=0). The web
+# sits on the bed at the seam centre: x within +-(g+web_ov)=+-6.25, y within
+# +-web_len/2=+-8, z within [0, web_t=0.7]; the zone below is a touch generous
+# so a coarse tessellation can't leave a sliver bridging.
+flexure -7,-9,-0.1:7,9,1.2
+
+# The sliced part, minus the web, must split into 2 separable bodies — the two
+# halves connect ONLY through the hinge.
+assert  sweetheart-hamster.stl 2
+
+# Mandatory negative control: `part="fused"` reproduces the v0.1 weld (fold axis
+# dropped below the ear-top) as one solid. With the SAME web zone removed it must
+# STAY 1 body — the halves weld to each other beyond the web — proving the check
+# can fire. (An over-large flexure zone that masked a real fuse would split this
+# control too, and fail here.)
+control fused 1
