@@ -380,6 +380,7 @@ jobs:
           github_token: ${{ github.token }}
           # Same narrow tool grant + labeler deny backstop + dontAsk as the Z.AI step.
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort low --permission-mode dontAsk --settings .claude/labeler-settings.json --allowedTools "Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"
+          prompt: "/label-issues ${{ steps.select.outputs.issues }}"
 
       - name: Explain a skipped agentic run
         if: >-
