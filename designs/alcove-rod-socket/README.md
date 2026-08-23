@@ -68,14 +68,16 @@ this fixes). Shipping the shallow collar as a gated part is tracked in #379.
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
 - **Infill:** 20%.
 - **Supports:** none needed anywhere, by design.
-- **Bed adhesion:** enable a **brim** for the collar — its first layer is a thin
-  annular rim (~2.2 mm wide, carrying a 40.6 mm tube), the part most prone to
-  lifting; it helps the boss too. Cheap insurance on the rim's own merits (the v1
-  field failure was *packaging*, not adhesion — see NOTES.md — so the plate is
-  what fixes that; the brim is separate). On the plate the two parts sit ~5.7 mm
-  apart, so stock brims may bridge the gap into one web spanning both — it should
-  peel off clean (*untested; the proving print will confirm — worst case is a
-  knife against the web, not a reprint*), and it is not the v1 fuse.
+- **Bed adhesion:** brim the **collar**, per-object (Bambu Studio and most
+  slicers brim per object — select just the collar). Its first layer is a thin
+  ~2.2 mm annular rim carrying a 40.6 mm tube, the part that can lift; the boss
+  doesn't need it — it prints flange-down on a full Ø58.8 disc, the best contact
+  on the plate. Cheap insurance on the collar rim's own merits (the v1 field
+  failure was *packaging*, not adhesion — see NOTES.md — so the plate is what
+  fixes that; the brim is separate). A per-object collar brim can't reach the
+  ~5.7 mm gap to the boss, so nothing bridges. (Brim the *whole plate* instead
+  and the two brims may meet in one web — harmless, it should peel clean, though
+  that's untested — but per-object avoids the question.)
 - **Orientation:** print every part as rendered — boss flange-down, collar
   rod-mouth-down (the internal thread prints at the top of the collar, never
   on the first layer).
