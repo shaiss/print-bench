@@ -1,0 +1,6 @@
+# Printable parts to render and gate in CI (the default render is the
+# assembled preview, not a printable deliverable). The thread coupon is gated
+# separately: gate.sh picks up its wrapper file automatically.
+boss
+collar
+bore-coupon

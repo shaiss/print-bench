@@ -1,0 +1,11 @@
+# Boolean fit checks — never printed or sliced, rendered by gate.sh.
+# fit-mate: the production male thread ∩ the production collar solid, seated
+#   as the assembly seats (rim on the flange face, phases aligned by the
+#   shared lead_in offset). Zero facets = the printed thread mates at
+#   thread_tol.
+# fit-mate-ctrl: the same boolean with the collar a quarter turn off — at
+#   starts = 2 that parks every rib half a pitch from every groove, real
+#   volumetric overlap. The mandatory negative control: if this ever renders
+#   empty, the empty check above is proving nothing.
+fit-mate       empty
+fit-mate-ctrl  interferes
