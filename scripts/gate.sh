@@ -603,6 +603,27 @@ gate_one() {
     fi
   fi
 
+  # Multi-object 3MF plate (designs/<name>/ci.plate). A design whose parts print
+  # SEPARATELY (a wall boss + a screw-on collar) has no single sliceable STL:
+  # STL carries no object separation, so the assembled/default render slices as
+  # ONE fused body and the user prints a welded lump (the multi-part fuse field
+  # test). ci.plate lists the production parts; plate.sh merges their gated STLs
+  # into build/<name>-plate.3mf — N distinct objects a slicer imports as N parts
+  # — and asserts the object count equals the declared part count. Needs
+  # prusa-slicer (the same --merge --export-3mf path as --slice); when it is
+  # absent (a bare local run) the check is skipped with a WARN rather than a
+  # spurious fail — CI always has it (session-start installs prusa-slicer).
+  if [[ -f "designs/${name}/ci.plate" ]]; then
+    if command -v prusa-slicer >/dev/null; then
+      echo "== ${name}: plate (multi-object 3MF deliverable) =="
+      if ! "$(dirname "$0")/plate.sh" --check "$name"; then
+        fail=1
+      fi
+    else
+      echo "WARN  ${name}: ci.plate present but prusa-slicer not on PATH — plate 3MF check skipped"
+    fi
+  fi
+
   # Last, so the printcheck rows above stay one contiguous block in the log
   # and in the summary table. A no-op for every design without a derives.conf.
   derivative_gate "$name"

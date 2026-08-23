@@ -296,6 +296,11 @@ surfaces studies awaiting a read live in
     `design-run.yml` and `backlog-burn.yml` (issues #312/#313)
   - `gate.sh` — render printable parts and gate the STLs with printcheck;
     `--slice` adds a PrusaSlicer test-slice (this is what CI enforces)
+  - `plate.sh` — the multi-part deliverable: merges a design's per-part STLs
+    into a multi-object 3MF (`build/<name>-plate.3mf`, N separate objects a
+    slicer imports as N parts) from a `ci.plate` manifest, so a two-part
+    design isn't handed over as one fused STL; `--check` gates the object
+    count, `--selftest` proves it discriminates a fused body
   - `gate-summary.py` — turns a gate log into the CI results table
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and
