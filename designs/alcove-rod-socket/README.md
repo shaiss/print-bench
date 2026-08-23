@@ -53,9 +53,11 @@ the push-in-deep / drop-in-shallow install (Assembly step 3, Parameters table)
 the two holders share the **same boss**; only the far holder's collar differs —
 render it shallow with `engagement_depth=12`. So a deep+shallow pair is two
 bosses + one default collar + one shallow collar. **Neither shipped set — the
-Release nor the plate — carries that shallow collar yet**; it's a clone-and-render
-(`-D 'engagement_depth=12'`) before install day (shipping it as a gated part is
-tracked in #379).
+Release nor the plate — carries that shallow collar yet**; render it before
+install day with **`-D 'part="collar"' -D 'engagement_depth=12'`** (the
+`part="collar"` is essential — the file defaults to `part="assembly"`, so
+without it you'd export the fused two-part preview as one STL, the very failure
+this fixes). Shipping the shallow collar as a gated part is tracked in #379.
 
 ![The collar in its print orientation](previews/collar-print.png)
 
