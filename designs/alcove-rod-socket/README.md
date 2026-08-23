@@ -5,6 +5,11 @@ closet rod that spans a recess or alcove. A wall boss screws flat to each
 facing wall; the rod's ends plug into knurled collars that hand-thread onto
 the bosses. Curtains down for washing = unthread two collars, no tools.
 
+> **v0.2** — ships the separable multi-object plate deliverable. v1 (#361)
+> printed **fused** in the field (a single STL of the two parts slices as one
+> welded body); v0.2 fixes the packaging, geometry unchanged. See *Deliverable*
+> below and the field test log in NOTES.md.
+
 ![Product shot](previews/product-hero.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
@@ -23,6 +28,15 @@ Printed **in pairs** (one holder per wall, one pair per rod):
 - `thread-coupon` / `bore-coupon` — the "print this first" fit checks (see
   Print settings).
 
+**Deliverable — slice the plate, not a single STL.** `boss` and `collar` print
+as separate parts, so the printable file is the multi-object 3MF plate
+**`build/alcove-rod-socket-plate.3mf`** (`./scripts/plate.sh alcove-rod-socket`)
+— the slicer imports it as two distinct objects. Do **not** export the two into
+one STL: STL carries no object separation, so a slicer treats them as one fused
+body and the print welds them together (that was v1's field-test failure — see
+NOTES.md). Stacking the two on the bed to save space is fine; the 3MF keeps them
+separate objects.
+
 ![The collar in its print orientation](previews/collar-print.png)
 
 ## Print settings
@@ -32,6 +46,9 @@ Printed **in pairs** (one holder per wall, one pair per rod):
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
 - **Infill:** 20%.
 - **Supports:** none needed anywhere, by design.
+- **Bed adhesion:** enable a **brim** for the collar — its first layer is a thin
+  annular rim, the part most prone to lifting; it helps the boss too. Cheap
+  insurance against the first-layer detachment seen in the field (NOTES.md).
 - **Orientation:** print every part as rendered — boss flange-down, collar
   rod-mouth-down (the internal thread prints at the top of the collar, never
   on the first layer).

@@ -1,0 +1,12 @@
+# Production parts for the multi-object 3MF plate deliverable,
+# build/alcove-rod-socket-plate.3mf (scripts/plate.sh, gate.sh --check).
+#
+# These two parts print SEPARATELY (a wall boss + a screw-on collar). A single
+# STL of both imports into the slicer as ONE fused body and prints welded — the
+# multi-part-fuse field test (v1, #361). The plate packs them as N distinct
+# objects the slicer imports as N parts; the assembled render stays a preview.
+#
+# A subset of ci.parts: the coupons and the assembled preview are NOT plate
+# parts. Stacking to save bed space is fine — the 3MF keeps the objects separate.
+boss
+collar
