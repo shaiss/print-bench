@@ -383,6 +383,16 @@ if ! ./scripts/ci-ok-guard.sh; then
   fail=1
 fi
 
+# reviewer-signoff decision helper (scripts/reviewer-signoff.sh): the pass/block
+# logic behind the `reviewer-signoff` required status (auto-review.yml, W2). The
+# gate is fail-closed — a design PR without two clean, current sign-offs blocks —
+# so the selftest is the only thing that proves it both passes clean AND fails
+# closed (missing/malformed/stale/blocking/fuse-unacked markers each block).
+echo "-- reviewer-signoff selftest: scripts/reviewer-signoff.sh --selftest"
+if ! ./scripts/reviewer-signoff.sh --selftest; then
+  fail=1
+fi
+
 # vercel-ignore-build selftest (scripts/vercel-ignore-build.sh --selftest): the
 # Vercel "Ignored Build Step" gate decides whether a preview deployment is worth
 # building from the changed-file list alone. The classifier is a pure function

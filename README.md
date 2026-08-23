@@ -281,6 +281,15 @@ surfaces studies awaiting a read live in
     RED while `ci-ok` stays green and the PR merges anyway. The exemption is
     read from each job's own flag, so a new advisory job is exempt
     automatically and a new blocking one is not; with a `--selftest`
+  - `reviewer-signoff.sh` — the pass/block decision behind the
+    `reviewer-signoff` required commit status (posted by `auto-review.yml`), the
+    second required context that makes Jane and Drik actually run and sign off
+    before a design PR merges. Fail-closed: a design PR without two clean,
+    current sign-offs blocks (a sign-off survives a non-design push via
+    design-tree currency, and must acknowledge a live `fusecheck` STRONG WARN);
+    a non-design PR and the `no-auto-review`/`signoff-override` labels pass so a
+    required check never strands a PR it wasn't meant to gate. All the policy
+    lives here behind a `--selftest` with a negative control per row
   - `routine-lock-cleanup.sh` — withdraws a dead scheduled run's SHIP-LOCK (a
     run killed by its timeout cannot run the skill's own release step) and
     escalates to `needs-decision` after 3 run-deaths on one issue; invoked by

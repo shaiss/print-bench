@@ -75,10 +75,14 @@ jobs:
   design-changes:
     name: Check for design file changes
     runs-on: ubuntu-latest
-    # Honour the opt-out label before doing any work.
+    # Honour the opt-out label before doing any work. Drafts are NOT skipped
+    # (W2, the reviewer-signoff gate): the autonomy pipeline ships design PRs as
+    # drafts (a human flips them ready to merge), so if reviewers skipped drafts
+    # the sign-off gate could never be satisfied — and the sweetheart-hamster
+    # fused hinge slipped in precisely because the reviewers never ran on the
+    # draft. The is_new_round dedup still bounds cost to design-changing pushes.
     if: >-
       !contains(github.event.pull_request.labels.*.name, 'no-auto-review')
-      && !github.event.pull_request.draft
     outputs:
       designs_changed: ${{ steps.check.outputs.designs_changed }}
       changed_designs: ${{ steps.check.outputs.changed_designs }}
@@ -221,7 +225,7 @@ jobs:
         id: p1
         if: env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -237,7 +241,7 @@ jobs:
         id: p2
         if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -253,7 +257,7 @@ jobs:
         id: p3
         if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -273,7 +277,7 @@ jobs:
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -290,7 +294,7 @@ jobs:
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -308,7 +312,7 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -360,7 +364,7 @@ jobs:
         id: p1
         if: env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -376,7 +380,7 @@ jobs:
         id: p2
         if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -392,7 +396,7 @@ jobs:
         id: p3
         if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -412,7 +416,7 @@ jobs:
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -429,7 +433,7 @@ jobs:
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -447,7 +451,7 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -515,7 +519,7 @@ jobs:
         id: p1
         if: env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -540,7 +544,7 @@ jobs:
         id: p2
         if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -565,7 +569,7 @@ jobs:
         id: p3
         if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -594,7 +598,7 @@ jobs:
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -620,7 +624,7 @@ jobs:
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -647,7 +651,7 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -726,7 +730,7 @@ jobs:
         id: p1
         if: env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -742,7 +746,7 @@ jobs:
         id: p2
         if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -758,7 +762,7 @@ jobs:
         id: p3
         if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -778,7 +782,7 @@ jobs:
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -795,7 +799,7 @@ jobs:
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -813,7 +817,7 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50  # v1
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -935,3 +939,119 @@ jobs:
               "/repos/$GITHUB_REPOSITORY/issues/${PR_NUMBER}/comments" \
               -f body="$body"
           fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 7. Reviewer-signoff status (W2). Post the `reviewer-signoff` commit status on
+  #    the PR head — the SECOND required context (CI OK can't cross workflows, so
+  #    enforcement of "reviewers ran and signed off" lives here). FAIL-CLOSED: a
+  #    design PR without two clean, current sign-offs BLOCKS; a non-design PR and
+  #    the human escape-hatch labels PASS (always-report, so a required check
+  #    never strands a PR it was never meant to gate). The pass/block decision is
+  #    scripts/reviewer-signoff.sh — a tested helper (--selftest, run by
+  #    check.sh) — so the fail-closed policy is proven, not asserted in YAML.
+  #
+  #    Runs on EVERY PR event (always(), needs the reviewer jobs only so the
+  #    sign-off markers are already posted when we read them). It never checks
+  #    out or runs untrusted PR code beyond `git rev-parse` on tree objects.
+  #
+  #    ARMING (the one manual step): this status only *blocks* a merge once an
+  #    admin adds `reviewer-signoff` to the branch's required status checks.
+  #    Until then it reports but does not gate — see the needs-decision issue.
+  signoff-status:
+    name: Reviewer sign-off status
+    needs: [design-changes, jane-review, drik-review]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read      # checkout + git rev-parse of design tree objects
+      statuses: write     # post the reviewer-signoff commit status
+      issues: read        # read the sign-off / gate-report comments
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0                       # older head shas must resolve
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Compute and post the reviewer-signoff status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DESIGNS_CHANGED: ${{ needs.design-changes.outputs.designs_changed }}
+          NO_AUTO_REVIEW: ${{ contains(github.event.pull_request.labels.*.name, 'no-auto-review') }}
+          OVERRIDE: ${{ contains(github.event.pull_request.labels.*.name, 'signoff-override') }}
+        run: |
+          set -euo pipefail
+
+          # A reviewer's sign-off marker can land in any of three places
+          # depending on how the session posted (a PR review body, an issue
+          # comment, or a review line comment), so gather all three bodies.
+          all_bodies() {
+            gh api --paginate "/repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[].body' 2>/dev/null || true
+            gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/reviews"   --jq '.[].body' 2>/dev/null || true
+            gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/comments"  --jq '.[].body' 2>/dev/null || true
+          }
+          bodies="$(all_bodies)"
+          # Prefer the marker stamped for THIS head (the current round); fall back
+          # to the latest one seen (the currency check BLOCKs if its tree is stale).
+          get_marker() {   # $1 = JANE_SIGNOFF | DRIK_SIGNOFF
+            local all m
+            all="$(grep -oiE "<!-- $1 [^>]*-->" <<<"$bodies" || true)"
+            m="$(grep -iF "sha=$HEAD_SHA" <<<"$all" | tail -1 || true)"
+            [[ -n "$m" ]] && { printf '%s' "$m"; return; }
+            tail -1 <<<"$all" || true
+          }
+          jane="$(get_marker JANE_SIGNOFF)"
+          drik="$(get_marker DRIK_SIGNOFF)"
+
+          # Fuse warn live this round? The render-gate sticky (W1) renders a
+          # fusecheck STRONG WARN when a print-in-place mechanism welds shut.
+          # Best-effort cross-workflow read: if the gate sticky isn't posted yet
+          # the flag is false and the reviewers' own acknowledgement (their skill)
+          # plus the visible warn carry it — documented in reviewer-signoff.sh.
+          fuse_warn=false
+          if gh api --paginate "/repos/$REPO/issues/$PR_NUMBER/comments" \
+               --jq '[.[] | select(.body | contains("printcheck-gate-report"))] | last | .body' \
+               2>/dev/null | grep -qi "STRONG WARN"; then
+            fuse_warn=true
+          fi
+
+          # Design tree at the current head, and at each reviewer's sha, so a
+          # sign-off survives a push that changed no designs/ file (currency).
+          tree_current="$(git rev-parse "${HEAD_SHA}:designs" 2>/dev/null || true)"
+          tree_of() {   # echo the designs tree object at a marker's sha, or empty
+            local sha; sha="$(grep -oiE 'sha=[0-9a-f]+' <<<"$1" | head -1 | cut -d= -f2)"
+            if [[ -n "$sha" ]]; then
+              git rev-parse "${sha}:designs" 2>/dev/null || true
+            fi
+          }
+          jane_tree="$(tree_of "$jane")"
+          drik_tree="$(tree_of "$drik")"
+
+          set +e
+          out="$(scripts/reviewer-signoff.sh decide \
+            --head "$HEAD_SHA" \
+            --designs-changed "${DESIGNS_CHANGED:-false}" \
+            --no-auto-review "$NO_AUTO_REVIEW" \
+            --override "$OVERRIDE" \
+            --fuse-warn "$fuse_warn" \
+            --jane "$jane" --drik "$drik" \
+            --tree-current "$tree_current" \
+            --jane-tree "$jane_tree" --drik-tree "$drik_tree")"
+          rc=$?
+          set -e
+
+          state=success
+          [[ "$rc" != 0 ]] && state=failure
+          desc="${out#* }"                     # strip the leading PASS/BLOCK
+          desc="${desc:0:140}"                 # GitHub caps status descriptions
+          echo "reviewer-signoff → ${state}: ${desc}"
+
+          gh api --method POST "/repos/$REPO/statuses/$HEAD_SHA" \
+            -f state="$state" \
+            -f context="reviewer-signoff" \
+            -f description="$desc" \
+            -f target_url="$RUN_URL"
