@@ -9,6 +9,8 @@ standoffs automatically.
 
 ![Product shot](previews/product-hero.png)
 
+![Base — studio product shot](previews/product-base.png)
+
 ![Preview](previews/iso.png)
 
 ![Board view](previews/board.png)
@@ -37,6 +39,10 @@ cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan.
 - **Orientation:** `base` floor-down as modeled; `lid` outer-face-down (the
   rendered `part="lid"` orientation) — the register lip and fan bosses print
   as standing features. **Print the coupon first** (with a brim) — see below.
+
+The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
+
+![As-printed contact sheet](previews/contact-sheet.png)
 
 ## Parameters
 
@@ -69,10 +75,10 @@ so what you feel there is what the full parts do.
 
 ## Licensing
 
-This design incorporates parts of [NopSCADlib](lib/NopSCADlib), which is
+This design incorporates parts of [NopSCADlib](../../lib/NopSCADlib/VENDORED.md), which is
 licensed under **GPL-3.0**: the board, fan, insert and screw definitions it
 reads at build time and renders in its assembly documentation. The exported
 case geometry is therefore a GPL-3.0 combined work — you may print and share
 it freely under those terms, keeping the license and attribution intact. This
-isolation is deliberate (see [docs/licensing.md](docs/licensing.md)): designs
+isolation is deliberate (see [docs/licensing.md](../../docs/licensing.md)): designs
 that do not use NopSCADlib in this repo are unaffected.
