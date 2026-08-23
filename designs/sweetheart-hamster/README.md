@@ -37,15 +37,29 @@ folds shut.
   ~36 g / ~2.5 h; low infill cuts both substantially.
 - **Supports:** none for the body — it prints flat/open, cut-faces down, domes
   self-supporting. ~3 % of the surface (the ring-nest ceiling and a couple of
-  underside curves) is technically overhang. The nest ceiling is the one that
-  matters: a sagging ceiling droops *into* the pocket and eats the headroom a
-  ring's stone needs to sit flush, so if the ring fit matters to you, enable
-  supports for the nest interior (the underside-curve sag is cosmetic and hidden).
+  underside curves) is technically overhang. **Keep auto-supports OFF.** The nest
+  prints as a heart-shaped arch opening at the bed; only its small crown — where
+  the lobes curl over — is a real overhang, and a sagging crown droops *into* the
+  pocket and eats the headroom a ring's stone needs. If the fit matters, **paint a
+  support enforcer on the nest crown only** — a global "enable supports" drops
+  pillars into the 0.5 mm parting gap (re-welding the seam this design is built to
+  keep open) and scabs the cheeks and the pocket the ring seats against. Note that
+  PETG (the recommended material) sags on that crown more than PLA does, so a
+  truly stone-flush ceiling is really a PLA job — at the cost of the hinge (see
+  **Material**).
 - **Seam:** set the seam to **Back** (or use a scarf seam) — the slicer's default
   aligned seam stacks a vertical ridge down the show dome (a scar on the cheek of
   a gift print); moving it to the back keeps the face clean.
 - **Orientation:** as modelled — the default render **is** the print pose (both
   halves flat, cut-face-down, hinge in the middle). Don't re-orient.
+- **First layer & plate:** the cut faces print as the first layer — and that's the
+  heart-reveal surface the whole gift points at. On **textured PEI** it comes out
+  matte (expected — it reads like a flocked jewelry-box liner); expect a faint
+  elephant-foot flare around the seam silhouette (nose, brow, ears, tail), which
+  0.2 mm elephant-foot compensation cleans up if you care. Don't chase a glossy
+  reveal with PETG on **smooth** PEI without a glue-stick release — it welds to the
+  plate and you'll chip the reveal face lifting the print. Textured PEI is the safe
+  choice.
 - **Print this first:** the coupon, to dial in the hinge flex and seam
   clearance for your printer before committing to the full print.
 
@@ -79,13 +93,21 @@ Override on the command line, e.g. `-D 'S=1.5'` for a smaller hamster or
 
 ## Assembly & use
 
-Nothing to assemble — it prints as one piece. Gently fold the two halves shut
-about the spine; open it like a locket to drop a ring into the heart pocket. The
-closed hamster carries a small tab along the top of the spine between the ears —
-that's the living hinge, printed flat and folded up, and it stays on the finished
-piece. If the halves fit tight at the seam, raise `part_gap` and reprint, tuned
-on the coupon first.
+Nothing to assemble — it prints as one piece, splayed flat and open. The hinge
+runs along the **top of the spine** (dorsal), so in the print/open pose both heart
+scoops face *down*. To load it: turn the open piece scoops-up, set the ring into a
+scoop, then fold the two halves shut about the spine. The reveal runs in reverse —
+unfolding parts the halves and the ring lifts free of the scoop as they open, so
+open it over a hand or the table, not in mid-air. The closed hamster carries a
+small tab along the top of the spine between the ears — that's the living hinge,
+printed flat and folded up, and it stays on the finished piece. A light tack
+across the seam at the very first layer is normal elephant foot — flex the halves
+gently to break it before first use (a non-event in PETG; in PLA expect a faint
+whitened crack along the seam). If the halves fit tight at the seam, raise
+`part_gap` and reprint, tuned on the coupon first.
 
-The box has no catch — it holds shut by friction alone — so **carry it flat and
-fold it shut at the table**, not in a pocket, or a surprise ring can reveal
-itself early. Print in PETG if you want the hinge to fold repeatedly.
+The box has no catch — it holds shut by friction alone — so **carry the print
+flat and empty, and load the ring at the table** just before folding it shut: not
+in a pocket, and not pre-loaded in a bag, where an open box jostled in transit
+lets the ring hop its scoop (and a ring looser than the pocket rattles in the
+closed box — a tell). Print in PETG if you want the hinge to fold repeatedly.
