@@ -62,8 +62,12 @@ bosses + one default collar + one shallow collar.
 - **Infill:** 20%.
 - **Supports:** none needed anywhere, by design.
 - **Bed adhesion:** enable a **brim** for the collar — its first layer is a thin
-  annular rim, the part most prone to lifting; it helps the boss too. Cheap
-  insurance against the first-layer detachment seen in the field (NOTES.md).
+  annular rim (~2.2 mm wide, carrying a 40.6 mm tube), the part most prone to
+  lifting; it helps the boss too. Cheap insurance on the rim's own merits (the v1
+  field failure was *packaging*, not adhesion — see NOTES.md — so the plate is
+  what fixes that; the brim is separate). On the plate the two parts sit ~5.7 mm
+  apart, so stock brims may bridge the gap into one web spanning both — harmless,
+  it peels off clean (not the v1 fuse).
 - **Orientation:** print every part as rendered — boss flange-down, collar
   rod-mouth-down (the internal thread prints at the top of the collar, never
   on the first layer).
