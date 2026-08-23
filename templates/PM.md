@@ -63,8 +63,23 @@ named framing and color vocabularies (or give a hex / a raw `rotz,elev,zoom`).
 
 **Page promise.** The one thing a stranger must take away from the page.
 
+**Mechanism honesty (non-negotiable for anything that folds, snaps, slides or
+prints in place).** A posed or assembled hero (a `-D fold=90` / `part="assembled"`
+render) must **never be the only geometry-true view** on the page — the
+as-printed pose (the default `contact-sheet` 4-view, exactly what CI slices) has
+to be shown too, and the shot list below must include it. This is the
+sweetheart-hamster lesson: its hinge shipped **fused solid**, and a `fold=90`
+hero could never expose the weld, so a "simple camera angle hid the issue." You
+own the angles; choosing ones that could hide a print-pose defect is a PM miss,
+not a reviewer's or CI's. `readme-gate.sh` requirement 12 enforces that the
+contact-sheet is *present and embedded*; picking angles that are actually
+honest is yours. (The deterministic backstop for a fused mechanism is
+`fusecheck` — a gate STRONG WARN — but the page must not rely on it: show the
+real pose.)
+
 **Shot list — tier 1 (real studio renders).** Ranked; the first is the hero.
-Shots are frozen once reviewed — add a row, never repurpose one.
+Shots are frozen once reviewed — add a row, never repurpose one. A mechanism
+design's list must carry the as-printed `contact-sheet` (default pose, no `-D`).
 
 | Shot | What it sells | View | Look (color / finish) | Pose (`-D`, if any) |
 |---|---|---|---|---|

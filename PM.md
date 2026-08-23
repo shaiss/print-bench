@@ -111,6 +111,10 @@ Not a one-time definition of done — the health invariants a stranger can check
       arms, the burn ships, `needs-decision` parks what's the human lead's.
 - [ ] No platform feature is live that no design uses (N6) — or it's tracked to a
       design that will.
+- [ ] A print-in-place mechanism cannot ship *fused* unseen: `fusecheck` STRONG-WARNs
+      a weld deterministically on the sliced STL, its product page must show the
+      as-printed pose (`readme-gate` req 12), and the design PM owns picking angles
+      that don't hide a print-pose defect — the sweetheart-hamster fused-hinge lesson.
 - [ ] The ops pulse is read, not just emitted: no regression Reeve detects (gate
       failure, score drop, budget headroom, wall-time, a design newly frozen out
       of gating, report drift, a scheduled routine whose recent runs all died, a

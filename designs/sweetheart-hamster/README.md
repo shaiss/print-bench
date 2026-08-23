@@ -22,7 +22,7 @@ folds shut.
 - `sweetheart-hamster` — the hamster locket, **~53 × 61 × 60 mm** assembled;
   ring nest ~22 mm across. Prints flat/open, ~126 mm wide on the bed.
 - `sweetheart-hamster-coupon` — a smaller "print this first" copy to dial in the
-  hinge and seam fit before committing to the full print.
+  hinge flex and seam fit before committing to the full print.
 
 ## Print settings
 
@@ -39,7 +39,8 @@ folds shut.
   nest interior, or ignore it — the sag is hidden inside.
 - **Orientation:** as modelled — the default render **is** the print pose (both
   halves flat, cut-face-down, hinge in the middle). Don't re-orient.
-- **Print this first:** the coupon, to tune the hinge/seam for your printer.
+- **Print this first:** the coupon, to dial in the hinge flex and seam
+  clearance for your printer before committing to the full print.
 
 ## Parameters
 
@@ -64,5 +65,5 @@ Override on the command line, e.g. `-D 'S=1.5'` for a smaller hamster or
 
 Nothing to assemble — it prints as one piece. Gently fold the two halves shut
 about the spine; open it like a locket to drop a ring into the heart pocket. If
-the halves stick at the seam, raise `part_gap` and reprint (tune on the coupon
-first). Print in PETG if you want the hinge to fold repeatedly.
+the halves fit tight at the seam, raise `part_gap` and reprint, tuned on the
+coupon first. Print in PETG if you want the hinge to fold repeatedly.

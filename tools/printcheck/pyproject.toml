@@ -26,6 +26,7 @@ test = ["pytest>=7"]
 
 [project.scripts]
 printcheck = "printcheck.cli:main"
+fusecheck = "printcheck.fusecheck:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

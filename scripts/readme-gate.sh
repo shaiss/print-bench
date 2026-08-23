@@ -79,6 +79,21 @@
 #      failure; the reviewers close the deceptive one. No design opts in yet, so
 #      this is dormant until one does, and the selftest is the only thing that
 #      proves it fires.
+#  12. Mechanism preview honesty (the sweetheart-hamster fused-hinge lesson). A
+#      MECHANISM design — one whose sliced (default, no -D) pose is not the
+#      display pose — must embed its as-printed 4-view, previews/contact-sheet.png
+#      (the bare `contact-sheet` cameras token renders the default .scad with no
+#      override — exactly what CI slices), in the README. A flattering closed or
+#      assembled hero (rendered with -D fold=90 / part="assembled") can then
+#      never be the ONLY geometry-true view a stranger sees, because a posed
+#      hero can hide a print-pose defect the way a fused hinge hid behind a
+#      fold=90 render that could never expose the weld. Mechanism = ships
+#      ci.fitchecks OR ci.fusecheck, OR the entry .scad `use`s/`include`s the
+#      print-in-place library (<print-in-place.scad>). Presence + embed only,
+#      like requirement 7: the honesty of WHICH angles sell the part stays the
+#      design PM's call (they own the shot list and the freeze); this gate only
+#      guarantees the as-printed pose is on the page at all, so the PM has an
+#      honest baseline to curate against and a posed hero is never alone.
 #
 # Fenced code blocks and HTML comments are ignored throughout: an example
 # snippet or commented-out line is not page content, so it neither
@@ -446,6 +461,31 @@ check_one() {
   if [[ "$gpl_opted" == 1 ]] && ! grep -qF 'GPL-3.0' <<<"$cleaned"; then
     err "$name" "incorporates a GPL-3.0 part (NopSCADlib) but README.md doesn't disclose it — add a product-page note naming the GPL-3.0-licensed part (see docs/licensing.md)"
     ok=0
+  fi
+
+  # 12. Mechanism preview honesty (see the header comment). A design whose
+  #     sliced pose differs from its display pose must show the as-printed
+  #     4-view on the page, so a posed hero is never the only geometry-true
+  #     proof. Three opt-in signals, all mechanical (entry_scad is set above in
+  #     requirement 11; // comments stripped so a noted-but-inactive include
+  #     does not trigger, mirroring that block).
+  local mech=0
+  if [[ -f "${dir}/ci.fitchecks" || -f "${dir}/ci.fusecheck" ]]; then
+    mech=1
+  elif [[ -f "$entry_scad" ]] \
+    && sed 's://.*$::' "$entry_scad" 2>/dev/null \
+       | grep -qE '^[[:space:]]*(use|include)[[:space:]]*<print-in-place\.scad>'; then
+    mech=1
+  fi
+  if [[ "$mech" == 1 ]]; then
+    local cspng="previews/contact-sheet.png"
+    if [[ ! -f "${dir}/${cspng}" ]]; then
+      err "$name" "is a mechanism design (ships ci.fitchecks/ci.fusecheck or includes print-in-place.scad) but ${cspng} is missing — render the as-printed 4-view with ./scripts/render.sh ${name} --previews (add a bare 'contact-sheet' line to previews/cameras.conf)"
+      ok=0
+    elif ! grep -qF "](${cspng})" <<<"$cleaned"; then
+      err "$name" "README.md doesn't embed ${cspng} — a mechanism's product page must show the as-printed pose (the sliced 4-view), not only a posed hero that can hide a print-pose defect (the sweetheart-hamster fused hinge slipped behind a fold=90 render that could never expose the weld)"
+      ok=0
+    fi
   fi
 
   # 8. Lineage credit. A derivative's product page documents the delta and
@@ -967,8 +1007,58 @@ run_selftest() {
   d="$(_fixture gpl-not-opted)"
   _check gpl-not-opted 0 ""
 
+  # --- Mechanism preview honesty (requirement 12, the sweetheart-hamster
+  # fused-hinge lesson). A mechanism design must embed previews/contact-sheet.png
+  # (the as-printed 4-view). The base _fixture is NOT a mechanism (no
+  # ci.fitchecks/ci.fusecheck, no print-in-place include) and embeds
+  # previews/contact.png, so requirement 12 is inert on every fixture above —
+  # these are the only proof it fires, and the only proof it stays scoped to
+  # mechanisms. Each of the three opt-in signals gets a fixture.
+
+  # _mech_cs <dir> — commit + embed the as-printed 4-view, satisfying req 12.
+  _mech_cs() {
+    : >"$1/previews/contact-sheet.png"
+    printf '\n![Print layout — the as-printed 4-view](previews/contact-sheet.png)\n' >>"$1/README.md"
+  }
+
+  # mech-good: ships ci.fitchecks and embeds the contact sheet -> passes
+  d="$(_fixture mech-good)"; : >"$d/ci.fitchecks"; _mech_cs "$d"
+  _check mech-good 0 ""
+
+  # mech-missing-png: mechanism (ci.fitchecks), no contact-sheet.png at all -> fails
+  d="$(_fixture mech-missing-png)"; : >"$d/ci.fitchecks"
+  _check mech-missing-png 1 "render the as-printed 4-view"
+
+  # mech-missing-embed: mechanism, PNG committed but never embedded -> fails
+  d="$(_fixture mech-missing-embed)"; : >"$d/ci.fitchecks"
+  : >"$d/previews/contact-sheet.png"
+  _check mech-missing-embed 1 "must show the as-printed pose"
+
+  # mech-fusecheck: the ci.fusecheck signal also triggers req 12 (no PNG) -> fails
+  d="$(_fixture mech-fusecheck)"; : >"$d/ci.fusecheck"
+  _check mech-fusecheck 1 "render the as-printed 4-view"
+
+  # mech-piplib: the print-in-place include triggers req 12 (no PNG) -> fails.
+  # _fixture writes no .scad, so write one that uses the pip library.
+  d="$(_fixture mech-piplib)"
+  printf 'use <print-in-place.scad>\nmodule m() cube([10,10,10]);\nm();\n' >"$d/mech-piplib.scad"
+  _check mech-piplib 1 "render the as-printed 4-view"
+
+  # mech-piplib-commented: the include is commented out (//) so it is NOT an
+  # active mechanism -> requirement 12 does not fire, passes with no contact
+  # sheet. Regression for the // strip (mirrors gpl-scad-commented).
+  d="$(_fixture mech-piplib-commented)"
+  printf '// TODO: use <print-in-place.scad>\nmodule m() cube([10,10,10]);\nm();\n' >"$d/mech-piplib-commented.scad"
+  _check mech-piplib-commented 0 ""
+
+  # mech-not-triggered: a plain design (no ci.fitchecks/ci.fusecheck, no pip
+  # include) with NO contact-sheet.png must still PASS — proving req 12 is
+  # scoped to mechanisms and does not force a 4-view on every design.
+  d="$(_fixture mech-not-triggered)"
+  _check mech-not-triggered 0 ""
+
   if [[ "$pass" == 1 ]]; then
-    echo "ok    readme-gate --selftest: every lifestyle-disclosure, assembly and GPL-disclosure guard fires"
+    echo "ok    readme-gate --selftest: every lifestyle-disclosure, assembly, GPL-disclosure and mechanism-preview guard fires"
     return 0
   fi
   echo "FAIL  readme-gate --selftest: a guard did not fire"
