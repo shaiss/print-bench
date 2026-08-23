@@ -82,6 +82,47 @@ findings to slicer settings, but never decides printability itself. Needs
 `pip install '.[ai]'` and `ANTHROPIC_API_KEY` set. Without the flag the
 tool is fully offline.
 
+## `fusecheck` — deterministic fuse detection for print-in-place mechanisms
+
+The package ships a second console entry point, `fusecheck`, for a failure
+printcheck structurally cannot see: a print-in-place mechanism (a living-hinge
+lid, a snap clamshell) that **welds shut** still exports watertight, and — for a
+living hinge — as a *single connected body*, so the integrity checks above all
+pass while the part cannot open. A hand-written interference test can catch
+fusion, but only in the pose its author intersects, and that pose can be the
+wrong one (print-bench's first `sweetheart-hamster` shipped a fitcheck that
+tested the *closed* pose while CI sliced the *flat* one, and missed a
+1378-facet weld at the hinge).
+
+`fusecheck` answers the un-mis-aimable question on the **sliced STL**, never a
+parametric pose: remove the declared thin-flexure zone(s) and count the
+separable bodies that remain. A living hinge that joins the two halves *only*
+through its flexure splits into 2 once the flexure is removed; a large-area
+weld stays 1.
+
+```bash
+# both halves of a print-in-place locket, joined only by a hinge web at the
+# dorsal seam (rested frame, lowest point at z=0):
+fusecheck build/locket.stl --ignore-aabb=-4,-9,-0.1:4,9,1.0
+# → 2   (the halves separate)   |   → 1   (fused: the weld reaches past the web)
+
+fusecheck build/locket.stl --ignore-aabb=... --json   # {stl, bodies, dropped_faces, aabbs}
+fusecheck --selftest                                  # in-memory positive+negative fixtures
+```
+
+It prints the body count and nothing else — a pure measurement, like
+`lineage facet-count`. Pass `--ignore-aabb=` with the leading `=` so a
+negative first coordinate isn't parsed as a flag. `dropped_faces` in `--json`
+is the calibration signal: a zero-drop means the flexure AABB missed the web.
+Reuses the same loader and `body_count` as the analyzer above, so a fused
+export reads identically to printcheck's `bodies`.
+
+In print-bench, `scripts/gate.sh` drives it from a `designs/<name>/ci.fusecheck`
+manifest and applies the per-design thresholds, including a **mandatory
+negative control** (a known-fused pose that must still read fused, so the check
+can never become unfalsifiable) — the same issue-#37 discipline as
+`ci.fitchecks`.
+
 ## The OSS landscape (why this exists)
 
 Surveyed before building; use these instead of or alongside printcheck:

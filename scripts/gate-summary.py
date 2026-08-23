@@ -38,6 +38,7 @@ def main() -> int:
     rows = []          # {stl, score, verdict, criticals, warnings, time, slice_fail}
     pre_fails = []     # FAIL lines emitted before printcheck ran (render/missing)
     derivs = []        # {ok, design, kind, subject, detail} from derivative_gate
+    fusechecks = []    # {status, design, detail} from the ci.fusecheck gate
     cur = None
     for line in lines:
         m = re.match(r"== .*: printcheck (\S+) ==", line)
@@ -61,6 +62,16 @@ def main() -> int:
             status, design, kind, subject, detail = m.groups()
             derivs.append({"ok": status == "ok", "design": design, "kind": kind,
                            "subject": subject or "", "detail": detail.strip()})
+            continue
+        # Claimed before pre_fails too: a fusecheck control "render failed" line
+        # would otherwise be swallowed by the pre_fails matcher below and lose
+        # its section. `fusecheck ` is the discriminator, so an ordinary
+        # `FAIL  <design>: render failed` still falls through to pre_fails.
+        m = re.match(r"(ok|warn|FAIL)\s+fusecheck (\S+): (.+)$", line)
+        if m:
+            status, design, detail = m.groups()
+            fusechecks.append({"status": status, "design": design,
+                               "detail": detail.strip()})
             continue
         m = re.match(r"FAIL\s+(.+: (?:render failed|\S+ not found))$", line)
         if m:
@@ -94,7 +105,7 @@ def main() -> int:
 
     print("### printcheck + slice results")
     print()
-    if not rows and not pre_fails and not derivs:
+    if not rows and not pre_fails and not derivs and not fusechecks:
         print("_no gate output captured_")
         return 0
     if rows:
@@ -138,6 +149,22 @@ def main() -> int:
             detail = d["detail"].replace("|", "\\|")
             print(f"| `{d['design']}` | {check} "
                   f"| {'✅' if d['ok'] else '❌'} {detail} |")
+    if fusechecks:
+        # Its own section: a fuse warn is not a printcheck finding (the fused
+        # part scores a clean 100) and it is not a hard fail either — it is the
+        # STRONG WARN the reviewers must sign off on, so it must be impossible to
+        # miss in the sticky comment they read as ground truth.
+        print()
+        print("### Fusecheck (separable bodies)")
+        print()
+        print("| Design | Result |")
+        print("|---|---|")
+        icons = {"ok": "✅", "FAIL": "❌", "warn": "⚠️"}
+        for u in fusechecks:
+            detail = u["detail"].replace("|", "\\|")
+            if u["status"] == "warn":
+                detail = f"**STRONG WARN — reviewer signoff required.** {detail}"
+            print(f"| `{u['design']}` | {icons.get(u['status'], '')} {detail} |")
     return 0
 
 
