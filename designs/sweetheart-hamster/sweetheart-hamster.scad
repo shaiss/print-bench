@@ -176,10 +176,21 @@ module half_solid(side, gg = g) {
 // the bed (z=0), dome up. Left splays −X, right +X. `hz` is the fold-axis height
 // (pre-scale): the production default `hinge_z` clears the top so the halves
 // don't weld; the welded controls pass `fused_hz` to reproduce the v0.1 bug.
+//
+// The outer `translate([0,0,-gg])` LANDS the cut face on the bed. Without it the
+// rotate maps the cut plane (x = -gg) to flat-z = +gg = 0.25 mm, so each half
+// hovers a quarter-millimetre above the plate and only the 0.7 mm web touches
+// z=0: the ~47 cm² of intended first-layer contact prints over bare glass and
+// the domes never adhere. No gate caught it (printcheck counts a face under
+// 0.3 mm as on-plate; the slicer slices floating geometry silently) — the print
+// fails at layer 1 while every check is green. Dropping by gg puts the cut faces
+// on the plate; the web (drawn separately in model(), z ∈ [0, web_t]) is
+// untouched and still bridges the now-lower dorsal ridges.
 module half_flat(side, gg = g, hz = hinge_z) {
-    rotate([0, side < 0 ? 90 : -90, 0])
-        translate([0, 0, -hz*S])
-            half_solid(side, gg);
+    translate([0, 0, -gg])
+        rotate([0, side < 0 ? 90 : -90, 0])
+            translate([0, 0, -hz*S])
+                half_solid(side, gg);
 }
 
 // Living-hinge web: thin flexure bridging the two halves at the dorsal seam,
