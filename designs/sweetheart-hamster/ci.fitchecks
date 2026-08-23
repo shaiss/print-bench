@@ -1,0 +1,9 @@
+# Print-in-place fit proof for the sweetheart-hamster clamshell locket.
+# `fitcheck` intersects the two CLOSED halves (folded to assembled) — it must
+# render EMPTY: the sagittal parting gap is real, so the two halves clear and
+# the locket opens instead of printing welded shut. `fitcheck_neg` forces the
+# parting gap NEGATIVE (the halves overlap) and MUST interfere — the mandatory
+# negative control proving the empty check can actually fail. The living-hinge
+# web is drawn outside these bodies, so it never masks the seam clearance.
+fitcheck      empty
+fitcheck_neg  interferes
