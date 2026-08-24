@@ -326,6 +326,24 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     Queued: shouldered-insert-tip stopgap → B4; occupied-notch guard (fan leads +
     ribbon share the notch) → B7; the 2 a.m. by-feel framing → B10. The
     `sbc-case.scad` freeze held rounds 3–10, all page-only since 2c.
+24. **Round 11 — the last page word before the print (PR #397).** Both reviewers
+    passed again (Jane fresh at `a220364`, Drik at `99fdc73`, one text-commit
+    behind). One act-now, a one-word honesty fix and the second use of the
+    round-9 retirement rule's page-honesty exception: the "Living with it"
+    SD-swap bullet cited the verification as "(the field test in NOTES)", but
+    NOTES has no `## Field test log` section yet — that entry *is* B10, still
+    pending — so a stranger following the parenthetical finds the engineering
+    log, not a test, and reads settled what is only promised. Fixed to "the
+    **planned** field test in NOTES" (README), which B10 makes true when it logs
+    the first print. Recorded keep-guard: `ports.png` and `top.png` stay
+    committed but off-page on purpose (`ports` is B9's reserved evidence image —
+    a future connectors-clear-the-rim claim takes a new `ports-rim` entry, never
+    a reframe; `top` is carried by the contact-sheet's own top view). Drik's
+    round-11 "header reaches through" read (reviewed at `99fdc73`, before the
+    round-10 caption fix landed) was the third such misread and is corrected by
+    the same evidence — the pins sit ~0.6 mm below the notch lip; the jumper-exit
+    promise the read rode is true. The `sbc-case.scad` freeze held rounds 3–11,
+    all page-only since 2c; the page is now retired to B10.
 
 ## Print settings
 
