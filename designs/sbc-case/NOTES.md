@@ -285,6 +285,28 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     vitamin — the printed foot is the billable durable choice); B10 widened to
     also log the fan-lead landing and the 1 a.m. noise. The `sbc-case.scad`
     freeze held rounds 3–7, all page-only since 2c.
+22. **Rounds 8–9 — the page converges (PR #397).** Round 8 was the PR's first
+    all-confirmation round: both reviewers passed *fresh at the same head*
+    `5db3e7c` (Jane a formal APPROVE), every finding a `[saw-it]`/`[used-it]`
+    verification or queue-tier keep-guard, **zero act-now**. Round 9 landed the
+    last page batch (push `86a25c2`): Vera re-triaged the findings that arrived
+    after the round-8 triage (Drik's fuller re-review + Jane's re-run) and ruled
+    three text-only act-nows — (a) the fan-lead **tether**: the round-7 step-7
+    routing clause created it (leads go to the board, but the fan mounts to the
+    lid), so step 7 and the README "Serviceable where it counts" bullet now say
+    to **unplug the fan lead at the header before lifting the lid** — the
+    conservative unplug-first instruction is print-independent, and the
+    reach-with-slack refinement is B10's; (b) an **ASA** vent-ceiling clause (ASA
+    bridges the 2 mm ceiling fuzzier than PETG — same
+    reader-mistakes-a-normal-artifact-for-a-defect class as round 7's vent-span
+    line); (c) the coupon **global elephant-foot is fine** clause (the base crop's
+    fit is a vertical cavity wall the compensation never touches). Queued to B10:
+    the "quieter at night" wording — the `fan40x11` vitamin carries no wire count,
+    so the 1 a.m. noise log settles 2-wire on/off vs 4-wire PWM. **Standing rule
+    (Vera, round 9): the page is now retired to B10 — page-only findings queue
+    behind the first real print by default, unless they touch a non-negotiable or
+    page honesty.** The `sbc-case.scad` freeze held rounds 3–9, all page-only
+    since 2c.
 
 ## Print settings
 
