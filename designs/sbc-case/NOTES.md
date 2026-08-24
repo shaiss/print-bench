@@ -176,6 +176,16 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     "flush with the post top" step; the stepped bore that would enforce it in
     geometry is backlogged (PM.md B4). New shots/cameras are regen-owned — the
     manifests and embeds are ours, CI renders the pixels.
+15. **Round 2b (PR #397 review round).** Jane and Drik passed again; Vera's
+    pm-triage act-now'd four copy/framing touches, no geometry: the `notch`
+    camera widened `dist` 170→230 while its freeze window was still open (this
+    was the first round to see it; at 170 it cropped the notch and 3 of 4
+    slots — verified the wider frame shows all four slots, both notch ends, the
+    wall top and the header); a vents "supports off / PETG slot droop is normal"
+    settings line; an ASA fits clause (ASA prints the register tighter than a
+    PETG coupon suggests, eating the 0.25 mm `fit_clearance` budget); and
+    softening the fan-life claim to "typically". SD-swap ergonomics parked as
+    B10 (a field-test on the first real print).
 
 ## Print settings
 

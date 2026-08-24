@@ -43,6 +43,9 @@ five separate hardware orders.
 - **Layer height:** 0.2 mm
 - **Infill:** 15 %, gyroid
 - **Supports:** none needed — both parts are support-free by design
+- **Vents:** leave supports **off** — each of the four +Y-wall slots bridges
+  ~12 mm cleanly; a little ceiling droop *inside* the slots is normal in PETG
+  and hidden once the lid is on. Auto-supports here just weld into the tunnels.
 - **Orientation:** `base` floor-down as modeled; `lid` outer-face-down (the
   rendered `part="lid"` orientation) — the register lip and fan bosses print
   as standing features. **Print the coupon first** (with a brim) — see below.
@@ -52,6 +55,9 @@ five separate hardware orders.
 - **Plate (PETG):** print PETG on a **textured** sheet — it welds to smooth PEI.
 - **Enclosure (ASA):** ASA wants an **enclosure** — the flat 94.5 × 76.2 mm lid
   and the long open skirt edges lift on a cold chamber. No enclosure → use PETG.
+  And **coupon in the material you'll ship**: ASA prints the register fit tighter
+  than a PETG coupon suggests (its shrink eats the 0.25 mm `fit_clearance` budget),
+  so bump `fit_clearance` a hair before reaching for sandpaper.
 - **Lid first layer:** enable **elephant-foot compensation** for the `lid`. It
   prints outer-face-down, so its show face *is* the bed face (the `base` already
   carries a 0.6 mm bed chamfer; the lid plate does not).
@@ -100,7 +106,7 @@ so what you feel there is what the full parts do.
   jumper wires reach the pins with the lid on.
 - **Serviceable where it counts.** The heat-set inserts sit at the two joints
   you ever revisit — the lid and the fan — so opening the case or swapping the
-  fan (a sleeve-bearing 40 mm fan is a 4–6 year part) never chews a plastic
+  fan (a sleeve-bearing 40 mm fan is typically a 4–6 year part) never chews a plastic
   thread. The board screws are the ones you touch once.
 - **Keep it breathing.** The fan blows *in* through an open-skirted case, so
   it is an intake for dust too — on an always-on build, blow the fan and the
