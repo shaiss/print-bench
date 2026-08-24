@@ -307,6 +307,25 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     behind the first real print by default, unless they touch a non-negotiable or
     page honesty.** The `sbc-case.scad` freeze held rounds 3–9, all page-only
     since 2c.
+23. **Round 10 — the notch-caption honesty fix (PR #397).** Both reviewers
+    passed again (Jane fresh at `8ebc344`, Drik re-run; head `99fdc73` is CI's
+    regen commit-back). One act-now, the page-honesty exception the round-9
+    retirement rule reserves: the `notch` exhibit's alt text ("header reaching
+    through", README) and the matching `previews/CAMERAS.md` phrase claimed the
+    2×20 header reaches through the notch opening. It doesn't — the pin tops sit
+    at ~16.9 mm (`board_z` 7 + ~1.4 board + ~8.5 header) and
+    `gpio_notch_bottom = 17.5` (`sbc-case.scad:77`), so the pins are ~0.6 mm
+    **below** the notch lip, behind solid wall; the notch clears a jumper/Dupont
+    housing (~19.4 mm, over the 17.5 lip) with the lid on, which is what "GPIO
+    stays reachable" actually promises (the comment at the cut even says "a
+    notch, not a window, so nothing bridges"). The feature is sound — only the
+    caption was ahead of the pixels — so the fix is page-side only: both strings
+    reworded, the frozen camera untouched, `sbc-case.scad` unchanged. Tell that
+    it mattered: Drik's own round-10 review misread the exhibit ("the pins
+    visibly reach through the wall"), the caption fooling a careful reviewer.
+    Queued: shouldered-insert-tip stopgap → B4; occupied-notch guard (fan leads +
+    ribbon share the notch) → B7; the 2 a.m. by-feel framing → B10. The
+    `sbc-case.scad` freeze held rounds 3–10, all page-only since 2c.
 
 ## Print settings
 

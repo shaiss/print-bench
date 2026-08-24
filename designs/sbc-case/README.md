@@ -127,7 +127,7 @@ so what you feel there is what the full parts do.
   it is an intake for dust too — on an always-on build, blow the fan and the
   vent row out every few months.
 
-![GPIO access notch, header reaching through](previews/notch.png)
+![GPIO access notch above the 2×20 header — jumpers exit here with the lid on](previews/notch.png)
 
 ## Licensing
 
