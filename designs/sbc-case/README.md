@@ -15,7 +15,7 @@ separately (see the bill of materials below).*
 ![Your Pi on the generated standoffs](previews/product-populated.png)
 
 *Shown in the case's own charcoal, so the board reads dark; the color notch
-view lower down shows the green board and gold header pins through the wall.*
+view lower down shows the green board and gold header pins seated just below the notch lip.*
 
 ![Base — the bare tray](previews/product-base.png)
 

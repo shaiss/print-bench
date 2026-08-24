@@ -344,6 +344,26 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     the same evidence — the pins sit ~0.6 mm below the notch lip; the jumper-exit
     promise the read rode is true. The `sbc-case.scad` freeze held rounds 3–11,
     all page-only since 2c; the page is now retired to B10.
+25. **Round 12 — the page converges for real (PR #397).** Both reviewers pass
+    fresh at the same head `6dcebba` (Jane a formal APPROVE); the PR's first
+    zero-act-now round since round 8 — and unlike round 8 it holds, because the
+    round-9 retirement rule blocks any further page act-now, so only B10 (a
+    physical print) remains. Two queue-tier filings: Jane's lid-seating feel →
+    B10; Drik's exploded-view legibility → B8. `iso.png` byte-checked valid (a
+    reviewer reader refusal, not a corrupt file). Freeze held rounds 3–12.
+26. **Round 13 — the last caption straggler (PR #397).** One act-now, the
+    page-honesty exception's third use: the `product-populated` italic caption
+    (README) still said "gold header pins through the wall" — the round-3 wording
+    that outlived round 10's fix of the identical false claim in the notch
+    alt-text and CAMERAS.md, so the page contradicted its own corrected exhibit a
+    screen apart (Drik's image tool made the same misread unprompted). Fixed to
+    "seated just below the notch lip", consistent with CAMERAS.md's "pin tops fall
+    ~0.6 mm below the notch lip … the pins stay behind the wall". Bundled with the
+    carried round-12/13 charter bookkeeping in one push (Vera's economy: reset the
+    sign-offs once). Queued to B10: the "2 a.m. reflash needs no tools" tagline,
+    coupled to the field-test entry. Queued to B11: the finger guard must be a
+    co-planar grille in the lid plate, never a bar across the aperture
+    (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
 
 ## Print settings
 
