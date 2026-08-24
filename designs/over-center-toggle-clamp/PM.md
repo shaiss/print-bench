@@ -30,7 +30,7 @@ no-hardware promise); styling beyond clean functional geometry (brief says
 
 ## v1 — definition of done
 
-- [ ] All six gate-contract boxes green (claim comment on #285)
+- [ ] All five gate-contract boxes green (G1–G5, claim comment on #285)
 - [ ] Coupon printed and snapped by a human; measured f_snap recorded here
 - [ ] Clamp mounted, holds a 3 kg pull at the jaws without opening
 - [ ] 50 toggle cycles by hand with no change in snap feel

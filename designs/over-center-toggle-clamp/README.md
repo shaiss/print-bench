@@ -6,9 +6,9 @@ the jaw closes on your workpiece, the linkage passes dead center and
 it holds both open and closed. One PETG print, four moving parts, zero
 hardware, no supports.
 
-![4-view contact sheet](previews/contact-sheet.png)
-
 ![The clamp at its printed open pose](previews/iso-open.png)
+
+![4-view contact sheet](previews/contact-sheet.png)
 
 ## What you get
 
