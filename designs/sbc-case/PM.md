@@ -43,6 +43,11 @@ vents and a tidy parting line).
 - [x] `readme-gate.sh sbc-case` passes incl. the GPL-3.0 disclosure (N3)
 - [x] CI `regen` committed the shots and exploded view (PR #371, merged;
       round-2 shots follow the same regen-owned path)
+- [ ] **First real print survives (B10 field test)** — the gates are necessary,
+      not sufficient: every box above was checked while the base could not print
+      (the floating skirt, B0). "Done" now includes a finger on the wall, not
+      only the gates. This is the **second #69-class escape** on this design
+      (the 7-body `rounded_box` frame miss, NOTES decision 11, was the first).
 
 ## Product page & shots (art direction)
 
@@ -68,6 +73,7 @@ geometry, and the GPL/first-party story stays clean.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
+| B0 | **[done, round 2c]** Make the skirt exist — the +X/−X/−Y open-edge cuts floated the wall 16.75 mm over the bed (`center = true` centred them on `skirt_top`; NOTES decision 16). Inherited from merged #371 | the block: an N4 violation, unprintable, that every gate **and Jane** passed — Drik's finger caught it. B1–B9 are all downstream of a base that prints | consumed by this round's push, not open work |
 | B1 | Modeled per-port cutouts (USB/HDMI/Ethernet/USB-C) instead of open skirted edges | biggest look upgrade — but it puts tight holes on the most-touched surface (cables); the open skirt is today's zero-force win (Drik cable-band caution, round 2). brief Open question 2 deferred it for support-free risk | medium — 4 cutout profiles + re-gate |
 | B2 | Additional validated board presets (RPi 3B+/5, Zero 2 W) | `pcb_holes()` derivation makes it nearly free; each board still needs its port wall checked | low per board — parameter + render + check |
 | B3 | Fan shroud / duct over the SoC | the only backlog item on the 8,760 h/yr runtime path — first to move when a measured thermal story lands (Drik usage-math re-rank, round 2); still declined for support-free until then | medium — new part + slice gate |
@@ -76,8 +82,8 @@ geometry, and the GPL/first-party story stays clean.
 | B6 | Printed-foot option (parameter) | Drik, round 2: the case walks on a one-handed cable pull; this round's fix is a README "add adhesive feet" line, a printed foot is the no-hardware option | low — parameter + render |
 | B7 | GPIO-with-lid-on clearance: measure the notch window height vs a 2×20 ribbon socket, then an honest page line | Drik hunch, round 2 — jumpers clear (shown); a tall ribbon socket may foul. A hunch drives a measurement, not a change | low — measure in the .scad + one line |
 | B8 | Exploded-view size bump (inserts are specks at 512 px) | Drik, round 2: rides the next assembly.conf change, kept off this diff to stay minimal | trivial — generator size step |
-| B9 | Decide `ports.png` framing (reads as a near-solid wall) — a CAMERAS.md note if the gap reads better in `iso`, else a new plugged-in camera row | Drik hunch, round 2: decide alongside the notch camera | trivial |
-| B10 | SD-swap ergonomics field-test on the first real print — card in / out with the lid on, logged as the first `## Field test log` entry in NOTES.md | Drik hunch, round 2b: the lid-on SD swap is the page's best promise but render-only; a microSD is a slippery 15×11×1 mm chip at the bottom of a 26 mm skirt. A hunch drives a measurement (B7 precedent); promote to a page line only if the print says so | trivial — one field test on first print |
+| B9 | **[resolved, round 2c]** `ports.png` keeps its framing; `iso.png` is the open-edge evidence image (and post-B0 shows a real skirt, not a curtain) | Drik hunch, round 2 | — (decided) |
+| B10 | SD-swap ergonomics field-test on the first real print — card in / out with the lid on, logged as the first `## Field test log` entry in NOTES.md | Drik hunch, **re-scoped round 2c against the restored rim**: the micro-SD socket hangs ~1.3 mm below the board, so the card sweeps z ≈ 5.85–6.85 against a rim now solid to 6.5 and may scrape ~0.3–0.4 mm. A hunch drives a measurement, not a change; if the print confirms it, `skirt_margin` 0.5 → ~1.6 or a local −X scallop is next round's | trivial — one field test on first print |
 
 ## Open decisions
 
@@ -98,3 +104,4 @@ their stated assumptions (see the decision log).
 | 2026-08-24 | Vent re-web: five 12 mm slots @ 11.5 mm pitch → four @ 15 mm pitch | 0.5 mm overlap fused them into one 58 mm bridge that sags in PETG (Jane, PR #371); 4 @ 15 gives 3 mm webs and real 12 mm bridges at the same span, re-gated 100/100 (NOTES 13) |
 | 2026-08-24 | Round-2 product-page pass (Vera triage of PR #371, merged): product-populated shot, notch camera, print-settings + serviceability + care lines, hero caption | both reviewers passed at head; act-now was textual + one geometry (vents). Stepped bore, lip chamfer, printed foot, ribbon measurement, exploded size, ports camera → backlog B4–B9 |
 | 2026-08-24 | Round 2b (PR #397 pm-triage): `notch` camera widened `dist` 170→230 pre-freeze, vents "supports off / PETG droop" line, ASA fits clause, fan-life "typically" | both reviewers passed again; Vera act-now'd four copy/framing touches. `notch` widened inside its **first** review round — the freeze attaches to a shot that has *survived* a round, so widening now is one line vs a `notch-wide` companion after merge (a considered interpretation, recorded); SD-swap ergonomics → B10 field-test |
+| 2026-08-24 | **B0 — floating skirt** (round 2c, PR #397): `center = true` on the +X/−X/−Y open-edge cuts centred them on `skirt_top`, floating the wall 16.75 mm over the bed (`sbc-case.scad` open-edge cuts; NOTES decision 16). **Inherited from merged #371 — `main` carried it until this PR.** | Drik blocked, Vera upheld it as an N4 violation. Found by Drik's round-2b finger-check, missed by every gate and by Jane. Fix = keep `center = true` (needed for the X/Y straddle — deleting it, as Drik and Vera both proposed, mis-cuts) and lift the Z so the cut floor rests on `skirt_top`; re-verified skirt restored, base 100/100. Second #69-class escape (7-body `rounded_box` was the first) → DoD gains a first-real-print row |

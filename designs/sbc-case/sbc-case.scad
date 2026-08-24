@@ -139,12 +139,21 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
                     linear_extrude(interior_h + 1)
                         rounded_square([2 * cavity_x_half, 2 * cavity_y_half], r = 3, center = true);
             }
-            // three open edges above the skirt: +X (USB-A x2 / Ethernet),
-            // -X (micro-SD), -Y (USB-C / 2x micro-HDMI / jack)
+            // three open edges ABOVE the skirt: +X (USB-A x2 / Ethernet),
+            // -X (micro-SD), -Y (USB-C / 2x micro-HDMI / jack). center=true is
+            // REQUIRED — the translate points are the wall centrelines, so the
+            // cut must straddle the wall in X/Y (deleting center shifts it onto
+            // the centreline, leaving an inner sliver / missing the -Y wall). The
+            // bug was the Z: translating to skirt_top with center=true centred
+            // the cut ON z=6.5, spanning z[-3.75,16.75] — it deleted the 6.5 mm
+            // skirt and left the wall a band floating 16.75 mm over the bed,
+            // watertight and sliceable yet unprintable (angle-only gates can't
+            // see a vertical curtain over air; NOTES decision 16). Fix: lift the
+            // Z centre by half the cut height so the cube FLOOR rests on skirt_top.
             for (sx = [-1, 1])
-                translate([sx * (cavity_x_half + wall / 2), 0, skirt_top])
+                translate([sx * (cavity_x_half + wall / 2), 0, skirt_top + (base_top_z - skirt_top + 1) / 2])
                     cube([wall + 2.5, 2 * outer_w + 2, base_top_z - skirt_top + 1], center = true);
-            translate([0, -(cavity_y_half + wall / 2), skirt_top])
+            translate([0, -(cavity_y_half + wall / 2), skirt_top + (base_top_z - skirt_top + 1) / 2])
                 cube([2 * cavity_x_half + 1, wall + 2.5, base_top_z - skirt_top + 1], center = true);
             // GPIO access notch: cut down from the top edge of the +Y wall
             // over the 2x20 header — a notch, not a window, so nothing bridges
@@ -276,13 +285,16 @@ module vitamin_washer()       { washer(M3_washer); }
 module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, post, generated standoff) in place, the lid's at print pose across the plate — flip the lid crop over and it nests on the base corner
     union() {
         // base -X,+Y corner as printed (floor down): real wall the lid lip
-        // registers against, skirt profile, the through-insert lid-screw post
-        // and one generated board standoff (the RPI4 hole pattern is centered
-        // at x = -10, so the -X corner is the one that carries a standoff)
+        // registers against, skirt profile, the through-insert lid-screw post,
+        // one generated board standoff (the RPI4 hole pattern is centered at
+        // x = -10, so the -X corner is the one that carries a standoff), and —
+        // crop widened (-33 -> -14, X to ~-14.6) — the leftmost vent slot, so
+        // the coupon rehearses the 12 mm PETG bridge before the full base does
+        // (Jane, PR #397). It stays the fit AND structure proof.
         intersection() {
             base();
             translate([-outer_l / 2 - 0.6, 20.5, -0.5])
-                cube([outer_l / 2 - 33, 18.2, base_top_z + 1]);
+                cube([outer_l / 2 - 14, 18.2, base_top_z + 1]);
         }
         // lid -X,+Y corner at print pose (outer face down), cropped in
         // assembled coords — the flip lands it on the -Y side of the plate,

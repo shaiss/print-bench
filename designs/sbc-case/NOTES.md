@@ -186,6 +186,25 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     PETG coupon suggests, eating the 0.25 mm `fit_clearance` budget); and
     softening the fan-life claim to "typically". SD-swap ergonomics parked as
     B10 (a field-test on the first real print).
+16. **B0 — the floating skirt (round 2c, PR #397).** The three open-edge cuts
+    (+X / −X / −Y) carried `center = true` under a `translate(..., skirt_top)`,
+    so each cut was centred ON z = skirt_top (6.5), spanning z[−3.75, 16.75].
+    That deleted the 6.5 mm skirt and left the wall as a 9.25 mm band floating
+    16.75 mm over the bed on those three sides — anchored only at the corner
+    posts: unprintable, yet watertight, sliceable and 100/100 (angle-only
+    overhang logic can't see a vertical curtain over air, and the posts keep it
+    one connected body). It is the **second #69-class escape** on this design
+    (the 7-body `rounded_box` frame miss, decision 11, was the first) and it was
+    **inherited from merged #371** — `main` carried it until this PR repaired
+    it. Caught by Drik's round-2b "finger run up the wall from the bed," missed
+    by every gate; Jane passed the same head. Fix: **keep `center = true`** —
+    the translate points are the wall *centrelines*, so the cut must straddle
+    the wall in X/Y; deleting center (as both Drik and Vera proposed) shifts the
+    cut onto the centreline, leaving an inner sliver and missing the −Y wall —
+    and **lift the Z centre by half the cut height** so the cube *floor* rests
+    on skirt_top (z[6.5, 27]). Re-verified: skirt restored on all three edges
+    (ortho profile), base re-gated 100/100. The micro-SD-clearance consequence
+    of the restored −X rim is B10, measured on the first real print.
 
 ## Print settings
 
@@ -205,7 +224,10 @@ NopSCADlib vitamins (the brief's named source), read at build time:
 ## Print this first
 
 Print `sbc-case-coupon.scad` (the `coupon` part) before the full case — it is
-two cropped corners of the real parts, ~40 min:
+two cropped corners of the real parts, ~40 min. Since PR #397 the base crop
+also carries the restored skirt rim and the leftmost vent slot, so it rehearses
+the **PETG bridge the full base stands on** — the coupon is now the fit *and*
+structure proof:
 
 1. **Insert fit:** an F1BM3 should press into the post's Ø4.0 hole and grab.
    Loose → drop `post_d` shell or check hole size first; the hole diameter is
