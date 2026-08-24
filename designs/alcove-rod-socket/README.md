@@ -5,6 +5,11 @@ closet rod that spans a recess or alcove. A wall boss screws flat to each
 facing wall; the rod's ends plug into knurled collars that hand-thread onto
 the bosses. Curtains down for washing = unthread two collars, no tools.
 
+> **v2** — ships the separable multi-object plate deliverable. v1 (#361)
+> printed **fused** in the field (a single STL of the two parts slices as one
+> welded body); v2 fixes the packaging, geometry unchanged. See *Deliverable*
+> below and the field test log in NOTES.md.
+
 ![Product shot](previews/product-hero.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
@@ -23,6 +28,37 @@ Printed **in pairs** (one holder per wall, one pair per rod):
 - `thread-coupon` / `bore-coupon` — the "print this first" fit checks (see
   Print settings).
 
+**Deliverable — two objects, never one fused STL.** `boss` and `collar` print as
+**separate parts**, and the one rule is: keep them as two distinct objects in the
+slicer. STL carries no object separation, so exporting the two into a *single*
+STL imports as one fused body and welds them together — v1's field-test failure
+(NOTES.md). Two ways to get the parts, both give the separation:
+
+- **Downloaded a Release:** you get two files, `boss` and `collar` — import
+  **both** and keep them as separate objects. (No v2 Release is tagged yet —
+  releases are cut on a tag, not on merge — so until one exists, use the clone
+  path below.)
+- **Cloned the repo:** `./scripts/plate.sh alcove-rod-socket` bundles the two
+  into one multi-object 3MF (`build/alcove-rod-socket-plate.3mf`) — the same two
+  objects in one file. (The 3MF is a local build artifact; it isn't attached to
+  the GitHub Release yet — that's a tracked follow-up.)
+
+Either way, saving bed space is fine — lay the two parts **side by side and
+flat** (the plate's `--merge` does exactly that). Don't stack them **one on top
+of the other**: two separate objects stacked vertically still print the upper one
+over open air — the ~10-layers-in spaghetti from v1.
+
+**A rod takes a pair — two holders**, so print (or import) the set **twice**. For
+the push-in-deep / drop-in-shallow install (Assembly step 3, Parameters table)
+the two holders share the **same boss**; only the far holder's collar differs —
+render it shallow with `engagement_depth=12`. So a deep+shallow pair is two
+bosses + one default collar + one shallow collar. **Neither shipped set — the
+Release nor the plate — carries that shallow collar yet**; render it before
+install day with **`-D 'part="collar"' -D 'engagement_depth=12'`** (the
+`part="collar"` is essential — the file defaults to `part="assembly"`, so
+without it you'd export the fused two-part preview as one STL, the very failure
+this fixes). Shipping the shallow collar as a gated part is tracked in #379.
+
 ![The collar in its print orientation](previews/collar-print.png)
 
 ## Print settings
@@ -32,6 +68,16 @@ Printed **in pairs** (one holder per wall, one pair per rod):
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
 - **Infill:** 20%.
 - **Supports:** none needed anywhere, by design.
+- **Bed adhesion:** brim the **collar**, per-object (Bambu Studio and most
+  slicers brim per object — select just the collar). Its first layer is a thin
+  ~2.2 mm annular rim carrying a 40.6 mm tube, the part that can lift; the boss
+  doesn't need it — it prints flange-down on a full Ø58.8 disc, the best contact
+  on the plate. Cheap insurance on the collar rim's own merits (the v1 field
+  failure was *packaging*, not adhesion — see NOTES.md — so the plate is what
+  fixes that; the brim is separate). A per-object collar brim can't reach the
+  ~5.7 mm gap to the boss, so nothing bridges. (Brim the *whole plate* instead
+  and the two brims may meet in one web — it should peel clean, though that's
+  untested — but per-object avoids the question.)
 - **Orientation:** print every part as rendered — boss flange-down, collar
   rod-mouth-down (the internal thread prints at the top of the collar, never
   on the first layer).

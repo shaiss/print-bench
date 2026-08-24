@@ -1,5 +1,12 @@
 # alcove-rod-socket — engineering notes
 
+**Version: v2.** v1 (#361) shipped with the multi-part-fuse defect — `boss`
+and `collar` are separate parts, but a single STL of both imports as one fused
+body and prints welded (the field test log below). v2 keeps the v1 geometry
+unchanged and fixes the *deliverable*: it ships the two parts as a multi-object
+3MF plate (`build/alcove-rod-socket-plate.3mf`, `ci.plate` → `scripts/plate.sh`,
+landed in #373) so the slicer imports them as two distinct objects. See D11.
+
 ## Goal
 
 A parametric, two-part **screw-together end socket** for a 40 mm round
@@ -29,6 +36,13 @@ One `.scad` with a `part` parameter (`assembly` default renders the seated
 preview). Two coupon wrappers exist as sibling files
 (`alcove-rod-socket-coupon.scad`, `…-bore-coupon.scad`) — include-and-override,
 never copied geometry; `gate.sh` picks them up automatically.
+
+`boss` and `collar` print **separately**, so the printable deliverable is the
+multi-object 3MF plate (`build/alcove-rod-socket-plate.3mf`), not the assembled
+render and not a single STL — a single STL of both imports as one fused body
+(D11). `ci.plate` lists the two production parts; `gate.sh` builds the plate and
+`--check`s that it imports as exactly 2 objects. The coupons and the assembled
+preview are not plate parts.
 
 ## Key decisions
 
@@ -102,6 +116,26 @@ never copied geometry; `gate.sh` picks them up automatically.
   changing the family's rule applicability is a pack-owner decision, not
   this design's. Re-adding `style.conf` needs that upstream call (follow-up
   issue on the PR).
+- **D11 — (v2) Deliverable is the multi-object 3MF plate, not the assembled
+  STL.** The field test (log below) failed two ways on one root cause: STL
+  carries no object separation, so a single file of `boss` + `collar` imports as
+  **one fused body** and prints welded, and — because the two were stacked on
+  the bed to save space — the extruder ran over a mid-air discontinuity and
+  spaghettied ~10 layers in. Both are packaging, not geometry: the parts are
+  each individually sound (92/92/100/92 at v1's merge; the printcheck estimator
+  has since nudged the boss to 100/100 — geometry unchanged, only the estimate
+  moved). Fix, from the platform
+  support added in #373: `ci.plate` lists `boss` + `collar`, and `gate.sh` packs
+  them via `scripts/plate.sh` (`prusa-slicer --merge --export-3mf`) into
+  `build/alcove-rod-socket-plate.3mf` as **2 distinct objects**, gated by
+  `--check` (object count == declared parts). The slicer then auto-arranges the
+  two objects flat and side by side, so the fix removes the stacking too — the
+  spaghetti and the fuse both go away. **No `.scad` change**: v1 geometry is
+  frozen; saving bed space stays a valid goal, and the plate's side-by-side,
+  both-flat layout is the safe way to reach it — the 3MF cures the *fuse*, not
+  the *spaghetti*, so two separate objects re-stacked *vertically* would still
+  spaghetti (never do that). A brim is recommended for the collar (README) as
+  first-layer insurance, kept a slicer setting rather than baked geometry.
 
 ## Print settings
 
@@ -133,3 +167,26 @@ production modules — what you print *is* what ships.
 
 Measure the pole with calipers first and set `rod_d` to the *barrel* reading
 (where the socket sits), not the finial/ring size.
+
+## Field test log
+
+_Real prints of this design, newest at the bottom. See templates/FIELD-TEST.md
+and docs/print-feedback.md for the convention._
+
+### 2026-08-23 — Bambu P2S + H2C
+- **Printed from:** v1 (#361), assembled/stacked export (pre-`ci.plate`)
+- **Part(s):** boss + collar, exported together
+- **Slicer settings:** stock profile · 0.2 mm layer · 0.4 mm nozzle · PLA · —
+- **Result:** FAILED. The two parts imported as a **single object** and printed
+  **fused** — the bottom piece welded to the top. On the H2C the print also
+  threw a **spaghetti warning ~10 layers in** (bed adhesion / detachment). The
+  parts had been stacked on the bed only to save space — no functional reason to
+  stack them.
+- **Measured deviations:** n/a — the print never reached a measurable state.
+- **Carry forward:** none for `printer.conf`. Root cause is *packaging*, not a
+  clearance: STL carries no object separation, so a multi-part export slices as
+  one body, and the stack put the extruder over a mid-air discontinuity. Fixed
+  in **v2** — ship the multi-object 3MF plate (D11, `ci.plate` →
+  `build/alcove-rod-socket-plate.3mf`), which imports as two distinct objects
+  and lays them out flat and separate (no stacking → no spaghetti). A brim on
+  the collar's first layer is recommended as insurance.
