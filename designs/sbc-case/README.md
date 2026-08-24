@@ -36,10 +36,10 @@ view lower down shows the green board and gold header pins through the wall.*
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
-cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan. The screws
-come out of one standard **M2.5 / M3 assortment**; add one bag of **M3
-heat-set inserts** and that single fan — **three carts, not five** separate
-hardware orders.
+cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan, and four
+adhesive rubber feet. The screws come out of one standard **M2.5 / M3
+assortment**; add one bag of **M3 heat-set inserts**, that single fan, and a
+strip of **adhesive feet** — **four carts, not five** separate hardware orders.
 
 ## Print settings
 
@@ -47,10 +47,11 @@ hardware orders.
 - **Layer height:** 0.2 mm
 - **Infill:** 15 %, gyroid
 - **Supports:** none needed — both parts are support-free by design
-- **Vents:** leave supports **off** — each of the four +Y-wall slots bridges
-  ~12 mm cleanly; a little ceiling droop *inside* the slots is normal in PETG
-  — it faces down into the tunnel, so you only notice it from vent height, not
-  from across the desk. Auto-supports here just weld into the tunnels.
+- **Vents:** leave supports **off** — each of the four +Y-wall slots is a 12 mm
+  tunnel whose ceiling bridges only the **2.0 mm wall thickness**, so it comes
+  out clean even in PETG; a little ceiling droop *inside* the slots is normal
+  and faces down into the tunnel — you only notice it from vent height, not from
+  across the desk. Auto-supports here just weld into the tunnels.
 - **Orientation:** `base` floor-down as modeled; `lid` outer-face-down (the
   rendered `part="lid"` orientation) — the register lip and fan bosses print
   as standing features. **Print the coupon first** (with a brim) — see below.

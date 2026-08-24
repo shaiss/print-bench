@@ -269,6 +269,22 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     1–6 stay verbatim (the fan bolts on **last** from outside the closed lid, so
     the fan wire is never trapped — a pinch the step order avoids for free). The
     `sbc-case.scad` freeze held rounds 3–6, all page-only since 2c.
+21. **Round 7 — assembly-doc completeness (PR #397).** Both reviewers passed
+    (Jane re-ran fresh at `5cada8f` after the outage, Drik at `9771d3f`). Three
+    text-only act-nows, all on the assemble-exactly-as-the-steps-say promise
+    (this design's whole point): (a) the vent line now names the **2.0 mm wall
+    span** the ceiling actually bridges (12 mm is the tunnel length) — "~12 mm
+    bridge" is the kind of scary number that makes a reader flip auto-supports
+    on, the failure the line guards against; (b) ASSEMBLY **step 7** now routes
+    the fan leads out the GPIO notch to the fan header (thermal, quieter) or a
+    5 V pin pair (constant) — the step had stopped at the mechanical bolt-on and
+    left the build with two loose wires; (c) the **adhesive feet** are now billed
+    on the README hardware line ("three carts" → "four carts, not five") — the
+    page's own anti-walk measure had gone unbilled. Recorded/queued: step-1 FLUSH
+    reinforces B4; the ASSEMBLY feet row is B6 (a glue-on dot isn't an N2 assembly
+    vitamin — the printed foot is the billable durable choice); B10 widened to
+    also log the fan-lead landing and the 1 a.m. noise. The `sbc-case.scad`
+    freeze held rounds 3–7, all page-only since 2c.
 
 ## Print settings
 
