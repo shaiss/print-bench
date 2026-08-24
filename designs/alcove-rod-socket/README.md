@@ -76,8 +76,8 @@ this fixes). Shipping the shallow collar as a gated part is tracked in #379.
   failure was *packaging*, not adhesion — see NOTES.md — so the plate is what
   fixes that; the brim is separate). A per-object collar brim can't reach the
   ~5.7 mm gap to the boss, so nothing bridges. (Brim the *whole plate* instead
-  and the two brims may meet in one web — harmless, it should peel clean, though
-  that's untested — but per-object avoids the question.)
+  and the two brims may meet in one web — it should peel clean, though that's
+  untested — but per-object avoids the question.)
 - **Orientation:** print every part as rendered — boss flange-down, collar
   rod-mouth-down (the internal thread prints at the top of the collar, never
   on the first layer).
