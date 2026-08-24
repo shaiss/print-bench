@@ -18,7 +18,7 @@
 
 ## Assembly steps
 
-1. Press the 4 F1BM3 inserts into the base's lid-screw posts — melt each one until it sits FLUSH with the post top, no deeper. The posts are through-bored (an M3x10 screw tip then bottoms out in free space, not plastic), so there is no shoulder to stop the insert: sink it too far and the lid screws find nothing to bite. (A stepped seat that stops the insert on its own is a planned refinement — see NOTES.md backlog.)
+1. Press the 4 F1BM3 inserts into the base's lid-screw posts — melt each one until it sits FLUSH with the post top, no deeper. The posts are through-bored (an M3x10 screw tip then bottoms out in free space, not plastic), so there is no shoulder to stop the insert: sink it too far and the lid screws find nothing to bite. (A stepped seat that stops the insert on its own is a planned refinement.)
 2. Press the 4 F1BM3 inserts into the lid's fan bosses from the inner face (lid inner-face-up; the inserts melt in blind-side-down so the fan screws thread into them through the plate).
 3. Drop the Raspberry Pi 4 onto the standoffs — every standoff is generated from the board's own hole list, so it self-locates.
 4. Fix the board with 4 M2.5 cap screws into the printed pilot bosses (they self-tap; do not overtighten).
