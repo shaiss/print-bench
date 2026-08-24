@@ -75,7 +75,7 @@ The handful worth tuning; all parameters are at the top of
 | `heart_proud` | 4 mm | How far the belly heart stands off the skin |
 | `nest_w` | 22 mm | Ring-nest heart cavity width |
 | `nest_depth` | 6 mm | Nest depth into each half (total ≈ 12 mm closed) |
-| `part_gap` | 0.5 mm | Seam parting clearance — raise if the halves fuse |
+| `part_gap` | 0.5 mm | Seam parting clearance — raise if the halves fit tight |
 | `web_t` | 0.7 mm | Living-hinge flexure thickness |
 | `fold` | 0 | Preview only: 0 = flat print pose, 90 = assembled |
 

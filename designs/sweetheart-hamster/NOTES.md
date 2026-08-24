@@ -102,7 +102,7 @@ print:
   material. If you print in PLA, treat the halves as separable (the web is a thin
   tear-line) rather than a repeatedly-folding hinge.
 - **Seam parting gap** (`part_gap`, default 0.5 mm total): the two halves must
-  come apart cleanly. If they fuse at the seam, raise `part_gap` by 0.05 mm and
+  come apart cleanly. If they fit tight at the seam, raise `part_gap` by 0.05 mm and
   reprint. The `ci.fitchecks` prove the modelled gap is real (the halves clear)
   and that the check can fail (a negative gap interferes).
 
