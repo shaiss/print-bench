@@ -14,6 +14,9 @@ separately (see the bill of materials below).*
 
 ![Your Pi on the generated standoffs](previews/product-populated.png)
 
+*Shown in the case's own charcoal, so the board reads dark; the color notch
+view lower down shows the green board and gold header pins through the wall.*
+
 ![Base — the bare tray](previews/product-base.png)
 
 ![Preview](previews/iso.png)
@@ -29,7 +32,7 @@ separately (see the bill of materials below).*
   Ø37 fan aperture, four insert bosses on the inner face, lid-screw holes
   (~95 × 76 × 2.5 mm plate + 7 mm bosses)
 - `sbc-case-coupon` — two crops of the same case corner that nest; print it
-  first to tune the fits (~14 × 76 × 26 mm)
+  first to tune the fits (~33 × 76 × 26 mm)
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
@@ -45,7 +48,8 @@ five separate hardware orders.
 - **Supports:** none needed — both parts are support-free by design
 - **Vents:** leave supports **off** — each of the four +Y-wall slots bridges
   ~12 mm cleanly; a little ceiling droop *inside* the slots is normal in PETG
-  and hidden once the lid is on. Auto-supports here just weld into the tunnels.
+  — it faces down into the tunnel, so you only notice it from vent height, not
+  from across the desk. Auto-supports here just weld into the tunnels.
 - **Orientation:** `base` floor-down as modeled; `lid` outer-face-down (the
   rendered `part="lid"` orientation) — the register lip and fan bosses print
   as standing features. **Print the coupon first** (with a brim) — see below.
@@ -100,8 +104,9 @@ so what you feel there is what the full parts do.
 ## Living with it
 
 - **Swap the micro-SD without opening the case.** The −X edge is open, so the
-  card — and every cable — comes out with the lid on and every screw untouched.
-  The 2 a.m. reflash needs no tools.
+  card — and every cable — *should* come out with the lid on and every screw
+  untouched — the first real print verifies the card clears the restored rim
+  (the field test in NOTES). The 2 a.m. reflash needs no tools.
 - **GPIO stays reachable.** A notch in the +Y wall clears the 2×20 header, so
   jumper wires reach the pins with the lid on.
 - **Serviceable where it counts.** The heat-set inserts sit at the two joints

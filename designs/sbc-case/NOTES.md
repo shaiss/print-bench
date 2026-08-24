@@ -205,6 +205,29 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     on skirt_top (z[6.5, 27]). Re-verified: skirt restored on all three edges
     (ortho profile), base re-gated 100/100. The micro-SD-clearance consequence
     of the restored −X rim is B10, measured on the first real print.
+17. **Round 3 — page currency & honesty (PR #397).** With B0 landed, both
+    reviewers passed at head `3984950` (Drik's block cleared; Jane re-signed,
+    making a wall-to-bed check on `part="base"` permanent in her routine).
+    Vera's triage ruled an act-now list that is **all page-side —
+    `sbc-case.scad` stays frozen**: (a) `previews/contact-sheet.png` was
+    byte-identical to the PR base `978c9ba` and `cameras.conf` carried no
+    `contact-sheet` row, so `render.sh --previews`/regen had **no path to
+    refresh it** — the page's only as-printed exhibit still showed the pre-B0
+    floating-skirt base. That is the **third #69-class escape** here (7-body
+    frame → decision 11; floating skirt → decision 16; ownerless exhibit →
+    this). Fix: add the bare `contact-sheet` row so regen re-renders it from the
+    fixed base every run and it tracks the source forever. (b) The README droop
+    clause "hidden once the lid is on" was false — the vents are in the
+    *external* +Y wall (z 9.75–14.25), not under the lid (z ≥ 26); rewritten to
+    the honest mechanism (droop faces down into the tunnel, seen only from vent
+    height). (c) The SD-swap promise was flatter than B10's own measurement,
+    softened to an interim "*should* come out — the first print verifies the
+    rim." (d) `product-populated.png` reads as an empty tray in monochrome — a
+    caption now points to the color `notch` view; the multi-color-render fix is
+    a pipeline property and was declined. (e) The coupon size (~14 → ~33 mm in
+    X, stale from 2c's own crop widen; measured 32.6 mm) and (f) the ASSEMBLY
+    step-1 "see NOTES.md backlog" pointer (trimmed to "a planned refinement" in
+    `assembly.conf`) were corrected in the same pass.
 
 ## Print settings
 
