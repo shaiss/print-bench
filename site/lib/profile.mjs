@@ -16,7 +16,7 @@
 // team's product page. No avatars: initials monograms only (#122 non-goal).
 
 import { avatarConfig } from "./avatars.mjs";
-import { escapeHtml } from "./markdown.mjs";
+import { escapeHtml, inlineMarkdown } from "./markdown.mjs";
 
 /**
  * The member's identity mark: the committed DiceBear avatar where one
@@ -90,7 +90,7 @@ export function memberProfile(member, { scope = null, teams = [], githubBase }) 
     .join("\n      ");
 
   const mandateSummary = member.mandate.summary
-    ? `<p class="mandate-summary">${escapeHtml(member.mandate.summary)}</p>`
+    ? `<p class="mandate-summary">${inlineMarkdown(member.mandate.summary)}</p>`
     : "";
 
   const teamChips = teams.length
@@ -142,7 +142,7 @@ ${work.map((w) => workItem(w, { scoped, githubBase })).join("\n")}
   <section class="profile-mandate">
     <h4>Mandate &amp; instructions</h4>
     ${mandateSummary}
-    <p>${escapeHtml(member.mandate.text)}</p>
+    <p>${inlineMarkdown(member.mandate.text)}</p>
     <p class="mandate-source muted">From <a href="${sourceHref(githubBase, member.mandate.source)}" rel="noopener noreferrer"><code>${escapeHtml(citeSource(member.mandate.source))}</code></a></p>
   </section>
   ${teamChips}
