@@ -52,8 +52,11 @@ preload_past = 0.8;
 engage_free = 2.8;
 
 /* [Handle] */
-// Lever handle paddle, inner/outer radius from pivot B (mm)
-handle_r_in = 18;
+// Lever handle paddle, inner/outer radius from pivot B (mm). r_in must reach
+// inside the boss rim (boss_d/2) or the paddle islands off the lever — caught
+// by the ci.fusecheck control, not by printcheck ("multiple bodies" is only
+// an INFO there).
+handle_r_in = 6;
 handle_r_out = 33;
 // Handle paddle half-angle (deg)
 handle_half = 11;
@@ -106,11 +109,14 @@ part = "assembly";
 
 // ---------------------------------------------------------------------------
 // Effective PIP clearances: the "fused" control renders with every moving
-// interface coincident, which must weld into ONE body (ci.fusecheck).
+// interface coincident, which must weld into ONE body (ci.fusecheck). The cam
+// carve deliberately INTERFERES 0.3 mm in that pose: the nub-in-cavity contact
+// is a curved-surface coincidence there, and a guaranteed overlap welds the
+// known-fused control without depending on CGAL's coincidence handling.
 // ---------------------------------------------------------------------------
 eff_xy  = part == "fused" ? 0 : pip_xy;
 eff_z   = part == "fused" ? 0 : pip_z;
-eff_cam = part == "fused" ? 0 : cam_gap;
+eff_cam = part == "fused" ? -0.3 : cam_gap;
 
 // ---------------------------------------------------------------------------
 // Kinematics — closed-form. The link has one length L between P2 (on the
@@ -138,11 +144,13 @@ function face_at(t) = p3_at(t) + p3_off;
 
 // Cam map: where the flank holds the arch apex at lever angle t. Linear from
 // the printed (first stable) state at pick-up to just past the second stable
-// state at the closed seat.
+// state at the closed seat. Above pick-up the arch is unloaded and sits in
+// its first stable state — the map CLAMPS there (a linear extrapolation would
+// push the apex past state 1, which no spring force does).
 theta_engage = theta_open - engage_free;
 function apex_y_at(t) =
     arch_line_y - arch_rise
-    + (t - theta_engage) / (theta_closed - theta_engage)
+    + min(t - theta_engage, 0) / (theta_closed - theta_engage)
       * (2 * arch_rise + preload_past);
 
 // ---------------------------------------------------------------------------
@@ -332,8 +340,18 @@ module carrier(F) {
 // Lever: boss + crank arm + handle paddle + cam tail, carved by the sweep of
 // the arch nub (tangential contact at every angle by construction)
 // ---------------------------------------------------------------------------
+// Carve sweep: 1 deg along the deflecting map, 0.5 deg across the free window
+// (pick-up -> printed pose, where the nub is stationary and the tail rotates
+// past it), and theta_open itself appended — the range alone can stop short of
+// a non-integer pose, and the PRINTED pose must be carved or the tail welds
+// into the nub. List comprehensions, not bare ranges: concat() passes a range
+// literal through as a range object, and the carve silently no-ops on it.
+cam_sweep = concat([for (i = [theta_closed : 1 : theta_engage]) i],
+                   [for (i = [theta_engage + 0.5 : 0.5 : theta_open - 0.25]) i],
+                   [theta_open]);
+
 module cam_carve() {
-    for (t = [theta_closed : 1 : theta_engage])
+    for (t = cam_sweep)
         rotate([0, 0, -t])
             translate([arch_apex_x - B_x, apex_y_at(t) - B_y, 0])
                 cylinder(r = r_nub + eff_cam, h = 60, center = true);

@@ -12,11 +12,12 @@ hardware, no supports.
 
 ## What you get
 
-- `over-center-toggle-clamp` — the clamp, ~146 × 74 × 27 mm. Jaws take a
+- `over-center-toggle-clamp` — the clamp, ~146 × 88 × 27 mm (the handle
+  overhangs the plate's back edge; the plate itself is 146 × 74). Jaws take a
   workpiece up to **25 mm** thick, **30 mm** deep, **20 mm** tall of face;
   mounts with two M5 screws at 40 mm centres.
 - `over-center-toggle-clamp-coupon` — print this first: the same production
-  flexure in a test frame, ~109 × 26 × 22 mm, and the **force-measuring
+  flexure in a test frame, ~103 × 24 × 22 mm, and the **force-measuring
   artifact** (see below).
 
 ## Print settings

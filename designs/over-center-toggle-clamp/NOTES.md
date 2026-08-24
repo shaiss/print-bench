@@ -155,6 +155,41 @@ standard), the link's 47 mm span at z 16.8 (PETG bridges this fine; sag
 lands in a 4.8 mm clearance — inspect), and the lips' leading 2 mm. Bottom
 edges of the plate get a 0.6 mm chamfer via `rounded_box`.
 
+## Gate round 1 — two real defects the fusecheck control caught (fixed)
+
+The first `gate.sh --slice` run failed on the fusecheck **control**
+(`fused` read 2 bodies, not 1) — and chasing it exposed two real geometry
+defects, both invisible to printcheck (a disconnected shell is only an INFO
+"multiple bodies" there, and a weld is by definition watertight):
+
+1. **Handle paddle was an island.** `annulus_sector(handle_r_in=18 …)` never
+   reached the boss (r = 8) and shares no angular range with the cam tail, so
+   the 2D lever profile was two disjoint regions — the exported "lever" was
+   really lever + a floating 68-facet paddle. Fix: `handle_r_in = 6` (same
+   inner radius as the cam tail, 2 mm inside the boss rim). The seating
+   geometry is untouched: the stop posts meet the paddle at its *outer*
+   angular edges, which the inner radius never touches.
+2. **The printed pose was never carved — tail welded to the nub.** The cam
+   carve loop ran `t = [theta_closed : 1 : theta_engage]`, but the lever is
+   *printed* at `theta_open` = pick-up + `engage_free`; the pose the printer
+   actually builds had no cavity for the nub, and `apex_y_at` extrapolated
+   linearly past pick-up (−31.5) instead of holding the state-1 apex (−31).
+   The tail was fused into the base through ~2.6 mm of embedded nub: the
+   printed clamp would have been one immovable lump. Fix: clamp the map above
+   pick-up (the unloaded arch sits in state 1) and carve through
+   `theta_open` itself at 0.5° steps across the free window, so the printed
+   pose carries the designed 0.25 mm film with no seam.
+
+The manifest changed with them: the over-large `flexure` AABB (which was
+*masking* defect 2 by deleting the weld zone before counting, and broke the
+control by severing the fused monolith's handle lobe) is gone — nothing here
+is joined through a flexure, so the raw shell count is the truth — and the
+assert tightened from ≥ 4 to the true count, **7 shells** (base, carrier,
+lever, link + three trapped pin heads; the head cones ride one `pip_z` film
+above what they retain). The `fused` control now also interferes the cam carve
+0.3 mm (`eff_cam = -0.3`) so the known-fused weld is a guaranteed overlap,
+not a curved-surface coincidence handed to CGAL.
+
 ## Deferred / out of scope (per the contract)
 
 - Box-lid variant (clamping a lid down with two clamps) — noted here only;

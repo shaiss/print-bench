@@ -2,23 +2,21 @@
 # The whole mechanism legitimately prints as ONE watertight body (four moving
 # parts, all captured), so printcheck cannot see a weld: if any of the 0.4 mm
 # Z films or 0.25 mm XY films bridge during printing, the part still slices
-# green and the clamp arrives frozen. fusecheck answers it on the sliced STL:
-# remove the arch zone — the flexure that connects nothing to nothing — and
-# the print must still split into the 4 moving bodies it is supposed to be.
+# green and the clamp arrives frozen. fusecheck answers it on the sliced STL.
 #
-# Coordinates are design coordinates (lowest point of the print is z=0, the
-# plate's bottom, so the rested frame is the model frame). The zone covers
-# the arch beam (x -22.5..62.5, y -31.6..-24.4, z 7..12), its anchor posts,
-# and the cam nub (z up to 15); it necessarily clips the cam tail's rim and
-# the stop posts that merge with the left anchor post — both stay connected
-# to their own bodies through material outside the zone.
-flexure -28,-35,6.9:68,-20,16.6
-
-# The sliced part, minus the arch zone, must split into 4 separable bodies:
-# base, lever, link, carrier.
-assert  over-center-toggle-clamp.stl 4
+# No `flexure` line, deliberately: nothing in this mechanism is joined THROUGH
+# a flexure — the moving parts are joined by pivot pins and films, and the arch
+# spring only ever PUSHES on the lever's cam flank through a contact, never
+# bridges material across it. So the raw shell count is the whole truth, and an
+# ignore-zone would only hide things (round 1's over-large arch AABB deleted
+# the nub weld it existed to ignore, masking a real defect — see NOTES.md).
+#
+# The sliced part must show its true shell count: base, carrier, lever, link,
+# plus the three trapped pin heads (head cones float one pip_z film above what
+# they retain) = 7. Any welded film merges two shells and drops the count.
+assert  over-center-toggle-clamp.stl 7
 
 # Mandatory negative control: `part="fused"` zeroes every print-in-place
-# clearance (films and cam gap), reproducing the weld as one solid. With the
-# SAME zone removed it must STAY 1 body — proving the check can fire.
+# clearance and makes the cam carve deliberately interfere 0.3 mm, reproducing
+# the weld as one solid. It must read exactly 1 body — proving the check fires.
 control fused 1
