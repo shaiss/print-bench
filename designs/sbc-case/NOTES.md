@@ -241,6 +241,17 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     RPI4 vitamin draws USB-C / micro-HDMI / jack top-side, so no render can
     witness overmold-vs-rim); Vera did not block a merge on the two passes at
     this head.
+19. **Round 5 — BOM notation (PR #397).** Both reviewers passed again at
+    `47bd7ce` (geometry frozen since 2c). Act-now was three `assembly.conf` BOM
+    strings: the screw *lengths* `x6` / `x10` / `x20` read as *quantities* next
+    to the Qty-4 column, so they became `×6 mm` / `×10 mm` / `×20 mm` (regen
+    re-emits ASSEMBLY.md). The BOM is this design's N2 deliverable and the
+    strings are ours (authored, not vendored), so the fix was in-scope. Backlog:
+    **B7 above B4** (Drik's recoverability principle — a sunken insert walks back
+    with a soldering iron; a scraped card / blocked ribbon socket don't); new
+    **B11**, a fan-aperture finger guard (queued — N4 proof + airflow cost
+    checked when built). The `sbc-case.scad` freeze held rounds 3–5 (all
+    page-only), so the 2c/3 geometry verification is what ships.
 
 ## Print settings
 
