@@ -51,7 +51,9 @@ strip of **adhesive feet** — **four carts, not five** separate hardware orders
   tunnel whose ceiling bridges only the **2.0 mm wall thickness**, so it comes
   out clean even in PETG; a little ceiling droop *inside* the slots is normal
   and faces down into the tunnel — you only notice it from vent height, not from
-  across the desk. Auto-supports here just weld into the tunnels.
+  across the desk. ASA — the page's other supports-off material — bridges a touch
+  fuzzier here than PETG; same call, leave supports off, the droop still faces
+  down into the tunnel. Auto-supports here just weld into the tunnels.
 - **Orientation:** `base` floor-down as modeled; `lid` outer-face-down (the
   rendered `part="lid"` orientation) — the register lip and fan bosses print
   as standing features. **Print the coupon first** (with a brim) — see below.
@@ -66,7 +68,10 @@ strip of **adhesive feet** — **four carts, not five** separate hardware orders
   so bump `fit_clearance` a hair before reaching for sandpaper.
 - **Lid first layer:** enable **elephant-foot compensation** for the `lid`. It
   prints outer-face-down, so its show face *is* the bed face (the `base` already
-  carries a 0.6 mm bed chamfer; the lid plate does not).
+  carries a 0.6 mm bed chamfer; the lid plate does not). Printing the coupon, which
+  nests the lid and base crops on one plate? A **global** elephant-foot setting is
+  fine — the base crop's fit is a vertical cavity wall the compensation never
+  touches, and its floor-and-skirt footprint hides the 0.1–0.2 mm shave.
 - **Feet:** stick four **adhesive rubber feet** on the floor — the case sits on
   a flat base, and feet keep it from walking when you plug a cable in one-handed.
 
@@ -115,7 +120,9 @@ so what you feel there is what the full parts do.
 - **Serviceable where it counts.** The heat-set inserts sit at the two joints
   you ever revisit — the lid and the fan — so opening the case or swapping the
   fan (a sleeve-bearing 40 mm fan is typically a 4–6 year part) never chews a plastic
-  thread. The board screws are the ones you touch once.
+  thread. The board screws are the ones you touch once. One catch the fan adds: it
+  lives on the lid, but its lead plugs into the board — so unplug that lead at the
+  header before you lift the lid, or a set-aside lid hangs by two wires.
 - **Keep it breathing.** The fan blows *in* through an open-skirted case, so
   it is an intake for dust too — on an always-on build, blow the fan and the
   vent row out every few months.
