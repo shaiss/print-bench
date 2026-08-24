@@ -75,6 +75,6 @@ reveal), contact-sheet (as-printed). Frozen; add rows, never repurpose.
 
 | Date | Decision | Reason |
 |---|---|---|
-| 2026-08 | v0.2: raise `hinge_z` above the ear-top | v0.1 hinge printed fused; material above the fold axis welded across the seam |
-| 2026-08 | v0.2: land the cut faces on the bed (`translate([0,0,-gg])` in `half_flat`) | halves hovered 0.25 mm; only the web touched the plate, so the first layer wouldn't adhere |
-| 2026-08 | `pip_hinge` stays deferred | ~5 folds ever — a many-cycle hinge solves a problem this object doesn't have |
+| 2026-08-23 | v0.2: raise `hinge_z` above the ear-top | v0.1 hinge printed fused; material above the fold axis welded across the seam |
+| 2026-08-23 | v0.2: land the cut faces on the bed (`translate([0,0,-gg])` in `half_flat`) | halves hovered 0.25 mm; only the web touched the plate, so the first layer wouldn't adhere |
+| 2026-08-23 | `pip_hinge` stays deferred | ~5 folds ever — a many-cycle hinge solves a problem this object doesn't have |

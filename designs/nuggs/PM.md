@@ -1,10 +1,5 @@
 # nuggs — product charter
 
-Enforced by `/pm nuggs`. Engineering log: `NOTES.md`. Product page:
-`README.md`. Sourced research: [`docs/nuggs-research.md`](../../docs/nuggs-research.md)
-— **read §11 (re-verification, 2026-08-03) before quoting any welfare
-figure in this file.** Design request: #34.
-
 ## The product, in one paragraph
 
 **N.U.G.G.S. is a tube system, and the thing it ships is a standard.** The
@@ -31,6 +26,11 @@ part and on the product page as well as in the model.
 The customer is the **owner**, but the user is the **animal**, and the
 animal cannot report a defect. That asymmetry is why the non-negotiables
 below are asserts rather than guidance.
+
+Enforced by `/pm nuggs`. Engineering log: `NOTES.md`. Product page:
+`README.md`. Sourced research: [`docs/nuggs-research.md`](../../docs/nuggs-research.md)
+— **read §11 (re-verification, 2026-08-03) before quoting any welfare
+figure in this file.** Design request: #34.
 
 ## Non-negotiables
 
