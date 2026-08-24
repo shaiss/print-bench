@@ -348,6 +348,19 @@ if ! python3 .claude/skills/adoption-assessor/assessor_mcp.py --selftest; then
   fail=1
 fi
 
+# Adoption-assessor vendor-context fetcher (scripts/assessor-context.sh): the
+# trusted workflow step that clones each study's named vendor repo into
+# .assessor-context/<n>/ so the assessor compares the tool at a code level, not
+# just against the vendor's prose. Its --selftest pins the security-critical URL
+# parser — only https://github.com/<owner>/<repo> is ever a clone target — with
+# negative controls (ssh, non-github host, userinfo spoof, look-alike host,
+# reserved owner, bare owner, file://). The clone itself needs network + gh, so
+# the selftest exercises the pure parser only; that parser is the guard.
+echo "-- assessor-context selftest: scripts/assessor-context.sh --selftest"
+if ! ./scripts/assessor-context.sh --selftest; then
+  fail=1
+fi
+
 # Cadence-parity check (issue #276): every scheduled autonomy routine stores
 # its cadence TWICE — the `cadence:` key in .github/<routine>.conf and the
 # `cron:` literal in .github/workflows/<routine>.yml (Actions can't read a
