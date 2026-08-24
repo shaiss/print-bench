@@ -111,9 +111,10 @@ NopSCADlib vitamins (the brief's named source), read at build time:
    is exactly the design-layer opt-in `docs/licensing.md` describes: disclosed
    on the product page (readme-gate requirement 11), isolated to this design,
    shared core untouched (`license-boundary-check.sh` enforces that part).
-10. **Vents: five 12 × 4.5 stadium slots** in the +Y wall at z = 12 — tops are
-    12 mm bridges inside the bridgeable band; they sit opposite the fan's
-    exhaust path across the board.
+10. **Vents: four 12 × 4.5 stadium slots** in the +Y wall at z = 12, on a 15 mm
+    pitch (3 mm webs) — each slot top is a real 12 mm bridge inside the
+    bridgeable band; they sit opposite the fan's exhaust path across the board.
+    (First draft was five slots at 11.5 mm pitch — corrected, decision 13.)
 11. **`rounded_box` is corner-anchored — the shell needed a translate.** The
     first base render passed every presence-only gate with the shell
     displaced (+47.25, +38.10) from the origin-centred frame every other
@@ -150,6 +151,31 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     the BOM descriptions in assembly.conf state the same hardware — keep them
     in sync. Generator-side fix (emit `include` of the design file, or document
     the wrapper requirement) is a follow-up issue, not this design's diff.
+13. **Vent re-web (review round 2).** The five-slot layout (decision 10, first
+    draft) put 12 mm slots on an 11.5 mm pitch — a 0.5 mm overlap that fused
+    them into a single ~58 mm opening whose top bridged as one 58 mm curtain.
+    It passed printcheck 100/100 (watertight, sliceable), but a 58 mm bridge
+    sags in PETG — the README's first-listed material — exactly the bench
+    judgment no geometry gate produces (Jane, PR #371 review). Fix: four slots
+    on a 15 mm pitch, so 3 mm webs separate them and each top is a real 12 mm
+    bridge, at nearly the same ~57 mm overall span. "Supports: none" is now
+    honest in PETG too. Re-gated: base/lid/coupon 100/100, all four fitchecks
+    unchanged.
+14. **Round-2 product-page pass (PR #371 triage, Vera).** Merged v1 shipped
+    with the reviewers' act-now list open; this round lands it. Geometry: only
+    the vent re-web (decision 13). Everything else is manifests and page copy:
+    a `base-board` render pose (base + Pi on the standoffs, no lid) drives a
+    `product-populated` still that actually shows the board on the generated
+    standoffs — the empty `product-base` tray undersold the promise; a `notch`
+    preview camera (on the `base-board` pose, so the 2×20 header reaches through
+    the notch and the GPIO-access feature reads); the print-settings lines the
+    page lacked (seam, PETG textured plate, ASA enclosure, lid elephant-foot);
+    and the serviceability / care lines (lid-on SD swap, serviceable inserts,
+    adhesive feet, dust maintenance) plus the "shown for fit, purchased
+    separately" hero caption. The insert-seating fix is the assembly.conf
+    "flush with the post top" step; the stepped bore that would enforce it in
+    geometry is backlogged (PM.md B4). New shots/cameras are regen-owned — the
+    manifests and embeds are ours, CI renders the pixels.
 
 ## Print settings
 

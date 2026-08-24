@@ -9,7 +9,12 @@ standoffs automatically.
 
 ![Product shot](previews/product-hero.png)
 
-![Base — studio product shot](previews/product-base.png)
+*The Raspberry Pi 4 and 40 mm fan are shown for fit — both are purchased
+separately (see the bill of materials below).*
+
+![Your Pi on the generated standoffs](previews/product-populated.png)
+
+![Base — the bare tray](previews/product-base.png)
 
 ![Preview](previews/iso.png)
 
@@ -28,7 +33,9 @@ standoffs automatically.
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
-cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan.
+cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan. Every screw
+comes out of one standard **M2.5 / M3 assortment** plus that single fan — not
+five separate hardware orders.
 
 ## Print settings
 
@@ -39,6 +46,17 @@ cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan.
 - **Orientation:** `base` floor-down as modeled; `lid` outer-face-down (the
   rendered `part="lid"` orientation) — the register lip and fan bosses print
   as standing features. **Print the coupon first** (with a brim) — see below.
+- **Seam:** set it to **Back** (or a scarf seam). The stock *Aligned* seam
+  stacks a vertical ridge on the base's show walls, and one stack lands inside
+  the cavity right where the lid lip registers.
+- **Plate (PETG):** print PETG on a **textured** sheet — it welds to smooth PEI.
+- **Enclosure (ASA):** ASA wants an **enclosure** — the flat 94.5 × 76.2 mm lid
+  and the long open skirt edges lift on a cold chamber. No enclosure → use PETG.
+- **Lid first layer:** enable **elephant-foot compensation** for the `lid`. It
+  prints outer-face-down, so its show face *is* the bed face (the `base` already
+  carries a 0.6 mm bed chamfer; the lid plate does not).
+- **Feet:** stick four **adhesive rubber feet** on the floor — the case sits on
+  a flat base, and feet keep it from walking when you plug a cable in one-handed.
 
 The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 
@@ -72,6 +90,23 @@ the fan on blowing into the case.
 If a fit is off, tune it on the coupon (NOTES.md, "Print this first") and
 reprint only the affected part — the coupon is cropped from the same geometry,
 so what you feel there is what the full parts do.
+
+## Living with it
+
+- **Swap the micro-SD without opening the case.** The −X edge is open, so the
+  card — and every cable — comes out with the lid on and every screw untouched.
+  The 2 a.m. reflash needs no tools.
+- **GPIO stays reachable.** A notch in the +Y wall clears the 2×20 header, so
+  jumper wires reach the pins with the lid on.
+- **Serviceable where it counts.** The heat-set inserts sit at the two joints
+  you ever revisit — the lid and the fan — so opening the case or swapping the
+  fan (a sleeve-bearing 40 mm fan is a 4–6 year part) never chews a plastic
+  thread. The board screws are the ones you touch once.
+- **Keep it breathing.** The fan blows *in* through an open-skirted case, so
+  it is an intake for dust too — on an always-on build, blow the fan and the
+  vent row out every few months.
+
+![GPIO access notch, header reaching through](previews/notch.png)
 
 ## Licensing
 

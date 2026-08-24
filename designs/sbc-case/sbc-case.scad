@@ -150,10 +150,13 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
             // over the 2x20 header — a notch, not a window, so nothing bridges
             translate([-37.5, cavity_y_half - 1, gpio_notch_bottom])
                 cube([55, wall + 2, base_top_z - gpio_notch_bottom + 1]);
-            // vent slots in the +Y wall (tops are 12 mm bridges, well inside
-            // the bridgeable band)
-            for (i = [-2 : 2])
-                translate([i * 11.5, cavity_y_half + wall / 2, 12])
+            // vent slots in the +Y wall: 4 slots on a 15 mm pitch, so 3 mm
+            // webs separate them and each slot top is a real 12 mm bridge.
+            // (Was 5 @ 11.5 mm pitch with a 12 mm slot — 0.5 mm overlap fused
+            // them into one ~58 mm opening whose top bridged as a single
+            // curtain that sags in PETG; NOTES decision 13.)
+            for (i = [-1.5, -0.5, 0.5, 1.5])
+                translate([i * 15, cavity_y_half + wall / 2, 12])
                     vent_slot();
         }
         // four lid-screw posts with through insert holes (through so an M3x10
@@ -308,7 +311,7 @@ module fit_pins(dx = 0) {
             cylinder(d = pilot_d - pin_slop, h = standoff_h + 0.5);
 }
 
-part = "assembled"; // [assembled, base, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
+part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
 
 if (part == "assembled") {
     base();
@@ -317,6 +320,12 @@ if (part == "assembled") {
     fan_vitamin();
 } else if (part == "base") {
     base();
+} else if (part == "base-board") {
+    // base tray with the Raspberry Pi seated on the generated standoffs (no
+    // lid, no fan) — the "board on the standoffs, ports open" pose the product
+    // page promises, so a stranger sees their own board on it, not a bare tray
+    base();
+    board_vitamin();
 } else if (part == "lid") {
     // printed orientation: outer face down (flipped) — flat bed face, lip and
     // bosses standing up, insert holes opening up

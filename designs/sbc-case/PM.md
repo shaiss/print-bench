@@ -40,10 +40,9 @@ vents and a tidy parting line).
       shifted pins interfere)
 - [x] `assembly.conf` generates `previews/exploded.png` + `ASSEMBLY.md`
       with every vitamin in the BOM (N2)
-- [ ] `readme-gate.sh sbc-case` passes incl. the GPL-3.0 disclosure (N3) —
-      every requirement passes except the embedded CI-rendered images below
-- [ ] CI `regen` has committed the shots and exploded view on the PR
-      (manifests and embeds are ours; pixels are CI's)
+- [x] `readme-gate.sh sbc-case` passes incl. the GPL-3.0 disclosure (N3)
+- [x] CI `regen` committed the shots and exploded view (PR #371, merged;
+      round-2 shots follow the same regen-owned path)
 
 ## Product page & shots (art direction)
 
@@ -55,10 +54,12 @@ and believes the assembly before trying it.
 | Shot | What it sells | View | Look (color / finish) | Pose (`-D`, if any) |
 |---|---|---|---|---|
 | product-hero | the closed case, fan in the lid | hero | #35383d satin | `part="assembled"` |
-| product-base | board on generated standoffs, ports open | high angle | #35383d satin | `part="base"` |
+| product-populated | your Pi on the generated standoffs, ports open — the promise `product-base`'s empty tray didn't sell (round 2) | high angle | #35383d satin | `part="base-board"` |
+| product-base | the bare tray: generated standoffs, through-bored posts, skirt | high angle | #35383d satin | `part="base"` |
 
 Frozen preview cameras (`previews/cameras.conf`): `iso`, `top`, `ports`
-(assembled) and `board` (base) — add rows, never reframe.
+(assembled), `board` (base) and `notch` (base + board, round 2) — add rows,
+never reframe.
 
 No tier-1.5 / tier-2 AI shots: a functional print sells on the real
 geometry, and the GPL/first-party story stays clean.
@@ -67,9 +68,15 @@ geometry, and the GPL/first-party story stays clean.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | Modeled per-port cutouts (USB/HDMI/Ethernet/USB-C) instead of open skirted edges | the biggest look upgrade; brief Open question 2 deferred it for support-free risk | medium — 4 cutout profiles + re-gate |
+| B1 | Modeled per-port cutouts (USB/HDMI/Ethernet/USB-C) instead of open skirted edges | biggest look upgrade — but it puts tight holes on the most-touched surface (cables); the open skirt is today's zero-force win (Drik cable-band caution, round 2). brief Open question 2 deferred it for support-free risk | medium — 4 cutout profiles + re-gate |
 | B2 | Additional validated board presets (RPi 3B+/5, Zero 2 W) | `pcb_holes()` derivation makes it nearly free; each board still needs its port wall checked | low per board — parameter + render + check |
-| B3 | Fan shroud / duct over the SoC | brief's optional part, declined for support-free; only worth it with a measured thermal story | medium — new part + slice gate |
+| B3 | Fan shroud / duct over the SoC | the only backlog item on the 8,760 h/yr runtime path — first to move when a measured thermal story lands (Drik usage-math re-rank, round 2); still declined for support-free until then | medium — new part + slice gate |
+| B4 | Stepped insert bore on the base posts (Ø4.0 seat for the insert, Ø3.3 relief through the rest) | Jane, round 2: the through-bore has no shoulder, so an insert can sink past flush → zero lid-screw engagement; this round's fix is the assembly.conf "flush" line, the geometry is the durable fix | low — bore profile + re-gate |
+| B5 | Lead-in chamfer on the register lip's entering edge | Jane, round 2: 2.5 mm of straight knife-edge; a 0.4–0.5 mm chamfer starts the seat straight — feel only, the fitchecks already prove the clearance | low — chamfer + coupon re-check |
+| B6 | Printed-foot option (parameter) | Drik, round 2: the case walks on a one-handed cable pull; this round's fix is a README "add adhesive feet" line, a printed foot is the no-hardware option | low — parameter + render |
+| B7 | GPIO-with-lid-on clearance: measure the notch window height vs a 2×20 ribbon socket, then an honest page line | Drik hunch, round 2 — jumpers clear (shown); a tall ribbon socket may foul. A hunch drives a measurement, not a change | low — measure in the .scad + one line |
+| B8 | Exploded-view size bump (inserts are specks at 512 px) | Drik, round 2: rides the next assembly.conf change, kept off this diff to stay minimal | trivial — generator size step |
+| B9 | Decide `ports.png` framing (reads as a near-solid wall) — a CAMERAS.md note if the gap reads better in `iso`, else a new plugged-in camera row | Drik hunch, round 2: decide alongside the notch camera | trivial |
 
 ## Open decisions
 
@@ -87,3 +94,5 @@ their stated assumptions (see the decision log).
 | 2026-08-23 | Fan stays in the reference BOM | brief Open question 4, assumed yes |
 | 2026-08-23 | `assembly.conf` vitamin lines name design-file wrapper modules, not raw constants | `assembly.sh`'s generated preview `use`s the design file — variables don't cross `use`, so `pcb(RPI4)` aborts; measured, filed as #368 |
 | 2026-08-23 | Base shell drawn origin-centred (`translate` around `rounded_box`) | `rounded_box` is corner-anchored; un-translated it split the base into 7 disjoint bodies that every presence-only gate passed (printcheck 92 "fine if intentional", clean slice, empty fitchecks) — caught only by measuring the export, issue #69's class; fixed and re-measured 1 body, 100/100 |
+| 2026-08-24 | Vent re-web: five 12 mm slots @ 11.5 mm pitch → four @ 15 mm pitch | 0.5 mm overlap fused them into one 58 mm bridge that sags in PETG (Jane, PR #371); 4 @ 15 gives 3 mm webs and real 12 mm bridges at the same span, re-gated 100/100 (NOTES 13) |
+| 2026-08-24 | Round-2 product-page pass (Vera triage of PR #371, merged): product-populated shot, notch camera, print-settings + serviceability + care lines, hero caption | both reviewers passed at head; act-now was textual + one geometry (vents). Stepped bore, lip chamfer, printed foot, ribbon measurement, exploded size, ports camera → backlog B4–B9 |
