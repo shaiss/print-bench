@@ -213,6 +213,30 @@ export function inlineMarkdown(text) {
   return inline.parseInline(String(text || ""));
 }
 
+/**
+ * Render a markdown fragment that is shown AWAY from its source file — a
+ * charter excerpt on a PM's People-page card, a decision-log row on a design's
+ * timeline. Same inline render as inlineMarkdown (emphasis, code spans), but
+ * relative-href links are flattened to their text first: a charter's
+ * `[x](../sibling/)` resolves against the charter's own directory, not the page
+ * that aggregates it here, so left live it 404s (a PM card's parent-design
+ * link did exactly that). Absolute (`http(s)://`) and site-rooted (`/…`) links
+ * resolve the same everywhere, so they are kept.
+ */
+export function inlineExcerpt(text) {
+  // Escape HTML FIRST so a stray tag can never survive as live markup — Marked
+  // passes raw `<script>` through, so these aggregated surfaces keep their
+  // injection guard only if nothing reaches the parser as HTML. escapeHtml
+  // leaves markdown punctuation (* ` [ ] ( )) untouched, so emphasis, code
+  // spans and the link flatten below still work on the escaped text.
+  const escaped = escapeHtml(String(text || ""));
+  const flattened = escaped.replace(
+    /\[([^\]]*)\]\((?!https?:\/\/|\/)[^)]*\)/g,
+    "$1",
+  );
+  return inlineMarkdown(flattened);
+}
+
 /** Same fragment with all markup removed — for <title>/<meta> attributes. */
 export function plainText(text) {
   return String(text || "")
