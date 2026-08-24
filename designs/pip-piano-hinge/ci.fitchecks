@@ -1,8 +1,11 @@
-# Print-in-place fit proof: the three bodies (leaf A, leaf B, free pin) must be
-# geometrically separate. `fitcheck` renders every pairwise overlap and must be
-# EMPTY (they clear — the pin is free, leaves don't rub). `fitcheck_neg` renders
-# an oversized pin that MUST overlap the bores, proving the check can fail.
-# This is the guard that catches the locked-hinge bug (a fused hinge scores
-# 100/100 watertight; only this interference check sees it).
+# Print-in-place fit proofs for the three bodies (leaf A, leaf B, free pin).
+# `fitcheck` renders every pairwise overlap and must be EMPTY (they clear —
+# the pin is free, leaves don't rub). `fitcheck_neg` renders an oversized pin
+# that MUST overlap the bores, proving the check can fail. This is the guard
+# that catches the locked-hinge bug (a fused hinge scores 100/100 watertight;
+# only this interference check sees it). `fold90` is the articulation proof:
+# leaf B folded 90° must clear leaf A and the pin entirely — EMPTY means the
+# hinge really swings (the check a teardrop pin fails; see NOTES.md).
 fitcheck      empty
 fitcheck_neg  interferes
+fold90        empty
