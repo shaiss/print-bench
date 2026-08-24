@@ -36,9 +36,10 @@ view lower down shows the green board and gold header pins through the wall.*
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
-cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan. Every screw
-comes out of one standard **M2.5 / M3 assortment** plus that single fan — not
-five separate hardware orders.
+cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan. The screws
+come out of one standard **M2.5 / M3 assortment**; add one bag of **M3
+heat-set inserts** and that single fan — **three carts, not five** separate
+hardware orders.
 
 ## Print settings
 

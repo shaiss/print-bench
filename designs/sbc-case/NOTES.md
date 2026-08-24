@@ -252,6 +252,23 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     **B11**, a fan-aperture finger guard (queued — N4 proof + airflow cost
     checked when built). The `sbc-case.scad` freeze held rounds 3–5 (all
     page-only), so the 2c/3 geometry verification is what ships.
+20. **Round 6 — hardware-honesty strings + the dome note (PR #397).** Both
+    reviewers' substance passed; Drik re-signed at `21325fc` (Jane's round here
+    failed to complete during a total LLM-provider outage, her `47bd7ce` pass one
+    text-only commit behind). Act-now was two N2-surface strings: the README
+    hardware line now tells the **three-cart** truth — the 8 heat-set inserts are
+    a separate purchase no screw assortment carries, so "one assortment plus a
+    fan, not five orders" had undercounted the shopping list by a cart — and the
+    `assembly.conf` insert BOM reads "4 **base** lid-screw posts, 4 **lid** fan
+    bosses" (it had read "4 lid posts, 4 fan bosses", backwards for two seconds).
+    Recorded, not changed: the **dome-screw choice** — M3×20 *dome* heads sit on
+    the lid's visible exterior under a washer, which is why the BOM specifies them
+    over caps (Drik's "dome or cap" is a future considered choice, not a
+    hunch-driven BOM edit). Two keep-guards for future page passes: the SD-swap
+    *should* asterisk stays until B10's first field test logs, and ASSEMBLY steps
+    1–6 stay verbatim (the fan bolts on **last** from outside the closed lid, so
+    the fan wire is never trapped — a pinch the step order avoids for free). The
+    `sbc-case.scad` freeze held rounds 3–6, all page-only since 2c.
 
 ## Print settings
 
