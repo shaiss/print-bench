@@ -228,6 +228,19 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     X, stale from 2c's own crop widen; measured 32.6 mm) and (f) the ASSEMBLY
     step-1 "see NOTES.md backlog" pointer (trimmed to "a planned refinement" in
     `assembly.conf`) were corrected in the same pass.
+18. **Round 4 — the last page nits (PR #397).** Both reviewers passed again at
+    `42b8bea`; act-now was two text lines and a free PR-body edit, no geometry —
+    the `sbc-case.scad` freeze held through rounds 3 and 4 (both page-only), so
+    the geometry verification stamped at 2c/3 is what ships. (a) The README
+    short-version "melt the inserts in" gained the **flush with the post top**
+    caveat — the one irreversible build step's warning had been one click deep
+    in ASSEMBLY.md step 1. (b) "Print this first" step 4 synced its print times
+    to the gate's (~5 h / ~2.5 h → ~2h45m / ~1h40m). (c) The PR description's
+    stale "only geometry change is the vent re-web" line was corrected to name
+    the B0 skirt repair. B10 widened to card + the four front-edge plugs (the
+    RPI4 vitamin draws USB-C / micro-HDMI / jack top-side, so no render can
+    witness overmold-vs-rim); Vera did not block a merge on the two passes at
+    this head.
 
 ## Print settings
 
@@ -262,7 +275,8 @@ structure proof:
    steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
 3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
    the standoff sample and hold firm.
-4. Only then print `base` (~5 h) and `lid` (~2.5 h).
+4. Only then print `base` (~2h45m) and `lid` (~1h40m) — the head-stamped gate
+   times; your slicer and material may differ.
 
 ## Derivations worth keeping
 

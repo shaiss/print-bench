@@ -91,7 +91,8 @@ override on the command line with `-D 'fit_clearance=0.3'`.
 ## Assembly & use
 
 Full bill of materials and step-by-step instructions: [ASSEMBLY.md](ASSEMBLY.md)
-and the exploded view below. The short version: melt the inserts in, drop the
+and the exploded view below. The short version: melt the inserts in **flush with
+the post top** (see the exploded view), drop the
 board on (it self-locates on the standoffs), screw it down, seat the lid, bolt
 the fan on blowing into the case.
 
