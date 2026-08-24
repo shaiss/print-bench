@@ -84,8 +84,9 @@ scheduled routines — `design-run.yml`, `backlog-burn.yml`, `chunker.yml`,
 them and walk the links, one ship step per link per provider, so a dead model
 falls through to the next instead of killing the run. Since #327 each routine
 chain carries a multi-model tail *within its routine's provider* (the GLM
-routines walk glm-5.2 → 5.1 → 4.6; the chunker walks Opus 4.8 → Sonnet 5 →
-Haiku 4.5), so no routine bottoms out on a single id. Each routine's chain must
+routines walk glm-5.2 → 5.1 → 4.6 — the chunker among them since #347/#358
+rerouted it off the unfunded Anthropic account), so no routine bottoms out on a
+single id. Each routine's chain must
 sit on the provider its `.github/<routine>.conf` declares; the workflow's
 resolve step cross-checks that before any key is spent.
 `tests/test_workflow_drift.py` pins the registry and every consumer workflow

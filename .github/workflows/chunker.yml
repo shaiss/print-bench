@@ -47,11 +47,14 @@ name: Chunker (scheduled issue splitter)
 #   * One issue per firing: a hard cap in the selector means a bad day costs one
 #     over-eager split, not five.
 #
-# Auth: the agentic run uses the ANTHROPIC_API_KEY secret (a plain API key is
-# the right fit for an unattended bot — pay-per-token, no subscription seat).
-# With that secret unset the job still selects and logs its pick, then emits a
-# ::notice:: and stops — exactly how ci.yml skips product-page drafting without
-# the key. So this workflow is useful (and testable) before any secret exists.
+# Auth: the agentic run uses the secret of the provider .github/chunker.conf
+# names — currently ZAI_KEY (zai), the servable frontier provider while the
+# Anthropic account is unfunded (#347/#358); the ANTHROPIC_API_KEY ship steps
+# stay git-tracked for when it is funded again. A plain API key is the right fit
+# for an unattended bot — pay-per-token, no subscription seat. With that secret
+# unset the job still selects and logs its pick, then emits a ::notice:: and
+# stops — exactly how ci.yml skips product-page drafting without the key. So
+# this workflow is useful (and testable) before any secret exists.
 
 on:
   schedule:
@@ -299,9 +302,9 @@ jobs:
       # no red-on-death step to keep alive for: non-terminal links are
       # continue-on-error so a dead id falls through, and the TERMINAL link
       # keeps none — a total-walk failure then fails the step, and the job,
-      # exactly as a single failing step did before the tail existed. The zai
-      # block below stays single-step (chunker.conf says anthropic, so that
-      # block is latent; see the design-run tail comment for the reason).
+      # exactly as a single failing step did before the tail existed. Both
+      # blocks now walk all three links; chunker.conf says zai, so the anthropic
+      # block is the latent one, kept git-tracked for when the account is funded.
       - name: Run via Anthropic (Claude, chain link 2)
         id: run_anthropic_2
         if: >-
@@ -371,6 +374,53 @@ jobs:
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
           prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
 
+      # The zai walk's tail (#327): links 2 and 3, reached only when the earlier
+      # zai links failed — the same shape as the Anthropic block above and as
+      # this routine's scheduled siblings (design-run, backlog-burn, labeler).
+      # Non-terminal link is continue-on-error so a dead id falls through; the
+      # terminal link keeps none, so a total-walk failure fails the job.
+      - name: Run via Z.AI (GLM, chain link 2)
+        id: run_zai_2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model ${{ steps.chain.outputs.link2_model }} --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
+          prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Run via Z.AI (GLM, chain link 3)
+        id: run_zai_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_zai_2.outcome != 'success'
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort max --settings .claude/chunker-settings.json --allowedTools "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"
+          prompt: "/chunk-issue ${{ steps.select.outputs.issue }}"
+
       - name: Explain a skipped agentic run
         if: >-
           steps.policy.outputs.enabled == 'true'
@@ -414,13 +464,13 @@ jobs:
           # selection so the summary can't claim "nothing eligible" for a run
           # that never checked eligibility.
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          # Only the step matching the configured provider runs; the other is
-          # 'skipped'. Report the one that actually ran.
+          # Only the block matching the configured provider runs; the other
+          # block's steps are 'skipped'. Report the block that actually ran.
           # The walk's outcome (#327): success if ANY link of the block the
           # conf's provider label selected succeeded; the last link's outcome
           # otherwise. With no SHIP-LOCK lifecycle there is no separate
           # red-on-death gate here — the terminal link failing IS the failure.
-          RUN: ${{ steps.policy.outputs.provider == 'zai' && steps.run_zai_1.outcome || (steps.run_anthropic_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome) }}
+          RUN: ${{ steps.policy.outputs.provider == 'zai' && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome) || (steps.run_anthropic_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome) }}
           # $GITHUB_STEP_SUMMARY does not auto-link a bare #N — build a real link.
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}

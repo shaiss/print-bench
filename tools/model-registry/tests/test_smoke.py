@@ -278,7 +278,7 @@ def test_routine_chains_are_smokeable_and_within_their_provider():
     routines = {
         "design-run": "zai",
         "backlog-burn": "zai",
-        "chunker": "anthropic",
+        "chunker": "zai",
         "labeler": "zai",
     }
     for chain_id, provider in routines.items():
