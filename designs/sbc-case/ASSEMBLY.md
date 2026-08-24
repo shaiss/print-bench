@@ -1,0 +1,28 @@
+# sbc-case — Raspberry Pi 4, 40 mm fan, heat-set inserts — assembly
+
+![Exploded view](previews/exploded.png)
+
+## Bill of materials
+
+| Part | Qty | Description |
+|---|---|---|
+| `base()` | 1 | printed base tray (floor-down, no supports) |
+| `lid()` | 1 | printed lid with fan mount (outer-face-down, no supports) |
+| `vitamin_pcb()` | 1 | Raspberry Pi 4 model B |
+| `vitamin_insert()` | 8 | M3x5.8 heat-set insert (4 lid posts, 4 fan bosses) |
+| `vitamin_board_screw()` | 4 | M2.5 cap screw x6 (board to standoffs) |
+| `vitamin_lid_screw()` | 4 | M3 cap screw x10 (lid to base posts) |
+| `vitamin_fan_screw()` | 4 | M3 dome screw x20 (fan through plate into lid bosses) |
+| `vitamin_washer()` | 4 | M3 washer under each fan screw |
+| `vitamin_fan()` | 1 | 40x11 mm 5 V fan (fan40x11 vitamin; blows into the case) |
+
+## Assembly steps
+
+1. Press the 4 F1BM3 inserts into the base's lid-screw posts (holes are through-bored, so the insert seats from the top and an M3x10 screw tip bottoms out in free space, not plastic).
+2. Press the 4 F1BM3 inserts into the lid's fan bosses from the inner face (lid inner-face-up; the inserts melt in blind-side-down so the fan screws thread into them through the plate).
+3. Drop the Raspberry Pi 4 onto the standoffs — every standoff is generated from the board's own hole list, so it self-locates.
+4. Fix the board with 4 M2.5 cap screws into the printed pilot bosses (they self-tap; do not overtighten).
+5. Fit the lid: the register lip drops into the cavity with 0.25 mm clearance — its notches pass the four lid-screw posts, which locate it — then seats on the wall and post tops.
+6. Close the case with 4 M3 cap screws through the lid into the base posts.
+7. Bolt the 40 mm fan to the lid bosses with 4 M3 dome screws, washer under each head, airflow blowing into the case.
+
