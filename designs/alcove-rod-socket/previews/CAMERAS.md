@@ -17,3 +17,9 @@ once reviewed — add a line, never reframe one.
   band, and that the internal thread sits at the top of the print.
 - **coupon** — the thread coupon as printed (male stub + female ring side
   by side), the part a user prints first to dial `thread_tol`.
+- **collar-bed** — the collar's bed face, from below (the contact sheet's
+  bottom-iso angle on `part="collar"` alone): the Ø47 first-layer annulus —
+  the thin rim that lands on the plate, and the one part of the collar a
+  brim protects. `collar-print`'s iso reads end-for-end misleadable (both
+  round ends look alike from the side); this shot fixes which face meets
+  the bed and where the mouth is.

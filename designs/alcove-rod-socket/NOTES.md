@@ -68,11 +68,11 @@ preview are not plate parts.
   assembly proof, and `fit-mate-ctrl` (collar turned 90° — at 2 starts that
   parks every rib half a pitch off every groove) interfering with 7688
   facets is the negative control that keeps the empty check falsifiable.
-- **D4 — `lead_in` 1.6 mm is 4 layers, not the brief's "~1–2".** It has a
-  second job: it is the shared phase offset (D3). It also keeps the collar
-  rim's seating plane clear of the flange's elephant foot. Satisfies the
-  brief's intent (first-layer squish cannot fatten the first turns) with
-  margin.
+- **D4 — `lead_in` 1.6 mm is 8 layers at the pinned 0.2 mm layer height,
+  not the brief's "~1–2".** It has a second job: it is the shared phase
+  offset (D3). It also keeps the collar rim's seating plane clear of the
+  flange's elephant foot. Satisfies the brief's intent (first-layer squish
+  cannot fatten the first turns) with margin.
 - **D5 — Print orientations.** Boss flange-down (its use orientation). Collar
   **rod-mouth-down**: the internal thread prints at the *top* of the print,
   never on the first layer, and the bore's 45° mouth lead-in (D7) faces up.
@@ -139,7 +139,13 @@ preview are not plate parts.
 
 ## Print settings
 
-- **Material:** PLA default; PETG or ASA for a hot/sunny window (heat + UV).
+- **Material:** PLA proved the geometry (the v1 field test); PETG or ASA for
+  a permanent, load-bearing install — PLA creeps under sustained load, and
+  a hot south-facing window (heat + UV) is the one-strike failure. Retune
+  on the coupons: PETG wants `thread_tol` +0.05–0.1 mm vs PLA; ASA shrinks
+  the bore ~0.2–0.4 mm — about the whole slip — so print the bore coupon in
+  ASA first and expect +0.1–0.2 mm on `rod_clearance` (a material-specific
+  preset is charter backlog B4).
 - **Nozzle / layer:** 0.4 mm / 0.2 mm.
 - **Perimeters:** 3 (walls are 3.2 mm by design — the wall *is* the part).
 - **Infill:** 20% gyroid (the socket is wall-dominated; infill is backup).
@@ -158,15 +164,51 @@ production modules — what you print *is* what ships.
    with slight play and hold without cross-threading.
    - Won't start or binds → raise `thread_tol` +0.05 mm and reprint.
    - Sloppy / rocks radially → lower `thread_tol` 0.05 mm.
+   - In PETG expect to land +0.05–0.1 mm above the PLA value (fatter
+     extrusion) — tune `thread_tol` in the material you'll print.
    - A strip of values in one print:
      `./scripts/render.sh alcove-rod-socket --sweep thread_tol=0.2:0.4:0.05`
 2. **Bore coupon** (`alcove-rod-socket-bore-coupon.scad`): a production
    rod-bore ring. Slide it along the real pole past both mouths.
    - Won't slide → raise `rod_clearance` +0.1 mm.
    - Visible wobble → lower it 0.1 mm.
+   - In ASA print this coupon first: bore shrink is ~0.2–0.4 mm, most of
+     the slip — expect +0.1–0.2 mm on `rod_clearance`.
 
 Measure the pole with calipers first and set `rod_d` to the *barrel* reading
 (where the socket sits), not the finial/ring size.
+
+## Hardware: screw length and load rating
+
+The M5 line on the product page, derived. Nothing here is tested — it is
+arithmetic from the geometry plus rated anchors' spec cards, so treat it as
+a reasoned ceiling, not a measurement.
+
+**Screw length.** The boss is 18.0 mm through (flange 6.4 + `lead_in` 1.6 +
+neck 10, `boss_h` in the .scad): the screw's shank runs the full boss
+height, head countersunk flush at the neck's top face — inside the collar's
+bore once seated, so nothing collides. Into a **rated drywall anchor**: M5 ×
+40 mm, and the anchor card governs the pairing — anchors are rated and sold
+with a screw length, so match the card rather than this number. Into a
+**stud** behind ~13 mm board: 18 + 13 = 31 mm consumed, so M5 × 55 mm keeps
+≥ 20 mm in the stud with no risk of exiting an 89 mm stud's far side.
+
+**Load.** The curtains' weight travels down the rod and out its ends: each
+holder carries about half the rod's hung weight as an **axial push into the
+wall** — compression through the Ø58.8 flange face, which the wall reacts,
+not tension in the screw. The screw carries **shear** (the vertical half of
+the load, plus the rod's offset from the wall prying on the boss) and the
+unthreading torque (Assembly step 4's hold-the-flange caution). Numbers: a
+blackout pair on a 1.8 m rod runs ~5–8 kg → ~2.5–4 kg static per holder; a
+snatch — curtains down for washing, a child pulling — spikes ~3× to
+~8–12 kg peak. A steel M5 self-drilling anchor in 12.7 mm board is
+card-rated ~20–25 kg working shear, so the margin is ~2× at an 8 kg peak
+and ~1.7× at 10 kg. Hence the page's rule: **a pair to ~10 kg hung on one
+M5 in a rated anchor; heavier than that → find a stud, or set
+`screw_count=2`** — the second off-axis screw also pins the boss against
+the spin of unthreading. The cyclic half of this load (~730 axial
+curtain-tugs a year against single-digit unthreads) is charter B1's
+vibration case, not this rating's.
 
 ## Field test log
 
