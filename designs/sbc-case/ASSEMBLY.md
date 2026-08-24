@@ -24,5 +24,5 @@
 4. Fix the board with 4 M2.5 cap screws into the printed pilot bosses (they self-tap; do not overtighten).
 5. Fit the lid: the register lip drops into the cavity with 0.25 mm clearance — its notches pass the four lid-screw posts, which locate it — then seats on the wall and post tops.
 6. Close the case with 4 M3 cap screws through the lid into the base posts.
-7. Bolt the 40 mm fan to the lid bosses with 4 M3 dome screws, washer under each head, airflow blowing into the case.
+7. Bolt the 40 mm fan to the lid bosses with 4 M3 dome screws, washer under each head, airflow blowing into the case; route its leads out through the GPIO notch to the Pi's fan header (follows temperature — quieter at night) or to a 5 V + GND pin pair (runs constant).
 
