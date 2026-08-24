@@ -1,141 +1,433 @@
-// compliant-gripper — a print-in-place collet grabber that fuses all three
-// domains of docs/advanced-techniques.md into one part that comes off the plate
-// working. Advanced (Tier-3) reference design.
+// compliant-gripper — a monolithic print-in-place PARALLEL-JAW gripper that
+// comes off the plate assembled and working. Tier-3 reference design: the
+// fusion of all three domains of docs/advanced-techniques.md in one part.
 //
-//   Domain 1 (compliant mechanisms): the fingers are slotted flexure cantilevers
-//     rooted in a base ring — no pins, no springs, they flex and self-return.
-//   Domain 3 (print-in-place kinematics): a captive collar prints already around
-//     the fingers, trapped between the base (below) and the fingers' outward cone
-//     (above), free to slide — the collet actuator.
-//   Domain 2 (designing around supports) / CC1: printed bore-axis vertical, so
-//     the fingers are near-vertical walls and the ONLY floating face is the
-//     collar underside, caught by the base across a layer-quantized z-gap.
+//   Domain 1 (compliant): each jaw rides a parallelogram of two leaf flexures
+//     (in-plane S-bend, flex in-layer — the #1 orientation rule), and the
+//     clamped state is held by a pre-buckled ARCH (the bistable-toggle solve)
+//     whose apex tip rides a VALLEY detent on the actuator wing: push past
+//     the crest and the tip drops into the valley, where the deflected arch
+//     preloads it against the 80° hold face — the wedge turns that preload
+//     into more holding force than the jaws' spring reaction (asserted), so
+//     the gripper stays clamped with no force applied. The arch is
+//     bistable-capable by construction (rise/t >= 2.3, asserted) but the
+//     detent runs it in its pre-toggle regime — NOTES.md records why the
+//     full-flip coupling was declined (it needs a follower body the one-part
+//     constraint forbids).
+//   Domain 3 (print-in-place): the push-actuator prints already captive in
+//     its race — walled in XY between two side walls, roofed by a bridged
+//     rail it cannot pass, held down over its nose by the jaw pin-arms, with
+//     its travel bounded by its own cam notch ends (the captive-spinner
+//     capture recipe, xy/z split and all).
+//   Domain 2 (supports): printed FLAT. Every moving interface is either a
+//     vertical wall gap (spread-limited) or a horizontal roof gap quantized to
+//     whole layers (sag-limited) — the CC3 anisotropy, two different numbers.
+//     The one bridge in the part is the race rail's own underside.
 //
-// How it grips: the fingers form an OUTWARD cone (widest at the top), so at rest
-// the collar sits low and the fingers are relaxed (bore open). Slide the collar
-// UP and the cone cams the fingers inward — the bore closes on a rod. Release and
-// the flexures spring the fingers back out, pushing the collar down. The collar
-// cannot leave: its bore is narrower than the cone's top, and the base stops it
-// below. That capture is the whole print-in-place trick, and it needs the CC3
-// anisotropy — the collar↔finger gap is a vertical wall gap (spread-limited,
-// tight) while the collar↔base float is a roof gap (sag-limited, quantized).
+// How it grips: the jaws rest OPEN (gap 33 mm for a Ø25 rod + 8 mm of travel).
+// Push the rear tab forward: the plunger's diagonal edge-notch cams the jaw
+// pin inward — the jaws close IN PARALLEL (the leaf parallelogram keeps the
+// grip faces mutually parallel) — the pads pass the rod faces by 0.5 mm of
+// flexure preload, the detent tip rides the 45° ramp over the crest, and the
+// flexures seat it against the steep wall: held, zero applied force. Pull the
+// tab back: the tip climbs the release face, the flexures push the jaws open.
+//
+// Technique lineage (the point of the tier — reused recipes, not re-derived):
+//   - #387 captive-spinner: the xy/z clearance split, quantized roof gaps,
+//     the captive-race capture and the break-free first motion.
+//   - #388 let-folding-panel: the flexure guards (min leaf 1.2) and the
+//     root-fillet discipline applied to every flexure root.
+//   - #389 bistable-toggle: the arch solve — yc = h(1−cos(2πx/l))/2,
+//     f_s·l³/(E·I·h) = 1486.57, u_tr = 1.98·h, bistability h/t >= 2.3.
 //
 // All dimensions in millimeters.
 
-/* [Fingers] */
-// Number of collet fingers
-fingers = 3;
-// Finger zone height above the base (mm)
-finger_h = 26;
-// Outer radius at the finger roots / base (mm)
-ro_base = 7;
-// Outer radius at the finger tips — larger ⇒ outward cone the collar cams on (mm)
-ro_tip = 10;
-// Finger wall thickness, radial (mm)
-finger_wall = 3;
-// Slot width between fingers (mm)
-slot_w = 2.2;
-// Unslotted base-ring height that roots the fingers (mm)
-root_h = 3;
+/* [Grip] */
+// Diameter of the gripped cylinder (mm)
+grip_od = 25;
+// Total jaw travel, open → clamped (mm). Brief requires >= 8.
+jaw_travel = 8;
+// Grip-zone length along the rod axis (mm)
+grip_len = 32;
 
-/* [Collar] */
-// Collar height (mm)
-collar_h = 7;
-// Collar wall thickness (mm)
-collar_wall = 3.5;
-// Push scallops around the collar for grip
-collar_scallops = 6;
+/* [Jaw flexures (parallelogram leaves)] */
+// Leaf thickness, the bending direction, Y (mm)
+leg_t = 2.2;
+// Leaf length between root and jaw (mm)
+leg_l = 55;
+// Distance between a jaw's two leaves (mm) — sets rotation stiffness
+leg_spacing = 6;
+// Leaf depth in Z (mm) — must stay clear of the detent wing band above
+leg_z = 3.8;
 
-/* [Base] */
-// Base disc thickness (mm)
-base_t = 3;
-// Extra base radius past the collar (mm)
-base_margin = 3;
+/* [Actuator] */
+// Notch ramp angle off the travel axis (deg) — sets force ratio and stroke
+ramp_ang = 30;
+// Flexure preload at full closure: the drive overcloses past the rod faces (mm)
+preload = 0.5;
+// Plunger blade width (mm)
+plunger_w = 10;
 
-/* [Clearances — CC3 anisotropy] */
-// Layer height the z gap quantizes to (mm)
+/* [Detent arch — the bistable-toggle solve] */
+// Arch span between posts (mm) — the "l"
+arch_span = 120;
+// Mid-rise of the arch (mm) — the "h". Bistable iff h/t >= 2.3.
+arch_rise = 3.8;
+// Arch beam thickness, the in-plane bending direction (mm) — the "t"
+arch_t = 1.6;
+// Arch out-of-plane width, the extrude height (mm) — the "w" in I = w·t³/12
+arch_w = 2.2;
+// Detent VALLEY: how far the seated tip lifts the arch (mm) — the preload
+// that makes R(seat) > 0, without which no wall angle can hold the drive
+seat_u = 2.2;
+// Detent crest lift (mm) — must stay under arch_rise or the arch inverts
+crest_u = 3.0;
+// Hold-face angle off horizontal (deg). The seat holds by tan(hold_ang)·R;
+// 80° keeps the wedge ratio ~5.7:1 so even the pessimistic R model holds.
+hold_ang = 80;
+// Assumed PETG tensile modulus (MPa) for the echoed force estimate
+E_modulus = 1550;
+
+/* [Structure] */
+// Base plate thickness (mm)
+base_t = 8;
+// Jaw block height (mm)
+jaw_h = 18;
+// Pocket floor thickness under the jaw sweep (mm)
+pocket_t = 3;
+// Race side-wall top / rail top (mm)
+race_h = 17;
+
+/* [Clearances — the CC3 anisotropy (#387 recipe)] */
+// Layer height the roof gaps quantize to (mm)
 layer_h = 0.2;
-// Radial gap, collar bore ↔ fingers (mm) — spread-limited, keep tight
-xy_tol = 0.35;
-// Axial float of the collar above the base, in WHOLE LAYERS — sag-limited
+// Vertical-wall gap (mm) — spread-limited, keep >= one line width
+xy_tol = 0.2;
+// Roof/floor gaps, in WHOLE LAYERS — sag-limited
 z_layers = 2;
 
 /* [Quality] */
+// Iterating: 64. Production: 128.
 $fn = 96;
 
 // ---- derived -----------------------------------------------------------
-z_tol        = z_layers * layer_h;
-ri_base      = ro_base - finger_wall;         // grip bore at the roots
-ri_tip       = ro_tip  - finger_wall;         // grip bore at the tips
-collar_z0    = base_t + z_tol;                // collar floats above the base
-// finger outer radius at absolute height z
-function ro_at(z) = ro_base + (ro_tip - ro_base) * (z - base_t) / finger_h;
-// The collar bore is cylindrical, so it must clear the WIDEST fingers it spans
-// at rest — the fingers at the collar's TOP (the cone flares upward). Then
-// sliding the collar up closes the gap uniformly (the cam). Looser at the
-// bottom, just-clear at the top: exactly a collet nut at rest.
-collar_ir    = ro_at(collar_z0 + collar_h) + xy_tol;
-collar_or    = collar_ir + collar_wall;
-base_r       = collar_or + base_margin;
+z_tol    = z_layers * layer_h;           // 0.4 — every horizontal gap
+half     = grip_od / 2;                  // clamped jaw faces reach ±12.5
+open_f   = half + jaw_travel / 2;        // open jaw inner face, ±16.5
+d_jaw    = jaw_travel / 2 + preload;     // 4.5 — notch drop per jaw
+float_z  = pocket_t + z_tol;             // 3.4 — jaw underside over the pocket
+pl_z0    = base_t + z_tol;               // 8.4 — plunger band floor
+pl_z1    = pl_z0 + 4.2;                  // 12.6 — plunger band top
+arm_z0   = pl_z1 + z_tol;                // 13.0 — pin arms ride over the blade
+arch_z0  = pl_z0 + 1;                    // 9.4 — arch web sits inside the band
+// x stations (mm)
+x_tab0   = 2;                            // push-tab rear face
+x_race0  = 8;    x_race1 = 44;           // race side walls
+x_rail0  = 17;                           // rail front (the tab swings past under it)
+x_twr0   = 54;   x_twr1 = 62;            // flexure anchor towers
+x_leg0   = x_twr1;                       // 62 — leaf roots
+x_leg1   = x_leg0 + leg_l;               // 112 — leaves meet the carriage
+pin_x    = 103;                          // jaw pin centre in X (ground)
+nose_f   = 105;                          // blade nose face (plunger-local X)
+x_pad0   = x_leg1 + 3;   x_pad1 = x_pad0 + grip_len;   // grip zone, past the leaf tips
+x_base1  = x_pad1 + 4;                   // 150 — base front edge
+x_arch0  = 10;
+x_arch1  = x_arch0 + arch_span;          // 130 — arch posts
+apex_x   = x_arch0 + arch_span / 2;      // 70 — ground x of the detent tip
+// y stations (mm)
+y_race   = plunger_w / 2 + xy_tol;       // 5.2 — race wall inner face
+race_wt  = 3.8;
+y_pocket = 11.7;                         // pocket inner edge (base step)
+jaw_w    = 12;                           // jaw block width in Y
+leg_y_in = 17.5;  leg_y_out = leg_y_in + leg_spacing;   // leaf lines
+y_wing1  = 20;                           // detent wing outer edge
+arch_mid = 33;                           // arch centreline at the posts
+pin_y    = 9.5;                          // pin centre in Y at open (−y jaw)
+// actuator: stroke, leaf stiffness/strain, detent force budget
+stroke   = d_jaw / tan(ramp_ang);        // plunger advance, full close
+k_leaf   = 12 * E_modulus * (leg_z * leg_t^3 / 12) / leg_l^3;
+k_jaw    = 2 * k_leaf;                   // both leaves in parallel
+jaw_react= 2 * k_jaw * d_jaw * tan(ramp_ang);   // plunger reaction, both jaws
+grip_f   = k_jaw * preload;              // pad force on the rod at the seat
+strain   = 3 * leg_t * d_jaw / (leg_l * leg_l);      // guided S-bend
+I_arch   = arch_w * arch_t^3 / 12;       // w·t³/12 — bending is in-plane
+f_snap   = 1486.57 * E_modulus * I_arch * arch_rise / arch_span^3;
+u_travel = 1.98 * arch_rise;
+// detent tooth (plunger-local X): the tip rides the 45° advance ramp over the
+// crest and SEATS IN A VALLEY that holds the arch deflected seat_u — the
+// preload that gives the hold face a spring to push against. The valley is
+// placed so the tip footprint is on the floor both at full advance (no rod)
+// and where the pins jam with a Ø25 rod in (stroke−0.63): the seat must be
+// reachable with the payload present, or the gripper parks on the crest and
+// pops back. The −x end of the valley is a step down to the wing flank; the
+// tip never passes it (release stops at the open pose).
+pin_r      = 1.5;                                  // jaw pin radius
+seat_clamp = apex_x - stroke;
+valley_x1  = seat_clamp + pin_r + xy_tol + 0.59;   // valley +x edge (hold-face base)
+valley_x0  = valley_x1 - 3.3;                      // valley −x edge (covers tip ± slop)
+crest_x    = valley_x1 + (crest_u - seat_u) / tan(hold_ang);
+ramp_x     = crest_x + crest_u;                    // 45° rideable advance face
+// Arch apex resistance R(u) — the detent's spring. Two-term conservative
+// model (NOTES.md derives it and brackets it against #389's f_s):
+//   bending   192·E·I/l³ · u          (small-deflection fixed-fixed beam)
+//   catenary  4·T(u)·u/l, T = E·A·ε/l (flattening a fixed-end arch must
+//                                     stretch it: ε = π²(2hu−u²)/4l)
+function arch_eps(u) = 9.8696 * (2 * arch_rise * u - u * u) / (4 * arch_span);
+function arch_R(u) =
+    (192 * E_modulus * I_arch / arch_span^3) * u
+    + 4 * (E_modulus * arch_w * arch_t * arch_eps(u) / arch_span) * u / arch_span;
+R_seat   = arch_R(seat_u);       // hold capacity = tan(hold_ang) · R_seat
+R_crest  = arch_R(crest_u);
+F_release = tan(hold_ang) * R_crest * 0.6;   // pull past the crest (drive falling)
 
-module base_disc() {
-    cylinder(r = base_r, h = base_t);
+echo(str("actuator stroke = ", stroke, " mm (jaw travel ", jaw_travel,
+         " + ", preload, " preload via ", ramp_ang, " deg notch)"));
+echo(str("jaw flexures: k = ", k_jaw, " N/mm per jaw; root strain = ",
+         strain * 100, " % (target < 2.5 %)"));
+echo(str("grip: pad force at the clamped seat = ", grip_f,
+         " N; jaw drive the detent must hold = ", jaw_react, " N"));
+echo(str("detent arch: u_tr = 1.98 h = ", u_travel, " mm; toggle f_s ~ ",
+         f_snap, " N at E = ", E_modulus, " MPa — coupon measures"));
+echo(str("detent hold: R(seat_u=", seat_u, ") = ", R_seat, " N; wedge tan(",
+         hold_ang, ") -> hold ", tan(hold_ang) * R_seat, " N vs jaw drive ",
+         jaw_react, " N (x", tan(hold_ang) * R_seat / jaw_react,
+         "); release pull ~ ", F_release, " N"));
+
+module guards() {
+    assert(jaw_travel >= 8, "brief requires jaw travel >= 8 mm");
+    assert(leg_t >= 1.2, "flexure leaf under 3 perimeters — it will tear");
+    assert(strain <= 0.025, "flexure root strain over 2.5 % — fatigue risk");
+    assert(arch_rise / arch_t >= 2.3,
+           "arch too flat to be bistable (rise/t < 2.3) — it would just spring back");
+    assert(arch_t >= 1.2, "arch beam under 3 perimeters");
+    assert(f_snap > 2 && f_snap < 4, "predicted toggle outside 2–4 N — retune");
+    assert(arch_mid - arch_rise - arch_t > leg_y_out + leg_t,
+           "arch beam corridor clips the outer flexure leaf");
+    assert(nose_f > x_race1 + 4, "blade nose too close to the race front");
+    assert(x_race0 + 0.2 + stroke < x_rail0 - 0.5,
+           "the tab would hit the rail's front face at full advance");
+    assert(float_z + leg_z <= pl_z0 - z_tol,
+           "flexure tops reach the detent wing band — the wing would fuse");
+    // detent force vs jaw stiffness — the brief's named failure mode. The
+    // clamped jaws drive the plunger backwards with jaw_react; the valley
+    // preload makes the arch push the tip into the hold face with R_seat,
+    // and the wedge turns that into tan(hold_ang)·R_seat of holding force.
+    // Without the preload (R(0)=0) no wall angle holds — it just climbs.
+    assert(tan(hold_ang) * R_seat >= 1.25 * jaw_react,
+           "detent cannot hold the jaw drive — the gripper unclamps itself");
+    assert(crest_u < arch_rise,
+           "detent crest would invert the arch (u_max >= rise) — detent dies");
+    assert(F_release <= 8,
+           "release pull too heavy — flatten hold_ang or cut seat preload");
+    // the cam must BITE: the notch has to open through the blade's edge or
+    // the pin is never driven (formula-level; the drive_mouth fitcheck is
+    // the same proof on the built geometry)
+    assert(-(pin_y - d_jaw) + pin_r + xy_tol > -plunger_w / 2 + 0.1,
+           "notch never opens through the blade edge — the drive is disconnected");
 }
 
-// The slotted flexure fingers as an outward cone shell, rooted in a solid ring.
-module finger_cone() {
-    translate([0, 0, base_t - 0.01])
-    difference() {
-        // cone shell
-        difference() {
-            cylinder(r1 = ro_base, r2 = ro_tip, h = finger_h);
-            translate([0, 0, -0.02])
-                cylinder(r1 = ri_base, r2 = ri_tip, h = finger_h + 0.04);
-        }
-        // slots (start above the root ring so the fingers stay rooted)
-        for (i = [0 : fingers - 1])
-            rotate([0, 0, i * 360 / fingers + 180 / fingers])
-                translate([0, 0, root_h])
-                    linear_extrude(finger_h)
-                        translate([-slot_w/2, 0]) square([slot_w, ro_tip + 1]);
+// ============ fixed frame =================================================
+// Base: solid 0…pocket_t everywhere, then pocket_t…base_t with the jaw-sweep
+// pocket and the rod trough cut, so the jaws and leaves float z_tol over a
+// floor instead of fusing into the plate.
+module plate_2d() { translate([0, -35.5]) square([x_base1, 71]); }
+module pocket_cut_2d() {
+    for (s = [1, -1])
+        translate([x_leg0, s > 0 ? y_pocket : -35.5])
+            square([x_base1 - x_leg0, 35.5 - y_pocket]);
+}
+module trough_cut_2d() {
+    translate([x_pad0, -(grip_od / 2 + 0.4)]) square([grip_len, grip_od + 0.8]);
+}
+
+module race_walls_2d() {
+    for (s = [1, -1])
+        translate([x_race0, s > 0 ? y_race : -y_race - race_wt])
+            square([x_race1 - x_race0, race_wt]);
+}
+// The rail is a lid over the blade, anchored on both walls; its underside is
+// the part's one deliberate bridge, so the blade's roof gap is sag-limited.
+module rail_2d() {
+    translate([x_rail0, -y_race - race_wt + 0.2])
+        square([x_race1 - x_rail0, 2 * (y_race + race_wt) - 0.4]);
+}
+
+module towers_2d() {
+    for (s = [1, -1])
+        translate([x_twr0, s > 0 ? leg_y_in - 2.5 : -(leg_y_out + 2.5)])
+            square([x_twr1 - x_twr0, leg_spacing + 5]);
+}
+
+// ============ jaws ========================================================
+// Jaw A is the −y jaw (mirrored for +y). Drawn in the OPEN pose; every
+// interface is a clearance gap, so the body is pose-independent.
+module jaw_block_2d() {
+    translate([x_leg1 - 6, -open_f - jaw_w]) square([x_base1 - x_leg1 + 6, jaw_w]);
+}
+// Flexure leaves for one jaw side: thin in Y, long in X, rooted 2 mm inside
+// the tower and ending 2 mm inside the jaw block so both ends truly fuse.
+module leaves_2d(side) {
+    for (yy = [leg_y_in, leg_y_out])
+        translate([x_leg0 - 2, side * yy - leg_t / 2]) square([leg_l + 4, leg_t]);
+}
+module jaw_arm_2d() {
+    hull() {
+        translate([x_leg1 - 6, -open_f - 5]) square([6, 5]);        // root
+        translate([pin_x - 4.5, -pin_y - 4.5]) square([9, 9]);      // boss
     }
 }
 
-// The captive collar: a scalloped ring floating around the finger roots.
-module collar(ir = collar_ir) {
-    translate([0, 0, collar_z0])
-        difference() {
-            cylinder(r = collar_or, h = collar_h);
-            translate([0, 0, -0.01])
-                cylinder(r = ir, h = collar_h + 0.02);
-            for (i = [0 : collar_scallops - 1])
-                rotate([0, 0, i * 360 / collar_scallops])
-                    translate([collar_or, 0, -0.01])
-                        cylinder(r = 2.2, h = collar_h + 0.02);
+// ============ actuator ====================================================
+// Plunger, drawn at s = 0. The notch is the pin's plunger-local path: the pin
+// is fixed in X and slides from −pin_y (open) to −(pin_y − d_jaw) (closed)
+// while the plunger advances, so the channel is that diagonal. It is an
+// EDGE-notch, open at the blade's side: the pin arm wraps over the blade and
+// the post drops into the channel.
+module plunger_2d() {
+    difference() {
+        union() {
+            // tab: rides between the race walls; taller than the rail's
+            // underside so it can never escape over it
+            translate([x_tab0, -plunger_w / 2])
+                square([x_race0 - x_tab0 + 0.2, plunger_w]);
+            // blade + nose, one profile between the race walls
+            translate([x_race0, -plunger_w / 2])
+                square([nose_f - x_race0, plunger_w]);
+            // detent wing outboard on +y, beside the blade
+            translate([apex_x - 12, plunger_w / 2])
+                square([24, y_wing1 - plunger_w / 2]);
+            // detent tooth: 45° advance ramp up to the crest, 80° hold face
+            // down into the VALLEY — the seated tip is held there by the
+            // preloaded arch pressing it against the hold face (guards()
+            // asserts that wedge actually beats the jaw drive)
+            translate([0, y_wing1 - 0.01])
+                polygon([[valley_x0, 0], [valley_x0, seat_u],
+                         [valley_x1, seat_u], [crest_x, crest_u], [ramp_x, 0]]);
+        }
+        notch_2d();
+        mirror([0, 1]) notch_2d();
+    }
+}
+module notch_2d() {
+    // The FULL pin path, a→b, grown by the clearance. The bite this opens
+    // through the blade's edge is the cam itself: the tangent wall is what
+    // drives the pin, and the far cap is the stroke stop. (An earlier draft
+    // hullled A with a point 2r short of B — with these parameters the
+    // truncated cap landed exactly tangent to the blade edge, cut ZERO
+    // material, and left the drive disconnected: every gate green, jaws that
+    // could not close. `drive_mouth` in ci.fitchecks now proves the mouth
+    // exists on the built geometry.)
+    a = [pin_x, -pin_y];                       // pin at s = 0 (open)
+    b = [pin_x - stroke, -(pin_y - d_jaw)];    // pin at s = stroke (closed)
+    r = pin_r + xy_tol;
+    hull() {
+        translate(a) circle(r);
+        translate(b) circle(r);
+    }
+}
+
+// ============ detent arch (#389 solve) ====================================
+// Beam corridor at arch_mid bowing −y toward the wing; posts drop to the base;
+// the apex carries a short inboard tip that rides the wing's detent profile.
+module arch_beam_2d() {
+    NS = 60;
+    // yc over LOCAL x (0..span): posts at 0, apex of the dip at span/2 —
+    // i.e. world apex_x, where the detent tip rides. (Feeding world x here
+    // skewed the whole arch: full dip at x_arch0+50, the tip on a flank,
+    // and the built rise/t measured 1.83 — under the 2.3 bistable bar the
+    // guard exists to hold.)
+    function yc(x) = -arch_rise * (1 - cos(360 * (x - x_arch0) / arch_span)) / 2;
+    top = [for (i = [0 : NS]) let (x = x_arch0 + arch_span * i / NS)
+              [x, arch_mid + yc(x) + arch_t / 2]];
+    bot = [for (i = [NS : -1 : 0]) let (x = x_arch0 + arch_span * i / NS)
+              [x, arch_mid + yc(x) - arch_t / 2]];
+    polygon(concat(top, bot));
+}
+module arch_tip_2d() {
+    // from the wing flank up past the beam's apex (overlap = fused)
+    translate([apex_x - 1.5, y_wing1 + xy_tol])
+        square([3, arch_mid - arch_rise + 0.5 - (y_wing1 + xy_tol)]);
+}
+module arch_posts_2d() {
+    for (xx = [x_arch0, x_arch1])
+        translate([xx - 2.5, arch_mid - arch_t - 1]) square([5, 4]);
+}
+
+// ============ assembly ====================================================
+module frame() {
+    linear_extrude(pocket_t) plate_2d();
+    linear_extrude(base_t - pocket_t)
+        difference() { plate_2d(); pocket_cut_2d(); trough_cut_2d(); }
+    // race side walls to race_h, and the bridged rail over the blade
+    linear_extrude(race_h) race_walls_2d();
+    translate([0, 0, arm_z0]) linear_extrude(race_h - arm_z0) rail_2d();
+    // flexure anchor towers stand on the solid plate
+    linear_extrude(base_t) towers_2d();
+    // arch: posts rise to the web, web + tip ride in the plunger band
+    linear_extrude(arch_z0 + 0.1) arch_posts_2d();
+    translate([0, 0, arch_z0]) linear_extrude(arch_w) arch_beam_2d();
+    translate([0, 0, pl_z0]) linear_extrude(pl_z1 - pl_z0) arch_tip_2d();
+}
+
+module jaw_side() {
+    // block + pad
+    translate([0, 0, float_z]) linear_extrude(jaw_h - float_z) jaw_block_2d();
+    // leaves (float over the pocket floor, rooted in the tower)
+    translate([0, 0, float_z]) linear_extrude(leg_z) leaves_2d(-1);
+    // pin arm over the blade + pin post down beside/into the notch
+    translate([0, 0, arm_z0]) linear_extrude(3) jaw_arm_2d();
+    translate([0, 0, pl_z0]) linear_extrude(arm_z0 - pl_z0 + 1)
+        translate([pin_x, -pin_y]) circle(pin_r);
+}
+
+module plunger() {
+    translate([0, 0, pl_z0]) linear_extrude(pl_z1 - pl_z0) plunger_2d();
+    // tab upper band — taller than the blade, caught by the rail above
+    translate([0, 0, pl_z1]) linear_extrude(race_h - pl_z1 - z_tol)
+        translate([x_tab0, -plunger_w / 2])
+            square([x_race0 - x_tab0 + 0.2, plunger_w]);
+}
+
+part = "";  // "" gripper · "fitcheck" free-body intersection (empty) ·
+            // "fitcheck_neg" interfering control · "drive_mouth" cam proof
+
+// PROOF the cam is connected, on the built geometry: the pin's own swept
+// body (r = pin_r, shrunk 0.05), above the blade's −y edge, must be free of
+// plunger material. A notch that lands tangent or short — as the first
+// draft did — cuts nothing there, and a disconnected cam still renders
+// watertight, slices clean and scores well: no other gate can see it.
+// (The +y side is the mirror; proving one side proves the generator.)
+module drive_mouth() {
+    translate([0, 0, pl_z0]) linear_extrude(pl_z1 - pl_z0)
+        intersection() {
+            hull() {
+                translate([pin_x, -pin_y]) circle(pin_r - 0.05);
+                translate([pin_x - stroke, -(pin_y - d_jaw)]) circle(pin_r - 0.05);
+            }
+            // strictly above the blade's −y edge: only the bite can clear this
+            translate([0, -plunger_w / 2 + 0.05]) square([nose_f, plunger_w]);
         }
 }
 
-module fixed() { base_disc(); finger_cone(); }
-
-// "" = the gripper. "fitcheck" = collar ∩ fixed (must be EMPTY — the collar is a
-// free captive body). "fitcheck_neg" = the collar bore shrunk onto the fingers
-// (must be NON-EMPTY — proves the check can fail). See ci.fitchecks.
-part = "";
-
 module main() {
-    assert(ro_tip > collar_ir,
-           "cone top not wider than the collar bore — the collar would slide off (not captive)");
-    assert(ri_tip > 1.5, "grip bore collapses at the tips");
-    assert(collar_z0 + collar_h < base_t + finger_h,
-           "collar taller than the finger zone");
-
+    guards();
     if (part == "fitcheck")
-        intersection() { collar(); fixed(); }
+        intersection() { plunger(); frame(); jaw_side(); mirror([0, 1]) jaw_side(); }
     else if (part == "fitcheck_neg")
-        intersection() { collar(ir = ro_base - 0.4); fixed(); }   // bore bites the fingers
+        intersection() {
+            plunger();
+            union() {
+                frame(); jaw_side(); mirror([0, 1]) jaw_side();
+                // race walls grown onto the blade — must interfere
+                translate([0, 0, pl_z0]) linear_extrude(pl_z1 - pl_z0)
+                    translate([x_race0, -plunger_w / 2 + 0.6])
+                        square([nose_f - x_race0, plunger_w - 1.2]);
+            }
+        }
+    else if (part == "drive_mouth")
+        intersection() { plunger(); drive_mouth(); }
     else {
-        fixed();
-        collar();
+        frame(); jaw_side(); mirror([0, 1]) jaw_side(); plunger();
     }
 }
 
