@@ -1,10 +1,5 @@
 # nuggs — product charter
 
-Enforced by `/pm nuggs`. Engineering log: `NOTES.md`. Product page:
-`README.md`. Sourced research: [`docs/nuggs-research.md`](../../docs/nuggs-research.md)
-— **read §11 (re-verification, 2026-08-03) before quoting any welfare
-figure in this file.** Design request: #34.
-
 ## The product, in one paragraph
 
 **N.U.G.G.S. is a tube system, and the thing it ships is a standard.** The
@@ -31,6 +26,11 @@ part and on the product page as well as in the model.
 The customer is the **owner**, but the user is the **animal**, and the
 animal cannot report a defect. That asymmetry is why the non-negotiables
 below are asserts rather than guidance.
+
+Enforced by `/pm nuggs`. Engineering log: `NOTES.md`. Product page:
+`README.md`. Sourced research: [`docs/nuggs-research.md`](../../docs/nuggs-research.md)
+— **read §11 (re-verification, 2026-08-03) before quoting any welfare
+figure in this file.** Design request: #34.
 
 ## Non-negotiables
 
@@ -190,3 +190,4 @@ Gate-green is necessary and **not** sufficient. v1 is done when:
 | **2026-08-03** | **N11: an open module is a tube with a window, never a flat-floored trough** | Forced by N6 and by arithmetic, not by taste. Against a round mate, a flat floor tangent to the invert stands 6.93 mm proud at the paw-span edge (22.5 mm lateral) — a full-height vertical rim across the joint, i.e. a toe-stub; a chord floor gives an 8.78 mm centreline pit that also collects bedding and urine. Only the arc floor gives a 0.000 mm step, because both modules' bores are the same cylinder. The 45° per-module bend ceiling that follows from bore-axis-vertical printing is **accepted as the price** |
 | **2026-08-03** | **The reversing derivation is labelled ENGINEERING JUDGEMENT wherever it appears** | The 2× multiplier is (probably) sourced; "an animal should not have to reverse more than its own body length" is not, and neither is the ~110 mm hairpin width it depends on. No literature measures either. A number that has been given a meaning is more useful than an inherited one — but presenting the meaning as literature is exactly the citation defect this round exists to fix |
 | **2026-08-03** | **The nuggs-yard rebuild is a later PR** | Its gendered lap-skirt joint is superseded by N10, and its open modules must be rebuilt on the port with an arc floor (N11) — including the loss of its one-part 90° plan curve, which the 45° ceiling makes impossible. That is real geometry work with its own gate run, and folding it into the re-charter would make the charter change unreviewable |
+| 2026-08-24 | Charter now leads with the product paragraph; the admin/nav block (engineering-log and research pointers) moved below it | The People-page mandate excerpt renders this charter's first paragraph, so leading with the nav preamble put boilerplate on the card. Formatting only — the §11 caution and every non-negotiable are preserved verbatim, no scope changed |

@@ -48,10 +48,9 @@ compromising one millimetre of the welfare standard the system is built on.
 
 ## Decision log
 
-- 2026-08-11 — Design created; dual-material orbit-ring concept chosen over
-  interpenetrating lattice (unverifiable) and over dissimilar-material
-  break-away brims (rejected by designs/nuggs round 3 precedent). Sprue
-  frame added for slicer layer-continuity, not print necessity.
+| Date | Decision | Reason |
+|---|---|---|
+| 2026-08-11 | Design created; dual-material orbit-ring concept chosen over interpenetrating lattice and over dissimilar-material break-away brims; sprue frame added for slicer layer-continuity | Lattice unverifiable; break-away brims rejected by designs/nuggs round 3 precedent; sprue frame is for slicer layer-continuity, not print necessity |
 
 ## Product page & shots (art direction)
 
