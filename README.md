@@ -269,6 +269,15 @@ surfaces studies awaiting a read live in
     (`.claude/adoption-assessor-settings.json`), which additionally denies
     `chunk-helper.sh`, `label-helper.sh` AND `scout-helper.sh` and must never
     deny its own `assessor-helper.sh`
+  - `assessor-context.sh` — the trusted vendor-fetch step behind the
+    adoption-study assessor: extracts the study's named GitHub repository and
+    shallow-clones it into `.assessor-context/<n>/` (GitHub-only, hooks
+    disabled, size-capped, package never run) so the assessor compares the tool
+    at a feature and code/functional level against the vendor's real source,
+    the way `oracle.yml` assembles `.oracle-context/`. The agent only reads the
+    fetched tree — it gains no network/`git`/`gh`. Its `--selftest` pins the
+    security-critical URL parser (only `https://github.com/<owner>/<repo>` is a
+    clone target) with negative controls
   - `cadence-sync-check.sh` — cadence-parity check for the scheduled autonomy
     routines (issue #276): the `cadence:` key in `.github/<routine>.conf` must
     resolve to the same schedule as the `cron:` literal in the matching
