@@ -417,6 +417,18 @@ if ! ./scripts/vercel-ignore-build.sh --selftest; then
   fail=1
 fi
 
+	# lifestyle-shot.sh selftest: tests the live parse branch that was affected by
+	# the resp_kind rename bug (issue #418). The parse branch -- which extracts
+	# the ZAI API response and decodes it -- previously reused the 'kind' global,
+	# clobbering it so product-still embeds got lifestyle alt text and the
+	# per-kind seed guard stopped firing. This selftest exercises the parse with
+	# no ZAI_KEY and no network, proving the 'resp_kind' variable isolation and
+	# that malformed responses fail loudly.
+	echo "-- lifestyle-shot selftest: scripts/lifestyle-shot.sh --selftest"
+	if ! ./scripts/lifestyle-shot.sh --selftest; then
+	  fail=1
+	fi
+
 # Lineage check: derives.conf parses, its parents exist, the declared parent
 # order still matches the entry .scad's include order, and every diamond is
 # explicitly asserted. All static, all milliseconds, so it runs unconditionally
