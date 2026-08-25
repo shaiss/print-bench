@@ -258,7 +258,13 @@ module pip_hinge(pin_d = 4, clear = 0.5, wall = 2.4, l = 8) {
     difference() {
         rotate([-90, 0, 0])
             cylinder(r = 0.8*pin_d + clear + wall, h = l, center = true);
-        rotate([-90, 0, 0])
+        // The bore extrudes at +90, NOT the barrel's -90: that sign is what
+        // aims the teardrop point +Z to match the pin (teardrop_hole). The
+        // barrel's own sign is irrelevant — it is a cylinder — but the two
+        // rotations matching here is not coincidence to tidy away; the bore
+        // and teardrop_hole carried the same flipped -90 through issue #398,
+        // mutually consistent and both undocumented.
+        rotate([90, 0, 0])
             linear_extrude(l + 0.02, center = true)
                 offset(r = clear)
                     _pip_teardrop2d(pin_d);
