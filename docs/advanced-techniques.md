@@ -68,6 +68,8 @@ These recur across every domain below; they are the transferable moves.
    clearance on a faceted profile. (`lib/print-in-place.scad`'s `pip_hinge`
    already documents this for one case.)
 
+<!-- brief-candidate: compliant-gripper | compliant-gripper — Tier 3 reference design (fused compliant + print-in-place gripper) | source=docs/advanced-techniques.md#four-cross-cutting-techniques | status=briefed ref=391 -->
+
 ---
 
 ## Domain 1 — Compliant mechanisms
@@ -92,6 +94,8 @@ pin and a torsional spring**, so all rigid-linkage math applies to a flexure.
   Root stress for a pure-moment SLFP: **`σ_max ≈ E·t·θ / (2L)`** — stress scales
   with `t/L`, so *thinner + longer lowers stress for the same rotation*, while
   stiffness scales with `t³`. Thickness `t` is the highest-leverage knob.
+
+<!-- brief-candidate: snap-cantilever-clip | snap-cantilever-clip — Tier 1 reference design (Domain 1, cantilever snap flexure) | source=docs/advanced-techniques.md#pseudo-rigid-body-model-prbm--the-design-theory | status=briefed ref=386 -->
 
 ### Flexure joint families
 
@@ -128,6 +132,10 @@ element (a bistable/buckled beam) in parallel with a positive one (a V-beam) so
 the slopes cancel over a stroke — vibration isolation, constant-preload grippers,
 force-limited contact.
 
+<!-- brief-candidate: bistable-toggle | bistable-toggle — Tier 2 reference design (Domain 1, buckled-arch bistable switch) | source=docs/advanced-techniques.md#bistable--constant-force | status=briefed ref=389 -->
+<!-- brief-candidate: bistable-snap-box | bistable-snap-box — Tier 3 reference design (living-hinge box with bistable latch) | source=docs/advanced-techniques.md#bistable--constant-force | status=briefed ref=392 -->
+<!-- brief-candidate: constant-force-slider | constant-force-slider — Tier 3 reference design (quasi-zero-stiffness captive slider) | source=docs/advanced-techniques.md#bistable--constant-force | status=briefed ref=393 -->
+
 ### Fatigue & material reality (FDM)
 
 Where the digital gate lies and the physical coupon rules.
@@ -160,6 +168,8 @@ fillet `r ≥ 0.5t`, target `θ_max`. Echo predicted `K` and root `σ`; for bist
 echo predicted `f_s`, `u_tr`. A coupon measures the three numbers the model can't
 self-verify: torque-vs-angle (stiffness), snap force + travel, cycles-to-failure
 at `θ_max`. Sweep `t` (and `r`) — the `t³` sensitivity makes it highest-leverage.
+
+<!-- brief-candidate: let-folding-panel | let-folding-panel — Tier 2 reference design (Domain 1, LET lamina-emergent joint) | source=docs/advanced-techniques.md#lamina-emergent-mechanisms-lems | status=briefed ref=388 -->
 
 ---
 
@@ -220,6 +230,8 @@ dictate.
   → severe overhang that curls; keep fillets for up-facing stress reliefs).
 - All internal surfaces ≤45° by construction; teardrop horizontal fastener holes;
   countersinks self-support (they *are* cones), counterbores do not.
+
+<!-- brief-candidate: support-free-bracket | support-free-bracket — Tier 1 reference design (Domain 2, support-free by construction) | source=docs/advanced-techniques.md#self-supporting-substitution | status=briefed ref=385 -->
 
 ### Orientation & part-splitting (the Slant3D approach)
 
@@ -288,6 +300,8 @@ use an annular undercut; the **capture ratio** (throat/ball) trades retention
 against swing angle. Chain links, gimbals and print-in-place bearings are the same
 trick with the gap tuned per axis.
 
+<!-- brief-candidate: captive-spinner | captive-spinner — Tier 1 reference design (Domain 3, print-in-place captive ring) | source=docs/advanced-techniques.md#captive-joints | status=briefed ref=387 -->
+
 ### Hinges
 
 Pin-in-bore, living hinge, or flexure. A horizontal bore's roof is an overhang →
@@ -296,6 +310,8 @@ scaling a teardrop to add clearance leaves its upper 45° flank planes *coincide
 with the pin's — the print welds along the flat. Grow the bore with a true
 **`offset(r=clear)`** instead. Barrel/piano hinges suffer axial **tolerance
 stacking** — split into short segments or add per-knuckle axial clearance.
+
+<!-- brief-candidate: pip-piano-hinge | pip-piano-hinge — Tier 2 reference design (Domain 3, multi-knuckle print-in-place hinge) | source=docs/advanced-techniques.md#hinges | status=briefed ref=390 -->
 
 ### Sliding / prismatic joints
 
