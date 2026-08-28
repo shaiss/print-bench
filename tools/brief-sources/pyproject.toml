@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brief-sources"
+version = "0.1.0"
+description = "Deterministic extractor/selector for decided design-brief candidates in committed research docs (#245 A, issue #438)"
+license = "CC-BY-SA-4.0"
+requires-python = ">=3.10"
+# Stdlib-only on purpose — the mold tools/lineage, tools/backlog-groomer and
+# tools/reeve keep: no pip resolve in front of the step that only wants to
+# read committed files, and (stronger here) no network and no writes at all.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+brief-sources = "brief_sources.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
