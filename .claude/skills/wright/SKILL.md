@@ -54,8 +54,11 @@ Every run, in order:
 
 3. **File at most the cap's worth of briefs — usually one.** For the single
    strongest gap the pulse supports, compose a body matching
-   `templates/agent-brief.md` section for section (§3) and **actually call
-   `file_agent_brief`** — writing a brief in your reply files nothing.
+   `templates/agent-brief.md` section for section (§3), and **before filing**
+   read the composed body back once as a cold `/ship-issue` (§6) — fixing is
+   only possible pre-file: you have no edit surface, and the per-run cap
+   blocks a corrected re-file. Then **actually call `file_agent_brief`** —
+   writing a brief in your reply files nothing.
    - `title`: `Agent brief: <short name of the tool/agent>` (the tool
      requires the `Agent brief:` prefix and rejects anything else).
    - `body`: the full markdown, verbatim.
@@ -64,9 +67,11 @@ Every run, in order:
    shows a real gap means you did not finish; filing a weak brief to fill the
    cap is worse — Reeve will decline it and the decline is on the record.
 
-4. **Read the filed issue back** as if you were `/ship-issue` picking it up
-   cold (§6). If any acceptance criterion is unfalsifiable or any surface
-   unbounded, fix the brief before ending the run.
+4. **Verify the filed issue** (read-thread it once): confirm it landed with
+   the label and the body intact. If a residual defect slipped through the
+   pre-file read-back, note it plainly in your run output — Reeve's sign-off
+   reads the thread and a decline naming the defect is the correction path;
+   you cannot edit a filed issue.
 
 ## 1. The mandate — what to forge
 

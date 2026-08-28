@@ -173,6 +173,9 @@ authorised by your real repository permission (write access needed).
     scheduled agents (backlog burn, idea→PR design run, issue chunker). Each
     also needs its committed `enabled: true` in the matching `.github/*.conf`;
     both keys must agree before it runs.
+  - `WRIGHT_ENABLED` — the agent forge (Wright's proposals + Reeve's sign-off,
+    [docs/agent-forge.md](docs/agent-forge.md)); same two-key rule, and its
+    `WRIGHT_AUTO_ARM` env in `wright.yml` demotes approves to advisory.
   - `PRINT_FEEDBACK_ENABLED` — the *Log a print result* form (single switch).
 - **Manual workflows** — several workflows are `workflow_dispatch` forms in the
   repository's **Actions** tab: *Log a print result*, *Regenerate avatar*,

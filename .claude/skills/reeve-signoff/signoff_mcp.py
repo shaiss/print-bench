@@ -30,9 +30,13 @@ rather than trusting anything the model supplies:
   * the SENSITIVE-PATH GUARD is deterministic and runs on the SERVER-FETCHED
     title+body (never the model's paraphrase): an `approve` whose brief
     mentions the bench's protection machinery — existing deny backstops,
-    perms-checks, the decision gate, arming variables, secret names, the
-    forge's own workflow — is DOWNGRADED to needs-human, so the forge can
-    never arm a brief that would modify its own fence. Erring safe is the
+    perms-checks, the decision gate, arming variables, routine confs, secret
+    names, the forge's own workflow — is DOWNGRADED to needs-human. It is a
+    BEST-EFFORT backstop behind the judge's own instruction not to approve
+    fence work (a brief can always describe a fence change in generic words),
+    but its cost to an attacker is always a human's eyes, never an arm; the
+    haystack is normalized (NFKC + strip format chars + casefold) so
+    invisible-character smuggling cannot split a pattern. Erring safe is the
     point: a false positive parks a brief for a human, it never blocks one;
   * `WRIGHT_AUTO_ARM` != 'true' demotes the whole tool to advisory: approve
     then applies `needs-decision` (+ points) instead of `autonomy-ok`, so the
@@ -53,6 +57,7 @@ tool, so the judge can never file briefs. Stdlib only; logs to stderr.
 import json
 import os
 import sys
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -102,10 +107,11 @@ SENSITIVE_PATTERNS = (
     "oracle-perms-check",
     "adoption-assessor-perms-check",
     "wright-perms-check",
-    # the decision gate + privileged workflows + the forge itself
+    # the decision gate + privileged workflows + the forge itself (bare
+    # "wright.yml" also covers the "workflows/wright.yml" spelling)
     "decide.yml",
     "ci-gate-approve",
-    "workflows/wright.yml",
+    "wright.yml",
     "wright_mcp",
     "signoff_mcp",
     # the sibling wrappers (each is another routine's write surface)
@@ -132,6 +138,18 @@ SENSITIVE_PATTERNS = (
     "branch protection",
     "branch-protection",
     "reviewer-signoff",
+    # the routine policy confs — the git half of every routine's two-key
+    # arming. A NEW routine's brief names its conf generically ("its own
+    # conf"), so a literal existing-conf name is a fence-touching change.
+    "backlog-burn.conf",
+    "design-run.conf",
+    "chunker.conf",
+    "labeler.conf",
+    "product-scout.conf",
+    "backlog-groomer.conf",
+    "reeve.conf",
+    "adoption-assessor.conf",
+    "wright.conf",
 )
 
 # Per-run cap — GITHUB_RUN_ID is set and stable across one Actions run and
@@ -272,9 +290,21 @@ def _label_names(issue):
     return out
 
 
+def _guard_normalize(text):
+    """Normalize before matching so invisible-character smuggling can't split
+    a pattern: NFKC folds compatibility forms, stripping category Cf removes
+    zero-width/format characters (ZWSP, ZWNJ, soft hyphen's Cf cousins, BOM),
+    casefold beats .lower() on non-ASCII. The guard stays best-effort — a
+    brief can always DESCRIBE a fence change in generic words — but the label
+    it costs an attacker is `needs-decision`, i.e. a human's eyes, never an
+    arm."""
+    text = unicodedata.normalize("NFKC", text)
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf").casefold()
+
+
 def _sensitive_hits(title, body):
     """The deterministic guard, run on SERVER-FETCHED text only."""
-    haystack = f"{title}\n{body}".lower()
+    haystack = _guard_normalize(f"{title}\n{body}")
     return sorted({p for p in SENSITIVE_PATTERNS if p in haystack})
 
 
@@ -373,8 +403,9 @@ def _post_reeve_signoff(arguments):
             "protection machinery (" + ", ".join(f"`{h}`" for h in hits) + "), "
             "so this approve was **downgraded to needs-human** — arming a "
             "change that touches the bench's fence is a human's call by "
-            "construction. Resolve with the decision gate "
-            "(`docs/decision-gate.md`) or arm by hand after review."
+            "construction. To build it after review, apply `autonomy-ok` "
+            "yourself; `/decide` (`docs/decision-gate.md`) records the call "
+            "but a yes still needs `autonomy-ok` applied by hand to arm."
         )
 
     # --- advisory mode (WRIGHT_AUTO_ARM off) -------------------------------
@@ -383,7 +414,8 @@ def _post_reeve_signoff(arguments):
         guard_note += (
             "\n\n> ℹ️ **Advisory mode** (`WRIGHT_AUTO_ARM` is off): approved "
             "on the merits, but parked with `needs-decision` instead of armed "
-            "— a human arms it (apply `autonomy-ok`, or use the decision gate)."
+            "— a human arms it by applying `autonomy-ok` (a `/decide yes` "
+            "records the call but does not arm by itself)."
         )
 
     # --- decide the labels (constants only) --------------------------------
@@ -673,6 +705,15 @@ def selftest():
           _sensitive_hits("t", "wire up ZAI_KEY differently") == ["zai_key"])
     check("the guard fires on an arming variable",
           "labeler_enabled" in _sensitive_hits("t", "flip LABELER_ENABLED off"))
+    # Invisible-character smuggling: a ZWSP inside a protection-file name must
+    # not split the pattern (the normalization strips category Cf).
+    check("the guard fires through zero-width smuggling",
+          "labeler-settings.json" in _sensitive_hits(
+              "t", "relax labeler-set​tings.json for richer comments"))
+    # The routine policy confs are the git half of two-key arming.
+    check("the guard fires on an existing routine conf",
+          "backlog-burn.conf" in _sensitive_hits(
+              "t", "retarget the burn: change label: in .github/backlog-burn.conf"))
 
     # Advisory mode (WRIGHT_AUTO_ARM off): approve parks instead of arming.
     reset()

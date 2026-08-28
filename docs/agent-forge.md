@@ -64,12 +64,15 @@ in the family. The design spends its entire safety budget there:
    cross-*vendor* split, the Oracle's stronger property, is blocked today by
    the unfunded Anthropic account — see Future work.)
 3. **The deterministic sensitive-path guard.** `signoff_mcp.py` scans the
-   *server-fetched* brief text (never the model's paraphrase) and downgrades
-   any approve that mentions the bench's protection machinery — existing
-   deny backstops, perms-checks, `decide.yml`, arming variables, secret
-   names, the forge's own workflow — to `needs-decision`. The forge cannot
-   arm a change to its own fence, whatever any model concludes. False
-   positives park a brief for a human; they never arm one.
+   *server-fetched* brief text (never the model's paraphrase, normalized
+   against invisible-character smuggling) and downgrades any approve that
+   mentions the bench's protection machinery — existing deny backstops,
+   perms-checks, `decide.yml`, arming variables, the routine policy confs,
+   secret names, the forge's own workflow — to `needs-decision`. It is a
+   best-effort backstop behind the judge's own never-arm-the-fence
+   instruction (generic wording can always describe a fence change), but
+   what it costs a bypasser is a human's eyes, never an arm — and false
+   positives park a brief; they never arm one.
 4. **Write-time target validation.** The sign-off tool re-reads the issue at
    write time: open, an issue (not a PR), `agent-brief`-labeled, no verdict
    label yet, inside the trusted Select step's candidate set. Labels apply
@@ -137,11 +140,11 @@ dedup, and for `needs-decision` threads whose answer is a small tool).
 | Brief flood | `WRIGHT_MAX_BRIEFS` (tool-enforced) + `WRIGHT_MAX_PENDING` backpressure (trusted bash) |
 | Duplicate verdicts / re-judging | verdict-label re-read + marker dedup, both at write time |
 | Verdict label applied but comment lost | label-first ordering — the label is the operative record; the next Select excludes the brief, so no re-rule |
-| Sign-off model chain head dies | the `wright-signoff` chain walks (3 GLM links, labeler-style); total exhaustion fails the job visibly and Reeve's `routine-dead` detector picks up a streak |
+| Sign-off model chain head dies | the `wright-signoff` chain walks (3 GLM links, labeler-style); total exhaustion fails the job red in the Actions run list. Reeve's `routine-dead` detector does **not** watch wright.yml yet (`ROUTINE_WORKFLOWS` covers the four #326 routines) — extending it is a named first agent-brief (see Future work) |
 | Propose model dies | single-link by design (scout precedent) — the firing fails, retries ≤6h later, sign-off is unaffected (separate job) |
 | A build run dies mid-flight after arming | the burn's existing `routine-lock-cleanup.sh` (SHIP-LOCK withdrawal + red-on-death) — the forge adds no new lock machinery |
 | An armed brief is actually too big | `/ship-issue` declines → `declined-too-big` → the chunker splits → the burn ships the pieces (the existing loop) |
-| The forge proposing forge changes | Wright's mandate forbids it; the sensitive-path guard backstops it deterministically (`workflows/wright.yml`, `wright_mcp`, `signoff_mcp` are sensitive patterns) |
+| The forge proposing forge changes | Wright's mandate forbids it; the sensitive-path guard backstops it deterministically (`wright.yml`, `wright.conf`, `wright_mcp`, `signoff_mcp` are sensitive patterns) |
 | Runaway routine | two-key arming (`WRIGHT_ENABLED` unset kills in seconds); `WRIGHT_AUTO_ARM: 'false'` demotes to advisory; conf `enabled: false` pauses in git |
 
 ## Arming it (the morning-after checklist)
@@ -149,11 +152,16 @@ dedup, and for `needs-decision` threads whose answer is a small tool).
 Shipped fully disarmed. To turn the autopilot on:
 
 1. Merge the PR (human, as ever).
-2. `gh variable set WRIGHT_ENABLED --body true` — key 2 of 2
+2. Create the queue's label — the issue form silently drops a label that
+   does not exist yet, and an unlabeled brief is invisible to every guard
+   keyed on it (the armed workflow also ensures it, but a hand-filed brief
+   can arrive before the first armed firing):
+   `gh label create agent-brief --color 8250DF --description "Well-formed tooling/agent brief awaiting Reeve's sign-off (the agent forge)"`
+3. `gh variable set WRIGHT_ENABLED --body true` — key 2 of 2
    (`.github/wright.conf` already says `enabled: true`).
-3. Optionally dispatch `Wright (scheduled agent forge)` with `dry_run: true`
+4. Optionally dispatch `Wright (scheduled agent forge)` with `dry_run: true`
    first — it selects and logs without invoking either model.
-4. To run *proposals-only* for a probation period: leave `WRIGHT_AUTO_ARM:
+5. To run *proposals-only* for a probation period: leave `WRIGHT_AUTO_ARM:
    'true'` alone but expect the first approves to be fence-adjacent and
    parked; or flip it to `'false'` so every approve lands as
    `needs-decision` for `/decide`.
@@ -177,8 +185,9 @@ Shipped fully disarmed. To turn the autopilot on:
 - **Cross-vendor sign-off** (judge on the vendor the proposer didn't use —
   the Oracle's independence property) once the Anthropic account is funded;
   today both chains sit on the servable frontier provider, split by model.
-- A Reeve report detector surfacing pending/parked agent-briefs (today the
-  groomer's `decision-resolved-parked` and the sign-off's own sweep cover
-  the gaps).
+- Reeve watching the forge: `tools/reeve`'s `ROUTINE_WORKFLOWS` predates
+  wright.yml, so a forge death-streak is red in Actions but absent from the
+  bench-health report — adding it (plus a pending/parked agent-brief
+  detector) is a natural first agent-brief.
 - Per-agent memory for Wright (issue #426's pilot order applies) so a
   declined-gap class stops being re-derived from scratch each firing.

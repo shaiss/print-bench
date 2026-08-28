@@ -104,6 +104,12 @@ on:
 permissions:
   contents: read
   issues: write
+  # wright-helper.sh's `run-health` verb reads the scheduled routines' recent
+  # run conclusions (`gh run list`) — the routine's strongest heal signal.
+  # Without this scope the API 403s and the wrapper degrades to "(no runs)"
+  # silently, leaving Wright permanently blind to run health (the same grant
+  # reeve.yml carries for its run-health gather).
+  actions: read
 
 # Never run two forges at once — this group serializes THIS workflow with
 # itself (the siblings use their own group strings, so it does not serialize
@@ -229,16 +235,28 @@ jobs:
           LIMIT: '10'
         run: |
           set -euo pipefail
+          # The label must exist BEFORE anything keys on it: the issue form
+          # (agent-brief.yml) silently drops a nonexistent label, and an
+          # unlabeled brief would be invisible to this Select AND visible to
+          # the labeler's sweep — the exact arm-around-signoff hole the
+          # NON_TRIAGE exclusion closes. Idempotent (422 = exists).
+          gh label create agent-brief \
+            --color 8250DF \
+            --description "Well-formed tooling/agent brief awaiting Reeve's sign-off (the agent forge)" \
+            2>/dev/null || true
           # "Pending" = an OPEN `agent-brief` issue carrying NO verdict label
           # yet: not armed (autonomy-ok), not parked (needs-decision), not
-          # declined (wright-declined). This runs in the TRUSTED workflow
-          # context (github.token), not the agent — the agent is handed only
-          # the resulting numbers, so a prompt-injected run cannot widen its
-          # own candidate set (the MCP tool refuses any number outside it).
+          # declined (wright-declined) — and not already resolved through the
+          # decision gate (decision-approved/-rejected replace needs-decision
+          # when a human rules via /decide, and a decided brief is resolved,
+          # never re-judged). This runs in the TRUSTED workflow context
+          # (github.token), not the agent — the agent is handed only the
+          # resulting numbers, so a prompt-injected run cannot widen its own
+          # candidate set (the MCP tool refuses any number outside it).
           list="$(gh issue list \
             --state open \
             --label agent-brief \
-            --search '-label:autonomy-ok -label:needs-decision -label:wright-declined' \
+            --search '-label:autonomy-ok -label:needs-decision -label:wright-declined -label:decision-approved -label:decision-rejected' \
             --limit "$LIMIT" \
             --json number \
             --jq '.[].number')"
@@ -294,7 +312,10 @@ jobs:
         # Z.AI GLM via its Anthropic-compatible endpoint. Judging whether the
         # bench grows a new agent is expensive-to-be-wrong (the review tier),
         # so the chain leads with the top GLM link; which model exactly is the
-        # registry's call.
+        # registry's call. Non-terminal, so continue-on-error: a dead head id
+        # must FALL THROUGH to link 2, not fail the job before the walk starts
+        # (the backlog-burn link-1 shape).
+        continue-on-error: true
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -532,7 +553,7 @@ jobs:
           pending="$(gh issue list \
             --state open \
             --label agent-brief \
-            --search '-label:wright-declined -label:needs-decision' \
+            --search '-label:wright-declined -label:needs-decision -label:decision-approved -label:decision-rejected' \
             --limit 100 \
             --json number \
             --jq 'length')"
