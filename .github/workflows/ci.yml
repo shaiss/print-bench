@@ -67,6 +67,7 @@ jobs:
       ci_gates_tests: ${{ steps.filter.outputs.ci_gates_tests }}
       model_registry_tests: ${{ steps.filter.outputs.model_registry_tests }}
       reeve_tests: ${{ steps.filter.outputs.reeve_tests }}
+      brief_sources_tests: ${{ steps.filter.outputs.brief_sources_tests }}
       styles: ${{ steps.filter.outputs.styles }}
       gate: ${{ steps.filter.outputs.gate }}
       gate_designs: ${{ steps.filter.outputs.gate_designs }}
@@ -664,6 +665,28 @@ jobs:
         run: pip install -e 'tools/reeve[test]'
       - name: Run tests
         run: python -m pytest tools/reeve/tests -q
+
+  brief-sources-tests:
+    name: brief-sources unit tests
+    needs: changes
+    if: needs.changes.outputs.brief_sources_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install brief-sources
+        # Stdlib-only like its siblings — the [test] extra is just pytest;
+        # the tool runs wherever the #245 converter invokes it, no install.
+        run: pip install -e 'tools/brief-sources[test]'
+      - name: Run tests
+        # The live-control tests read the seeded markers in docs/, which the
+        # checkout above carries — the suite is hermetic beyond that.
+        run: python -m pytest tools/brief-sources/tests -q
 
   model-registry-tests:
     name: model-registry unit tests
@@ -1598,6 +1621,7 @@ jobs:
       - backlog-groomer-tests
       - model-registry-tests
       - reeve-tests
+      - brief-sources-tests
       - telemetry-tests
       - ci-gates-tests
       - docs-standards
