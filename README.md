@@ -434,5 +434,11 @@ surfaces studies awaiting a read live in
   changes call for but that don't exist yet, runs the approved ones, and
   comments the command to cross the rest (registry:
   `.github/ci-gates/registry.conf`) — see its [README](tools/ci-gates/README.md)
+- `tools/brief-sources/` — the deterministic half of the spike-to-brief
+  converter (#245): extracts `brief-candidate` markers from committed
+  research docs and applies the guard rails (never re-file a briefed
+  candidate, dedup against open briefs and existing designs, one candidate
+  or NONE) as tested, zero-network code — see its
+  [README](tools/brief-sources/README.md)
 - `audits/` — preserved before/after render comparisons from design
   reviews (review history — don't delete)
