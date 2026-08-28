@@ -1,0 +1,676 @@
+name: Wright (scheduled agent forge — propose + Reeve sign-off)
+
+# The scheduled heartbeat for the agent forge (docs/agent-forge.md): the bench
+# growing and healing its OWN tooling through the same gated pipeline designs
+# use. 4×/day it runs two independent halves:
+#
+#   * PROPOSE (the `propose` job, /wright): Wright — Reeve's subordinate
+#     toolwright — reads the bench's committed and live pulse (Reeve's
+#     bench-health report, the groomer report, telemetry, the routines' recent
+#     run conclusions, open issues) and files `agent-brief` issues proposing
+#     new LLM-based probabilistic agents, deterministic tools, or hybrids.
+#     Where Remy (/product-scout) proposes DESIGNS, Wright proposes TOOLING.
+#   * SIGN-OFF (the `signoff` job, /reeve-signoff): Reeve — the platform PM
+#     and Wright's keeper — judges each pending agent-brief against the
+#     platform charter (PM.md) and posts ONE verdict comment per brief via an
+#     MCP tool that also applies the verdict's label: approve → `autonomy-ok`
+#     + `points-<n>` (the brief joins the backlog burn's queue and is built
+#     into a DRAFT PR by the existing /ship-issue machinery), decline →
+#     `wright-declined`, needs-human → `needs-decision` (the #161 HITL gate).
+#
+# Everything downstream is machinery that already exists: the hourly burn
+# ships an armed brief as a draft PR, /ship-issue declines an oversized one
+# into the chunker, the Oracle cross-vendor-reviews the PR, and A HUMAN STILL
+# MERGES EVERY PR (charter N3). Wright never pushes code and never merges; its
+# widest write is a label a human can undo with one click.
+#
+# This is the SIBLING of backlog-burn.yml, design-run.yml, chunker.yml,
+# labeler.yml, product-scout.yml and adoption-assessor.yml. It shares their
+# config parser and their two-key safety model. Like the assessor it has a
+# trusted Select step that hands each agent only a bounded set of issue
+# numbers; like the scout its propose half CREATES issues; unlike any sibling
+# its sign-off half may APPLY the arming label — which is why that write goes
+# through the most-guarded MCP tool in the family (target re-read at write
+# time, a deterministic sensitive-path downgrade, a fixed label taxonomy, a
+# duplicate guard, and a per-run cap; see signoff_mcp.py).
+#
+# WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
+#   * Policy → committed, git-tracked: .github/wright.conf holds `enabled`,
+#     the `provider` and the `cadence`. Change it with a reviewed one-line PR;
+#     a clone carries it.
+#   * Live arming / kill switch → the WRIGHT_ENABLED repo variable, a fast
+#     human-only toggle (Settings → Secrets and variables → Actions →
+#     Variables). Not in git on purpose: arming an agent that writes issues
+#     and applies arming labels should be a conscious act a fresh clone/fork
+#     can't inherit, and flipping it off halts the routine in seconds without
+#     a PR. SHIPPED DISARMED — the variable is unset by default.
+#   * Cadence → the `cron` literal below. Actions cannot read a file or
+#     variable for on.schedule, so the schedule must be literal here — kept in
+#     sync with the `cadence:` key in .github/wright.conf
+#     (scripts/cadence-sync-check.sh enforces the parity).
+#
+# Safety properties (same as the siblings, plus the forge's own bounds):
+#   * TWO keys must agree to run: committed `enabled: true` AND
+#     WRIGHT_ENABLED == 'true'. Either off → inert.
+#   * Bounded on both halves: propose is capped per run (WRIGHT_MAX_BRIEFS)
+#     and skipped entirely while enough briefs are already pending
+#     (WRIGHT_MAX_PENDING, computed in the trusted Select step); sign-off is
+#     capped per run (SIGNOFF_MAX_VERDICTS) and bound to the trusted Select
+#     step's issue set.
+#   * The one escalation-shaped write — arming a brief — is fenced twice: the
+#     sign-off tool's deterministic sensitive-path guard DOWNGRADES any
+#     approve whose brief touches the bench's protection machinery (existing
+#     deny backstops, perms-checks, decide.yml, arming variables, secret
+#     names) to `needs-decision`, and WRIGHT_AUTO_ARM can be flipped to
+#     'false' here to make every approve advisory-only (verdict + points, no
+#     autonomy-ok) without touching the skill or the tool.
+#   * Each half runs behind its OWN deny backstop (.claude/wright-settings.json
+#     and .claude/reeve-signoff-settings.json, via --settings), neutralizing
+#     the additive settings.json allows AND each other's write tool — the
+#     propose agent cannot sign off, the sign-off agent cannot file — kept
+#     honest by scripts/wright-perms-check.sh.
+
+on:
+  schedule:
+    # 4×/day at :35 — 00:35 / 06:35 / 12:35 / 18:35 UTC — an off-peak minute
+    # offset from the labeler's :11, the burn's :17, design-run's :23, the
+    # chunker's :29, the assessor's :37, the groomer's :41, the scout's :47
+    # and Reeve's :53, so the routines don't fire simultaneously. Each fire
+    # lands ~40 minutes before the next hourly burn (:17), so a brief this
+    # run's sign-off arms is picked up within the hour. Cron must be a
+    # literal — Actions evaluates no files or variables for on.schedule — so
+    # change the cadence by editing this line in a one-line PR (and the
+    # `cadence:` key in .github/wright.conf to match; cadence-sync-check
+    # enforces it). The two-key guard (WRIGHT_ENABLED + committed
+    # `enabled: true`) keeps the schedule harmless until deliberately armed,
+    # and both halves skip before any model call when there is nothing to do.
+    - cron: '35 0,6,12,18 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Select and log, but invoke neither /wright nor /reeve-signoff'
+        type: boolean
+        default: false
+
+# Scoped to what the unattended run actually does: it reads the repo to run
+# the skills (contents:read), CREATES agent-brief issues, COMMENTS verdicts,
+# and ADDS labels (issues:write). It pushes no branch and opens no PR, so it
+# needs NEITHER contents:write NOR pull-requests:write — the same tight grant
+# as the labeler, scout and assessor. The default GITHUB_TOKEN is fine: issue
+# writes run no CI, so the REGEN_TOKEN/PAT reasoning the burn and design run
+# carry does not apply. The job is off unless WRIGHT_ENABLED is set AND the
+# committed config says enabled, and the writing steps are skipped without the
+# provider's secret, so even these grants sit idle until the routine is armed.
+permissions:
+  contents: read
+  issues: write
+
+# Never run two forges at once — this group serializes THIS workflow with
+# itself (the siblings use their own group strings, so it does not serialize
+# against them). Do not cancel an in-flight run.
+concurrency:
+  group: wright
+  cancel-in-progress: false
+
+jobs:
+  signoff:
+    name: Reeve sign-off on pending agent briefs
+    # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
+    # anything but 'true' pauses the whole job in seconds without a commit.
+    # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
+    # Also pin the run to the DEFAULT BRANCH: this job carries a write scope
+    # and a secret, and workflow_dispatch can target any in-repo branch — so a
+    # dispatch against a PR branch must not run that branch's skill code with
+    # the secret. On schedule github.ref_name is already the default branch.
+    if: >-
+      vars.WRIGHT_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    # A hung sign-off must not hold a runner for the 6-hour default while
+    # holding a secret, unwatched.
+    timeout-minutes: 40
+    env:
+      # Secrets cannot be read in a step `if:` directly, so surface each
+      # provider's key presence as a plain string and gate on it below.
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      # The per-run verdict cap, enforced by signoff_mcp.py.
+      SIGNOFF_MAX_VERDICTS: '3'
+      # The autopilot switch: 'true' lets an approve verdict arm the brief
+      # (`autonomy-ok` + `points-<n>`); anything else makes every approve
+      # advisory-only (verdict comment + points, no arming) — a one-line PR
+      # here demotes the whole forge to advisory without touching the skill.
+      WRIGHT_AUTO_ARM: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # Belt-and-braces with the job `if:` above: always check out the
+          # default branch, so the secret-bearing agent runs the reviewed,
+          # merged skill — never a dispatched branch's version. The agent
+          # reads untrusted issue text, so it must run trusted base tooling.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install the config parser
+        # Wright reuses the backlog burn's config parser verbatim (only the
+        # `enabled`/`provider`/`cadence` keys — it has no selector).
+        run: pip install -e tools/backlog-burn
+
+      - name: Read policy (.github/wright.conf)
+        id: policy
+        # Key 2 of 2: the committed, git-tracked source of truth. A malformed
+        # or typo'd config (bad key, unknown provider) fails this step loudly
+        # rather than running on a policy nobody wrote. It also resolves the
+        # configured provider to whether *that provider's* secret is present,
+        # so the run steps below gate on one `key_present` output. The model
+        # itself is NOT decided here — it comes from the registry chain below.
+        run: |
+          set -euo pipefail
+          conf=.github/wright.conf
+          enabled="$(backlog-burn config --get enabled --path "$conf")"
+          provider="$(backlog-burn config --get provider --path "$conf")"
+          case "$provider" in
+            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
+            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          {
+            echo "enabled=$enabled"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      # Resolve the sign-off's model chain from the committed provider/model
+      # registry (issue #206) — the same resolve step the labeler runs,
+      # stdlib-only so it needs no install in front of it. A malformed
+      # registry, or one whose `wright-signoff` chain went missing, fails this
+      # step loudly BEFORE any key is spent; the same drift is caught
+      # pre-merge by the model-registry drift-guard tests, which pin this
+      # workflow to the registry.
+      #
+      # The cross-check walks EVERY link, not just the first: the conf's
+      # `provider:` label picks which ship-step block (and so which endpoint +
+      # literal secret) runs, while the registry picks the models — the walk
+      # below reaches link2, link3 only after link1 died, so a tail on another
+      # provider would spend its key against the wrong endpoint mid-walk.
+      - name: Resolve the sign-off model chain (issue #206)
+        id: signoff_chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve wright-signoff --gh-output "$GITHUB_OUTPUT"
+          conf_provider="$(backlog-burn config --get provider --path .github/wright.conf)"
+          n="$(sed -n 's/^link_count=//p' "$GITHUB_OUTPUT" | head -1)"
+          i=1
+          while [ "$i" -le "$n" ]; do
+            link_provider="$(sed -n "s/^link${i}_provider=//p" "$GITHUB_OUTPUT" | head -1)"
+            if [ "$link_provider" != "$conf_provider" ]; then
+              echo "::error::link ${i} of the registry's 'wright-signoff' chain resolves to provider '$link_provider' but .github/wright.conf says provider '$conf_provider' — the walk would spend that link's key against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/wright.conf."
+              exit 1
+            fi
+            i=$((i + 1))
+          done
+
+      - name: Note when disabled by committed policy
+        if: steps.policy.outputs.enabled != 'true'
+        run: echo "::notice::.github/wright.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
+
+      - name: Select pending agent briefs
+        id: select
+        if: steps.policy.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Cap the discovery list so a bad run touches a bounded set.
+          LIMIT: '10'
+        run: |
+          set -euo pipefail
+          # "Pending" = an OPEN `agent-brief` issue carrying NO verdict label
+          # yet: not armed (autonomy-ok), not parked (needs-decision), not
+          # declined (wright-declined). This runs in the TRUSTED workflow
+          # context (github.token), not the agent — the agent is handed only
+          # the resulting numbers, so a prompt-injected run cannot widen its
+          # own candidate set (the MCP tool refuses any number outside it).
+          list="$(gh issue list \
+            --state open \
+            --label agent-brief \
+            --search '-label:autonomy-ok -label:needs-decision -label:wright-declined' \
+            --limit "$LIMIT" \
+            --json number \
+            --jq '.[].number')"
+          nums="$(printf '%s\n' "$list" | sed '/^$/d' | sort -n | tr '\n' ' ' | sed 's/ *$//')"
+          echo "issues=$nums" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Reeve sign-off — selection"
+            if [ -z "$nums" ]; then
+              echo "- no pending agent briefs (every open \`agent-brief\` issue already carries a verdict label)"
+            else
+              echo "- pending briefs to judge: #${nums// / #}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One explicit run step per CHAIN LINK, inside one block per provider —
+      # a provider is a reviewed, git-tracked step because GitHub Actions can
+      # only reference a secret by its literal name. The committed `provider:`
+      # label picks which BLOCK runs; the registry's `wright-signoff` chain
+      # (steps.signoff_chain.outputs) picks which MODEL each link runs. The
+      # links walk in chain order: each is gated on the earlier links NOT
+      # having succeeded, so the first success short-circuits the rest and a
+      # dead model falls through to the next instead of killing the run
+      # (#327). Non-terminal links are continue-on-error; the terminal link
+      # keeps none, so a total-walk failure fails the job. The anthropic block
+      # stays single-step and latent (the conf says zai; see the labeler's
+      # tail comment for the reason).
+      #
+      # Tool surface: WRITING is the MCP tool mcp__reeve_signoff__post_reeve_-
+      # signoff (served by signoff_mcp.py via --mcp-config) — a JSON-argument
+      # tool for the same dontAsk-matcher reason as the scout's, and the most
+      # guarded write in the family because approve ARMS a brief: the tool
+      # re-reads the target at write time (open, agent-brief-labeled, no
+      # verdict label, in the trusted candidate set), runs a deterministic
+      # sensitive-path guard that downgrades an approve touching protection
+      # machinery to needs-decision, applies labels from a fixed taxonomy
+      # label-first (decide.yml's fail-closed ordering), refuses a duplicate,
+      # and caps verdicts per run. READING stays on Wright's read-only wrapper
+      # wright-helper.sh (both path spellings) plus Read/Grep/Glob — never
+      # Write, never a general Bash. --settings closes the additive allow leak
+      # from settings.json with the sign-off's OWN deny backstop
+      # (.claude/reeve-signoff-settings.json — which also denies Wright's
+      # filing tool, so the judge cannot file briefs), kept honest by
+      # scripts/wright-perms-check.sh. The pin is the immutable commit behind
+      # the v1 tag.
+      - name: Sign off via Z.AI (GLM, chain link 1)
+        id: signoff_zai_1
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Z.AI GLM via its Anthropic-compatible endpoint. Judging whether the
+        # bench grows a new agent is expensive-to-be-wrong (the review tier),
+        # so the chain leads with the top GLM link; which model exactly is the
+        # registry's call.
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          # The MCP write tool inherits this env and authenticates with it.
+          GITHUB_TOKEN: ${{ github.token }}
+          # The trusted Select step's bounded issue set — the MCP write tool
+          # refuses any issue not in it.
+          SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          # Keep the full transcript OUT of the public Actions log: this step
+          # holds the provider key + GITHUB_TOKEN and can apply arming labels,
+          # so it follows the assessor's posture, not the scout's.
+          show_full_output: "false"
+          claude_args: --model ${{ steps.signoff_chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
+
+      - name: Sign off via Z.AI (GLM, chain link 2)
+        id: signoff_zai_2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.signoff_zai_1.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.signoff_chain.outputs.link2_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
+
+      - name: Sign off via Z.AI (GLM, chain link 3)
+        id: signoff_zai_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.signoff_zai_1.outcome != 'success'
+          && steps.signoff_zai_2.outcome != 'success'
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over.
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.signoff_chain.outputs.link3_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
+
+      - name: Sign off via Anthropic (Claude, chain link 1)
+        id: signoff_anthropic_1
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Claude via api.anthropic.com — the latent block (wright.conf says
+        # zai); flips live by editing the conf AND the chain together (the
+        # resolve step's cross-check refuses one without the other).
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.signoff_chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
+
+      - name: Explain a skipped agentic run
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && (steps.policy.outputs.key_present != '1'
+              || github.event.inputs.dry_run == 'true')
+        env:
+          ISSUES: ${{ steps.select.outputs.issues }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — selected pending briefs (${ISSUES}) but did not invoke /reeve-signoff"
+          else
+            echo "::notice::the configured provider '${PROVIDER}' has no key set (ZAI_KEY for zai, ANTHROPIC_API_KEY for anthropic) — selected (${ISSUES}) but skipping the unattended /reeve-signoff run"
+          fi
+
+      - name: Explain an empty selection
+        if: steps.policy.outputs.enabled == 'true' && steps.select.outputs.issues == ''
+        run: echo "::notice::no pending agent briefs — every open agent-brief issue already carries a verdict label; nothing to sign off"
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          ISSUES: ${{ steps.select.outputs.issues }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          SELECT_OUTCOME: ${{ steps.select.outcome }}
+          # The walk's outcome (#327): success if ANY link of the block the
+          # conf's provider label selected succeeded (the anthropic block is
+          # the latent single-step one); the last zai link's outcome
+          # otherwise. No SHIP-LOCK lifecycle here, so the terminal link
+          # failing IS the failure.
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.signoff_anthropic_1.outcome || (steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome) }}
+        run: |
+          {
+            echo "## Reeve sign-off — run outcome"
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/wright.conf \`enabled\` != true) — nothing ran"
+            elif [ "${SELECT_OUTCOME}" != "success" ]; then
+              echo "- selection did not complete (\`${SELECT_OUTCOME:-skipped}\`) — the select step failed; see the log"
+            elif [ -z "${ISSUES}" ]; then
+              echo "- selected: none (every open agent-brief issue already carries a verdict label)"
+            else
+              echo "- selected pending briefs: #${ISSUES// / #}"
+              echo "- provider: ${PROVIDER}"
+              echo "- run step: ${RUN:-skipped} (each verdict is a comment + label on its brief; an armed brief joins the backlog burn's queue)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  propose:
+    name: Propose agent briefs with /wright
+    # Same two-key + default-branch pinning as the signoff job above.
+    if: >-
+      vars.WRIGHT_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      # The per-run brief cap, enforced by wright_mcp.py's filing tool. One
+      # brief per firing × 4 firings/day keeps the queue reviewable; the
+      # pending cap below stops even that when the queue is full.
+      WRIGHT_MAX_BRIEFS: '1'
+      # Skip proposing entirely while this many briefs are already pending a
+      # verdict or armed-but-unbuilt — backpressure so the forge can never
+      # flood the backlog it feeds (computed in the trusted Select step).
+      WRIGHT_MAX_PENDING: '3'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install the config parser
+        run: pip install -e tools/backlog-burn
+
+      - name: Read policy (.github/wright.conf)
+        id: policy
+        run: |
+          set -euo pipefail
+          conf=.github/wright.conf
+          enabled="$(backlog-burn config --get enabled --path "$conf")"
+          provider="$(backlog-burn config --get provider --path "$conf")"
+          case "$provider" in
+            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
+            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          {
+            echo "enabled=$enabled"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      # Resolve the propose half's model from the registry (#206). Single-link
+      # like the scout's chain — proposing is the cheap-to-be-wrong case (a
+      # bad brief is one Reeve declines), and a failed run costs nothing at
+      # this cadence: the next firing is at most six hours away.
+      - name: Resolve the propose model chain (issue #206)
+        id: propose_chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve wright --gh-output "$GITHUB_OUTPUT"
+          conf_provider="$(backlog-burn config --get provider --path .github/wright.conf)"
+          n="$(sed -n 's/^link_count=//p' "$GITHUB_OUTPUT" | head -1)"
+          i=1
+          while [ "$i" -le "$n" ]; do
+            link_provider="$(sed -n "s/^link${i}_provider=//p" "$GITHUB_OUTPUT" | head -1)"
+            if [ "$link_provider" != "$conf_provider" ]; then
+              echo "::error::link ${i} of the registry's 'wright' chain resolves to provider '$link_provider' but .github/wright.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/wright.conf."
+              exit 1
+            fi
+            i=$((i + 1))
+          done
+
+      - name: Note when disabled by committed policy
+        if: steps.policy.outputs.enabled != 'true'
+        run: echo "::notice::.github/wright.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
+
+      - name: Check the pending-brief backpressure
+        id: select
+        if: steps.policy.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Backpressure, computed in the TRUSTED workflow context: count the
+          # open agent-brief issues that are still pending a verdict or armed
+          # but not yet closed by a merged PR. At or past WRIGHT_MAX_PENDING,
+          # this firing proposes nothing — the forge can never flood the queue
+          # it feeds, whatever the model wants.
+          pending="$(gh issue list \
+            --state open \
+            --label agent-brief \
+            --search '-label:wright-declined -label:needs-decision' \
+            --limit 100 \
+            --json number \
+            --jq 'length')"
+          if [ "$pending" -ge "$WRIGHT_MAX_PENDING" ]; then
+            propose=no
+          else
+            propose=yes
+          fi
+          {
+            echo "pending=$pending"
+            echo "propose=$propose"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Wright — backpressure"
+            echo "- open agent briefs pending or armed-unbuilt: $pending (cap: $WRIGHT_MAX_PENDING)"
+            echo "- proposing this firing: $propose"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One explicit run step per provider (the scout's single-link shape).
+      # Tool surface: FILING is the MCP tool mcp__wright__file_agent_brief
+      # (served by wright_mcp.py via --mcp-config) — a JSON-argument tool so a
+      # rich multi-line brief body never touches a shell command line; it
+      # hardcodes the `agent-brief` label, requires the `Agent brief:` title
+      # prefix, and caps briefs per run. READING is the wrapper
+      # wright-helper.sh (list-briefs / read-thread / pulse / run-health —
+      # all read-only) plus Read/Grep/Glob; never Write, never a general
+      # Bash. --settings closes the additive allow leak from settings.json
+      # with Wright's OWN deny backstop (.claude/wright-settings.json — which
+      # also denies the sign-off tool, so the proposer can never judge its own
+      # briefs), kept honest by scripts/wright-perms-check.sh.
+      - name: Propose via Z.AI (GLM)
+        id: propose_zai
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.propose == 'yes'
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          # The MCP filing tool inherits this env and authenticates with it.
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          # Wright reads only public signals and writes only public
+          # agent-brief issues, so its transcript carries nothing sensitive —
+          # the scout's posture, and the same "filed zero, no error"
+          # diagnosability reason.
+          show_full_output: "true"
+          claude_args: --model ${{ steps.propose_chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/wright-settings.json --mcp-config .claude/skills/wright/wright-mcp.json --allowedTools "mcp__wright__file_agent_brief,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/wright"
+
+      - name: Propose via Anthropic (Claude)
+        id: propose_anthropic
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.propose == 'yes'
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --model ${{ steps.propose_chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/wright-settings.json --mcp-config .claude/skills/wright/wright-mcp.json --allowedTools "mcp__wright__file_agent_brief,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/wright"
+
+      - name: Explain a skipped agentic run
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && (steps.select.outputs.propose != 'yes'
+              || steps.policy.outputs.key_present != '1'
+              || github.event.inputs.dry_run == 'true')
+        env:
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          PROPOSE: ${{ steps.select.outputs.propose }}
+          PENDING: ${{ steps.select.outputs.pending }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — did not invoke /wright"
+          elif [ "$PROPOSE" != "yes" ]; then
+            echo "::notice::backpressure — ${PENDING} agent briefs already pending or armed-unbuilt (cap ${WRIGHT_MAX_PENDING}); proposing nothing this firing"
+          else
+            echo "::notice::the configured provider '${PROVIDER}' has no key set (ZAI_KEY for zai, ANTHROPIC_API_KEY for anthropic) — skipping the unattended /wright run"
+          fi
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          PROPOSE: ${{ steps.select.outputs.propose }}
+          PENDING: ${{ steps.select.outputs.pending }}
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.propose_anthropic.outcome || steps.propose_zai.outcome }}
+        run: |
+          {
+            echo "## Wright — run outcome"
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/wright.conf \`enabled\` != true) — nothing ran"
+            elif [ "${PROPOSE}" != "yes" ]; then
+              echo "- backpressure: ${PENDING:-?} briefs already pending — proposed nothing this firing"
+            else
+              echo "- provider: ${PROVIDER}"
+              echo "- run step: ${RUN:-skipped} (any filed agent-brief issues are on the tracker, labelled \`agent-brief\`, awaiting Reeve's sign-off)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    name: Explain a disarmed run
+    # The agent jobs are gated at job level, so an unset arming variable (the
+    # default clone/fork state) or a dispatch against a non-default ref skips
+    # them silently. This sibling makes that legible. No secrets, no write
+    # perms.
+    if: >-
+      vars.WRIGHT_ENABLED != 'true'
+      || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the routine did not run
+        env:
+          ARMED: ${{ vars.WRIGHT_ENABLED }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::notice::Wright is disarmed — set the WRIGHT_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/wright.conf; both must agree before it runs."
+          else
+            echo "::notice::Wright only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
+          fi

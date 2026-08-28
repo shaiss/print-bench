@@ -269,6 +269,13 @@ surfaces studies awaiting a read live in
     (`.claude/adoption-assessor-settings.json`), which additionally denies
     `chunk-helper.sh`, `label-helper.sh` AND `scout-helper.sh` and must never
     deny its own `assessor-helper.sh`
+  - `wright-perms-check.sh` — the same drift check for BOTH halves of the
+    agent forge ([docs/agent-forge.md](docs/agent-forge.md)) in one script:
+    the propose half's backstop (`.claude/wright-settings.json`) must deny
+    the sign-off MCP server and the sign-off half's
+    (`.claude/reeve-signoff-settings.json`) must deny the filing server —
+    the proposer can never judge, the judge can never file — while neither
+    denies the shared read wrapper `wright-helper.sh` or its own write tool
   - `assessor-context.sh` — the trusted vendor-fetch step behind the
     adoption-study assessor: extracts the study's named GitHub repository and
     shallow-clones it into `.assessor-context/<n>/` (GitHub-only, hooks
