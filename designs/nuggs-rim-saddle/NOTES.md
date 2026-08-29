@@ -94,6 +94,17 @@ values and the coupon is the calibration path.
   onto the axis and reading the radii. The fix (one translate/rotate swap so
   the wide end sits at each face) was verified the same way: 41.000 at each
   face tapering to 40.000 one mm inside, both mouths, no groove, no lip.
+  Round 2.1: the first cut of that fix put the cone's base disc EXACTLY in
+  the mouth face plane — a coincident-face subtraction that stable CGAL
+  absorbs (watertight, 1 body, local gate green) but CI's Manifold backend
+  rendered as non-manifold: 15 shells, watertight False, 59/100 NOT
+  PRINTABLE, every non-manifold cluster on the in-tank mouth plane. Same
+  family as the issue #99 / PR #200 lesson: the two backends disagree
+  exactly on degenerate boundaries, so a cutter must OVERLAP every face it
+  opens (the lead cone now overshoots each face by 0.5 mm into open air at a
+  true 45°, its tip under-running the bore by eps — every cut boundary a
+  transversal crossing, and the profile still exactly 41.000 at the face to
+  40.000 one mm inside).
 - **G4 measured off the export, not the parameter** (issue #37 discipline).
   A gauge cylinder placed from the *declared* axis/incline and intersected
   with the rendered body: **Ø 79.6 passes the full ~145 mm clean** (empty

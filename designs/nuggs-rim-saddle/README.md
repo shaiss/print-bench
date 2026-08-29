@@ -80,8 +80,8 @@ about your cabinet; it is not a promise about what the rim carries.
   thin shell rings, and fast outer walls show it. And plainly: no setting
   de-risks a 13 h tall shell — if the first hours look wrong, stop and
   restart rather than hope
-- (Printcheck's remaining body caveat — thin walls, ~4 % of sampled surface,
-  thinnest ≈ 0.00 mm — is the port itself, by design: the rib/groove
+- (If printcheck flags thin walls on the body — a few % of sampled surface,
+  thinnest ≈ 0.00 mm — that is the port itself, by design: the rib/groove
   interlock detail at the port face samples as coincident flank faces, the
   ≈ 0.00 mm reading, and the 1 mm 45° lead at each bore mouth tapers the
   rim's last fraction of a millimetre below 0.8 mm. Every NUGGS port prints this same

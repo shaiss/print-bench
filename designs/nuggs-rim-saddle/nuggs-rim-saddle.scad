@@ -260,15 +260,28 @@ module port_tube_solid() {
 }
 
 // 45-degree lead at a bore mouth. Cut only; only ever widens the bore.
-// The wide end (ri + 1) sits AT the mouth face and the cone tapers to ri one
-// mm inside the material — for dir=1 the material lies below z so the cone
-// must grow downward (rotate 180), for dir=-1 it lies above z and grows up.
-// (Round-2 fix: the two dir branches were crossed, which inverted the in-tank
-// lead into a groove-behind-a-lip and dropped the port-face cone below its
-// own cutting plane — the exact "step" N11 forbids.)
+// The profile is exact: bore ri + 1 AT the mouth face plane z, tapering at
+// exactly 45 deg to ri one mm inside the material — for dir=1 the material
+// lies below z so the cone grows downward (rotate 180), for dir=-1 it lies
+// above z and grows up. (Round-2 fix: the two dir branches were crossed,
+// which inverted the in-tank lead into a groove-behind-a-lip and dropped the
+// port-face cone below its own cutting plane — the exact "step" N11 forbids.)
+// The cone OVERSHOOTS the face plane by `over` into open air, so its base
+// disc is never coplanar with the mouth face and its tip under-runs the bore
+// by eps: every boundary of the cut is a transversal crossing. A base disc
+// sitting exactly in the face plane is a coincident-face subtraction — CGAL
+// absorbs it, but the Manifold backend emits non-manifold edges and shell
+// fragments along that plane (the round-2.1 59/100 NOT PRINTABLE: 15 shells,
+// watertight False, every cluster on the in-tank mouth plane). The overshoot
+// is safe at both mouths: the in-tank face fronts open tank air, and at the
+// port face the nearest material below z=0 is the inner sectors' projecting
+// half at i_in = ro + tol/2, well outboard of the cone's ri + 1 + over reach.
 module bore_lead(z, dir = 1) {      // dir=1: mouth on +z; dir=-1: mouth on -z
-    translate([0, 0, z]) rotate([dir > 0 ? 180 : 0, 0, 0])
-        cylinder(r1 = ri + 1.0, r2 = ri - eps, h = 1.0 / tan(45));
+    over = 0.5;                     // real overlap past the face plane (mm)
+    translate([0, 0, z + (dir > 0 ? over : -over)])
+        rotate([dir > 0 ? 180 : 0, 0, 0])
+            cylinder(r1 = ri + 1.0 + over, r2 = ri - eps,
+                     h = 1.0 + over + eps);   // slope (r1-r2)/h = 1: true 45
 }
 
 // The shell (USE frame): bridge over the rim + skirts down both faces +
@@ -326,7 +339,7 @@ module body() {                       // USE frame
             shell();
         }
         P2U() nuggs_bore_cut(cfg, nuggs_z_tip(cfg) - 2, tube_len + 2);
-        P2U() bore_lead(0.001, -1);                 // port-face bore mouth
+        P2U() bore_lead(0, -1);                     // port-face bore mouth
         P2U() bore_lead(tube_len, 1);               // in-tank mouth
     }
 }
