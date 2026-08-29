@@ -22,7 +22,10 @@
 //   Domain 2 (supports): printed FLAT. Every moving interface is either a
 //     vertical wall gap (spread-limited) or a horizontal roof gap quantized to
 //     whole layers (sag-limited) — the CC3 anisotropy, two different numbers.
-//     The one bridge in the part is the race rail's own underside.
+//     Every fixed feature stands on solid material or a support shelf (the
+//     corridor shelf under the arch beam, the wing table under the detent
+//     band); the part's two deliberate bridges are the race rail's underside
+//     and that wing table (each spanning between fixed walls).
 //
 // How it grips: the jaws rest OPEN (gap 33 mm for a Ø25 rod + 8 mm of travel).
 // Push the rear tab forward: the plunger's diagonal edge-notch cams the jaw
@@ -179,6 +182,17 @@ function arch_R(u) =
 R_seat   = arch_R(seat_u);       // hold capacity = tan(hold_ang) · R_seat
 R_crest  = arch_R(crest_u);
 F_release = tan(hold_ang) * R_crest * 0.6;   // pull past the crest (drive falling)
+// print-support shelving (round 2 — Jane's review, PR #410): fixed material
+// under everything the frame used to hang over the pocket void. All derived
+// from the moving parts' own envelopes, so the clearances hold by construction.
+shelf_top = arch_z0 - z_tol;         // 9.0 — corridor shelf top; beam floats z_tol
+shelf_y0  = leg_y_out + leg_t / 2 + 1;   // 25.6 — 1 mm past the leaf tips' rest
+                                         // edge (leaves snap back +y on release)
+shelf_y0j = open_f + jaw_w + 1;      // 29.5 — same margin past the jaw block edge
+x_shelf_j = x_leg1 - 6 - xy_tol;     // where the corridor shelf steps for the jaw
+table_z1  = pl_z0 - z_tol;           // 8.0 — wing table top; the band floats z_tol
+table_z0  = float_z + leg_z + z_tol; // 7.6 — table underside roofs the leaf sweep
+pad_y0    = y_wing1 + crest_u + xy_tol;  // 23.2 — tip pad clear of the tooth path
 
 echo(str("actuator stroke = ", stroke, " mm (jaw travel ", jaw_travel,
          " + ", preload, " preload via ", ramp_ang, " deg notch)"));
@@ -208,6 +222,8 @@ module guards() {
            "the tab would hit the rail's front face at full advance");
     assert(float_z + leg_z <= pl_z0 - z_tol,
            "flexure tops reach the detent wing band — the wing would fuse");
+    assert(table_z1 - table_z0 >= 2 * layer_h,
+           "wing table under 2 layers thick — raising z_layers eats the band between the leaf tops and the wing; raise base_t by the same amount");
     // detent force vs jaw stiffness — the brief's named failure mode. The
     // clamped jaws drive the plunger backwards with jaw_react; the valley
     // preload makes the arch push the tip into the hold face with R_seat,
@@ -246,7 +262,8 @@ module race_walls_2d() {
             square([x_race1 - x_race0, race_wt]);
 }
 // The rail is a lid over the blade, anchored on both walls; its underside is
-// the part's one deliberate bridge, so the blade's roof gap is sag-limited.
+// one of the part's two deliberate bridges (the wing table is the other),
+// so the blade's roof gap is sag-limited.
 module rail_2d() {
     translate([x_rail0, -y_race - race_wt + 0.2])
         square([x_race1 - x_rail0, 2 * (y_race + race_wt) - 0.4]);
@@ -354,19 +371,61 @@ module arch_posts_2d() {
 }
 
 // ============ assembly ====================================================
+// Print-support shelving (round 2, Jane's block on PR #410). Three fixed
+// pieces, none touching a moving part — every top face sits exactly z_tol
+// under what floats over it:
+//   corridor shelf — under the arch beam's whole span (frame under frame; the
+//     beam keeps its full Y freedom, it just floats 2 layers over the shelf
+//     instead of over the pocket void). Steps outboard past the jaw blocks.
+//   wing table — a 2-layer plate roofing the leaf sweep (z_tol over the leaf
+//     tops) so the wing band and the tooth print on the standard roof gap
+//     instead of as an 8 mm ceiling. Bridges base step → corridor shelf: the
+//     part's second deliberate bridge, welded on three sides (base step, the
+//     solid band west of the pocket, the shelf).
+//   tip pad — a riser on the table under the detent tip's rest footprint,
+//     clear of the tooth's travel by xy_tol, so the restarted tip's first
+//     layer lands on a roof gap, not on air.
+module base_2d() {
+    difference() { plate_2d(); pocket_cut_2d(); trough_cut_2d(); }
+}
+module shelf_2d() {
+    translate([x_arch0 - 2.7, shelf_y0])
+        square([x_shelf_j - (x_arch0 - 2.7), 35.2 - shelf_y0]);
+    translate([x_shelf_j, shelf_y0j])
+        square([x_arch1 + 2.7 - x_shelf_j, 35.2 - shelf_y0j]);
+}
+module table_2d() {
+    translate([x_leg0 - 2, y_pocket - 0.3])
+        square([apex_x + 13 - (x_leg0 - 2), shelf_y0 + 0.7 - (y_pocket - 0.3)]);
+}
+module pad_2d() {
+    translate([apex_x - 4, pad_y0]) square([8, shelf_y0 + 0.7 - pad_y0]);
+}
+
 module frame() {
+    // The base and shelving extrude in z-bands, each band one 2D union, so
+    // the continuous roof planes (base top + table top at table_z1, shelf
+    // top + pad top at shelf_top) tessellate as single faces instead of
+    // coplanar seams between separate prisms (degenerate-triangle bait).
     linear_extrude(pocket_t) plate_2d();
-    linear_extrude(base_t - pocket_t)
-        difference() { plate_2d(); pocket_cut_2d(); trough_cut_2d(); }
+    translate([0, 0, pocket_t]) linear_extrude(table_z0 - pocket_t) base_2d();
+    translate([0, 0, table_z0]) linear_extrude(table_z1 - table_z0)
+        { base_2d(); table_2d(); }
+    linear_extrude(table_z1) shelf_2d();
+    translate([0, 0, table_z1]) linear_extrude(shelf_top - table_z1)
+        { shelf_2d(); pad_2d(); }
     // race side walls to race_h, and the bridged rail over the blade
     linear_extrude(race_h) race_walls_2d();
     translate([0, 0, arm_z0]) linear_extrude(race_h - arm_z0) rail_2d();
     // flexure anchor towers stand on the solid plate
     linear_extrude(base_t) towers_2d();
-    // arch: posts rise to the web, web + tip ride in the plunger band
+    // arch: posts rise to the web, web + tip ride in the plunger band. The
+    // tip starts AT the beam's underside (arch_z0), never below it: material
+    // below arch_z0 there would print as a floating island over the moving
+    // outer leaf and weld the arch to the jaw (Jane's block finding, PR #410).
     linear_extrude(arch_z0 + 0.1) arch_posts_2d();
     translate([0, 0, arch_z0]) linear_extrude(arch_w) arch_beam_2d();
-    translate([0, 0, pl_z0]) linear_extrude(pl_z1 - pl_z0) arch_tip_2d();
+    translate([0, 0, arch_z0]) linear_extrude(pl_z1 - arch_z0) arch_tip_2d();
 }
 
 module jaw_side() {
@@ -389,7 +448,9 @@ module plunger() {
 }
 
 part = "";  // "" gripper · "fitcheck" free-body intersection (empty) ·
-            // "fitcheck_neg" interfering control · "drive_mouth" cam proof
+            // "fitcheck_neg" interfering control · "drive_mouth" cam proof ·
+            // "side_section" preview-only cross-section at the detent station
+            // (keeps x >= 65) — the z-stack review shot in cameras.conf
 
 // PROOF the cam is connected, on the built geometry: the pin's own swept
 // body (r = pin_r, shrunk 0.05), above the blade's −y edge, must be free of
@@ -426,6 +487,17 @@ module main() {
         }
     else if (part == "drive_mouth")
         intersection() { plunger(); drive_mouth(); }
+    else if (part == "side_section")
+        // Preview-only cross-section at the detent station: one frame showing
+        // every layer of the z-stack (leaves over the pocket floor, wing table
+        // over the leaves, wing band + tooth over the table, tip pad, beam
+        // over the corridor shelf, blade over the base) — the review shot
+        // Jane's round-1 freeze-window ask exists for: fixed-over-air is
+        // invisible from every show angle, and visible here.
+        intersection() {
+            union() { frame(); jaw_side(); mirror([0, 1]) jaw_side(); plunger(); }
+            translate([apex_x - 5, -40, -1]) cube([x_base1, 80, race_h + 2]);
+        }
     else {
         frame(); jaw_side(); mirror([0, 1]) jaw_side(); plunger();
     }

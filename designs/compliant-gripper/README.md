@@ -30,11 +30,23 @@ into the valley on the plunger wing and holds the clamped state:
 
 - `compliant-gripper` — the part, **156 × 71 × 18 mm**, printed flat in one
   piece. Grips a **Ø 25 mm** cylinder with 0.5 mm of preload per jaw (the pads
-  close to a 24.0 mm gap); **8 mm** of jaw travel; toggle force ≈ 3.8 N (a firm
-  thumb push), held by the detent until you pull ≈ 5.7 N to release.
+  close to a 24.0 mm gap); **8 mm** of jaw travel; toggle force ≈ 3.8 N
+  (a firm thumb push), held by the detent until you pull ≈ 5.7 N to release —
+  both **modeled** figures, derived from the geometry; the field-test log owns
+  the measured values.
+- The as-shipped **working window is Ø 24–25.8 mm**: under Ø 24 the pads seat
+  before they touch the rod, and the trough clears 25.8. A 1″ (25.4 mm) dowel
+  fits; a Ø 20 dowel grips air. For other stock, re-derive from `grip_od` —
+  the parameter table below is the recipe.
+- It is a **positioner, not a vise**: at the seat each pad presses with the
+  leaf preload — about 0.4 N, roughly 40 g of squeeze. That registers a rod in
+  the trough while you file, sand or glue, and holds that state hands-free; it
+  will not resist bearing down on the work. Locate and hold, don't clamp.
 - `compliant-gripper-coupon` — the **print-this-first** coupon: the same
-  mechanism with the grip zone shortened. Print it to check the clearances and
-  feel the detent snap before committing 4¼ hours to the full part.
+  mechanism with the grip zone shortened. Honest price tag: it costs nearly as
+  much as the part itself (~4 h 11 m vs 4 h 37 m sliced), because the leaves must stay at
+  production length to prove the detent force balance — what it buys is
+  knowing the fit and the snap before the real print, not a cheaper print.
 
 ## Print settings
 
@@ -45,11 +57,23 @@ into the valley on the plunger wing and holds the clamped state:
 - **Infill:** 30–40 %
 - **Supports:** none needed — and none wanted: a support inside the mechanism
   would weld it
+- **Slicer, set these two:** gap-closing radius **0.1 mm** (the stock 0.2
+  default merges gaps at or under 0.2 mm — exactly this part's sliding
+  clearances) and seam position **Back** or scarf (an Aligned seam stacks a
+  ridge somewhere on the blade's long sliding flanks)
+- **Cooling:** keep part cooling up — PETG sags on bridges where PLA doesn't,
+  and the part has two deliberate bridges (the race rail's underside, the wing
+  table); a saggy rail underside is what closes the plunger's roof gap
+- **Plate:** textured PEI prints it clean; brim only if the long corners lift
 - **Orientation:** as modelled, **flat on the bed** — the whole mechanism is one
   XY profile extruded in Z; printing it any other way breaks the flexures'
   in-layer bending and hangs the moving parts over air
 - **First use:** work the tab once through its full stroke to free the race,
   then push it again and feel the detent click.
+- **Storage:** store it **open**. Clamped, the detent holds the PETG arch
+  deflected 2.2 mm, and PETG creeps under sustained load — an overnight
+  glue-up is the use case and is fine, but parking it clamped for weeks may
+  cost hold force.
 
 ## How it works
 
@@ -62,15 +86,21 @@ shallow enough to slide back on release). A pre-buckled **arch** along one edge
 carries the detent tooth: push the tab and its tip climbs the ramp, passes the
 crest, and drops into a **valley** whose floor holds the arch deflected — the
 seat presses the tip against an 80° hold face, which holds the jaws' 3.9 N
-spring-back with a 6.2 N wall. Pull past it and everything springs open.
+spring-back with a 6.2 N wall (both modeled). Pull past it and everything
+springs open.
 
 The fusion: **leaf-flexure jaws + the bistable arch** (compliant mechanisms) ×
 **captive plunger, pin arms and detent tip printed in place** with the PIP
 clearance recipe (0.2 mm vertical walls, 0.4 mm = 2-layer roof gaps) ×
 **support-free flat printing** (the flexures bend in-layer; every moving
-underside floats exactly two layers over solid pocket floors). Committed
-fit-checks (`ci.fitchecks`) prove the plunger is a free captive body **and**
-that the cam mouth actually opens through the blade — and a fuse-check
+underside — and every fixed feature the frame carries over the pocket — floats
+exactly two layers over a solid floor, shelf or table). The cross-section at
+the detent station shows the whole z-stack in one frame:
+
+![Cross-section at the detent station — every gap is exactly two layers](previews/side-section.png)
+
+Committed fit-checks (`ci.fitchecks`) prove the plunger is a free captive body
+**and** that the cam mouth actually opens through the blade — and a fuse-check
 (`ci.fusecheck`) proves nothing welds shut.
 
 ## Parameters
@@ -94,7 +124,12 @@ the detent's hold margin (the guards in the file refuse a set that loses it).
 
 ## If a fit is off
 
-Print the coupon first. Plunger fused → raise `xy_tol` by 0.05 and reprint;
-rattles → lower it the same. Detent won't hold → do **not** steepen `hold_ang`;
-raise `seat_u` (deeper preload) or thin the leaves — the file's guards will tell
-you which way the force balance still closes.
+Print the coupon first. Plunger fused **at its sides** → raise `xy_tol` by
+0.05 and reprint; rattles → lower it the same. Plunger fused **under the
+rail** → that is a Z problem, not XY (the roof gap closed — PETG bridge sag is
+the usual culprit; check cooling first): raise `z_layers` to 3, and `base_t`
+to 9 with it — the wing table lives in the band the bigger gap eats, and the
+file's guard walks you through it — at the cost of 0.2 mm of captive height.
+Detent won't hold → do **not** steepen `hold_ang`; raise `seat_u` (deeper
+preload) or thin the leaves — the file's guards will tell you which way the
+force balance still closes.

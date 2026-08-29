@@ -46,11 +46,21 @@ body floats `z_tol = 2 × 0.2` over solid material, never printing on air and
 never welding (sag-limited, the #387 recipe).
 
 **Proof.** `previews/contact-sheet.png` bottom-iso: the bed face is one solid
-footprint. The test-slice gcode contains **zero support-material
-extrusions**. printcheck reports the expected PIP signature — 92/100 with a
-"8 % needs support" warning that is exactly those 2-layer roof-gap first
-layers; the landed #387 captive-spinner scores the same class (92/100, 11 %).
-That warning is the cost of print-in-place, not an orientation defect.
+footprint. `previews/side-section.png` (added round 2): the z-stack at the
+detent station, every gap exactly two layers. The test-slice gcode contains
+**zero support-material extrusions**. printcheck reports the PIP signature —
+92/100 with a "needs support" warning. **Round 1 misread that warning**: it
+was called "exactly those 2-layer roof-gap first layers" by analogy to #387,
+but at that head a real share of it was open voids — the arch corridor, the
+wing band, and the whole plunger band riding 3.4 mm over air (see *Round 2*
+below). The honest reading, kept as this design's regression signal: the
+metric counts **all** unsupported downward surface, blind to gap height, so
+it cannot shrink when a void becomes a legit 2-layer roof — it must instead
+be **fully accounted**. At this head it is: 3 810 mm², the sum of the
+deliberate roof-gap undersides (leaves and jaw blocks over the pocket floor,
+blade/tab/wing over base and table, table over the leaves, beam over the
+shelf, arms over the blade). Re-read it every round: **growth beyond a
+deliberate new roof means something is hanging over air again.**
 
 ### 2. Detent force vs jaw stiffness — the gripper must not unclamp itself
 
@@ -160,6 +170,59 @@ at rest, `drive_mouth` proves the cam mouth exists, and the negative control
 4 bodies (frame+arch, jaw A, jaw B, plunger) — nothing is welded that
 shouldn't be, and each jaw's only connection to the frame is its leaf pair.
 
+## Round 2 — the print story (Jane's block, PR #410)
+
+Round 1's Jane review blocked on **fixed and moving features standing over
+open air**: the detent arch beam spanning its posts over a slot/void, the
+detent tip's first layers a floating island 1.2 mm above the moving outer
+leaf, the cam pins and blade nose over air, and the wing's outer band an
+unsupported one-sided ceiling. Every gate was green — a slicer slices
+floating islands inside a watertight solid silently.
+
+**Root cause, found by probing the export (not visible in any preview):**
+`frame()`'s upper base band was extruded **without its z-offset** — 
+`linear_extrude(base_t - pocket_t)` from z 0 instead of from `pocket_t` — so
+the base top measured **z 5 on the export instead of the designed z 8**. The
+entire plunger band (blade, nose, tab, pins, tooth root) "floated" 3.4 mm
+over air instead of the designed 2-layer roof. One `translate` restores it.
+(Jane's coordinates localized the pin/nose symptom to the rod trough; the
+mesh says the trough was innocent — it sits at x 120–152 under the grip zone
+with nothing printed above it — the missing 3 mm of base was the whole
+story. Same block verdict either way; the mesh owns the mechanism.)
+
+**The pass — fixed material only, no spring section touched by a polygon:**
+
+1. **Base band restored** (the missing `translate`): blade, tab, pins, nose
+   and the wing's inboard edge get their designed 0.4 roof over z 8.
+2. **Corridor shelf** under the arch beam's whole span, top at
+   `arch_z0 − z_tol` (9.0): frame under frame, the beam floats 2 layers and
+   keeps its full Y freedom. Its walls sit **1 mm** outboard of the leaf tips
+   and jaw blocks (not `xy_tol`): leaves and blocks snap back *through* rest
+   on release, and a wall at 0.2 would catch the overshoot.
+3. **Wing table**: a 2-layer plate at `leaf tops + z_tol` → `wing band −
+   z_tol` (z 7.6–8.0 — the only band the leaf sweep leaves available),
+   bridging base step → corridor shelf, welded on three sides. The wing band
+   and the detent tooth now print on the standard roof gap instead of as an
+   8 mm ceiling; the part's second deliberate bridge (the rail is the first).
+4. **Tip restarted at the beam's underside** (`arch_z0`, was `pl_z0`): no
+   fixed material below the beam over a moving leaf. Tooth engagement keeps a
+   3.2 mm bearing band. A **tip pad** riser on the table (clear of the
+   tooth's travel by `xy_tol`) puts a roof gap under most of the tip's first
+   layer; the inner ~3 mm stays a one-sided ledge because the tooth's travel
+   corridor beneath it must stay void — it is anchored on pad + beam + shelf,
+   and worst-case sag lands on the fixed table 1.4 mm below, not on a mover.
+5. **New guard**: the wing table must keep ≥ 2 layers of thickness — raising
+   `z_layers` eats its band, so the guard names the `base_t` raise (the
+   README's Z-rung recipe: `z_layers=3` + `base_t=9`, verified to render).
+
+**Verified on the export** (the same point-in-mesh probe discipline as G4):
+33 probes — material present through every shelf/table/pad station, void in
+every designed gap (2-layer roofs over base, table, shelf and pad; the leaf
+band under the table; the tooth's travel corridor), clearances beside every
+mover, the trough still open with nothing above it. `fitcheck` and
+`drive_mouth` still render empty, `fitcheck_neg` still interferes, fusecheck
+still separates 4 bodies.
+
 ## The measured contract (G4 — measured on the export, not the variable)
 
 Measured with a stdlib Python vertex probe on the ASCII STL
@@ -207,7 +270,8 @@ recorded under their interaction below: the cam notch that cut **nothing**
   arm can wrap over the blade and drop in — a closed slot would need the arm
   to print *through* the blade.
 - **Capture.** The plunger cannot escape: race walls in XY, bridged rail above
-  (the part's one deliberate bridge), jaw pin-arms over the blade's nose, race
+  (one of the part's two deliberate bridges — the wing table is the other),
+  jaw pin-arms over the blade's nose, race
   front / tab rear as the stroke ends (#387 capture recipe).
 
 ## Print this first
@@ -233,14 +297,20 @@ detent's snap feel reads on this coupon too (same arch, same tooth).
   fusecheck + control). Telemetry: iterations 1–4 captured; scores flat at 92
   after iteration 1 (the PIP signature — see interaction 1), the middle
   iterations were *correctness* fixes the score cannot see.
-- Three defects found and fixed, none visible to a score: the detent that
+- Round 2 (PR #410 review): Jane's block on the print story — three
+  subsystems over open air — fixed by the base-band `translate`, the corridor
+  shelf, the wing table and the tip restart (see *Round 2* above). The
+  spring sections are untouched; the force story of interaction 2 is
+  unchanged.
+- Four defects found and fixed, none visible to a score: the detent that
   couldn't hold (interaction 2, found by the force balance), the arch that
-  wasn't the modeled arch (interaction 2, found by measuring the export), and
-  the disconnected cam (interaction 3, found the same way — the gates were all
-  green on a gripper whose jaws could not close). `drive_mouth` now gates the
-  last class on geometry.
+  wasn't the modeled arch (interaction 2, found by measuring the export), the
+  disconnected cam (interaction 3, found the same way — the gates were all
+  green on a gripper whose jaws could not close), and the base band extruded
+  at the wrong z (Round 2, found by the review + probing the export).
+  `drive_mouth` now gates the cam class on geometry.
 - Detent force estimate is model + coupon territory: the field-test log owns
-  the real number.
+  the real number — the README now labels the 3.8 / 5.7 N figures *modeled*.
 
 ## Lineage (the sibling recipes this reuses, per the brief's "reuse, don't
 re-derive")
