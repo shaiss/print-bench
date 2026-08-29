@@ -56,12 +56,38 @@ top-edge silicone seam, and a relief pocket keeps the bead zone clear.
 - **Supports:** body — yes, **tree** (the shell grows out of the vertical
   tube; ~11 % of its surface, ≈ 12 600 mm², 13 h / ~195 g on a 0.2 mm
   profile — tree supports anchor the tall body and leave less to clean than
-  grid); arms and coupon — none. Afterward **deburr every face that touches
-  glass or frame**: a support nick under a pad is a point load on tempered
-  glass
-- **Brim:** body — **mandatory** (155 mm tall standing on three sector tips
-  ≈ 527 mm² of bed contact; the slicer itself flags stability); arms and
-  coupon no
+  grid); arms and coupon — none. **Block supports under the two latch-flange
+  seats** (the faces the arms seat on print facing down) — or stone them dead
+  flat afterward: `seat_lift` is 0.2 mm of designed play, and one support
+  nick eats all of it (the arm rocks, or seats high). Afterward **deburr
+  every face that touches glass or frame**: a support nick under a pad is a
+  point load on tempered glass
+- **Overnighter expectations:** the body is a 13 h PETG print — set these
+  before you sleep. Tree-support touch points will scar the shell where it
+  grows off the tube; the scars are cosmetic (no bearing or coupling face
+  takes support). PETG grips its supports, so set the support top Z distance
+  to a full layer (0.2 mm) and keep the support/wall XY distance at the
+  profile default or wider, or the trees gouge on release. Slow the outer
+  walls on the tube's top half (a height-range modifier) — 155 mm up, a tall
+  thin shell rings, and fast outer walls show it. And plainly: no setting
+  de-risks a 13 h tall shell — if the first hours look wrong, stop and
+  restart rather than hope
+- (Printcheck's remaining body caveat — thin walls, ~3 % of sampled surface,
+  thinnest ≈ 0.00 mm — is the port itself, by design: the rib/groove
+  interlock detail at the port face samples as coincident flank faces, the
+  ≈ 0.00 mm reading, and the 45° lead chamfer tapers the last ~0.3 mm of
+  each bore-mouth rim below 0.8 mm. Every NUGGS port prints this same
+  detail; nothing to change in the slicer.)
+- **Brim:** body — **outer brim, mandatory** (155 mm tall standing on three
+  sector tips ≈ 527 mm² of bed contact; the slicer itself flags stability);
+  arms and coupon — none. Print on **textured PEI, or glue-stick the plate
+  first** — PETG welds to smooth PEI, and "mandatory" also has to survive
+  the night. After peeling the brim, **deburr the sector-tip bottom edges**:
+  brim tags and first-layer squish land exactly on the coupling datum (the
+  bed face is the port face)
+- **Initial layer horizontal expansion:** −0.1 to −0.2 mm — elephant foot
+  lands on that same datum, on the body's sector tips and the coupon's stubs
+  alike
 - **Bed:** 256 × 256 mm fits every part, but **place the coupon centered** —
   at 204 × 206 mm it would clip the front-left exclusion zone on X1/P1 beds
 
@@ -88,15 +114,17 @@ number and re-run the coupon before reprinting the saddle.
 
 1. **Print the coupon first** (same PETG as the arms) and tune: `port_tol` on
    the two port stubs (snap, twist), `grip_gap` on the latch fixture (snap an
-   arm on, lift the tab). Sloppy → −0.05; won't seat → +0.05. Peel the brim
-   and deburr the stub feet before judging — first-layer squish lands exactly
-   on the sectors you're testing.
+   arm on, lift the tab). Sloppy → −0.05; won't seat → +0.05. The coupon
+   prints without a brim — but deburr the stub feet before judging:
+   first-layer squish lands exactly on the sectors you're testing.
 2. Measure your actual rim: panel thickness, lip depth and height. Re-render
    with your numbers if they differ from the Detolf defaults.
 3. Slide the saddle over the rim — inner skirt inside the tank, bridge
-   seated on the rim top, bead clear — and push both arms down onto their
-   flanges until the hooks latch. Removal is the reverse: two-finger spread
-   on the outboard tabs, one action.
+   seated on the rim top, bead clear. Before the arms go in, run a needle
+   file through both bridge strap slots — they print as ~25 mm unsupported
+   PETG ceilings over the arm passage and sag a hair. Then push both arms
+   down onto their flanges until the hooks latch. Removal is the reverse:
+   two-finger spread on the outboard tabs, one action.
 4. Couple your NUGGS run to the port at the insertion clocking, twist ~14°.
    **Run accounting:** this module contributes its own enclosed length only
    (port face to mouth ≈ 145 mm axial); the mouth discharges into the
