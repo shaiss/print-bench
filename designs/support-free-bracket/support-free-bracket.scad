@@ -1,118 +1,188 @@
-// support-free-bracket — a wall bracket authored in its optimal print
+// support-free-bracket — a wall shelf bracket authored in its optimal print
 // orientation so it needs zero support material. Reference design for
 // docs/advanced-techniques.md Domain 2 (designing around supports) and the
 // cross-cutting move CC1 (orientation is the master variable).
 //
-// The whole part is a demonstration of "reshape geometry so the process
-// stops mattering":
-//   - vertical mounting holes through the back plate  → support-free because
-//     they run along the build axis (Z);
-//   - the horizontal dowel/rod bore                    → a TEARDROP, so its
-//     roof self-supports where a plain round bore would droop;
-//   - the arm-to-plate junction                       → a 45-degree GUSSET
-//     chamfer, never a bottom fillet (a bottom fillet starts horizontal and
-//     curls into an overhang).
+// Every feature that would force supports in a naive orientation is reshaped
+// here instead:
+//   - the 2 x M5 wall-fastener bores run HORIZONTAL in the print frame →
+//     TEARDROPS, so their roofs self-support where round bores would droop;
+//   - the cavity under the shelf arm is closed by a diagonal brace whose
+//     inner face is a VAULT at `vault_deg` from vertical — never a flat
+//     ceiling, which would print as an unsupported bridge roof;
+//   - every bed-contact edge carries a 45-degree CHAMFER, never a bottom
+//     fillet (a bottom fillet starts horizontal and curls into an overhang).
 //
-// Print orientation = as authored: back plate flat on the bed (z = 0), the arm
-// standing up in +Z. In USE you rotate it 90 deg so the back plate is against
-// the wall and the dowel bore is horizontal. All dimensions in millimeters.
+// Print orientation = as authored: the shelf arm lies flat on the bed (z = 0,
+// its shelf-bearing face down), the wall plate stands vertically at the back,
+// and the vault brace rises between them. In USE the part is flipped 180 deg
+// about X: the plate is still vertical against the wall, the arm is now at the
+// TOP with the vault brace hanging beneath it, and the shelf board rests on
+// the arm's smooth first-layer face. All dimensions in millimeters.
 
 use <printability.scad>
 
-/* [Back plate] */
-// Plate width, X (mm)
-plate_w = 46;
-// Plate depth up the wall, Y (mm)
-plate_d = 40;
-// Plate thickness, Z / build direction (mm)
-plate_t = 5;
-// Mounting-screw size
-screw = "M4"; // [M3, M4, M5]
-// Screw hole inset from the plate edges (mm)
-screw_inset = 9;
+/* [Wall plate] */
+// Plate width, across the wall (X) (mm)
+plate_w = 80;
+// Plate height up the wall in use; on the bed, front-to-back (mm)
+plate_h = 50;
+// Plate thickness (mm)
+plate_t = 6;
+// Wall-fastener size (bores are clearance holes)
+screw = "M5"; // [M3, M4, M5, M6]
+// Fastener bore inset from the plate ends, X (mm)
+bore_inset_x = 20;
+// Lower bore centre height on the bed (mm) — keep >= arm_t + socket-head
+// radius or the head fouls the arm face (guarded)
+bore_z_lo = 11;
+// Upper bore centre height on the bed (mm) — keep low enough that the socket
+// head clears the vault ceiling plane AND the hex key's short arm still has
+// its straight run out of the head before the vault closes in (both guarded)
+bore_z_hi = 18;
 
-/* [Arm] */
-// Arm (post) thickness, Y (mm) — must exceed bore_d so the horizontal bore
-// keeps a real wall on each side (keep arm_t >= bore_d + 2*1.2)
-arm_t = 16;
-// Arm height above the plate, Z (mm)
-arm_h = 34;
-// How far the arm's foot chamfer runs out onto the plate (mm) — the 45-deg
-// gusset that replaces a bottom fillet at the arm/plate junction
-gusset = 10;
-// Dowel/rod bore diameter (mm) — teardrop, so it prints roofless
-bore_d = 10;
+/* [Shelf arm] */
+// Arm depth out from the wall in use; on the bed, length in +Y (mm)
+arm_d = 60;
+// Arm thickness (mm) — the shelf rests on this print-face-down surface
+arm_t = 6;
+
+/* [Vault brace] */
+// Vault ceiling angle from vertical (deg) — must stay <= 45 to self-support
+vault_deg = 42;
+// Height on the bed where the brace springs off the plate (mm)
+web_top_z = 44;
+// Brace thickness measured down the plate face (mm)
+web_band = 8;
 
 /* [Fit & print] */
-// 45-deg chamfer on bed-contact edges (mm)
+// 45-degree chamfer on bed-contact edges (mm)
 bottom_chamfer = 0.8;
-// Corner rounding radius on the plate (mm)
-plate_r = 4;
+// Vertical-corner rounding, arm (mm)
+arm_r = 4;
+// Vertical-corner rounding, plate (mm) — keep < plate_t / 2
+plate_r = 2;
+
+/* [Tool access] */
+// Hex-key short-arm length the vault must admit at each bore (mm): tip to
+// elbow of the 4 mm key an M5 socket head takes — measured short arms run
+// 17-19 mm, so 17 assumes the small end of what a user owns
+tool_run = 17;
+// Working tilt of the key off the bore axis (deg) — the elbow drops down
+// into the open cavity, where the vault ceiling plane sits farther out
+tool_tilt = 10;
 
 /* [Quality] */
 // Iterating: 48. Production: 96+.
 $fn = 64;
 
 // ---- derived -----------------------------------------------------------
-arm_y0 = plate_d - arm_t - gusset;   // arm foot sits toward the wall edge
-// bore centre: high enough to hang a rod, low enough that the teardrop apex
-// (~bore_d above centre) keeps a solid cap of blade above it — no severing.
-bore_z = plate_t + arm_h * 0.52;
+arm_y0 = plate_t;                          // arm starts at the plate face
+arm_y1 = arm_y0 + arm_d;                   // arm tip on the bed
+bore_d = screw_clearance_d(screw);         // 5.5 for M5
+// Outer (upper) face of the brace: springs from the plate at web_top_z and
+// runs down to the arm surface. Both brace faces sit at vault_deg from
+// vertical, so every layer of the vault rests on the one below it.
+web_out_foot_y = plate_t + (web_top_z - arm_t) * tan(vault_deg);
+// Inner (lower) face — the vault ceiling over the cavity — parallel to it.
+web_in_z = web_top_z - web_band;
+web_in_foot_y = plate_t + (web_in_z - arm_t) * tan(vault_deg);
 
 module back_plate() {
-    difference() {
-        rounded_box([plate_w, plate_d, plate_t], r = plate_r,
+    // The wall plate, standing on the bed at the back edge.
+    rounded_box([plate_w, plate_t, plate_h], r = plate_r,
+                bottom_chamfer = bottom_chamfer);
+}
+
+module shelf_arm() {
+    // The shelf arm, lying flat on the bed: its top-in-use (shelf-bearing)
+    // face prints face-down, so the shelf rests on a smooth first-layer face.
+    translate([0, arm_y0, 0])
+        rounded_box([plate_w, arm_d, arm_t], r = arm_r,
                     bottom_chamfer = bottom_chamfer);
-        // Two countersunk mounting holes, axis +Z (support-free): the
-        // countersink cone opens upward and self-supports.
-        for (x = [screw_inset, plate_w - screw_inset])
-            translate([x, plate_d - screw_inset, 0])
-                screw_hole(size = screw, l = plate_t, head = "countersunk");
-    }
 }
 
-// The arm: a vertical blade with a 45-degree gusset foot (self-supporting),
-// carrying a teardrop dowel bore near the top.
-module arm() {
-    x0 = (plate_w - arm_t) / 2;   // not used for width; arm spans plate_w-inset
-    arm_w = plate_w - 2 * plate_r; // blade width in X
-    difference() {
-        union() {
-            // upright blade
-            translate([(plate_w - arm_w)/2, arm_y0, plate_t - 0.01])
-                cube([arm_w, arm_t, arm_h + 0.01]);
-            // 45-degree gusset running from the blade front face out onto the
-            // plate — a chamfer, so its sloped face self-supports
-            translate([(plate_w - arm_w)/2, arm_y0, plate_t - 0.01])
-                rotate([0, 0, 0])
-                gusset_wedge(arm_w, gusset, gusset);
-        }
-        // horizontal dowel bore, axis along X, teardrop point +Z
-        translate([plate_w/2, arm_y0 + arm_t/2, bore_z])
-            rotate([0, 0, 90])
-                teardrop_hole(d = bore_d, l = arm_w + 2);
-    }
+// The diagonal brace closing the cavity under the arm. Its inner face is the
+// vault: a plane at vault_deg from vertical spanning the bed-facing void,
+// where a flat ceiling would print as an unsupported bridge roof.
+module vault_brace() {
+    rotate([90, 0, 90])   // polygon (Y,Z) profile, extruded along +X
+        linear_extrude(plate_w)
+            polygon([[plate_t, web_in_z],
+                     [plate_t, web_top_z],
+                     [web_out_foot_y, arm_t],
+                     [web_in_foot_y, arm_t]]);
 }
 
-// A right-triangle wedge in the YZ plane, extruded along X — the gusset.
-// Grows from the blade front face (y local 0) out by `run` in +... actually -Y
-// (toward the plate front) and up by `rise` in Z.
-module gusset_wedge(w, run, rise) {
-    translate([0, 0, 0])
-        rotate([90, 0, 90])
-            linear_extrude(w)
-                polygon([[0, 0], [-run, 0], [0, rise]]);
+// 2 x M5 wall-fastener bores, axis along Y (horizontal in the print frame):
+// teardrop profile with the point UP, so the bore roof self-supports.
+// teardrop_hole() aims the point +Z as documented: the lib's sign bug (issue
+// #398 — the point faced -Z) was fixed by #424 and is pinned by printability's
+// own mates gauge, so the old local rotate([180, 0, 0]) workaround is gone —
+// kept, it double-flipped the point back DOWN on the fixed lib (measured on
+// the merged export; see NOTES.md).
+module fastener_bores() {
+    for (p = [[bore_inset_x, bore_z_lo],
+              [plate_w - bore_inset_x, bore_z_hi]])
+        translate([p[0], plate_t / 2, p[1]])
+            teardrop_hole(d = bore_d, l = plate_t + 4);
 }
 
 module main() {
-    // A horizontal bore only self-supports as a teardrop if it also fits the
-    // wall it passes through — guard the wall the render can't complain about.
-    assert(arm_t >= bore_d + 2 * 1.2,
-           "arm_t too thin for bore_d — the teardrop would breach the side walls");
-    assert(bore_z + bore_d <= plate_t + arm_h - 3,
-           "bore sits too high — the teardrop apex would sever the arm cap");
-    back_plate();
-    arm();
+    // The vault is the design: a ceiling over a bed-facing void must stay
+    // <= 45 deg from vertical or it stops self-supporting.
+    assert(vault_deg > 0 && vault_deg <= 45,
+           "vault_deg must be in (0, 45] — a steeper ceiling needs supports");
+    assert(web_out_foot_y <= arm_y1 - 4,
+           "vault brace foot runs off the arm");
+    assert(bore_z_hi + bore_d * 0.8 <= web_in_z - 2,
+           "upper bore teardrop apex would breach the vault springing");
+    assert(bore_z_lo - bore_d / 2 >= 3,
+           "lower bore too close to the bed");
+    // Socket-head envelope (PR #401 review): the bores must place the HEAD,
+    // not just the bore — the head rim must clear the arm face on one side
+    // and the vault ceiling plane on the other. socket_head() already
+    // carries 0.5 mm of diameter clearance.
+    head = socket_head(screw);
+    assert(bore_z_lo - head[0] / 2 >= arm_t,
+           "lower-bore socket head would foul the arm face — raise bore_z_lo");
+    assert(bore_z_hi + head[0] / 2 <= web_in_z - head[1] / tan(vault_deg),
+           "upper-bore socket head would foul the vault ceiling — lower bore_z_hi");
+    // Tool-access envelope (PR #401 round 4): a screw that SEATS can still be
+    // undrivable — the vault ceiling plane, y(z) = plate_t +
+    // (web_in_z - z) * tan(vault_deg), closes over each bore, and the hex
+    // key's short arm needs its straight run along the bore axis before the
+    // elbow. The run starts at the head's hex-recess floor (a socket cap is
+    // drilled nearly through — floor ~0.5 mm above the seat at the plate
+    // face) and the key may work tilted down by tool_tilt into the open
+    // cavity BELOW the bore, where the ceiling sits farther out: a tilted
+    // arm spans only tool_run * cos(tool_tilt) of run, and its elbow drops
+    // tool_run * sin(tool_tilt), buying tan(vault_deg) of extra ceiling per
+    // mm dropped. Hence the run a tilted short arm needs:
+    //   tool_run * (cos(tool_tilt) - sin(tool_tilt) * tan(vault_deg))
+    // (fires at bore_z_hi = 25: run 9.4 mm vs the 14.1 mm needed — Jane's
+    // round-4 probe; at 18 the run is 15.7 mm and a 17-19 mm arm works at
+    // <= ~10 deg of tilt).
+    key_need = tool_run * (cos(tool_tilt) - sin(tool_tilt) * tan(vault_deg));
+    for (bz = [bore_z_lo, bore_z_hi]) {
+        key_run = (web_in_z - bz) * tan(vault_deg) - 0.5;
+        assert(key_run >= key_need,
+               str("hex-key run at bore z=", bz, " is ", key_run,
+                   " mm; the tilted short arm needs ", key_need,
+                   " mm — lower the bore or shrink the tool"));
+    }
+    assert(bore_inset_x - bore_d / 2 >= 3,
+           "bores too close to the plate ends for the screw head");
+    assert(arm_t >= 4, "arm thinner than 3 perimeters plus infill");
+
+    difference() {
+        union() {
+            back_plate();
+            shelf_arm();
+            vault_brace();
+        }
+        fastener_bores();
+    }
 }
 
 main();
