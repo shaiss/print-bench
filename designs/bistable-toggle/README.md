@@ -133,7 +133,9 @@ fierce, lower it. Steps in `NOTES.md` → "Print this first".
 Two expectations, so the strip reads right: the cells are short (`l = 35` vs
 the part's ~82) and switch force scales as `1/l³`, so they snap roughly **13×
 harder** than the part — feel for whether each state *holds*, not for the
-production force (~3 N), and hold the strip down while you press. And the strip
+production force (~3 N), and hold the strip down while you press. Expect roughly
+4 kg on the two live cells — press with the ball of your thumb, strip flat on
+the bench. And the strip
 is the bigger commitment on purpose: about **1 h 26 m / 15 g** of insurance
 against the toggle's **~32 m / 6.3 g** — the honest first evening is both on
 one plate. The strip is ~197 mm long: on beds under ~210 mm, print it rotated
