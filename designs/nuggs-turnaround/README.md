@@ -72,7 +72,10 @@ its source live in [`designs/nuggs/PM.md`](../nuggs/PM.md) (N2) and
   the vault above. The whole part is support-free as modelled.
 - **Orientation:** as modelled — both ports down, sector tips on the bed, the
   chamber up. Do not rotate it.
-- **Brim:** optional; the sector tips and web give ~150 cm² of contact.
+- **Brim:** off. Only the sector tips touch the bed (the web is the bridge at
+  the port plane, 10 mm up), so the first ~50 layers print as twelve small
+  islands that merge at the port plane — expected, not a fault. A brim would
+  weld across the mating feet.
 - **Heads up:** ~195 mm tall — check your Z. It fits the 256×256×256 class
   this family gates on, but it is a big print: CI's test-slice reports
   **~21 h and ~300 g** at 0.2 mm (the coupon is ~2 h 17 m).
@@ -103,6 +106,10 @@ welfare geometry fails the render instead of shipping.
    Mate it with a printed port from any other NUGGS module — it must insert to
    the collar face and lock with a light quarter turn: firm, no rattle, no
    forcing. Forcing loose → raise `port_tol` +0.05; will not lock → lower 0.05.
+   If it inserts but the quarter-turn grinds near the lock, deburr the sector
+   tips' first layer with a blade before touching `port_tol` — or set
+   elephant-foot compensation (initial-layer horizontal expansion) to 0.2 mm
+   for the coupon and the node.
 2. **Print the node** ports-down, no supports, optional brim.
 3. **Fit it** between any two NUGGS faces: push together, twist a quarter turn
    either way, on both ports.

@@ -169,8 +169,12 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
    coupon). It must insert to the collar face and lock with a light quarter
    turn — firm, no rattle, no forcing.
 3. Forcing loose → raise `port_tol` in +0.05 steps and reprint the coupon.
-   Will not lock / grinds → lower 0.05. Caliper the bore while you're at it:
-   under 79.0 mm means the printer is shrinking.
+   Will not lock / grinds → lower 0.05. If it inserts but the quarter-turn
+   grinds near the lock, deburr the sector tips' first layer with a blade
+   before touching `port_tol` — or set elephant-foot compensation
+   (initial-layer horizontal expansion) to 0.2 mm for the coupon and the node.
+   Caliper the bore while you're at it: under 79.0 mm means the printer is
+   shrinking.
 4. Only then commit the full module (~195 mm tall, ~7 h at 0.2 mm).
 
 ## Print settings
@@ -182,7 +186,10 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
 - **Material:** PETG or PLA; the part is a pass-through, not a load-bearing
   joint, so either serves. PETG if the run lives in a warm room.
 - **Layer height:** 0.2 mm, 3 perimeters (wall 2.4 mm ≈ 3×0.4 nozzle exactly).
-- **Brim:** optional; the sector tips + web give ~150 cm² of contact already.
+- **Brim:** off. Only the sector tips touch the bed — ~10 cm² total; the web
+  is a bridge at the port plane, 10 mm up — so the first ~50 layers print as
+  twelve small islands that merge at the port plane. Expected, not a fault; a
+  brim would weld across the mating feet.
 - **Bed:** 256×256×256 class (what `printcheck.args` gates), **194.8 mm used
   height**. The binding constraint is the gate's test-slice, which runs
   PrusaSlicer on bare defaults: that build volume caps Z at **exactly

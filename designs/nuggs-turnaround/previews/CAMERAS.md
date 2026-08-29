@@ -6,9 +6,10 @@ region gets a new `cameras.conf` line, never a moved one.
 
 - **contact-sheet.png** — the repo-standard 2×2 sheet (iso / top / front /
   bottom-iso). The **bottom-iso** quadrant is the overhang and bed-contact
-  check: both port rings stand on their sector tips, the solid web spans them
-  on the bed, and the belly dome touches down pole-flush at the centre with
-  nothing hanging below the port plane.
+  check: both port rings stand on their sector tips — the only bed contact —
+  the web bridges between them at the port plane (10 mm above the bed, not on
+  it), and the belly dome closes pole-flush at that same plane, with nothing
+  but the tips hanging below it.
 - **hero.png** — three-quarter exterior of the whole node: both ports down on
   their sector tips, the solid web between them, the oblate chamber rising to
   the crown, the vent row on the use-ceiling flank.
@@ -32,3 +33,9 @@ region gets a new `cameras.conf` line, never a moved one.
   the ridge corner at the top of the cavity are not hidden behind the outer
   dome's silhouette. This is the shot that shows the crown-cap decision
   directly.
+- **bed-contact.png** — low, tight three-quarter on one port's castellated
+  sector-tip feet, the part's **only** bed contact: the tips, the gaps between
+  them, and a slice of the neighbouring ring fill the frame, with the
+  collar/web plane bridging 10 mm above the bed. This is the shot behind the
+  brim advice — the first ~50 layers print as twelve separate islands (these
+  feet) that merge at the port plane, and a brim would weld across them.
