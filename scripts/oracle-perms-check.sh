@@ -21,11 +21,13 @@
 # .claude/skills/oracle-review/oracle_mcp.py). So the coverage rule here has no
 # wrapper exemption — EVERY Bash allow in settings.json must be denied — and on
 # top of that the backstop must deny each sibling's write surface explicitly
-# (chunk-helper.sh, label-helper.sh, scout-helper.sh in both path spellings,
-# and the scout's MCP server), because two of those wrappers are not on
-# settings.json's allow-list and would otherwise go unasserted. The one thing
-# it must NOT deny is its own posting tool, or the unattended Oracle fails
-# closed with no other CI signal.
+# (chunk-helper.sh, label-helper.sh, scout-helper.sh, assessor-helper.sh and
+# the agent forge's wright-helper.sh, each in both path spellings, plus the
+# sibling MCP servers — the scout's, the assessor's, and the forge's two,
+# including the sign-off server that can APPLY the arming label), because most
+# of those surfaces are not on settings.json's allow-list and would otherwise
+# go unasserted. The one thing it must NOT deny is its own posting tool, or
+# the unattended Oracle fails closed with no other CI signal.
 #
 # That backstop is only as good as its coverage: add a Bash allow to
 # settings.json tomorrow and, unless it is also denied here, the Oracle
@@ -65,7 +67,14 @@ REQUIRED_DENIES = [
     {"Bash(./.claude/skills/label-issues/label-helper.sh:*)"},
     {"Bash(.claude/skills/product-scout/scout-helper.sh:*)"},
     {"Bash(./.claude/skills/product-scout/scout-helper.sh:*)"},
+    {"Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)"},
+    {"Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)"},
+    {"Bash(.claude/skills/wright/wright-helper.sh:*)"},
+    {"Bash(./.claude/skills/wright/wright-helper.sh:*)"},
     {"mcp__scout", "mcp__scout__file_design_brief"},
+    {"mcp__assessor", "mcp__assessor__post_adoption_disposition"},
+    {"mcp__wright", "mcp__wright__file_agent_brief"},
+    {"mcp__reeve_signoff", "mcp__reeve_signoff__post_reeve_signoff"},
     {"Write"},
     {"Edit"},
     {"NotebookEdit"},
@@ -144,7 +153,7 @@ selftest() {
 {"permissions":{"allow":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)"]}}
 EOF
   cat > "$tmp/good-oracle.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","mcp__scout","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__wright","mcp__reeve_signoff","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-oracle.json" 2>/dev/null; then
     echo "ok    selftest: complete deny coverage passes"
@@ -167,7 +176,7 @@ EOF
   # fail, even though it never appears on settings.json's allow-list — that is
   # exactly why the required-denies list exists.
   cat > "$tmp/bad2-oracle.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__assessor","mcp__wright","mcp__reeve_signoff","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad2-oracle.json" 2>/dev/null; then
     echo "FAIL  selftest: a missing scout-MCP deny was NOT caught"; return 1
@@ -177,7 +186,7 @@ EOF
 
   # BAD 3: the Oracle's own posting tool is denied → must fail (fails closed).
   cat > "$tmp/bad3-oracle.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","mcp__scout","Write","Edit","NotebookEdit","mcp__oracle__post_oracle_review"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__wright","mcp__reeve_signoff","Write","Edit","NotebookEdit","mcp__oracle__post_oracle_review"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad3-oracle.json" 2>/dev/null; then
     echo "FAIL  selftest: a denied posting tool was NOT caught"; return 1
@@ -187,7 +196,7 @@ EOF
 
   # BAD 4: a WILDCARD deny that covers the posting tool still blocks it.
   cat > "$tmp/bad4-oracle.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","mcp__scout","Write","Edit","NotebookEdit","mcp__*"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__wright","mcp__reeve_signoff","Write","Edit","NotebookEdit","mcp__*"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad4-oracle.json" 2>/dev/null; then
     echo "FAIL  selftest: a wildcard deny blocking the posting tool was NOT caught"; return 1

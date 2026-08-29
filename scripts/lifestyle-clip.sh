@@ -325,6 +325,17 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     echo "invalid seed name '${seedname}' in ${conf} — must be kebab-case ([a-z0-9-])" >&2
     exit 1
   fi
+  # Seed EXISTENCE for an EXPLICIT seed, at parse time — BEFORE the mock/live
+  # branch (issue #415): seed_url_for()'s full validation (existence,
+  # committed-at-HEAD, reachable) runs only on the live path, so a typo'd
+  # explicit seed passed `--mock` clean and died only at the paid Vidu call.
+  # The IMPLICIT seed is deliberately not checked here — its fallback (own
+  # name, else the first shots.conf shot) is the generator's to resolve;
+  # seed_url_for() stays the live-path backstop for it.
+  if (( explicit_seed )) && [[ ! -f "designs/${design}/previews/${seedname}.png" ]]; then
+    echo "seed render previews/${seedname}.png not found — a motion clip seeds image-to-video from a committed render (a tier-1 shot, a lifestyle still, or a product still); commit it or fix seed=" >&2
+    exit 1
+  fi
 
   outdir="designs/${design}/previews"
   mkdir -p "$outdir"
@@ -626,8 +637,8 @@ block = (
     f"\n![AI-styled scene: {design} in motion, staged in a real-world setting]({rel})\n\n"
     "*AI-generated motion impression for general illustration only — geometry "
     "is approximate and may not exactly match the printed part, and the "
-    "movement shown is illustrative, not a simulation; see the deterministic "
-    "previews above and the STL for the true shape.*\n"
+    "motion is illustrative; see the deterministic previews above and the "
+    "STL for the true shape.*\n"
 )
 text = open(readme, encoding="utf-8").read()
 if f"]({rel})" in text:
