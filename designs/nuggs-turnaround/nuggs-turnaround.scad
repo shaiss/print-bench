@@ -467,10 +467,11 @@ module bore_lead(s) {
 
 // The vents: teardrop bores through the use-ceiling flank (print -x), spaced
 // along the chamber's length at the ellipsoid's equator height, where the
-// flank is widest and the wall runs thickest. teardrop_hole bores along +y
-// with its roof at -z; the composition below turns the axis to +x and flips
-// the roof to +z — a horizontal hole in the print pose with its 45 deg peak
-// up, which is the whole point of the teardrop: it bridges supportlessly.
+// flank is widest and the wall runs thickest. teardrop_hole bores along y
+// with its 45 deg peak at +z (the lib's documented orientation since #424);
+// the z-spin below turns the axis to x and leaves the peak up — a horizontal
+// hole in the print pose with its peak up, which is the whole point of the
+// teardrop: it bridges supportlessly.
 // Each bore is centred ON the outer surface and overshoots both ways, so the
 // pierce through the curved wall is clean and stops inside the open cavity
 // well short of the floor flank.
@@ -481,7 +482,7 @@ module vents() {
              xc = -(chamber_ax + wall)
                   * sqrt(1 - pow(yv / (chamber_ay + wall), 2)))
             translate([xc, yv, chamber_zc])
-                rotate([180, 0, 0]) rotate([0, 0, -90])
+                rotate([0, 0, -90])
                     teardrop_hole(d = vent_d, l = 2 * (chamber_ax + wall) + 8);
 }
 

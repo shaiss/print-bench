@@ -33,8 +33,8 @@ its source live in [`designs/nuggs/PM.md`](../nuggs/PM.md) (N2) and
 
 - `turnaround` — the node (≈ 99 × 205 × 195 mm at defaults): an oblate chamber
   over a solid web, two Ø80 mm ports on the underside, six ceiling vents.
-- `coupon` — the standard NUGGS port stub (~21 mm) for tuning the joint fit
-  before you commit ~7 h of printing.
+- `coupon` — the standard NUGGS port stub (~21 mm, ~2 h 17 m to print) for
+  tuning the joint fit before you commit ~21 h of printing.
 
 ![Three-quarter view of the node](previews/hero.png)
 
@@ -74,7 +74,8 @@ its source live in [`designs/nuggs/PM.md`](../nuggs/PM.md) (N2) and
   chamber up. Do not rotate it.
 - **Brim:** optional; the sector tips and web give ~150 cm² of contact.
 - **Heads up:** ~195 mm tall — check your Z. It fits the 256×256×256 class
-  this family gates on (~7 h at 0.2 mm).
+  this family gates on, but it is a big print: CI's test-slice reports
+  **~21 h and ~300 g** at 0.2 mm (the coupon is ~2 h 17 m).
 
 ## Parameters
 
