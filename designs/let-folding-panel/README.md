@@ -29,6 +29,9 @@ Folded to ~90° (preview pose — the printed part is always flat):
 
 - **Material:** PETG / PP / nylon / TPU (they fold for hundreds of cycles).
   **Not PLA** — it cracks at a live flexure.
+- **Bed surface:** textured PEI, or drop the bed to ~70 °C after the first few
+  layers — PETG welds to smooth PEI, and this 70 × 102 mm solid-contact flat is
+  close to maximum stick area.
 - **Layer height:** 0.2 mm
 - **Infill:** 100 % or high perimeters (it's a thin sheet)
 - **Supports:** none — it's flat
