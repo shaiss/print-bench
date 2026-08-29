@@ -44,7 +44,7 @@ export function aiLifestyleEnabled(repoRoot) {
 export const AI_STILL_DISCLOSURE =
   "AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render and the STL for the true shape.";
 export const AI_MOTION_DISCLOSURE =
-  "AI-generated motion impression for general illustration only — geometry is approximate, and the movement shown is illustrative, not a simulation; see the deterministic previews and the STL for the true shape.";
+  "AI-generated motion impression for general illustration only — geometry is approximate, and the motion is illustrative; see the deterministic previews and the STL for the true shape.";
 
 /** "lifestyle-bench-calipers.png" → "Bench Calipers". */
 export function mediaLabel(file) {

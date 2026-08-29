@@ -103,7 +103,14 @@
       "Bash(./.claude/skills/label-issues/label-helper.sh:*)",
       "Bash(.claude/skills/product-scout/scout-helper.sh:*)",
       "Bash(./.claude/skills/product-scout/scout-helper.sh:*)",
-      "mcp__scout"
+      "mcp__scout",
+      "Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)",
+      "Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)",
+      "Bash(.claude/skills/wright/wright-helper.sh:*)",
+      "Bash(./.claude/skills/wright/wright-helper.sh:*)",
+      "mcp__assessor",
+      "mcp__wright",
+      "mcp__reeve_signoff"
     ]
   }
 }

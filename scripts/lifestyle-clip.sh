@@ -48,6 +48,15 @@ ZAI_VIDEO_ENDPOINT="${ZAI_VIDEO_ENDPOINT:-https://api.z.ai/api/paas/v4/videos/ge
 ZAI_POLL_ENDPOINT="${ZAI_POLL_ENDPOINT:-https://api.z.ai/api/paas/v4/async-result}"  # [S] GET <endpoint>/<task-id>
 ZAI_VIDEO_DURATION="${ZAI_VIDEO_DURATION:-4}"        # [S] seconds; 4 is the documented-safe value
 ZAI_VIDEO_SIZE="${ZAI_VIDEO_SIZE:-1280x720}"         # [S] the docs' python example; their curl example says 720x480
+# ZAI_VIDEO_SIZE may arrive from a workflow_dispatch 'size' input, so validate it
+# before it reaches the API request: WxH, each side within a sane ceiling.
+# Mirror of lifestyle-shot.sh's ZAI_SIZE guard (L57-61) — keep the two in sync.
+if [[ ! "$ZAI_VIDEO_SIZE" =~ ^[0-9]+x[0-9]+$ ]]; then
+  echo "invalid ZAI_VIDEO_SIZE '${ZAI_VIDEO_SIZE}' — want WxH (e.g. 1280x720)" >&2; exit 2
+fi
+if (( ${ZAI_VIDEO_SIZE%x*} < 256 || ${ZAI_VIDEO_SIZE#*x} < 256 || ${ZAI_VIDEO_SIZE%x*} > 4096 || ${ZAI_VIDEO_SIZE#*x} > 4096 )); then
+  echo "ZAI_VIDEO_SIZE '${ZAI_VIDEO_SIZE}' out of range — each side must be 256..4096 px" >&2; exit 2
+fi
 ZAI_MOVEMENT="${ZAI_MOVEMENT:-auto}"                 # [S] movement_amplitude: auto|small|medium|large
 ZAI_SEED_URL="${ZAI_SEED_URL:-}"                     # explicit https image_url override for the seed
 ZAI_POLL_INTERVAL="${ZAI_POLL_INTERVAL:-5}"          # seconds; doubles per poll, capped at 30
@@ -314,6 +323,17 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   seedname="${seed:-$shot}"
   if [[ ! "$seedname" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
     echo "invalid seed name '${seedname}' in ${conf} — must be kebab-case ([a-z0-9-])" >&2
+    exit 1
+  fi
+  # Seed EXISTENCE for an EXPLICIT seed, at parse time — BEFORE the mock/live
+  # branch (issue #415): seed_url_for()'s full validation (existence,
+  # committed-at-HEAD, reachable) runs only on the live path, so a typo'd
+  # explicit seed passed `--mock` clean and died only at the paid Vidu call.
+  # The IMPLICIT seed is deliberately not checked here — its fallback (own
+  # name, else the first shots.conf shot) is the generator's to resolve;
+  # seed_url_for() stays the live-path backstop for it.
+  if (( explicit_seed )) && [[ ! -f "designs/${design}/previews/${seedname}.png" ]]; then
+    echo "seed render previews/${seedname}.png not found — a motion clip seeds image-to-video from a committed render (a tier-1 shot, a lifestyle still, or a product still); commit it or fix seed=" >&2
     exit 1
   fi
 
@@ -617,8 +637,8 @@ block = (
     f"\n![AI-styled scene: {design} in motion, staged in a real-world setting]({rel})\n\n"
     "*AI-generated motion impression for general illustration only — geometry "
     "is approximate and may not exactly match the printed part, and the "
-    "movement shown is illustrative, not a simulation; see the deterministic "
-    "previews above and the STL for the true shape.*\n"
+    "motion is illustrative; see the deterministic previews above and the "
+    "STL for the true shape.*\n"
 )
 text = open(readme, encoding="utf-8").read()
 if f"]({rel})" in text:

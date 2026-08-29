@@ -159,6 +159,13 @@ constrains the card — resize freely against the slice clock):
      fine), but the flap tongue was built to plate height straight under the
      tail. Tongue root retracted to `y_ax + 1.9`, outside the tail envelope;
      the flap web carries the plate-to-barrel connection.
+     **(Superseded by the issue #398 lib fix, 2026-08-25: the point now
+     faces UP — the old measurement was the module's orientation bug, not a
+     property to design around. The retraction stays valid: the tail's
+     y-spread (flank corner 0.51·pin_d, bore + `hinge_clear` ≈ ±1.67) is
+     mirror-symmetric about the bore axis, so `tongue_root = y_ax + 1.9`
+     clears the bore whichever way the point aims. Pin and bore flipped
+     together, so the fit and the sweep envelope are unchanged.)**
   3. **The measured envelope (round-3 geometry): free through 104°, first
      stop contact at 108° (0.17 mm³), solid by 116°** — the committed empty
      sweep stayed at 100° with margin because a tessellation-sensitive
