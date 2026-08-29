@@ -1,0 +1,14 @@
+# Deterministic fuse check for the print-in-place piano hinge. Unlike the
+# living-hinge designs this check was built for, there is NO flexure web to
+# excuse: the three bodies (leaf A, leaf B, free pin) are joined only through
+# clearances, so a healthy assembly is THREE disjoint shells in the sliced
+# STL and no flexure zone needs dropping — count them directly. A pin welded
+# to any bore (clear_xy lost) or a leaf welded to a leaf (leaf_gap lost)
+# reads as fewer bodies, which is a STRONG WARN for reviewer signoff.
+assert pip-piano-hinge.stl 3
+
+# Mandatory negative control: part="fused" drives an oversized pin through
+# every bore, welding the whole assembly into one solid. It must STAY one
+# body — proving the check can fire (and that no over-generous zone is
+# masking a real fuse by splitting the control too).
+control fused 1
