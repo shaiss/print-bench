@@ -47,7 +47,10 @@ flat downward-facing surface anywhere. Print it with supports turned **off**.
 - **Infill:** 20–40 %
 - **Seam:** Back — buries the ridge on the wall face (the default Aligned
   seam stacks it on the shelf's front edge)
-- **Supports:** none — that's the whole point
+- **Supports:** none — that's the whole point. Printcheck flags one ~41 mm²
+  overhang warning — that's the two teardrop bore crowns (each chord ~0.3 mm,
+  under the nozzle, so a single pass bridges them); it is the design working as
+  intended, not a reason to enable supports
 - **Orientation:** as modelled — arm flat on the bed. To use, flip the print
   180° so the plate is against the wall and the arm is on top; the shelf board
   rests on the arm's smooth first-layer face.
@@ -73,7 +76,8 @@ Customizer sections; override on the command line with `-D 'arm_d=80'`.
 
 ## Assembly & use
 
-Fasten the plate to wall studs or anchors with two M5 screws, flip-mounted
+Fasten the plate to wall studs or anchors with two M5 screws (socket-cap,
+ISO 4762; length to suit your anchor — the 6 mm plate adds to embedment), flip-mounted
 with the arm on top, and rest the shelf board on the arm — **and fasten the
 board to the arm** (a short screw up through it, or adhesive): a typical
 800 × 200 × 18 mm pine board is ≈1.6 kg with its centroid ~100 mm out,
@@ -83,7 +87,10 @@ inside the cavity, and the bore heights are placed — and guarded in the
 source — so the head clears the arm face and the vault ceiling; no counterbore
 needed. Snug, don't crank: the plate *is* the washer, and PLA under a socket
 head embeds under a load that never lets go, quietly relaxing the preload —
-a steel M5 washer under each head buys that back. The vault-side screw is
+a steel M5 washer under the head of the screw *farther* from the shelf
+board buys that back. The screw nearer the shelf seats directly on the
+plate — its bore sits close enough to the arm face that a washer there
+would rock on the edge, so the plate does the job. The vault-side screw is
 hex-key-only: the vault face closes in about
 16 mm out from the plate at that height, so nothing straight follows the
 head — drive it with the short end of the L-key (it fits with a few degrees
