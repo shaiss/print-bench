@@ -1,0 +1,7 @@
+# Boolean fit checks (gate.sh): the clamped pose - body + both arms latched -
+# MINUS the enclosure envelope (glass + frame lip + seam bead) must render
+# EMPTY: nothing bears inside the glass, the lip or the bead zone.
+clamped     empty
+# Negative control: grip_gap forced 1 mm past crushing - the arm bearing face
+# lands inside the lip and the check MUST fire (else "empty" proves nothing).
+clamped_neg interferes
