@@ -56,7 +56,9 @@ as-printed `contact-sheet` are both on the page and frozen.
 
 Frozen geometry previews (`previews/cameras.conf`): `contact-sheet` (as
 printed — what CI slices), `iso`, `bottom-iso` (the no-supports proof),
-`front-bores` (teardrops head-on), `side-vault` (the 42° triangle).
+`front-bores` (teardrops head-on), `side-vault` (the 42° triangle, soft 3/4),
+`bore-detail` (one teardrop close up, round 4), `side-elevation` (the true
+orthographic side, round 4).
 
 **AI tiers (1.5 stills / 2 lifestyle / motion):** none. Tier 2 was removed —
 the committed scene depicted the superseded rod-holder geometry, which is
@@ -88,3 +90,4 @@ resolved (no rib; the vault brace is the stiffener; derivation in NOTES.md).
 | 2026-08-29 | Bores moved z 10/28 → 11/25 (x unchanged); head-envelope guards added | head-envelope clearance (Jane round-2 finding, Drik round-1): M5 socket head fouled the vault at z_hi=28 and kissed the arm at z_lo=10; the reviewed 10→9 lower move was sign-inverted (measured: 9 interferes 25.9 mm³, 11 clears), so 11 landed; stagger survives |
 | 2026-08-24 | No board locator — deliberate, clean reference top; revisit on field evidence | round-1 ruling (recorded late): a lip or dowel on the arm trades the clean reference top for a fixture no field test has asked for; the standing trigger is field evidence, tracked as B4 |
 | 2026-08-29 | Board tip hazard answered with a page note, not geometry | round 3: the ≈1.6 kg board's centroid sits ~100 mm out, forward of the 60 mm arm's support edge — the fasten-the-board sentence ships on the page; the locator stays deferred (B4); ASA-enclosure and snug-don't-crank/washer clauses land as page honesty |
+| 2026-08-29 | bore_z_hi 25 → 18; tool-envelope guard added | driver envelope, Jane round-4: ~9 mm of run vs the 17-19 mm a 4 mm L-key short arm needs; stagger 14 → 7 mm, pull-out trade accepted |

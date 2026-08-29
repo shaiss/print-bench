@@ -37,8 +37,9 @@ bore_inset_x = 20;
 // radius or the head fouls the arm face (guarded)
 bore_z_lo = 11;
 // Upper bore centre height on the bed (mm) — keep low enough that the socket
-// head clears the vault ceiling plane (guarded)
-bore_z_hi = 25;
+// head clears the vault ceiling plane AND the hex key's short arm still has
+// its straight run out of the head before the vault closes in (both guarded)
+bore_z_hi = 18;
 
 /* [Shelf arm] */
 // Arm depth out from the wall in use; on the bed, length in +Y (mm)
@@ -61,6 +62,15 @@ bottom_chamfer = 0.8;
 arm_r = 4;
 // Vertical-corner rounding, plate (mm) — keep < plate_t / 2
 plate_r = 2;
+
+/* [Tool access] */
+// Hex-key short-arm length the vault must admit at each bore (mm): tip to
+// elbow of the 4 mm key an M5 socket head takes — measured short arms run
+// 17-19 mm, so 17 assumes the small end of what a user owns
+tool_run = 17;
+// Working tilt of the key off the bore axis (deg) — the elbow drops down
+// into the open cavity, where the vault ceiling plane sits farther out
+tool_tilt = 10;
 
 /* [Quality] */
 // Iterating: 48. Production: 96+.
@@ -138,6 +148,29 @@ module main() {
            "lower-bore socket head would foul the arm face — raise bore_z_lo");
     assert(bore_z_hi + head[0] / 2 <= web_in_z - head[1] / tan(vault_deg),
            "upper-bore socket head would foul the vault ceiling — lower bore_z_hi");
+    // Tool-access envelope (PR #401 round 4): a screw that SEATS can still be
+    // undrivable — the vault ceiling plane, y(z) = plate_t +
+    // (web_in_z - z) * tan(vault_deg), closes over each bore, and the hex
+    // key's short arm needs its straight run along the bore axis before the
+    // elbow. The run starts at the head's hex-recess floor (a socket cap is
+    // drilled nearly through — floor ~0.5 mm above the seat at the plate
+    // face) and the key may work tilted down by tool_tilt into the open
+    // cavity BELOW the bore, where the ceiling sits farther out: a tilted
+    // arm spans only tool_run * cos(tool_tilt) of run, and its elbow drops
+    // tool_run * sin(tool_tilt), buying tan(vault_deg) of extra ceiling per
+    // mm dropped. Hence the run a tilted short arm needs:
+    //   tool_run * (cos(tool_tilt) - sin(tool_tilt) * tan(vault_deg))
+    // (fires at bore_z_hi = 25: run 9.4 mm vs the 14.1 mm needed — Jane's
+    // round-4 probe; at 18 the run is 15.7 mm and a 17-19 mm arm works at
+    // <= ~10 deg of tilt).
+    key_need = tool_run * (cos(tool_tilt) - sin(tool_tilt) * tan(vault_deg));
+    for (bz = [bore_z_lo, bore_z_hi]) {
+        key_run = (web_in_z - bz) * tan(vault_deg) - 0.5;
+        assert(key_run >= key_need,
+               str("hex-key run at bore z=", bz, " is ", key_run,
+                   " mm; the tilted short arm needs ", key_need,
+                   " mm — lower the bore or shrink the tool"));
+    }
     assert(bore_inset_x - bore_d / 2 >= 3,
            "bores too close to the plate ends for the screw head");
     assert(arm_t >= 4, "arm thinner than 3 perimeters plus infill");

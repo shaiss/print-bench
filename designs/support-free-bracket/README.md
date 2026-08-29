@@ -62,7 +62,7 @@ flat downward-facing surface anywhere. Print it with supports turned **off**.
 | `plate_t` | 6 mm | plate thickness |
 | `screw` | M5 | fastener size (M3–M6; bores are clearance holes) |
 | `bore_inset_x` | 20 mm | bore inset from the plate ends |
-| `bore_z_lo` / `bore_z_hi` | 11 / 25 mm | bore heights (staggered for pull-out resistance; placed — and guarded — so an M5 socket head clears the arm face and the vault) |
+| `bore_z_lo` / `bore_z_hi` | 11 / 18 mm | bore heights (slightly staggered for pull-out resistance; placed — and guarded — so an M5 socket head clears the arm face and the vault, and the hex key's short arm still has its run in front of the head) |
 | `arm_d` | 60 mm | arm depth out from the wall |
 | `arm_t` | 6 mm | arm thickness — the shelf rests on this face |
 | `vault_deg` | 42° | vault ceiling angle from vertical (guarded ≤ 45° — above that it needs supports) |
@@ -85,8 +85,10 @@ needed. Snug, don't crank: the plate *is* the washer, and PLA under a socket
 head embeds under a load that never lets go, quietly relaxing the preload —
 a steel M5 washer under each head buys that back. The vault-side screw is
 hex-key-only: the vault face closes in about
-10 mm out from the plate at that height, so nothing straight follows the
-head — drive it with the short end of the L-key, and spend the ~$2 on wall
+16 mm out from the plate at that height, so nothing straight follows the
+head — drive it with the short end of the L-key (it fits with a few degrees
+of tilt; the bore heights are guarded for this driver envelope, not just for
+the head), and spend the ~$2 on wall
 anchors rated well past the load; they, not the bracket, are the real
 insurance. Sized as a reference design for a ~1 kg-per-bracket shelf — an
 **assumed** figure, with no field test behind it yet, and note a pair rated

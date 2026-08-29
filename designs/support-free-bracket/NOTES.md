@@ -27,7 +27,7 @@ feature can be designed out.
 | Wall fasteners | 2 × M5, clearance bores | given (brief) |
 | Arm depth × thickness | 60 × 6 mm | given (brief) |
 | Cavity ceiling | vaulted, ≤ 45° from vertical | given (brief); modeled at **42°** — assumed margin |
-| Bore positions | x = 20 / 60 mm, z = 11 / 25 mm (staggered) | assumed (stagger resists pull-out better than a vertical pair); moved from 10 / 28 in the PR #401 review round for socket-head envelope clearance — see the head-envelope finding below |
+| Bore positions | x = 20 / 60 mm, z = 11 / 18 mm (staggered) | assumed (stagger resists pull-out better than a vertical pair); moved from 10 / 28 for socket-head envelope clearance (round 2), then upper 25 → 18 for the hex-key driver envelope (round 4) — see the two findings below |
 | Reference load | 1 kg per bracket (loaded shelf board between two brackets) | assumed |
 | Style | none | given (brief) |
 
@@ -113,11 +113,16 @@ test shows tip deflection.
   arm face (`bore_z_lo − head_d/2 ≥ arm_t`) and the upper head rim clears the
   vault ceiling plane (`bore_z_hi + head_d/2 ≤ web_in_z − head_h/tan(vault_deg)`),
   head envelope from `socket_head()` incl. its 0.5 mm diameter clearance
+- **tool envelope** (added in round 4 — the guard whose absence let 25 seat a
+  screw no key could drive): at each bore, the straight run from the hex
+  recess floor to the vault ceiling plane must be ≥
+  `tool_run·(cos(tool_tilt) − sin(tool_tilt)·tan(vault_deg))` — derivation
+  and measurements in the tool-envelope finding above
 
 ## Use-frame dimensions
 
 Overall in use: **80 wide × 60 deep × 50 tall** (as printed: 80 × 66 × 50 —
-plate 6 + arm 60 along Y). Bores sit 11 mm and 25 mm below the shelf line,
+plate 6 + arm 60 along Y). Bores sit 11 mm and 18 mm below the shelf line,
 heads landing inside the cavity. No counterbore is needed **because the bore
 heights place the head envelope**, not because it was never checked: the
 review round measured a max-spec M5 socket head fouling the arm underside by
@@ -140,7 +145,34 @@ interferes 2.4 mm³ (the 0.25 mm kiss), z = 11 is **clear** — so the landed
 move is 10 → **11**, and the new lower-head guard refuses both 9 and 10.
 Upper bore per the sanctioned route: 28 → **25**; the d 8.5 envelope at 25
 measures zero interference against the vault, with the guard holding
-0.95 mm of margin on the preset envelope.
+0.95 mm of margin on the preset envelope. (25 was itself superseded in
+round 4 — the head fit but its *driver* did not; next section.)
+
+### The tool-envelope finding, measured (PR #401 round 4)
+
+The round-2 guards place the **head**; nothing placed the **tool**. The vault
+ceiling plane closes over a bore at `y(z) = plate_t + (web_in_z − z)·tan 42°`,
+and the hex key's short arm needs its straight run along the bore axis, out
+of the head's hex recess (floor ≈ 0.5 mm above the seat — a socket cap is
+drilled nearly through — so the run starts at y ≈ 6.5; the hex *mouth* is at
+y = 6 + 5 = 11). At the old `bore_z_hi = 25` the ceiling sits at y ≈ 15.9, a
+run of **~9.4 mm** — a 4 mm L-key's short arm is **17–19 mm** tip-to-elbow,
+so the screw seats but cannot be driven.
+
+The fix drops `bore_z_hi` 25 → **18** and adds the tool-envelope guard.
+Derivation of the guard's inequality: a key tilted down by `tool_tilt` spans
+only `tool_run·cos(tool_tilt)` of run, and its elbow drops
+`tool_run·sin(tool_tilt)` into the open cavity below the bore, where the
+ceiling sits `tan(vault_deg)` farther out per mm dropped — so the run needed
+is `tool_run·(cos(tool_tilt) − sin(tool_tilt)·tan(vault_deg))` = 17 ×
+(cos 10° − sin 10°·tan 42°) = **14.08 mm**. Measured at 18 on the exported
+mesh (thin-slab intersection across the bore axis at z = 18): ceiling entry
+y = **22.16**, run = **15.66 mm** — a 17 mm short arm clears at ~4.7° of
+tilt, the conservative 19 mm arm at ~10.1°, and the guard holds 1.6 mm of
+run margin. Negative control: with `bore_z_hi = 25` the assert fires
+("hex-key run at bore z=25 is 9.40444 mm; the tilted short arm needs
+14.0837 mm") and the render aborts. Trade accepted: the stagger drops
+14 → **7 mm**; pull-out resistance still beats a level pair.
 
 ## Status log
 
@@ -160,6 +192,16 @@ measures zero interference against the vault, with the guard holding
   README: material line split (PLA vs PETG/ASA + textured-plate note), seam
   line added, load claim de-rated to "assumed, no field test", L-key/anchor
   install sentence added, counterbore claim grounded in the guards.
+- 2026-08-29 — round 4 (tool access): `bore_z_hi` 25 → 18 — at 25 the screw
+  seated but could not be driven (~9.4 mm of run vs the 17–19 mm a 4 mm
+  L-key short arm needs; measurements in the tool-envelope finding) — and
+  the tool-envelope guard landed beside the head-envelope pair, negative
+  control proven (assert fires at 25). Stagger 14 → 7 mm, trade accepted.
+  Cameras: two NEW frozen lines, `bore-detail` (one teardrop close up, arm
+  edge in frame for scale) and `side-elevation` (true orthographic side);
+  existing lines untouched, with CAMERAS.md wording honesty touches on
+  `bottom-iso` (plate edge hides the teardrop roofs) and `side-vault`
+  (a soft 3/4, not an elevation).
 
 ## Print-orientation reminder for reviewers
 
