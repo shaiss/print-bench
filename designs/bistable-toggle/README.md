@@ -53,6 +53,8 @@ the stem you'll press most often faces the operator.
 
 ![Coupon strip: four cells, bistability dying left to right](previews/coupon.png)
 
+![Close-up of the coupon strip's label row: the through-cut digits 3 / 2.5 / 2 / 1.5, left to right](previews/coupon-close.png)
+
 ## Print settings
 
 - **Material:** PETG — the easy path, and the only one the solve's
@@ -71,14 +73,17 @@ the stem you'll press most often faces the operator.
   bending stress runs across roads within a layer, not between them
 - **Plate:** textured PEI if you have it — PETG over-welds on smooth, and the
   moving clearances touch the bed (next line)
-- **First layer:** set initial-layer horizontal expansion (elephant-foot
-  compensation) to **0.2 mm** — stock profiles ship it at 0.0, so "enabled"
-  isn't a state the machine has. Every moving clearance here is a layer-1
-  clearance: the 0.4 mm stop gaps at the nub, the rail faces and the 0.6 mm
-  stem↔window slots all run the full height *including layer 1*, where squish
-  can pinch the thinnest to a hairline web — expect to shear one thin web on
-  the very first snap (each coupon cell has the same slots, so the strip shows
-  you the feel first)
+- **First layer:** set **Elephant foot compensation: 0.2 mm** — stock
+  profiles ship it at 0.0, so "enabled" isn't a state the machine has, a
+  number is. Every moving clearance here is a layer-1 clearance: the 0.4 mm
+  stop gaps at the nub, the rail faces and the 0.6 mm stem↔window slots all
+  run the full height *including layer 1*, where squish can pinch the
+  thinnest to a hairline web. Expect a gritty first press: it shears the
+  layer-1 tack webs *and* the PETG wisps strung across every through-height
+  gap — the stem windows, the rail gaps, the stop gaps — normal, not damage.
+  The through-cut windows give the debris somewhere to go, so the *second*
+  press should feel clean; only if it doesn't is there anything to tune (each
+  coupon cell has the same slots, so the strip shows you the feel first)
 - **Seam:** Back (cosmetic — nothing mates on a perimeter)
 
 The 0.82 mm arch beam prints as two clean perimeters at a 0.4 mm nozzle. If the
