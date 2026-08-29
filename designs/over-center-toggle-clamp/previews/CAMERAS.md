@@ -12,3 +12,5 @@ a new line, never a moved camera.
 | `mechanism` | Side elevation: the Z stack (plate / rails / carrier / lever / link), the arch beam and its posts, pin heads |
 | `cam-closeup` | The cam flank / nub engagement zone and the handle paddle at the printed pose |
 | `coupon` | The force-measuring artifact — the same production arch between anchored posts with the pull tab |
+| `workpiece-held` | The clamp clamping: the lever seated past dead center into its closed stop, a 1.6 mm PCB-class plate (colored — the preview-only `workpiece-held` pose, never printed) gripped between the jaws |
+| `under-lever` | The skeptic's view: ~15° elevation looking under the open lever band — the sacrificial film shelves beneath the paddle and crank, and daylight between every moving part and the plate |

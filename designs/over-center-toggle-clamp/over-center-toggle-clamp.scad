@@ -117,7 +117,8 @@ r_nub = 2.5;
 $fn = 64;
 
 /* [Part] */
-// assembly (the print) | fused (zero-clearance control for ci.fusecheck) | coupon
+// assembly (the print) | fused (zero-clearance control for ci.fusecheck) |
+// coupon | workpiece-held (preview-only closed pose, never gated/printed)
 part = "assembly";
 
 // ---------------------------------------------------------------------------
@@ -376,9 +377,13 @@ module base() {
                             r = 6, bottom_chamfer = 0.6);
             // plate tab under the printed-pose crank eye + P2 pin column,
             // which otherwise stand past the plate's back edge (Jane's
-            // block): plate under the eye, then the shelf films above it
-            translate([P2_open[0] - 9, plate_y1 - 3, 0])
-                rounded_box([18, P2_open[1] + eye_d / 2 + 2.4 - (plate_y1 - 3),
+            // block): plate under the eye, then the shelf films above it.
+            // Starts at P2_open[0] - 12 (round 2): the crank shelf's left
+            // hull edge crosses the plate's back edge at ~P2_open[0] - 11.7,
+            // and a - 9 start left a ~2.7 mm sliver of shelf bottom bridging
+            // over air there; the right edge stays at P2_open[0] + 9.
+            translate([P2_open[0] - 12, plate_y1 - 3, 0])
+                rounded_box([21, P2_open[1] + eye_d / 2 + 2.4 - (plate_y1 - 3),
                              plate_t], r = 3, bottom_chamfer = 0.6);
             band_shelves();
             // fixed jaw
@@ -544,6 +549,49 @@ module main() {
     link();
 }
 
+// ---------------------------------------------------------------------------
+// Preview-only closed pose — NEVER gated, never printed (the "workpiece-held"
+// camera in previews/cameras.conf). The clamp seated at theta_closed with a
+// PCB-class plate in the jaws: link_pose() re-draws the link at any lever
+// angle (link() stays the printed-pose original the gate hashes), and the
+// workpiece is colored so it cannot be mistaken for part of the print. The
+// 1.6 mm plate sits in the ~1.26 mm seat gap the way the real one does —
+// squeezed: the ~0.17 mm/side interpenetration is the elastic squeeze a
+// rigid preview cannot draw.
+// ---------------------------------------------------------------------------
+// Preview workpiece thickness (mm) — PCB-class stock in the locked band
+workpiece_t = 1.6;
+
+module link_pose(t) {               // link between P2(t) and P3(t)
+    P2 = [B_x + crank_r * cos(t), crank_r * sin(t)];
+    P3 = [p3_at(t), 0];
+    difference() {
+        translate([0, 0, link_z0]) linear_extrude(link_t)
+            hull() {
+                translate(P2) circle(d = eye_d);
+                translate(P3) circle(d = eye_d);
+            }
+        for (p = [P2, P3])
+            translate([p[0], p[1], link_z0 - 1])
+                cylinder(d = pin_d + 2 * eff_xy, h = link_t + 2);
+    }
+}
+
+module workpiece() {
+    color("darkseagreen")
+        translate([fixed_face_x - (seat_gap + workpiece_t) / 2, -24, plate_t])
+            cube([workpiece_t, 48, 38]);
+}
+
+module workpiece_held() {
+    base();
+    carrier(face_at(theta_closed));
+    translate([B_x, B_y, 0]) rotate([0, 0, theta_closed]) lever();
+    link_pose(theta_closed);
+    workpiece();
+}
+
 if (part == "fused" || part == "assembly") main();
 else if (part == "coupon") coupon();
+else if (part == "workpiece-held") workpiece_held();
 else assert(false, str("unknown part: ", part));

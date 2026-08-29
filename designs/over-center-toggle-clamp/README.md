@@ -7,6 +7,8 @@ then torques the lever *into* that stop, not out of it — and a buckled-beam
 arch gives the toggle a positive snap in both directions. One PETG print,
 four moving parts, zero assembly hardware, no supports.
 
+![The clamp seated closed on a 1.6 mm PCB-class workpiece — the lever past dead center into its stop](previews/workpiece-held.png)
+
 **What "self-locking" honestly means here.** A fixed linkage locks a *band*
 of thickness, not a whole range. Out of the box the over-center lock engages
 for stock about **1.4–1.6 mm** thick (a 1.6 mm PCB is the design target);
@@ -17,6 +19,14 @@ glue-up overnight; **above ~6 mm the lever will not stay closed**, and below
 stock is a parameter change, not a redesign: set `dead_center_gap` ≈ your
 thickness − 0.5 mm and reprint — the `[over-center]` echo lines print the
 locked band for whatever numbers you set.
+
+**The feel is the tell:** a hard seat into the stop means the locked band
+(vibration-proof — file away); a springy settle means the arch is holding
+(fine for a soldering session, not overnight). Mind FR4's tolerance here:
+it commonly runs ±10 % on thickness, and the locked band ends *at* 1.6 mm —
+so a fat-but-nominal 1.6 mm board lands arch-held, not locked. "Sized for
+1.6 mm PCB" is a strong default, not a promise; the retune knob is
+`dead_center_gap`.
 
 ![The clamp at its printed open pose](previews/iso-open.png)
 
@@ -43,10 +53,15 @@ locked band for whatever numbers you set.
   pivot film
 - **Bridges:** 100 % bridge cooling. The ~40 mm link span sags by design
   into a 4.8 mm clearance — a hairy underside there is cosmetic. Textured
-  PEI is kinder to the big first layer than smooth sheets.
+  PEI is kinder to the big first layer than smooth sheets. If the link feels
+  stiff out of the printer, don't force the handle — flip the part and
+  inspect the link's underside first; a welded bridge is a reprint, not a
+  flex.
 - **Supports:** none — everything prints flat as rendered; the moving parts
   ride 0.4 mm films (the lever band prints its first layer as a film over
-  sacrificial shelves, the rail tops and the arch)
+  sacrificial shelves, the rail tops and the arch). The film edges and
+  undersides are meant to look rough — that roughness is what keeps the
+  parts free. Never support them.
 - **Orientation:** exactly as rendered (plate down, lever open) — the flexure
   must bend across printed roads, which the flat pose guarantees
 - **Before the real print:** run the coupon. It proves two things — your
@@ -84,9 +99,10 @@ stress — check them against what you meant.
 None to assemble — the clamp arrives working off the plate (if a joint feels
 frozen, flex it gently; the fuse gate proves the geometry printed free *on a
 calibrated printer* — the coupon you just ran is that calibration). Mount
-with two M5 flat-heads at 40 mm centres, and **seat the heads flush or a
-touch under**: a flush head clears the carrier's slide by exactly its 0.4 mm
-film, so a proud head jams it. Best first mount: a sacrificial MDF plate you
+with two M5 screws at 40 mm centres — **flat/countersunk heads only**: a
+socket head stands proud even in this deep countersink and stops the carrier
+near full open; a flat head clears by millimetres, so don't sweat the
+seating. Best first mount: a sacrificial MDF plate you
 clamp in your vise (or a T-track plate) — the bench stays hole-free.
 
 To use: press the handle over — you will feel the arch snap — until the
@@ -95,7 +111,8 @@ the lever *into* the stop (vibration cannot release it); thicker stock up to
 ~6 mm is held closed by the arch spring instead. Lift the handle back over
 center to open.
 
-**Duty:** ~3 kgf of grip — glue-ups, soldering, light filing on small bench
+**Duty:** ~3 kgf of grip (design budget; physical validation still open) —
+glue-ups, soldering, light filing on small bench
 work: PCBs, thin boards, blanks and shims in the bands above. Not a
 drill-press vise, and not for construction lumber.
 
@@ -122,3 +139,5 @@ the asserts re-derive the rest.
 ![Side elevation: the Z stack and the arch](previews/mechanism.png)
 
 ![Cam flank and handle at the printed pose](previews/cam-closeup.png)
+
+![Looking up under the lever: the band, its film shelves, and daylight between every moving part and the plate](previews/under-lever.png)
