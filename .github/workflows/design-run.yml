@@ -491,6 +491,32 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Before failing the run, recover WHY the chain exhausted — the agent steps
+      # hide their provider error — and route it: out of credit / out of tokens /
+      # bad key escalate to ONE deduped needs-decision issue (so a scheduled red
+      # nobody is watching becomes a human-actionable ask), a bad model id or a
+      # transient blip is just diagnosed in the log. Advisory — it never fails the
+      # job; the red gate below still fails it, and the lock cleanup above already
+      # released the SHIP-LOCK. Same walk-exhaustion condition as that gate. The
+      # Anthropic key is the CLAUDE_KEY alias (as the run_anthropic_1 step wires).
+      - name: Diagnose the exhausted chain (billing / tokens / technical)
+        id: triage
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.policy.outputs.provider == 'zai' && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome) || steps.run_anthropic_1.outcome) != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: design-run
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.CLAUDE_KEY }}
+          github-token: ${{ github.token }}
+          context: the design-run routine (issue #${{ steps.select.outputs.issue }})
+          escalate: "true"
+
       - name: Turn a dead agentic run red
         # continue-on-error on the agent steps keeps the cleanup above
         # reachable, but alone it would leave a dead run green — and

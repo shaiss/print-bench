@@ -1,0 +1,67 @@
+# The hand-filed twin of /wright: same shape, same label, same consumers
+# (Reeve's sign-off, then /ship-issue). Field labels below must stay identical
+# to the `## ` headings in templates/agent-brief.md — that file is the
+# canonical format.
+name: Agent brief
+description: Propose a new probabilistic agent, deterministic tool, or hybrid for the bench — the same shape /wright files; Reeve's sign-off rules on it.
+title: "Agent brief: "
+labels: ["agent-brief"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An agent brief is the input contract of the agent forge
+        (`docs/agent-forge.md`): the gap, the tool, its bounds, and a
+        falsifiable acceptance contract, captured up front. Canonical format
+        (with fuller guidance per section): `templates/agent-brief.md`.
+        Name existing protection machinery generically ("its own deny
+        backstop") — a brief naming existing settings/perms-check files,
+        secrets, or arming variables is deterministically parked for a human
+        by the sign-off's sensitive-path guard.
+  - type: textarea
+    id: gap
+    attributes:
+      label: Gap
+      description: "The observed failure or missing capability, with the signal that proves it: a run link, a report section, a telemetry record, or an issue."
+      placeholder: "auto-review's Jane/Drik jobs exhausted every provider link and just went red (run <link>) — no classify-and-escalate path like oracle.yml's #347."
+    validations:
+      required: true
+  - type: textarea
+    id: what-to-build
+    attributes:
+      label: What to build
+      description: "Kind (probabilistic agent / deterministic tool / hybrid) + one paragraph. For an agent, name the house pattern it clones."
+    validations:
+      required: true
+  - type: textarea
+    id: surfaces-bounds
+    attributes:
+      label: Surfaces & bounds
+      description: "Reads, writes, caps. A new scheduled agent inherits the full house pattern (conf + two-key, registry chain, own backstop + perms-check, wrapper/MCP split, cadence-sync + drift-guard coverage) — listed generically."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: "Checkable and falsifiable, one per line; every claimed guard includes its negative control. This becomes /ship-issue's frozen contract."
+    validations:
+      required: true
+  - type: input
+    id: size
+    attributes:
+      label: Size
+      description: "points-1 / points-2 / points-3 with one line of reasoning; an honest 5+ means split first (or name the chunker as the expected path)."
+      placeholder: "points-2 — one script + selftest + check.sh wiring"
+    validations:
+      required: true
+  - type: textarea
+    id: assumptions-defaults
+    attributes:
+      label: Assumptions & defaults
+      description: Everything defaulted above, restated in one list so each can be challenged.
+  - type: textarea
+    id: open-questions
+    attributes:
+      label: Open questions
+      description: What must be answered before building starts, marked blocking or not. Empty claims /ship-issue can start from this brief alone.

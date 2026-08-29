@@ -148,9 +148,18 @@ class Registry:
                 secret = fields.get("secret", "").strip()
                 if not secret:
                     raise ValueError(f"{where}: 'secret' is required and must be non-empty")
+                base_url = fields.get("base_url", "").strip()
+                if base_url and not base_url.startswith("https://"):
+                    # smoke/diagnose POST the provider key to this endpoint, so a
+                    # non-HTTPS base_url would send the credential in cleartext.
+                    # Reject it at parse time (fail loud), the same as any other
+                    # bad config value.
+                    raise ValueError(
+                        f"{where}: 'base_url' must be an https:// URL (got "
+                        f"{base_url!r}) — the provider key is sent to it")
                 providers[ident] = Provider(
                     id=ident, secret=secret,
-                    base_url=fields.get("base_url", "").strip(),
+                    base_url=base_url,
                     notes=fields.get("notes", "").strip(),
                 )
             elif kind == "model":
