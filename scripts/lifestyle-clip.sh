@@ -637,8 +637,8 @@ block = (
     f"\n![AI-styled scene: {design} in motion, staged in a real-world setting]({rel})\n\n"
     "*AI-generated motion impression for general illustration only — geometry "
     "is approximate and may not exactly match the printed part, and the "
-    "movement shown is illustrative, not a simulation; see the deterministic "
-    "previews above and the STL for the true shape.*\n"
+    "motion is illustrative; see the deterministic previews above and the "
+    "STL for the true shape.*\n"
 )
 text = open(readme, encoding="utf-8").read()
 if f"]({rel})" in text:
