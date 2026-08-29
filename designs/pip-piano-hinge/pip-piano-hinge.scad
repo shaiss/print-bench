@@ -136,11 +136,13 @@ pin_len = hinge_len - c_k(0);
 
 // One knuckle: barrel + bore, built on the lib's gated teardrop PROFILE
 // (_pip_teardrop2d) and its radius formula — but constructed here, not via
-// pip_hinge, because of a finding this design surfaced: the lib's
-// teardrop_hole/pip_hinge rotate sign points the teardrop -Z (down) while its
-// docs say +Z (measured; see NOTES.md and the filed issue), so a pip_hinge
-// bore's ROOF is a round arch, not the 45° self-supporting flanks a hinge
-// roof exists for. Here the profile is rotated +90 so the point IS the roof.
+// pip_hinge. Historical note: this design surfaced the lib finding that the
+// teardrop_hole/pip_hinge rotate sign pointed the teardrop -Z (down) while
+// the docs say +Z (measured; NOTES.md D5, issue #407) — FIXED upstream by
+// PR #424 (closing #398), which flipped teardrop_hole and pip_hinge's bore
+// in lockstep. The in-design construction below already used the correct
+// +90 rotation (the point IS the roof) and is unchanged; it stays in-design
+// because pip_hinge has no xy≠z whole-layer split or per-knuckle clearance.
 // CC4 intact: the bore is the profile grown by a true offset(clear_xy) —
 // never scaled — and the ±dz copies open the sag-limited roof AND floor to
 // the whole-layer clear_z while the spread-limited sides stay at clear_xy.

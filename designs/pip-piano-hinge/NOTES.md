@@ -129,16 +129,25 @@ which are self-supporting by construction.
 
 ## D5 — the roof-up bore (lib finding, #407)
 
-`teardrop_hole` (and so `pip_hinge`'s bore) points its teardrop **−Z**, while
-both lib doc comments say +Z (measured on a Ø10 probe: 7.94 below the axis vs
-5.00 above — see issue #407). A `pip_hinge` bore's roof is therefore a round
+At design time, `teardrop_hole` (and so `pip_hinge`'s bore) pointed its
+teardrop **−Z**, while both lib doc comments say +Z (measured on a Ø10 probe:
+7.94 below the axis vs 5.00 above — see issue #407; **fixed upstream by PR
+#424**, see the update below). A `pip_hinge` bore's roof was therefore a round
 arch, not the 45° flanks. This design cuts its bore from the lib's
 `_pip_teardrop2d` profile with `rotate([90, 0, 0])` so the point **is** the
-roof, and does not use `pip_hinge` for the knuckle (its baked-in bore points
-the wrong way for a hinge). Lib candidates (NOT landed — design-first per the
-brief): fix the `teardrop_hole` sign upstream (a geometry-moving change with a
-measurable blast radius, #407), and a `pip_hinge_pin_round` / articulation
-parameter on the pair, each with a mate case proving fold clearance.
+roof, and does not use `pip_hinge` for the knuckle (at the time its baked-in
+bore pointed the wrong way for a hinge).
+
+**Update (post-merge of main):** the upstream sign fix LANDED as PR #424
+(closing #398, the same defect this design filed as #407) — `teardrop_hole`
+and `pip_hinge`'s bore now point +Z as documented, flipped in lockstep and
+pinned by a mates manifest. This design's in-design roof-up cut is unchanged
+and still correct (its `rotate([90, 0, 0])` is exactly the orientation the lib
+now ships); the knuckle stays constructed in-design rather than via
+`pip_hinge` because the xy≠z whole-layer split and the per-knuckle axial
+clearances are not things `pip_hinge` provides. Remaining lib candidate (NOT
+landed): a `pip_hinge_pin_round` / articulation parameter on the pair, with a
+mate case proving fold clearance.
 
 ## Construction
 

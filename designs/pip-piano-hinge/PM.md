@@ -64,7 +64,7 @@ workshop-bench staging (already committed; disclosed approximate).
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | Lib fix/call for the teardrop orientation (#407) | Unblocks every future teardrop bore | one lib PR + mate/guard re-proof |
+| B1 | ~~Lib fix/call for the teardrop orientation (#407)~~ — **done**: landed on main as PR #424 (closing #398, the same defect) | Unblocked every future teardrop bore | — |
 | B2 | `pip_hinge_pin_round` lib candidate (NOTES D5) | The round-pin lesson belongs in the lib | small module + mate case |
 | B3 | Knuckle-count/length sweep preview | Sizing aid for makers | one cameras.conf line |
 
