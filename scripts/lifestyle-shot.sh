@@ -402,7 +402,14 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         first_shot="$(trim "${sline%%|*}")"
         break
       done <"designs/${design}/shots.conf"
-      [[ -n "$first_shot" ]] && seed="$first_shot"
+      if [[ -n "$first_shot" ]]; then
+        seed="$first_shot"
+        # Announce the substitution (issue #415): the image is correctly seeded
+        # either way, but a PM re-rolling after renaming the tier-1 shot would
+        # otherwise have no trace of WHICH render seeded the shot they are
+        # looking at — requested shot and substituted seed, one line.
+        echo "seed: ${shot} → ${seed} (fallback — no previews/${shot}.png, seeded from the first shots.conf shot)"
+      fi
     fi
   fi
   if [[ -z "$prompt" ]]; then

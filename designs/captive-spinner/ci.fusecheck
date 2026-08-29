@@ -1,0 +1,13 @@
+# Post-slice separability (print-in-place): the rotor must survive as its own
+# body in the exact STL the gate test-slices — the question printcheck cannot
+# ask, because a welded print-in-place part is still watertight and sliceable.
+# No flexure zone applies: unlike a living hinge, the rotor connects to NOTHING
+# in the model (it is a disjoint captive body), so there is no legitimate thin
+# bridge to excuse. A fuse here can only mean clearance collapse — a z_layers
+# or xy_tol error welding rotor to post/base/cap — and reads as 1 body.
+assert captive-spinner.stl 2
+assert captive-spinner-coupon.stl 2
+# MANDATORY known-fused negative control: the "fused" pose shrinks the bore
+# onto the post (0.4 mm interference ring over the rotor's full height), so
+# the union is one body — proving the check can still fire.
+control fused 1
