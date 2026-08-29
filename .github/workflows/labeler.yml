@@ -403,6 +403,33 @@ jobs:
         if: steps.policy.outputs.enabled == 'true' && steps.select.outputs.issues == ''
         run: echo "::notice::no untriaged open issues — every open issue already carries a routing label; nothing to triage"
 
+      # No SHIP-LOCK lifecycle here, so the terminal link failing IS the job
+      # failure — but before that stands, recover WHY the chain exhausted (the
+      # agent steps hide their provider error) and route the human-fixable causes
+      # — out of credit / out of tokens / bad key — to ONE deduped needs-decision
+      # issue, so a scheduled red nobody watches becomes an actionable ask. A bad
+      # model id or a transient blip is only diagnosed in the log. Advisory: it
+      # never fails the job. Fires (always()) only when a key was present and the
+      # walk did not succeed — the same walk-outcome shape the record step reports
+      # as RUN (anthropic-first ternary; the anthropic block is the latent single).
+      - name: Diagnose the exhausted chain (billing / tokens / technical)
+        id: triage
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic_1.outcome || (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome)) != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: labeler
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the labeler routine
+          escalate: "true"
+
       - name: Record the run outcome
         if: always()
         env:
