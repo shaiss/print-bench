@@ -4,8 +4,13 @@
 //
 // A fixed–fixed buckled arch has two stable states (bowed up / bowed down)
 // separated by a negative-stiffness region: power is needed only to SWITCH, not
-// to HOLD. Push the centre nub down past flat and it snaps down and stays; push
-// it back up and it snaps up. Switches, latches, valves, closures.
+// to HOLD. Press the proud push stem past flat and the arch snaps to the other
+// state and stays. The stems are a mirrored pair riding the arch centre through
+// windows in the lid and base bar: whichever state the toggle is in, exactly
+// one stem stands proud of the cage, and pressing it is the next switch — one
+// motion of one finger, in both states (PR #406 review: a caged nub with no
+// reachable push face reads as welded — a dead button). Latches, closures,
+// tactile toggles.
 //
 // DIMENSIONED FROM TARGETS (issue #389), not by feel. Pick the switch force
 // f_s and travel u_tr, then invert the doc's two nondimensional constants
@@ -37,6 +42,20 @@
 // (out-of-plane) is left to geometry: that axis is (w/t)² ≈ 56× stiffer than
 // the flexure axis. The `fitcheck` part proves the cage clears the arch's and
 // nub's FULL travel; `fitcheck_neg` proves that check can fail.
+//
+// PUSH ACCESS vs STOP DUTY (the PR #406 reconciliation — stops moved OUTSIDE
+// the push column): the lid and base bar carry stem windows, so the +Y stop is
+// no longer the full lid over the nub — it is the nub's shoulders (the
+// nub[0]-wide body outboard of the stem) catching the lid-window JAMBS, at the
+// same `stop_gap`. The −Y stop stays the arch underside meeting the base bar,
+// now at the jambs beside its window: first contact ≈ stop_gap + the arch's
+// curvature drop across the half-window (≈ 0.03 mm here — sub-layer noise,
+// stated rather than compensated with an unprintable 0.03 mm ledge). The stems
+// carry NO root gussets, deliberately: their roots sit inside the nub-
+// rigidized centre span (|x−l/2| ≤ nub[0]/2) where cyclic strain is ~zero, and
+// gusset bumps there would demand windows too wide to keep the nub→jamb stop.
+// The stem↔jamb clearance is `stem_clear` > stop_gap so the ±X rails always
+// bite before a stem can touch its jamb — the stops keep their designed order.
 //
 // PRINT FLAT. The profile is in XY; the arch snaps in-plane, so bending stress
 // runs across the roads within a layer — the #1 flexure rule. The stop cage
@@ -73,8 +92,19 @@ frame_wall = 4;
 rail_w = 3;
 // Travel past the stable state / off-axis rest before a hard stop bites (mm)
 stop_gap = 0.4;
-// Centre push-nub size [width X, height Y above the arch] (mm)
+// Centre push-nub size [width X, height Y above the arch] (mm). The nub body
+// is the +Y over-travel stop: its top catches the lid-window jambs at stop_gap
 nub = [7, 4];
+// Push stem [width X, proud height beyond the cage's outer face] (mm) — the
+// button. One stem rises from the nub through the lid window, its mirror
+// drops from the arch centre through the base-bar window; whichever state the
+// toggle is in, one stem stands proud to take the next press. Proud height
+// must EXCEED the snap-through travel (= the cell's rise h) or the fingertip
+// bottoms on the cage face before the arch crosses flat — asserted per cell
+stem = [5, 3.5];
+// Stem↔window-jamb X clearance (mm) — deliberately > stop_gap so the ±X rails
+// (at stop_gap) always bite before a stem can touch its window jamb
+stem_clear = stop_gap + 0.2;
 
 /* [Quality] */
 $fn = 48;
@@ -82,6 +112,7 @@ $fn = 48;
 // ---- derived predictions (echoed; the asserts hold them to the targets) ----
 fs_pred = 1486.57 * E * (width * pow(beam_t, 3) / 12) * mid_rise / pow(span, 3);
 NS = 60;                                      // arch samples
+win_half = stem[0]/2 + stem_clear;            // stem-window half-width in X
 
 // ---- geometry (all 2D in the XY profile; `width` is the extrusion) --------
 // fixed–fixed first-mode arch centreline
@@ -94,7 +125,27 @@ module arch_beam_2d(l, h, t) {
 }
 
 module nub_2d(l, h, t) {
+    // the nub body — its top face is the +Y over-travel stop, catching the
+    // lid-window jambs (the lid outboard of win_half) at stop_gap
     translate([l/2 - nub[0]/2, h - t/2]) square([nub[0], t + nub[1]]);
+    // the push stems (the PR #406 fix, in the module so every coupon cell
+    // inherits it). A stem shorter than the snap-through travel h is a dead
+    // button: the fingertip bottoms on the cage face while the arch is still
+    // on the near side of flat, and it springs back.
+    assert(stem[1] > h + 0.5,
+           str("push stem proud height ", stem[1], " must exceed the snap-through travel h = ",
+               h, " by ≥ 0.5 or the finger bottoms on the cage before the arch crosses flat"));
+    // top stem: from the nub top through the lid window, proud of the lid's
+    // outer face by stem[1] in state 1 (the state it switches)
+    translate([l/2 - stem[0]/2, h - t/2])
+        square([stem[0], t + nub[1] + stop_gap + frame_wall + stem[1]]);
+    // bottom stem: from the arch underside through the base-bar window, proud
+    // of the base's outer face by stem[1] in state 2 (2h below as-printed).
+    // No root gussets on either stem: the roots sit inside the nub-rigidized
+    // centre span where cyclic strain is ~zero (see the header)
+    stem_y0 = base_top(h, t) - frame_wall - stem[1] + 2*h;
+    translate([l/2 - stem[0]/2, stem_y0])
+        square([stem[0], (h + t/2) - stem_y0]);
 }
 
 module beam_gussets_2d(l, h, t) {
@@ -122,12 +173,23 @@ function lid_bottom(h, t) = h + t/2 + nub[1] + stop_gap;  // the +Y hard-stop fa
 module frame_2d(l, h, t) {
     y0 = base_top(h, t) - frame_wall;
     y1 = lid_bottom(h, t) + frame_wall;
-    // posts (the clamps), full height to the lid
-    translate([-post_w, y0]) square([post_w, y1 - y0]);
-    translate([l, y0]) square([post_w, y1 - y0]);
-    // base bar (−Y over-travel stop) and lid (+Y over-travel stop)
-    translate([-post_w, y0]) square([l + 2*post_w, frame_wall]);
-    translate([-post_w, lid_bottom(h, t)]) square([l + 2*post_w, frame_wall]);
+    difference() {
+        union() {
+            // posts (the clamps), full height to the lid
+            translate([-post_w, y0]) square([post_w, y1 - y0]);
+            translate([l, y0]) square([post_w, y1 - y0]);
+            // base bar (−Y over-travel stop) and lid (+Y over-travel stop):
+            // both windowed below — the stops live on the jambs
+            translate([-post_w, y0]) square([l + 2*post_w, frame_wall]);
+            translate([-post_w, lid_bottom(h, t)]) square([l + 2*post_w, frame_wall]);
+        }
+        // stem windows: open the lid and the base bar over the push column.
+        // stem_clear per side in X (wider than stop_gap, so the ±X rails bite
+        // first); cut 0.5 past each face so the difference is robust
+        for (wy = [y0 - 0.5, lid_bottom(h, t) - 0.5])
+            translate([l/2 - win_half, wy])
+                square([2 * win_half, frame_wall + 1]);
+    }
 }
 
 module x_rails_2d(l, h, t) {
@@ -175,6 +237,15 @@ module nub_sweep_2d(l, h, t, m = 0) {
     xh = nub[0]/2 + t + m;                      // half-extent incl. gussets
     translate([l/2 - xh, -(h + t/2) - m])
         square([2 * xh, 2*(h + t/2) + nub[1] + 2*m]);
+    // the push stems' full designed travel: one column spanning both stems'
+    // reach through the lid and base windows — top stem up to its state-1
+    // proud face, bottom stem down to its state-2 proud face. Bare stem
+    // width: the stems carry no gusset bumps (see nub_2d), so the solid that
+    // moves through the windows really is stem[0] wide.
+    sw_y0 = base_top(h, t) - frame_wall - stem[1];
+    sw_y1 = lid_bottom(h, t) + frame_wall + stem[1];
+    translate([l/2 - stem[0]/2 - m, sw_y0 - m])
+        square([stem[0] + 2*m, sw_y1 - sw_y0 + 2*m]);
 }
 
 // everything that moves — the arch band mirrored through the snap (state 2 is
@@ -211,9 +282,13 @@ module coupon_strip() {
                 // dips ~0.28 below the baseline — the bar strip under it must
                 // stay ≥ 0.8 mm), spacing 1.5 because the period kerns tight
                 // against the next digit and left a ~0.04 mm wall in the gap
-                // (the iteration-4/5 warnings)
-                translate([sweep_l/2, base_top(h, beam_t) - frame_wall + 1.1])
-                    text(sweep_cells[i][0], size = 3.2, halign = "center", spacing = 1.5);
+                // (the iteration-4/5 warnings). Right-aligned 1.0 left of the
+                // base-bar stem window (PR #406): a centred label would land
+                // inside the window cut and vanish — 1.0, not less, keeps the
+                // glyph→window wall above the 0.8 mm floor.
+                translate([sweep_l/2 - win_half - 1.0,
+                           base_top(h, beam_t) - frame_wall + 1.1])
+                    text(sweep_cells[i][0], size = 3.2, halign = "right", spacing = 1.5);
             }
     }
 }
@@ -235,6 +310,11 @@ module main() {
            "arch not shallow enough for the fixed–fixed constants (l/h < 10)");
     assert(abs(fs_pred - target_fs) < 0.05,
            str("solve drifted: echoed f_s = ", fs_pred, " N vs target ", target_fs, " N"));
+    assert(stem[0] >= 0.8, "push stem under the two-perimeter floor (0.8 mm)");
+    assert(stem_clear > stop_gap,
+           "stem_clear must exceed stop_gap or the window jambs, not the ±X rails, become the X stop");
+    assert(nub[0]/2 - win_half >= 0.2,
+           "lid-window jambs no longer catch the nub — the +Y over-travel stop is gone");
     echo(str("predicted switch force f_s ≈ ", fs_pred, " N  (target ", target_fs, " N)"));
     echo(str("predicted centre travel u_tr ≈ ", 1.98 * mid_rise, " mm  (target ", target_utr, " mm)"));
 
