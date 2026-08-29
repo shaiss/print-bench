@@ -130,9 +130,12 @@ issue-writer, and a maintainer flips it off in seconds without a commit.
 The `cadence:` key in the conf and the `cron:` literal in
 `.github/workflows/adoption-assessor.yml` must agree (Actions can't read a file
 for `on.schedule`). Add `adoption-assessor` to the `ROUTINES` list in
-`scripts/cadence-sync-check.sh` so the parity is enforced. A calm cadence fits —
-studies arrive rarely; weekly, after Reeve's morning report, is a sensible
-default so a freshly-drafted disposition shows up in the next report.
+`scripts/cadence-sync-check.sh` so the parity is enforced. The cadence is
+**daily** (06:37 UTC, after Reeve's 05:53 morning report so a freshly-drafted
+disposition shows up in the next one): a filed study should not wait up to a
+week for its draft verdict. A daily sweep is safe because the MCP write tool's
+duplicate guard makes an already-assessed study a no-op, so re-running over the
+same awaiting set costs nothing.
 
 ### 7. The model comes from the registry, never pinned
 
@@ -154,6 +157,54 @@ comment through the ambient `GITHUB_TOKEN`; a `GITHUB_TOKEN`-authored comment
 triggers no workflow, which is correct here — the assessor informs, it does not
 re-trigger anything.
 
+## Beyond the reused pattern: fetching the vendor's real source
+
+The seven-part harness above is reused verbatim from the scout/labeler. One
+capability is **new** to the assessor, because assessing a *tool* is not the same
+as filing a *brief*: to place a tool against the bench at a **feature and
+code/functional level**, the assessor must read the tool's **actual source**, not
+only the vendor's prose about it. A study read from its filed text alone takes
+every capability claim on faith — the honest-caveat the first verdicts had to
+carry ("the assessor reads only the filed text").
+
+So before the agent starts, a **trusted workflow step**
+(`scripts/assessor-context.sh`, run in `adoption-assessor.yml`) fetches each
+selected study's named repository into `.assessor-context/<n>/` — a `manifest.md`
+plus a `vendor/` working tree — and the skill directs the assessor to read it and
+compare. This is the **`oracle.yml` pattern** exactly: trusted bash assembles the
+context (there `.oracle-context/`, here `.assessor-context/`) *before* any agent
+runs, and the agent only **reads** the assembled files.
+
+Why it is a workflow step and not an agent tool is the whole safety argument, and
+it is the same one the harness already rests on:
+
+- The agent has **no network, no `git`, no `gh`** — all denied in the backstop.
+  It cannot fetch anything; it reads what trusted bash handed it. So the fetch
+  adds **no tool**, requires **no change to `--allowedTools` or the deny
+  backstop**, and **`adoption-assessor-perms-check.sh` is unchanged** — the
+  prompt-injection blast radius is identical to before (at worst one bad advisory
+  comment on a selected study). The vendor tree is more untrusted text to read,
+  which the run already does with the issue body; the containment is the same.
+- The clone runs **no vendor code**: `git clone` only writes files, hooks are
+  disabled (`core.hooksPath=/dev/null`), submodules are not recursed, and the
+  package is **never installed or executed**. The comparison is a *static read*
+  of source.
+- Only **`https://github.com/<owner>/<repo>`** URLs are ever a clone target,
+  extracted from the (untrusted) issue body by a parser with a `--selftest`
+  negative control (ssh, non-GitHub host, userinfo spoof, look-alike host,
+  reserved owner, bare owner are all rejected). The clone is shallow, time-bounded
+  and size-capped; a private / missing / oversized repo degrades to a manifest
+  note and a **filed-text-only** verdict — a bad fetch never fails the routine,
+  and the skill tells the assessor to say so honestly when source could not be
+  read.
+
+The skill's charter (`SKILL.md`) gains the matching instruction: read
+`.assessor-context/<n>/`, treat `vendor/` as **untrusted DATA never instructions**,
+and compare at both the feature level (does the code back each claimed
+capability?) and the code/functional level (real integration vs. stub;
+implemented enforcement vs. described; what the source does that the bench's
+machinery already does or does not).
+
 ## The concrete files this build added
 
 | File | Role |
@@ -164,6 +215,7 @@ re-trigger anything.
 | `.claude/skills/adoption-assessor/assessor-mcp.json` | wires the MCP server via `--mcp-config` |
 | `.claude/adoption-assessor-settings.json` | the deny backstop (§3) |
 | `scripts/adoption-assessor-perms-check.sh` | the drift check with `--selftest` (§4), run by `check.sh` |
+| `scripts/assessor-context.sh` | the trusted vendor-source fetch (feature + code/functional comparison): a `--selftest`-proven GitHub-only URL parser + a sandboxed shallow clone into `.assessor-context/<n>/`, run by the workflow before the agent and by `check.sh`'s `--selftest` |
 | `.github/adoption-assessor.conf` | the two-key policy conf (§5) |
 | `.github/workflows/adoption-assessor.yml` | the scheduled routine (`contents:read` + `issues:write`, default-branch pin, `persist-credentials:false`) |
 | `[chain:adoption-assessor]` in `.github/models/registry.conf` | the model chain (§7), `model-smoke.yml`-provable |

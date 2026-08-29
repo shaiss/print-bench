@@ -74,10 +74,15 @@ def _is_transient(status: int) -> bool:
 # senses ("insufficient credit/balance/quota/funds") are already covered by the
 # specific tokens, so the bare word is dropped and "funds" added to keep
 # "insufficient funds" caught.
-_FUNDING_MARKERS = (
-    "credit", "billing", "balance", "quota", "payment", "funds",
-    "exhausted", "too low",
-)
+# Split into the two senses the finer cause (`_reason_fine`) must tell apart: a
+# spend/period cap the account has hit ("out of tokens" — quota/exhausted) versus
+# an unpaid or depleted balance ("billing" — credit/balance/payment/funds/too low).
+# Both are ``needs_human`` to the coarse verdict, so the UNION below preserves
+# ``_classify_fine``'s behaviour exactly; only the human-facing remediation differs
+# (raise the cap / wait for reset, versus fund the account).
+_QUOTA_MARKERS = ("quota", "exhausted")
+_BILLING_MARKERS = ("credit", "billing", "balance", "payment", "funds", "too low")
+_FUNDING_MARKERS = _BILLING_MARKERS + _QUOTA_MARKERS
 
 # Rate-limit wording (any status) — the account is momentarily over its rate, a
 # TRANSIENT condition a retry clears, so ``classify_chain`` reads these as
@@ -94,33 +99,66 @@ _RATE_LIMIT_MARKERS = ("rate limit", "rate_limit")
 _ACCOUNT_MARKERS = _FUNDING_MARKERS + _RATE_LIMIT_MARKERS
 
 
-def _classify_fine(status: int, body: str) -> str:
-    """Map an HTTP ``(status, body)`` to ``ok`` / ``dead`` / ``needs_human`` /
-    ``transient`` — the four outcomes a chain-exhaustion escalation must tell
-    apart (``classify_chain``).
+# The finest cause labels — the "why" behind the coarse verdict, so a human sees
+# billing vs out-of-tokens vs a bad key vs a retryable blip vs an unservable id,
+# each with its own remediation. `no-key` is the aggregate-only reason for a chain
+# with no secret configured (never a per-request status); every other reason comes
+# from one ``(status, body)``. Each maps to exactly one ``_classify_fine`` verdict
+# via ``_REASON_TO_FINE`` below, and ``_classify_fine`` is DERIVED from that map —
+# so the coarse verdict the smoke gate still exits on can never drift from the
+# finer cause the escalation message reads.
+_REASON_TO_FINE = {
+    "served":       "ok",
+    "bad-model-id": "dead",
+    "billing":      "needs_human",   # unpaid / depleted balance → fund the account
+    "quota":        "needs_human",   # out of tokens for the period → raise cap / wait
+    "auth":         "needs_human",   # invalid / missing key → rotate it
+    "no-key":       "needs_human",   # no secret configured at all → set it
+    "rate-limit":   "transient",     # momentarily over rate → retry
+    "outage":       "transient",     # timeout / 5xx / network → retry
+}
 
-    It splits ``_classify``'s single ``inconc`` bucket in two, on the one
-    distinction the HITL escalation turns on: a ``transient`` outage (a retry
-    clears it — rate limit, timeout, provider 5xx, network blip; no human
-    needed) versus a ``needs_human`` account/config problem (the account is out
-    of funds, or the key is invalid/missing — a person must fund or rotate it).
-    ``dead`` stays the #298 registry defect (a model id the key genuinely cannot
-    serve); ``ok`` stays a served request. The status/marker ORDER matches
-    ``_classify`` exactly so the two verdicts stay consistent by construction.
+
+def _reason_fine(status: int, body: str) -> str:
+    """Map an HTTP ``(status, body)`` to the finest cause label.
+
+    The single distinction the HITL escalation turns on stays intact — a
+    ``transient`` blip a retry clears versus a ``needs_human`` account/config
+    problem — but each side is split into the causes a human acts on differently:
+    ``billing`` (fund the account) vs ``quota`` (out of tokens — raise the cap or
+    wait) vs ``auth`` (rotate the key) among the human-fixable, and ``rate-limit``
+    vs ``outage`` among the retryable. ``bad-model-id`` stays the #298 registry
+    defect. The status/marker ORDER is unchanged from the old ``_classify_fine``,
+    so ``_REASON_TO_FINE[_reason_fine(...)]`` reproduces its verdict exactly.
     """
     if status == 200:
-        return "ok"
+        return "served"
     if _is_transient(status):               # 408/429/5xx: provider-side, retry
-        return "transient"
-    if status == 401:                       # missing/invalid key: a human fixes
-        return "needs_human"
+        return "rate-limit" if status == 429 else "outage"
+    if status == 401:                       # missing/invalid key: a human rotates
+        return "auth"
     low = body.lower()
     if any(marker in low for marker in _RATE_LIMIT_MARKERS):
-        return "transient"                  # worded rate limit at a non-429 status
-    if any(marker in low for marker in _FUNDING_MARKERS):
-        return "needs_human"                # "credit balance too low", quota, …
+        return "rate-limit"                 # worded rate limit at a non-429 status
+    # Billing BEFORE quota: a depleted balance ("credit balance exhausted") also
+    # matches the generic "exhausted" quota marker, but it wants funding
+    # remediation, not "raise the cap / wait for reset". Only a message with NO
+    # billing marker — a true "quota exceeded" / "weekly limit exhausted" — falls
+    # through to quota. Both are needs_human, so the coarse verdict is unchanged
+    # either way; the order only decides which remediation the escalation gives.
+    if any(marker in low for marker in _BILLING_MARKERS):
+        return "billing"                    # "credit balance too low", payment failed
+    if any(marker in low for marker in _QUOTA_MARKERS):
+        return "quota"                      # "quota exceeded", weekly limit exhausted
     # 404 not-found, 403 permission, invalid-model 400, …: the id is the problem.
-    return "dead"
+    return "bad-model-id"
+
+
+def _classify_fine(status: int, body: str) -> str:
+    """Coarse ``ok`` / ``dead`` / ``needs_human`` / ``transient`` verdict, DERIVED
+    from ``_reason_fine`` so the two can never drift — the four outcomes a
+    chain-exhaustion escalation groups causes into (``classify_chain``)."""
+    return _REASON_TO_FINE[_reason_fine(status, body)]
 
 
 def _classify(status: int, body: str) -> str:
@@ -255,42 +293,56 @@ _FINE_TO_CLASS = {
 }
 
 
-def classify_chain(
+def diagnose_chain(
     reg: Registry,
     chain_id: str,
     env: Mapping[str, str],
     post: Optional[Callable[[str, dict[str, str], bytes], tuple[int, str]]] = None,
-) -> tuple[list[str], str]:
+) -> tuple[list[str], str, str]:
     """Diagnose WHY a chain is unusable, for a caller whose own walk exhausted it.
 
     Where ``smoke_chain`` answers "is any id a registry defect?" (its exit code),
     this answers "what should a human/CI do about a chain that just failed on
-    every link?" — the finer question the Oracle's HITL escalation turns on. It
-    probes each configured link (the same 1-token ``_ping``) and reduces the
-    per-link ``_classify_fine`` verdicts to one aggregate class by
-    ``_CLASS_PRECEDENCE``:
+    every link?" — the finer question the HITL escalation turns on. It probes each
+    configured link (the same 1-token ``_ping``) and reduces the per-link verdicts
+    to two things: an aggregate **class** (the action bucket, by
+    ``_CLASS_PRECEDENCE``) and an aggregate **reason** (the finest cause behind it,
+    the button a human actually pushes):
 
       * ``servable``    — a link served: the chain is fine, so the exhaustion had
                           a non-provider cause (agent error, timeout in the real
-                          review). Not an escalation.
+                          review). Not an escalation.  reason ``served``.
       * ``dead``        — a link is a proven-unservable id (#298): a registry
-                          defect to fix in-repo. Red it.
-      * ``needs-human`` — the account is out of funds, or the key is invalid /
-                          missing: a person must fund or rotate it. Escalate via
-                          the HITL gate, do not red every PR.
-      * ``transient``   — every attempt was a retryable outage (rate limit /
-                          timeout / 5xx / network). Retry next run, no human.
+                          defect to fix in-repo. Red it.  reason ``bad-model-id``.
+      * ``needs-human`` — the account/config problem CI cannot fix: reason
+                          ``billing`` (fund the account), ``quota`` (out of tokens —
+                          raise the cap or wait for reset), ``auth`` (rotate an
+                          invalid/expired key), or ``no-key`` (no secret set at
+                          all). Escalate via the HITL gate, do not red every run.
+      * ``transient``   — every attempt was a retryable blip: reason ``rate-limit``
+                          or ``outage`` (timeout / 5xx / network). Retry next run.
 
-    Returns ``(report_lines, aggregate_class)``. Unlike ``smoke_chain`` there is
-    no exit code: the aggregate class IS the signal the caller branches on. A
-    chain with no configured secret reduces to ``needs-human`` — a human must set
-    the key — which is also why the funding and auth cases share that class.
+    The class stays the proven, precedence-ordered action signal every existing
+    caller branches on; the reason is the new sub-signal that lets a message say
+    *billing* vs *out-of-tokens* vs *bad key* instead of the undifferentiated
+    "needs-human". The aggregate reason is the cause of the FIRST link (report
+    order) that produced the aggregate class — deterministic, and the reason a
+    reader sees first in the per-link lines. Returns
+    ``(report_lines, aggregate_class, aggregate_reason)``; the class IS the signal,
+    there is no exit code. A chain with no configured secret reduces to
+    ``needs-human`` / ``no-key`` — a human must set the key.
     """
     if post is None:
         post = _post   # resolved at call time so tests can patch the seam
     lines: list[str] = []
     seen: set[str] = set()
+    first_reason_by_class: dict[str, str] = {}   # class -> reason of its first link
     attempted = 0
+
+    def record(cls: str, reason: str) -> None:
+        seen.add(cls)
+        first_reason_by_class.setdefault(cls, reason)
+
     for link in reg.resolve(chain_id):
         where = f"link {link.position} {link.model} ({link.provider})"
         key = env.get(link.secret, "")
@@ -301,23 +353,42 @@ def classify_chain(
         try:
             status, body = _ping(link, key, post)
         except OSError as exc:
-            seen.add("transient")
-            lines.append(f"transient   {where}: network error — {exc}")
+            record("transient", "outage")
+            lines.append(f"transient   {where}: [outage] network error — {exc}")
             continue
-        cls = _FINE_TO_CLASS[_classify_fine(status, body)]
-        seen.add(cls)
+        reason = _reason_fine(status, body)
+        cls = _FINE_TO_CLASS[_REASON_TO_FINE[reason]]
+        record(cls, reason)
         if cls == "servable":
-            lines.append(f"servable    {where}: served a 1-token request")
+            lines.append(f"servable    {where}: [{reason}] served a 1-token request")
         else:
-            lines.append(f"{cls:<11} {where}: HTTP {status} — {body}")
+            lines.append(f"{cls:<11} {where}: [{reason}] HTTP {status} — {body}")
     if attempted == 0:
-        # No secret set for any link: a human must configure the key — the same
-        # bucket as an invalid one, and the class the funding/auth cases share.
-        seen.add("needs-human")
+        # No secret set for any link: a human must configure the key. Its own
+        # ``no-key`` reason, so an escalation says "set the secret" rather than
+        # "fund the account" — a distinct fix from the funding/auth cases.
+        record("needs-human", "no-key")
         lines.append(
-            f"needs-human chain {chain_id}: no provider secret is set — a human "
-            "must configure the key before this chain can be used"
+            f"needs-human chain {chain_id}: [no-key] no provider secret is set — a "
+            "human must configure the key before this chain can be used"
         )
     aggregate = next(c for c in _CLASS_PRECEDENCE if c in seen)
+    reason = first_reason_by_class[aggregate]
+    lines.append(f"REASON {chain_id}: {reason}")
     lines.append(f"CLASS {chain_id}: {aggregate}")
+    return lines, aggregate, reason
+
+
+def classify_chain(
+    reg: Registry,
+    chain_id: str,
+    env: Mapping[str, str],
+    post: Optional[Callable[[str, dict[str, str], bytes], tuple[int, str]]] = None,
+) -> tuple[list[str], str]:
+    """Back-compat 2-tuple facade over ``diagnose_chain`` (aggregate class only).
+
+    Callers that only branch on the action bucket keep this shape; callers wanting
+    the finer cause for a human-facing message use ``diagnose_chain`` directly.
+    """
+    lines, aggregate, _reason = diagnose_chain(reg, chain_id, env, post)
     return lines, aggregate

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wright": {
+      "command": "python3",
+      "args": [".claude/skills/wright/wright_mcp.py"]
+    }
+  }
+}
