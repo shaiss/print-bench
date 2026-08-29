@@ -461,6 +461,20 @@ if ! ./scripts/vercel-ignore-build.sh --selftest; then
   fail=1
 fi
 
+# lifestyle-shot.sh selftest (issue #418): drives the LIVE parse branch — the
+# resp_kind assignment that once reused the 'kind' global, clobbering it so
+# product-still embeds got lifestyle alt text and the per-kind seed guard
+# stopped firing after the first shot — by running a sandboxed copy of the
+# real script against a localhost HTTP stub (no ZAI_KEY, no network beyond
+# 127.0.0.1), asserting the produced alt text, the second-shot seed-guard
+# refusal, and that malformed responses fail loudly. A sabotaged copy with
+# the rename reverted is the negative control proving the selftest still
+# fails when the clobber returns.
+echo "-- lifestyle-shot selftest: scripts/lifestyle-shot.sh --selftest"
+if ! ./scripts/lifestyle-shot.sh --selftest; then
+  fail=1
+fi
+
 # Lineage check: derives.conf parses, its parents exist, the declared parent
 # order still matches the entry .scad's include order, and every diamond is
 # explicitly asserted. All static, all milliseconds, so it runs unconditionally
