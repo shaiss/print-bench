@@ -26,3 +26,9 @@ once reviewed — add a line, never reframe one.
   rail, the guard-gap slot (open to the top face, so it reads as a dark
   groove), the finger's flat back across the slot, and the crown strap
   converging on the root corner where all three join.
+- **root-detail** — the close cut root's wider frame could not deliver
+  (added per review; `root` stays frozen): looking down over the crown
+  strap from above the guard-side rear corner, the guard-gap slot and the
+  channel terminate against the strap in the foreground — the root-fillet
+  arc rounds the channel's corner, the finger's flat back stands between
+  the two dark grooves, and the guard rail edges the near side.

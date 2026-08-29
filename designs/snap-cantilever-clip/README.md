@@ -34,14 +34,23 @@ folding the flexure to failure.
 | ![Profile](previews/profile.png) | The bed-plane working drawing: channel, lip tooth with both cam angles, guard gap, root fillet |
 | ![Mouth](previews/mouth.png) | The throat the plate passes, lead-in funnel, lip tooth dead centre |
 | ![Root](previews/root.png) | The flexure root from the guard side: guard rail, relief slot, finger and strap converging |
+| ![Root detail](previews/root-detail.png) | Close cut over the strap: the slot and channel terminating against it, the root-fillet arc on the channel corner |
 
 ## Print settings
 
 - **Material:** **PETG** (the design datum) or PP for far more cycles. Do not
   print the flexure in PLA — it work-hardens and cracks. PETG prints the
   channel a hair tight and may leave a couple of strings in the guard slot —
-  flick them out with a blade tip.
-- **Layer height:** 0.2 mm
+  flick them out with a blade tip. PP earns its extra cycles but is a warp
+  monster on a part this small — brim, slow first layer, and expect tuning;
+  PETG stays the sane default.
+- **Layer height:** 0.2 mm — a requirement for this part, not a suggestion:
+  the finger is a 1 mm free-standing wall and its layer faces are the
+  fatigue-critical surface.
+- **Initial layer horizontal expansion: −0.2 mm** — first-layer squish
+  (elephant foot) eats the channel's 0.1 mm/side working clearance; this
+  free slicer setting is the first fix for a tight channel, before reaching
+  for `plate_tol` (it also keeps the flexure numbers untouched).
 - **Infill:** 20 % — the walls and perimeters do the work; the body is solid
   where it matters
 - **Supports:** none — every wall is vertical, the whole silhouette lands on
