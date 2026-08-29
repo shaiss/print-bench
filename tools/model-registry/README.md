@@ -61,6 +61,20 @@ python3 -m model_registry show
 # blank chain input smokes every declared chain. Dispatch it before pointing a
 # new routine at a chain.
 ZAI_KEY=... ANTHROPIC_API_KEY=... python3 -m model_registry smoke review
+
+# Diagnose a chain that just failed on EVERY link (issue #347). Where `smoke`
+# asks "is any id a registry defect?", `classify` asks "what should be done about
+# a chain that exhausted?" — a live 1-token probe per link recovers the HTTP cause
+# the ship steps hide and reduces it to two signals: an aggregate `class` (the
+# action bucket — servable / dead / needs-human / transient) AND a finer `reason`
+# (the cause behind it — billing / quota / auth / no-key / rate-limit / outage /
+# bad-model-id / served). With --gh-output it appends `class=…` and `reason=…` so
+# a workflow can route *out of credit* vs *out of tokens* vs *a bad key* each to
+# its own remediation instead of one undifferentiated red. Exit 0 regardless —
+# the class/reason ARE the signal. The shared `.github/actions/provider-triage`
+# composite action runs this and escalates the human-fixable causes through the
+# decision gate; every chain-walking workflow invokes it on exhaustion.
+ZAI_KEY=... ANTHROPIC_API_KEY=... python3 -m model_registry classify review
 ```
 
 Stdlib-only, so a workflow runs it straight from the checkout with
@@ -94,6 +108,13 @@ together so they cannot silently diverge — including, since #327, that the
 expressions reading the walk's *outcome* cover every link (an expression still
 on link 1 after a chain deepened would send a healthy link-2 run red).
 
+When a chain *does* exhaust every link, each consumer invokes the shared
+`.github/actions/provider-triage` composite action, which runs `classify` to
+recover the cause and escalates a human-fixable one (out of credit / out of
+tokens / bad or missing key) through the `needs-decision` gate — so a scheduled
+red nobody is watching becomes one deduped, reason-tailored ask instead. A dead
+model id still reds (a registry defect); a rate limit or outage just retries.
+
 The `review` chain's Anthropic backstop is itself a chain — Opus 4.8 → Sonnet 5
 → Haiku 4.5 — rather than a single model (issue #298): a single hardcoded id can
 be unservable by a key (a deprecation, an access tier), so one dead id must never
@@ -106,11 +127,14 @@ serve it is exactly what the live smoke confirms, rather than a static claim.)
 
 - `src/model_registry/registry.py` — the parser (fail-loud, stdlib `configparser`)
   and the `resolve(chain)` → ordered `ResolvedLink`s.
-- `src/model_registry/cli.py` — `check` / `resolve` / `chain` / `show` / `smoke`;
-  `resolve` emits the `$GITHUB_OUTPUT` links a workflow consumes.
+- `src/model_registry/cli.py` — `check` / `resolve` / `chain` / `show` / `smoke` /
+  `classify`; `resolve` emits the `$GITHUB_OUTPUT` links a workflow consumes,
+  `classify` emits `class` + `reason` for a workflow's exhaustion branch.
 - `src/model_registry/smoke.py` — the live-callability proof (issue #298) and the
   package's single network seam (`_post`); everything else stays statically
-  network-free, and a test enforces that confinement.
+  network-free, and a test enforces that confinement. `diagnose_chain` reduces an
+  exhausted chain to `(class, reason)`; `_reason_fine` is the finest cause and
+  the coarse `_classify_fine` verdict is DERIVED from it, so the two cannot drift.
 - `src/model_registry/__main__.py` — `python -m model_registry` for the no-install
   workflow invocation.
 
@@ -128,6 +152,10 @@ python -m pytest tools/model-registry/tests -q
 
 A positive case and a negative control for every parser rule, the CLI's
 `$GITHUB_OUTPUT` emission, the smoke command's judgement (served / failed /
-skipped, and never green with nothing attempted) through its injected seam, and
-the drift guard that holds `.github/models/registry.conf` and
-`.github/workflows/auto-review.yml` in correspondence.
+skipped, and never green with nothing attempted) through its injected seam,
+`classify`'s class **and** reason for every cause (billing vs quota vs auth vs
+rate-limit vs outage vs a dead id, with the reason↔class consistency pinned so
+the split can't misroute), and the drift guard that holds
+`.github/models/registry.conf` and its consumer workflows in correspondence —
+including that every chain-walking workflow stays wired to the shared
+`.github/actions/provider-triage` action on its own chain.
