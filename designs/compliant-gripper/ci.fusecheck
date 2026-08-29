@@ -1,0 +1,14 @@
+# Fuse check on the SLICED gripper: the whole mechanism is one piece, and the
+# only thing joining each jaw to the frame is its pair of leaf flexures (the
+# parallelogram); the plunger is captive but must be a separate body. The two
+# flexure zones below drop the leaf MIDDLES (x 70..100 — the roots stay with
+# the towers and the carriage stays with the jaw), in printcheck's rested
+# frame (this part already rests at z=0). Expected: frame+arch, jaw A, jaw B,
+# plunger = 4 separable bodies; assert 3 to leave margin.
+# control: `fitcheck_neg` is the known-fused pose (race walls grown onto the
+# blade) — a single interference body that must stay 1, proving the check
+# can still see a weld.
+flexure 70,-25,3.3:100,-16,8.1
+flexure 70,16,3.3:100,25,8.1
+assert compliant-gripper.stl 3
+control fitcheck_neg 1

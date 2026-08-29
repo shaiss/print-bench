@@ -360,6 +360,63 @@ if ! python3 .claude/skills/adoption-assessor/assessor_mcp.py --selftest; then
   fail=1
 fi
 
+# Adoption-assessor vendor-context fetcher (scripts/assessor-context.sh): the
+# trusted workflow step that clones each study's named vendor repo into
+# .assessor-context/<n>/ so the assessor compares the tool at a code level, not
+# just against the vendor's prose. Its --selftest pins the security-critical URL
+# parser — only https://github.com/<owner>/<repo> is ever a clone target — with
+# negative controls (ssh, non-github host, userinfo spoof, look-alike host,
+# reserved owner, bare owner, file://). The clone itself needs network + gh, so
+# the selftest exercises the pure parser only; that parser is the guard.
+echo "-- assessor-context selftest: scripts/assessor-context.sh --selftest"
+if ! ./scripts/assessor-context.sh --selftest; then
+  fail=1
+fi
+
+# Wright deny-backstop drift check: same reasoning as the chunker's family,
+# for BOTH halves of the agent forge (docs/agent-forge.md). One script checks
+# two backstops because the halves' allow/deny roles are opposite BY DESIGN:
+# the propose half (.claude/wright-settings.json) must deny the sign-off MCP
+# server (the proposer can never hold the arming tool) while the sign-off
+# half (.claude/reeve-signoff-settings.json) must deny the filing server (the
+# judge can never file what it judges) — and each must deny every dangerous
+# settings.json allow plus all four sibling wrappers, while never denying the
+# shared read wrapper wright-helper.sh or its OWN write tool (or the
+# scheduled forge fails closed with no other CI signal).
+echo "-- wright-perms selftest: scripts/wright-perms-check.sh --selftest"
+if ! ./scripts/wright-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- wright-perms check: scripts/wright-perms-check.sh"
+if ! ./scripts/wright-perms-check.sh; then
+  fail=1
+fi
+
+# Wright MCP filing tool: the propose half's WRITE surface is the
+# file_agent_brief MCP tool (.claude/skills/wright/wright_mcp.py), a
+# JSON-argument tool for the same dontAsk-matcher reason as the scout's. Its
+# --selftest proves the invariants a live run cannot show: the label is
+# hardcoded to agent-brief and unpassable, the title must carry the 'Agent
+# brief:' prefix, and the per-run cap fires.
+echo "-- wright MCP selftest: .claude/skills/wright/wright_mcp.py --selftest"
+if ! python3 .claude/skills/wright/wright_mcp.py --selftest; then
+  fail=1
+fi
+
+# Reeve sign-off MCP tool: the judging half's WRITE surface — the ONE
+# escalation-shaped write in the routine family, since an approve applies
+# `autonomy-ok`. Its --selftest proves every guard fires offline: write-time
+# target re-read (open / agent-brief / unruled / in the candidate set), the
+# closed verdict-label taxonomy, label-first fail-closed ordering, marker
+# dedup, the per-run cap, the WRIGHT_AUTO_ARM advisory demotion, and above
+# all the deterministic sensitive-path guard (an approve whose brief touches
+# protection machinery downgrades to needs-decision, with a
+# clean-brief negative control so the guard can't rot into always-firing).
+echo "-- reeve-signoff MCP selftest: .claude/skills/reeve-signoff/signoff_mcp.py --selftest"
+if ! python3 .claude/skills/reeve-signoff/signoff_mcp.py --selftest; then
+  fail=1
+fi
+
 # Cadence-parity check (issue #276): every scheduled autonomy routine stores
 # its cadence TWICE — the `cadence:` key in .github/<routine>.conf and the
 # `cron:` literal in .github/workflows/<routine>.yml (Actions can't read a
@@ -413,6 +470,20 @@ fi
 # in the include closure, an architecture doc, an unknown top-level dir).
 echo "-- vercel-ignore-build selftest: scripts/vercel-ignore-build.sh --selftest"
 if ! ./scripts/vercel-ignore-build.sh --selftest; then
+  fail=1
+fi
+
+# lifestyle-shot.sh selftest (issue #418): drives the LIVE parse branch — the
+# resp_kind assignment that once reused the 'kind' global, clobbering it so
+# product-still embeds got lifestyle alt text and the per-kind seed guard
+# stopped firing after the first shot — by running a sandboxed copy of the
+# real script against a localhost HTTP stub (no ZAI_KEY, no network beyond
+# 127.0.0.1), asserting the produced alt text, the second-shot seed-guard
+# refusal, and that malformed responses fail loudly. A sabotaged copy with
+# the rename reverted is the negative control proving the selftest still
+# fails when the clobber returns.
+echo "-- lifestyle-shot selftest: scripts/lifestyle-shot.sh --selftest"
+if ! ./scripts/lifestyle-shot.sh --selftest; then
   fail=1
 fi
 

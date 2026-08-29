@@ -1,0 +1,172 @@
+name: Provider failure triage
+description: >-
+  Diagnose a model-registry chain that failed on EVERY link — billing / out of
+  tokens / bad key / a retryable blip / an unservable id — and route the
+  human-fixable causes to ONE deduplicated needs-decision issue. The ship steps
+  hide their own provider error ("full output hidden for security"), so this
+  probes each configured link with a live 1-token request to recover the real
+  HTTP cause (`model-registry classify`, issue #347), then exposes the aggregate
+  `class` (the action bucket) and `reason` (the finer cause) as outputs and
+  escalates on the account/config causes. It is ADVISORY: it never fails the
+  job — the calling workflow decides whether to red on the class — it only
+  classifies and, on a human-fixable cause, escalates once. Reuses the Oracle's
+  classify-and-escalate pattern (oracle.yml) as one shared, tested unit instead
+  of a copy per routine.
+
+inputs:
+  chain:
+    description: The registry chain id that exhausted (e.g. review, backlog-burn).
+    required: true
+  zai-key:
+    description: ZAI_KEY secret value (empty when the run holds no Z.AI key).
+    required: false
+    default: ""
+  anthropic-key:
+    description: ANTHROPIC_API_KEY value (empty when the run holds no Anthropic key).
+    required: false
+    default: ""
+  github-token:
+    description: A token with issues:write, for filing the escalation issue.
+    required: true
+  context:
+    description: >-
+      Human label for what failed, woven into the escalation (e.g.
+      "the Jane/Drik design-review chain").
+    required: true
+  escalate:
+    description: >-
+      When 'true' (default), file/refresh a deduped needs-decision issue on a
+      human-fixable cause (billing / quota / auth / no-key). Set 'false' to
+      classify only — for a sibling job that must not double-file on the same
+      chain.
+    required: false
+    default: "true"
+
+outputs:
+  class:
+    description: The action bucket — servable | dead | needs-human | transient.
+    value: ${{ steps.classify.outputs.class }}
+  reason:
+    description: >-
+      The finer cause — served | bad-model-id | billing | quota | auth | no-key
+      | rate-limit | outage.
+    value: ${{ steps.classify.outputs.reason }}
+
+runs:
+  using: composite
+  steps:
+    # Recover the real cause the ship steps hid. Runs from the caller's checkout,
+    # so `model_registry` resolves through PYTHONPATH exactly as the resolve step
+    # that fed the walk did. Exit 0 regardless — the class/reason ARE the signal.
+    - id: classify
+      shell: bash
+      env:
+        PYTHONPATH: tools/model-registry/src
+        CHAIN: ${{ inputs.chain }}
+        ZAI_KEY: ${{ inputs.zai-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-key }}
+      run: |
+        set -uo pipefail
+        python3 -m model_registry classify "$CHAIN" --gh-output "$GITHUB_OUTPUT"
+
+    # needs-human — the account/config problem CI cannot fix (out of credit, out
+    # of tokens, or a bad/missing key). Raise it ONCE through the decision gate
+    # (a single deduped needs-decision issue keyed by a per-chain marker),
+    # remediation tailored to the reason, instead of reddening every run with an
+    # undifferentiated failure. dead / transient / servable are the caller's to
+    # message. Trusted base-branch github-script, no PR-head code.
+    - id: escalate
+      if: ${{ inputs.escalate == 'true' && steps.classify.outputs.class == 'needs-human' }}
+      uses: actions/github-script@v9
+      env:
+        CHAIN: ${{ inputs.chain }}
+        REASON: ${{ steps.classify.outputs.reason }}
+        CONTEXT: ${{ inputs.context }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const chain = process.env.CHAIN;
+          const reason = process.env.REASON;
+          const contextLabel = process.env.CONTEXT;
+          const marker = `<!-- provider-escalation:${chain} -->`;
+          const decisionId = `provider-${chain}`;
+          const label = 'needs-decision';
+
+          // The reason IS the button a human pushes — say which, and where.
+          const REMEDIATION = {
+            billing: 'The provider account is **out of credit** (a billing/balance ' +
+              'rejection). **Fund the account**, then confirm.',
+            quota: 'The provider account is **out of tokens for the period** (a ' +
+              'quota / spend-cap rejection). **Raise the cap or wait for the reset**, ' +
+              'then confirm.',
+            auth: 'The API key is **invalid, expired, or revoked** (an auth rejection). ' +
+              '**Rotate the key**, then confirm.',
+            'no-key': 'No provider secret is configured for this chain at all. ' +
+              '**Set the key**, then confirm.',
+          };
+          const remedy = REMEDIATION[reason] ||
+            `A human-fixable account/config problem (\`${reason}\`). Fix it, then confirm.`;
+
+          // Ensure the decision-gate label exists (create-on-demand, tolerate a
+          // race with a sibling run) — docs/decision-gate.md's ensure-label idiom.
+          try {
+            await github.rest.issues.getLabel({ ...context.repo, name: label });
+          } catch (e) {
+            if (e.status !== 404) throw e;
+            try {
+              await github.rest.issues.createLabel({
+                ...context.repo, name: label, color: 'D93F0B',
+                description: 'A human decision is required before an agentic run can proceed',
+              });
+            } catch (_) { /* raced: another run created it first */ }
+          }
+
+          // One escalation per chain: reuse the OPEN needs-decision issue whose
+          // body carries this chain's marker rather than filing a duplicate every
+          // run. When a human resolves it (/decide clears the label, or the issue
+          // is closed) the next exhaustion is free to re-escalate.
+          const open = await github.paginate(github.rest.issues.listForRepo, {
+            ...context.repo, state: 'open', labels: label, per_page: 100,
+          });
+          const existing = open.find((i) => (i.body || '').includes(marker));
+          if (existing) {
+            core.warning(
+              `provider-triage: ${chain} still unusable (${reason}). Open ` +
+              `escalation: ${existing.html_url} — not filing a duplicate.`);
+            return;
+          }
+
+          const body = [
+            marker,
+            `🚦 DECISION NEEDED — \`${decisionId}\``,
+            ``,
+            `${contextLabel} (registry chain \`${chain}\`) failed on **every** link, and ` +
+            `the model-registry classifier read the cause as **${reason}** — an ` +
+            `account/config problem CI cannot fix, not a transient outage or a bad ` +
+            `model id.`,
+            ``,
+            `${remedy}`,
+            ``,
+            `Until it is resolved this chain's agentic runs cannot produce output.`,
+            ``,
+            `**yes** → the key is funded / rotated / configured and working. Confirm ` +
+            `by dispatching \`model-smoke.yml\` with input \`${chain}\`, then resolve.`,
+            `**no**  → accept this chain staying dark for now; this closes the ` +
+            `escalation without a code change.`,
+            ``,
+            `**Context:** classifier reason \`${reason}\` on chain \`${chain}\`. The ` +
+            `registry itself is correct — this is an account/key problem, behaviour ` +
+            `from issue #347.`,
+            ``,
+            `Resolve with \`/decide yes ${decisionId}\` or \`/decide no ${decisionId}\`.`,
+          ].join('\n');
+
+          const created = await github.rest.issues.create({
+            ...context.repo,
+            title: `🚦 Provider unusable: ${chain} (${reason})`,
+            body,
+            labels: [label],
+          });
+          core.warning(
+            `provider-triage: filed HITL escalation for ${chain} (${reason}): ` +
+            `${created.data.html_url}`);

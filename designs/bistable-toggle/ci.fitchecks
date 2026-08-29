@@ -1,0 +1,9 @@
+# Stop-cage fit proof: the mechanism's FULL travel — the arch band through BOTH
+# stable states plus the nub riding its apex — must clear the hard-stop cage
+# everywhere; the stops bite only on over-travel or off-axis load, never during
+# a normal switch. `fitcheck` renders cage ∩ travel and must be EMPTY (it is
+# the check that catches a stop placed where the arch sweeps — a mechanism that
+# prints fused solid). `fitcheck_neg` grows the swept zone past stop_gap so it
+# MUST overlap, proving the check can fail.
+fitcheck      empty
+fitcheck_neg  interferes

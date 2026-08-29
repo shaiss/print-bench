@@ -119,6 +119,16 @@ def test_provider_missing_secret_raises(tmp_path):
         load(tmp_path, bad)
 
 
+def test_provider_non_https_base_url_raises(tmp_path):
+    # smoke/diagnose POST the provider key to base_url, so a cleartext http://
+    # endpoint must fail loud at parse time rather than leak the credential on
+    # the wire. (Positive control: GOOD's https base_url loads — test_good_registry_loads.)
+    bad = GOOD.replace("base_url = https://api.z.ai/api/anthropic",
+                       "base_url = http://api.z.ai/api/anthropic")
+    with pytest.raises(ValueError, match=r"\[provider:zai\]: 'base_url' must be an https"):
+        load(tmp_path, bad)
+
+
 def test_model_missing_provider_raises(tmp_path):
     bad = GOOD.replace("[model:glm-4.6]\nprovider = zai\nnotes = older glm fallback",
                        "[model:glm-4.6]\nnotes = older glm fallback")

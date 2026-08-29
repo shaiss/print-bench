@@ -1182,3 +1182,273 @@ def test_routine_guards_fire_on_a_reintroduced_literal(tmp_path, monkeypatch):
         "the no-literal guard passed on a workflow carrying a hardcoded "
         "--model glm-5.2 — it has been weakened into a restatement")
 
+
+# ── Provider-failure triage wiring (smarter chain-exhaustion routing) ─────────
+#
+# Every chain-walking consumer must, when its chain fails on EVERY link, invoke
+# the shared provider-triage composite action with ITS OWN chain — so the cause
+# (billing / out-of-tokens / bad key / dead id / transient) is recovered and the
+# human-fixable ones escalate through the decision gate, instead of a silent
+# scheduled red. The action is the one tested home for that logic (the classify
+# core has its own suite in test_smoke.py); the guard below pins that each
+# consumer stays wired to it AND triages the same chain it walks — a mis-named
+# chain would diagnose a DIFFERENT registry chain than the one that just failed.
+
+TRIAGE_ACTION = REPO_ROOT / ".github" / "actions" / "provider-triage" / "action.yml"
+TRIAGE_CONSUMERS = {
+    "auto-review.yml": "review",
+    "backlog-burn.yml": "backlog-burn",
+    "design-run.yml": "design-run",
+    "chunker.yml": "chunker",
+    "labeler.yml": "labeler",
+}
+
+
+def _triage_chains(text: str) -> list[str]:
+    """The `chain:` input of every provider-triage invocation in a workflow."""
+    chains: list[str] = []
+    for chunk in re.split(r"\n      - ", text):
+        if "uses: ./.github/actions/provider-triage" not in chunk:
+            continue
+        m = re.search(r"^[ \t]*chain:[ \t]*(\S+)", chunk, re.MULTILINE)
+        chains.append(m.group(1) if m else None)
+    return chains
+
+
+def test_every_consumer_wires_provider_triage_to_its_own_chain():
+    for workflow, chain in TRIAGE_CONSUMERS.items():
+        text = (REPO_ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+        chains = _triage_chains(text)
+        assert chains, (
+            f"{workflow} no longer invokes ./.github/actions/provider-triage on "
+            "chain exhaustion — the smarter billing/tokens/technical routing is gone")
+        assert all(c == chain for c in chains), (
+            f"{workflow}: provider-triage is wired to chain(s) {chains}, but this "
+            f"workflow walks the {chain!r} chain — it would diagnose the wrong one")
+        # It must triage the SAME chain it resolves/walks.
+        assert f"model_registry resolve {chain}" in text, (
+            f"{workflow} triages chain {chain!r} but does not resolve it — the "
+            "walk and the diagnosis have drifted apart")
+
+
+def test_provider_triage_action_declares_the_io_its_callers_use():
+    # A rename or dropped input/output would break all five callers at once;
+    # actionlint catches an unknown `with:` key, and this pins the contract the
+    # callers depend on (the classify chain input, both provider keys, the token,
+    # the escalate switch, and the class/reason outputs the callers read).
+    action = TRIAGE_ACTION.read_text(encoding="utf-8")
+    for decl in ("chain:", "zai-key:", "anthropic-key:", "github-token:",
+                 "context:", "escalate:"):
+        assert decl in action, f"provider-triage no longer declares input {decl!r}"
+    assert re.search(r"^outputs:", action, re.MULTILINE), "provider-triage lost its outputs block"
+    for out in ("class:", "reason:"):
+        assert out in action, f"provider-triage no longer declares output {out!r}"
+    # The action must actually run the classifier that produces class+reason.
+    assert "model_registry classify" in action, (
+        "provider-triage no longer runs `model_registry classify` — its class/reason "
+        "outputs would be empty and every caller's branch would misfire")
+
+
+def test_triage_wiring_guard_discriminates_a_wrong_chain():
+    # NEGATIVE CONTROL: the same rule, run against a workflow whose triage chain
+    # was swapped to another consumer's, must NOT pass — or the guard proves
+    # nothing (a check that cannot fail is worthless, the repo's standing rule).
+    text = (REPO_ROOT / ".github" / "workflows" / "labeler.yml").read_text(encoding="utf-8")
+    tampered = text.replace("chain: labeler", "chain: review", 1)
+    assert tampered != text, "tamper target not found — the fixture is stale"
+    chains = _triage_chains(tampered)
+    assert not all(c == "labeler" for c in chains), (
+        "the triage-chain check did not react to a swapped chain — it has been "
+        "weakened into a restatement")
+
+
+# ── The agent forge (Wright + Reeve's sign-off, docs/agent-forge.md) ─────────
+#
+# The forge is the registry's next consumer: ONE workflow (wright.yml), TWO
+# chains — `wright` (the propose half, single-link, the scout's shape) and
+# `wright-signoff` (the judging half, a walking tail, the labeler's shape) —
+# each resolved by its own step id in its own job, the Oracle's two-chain
+# pattern. The guard pins each chain's ship steps to its registry links, the
+# conf/chain provider agreement, the per-half deny backstop + dontAsk on
+# every ship step (the sign-off can apply `autonomy-ok`, so a quietly-shed
+# backstop there is the worst drift in the family), the sign-off walk's
+# gating, and — by simulation — that the sign-off RUN expression reads every
+# link, with a negative control proving the simulation can fail.
+
+WRIGHT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "wright.yml"
+WRIGHT_CONF = ".github/wright.conf"
+# chain id → (the resolve step id whose outputs that chain's ship steps read,
+#             the half's OWN deny backstop the ship steps must carry)
+WRIGHT_CHAINS = {
+    "wright": ("propose_chain", ".claude/wright-settings.json"),
+    "wright-signoff": ("signoff_chain", ".claude/reeve-signoff-settings.json"),
+}
+# The sign-off walk's step ids in the conf provider's block, link order.
+WRIGHT_SIGNOFF_BLOCK = ("signoff_zai_1", "signoff_zai_2", "signoff_zai_3")
+
+
+def _wright_text() -> str:
+    return WRIGHT_WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_wright_chains_exist_and_match_conf():
+    # Both chains must exist AND every link must sit on the provider
+    # .github/wright.conf declares — the workflow resolve steps' run-time
+    # cross-check, caught pre-merge (a mismatched link would spend a key
+    # against the wrong endpoint mid-walk).
+    reg = Registry.load(str(REGISTRY))
+    conf_provider = _routine_provider(WRIGHT_CONF)
+    for chain in WRIGHT_CHAINS:
+        links = reg.resolve(chain)
+        assert links, f"the `{chain}` chain resolved to zero links"
+        for link in links:
+            assert link.provider == conf_provider, (
+                f"wright: link {link.position} of `{chain}` is on provider "
+                f"{link.provider!r} but {WRIGHT_CONF} declares "
+                f"{conf_provider!r} — the walk would spend that link's key "
+                "against the wrong endpoint")
+
+
+def test_wright_ship_steps_are_pinned_to_their_registry_links():
+    """Every forge ship step sources --model from a real link of its half's
+    chain and carries that half's deny backstop + dontAsk; the steps on the
+    conf's provider match the chain exactly (count, order, secret, endpoint),
+    the latent other-provider block is checked structurally — the scout/
+    routine guards' two-tier split."""
+    reg = Registry.load(str(REGISTRY))
+    conf_provider = _routine_provider(WRIGHT_CONF)
+    secrets_by_provider = {p.id: p.secret for p in reg.providers.values()}
+    bases_by_provider = {p.id: p.base_url for p in reg.providers.values()}
+    text = _wright_text()
+    for chain, (step_id, backstop) in WRIGHT_CHAINS.items():
+        links = reg.resolve(chain)
+        link_positions = {link.position for link in links}
+        steps = _oracle_ship_steps(text, step_id)
+        assert steps, f"no ship step reads steps.{step_id}.outputs in wright.yml"
+        current = []
+        for step in steps:
+            assert step["model_slot"] in link_positions, (
+                f"wright {chain}: a ship step references "
+                f"link{step['model_slot']}_model but the chain has links "
+                f"{sorted(link_positions)}")
+            providers_with_secret = [pid for pid, s in secrets_by_provider.items()
+                                     if s == step["secret"]]
+            assert len(providers_with_secret) == 1, (
+                f"wright {chain}: a ship step wires secrets.{step['secret']}, "
+                f"which matches no single registry provider "
+                f"({providers_with_secret})")
+            step_provider = providers_with_secret[0]
+            assert step["base_url"] == bases_by_provider[step_provider], (
+                f"wright {chain}: a step for provider {step_provider!r} carries "
+                f"ANTHROPIC_BASE_URL {step['base_url']!r} but the registry "
+                f"endpoint is {bases_by_provider[step_provider]!r}")
+            # Punch-list discipline (the Oracle's): the narrowed surface must
+            # not be quietly shed — and each half must carry ITS OWN backstop,
+            # never the other's (the proposer/judge separation lives there).
+            assert "--permission-mode dontAsk" in step["chunk"], (
+                f"wright {chain}: a ship step no longer runs under "
+                "--permission-mode dontAsk")
+            assert f"--settings {backstop}" in step["chunk"], (
+                f"wright {chain}: a ship step no longer carries its half's "
+                f"deny backstop (--settings {backstop})")
+            if step_provider == conf_provider:
+                current.append(step)
+        assert [s["model_slot"] for s in current] == [l.position for l in links], (
+            f"wright {chain}: the {conf_provider} block's steps reference links "
+            f"{[s['model_slot'] for s in current]} but the chain has "
+            f"{[l.position for l in links]} — one ship step per link, in order")
+
+
+def test_wright_signoff_walk_gates_on_earlier_links():
+    # The sign-off walk must actually WALK: each link-N step (N>1) is gated on
+    # every earlier same-block link NOT having succeeded, so the first success
+    # short-circuits the rest (#327's rule, the labeler's shape).
+    text = _wright_text()
+    steps = _oracle_ship_steps(text, "signoff_chain")
+    by_link = {}
+    for step in steps:
+        m = re.search(r"^\s*id:\s*(\S+)", step["chunk"], re.MULTILINE)
+        if m and m.group(1).startswith("signoff_zai_"):
+            by_link[step["model_slot"]] = step
+    assert set(by_link) == {1, 2, 3}, (
+        f"wright signoff: expected zai walk steps for links 1-3, found "
+        f"{sorted(by_link)}")
+    for n in (2, 3):
+        for earlier in range(1, n):
+            needle = f"steps.signoff_zai_{earlier}.outcome != 'success'"
+            assert needle in by_link[n]["chunk"], (
+                f"wright signoff: the link-{n} step is not gated on {needle} — "
+                "the walk would run every link unconditionally")
+
+
+def test_wright_run_steps_gate_on_key_presence():
+    # The degraded path stays a ::notice:: skip (the #326 constraint): every
+    # ship step gates on key_present, and the skip notice survives.
+    text = _wright_text()
+    for chain, (step_id, _backstop) in WRIGHT_CHAINS.items():
+        for step in _oracle_ship_steps(text, step_id):
+            assert "key_present == '1'" in step["chunk"], (
+                f"wright {chain}: a ship step does not gate on "
+                "key_present == '1' — an absent provider key would not skip it")
+    assert "::notice::the configured provider" in text, (
+        "wright.yml's secret-absent notice is gone — the degraded path must "
+        "stay a ::notice:: skip")
+
+
+def test_wright_no_hardcoded_model_literal_survives():
+    text = _wright_text()
+    literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
+                if not tok.startswith("${{")]
+    assert not literals, f"hardcoded --model literal(s) in wright.yml: {literals}"
+
+
+def _assert_wright_signoff_outcome_covers_every_link(text: str) -> None:
+    """The sign-off job's RUN expression must treat ANY walk link's success as
+    the walk's success, and no-success as not-success — simulated over the
+    full outcome cartesian, the #327 walk-outcome discipline. Factored out so
+    the negative control can run it against tampered text."""
+    global _PROVIDER_UNDER_TEST
+    blocks = _job_blocks(text)
+    assert "signoff" in blocks, "wright.yml has no `signoff` job"
+    exprs = _outcome_expressions(blocks["signoff"])
+    assert exprs.get("RUN"), (
+        "wright.yml's signoff job has no RUN outcome expression to pin")
+    _PROVIDER_UNDER_TEST = _routine_provider(WRIGHT_CONF)
+    links = Registry.load(str(REGISTRY)).resolve("wright-signoff")
+    assert len(WRIGHT_SIGNOFF_BLOCK) == len(links), (
+        f"the `wright-signoff` chain has {len(links)} links but the pinned "
+        f"walk block has {len(WRIGHT_SIGNOFF_BLOCK)} step ids — update "
+        "WRIGHT_SIGNOFF_BLOCK with the chain")
+    for expr in exprs["RUN"]:
+        for state in _walk_states(len(links)):
+            outcomes = dict(zip(WRIGHT_SIGNOFF_BLOCK, state))
+            got = _eval_github_expression(expr, outcomes)
+            any_success = "success" in state
+            if any_success:
+                assert got == "success", (
+                    f"wright signoff RUN evaluated to {got!r} under "
+                    f"{outcomes} — a link succeeded but the walk's outcome "
+                    "is not success")
+            else:
+                assert got != "success", (
+                    f"wright signoff RUN read {got!r} with no link having "
+                    f"succeeded ({state})")
+
+
+def test_wright_signoff_walk_outcome_covers_every_link():
+    _assert_wright_signoff_outcome_covers_every_link(_wright_text())
+
+
+def test_wright_walk_outcome_guard_fires_on_a_stale_link1_expression():
+    # NEGATIVE CONTROL: revert the sign-off RUN expression to a link-1-only
+    # read and require the simulation to FAIL — otherwise the guard is a
+    # restatement (the repo's standing rule).
+    text = _wright_text()
+    stale = ("(steps.signoff_zai_1.outcome == 'success' && 'success' || "
+             "steps.signoff_zai_2.outcome == 'success' && 'success' || "
+             "steps.signoff_zai_3.outcome)")
+    assert stale in text, (
+        "the live signoff RUN expression changed shape — update the mutation")
+    tampered = text.replace(stale, "(steps.signoff_zai_1.outcome)")
+    with pytest.raises(AssertionError):
+        _assert_wright_signoff_outcome_covers_every_link(tampered)

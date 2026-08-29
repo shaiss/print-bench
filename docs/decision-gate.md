@@ -165,6 +165,22 @@ new issues, and it runs as trusted base-branch `github-script` (no PR head code)
 It is a workflow raiser, not one of the agent skills below — those stay
 follow-ups.
 
+The same mechanism now covers **every** chain-walking workflow, factored into one
+shared composite action, `.github/actions/provider-triage`. When the design-review
+chain (`auto-review.yml`) or any of the four scheduled routines (`backlog-burn`,
+`design-run`, `chunker`, `labeler`) fails on every link, the action runs
+`model-registry classify` and, on a `needs-human` verdict, files a single deduped
+`needs-decision` issue keyed by a `<!-- provider-escalation:<chain> -->` marker
+(one per registry chain, so no two routines collide, and distinct from the
+Oracle's `oracle-provider-escalation:<chain>`). The body's remediation is tailored
+to the classifier's finer **reason** — `billing` says *fund the account*, `quota`
+says *out of tokens, raise the cap or wait*, `auth` says *rotate the key*,
+`no-key` says *set the secret* — so the maintainer sees which button to push, not
+just "provider down". A `dead` id (an unservable model — a registry defect) still
+reds its workflow; a `rate-limit`/`outage` just retries next run. Same rules as
+the Oracle raiser: label created on demand, deduped per chain, trusted
+base-branch `github-script`, advisory (it never fails the job on its own).
+
 ## Follow-ups (not in this slice)
 
 - Wiring the raise-a-decision step **and the verdict-consumption** (read the

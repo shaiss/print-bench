@@ -139,7 +139,15 @@ auto-drafts its split verdict is now **built and committed**, but **shipped
 disarmed**: it fires only when both the git-tracked
 `.github/adoption-assessor.conf` (`enabled: true`) and the live
 `ADOPTION_ASSESSOR_ENABLED` repo variable (unset) agree, so a maintainer arms it
-with that one repo variable. When armed, it posts the split verdict as an
+with that one repo variable. It runs **daily** (a filed study should not wait a
+week for its draft), and before it reasons a **trusted workflow step** fetches
+the study's named repository into `.assessor-context/<n>/` so the assessor
+compares the tool against the bench at a **feature and code/functional level** —
+against the vendor's *real source*, not only its prose — the way the Oracle's
+blind context is assembled (GitHub-only, sandboxed, the package never run; the
+agent gains no network and only reads the fetched tree, so no new tool and no
+wider blast radius; a repo that can't be fetched degrades to a filed-text-only
+verdict). When armed, it posts the split verdict as an
 **advisory comment** on the study thread — nothing more: it **never applies a
 `disposition:*` label** (that stays the human's reading), never decides adoption,
 never routes a label, never crosses the license boundary, and never merges. A
