@@ -368,6 +368,8 @@ jobs:
               echo "::error::/jane-review could not run — the review chain is unusable, cause '${REASON}' (an account/config problem: out of credit, out of tokens, or a bad/missing key). A needs-decision issue has been filed for a human to fund / rotate / configure the key. This is NOT a defect in this PR." ;;
             dead)
               echo "::error::/jane-review could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+            servable)
+              echo "::error::/jane-review could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
             *)
               echo "::error::/jane-review could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage / transient); it retries on the next review round. See the failed step logs above." ;;
           esac
@@ -539,6 +541,8 @@ jobs:
               echo "::error::/drik-review could not run — the review chain is unusable, cause '${REASON}' (out of credit / out of tokens / bad key). The Jane review job escalates this chain to a human (needs-decision). NOT a defect in this PR." ;;
             dead)
               echo "::error::/drik-review could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+            servable)
+              echo "::error::/drik-review could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
             *)
               echo "::error::/drik-review could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage); it retries on the next review round. See the failed step logs above." ;;
           esac
@@ -780,6 +784,8 @@ jobs:
               echo "::error::the PM triage could not run — the review chain is unusable, cause '${REASON}' (out of credit / out of tokens / bad key). The Jane review job escalates this chain to a human (needs-decision). NOT a defect in this PR." ;;
             dead)
               echo "::error::the PM triage could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+            servable)
+              echo "::error::the PM triage could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
             *)
               echo "::error::the PM triage could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage); it retries on the next review round. See the failed step logs above." ;;
           esac
@@ -969,6 +975,8 @@ jobs:
               echo "::error::/design-coach could not run — the review chain is unusable, cause '${REASON}' (out of credit / out of tokens / bad key). The Jane review job escalates this chain to a human (needs-decision). NOT a defect in this PR." ;;
             dead)
               echo "::error::/design-coach could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+            servable)
+              echo "::error::/design-coach could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
             *)
               echo "::error::/design-coach could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage); it retries on the next review round. See the failed step logs above." ;;
           esac

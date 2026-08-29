@@ -490,7 +490,12 @@ def test_reason_fine_reproduces_the_coarse_verdict_exactly():
         (401, "invalid x-api-key", "auth", "needs_human"),
         (400, "Your credit balance is too low", "billing", "needs_human"),
         (400, "insufficient funds in your account", "billing", "needs_human"),
+        # Collision: a depleted balance worded with the generic "exhausted" quota
+        # marker must still read as billing (fund it), not quota (raise the cap) —
+        # billing is checked first. Pure quota (no billing marker) stays quota.
+        (400, "credit balance exhausted", "billing", "needs_human"),
         (400, "monthly quota exceeded", "quota", "needs_human"),
+        (400, "weekly limit exhausted", "quota", "needs_human"),
         (400, "rate limit exceeded", "rate-limit", "transient"),
         (404, "model not found", "bad-model-id", "dead"),
         (403, "insufficient permissions to access this model", "bad-model-id", "dead"),

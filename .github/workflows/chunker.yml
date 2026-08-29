@@ -460,6 +460,7 @@ jobs:
           && steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
           && (steps.policy.outputs.provider == 'zai' && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome) || (steps.run_anthropic_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome)) != 'success'
         uses: ./.github/actions/provider-triage
         with:

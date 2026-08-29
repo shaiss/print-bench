@@ -140,10 +140,16 @@ def _reason_fine(status: int, body: str) -> str:
     low = body.lower()
     if any(marker in low for marker in _RATE_LIMIT_MARKERS):
         return "rate-limit"                 # worded rate limit at a non-429 status
-    if any(marker in low for marker in _QUOTA_MARKERS):
-        return "quota"                      # "quota exceeded", weekly limit exhausted
+    # Billing BEFORE quota: a depleted balance ("credit balance exhausted") also
+    # matches the generic "exhausted" quota marker, but it wants funding
+    # remediation, not "raise the cap / wait for reset". Only a message with NO
+    # billing marker — a true "quota exceeded" / "weekly limit exhausted" — falls
+    # through to quota. Both are needs_human, so the coarse verdict is unchanged
+    # either way; the order only decides which remediation the escalation gives.
     if any(marker in low for marker in _BILLING_MARKERS):
         return "billing"                    # "credit balance too low", payment failed
+    if any(marker in low for marker in _QUOTA_MARKERS):
+        return "quota"                      # "quota exceeded", weekly limit exhausted
     # 404 not-found, 403 permission, invalid-model 400, …: the id is the problem.
     return "bad-model-id"
 
