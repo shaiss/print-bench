@@ -67,6 +67,7 @@ jobs:
       ci_gates_tests: ${{ steps.filter.outputs.ci_gates_tests }}
       model_registry_tests: ${{ steps.filter.outputs.model_registry_tests }}
       reeve_tests: ${{ steps.filter.outputs.reeve_tests }}
+      growth_tests: ${{ steps.filter.outputs.growth_tests }}
       styles: ${{ steps.filter.outputs.styles }}
       gate: ${{ steps.filter.outputs.gate }}
       gate_designs: ${{ steps.filter.outputs.gate_designs }}
@@ -664,6 +665,29 @@ jobs:
         run: pip install -e 'tools/reeve[test]'
       - name: Run tests
         run: python -m pytest tools/reeve/tests -q
+
+  growth-tests:
+    name: growth unit tests
+    needs: changes
+    if: needs.changes.outputs.growth_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install growth
+        # Stdlib-only like its reeve sibling — the [test] extra is just
+        # pytest; the scheduled growth-twitter workflow reads the package
+        # straight from the checkout without installing at all.
+        run: pip install -e 'tools/growth[test]'
+      - name: Run tests
+        # Includes test_server_parity.py, which pins the posting server's
+        # self-contained weighted-length copy to growth.tweetlen.
+        run: python -m pytest tools/growth/tests -q
 
   model-registry-tests:
     name: model-registry unit tests
@@ -1598,6 +1622,7 @@ jobs:
       - backlog-groomer-tests
       - model-registry-tests
       - reeve-tests
+      - growth-tests
       - telemetry-tests
       - ci-gates-tests
       - docs-standards

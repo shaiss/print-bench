@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "growth"
+version = "0.1.0"
+description = "Deterministic engine behind print-bench's growth queue and channel agents (policy, tweet-length rule, accelerated dry-run simulator, X poster seam)"
+license = "CC-BY-SA-4.0"
+requires-python = ">=3.10"
+# Stdlib-only on purpose: the scheduled growth-twitter workflow reads the
+# committed policy straight from the checkout (PYTHONPATH=tools/growth/src,
+# no pip step in front of it), and the MCP posting server beside the skill is
+# stdlib for the same reason — the same rule tools/lineage, tools/telemetry,
+# tools/backlog-groomer and tools/reeve keep.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=9.1.1"]
+
+[project.scripts]
+growth = "growth.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

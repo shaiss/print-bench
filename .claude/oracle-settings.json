@@ -110,7 +110,9 @@
       "Bash(./.claude/skills/wright/wright-helper.sh:*)",
       "mcp__assessor",
       "mcp__wright",
-      "mcp__reeve_signoff"
+      "mcp__reeve_signoff",
+      "mcp__growth_queue",
+      "mcp__growth_twitter"
     ]
   }
 }

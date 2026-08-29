@@ -282,6 +282,12 @@ surfaces studies awaiting a read live in
     (`.claude/reeve-signoff-settings.json`) must deny the filing server —
     the proposer can never judge, the judge can never file — while neither
     denies the shared read wrapper `wright-helper.sh` or its own write tool
+  - `growth-perms-check.sh` — the same drift check for the Twitter/X growth
+    agent's own deny backstop (`.claude/growth-twitter-settings.json`, see
+    [docs/growth.md](docs/growth.md)): Lark has no shell wrapper, so EVERY
+    Bash allow must be denied plus every sibling write surface AND the growth
+    desk's own queue-filing server (the poster can never refill the queue it
+    drains), while its one posting tool must never be denied
   - `assessor-context.sh` — the trusted vendor-fetch step behind the
     adoption-study assessor: extracts the study's named GitHub repository and
     shallow-clones it into `.assessor-context/<n>/` (GitHub-only, hooks
@@ -400,6 +406,9 @@ surfaces studies awaiting a read live in
 - `telemetry/` — the committed self-measurement log (`log.ndjson`, one JSON
   record per default-branch gate run, appended by CI) and the report
   generated from it (`REPORT.md`) — never hand-edited
+- `growth/` — the growth desk's committed artifacts: accelerated dry-run
+  timelines of what the channel agents *would have posted* (reviewed before
+  anything is armed live) — see [docs/growth.md](docs/growth.md)
 - `docs/` — repo-level research and reference notes
 - `tools/printcheck/` — STL printability analyzer; scores rendered models
   for watertightness, overhangs, thin walls, and bed adhesion before
@@ -437,6 +446,11 @@ surfaces studies awaiting a read live in
   advisory-only into one sticky report issue — the platform-ops sibling of the
   backlog groomer — see its [README](tools/reeve/README.md) and the platform
   charter [PM.md](PM.md)
+- `tools/growth/` — the deterministic engine behind the growth desk
+  (`docs/growth.md`): the growth-twitter policy parser, the weighted
+  tweet-length rule (URLs = 23), the queue drain-order policy, the
+  accelerated dry-run simulator, and the stdlib-only OAuth 1.0a X poster
+  seam — see its [README](tools/growth/README.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log
   into the report — see its [README](tools/telemetry/README.md)

@@ -417,6 +417,54 @@ if ! python3 .claude/skills/reeve-signoff/signoff_mcp.py --selftest; then
   fail=1
 fi
 
+# Growth deny-backstop drift check: same reasoning as the chunker's family,
+# for the Twitter/X growth agent's own backstop
+# (.claude/growth-twitter-settings.json — docs/growth.md). Lark is
+# oracle-shaped (NO shell wrapper; its one write is the MCP posting tool),
+# so like the Oracle's check the coverage rule has no wrapper exemption:
+# EVERY Bash allow in settings.json must be denied, PLUS every sibling write
+# surface AND the growth desk's own queue-filing server (the poster must
+# never refill the queue it drains) — while never denying
+# mcp__growth_twitter__post_tweet (or the scheduled agent fails closed with
+# no other CI signal, its dry-run comments just silently stopping). The
+# stakes are the highest in the family: this is the one write surface that
+# can eventually reach OUTSIDE the repo.
+echo "-- growth-perms selftest: scripts/growth-perms-check.sh --selftest"
+if ! ./scripts/growth-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- growth-perms check: scripts/growth-perms-check.sh"
+if ! ./scripts/growth-perms-check.sh; then
+  fail=1
+fi
+
+# Growth queue MCP filing tool: the PM-side half of the growth desk's
+# queuing seam (docs/growth.md) — the /growth-queue skill's ONE write, a
+# JSON-argument tool for the same dontAsk-matcher reason as the scout's. Its
+# --selftest proves the invariants a live run cannot show: the labels are
+# hardcoded to growth-queue + channel:<name> and unpassable (queuing can
+# never approve, prioritize, or route), the channel set is closed, the title
+# must carry the 'Growth post:' prefix, and the per-run cap fires.
+echo "-- growth-queue MCP selftest: .claude/skills/growth-queue/queue_mcp.py --selftest"
+if ! python3 .claude/skills/growth-queue/queue_mcp.py --selftest; then
+  fail=1
+fi
+
+# Growth posting MCP tool: Lark's ONE write and the most-guarded surface in
+# the family — the only one that can eventually publish OUTSIDE the repo.
+# Its --selftest proves offline what a live run must never show: dry-run is
+# the default (live needs the human GROWTH_TWITTER_LIVE key AND all four X
+# credentials AND, per policy, the human-applied approved-to-post label),
+# the weighted-length rule refuses over-280 copy (URLs = 23), write-time
+# target re-read (open / growth-queue / channel:twitter / not parked), the
+# one-post-per-item marker guards in both modes, candidate-set binding, the
+# per-run cap, and that a live post closes its drained queue item while a
+# dry run never does.
+echo "-- growth MCP selftest: .claude/skills/growth-twitter/growth_mcp.py --selftest"
+if ! python3 .claude/skills/growth-twitter/growth_mcp.py --selftest; then
+  fail=1
+fi
+
 # Cadence-parity check (issue #276): every scheduled autonomy routine stores
 # its cadence TWICE — the `cadence:` key in .github/<routine>.conf and the
 # `cron:` literal in .github/workflows/<routine>.yml (Actions can't read a
