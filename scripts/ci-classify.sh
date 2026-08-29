@@ -186,8 +186,9 @@ classify() {
       esac
       case "$f" in
         # The model registry (issue #206). auto-review.yml, product-scout.yml
-        # oracle.yml (issue #333) and the four scheduled routines (design-run,
-        # backlog-burn, chunker, labeler — issue #326) are here because the
+        # oracle.yml (issue #333), the four scheduled routines (design-run,
+        # backlog-burn, chunker, labeler — issue #326) and the agent forge's
+        # wright.yml (docs/agent-forge.md) are here because the
         # drift-guard test reads them — a change to any of those workflows' chain
         # wiring must re-run the guard that pins it to
         # .github/models/registry.conf, or a reintroduced hardcoded model literal
@@ -198,6 +199,7 @@ classify() {
         .github/workflows/oracle.yml|\
         .github/workflows/design-run.yml|.github/workflows/backlog-burn.yml|\
         .github/workflows/chunker.yml|.github/workflows/labeler.yml|\
+        .github/workflows/wright.yml|\
         .github/workflows/ci.yml) mrtests=true ;;
       esac
       case "$f" in

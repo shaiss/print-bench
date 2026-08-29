@@ -240,9 +240,13 @@ R_k       = 0.8 * pin_d + hinge_clear + knuckle_wall;  // knuckle outer radius
 y_ax      = wlo + R_k + 0.55;                      // hinge axis y (swing relief)
 z_ax      = R_k;                                   // barrel bottoms rest on bed
 tongue_root = y_ax + 1.9;                          // tongue root edge —
-                                    // clear of the pin's teardrop TAIL,
-                                    // which points DOWN (measured on the
-                                    // export: tail to z_ax-2.0, y_ax+1.5)
+                                    // clear of the hinge bore's y-spread
+                                    // (flank corner 0.51·pin_d + clear ≈
+                                    // y_ax+1.67). Issue #398 flipped the
+                                    // teardrop point DOWN→UP in the lib;
+                                    // the y-spread is mirror-symmetric
+                                    // about the bore axis, so 1.9 clears
+                                    // whichever way the point aims
 plate_root  = y_ax + R_k + 0.4;                    // castellated main-plate root
 hx0       = fx0 + flap_gap;                        // hinge span = flap width
 hx1       = fx1 - flap_gap;

@@ -43,7 +43,9 @@ Each carries an `assert` in the .scad where a number can guard itself.
 - [ ] Both coupons committed and documented ("Print this first" in NOTES)
 - [ ] A stranger can answer *does this fit my pole* from the README alone
 - [ ] Field test: one printed pair holds a real 40 mm rod in a real alcove
-      (NOTES "Field test log" when it happens)
+      — stays open until the **v2 proving print** (the plate, laid out side
+      by side; v1's failure was packaging, so the holder itself is still
+      unproven in the field). NOTES "Field test log" when it happens
 
 ## Product page & shots (art direction)
 
@@ -68,11 +70,16 @@ the one motion the part really performs — seeded from the hero.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | Witness slot / seat detent ("is the rod fully in?") | brief's optional ask; install confidence | small geometry + re-gate |
+| B3 | Ship the shallow collar as a gated part (`engagement_depth=12` in `ci.parts`, exported with the Release) | #1: the deep+shallow install is now the documented trick, and the page has to tell the reader to hand-render the far-side collar with `-D` — the exact foot-gun the deliverable rules exist to stop. (The old item's docs half landed in #379; what remains is shipping the part.) | small: one `ci.parts` row + re-gate |
+| B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints | one print + NOTES entry |
+| B1 | Witness slot / seat detent ("is the rod fully in?") | brief's optional ask; install confidence — plus vibration insurance: ~730 axial curtain-tugs/yr vs single-digit unthreads, and a steep 2-start lead is what walks loose under cyclic load; nothing on the rod resists a slow unthread. Measured by the proving print's week-of-use seat check; a walked collar promotes B1 to #1 | small geometry + re-gate |
 | B2 | Anti-rotation rib (screwless alternative to `screw_count=2`) | protects drywall anchors from spin torque | small geometry + re-gate |
-| B3 | Shallow-socket preset (`engagement_depth` 12 documented as a pair) | the deep+shallow install trick, spelled out | docs only |
-| B4 | PETG/ASA field test in a hot window | the brief's material caveat, unproven | one print + NOTES entry |
-| B5 | Sizes other than 40 (25 mm reference origin) | parameters exist but are untested at other rods | coupon set per size |
+| B5 | Sizes other than 40 (25 mm reference origin) | parameters exist but are untested at other rods — the page now says so outright, so this is the proof, not the disclosure | coupon set per size |
+
+Re-ranked 2026-08-24 per the #379 thread's ruling (Vera's note: the issue
+body's order was two rounds stale — the committed order wins). A "B6" appears
+in early thread drafts but never gained a recoverable definition; it is not
+carried here.
 
 ## Open decisions
 
@@ -90,7 +97,11 @@ All four are the brief's own open questions, non-blocking for modeling.
 | Date | Decision | Reason |
 |---|---|---|
 | 2026-08-23 | Thread major 47.0 = bore + 2·wall (brief said ≈ 50) | brief's "+clearance" read as female-side fit clearance (`thread_tol`, collar OD wall stack); recorded in NOTES D2 and the PR audit |
-| 2026-08-23 | `lead_in` 1.6 mm (4 layers) vs brief's "~1–2" | doubles as the thread phase offset that makes the mate boolean exact (NOTES D3/D4) |
+| 2026-08-23 | `lead_in` 1.6 mm (8 layers at the pinned 0.2 mm height) vs brief's "~1–2" | doubles as the thread phase offset that makes the mate boolean exact (NOTES D3/D4) |
 | 2026-08-23 | One tier-1 hero shot only | utility part; cutaway + contact sheet carry the internals |
 | 2026-08-23 | 2-start thread (lead 8 mm) | ~1¼ turns to full engagement = tool-free both directions (N3) |
 | 2026-08-23 | Withdraw the `workshop-utility` claim, keep the tokens | the pack's required corner-radius/curve-smoothness rules fire on the male thread's tessellated crest (phantom r=1.76/fn≈8 rounding) and no waiver exists; printability wins (CLAUDE.md), amending the pack is the owner's call — NOTES D10 |
+| 2026-08-24 | The deliverable is the multi-object 3MF plate, never one STL of both parts (NOTES D11) | v1's field test printed fused — STL carries no object separation, so a boss+collar export slices as one welded body (#377) |
+| 2026-08-24 | Field test FAILED on packaging, not the holder | the parts were exported stacked/assembled: they fused, and the stack put the extruder over a mid-air discontinuity (spaghetti ~10 layers in) — the geometry never got tested |
+| 2026-08-24 | Correction: the 3MF cures the *fuse*, not the *spaghetti* | two separate objects re-stacked vertically still print the upper over open air; the plate's side-by-side flat layout is the safe way, and stacking is never a space-saving option |
+| 2026-08-24 | v1 → v2 numbering (not v0.2) | the field-test failure forced a second version before any release shipped: v1 = the frozen geometry, v2 = the packaging fix |

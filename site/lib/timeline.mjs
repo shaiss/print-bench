@@ -30,7 +30,7 @@
 // field-test entry names a printer, not a member, so it stays unattributed
 // rather than guessing. An unresolvable or absent handle renders plain.
 
-import { escapeHtml } from "./markdown.mjs";
+import { escapeHtml, inlineExcerpt } from "./markdown.mjs";
 import { identityMark } from "./profile.mjs";
 
 /**
@@ -415,14 +415,14 @@ export function timelineEvents(events, { people = new Map() } = {}) {
       </span>`
         : "";
       const detail = e.detail
-        ? `\n      <p class="timeline-detail muted">${escapeHtml(e.detail)}</p>`
+        ? `\n      <p class="timeline-detail muted">${inlineExcerpt(e.detail)}</p>`
         : "";
       return `    <li class="timeline-event">
       <div class="timeline-meta">
         <span class="timeline-date">${escapeHtml(e.date)}</span>
         <span class="tag tag-plain timeline-source">${escapeHtml(e.sourceTag)}</span>
       </div>
-      <p class="timeline-text">${escapeHtml(e.text)}</p>${detail}
+      <p class="timeline-text">${inlineExcerpt(e.text)}</p>${detail}
       ${who}
     </li>`;
     })

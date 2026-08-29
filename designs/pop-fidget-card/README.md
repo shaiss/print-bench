@@ -20,7 +20,7 @@ a fast Bambu.
 
 ![Easel flap folding out and back on its print-in-place hinge](previews/easel-fold.gif)
 
-*The easel fold in motion — out to its ~100° built-in stop and back; the printed pose is flat (0°).*
+*The easel fold in motion — out to its ~97° built-in stop and back; the printed pose is flat (0°).*
 
 ![Both bubble spinners turning](previews/spinner-flick.gif)
 
@@ -59,14 +59,17 @@ a fast Bambu.
   aligned seam stacks a ridge down the bore that stiffens the spin or the
   fold. If a rotor stays stiff after break-in, also set gap-closing to
   0.1 mm (the 0.2 mm default merges exactly this clearance) and re-check on
-  the coupon
+  the coupon; that 0.1 mm also covers the flap's bottom perimeter, so a
+  stiff first fold benefits too
 - **Orientation:** as modeled, face up
 - **First motion — break it in before you gift it:** spin both rotors and
   push the bead firmly once (this shears the deliberate break-free welds),
   pop the button a few times, fold the easel out to its stop (~76–80° leg
-  angle → the card leans ~12–15° back off vertical). Doing this the night
-  before means the parents receive a working toy, and a mushy button
-  surfaces at your desk, not at the party
+  angle → the card leans ~12–15° back off vertical). **The first fold is
+  firm** — that's the bottom layer's squish, not a fused hinge; fold
+  straight out in the fold plane and it frees. Doing this the night before
+  means the parents receive a working toy, and a mushy button surfaces at
+  your desk, not at the party
 
 A note for gift-givers: this is a keepsake for the grown-ups' shelf. It is
 print-in-place, so nothing detaches by design, but it is **not a teether** —
