@@ -33,10 +33,12 @@ plate_t = 6;
 screw = "M5"; // [M3, M4, M5, M6]
 // Fastener bore inset from the plate ends, X (mm)
 bore_inset_x = 20;
-// Lower bore centre height on the bed (mm)
-bore_z_lo = 10;
-// Upper bore centre height on the bed (mm)
-bore_z_hi = 28;
+// Lower bore centre height on the bed (mm) — keep >= arm_t + socket-head
+// radius or the head fouls the arm face (guarded)
+bore_z_lo = 11;
+// Upper bore centre height on the bed (mm) — keep low enough that the socket
+// head clears the vault ceiling plane (guarded)
+bore_z_hi = 25;
 
 /* [Shelf arm] */
 // Arm depth out from the wall in use; on the bed, length in +Y (mm)
@@ -103,18 +105,17 @@ module vault_brace() {
 }
 
 // 2 x M5 wall-fastener bores, axis along Y (horizontal in the print frame):
-// teardrop profile with the point UP, so the bore roof self-supports. The
-// extra 180-degree flip is load-bearing: teardrop_hole()'s point actually
-// faces -Z (its docstring says +Z; measured on the export — see NOTES.md and
-// issue #398), so unrotated it cuts a round roof with a downward
-// void spike — the exact droop this design exists to avoid. Flipped here, the
-// 45-degree hat is the roof.
+// teardrop profile with the point UP, so the bore roof self-supports.
+// teardrop_hole() aims the point +Z as documented: the lib's sign bug (issue
+// #398 — the point faced -Z) was fixed by #424 and is pinned by printability's
+// own mates gauge, so the old local rotate([180, 0, 0]) workaround is gone —
+// kept, it double-flipped the point back DOWN on the fixed lib (measured on
+// the merged export; see NOTES.md).
 module fastener_bores() {
     for (p = [[bore_inset_x, bore_z_lo],
               [plate_w - bore_inset_x, bore_z_hi]])
         translate([p[0], plate_t / 2, p[1]])
-            rotate([180, 0, 0])
-                teardrop_hole(d = bore_d, l = plate_t + 4);
+            teardrop_hole(d = bore_d, l = plate_t + 4);
 }
 
 module main() {
@@ -128,6 +129,15 @@ module main() {
            "upper bore teardrop apex would breach the vault springing");
     assert(bore_z_lo - bore_d / 2 >= 3,
            "lower bore too close to the bed");
+    // Socket-head envelope (PR #401 review): the bores must place the HEAD,
+    // not just the bore — the head rim must clear the arm face on one side
+    // and the vault ceiling plane on the other. socket_head() already
+    // carries 0.5 mm of diameter clearance.
+    head = socket_head(screw);
+    assert(bore_z_lo - head[0] / 2 >= arm_t,
+           "lower-bore socket head would foul the arm face — raise bore_z_lo");
+    assert(bore_z_hi + head[0] / 2 <= web_in_z - head[1] / tan(vault_deg),
+           "upper-bore socket head would foul the vault ceiling — lower bore_z_hi");
     assert(bore_inset_x - bore_d / 2 >= 3,
            "bores too close to the plate ends for the screw head");
     assert(arm_t >= 4, "arm thinner than 3 perimeters plus infill");

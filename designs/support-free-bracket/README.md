@@ -35,9 +35,14 @@ flat downward-facing surface anywhere. Print it with supports turned **off**.
 
 ## Print settings
 
-- **Material:** any (PLA/PETG both fine — no living flex here)
+- **Material:** PLA for a light or display shelf; **PETG or ASA for a loaded
+  shelf** — the layer planes cross the peel load all year, and PLA creeps
+  under sustained load. PETG note: this is an 80 × 66 mm slab of first layer,
+  and PETG welds to smooth PEI — use a textured plate (or glue-stick release).
 - **Layer height:** 0.2 mm
 - **Infill:** 20–40 %
+- **Seam:** Back — buries the ridge on the wall face (the default Aligned
+  seam stacks it on the shelf's front edge)
 - **Supports:** none — that's the whole point
 - **Orientation:** as modelled — arm flat on the bed. To use, flip the print
   180° so the plate is against the wall and the arm is on top; the shelf board
@@ -53,7 +58,7 @@ flat downward-facing surface anywhere. Print it with supports turned **off**.
 | `plate_t` | 6 mm | plate thickness |
 | `screw` | M5 | fastener size (M3–M6; bores are clearance holes) |
 | `bore_inset_x` | 20 mm | bore inset from the plate ends |
-| `bore_z_lo` / `bore_z_hi` | 10 / 28 mm | bore heights (staggered for pull-out resistance) |
+| `bore_z_lo` / `bore_z_hi` | 11 / 25 mm | bore heights (staggered for pull-out resistance; placed — and guarded — so an M5 socket head clears the arm face and the vault) |
 | `arm_d` | 60 mm | arm depth out from the wall |
 | `arm_t` | 6 mm | arm thickness — the shelf rests on this face |
 | `vault_deg` | 42° | vault ceiling angle from vertical (guarded ≤ 45° — above that it needs supports) |
@@ -64,9 +69,17 @@ Customizer sections; override on the command line with `-D 'arm_d=80'`.
 
 ## Assembly & use
 
-Fasten the plate to wall studs or anchors with two M5 screws (socket heads
-land inside the cavity — no counterbore needed), flip-mounted with the arm on
-top, and rest the shelf board on the arm. Sized as a reference design for a
-~1 kg-per-bracket shelf; scale `plate_w`/`arm_d` for heavier loads and keep
-`vault_deg` at or below 45° — the guard refuses anything steeper because it
-would break the no-supports promise.
+Fasten the plate to wall studs or anchors with two M5 screws, flip-mounted
+with the arm on top, and rest the shelf board on the arm. Socket heads land
+inside the cavity, and the bore heights are placed — and guarded in the
+source — so the head clears the arm face and the vault ceiling; no counterbore
+needed. The vault-side screw is hex-key-only: the vault face closes in about
+10 mm out from the plate at that height, so nothing straight follows the
+head — drive it with the short end of the L-key, and spend the ~$2 on wall
+anchors rated well past the load; they, not the bracket, are the real
+insurance. Sized as a reference design for a ~1 kg-per-bracket shelf — an
+**assumed** figure, with no field test behind it yet, and note a pair rated
+that way spends most of its 2 kg budget on the shelf board itself. Scale
+`plate_w`/`arm_d` for heavier loads and keep `vault_deg` at or below 45° —
+the guard refuses anything steeper because it would break the no-supports
+promise.

@@ -84,3 +84,4 @@ resolved (no rib; the vault brace is the stiffener; derivation in NOTES.md).
 | 2026-08-24 | No rib on the arm (brief left it to modeling) | the vault ties full 80 mm width to the plate; a rib would hang into the cavity and re-open the overhang question |
 | 2026-08-24 | Tier-2 lifestyle scene removed, not regenerated | it depicted the old geometry; CI's lifestyle workflow only fires when a manifest lands on main — re-adding there is the designed path (B1) |
 | 2026-08-24 | Bore positions staggered x=20/z=10 and x=60/z=28 (assumed) | stagger resists pull-out better than a vertical pair; recorded as assumption in NOTES.md |
+| 2026-08-29 | Bores moved z 10/28 → 11/25 (x unchanged); head-envelope guards added | head-envelope clearance (Jane round-2 finding, Drik round-1): M5 socket head fouled the vault at z_hi=28 and kissed the arm at z_lo=10; the reviewed 10→9 lower move was sign-inverted (measured: 9 interferes 25.9 mm³, 11 clears), so 11 landed; stagger survives |

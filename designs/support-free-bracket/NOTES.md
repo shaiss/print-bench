@@ -27,7 +27,7 @@ feature can be designed out.
 | Wall fasteners | 2 × M5, clearance bores | given (brief) |
 | Arm depth × thickness | 60 × 6 mm | given (brief) |
 | Cavity ceiling | vaulted, ≤ 45° from vertical | given (brief); modeled at **42°** — assumed margin |
-| Bore positions | x = 20 / 60 mm, z = 10 / 28 mm (staggered) | assumed (stagger resists pull-out better than a vertical pair) |
+| Bore positions | x = 20 / 60 mm, z = 11 / 25 mm (staggered) | assumed (stagger resists pull-out better than a vertical pair); moved from 10 / 28 in the PR #401 review round for socket-head envelope clearance — see the head-envelope finding below |
 | Reference load | 1 kg per bracket (loaded shelf board between two brackets) | assumed |
 | Style | none | given (brief) |
 
@@ -60,16 +60,20 @@ flip is what moves the arm from the bottom to the top.)
 | Plate/arm bed-contact edges | sharp edge → elephant foot | 45° `bottom_chamfer` (0.8 mm) | `rounded_box()` |
 | Arm-to-plate junction | bottom fillet starts horizontal, curls into an overhang | brace springs off the plate as a sloped plane — no fillet anywhere | `vault_brace()` |
 
-## The teardrop orientation finding (issue #398)
+## The teardrop orientation finding (issue #398 — closed by #424; workaround removed)
 
-`teardrop_hole()`'s docstring says the point faces +Z; measured on the export it
-faces **−Z**. Unrotated, our bores came out with round roofs plus a downward
-void spike — the exact droop this design exists to avoid. The local workaround
-is the `rotate([180, 0, 0])` wrapper in `fastener_bores()`; verified on the
-exported mesh: each bore's surface spans z from −2.75 mm (circle bottom) to
-**+4.4 mm above centre** (the 45° hat's apex, = 0.8·d), i.e. apex **up**.
-The lib fix belongs to its own PR (blast radius: aerochord, nuggs-den,
-print-in-place, printability-demo) — tracked as #398.
+At authoring time `teardrop_hole()`'s docstring said the point faces +Z but the
+export measured it facing **−Z**. Unrotated, our bores came out with round
+roofs plus a downward void spike — the exact droop this design exists to
+avoid — so this branch carried a local `rotate([180, 0, 0])` workaround in
+`fastener_bores()`. Main's **#424** then fixed the lib to the documented +Z
+(pinned by `lib/printability-mates.conf`'s gauge plug), which turned the local
+flip into a **double-flip**: on the merged tree the cutter cut point-down
+again, measured on the export (a probe box inside the would-be +Z apex void
+came back solid; its −Z mirror came back void). The workaround is removed and
+the bores use the lib orientation directly — re-verified on the merged export:
+the apex void sits **+4.4 mm above centre** (0.8·d) and the region below the
+bore is solid, i.e. apex **up**, no downward spike.
 
 ## The printcheck caveat, measured (benign)
 
@@ -104,14 +108,39 @@ test shows tip deflection.
 - upper bore teardrop apex ≤ vault springing − 2 — bores never breach the vault
 - lower bore ≥ 3 mm off the bed; bores ≥ 3 mm from the plate ends (screw heads)
 - `arm_t ≥ 4` — three perimeters plus infill
+- **socket-head envelope** (added in the PR #401 review round — the guard whose
+  absence let the 10/28 bore heights through): the lower head rim clears the
+  arm face (`bore_z_lo − head_d/2 ≥ arm_t`) and the upper head rim clears the
+  vault ceiling plane (`bore_z_hi + head_d/2 ≤ web_in_z − head_h/tan(vault_deg)`),
+  head envelope from `socket_head()` incl. its 0.5 mm diameter clearance
 
 ## Use-frame dimensions
 
 Overall in use: **80 wide × 60 deep × 50 tall** (as printed: 80 × 66 × 50 —
-plate 6 + arm 60 along Y). Bores sit 10 mm and 28 mm below the shelf line,
-heads landing inside the cavity (no counterbore needed for socket heads). The
-cavity opens down and out — ≈ 27 mm deep × 30 mm tall clearance — so nothing
-collects on the vault.
+plate 6 + arm 60 along Y). Bores sit 11 mm and 25 mm below the shelf line,
+heads landing inside the cavity. No counterbore is needed **because the bore
+heights place the head envelope**, not because it was never checked: the
+review round measured a max-spec M5 socket head fouling the arm underside by
+0.25 mm at the old 10 mm bore and the vault ceiling by ~2 mm at the old 28 mm
+bore, so the bores moved to 11 / 25 and the head-envelope guards now refuse
+any placement where the head rim would touch the arm face or the vault plane.
+The cavity opens down and out — ≈ 27 mm deep × 30 mm tall clearance — so
+nothing collects on the vault.
+
+### The head-envelope finding, measured (PR #401 review round)
+
+Both reviewers converged on the defect (the guards covered the teardrop apex
+and the bed, never the hardware): at 10 / 28 an ISO 4762 M5 head (d 8.5, k 5)
+interferes on both bores. The review's sanctioned lower-bore move was
+**10 → 9, which has the sign inverted**: `bore_z_lo` is height on the bed and
+the arm face sits at z = `arm_t` = 6 *below* the bore, so moving down moves
+the head *into* the arm. Measured by intersecting the d 8.5 head envelope
+(y = 6→11) with the exported mesh: z = 9 interferes **25.9 mm³**, z = 10
+interferes 2.4 mm³ (the 0.25 mm kiss), z = 11 is **clear** — so the landed
+move is 10 → **11**, and the new lower-head guard refuses both 9 and 10.
+Upper bore per the sanctioned route: 28 → **25**; the d 8.5 envelope at 25
+measures zero interference against the vault, with the guard holding
+0.95 mm of margin on the preset envelope.
 
 ## Status log
 
@@ -122,6 +151,15 @@ collects on the vault.
   green; preview shots frozen (`previews/cameras.conf`, descriptions in
   `previews/CAMERAS.md`). Found #398 (teardrop sign) and #400 (render.sh
   `--render` argv bug) on the way.
+- 2026-08-29 — PR #401 review round landed: merged main (bringing #424's
+  `teardrop_hole()` +Z fix), removed the local `rotate([180, 0, 0])`
+  workaround it had turned into a double-flip (apex re-verified up on the
+  merged export), moved the bores 10 / 28 → 11 / 25 for socket-head envelope
+  clearance (the lower move corrected from the reviewed 10 → 9, whose sign
+  was inverted — measurements above) and added the two head-envelope guards.
+  README: material line split (PLA vs PETG/ASA + textured-plate note), seam
+  line added, load claim de-rated to "assumed, no field test", L-key/anchor
+  install sentence added, counterbore claim grounded in the guards.
 
 ## Print-orientation reminder for reviewers
 
