@@ -1,6 +1,14 @@
-# Print-in-place fit proof: the collar must be a free captive body clearing the
-# fingers at rest. `fitcheck` renders collar ∩ fixed (base+fingers) and must be
-# EMPTY. `fitcheck_neg` shrinks the collar bore onto the fingers so it MUST
+# Print-in-place fit proof: the plunger must be a free captive body clearing
+# the fixed frame (race walls, bridged rail, arch tip) and both jaws (pin
+# arms, pin posts) at rest. `fitcheck` renders plunger ∩ (frame + jaws) and
+# must be EMPTY. `fitcheck_neg` grows the race walls onto the blade so it MUST
 # overlap, proving the check can fail.
+#
+# `drive_mouth` proves the CAM is connected: the pin's own swept body above
+# the blade's −y edge must be free of plunger material — the notch has to
+# open through that edge or the pin is never driven. A tangent/short notch
+# cuts nothing there while every other gate stays green (found on this very
+# design: watertight, sliced clean, jaws that could not close).
 fitcheck      empty
 fitcheck_neg  interferes
+drive_mouth   empty
