@@ -21,7 +21,8 @@ thickness − 0.5 mm and reprint — the `[over-center]` echo lines print the
 locked band for whatever numbers you set.
 
 **The feel is the tell:** a hard seat into the stop means the locked band
-(vibration-proof — file away); a springy settle means the arch is holding
+(vibration-proof — file away; by geometry, pending the field test); a
+springy settle means the arch is holding
 (fine for a soldering session, not overnight). Mind FR4's tolerance here:
 it commonly runs ±10 % on thickness, and the locked band ends *at* 1.6 mm —
 so a fat-but-nominal 1.6 mm board lands arch-held, not locked. "Sized for
@@ -112,7 +113,7 @@ the lever *into* the stop (vibration cannot release it); thicker stock up to
 center to open.
 
 **Duty:** ~3 kgf of grip (design budget; physical validation still open) —
-glue-ups, soldering, light filing on small bench
+short-session glue-ups, soldering, light filing on small bench
 work: PCBs, thin boards, blanks and shims in the bands above. Not a
 drill-press vise, and not for construction lumber.
 
