@@ -22,8 +22,9 @@ is itself open to ventilated air is one of only three breaks.
 It is the counterpart of the [den](../nuggs-den/README.md), and the opposite
 job: the den is a dead-end **refuge** (too narrow to turn in, does *not* reset
 the run count); this is a **pass-through** wide enough to turn in, which does.
-Put it wherever a run has to double back — along a wall, at the end of a
-shelf-line, in the middle of a loop. The two ports are parallel and 97 mm
+Put it wherever a run has to double back — along a wall, or at the end of a
+shelf-line (closed loops: pending the N2 source read — the family charter has
+only checked the open-run rule). The two ports are parallel and 97 mm
 apart, so the modules mating them leave side by side; that spacing is derived
 (`≥ 2 × port radius`) so two mating modules never collide. The full rule and
 its source live in [`designs/nuggs/PM.md`](../nuggs/PM.md) (N2) and
@@ -111,10 +112,15 @@ welfare geometry fails the render instead of shipping.
    elephant-foot compensation (initial-layer horizontal expansion) to 0.2 mm
    for the coupon and the node.
 2. **Print the node** ports-down, no supports, no brim.
-3. **Fit it** between any two NUGGS faces: push together, twist a quarter turn
-   either way, on both ports.
+3. **Fit it** between any two NUGGS faces: push together and twist a quarter
+   turn either way — **one port at a time**, twisting whichever half is still
+   free in the air (two engaged bayonets 97 mm apart on a rigid body cannot
+   turn together). The same order is the emergency order: twist one, twist
+   t'other.
 4. **Place it** where the run doubles back. The animal enters, climbs the
    ~1 mm step *down* onto the dish, crosses, pivots in the 200 mm-wide bowl,
    and leaves the second port. Bedding will collect in the dish; that is fine —
    it is a pass-through, not a refuge, and the den is the module that wants the
-   bedding.
+   bedding. Clean it hand-wash only, lukewarm (≤ 50 °C), never the dishwasher:
+   heat deforms PLA, and a deformed tube is a *narrowed* tube — the material
+   failure mode is the injury failure mode (family charter N7).
