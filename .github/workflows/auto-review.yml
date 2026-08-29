@@ -325,6 +325,31 @@ jobs:
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /jane-review for PR #${{ github.event.pull_request.number }}"
 
+      # The chain failed on every link. Recover WHY (the ship steps hide their
+      # provider error) and route it: billing / out-of-tokens / bad key escalate
+      # to a human via the decision gate, a bad model id is a registry defect, a
+      # rate limit / outage just retries next round. This job carries the
+      # escalation for the whole review chain (escalate: 'true'); the sibling
+      # reviewer jobs classify-only so a parallel exhaustion can't double-file.
+      - name: Diagnose the exhausted reviewer chain
+        id: triage
+        if: >-
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: review
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the design-review chain (Jane / Drik / PM / coach)
+          escalate: "true"
+
       - name: Every configured provider failed
         if: >-
           (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
@@ -334,8 +359,20 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+        env:
+          CLASS: ${{ steps.triage.outputs.class }}
+          REASON: ${{ steps.triage.outputs.reason }}
         run: |
-          echo "::error::/jane-review failed on every configured provider (Z.AI glm-5.3 → glm-5.2 → glm-5.1 → Anthropic claude-opus-4-8 → claude-sonnet-5 → claude-haiku-4-5). See the failed step logs above."
+          case "$CLASS" in
+            needs-human)
+              echo "::error::/jane-review could not run — the review chain is unusable, cause '${REASON}' (an account/config problem: out of credit, out of tokens, or a bad/missing key). A needs-decision issue has been filed for a human to fund / rotate / configure the key. This is NOT a defect in this PR." ;;
+            dead)
+              echo "::error::/jane-review could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+            servable)
+              echo "::error::/jane-review could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
+            *)
+              echo "::error::/jane-review could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage / transient); it retries on the next review round. See the failed step logs above." ;;
+          esac
           exit 1
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -464,6 +501,28 @@ jobs:
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
 
+      # Classify-only (escalate: 'false'): the Jane review job carries the single
+      # escalation for the shared review chain, so a parallel exhaustion here does
+      # not double-file. The cause still drives this job's own failure message.
+      - name: Diagnose the exhausted reviewer chain
+        id: triage
+        if: >-
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: review
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the design-review chain (Jane / Drik / PM / coach)
+          escalate: "false"
+
       - name: Every configured provider failed
         if: >-
           (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
@@ -473,8 +532,20 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+        env:
+          CLASS: ${{ steps.triage.outputs.class }}
+          REASON: ${{ steps.triage.outputs.reason }}
         run: |
-          echo "::error::/drik-review failed on every configured provider (Z.AI glm-5.3 → glm-5.2 → glm-5.1 → Anthropic claude-opus-4-8 → claude-sonnet-5 → claude-haiku-4-5). See the failed step logs above."
+          case "$CLASS" in
+            needs-human)
+              echo "::error::/drik-review could not run — the review chain is unusable, cause '${REASON}' (out of credit / out of tokens / bad key). The Jane review job escalates this chain to a human (needs-decision). NOT a defect in this PR." ;;
+            dead)
+              echo "::error::/drik-review could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+            servable)
+              echo "::error::/drik-review could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
+            *)
+              echo "::error::/drik-review could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage); it retries on the next review round. See the failed step logs above." ;;
+          esac
           exit 1
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -673,6 +744,28 @@ jobs:
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping the PM triage for PR #${{ github.event.pull_request.number }}"
 
+      # Classify-only (escalate: 'false'): the Jane review job owns the single
+      # escalation for the shared review chain; this reuses the cause for its
+      # own message.
+      - name: Diagnose the exhausted reviewer chain
+        id: triage
+        if: >-
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: review
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the design-review chain (Jane / Drik / PM / coach)
+          escalate: "false"
+
       - name: Every configured provider failed
         if: >-
           (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
@@ -682,8 +775,20 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+        env:
+          CLASS: ${{ steps.triage.outputs.class }}
+          REASON: ${{ steps.triage.outputs.reason }}
         run: |
-          echo "::error::the PM triage failed on every configured provider (Z.AI glm-5.3 → glm-5.2 → glm-5.1 → Anthropic claude-opus-4-8 → claude-sonnet-5 → claude-haiku-4-5). See the failed step logs above."
+          case "$CLASS" in
+            needs-human)
+              echo "::error::the PM triage could not run — the review chain is unusable, cause '${REASON}' (out of credit / out of tokens / bad key). The Jane review job escalates this chain to a human (needs-decision). NOT a defect in this PR." ;;
+            dead)
+              echo "::error::the PM triage could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+            servable)
+              echo "::error::the PM triage could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
+            *)
+              echo "::error::the PM triage could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage); it retries on the next review round. See the failed step logs above." ;;
+          esac
           exit 1
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -830,6 +935,28 @@ jobs:
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
 
+      # Classify-only (escalate: 'false'): the Jane review job owns the single
+      # escalation for the shared review chain; this reuses the cause for its
+      # own message.
+      - name: Diagnose the exhausted reviewer chain
+        id: triage
+        if: >-
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: review
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the design-review chain (Jane / Drik / PM / coach)
+          escalate: "false"
+
       - name: Every configured provider failed
         if: >-
           (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
@@ -839,8 +966,20 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+        env:
+          CLASS: ${{ steps.triage.outputs.class }}
+          REASON: ${{ steps.triage.outputs.reason }}
         run: |
-          echo "::error::/design-coach failed on every configured provider (Z.AI glm-5.3 → glm-5.2 → glm-5.1 → Anthropic claude-opus-4-8 → claude-sonnet-5 → claude-haiku-4-5). See the failed step logs above."
+          case "$CLASS" in
+            needs-human)
+              echo "::error::/design-coach could not run — the review chain is unusable, cause '${REASON}' (out of credit / out of tokens / bad key). The Jane review job escalates this chain to a human (needs-decision). NOT a defect in this PR." ;;
+            dead)
+              echo "::error::/design-coach could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+            servable)
+              echo "::error::/design-coach could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
+            *)
+              echo "::error::/design-coach could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage); it retries on the next review round. See the failed step logs above." ;;
+          esac
           exit 1
 
   # ─────────────────────────────────────────────────────────────────────────────

@@ -129,27 +129,32 @@ def cmd_smoke(args: argparse.Namespace) -> int:
 
 
 def cmd_classify(args: argparse.Namespace) -> int:
-    """`classify <chain>`: diagnose an exhausted chain into one aggregate class.
+    """`classify <chain>`: diagnose an exhausted chain into a class AND a reason.
 
     Where `smoke` answers "is any id a registry defect?" (its exit code), this
     answers "what should be done about a chain that just failed on every link?"
-    — `servable` / `dead` / `needs-human` / `transient` — the finer question the
-    Oracle's HITL escalation branches on (issue #347). It probes each configured
-    link with the same live 1-token request, prints the per-link report and the
-    aggregate to stdout, and — when a sink is available — appends `class=<token>`
-    to $GITHUB_OUTPUT (the same key=value shape `resolve` uses) so a workflow
-    step reads the verdict without a JSON parse. Exit 0 regardless of the class:
-    the class IS the signal, not the exit code (a malformed registry or unknown
-    chain still errors via main()).
+    (issue #347). It emits two signals: the aggregate **class** — the action
+    bucket `servable` / `dead` / `needs-human` / `transient` the HITL escalation
+    branches on — and the finer **reason** behind it, `billing` / `quota` / `auth`
+    / `no-key` / `rate-limit` / `outage` / `bad-model-id` / `served`, so a workflow
+    can tell *out of credit* from *out of tokens* from *bad key* and route the
+    right remediation. It probes each configured link with the same live 1-token
+    request, prints the per-link report plus the REASON/CLASS lines to stdout, and
+    — when a sink is available — appends `class=<token>` and `reason=<token>` to
+    $GITHUB_OUTPUT (the same key=value shape `resolve` uses) so a workflow step
+    reads both without a JSON parse. Exit 0 regardless: the class/reason ARE the
+    signal, not the exit code (a malformed registry or unknown chain still errors
+    via main()).
     """
     reg = _load(args)
-    lines, klass = smoke_mod.classify_chain(reg, args.chain, os.environ)
+    lines, klass, reason = smoke_mod.diagnose_chain(reg, args.chain, os.environ)
     for line in lines:
         print(line)
     gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
     if gh_output:
         with open(gh_output, "a", encoding="utf-8") as fh:
             fh.write(f"class={klass}\n")
+            fh.write(f"reason={reason}\n")
     return 0
 
 
@@ -182,11 +187,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_classify = sub.add_parser(
         "classify",
-        help="diagnose an exhausted chain -> servable/dead/needs-human/transient")
+        help="diagnose an exhausted chain -> class (action) + reason (cause)")
     p_classify.add_argument("chain", help="the chain id to classify")
     p_classify.add_argument(
         "--gh-output",
-        help="path to append `class=<token>` (defaults to $GITHUB_OUTPUT)")
+        help="path to append `class=<token>` and `reason=<token>` (defaults to $GITHUB_OUTPUT)")
     p_classify.set_defaults(func=cmd_classify)
 
     return parser
