@@ -16,11 +16,12 @@ part of the print:
 
 ![The gripper with a Ø 25 mm prop rod lying in the trough between the jaws](previews/loaded.png)
 
-The same pose end-on down the trough: the rod's cross-section seated between
-the two pad faces, with the open pose's 4 mm running daylight visible on each
-side:
+The same pose end-on down the trough: the rod's cross-section as a circle
+seated between the two pad faces, with the trough wall rising behind it. (The
+running daylight between rod and pads is the 3/4 view's job — see the shot
+above.)
 
-![End view down the trough — the rod's cross-section as a circle between the two pad faces, per-side daylight visible](previews/loaded-end.png)
+![End view down the trough — the rod's cross-section as a circle between the two pad faces, the trough wall rising behind it](previews/loaded-end.png)
 
 ![3/4 view of the flat monolithic mechanism](previews/hero3q.png)
 
@@ -84,10 +85,11 @@ into the valley on the plunger wing and holds the clamped state:
   ridge somewhere on the blade's long sliding flanks). The two knob names are
   PrusaSlicer's — translate for your slicer.
 - **Cooling:** keep part cooling up — PETG sags on bridges where PLA doesn't,
-  and the part has two deliberate bridges (the race rail's underside, the wing
-  table); a saggy rail underside is what closes the plunger's roof gap. But
+  and the part has three deliberate bridges (the race rail's underside, the wing
+  table, the arch beam over its shelf — the longest span on the part); a saggy
+  rail underside is what closes the plunger's roof gap. But
   don't raise the global part fan for the bridges — leave the stock
-  overhang/bridge auto-cooling on; it cools the two bridges where they need
+  overhang/bridge auto-cooling on; it cools the three bridges where they need
   it and keeps the flexures tough
 - **Plate:** textured PEI prints it clean; brim only if the long corners lift
 - **Orientation:** as modelled, **flat on the bed** — the whole mechanism is one
@@ -95,8 +97,9 @@ into the valley on the plunger wing and holds the clamped state:
   in-layer bending and hangs the moving parts over air
 - **First use:** work the tab once through its full stroke to free the race,
   then push it again and feel the detent click. Grit or crunch on the first
-  stroke → check the two bridge undersides (the rail over the race, the wing
-  table over the leaves) for PETG drool before changing any tolerance. Open,
+  stroke → that's bridge drool in one of the roof gaps (you can't see them from
+  outside the part — the crunch is the test). Check cooling first; still crunchy
+  → z_layers=3 + base_t=9 per the ladder below. Open,
   the plunger floats on its clearances and may tick faintly when jostled;
   clamped, it is preload-quiet — the sound story, not a defect.
 - **The scoot:** pushing the plunger is ~20× what the part's own weight
@@ -162,6 +165,9 @@ rail** → that is a Z problem, not XY (the roof gap closed — PETG bridge sag 
 the usual culprit; check cooling first): raise `z_layers` to 3, and `base_t`
 to 9 with it — the wing table lives in the band the bigger gap eats, and the
 file's guard walks you through it — at the cost of 0.2 mm of captive height.
-Detent won't hold → do **not** steepen `hold_ang`; raise `seat_u` (deeper
-preload) or thin the leaves — the file's guards will tell you which way the
-force balance still closes.
+Solid tab, **no click at all** → the corridor roof gap under the arch welded
+(the same Z problem as the rail — PETG bridge sag): raise `z_layers` to 3 and
+`base_t` to 9, and try that **before** `seat_u` or thinner leaves. Detent won't
+hold (but the tab still clicks) → do **not** steepen `hold_ang`; raise `seat_u`
+(deeper preload) or thin the leaves — the file's guards will tell you which way
+the force balance still closes.
