@@ -29,6 +29,7 @@
 #   ZAI_KEY=... ./scripts/lifestyle-shot.sh <design>
 #   ZAI_KEY=... ./scripts/lifestyle-shot.sh --kind product-still <design>
 #   ./scripts/lifestyle-shot.sh <design> --mock   # offline placeholder, no API
+#   ./scripts/lifestyle-shot.sh --selftest        # live parse branch vs a localhost stub (issue #418)
 #
 # Reads designs/<design>/<kind-manifest>. Each line is "<shot> | <prompt>" or
 # "<shot> | seed=<ref> | <prompt>": the seed names the committed render
@@ -43,154 +44,288 @@ cd "$(dirname "$0")/.."
 # shellcheck source=scripts/preview-budget.sh
 . scripts/preview-budget.sh          # MAX_SHOT_BYTES
 
-# --- --selftest: test the live parse branch with a stub endpoint ----------
+# --- --selftest: drive the live parse branch against a localhost stub -------
+# Issue #418. The live-path response parse below assigns 'resp_kind'; it once
+# assigned to 'kind', clobbering the --kind global on the live path (--mock
+# returns before the parse, so mock testing never saw it): product-still
+# embeds got lifestyle alt text, and the per-kind seed guard stopped firing
+# after the first shot of a multi-shot run. This selftest proves that class
+# of regression cannot silently return. It copies THIS script into a
+# throwaway repo root with a fixture design, points ZAI_ENDPOINT at a local
+# HTTP stub answering canned GLM-Image JSON, and runs the real script over a
+# real two-shot product-still manifest — no real ZAI_KEY, no network beyond
+# 127.0.0.1 — asserting the produced alt text and the second-shot seed-guard
+# refusal. The stub answers with the 'b64' response kind on purpose: a stub
+# 'url' pointing at localhost would be refused by the SSRF guard, by design.
+# Then the mandatory negative control: a second copy with the resp_kind
+# rename reverted (sed) must FLIP both assertions, proving the selftest can
+# still fail when the clobber returns.
+st_cleanup() {
+  if [[ -n "${ST_STUB_PID:-}" ]]; then
+    kill "$ST_STUB_PID" 2>/dev/null || true
+    wait "$ST_STUB_PID" 2>/dev/null || true
+  fi
+  if [[ -n "${ST_TMP:-}" ]]; then
+    rm -rf "$ST_TMP"
+  fi
+}
+
 selftest_fn() {
-  local fails=0 tmp
+  local st_fails=0 st_root st_port st_path st_script st_reverted st_readme
+  local st_previews rc cmd
 
-  # Helper: create a minimal valid base64 string for testing
-  # Use a simple 1x1 red pixel PNG, properly encoded as base64
-  create_test_image_b64() {
-    # A minimal valid PNG (1x1 red pixel) as base64
-    # This is a known valid base64 encoding of a 1x1 red PNG
-    echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
-  }
-
-  echo "lifestyle-shot.sh selftest: testing live parse branch"
-
-  # Test 1: Happy path with b64 response (no network, no ZAI_KEY)
-  echo "Testing b64 parse..."
-  parsed_output=$(
-    echo '{"data":[{"b64_json":"'"$(create_test_image_b64)"'"}]}' | \
-    python3 -c '
-import json, sys
-try:
-  obj = json.loads(sys.stdin.read())
-  item = obj["data"][0]
-  if item.get("b64_json"):
-    print("b64\t" + item["b64_json"])
-  else:
-    raise KeyError("No b64_json")
-except Exception as e:
-  sys.stderr.write(str(e) + "\n")
-  sys.exit(1)
-'
-  )
-
-  if [[ $? -ne 0 ]]; then
-    echo "FAIL [b64-parse]: Parse failed" >&2
-    fails=$((fails + 1))
-  elif [[ ! "$parsed_output" =~ ^b64$'\t' ]]; then
-    echo "FAIL [b64-parse]: Unexpected parse output format" >&2
-    fails=$((fails + 1))
-  else
-    echo "ok   [b64-parse]"
-  fi
-
-  # Test 2: Verify resp_kind rename (the core bug fix)
-  echo "Testing resp_kind variable isolation..."
-  (
-    # Simulate the OLD buggy behavior where 'kind' was reused for parse
-    kind="product-still"  # The global --kind value
-    kind="b64"            # This would clobber the global!
-
-    if [[ "$kind" == "product-still" ]]; then
-      echo "FAIL: kind was not clobbered (test setup error)" >&2
-      exit 1
+  # External commands the live path needs: python3 + curl (the request) and
+  # file (the mime pin). ImageMagick is optional — see the shim below.
+  for cmd in python3 curl file; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "lifestyle-shot.sh selftest: required command '$cmd' not found" >&2
+      return 1
     fi
-  )
+  done
 
-  if [[ $? -eq 0 ]]; then
-    echo "ok   [kind-clobber-demonstrated]"
-  else
-    echo "FAIL [kind-clobber-demonstrated]" >&2
-    fails=$((fails + 1))
-  fi
+  ST_TMP="$(mktemp -d)"
+  trap st_cleanup EXIT
 
-  # Test 3: Malformed response fails loudly
-  echo "Testing malformed response handling..."
-  if echo "{not valid json}" | python3 -c '
-import json, sys
-try:
-  obj = json.loads(sys.stdin.read())
-  sys.exit(0)
-except Exception as e:
-  sys.stderr.write("non-JSON response\n")
-  sys.exit(1)
-' 2>&1 >/dev/null; then
-    echo "FAIL [malformed-fails-loudly]: Should have failed" >&2
-    fails=$((fails + 1))
-  else
-    echo "ok   [malformed-fails-loudly]"
-  fi
+  # Throwaway repo root: the script cds to its parent-of-dirname and resolves
+  # everything relative to it, so a copy under $ST_TMP/root operates entirely
+  # on fixture files and can never touch the real tree.
+  st_root="$ST_TMP/root"
+  st_script="$st_root/scripts/lifestyle-shot.sh"
+  st_readme="$st_root/designs/selftest-fixture/README.md"
+  st_previews="$st_root/designs/selftest-fixture/previews"
+  mkdir -p "$st_root/scripts"
+  cp "$0" "$st_script"
+  chmod +x "$st_script"
+  cp scripts/preview-budget.sh "$st_root/scripts/preview-budget.sh"
 
-  # Test 4: Verify the fix by checking that resp_kind exists in the code
-  echo "Verifying resp_kind variable is used..."
-  if grep -q "resp_kind=" "$0"; then
-    echo "ok   [resp_kind-exists]"
-  else
-    echo "FAIL [resp_kind-exists]: resp_kind variable not found" >&2
-    fails=$((fails + 1))
-  fi
+  # A 1x1 PNG: small enough to keep the stubbed request/response tiny, real
+  # enough that file(1) types the decoded payload image/png. It is both the
+  # fixture's geometry-true seed render and the stub's generated image.
+  python3 - "$ST_TMP/tiny.png" <<'PY'
+import base64, sys
+PNG_B64 = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+           "AAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==")
+open(sys.argv[1], "wb").write(base64.b64decode(PNG_B64))
+PY
 
-  # Test 5: Verify that 'kind' is NOT used for parse response (no regression)
-  echo "Verifying parse does not reuse 'kind' variable..."
-  # The parse code should use 'resp_kind', not clobber 'kind'
-  if grep -q "resp_kind=" "$0"; then
-    echo "ok   [resp_kind-used-for-parse]"
-  else
-    echo "FAIL [resp-kind-used]: resp_kind not used for parse" >&2
-    fails=$((fails + 1))
-  fi
+  # The stub GLM-Image endpoint: one server, response selected by path.
+  #   /b64        the happy shape {"data":[{"b64_json":<png>}]}
+  #   /malformed  not JSON at all — the parse must fail loudly
+  #   /empty-item valid JSON, wrong shape — the parse must fail loudly too
+  cat >"$ST_TMP/stub.py" <<'PY'
+import base64, http.server, json, sys
 
-  # Test 6: Verify that the bug would cause failures (regression guard)
-  # This test demonstrates that if we reverted to using 'kind' for the parse,
-  # the global --kind value would be clobbered, causing downstream failures.
-  echo "Testing that reverting resp_kind would cause failures..."
-  (
-    # Simulate the scenario: a multi-shot run with --kind product-still
-    kind="product-still"  # Global --kind value
+with open(sys.argv[1], "rb") as fh:
+    B64 = base64.b64encode(fh.read()).decode("ascii")
 
-    # Simulate the OLD buggy parse that reused 'kind'
-    # This is what lines 376-377 USED to do before the fix:
-    # kind="${parsed%%$'\t'*}"  # This would clobber the global!
-    kind="b64"  # Simulating the clobber
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"   # answer curl's Expect: 100-continue
 
-    # After the parse, 'kind' is now "b64", not "product-still"
-    # This would break:
-    # 1. The README embed alt text (would show "lifestyle scene" instead of "product still")
-    # 2. The per-kind seed guard (would not fire correctly on subsequent shots)
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.path == "/b64":
+            body = json.dumps({"data": [{"b64_json": B64}]}).encode("ascii")
+        elif self.path == "/malformed":
+            body = b"this is not json {"
+        else:
+            body = json.dumps({"data": [{}]}).encode("ascii")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-    if [[ "$kind" == "product-still" ]]; then
-      echo "FAIL: Bug simulation did not clobber kind" >&2
-      exit 1
+    def log_message(self, *args):   # keep the selftest output clean
+        pass
+
+srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+print(srv.server_address[1], flush=True)
+srv.serve_forever()
+PY
+  python3 "$ST_TMP/stub.py" "$ST_TMP/tiny.png" \
+    >"$ST_TMP/stub.port" 2>"$ST_TMP/stub.log" &
+  ST_STUB_PID=$!
+  for _ in $(seq 1 100); do
+    if [[ -s "$ST_TMP/stub.port" ]]; then break; fi
+    if ! kill -0 "$ST_STUB_PID" 2>/dev/null; then
+      echo "lifestyle-shot.sh selftest: stub server died at startup:" >&2
+      cat "$ST_TMP/stub.log" >&2
+      return 1
     fi
-
-    # Demonstrate the consequence: alt text would be wrong
-    if [[ "$kind" == "product-still" ]]; then
-      correct_alt="AI-styled scene: bare-part product still"
-    else
-      wrong_alt="AI-styled scene: staged in a real-world setting"
-    fi
-
-    # With the bug, we'd get the wrong alt text
-    if [[ "$kind" != "product-still" ]]; then
-      echo "PASS: Bug demonstration confirms clobber causes wrong alt text"
-      exit 0
-    fi
-  )
-
-  if [[ $? -eq 0 ]]; then
-    echo "ok   [revert-would-fail]"
-  else
-    echo "FAIL [revert-would-fail]: Could not demonstrate bug" >&2
-    fails=$((fails + 1))
-  fi
-
-  if [[ $fails -ne 0 ]]; then
-    echo "lifestyle-shot.sh selftest: $fails test(s) failed" >&2
+    sleep 0.1
+  done
+  if [[ ! -s "$ST_TMP/stub.port" ]]; then
+    echo "lifestyle-shot.sh selftest: stub server never reported its port" >&2
     return 1
   fi
-  echo "lifestyle-shot.sh selftest: all tests passed"
+  st_port="$(head -n1 "$ST_TMP/stub.port")"
+
+  # CI's scad-check job (which runs check.sh) installs no ImageMagick. The
+  # code under test — the response parse, the per-kind seed guard, the README
+  # embed — never calls convert; only the post-decode normalize and the
+  # budget fit do. So when convert is absent, a byte-copying shim stands in
+  # for those two call sites and the selftest still drives the real parse;
+  # locally (session-start.sh installs imagemagick) the real convert runs.
+  st_path="$PATH"
+  if ! command -v convert >/dev/null 2>&1; then
+    mkdir -p "$st_root/bin"
+    cat >"$st_root/bin/convert" <<'SHIM'
+#!/usr/bin/env bash
+# lifestyle-shot selftest shim: 'convert <src> [flags...] <out>' copies bytes.
+set -eu
+src="${1#*:}"        # drop a coder prefix like png:
+out="${@: -1}"       # the output path is always the last argument
+cp -- "$src" "$out"
+SHIM
+    chmod +x "$st_root/bin/convert"
+    st_path="$st_root/bin:$PATH"
+    echo "note: ImageMagick absent — using a byte-copy convert shim for the sandboxed runs"
+  fi
+
+  st_ok()   { echo "ok   [$1]"; }
+  st_fail() { echo "FAIL [$1]: $2" >&2; st_fails=$((st_fails + 1)); }
+
+  # (Re)create the fixture design from scratch — each test starts clean so an
+  # earlier run's generated previews and README embeds can't mask a result.
+  st_reset_fixture() {
+    rm -rf "$st_root/designs/selftest-fixture"
+    mkdir -p "$st_previews"
+    cp "$ST_TMP/tiny.png" "$st_previews/hero.png"
+    cat >"$st_readme" <<'EOF'
+# selftest-fixture
+
+Throwaway fixture design for the lifestyle-shot selftest — never committed.
+
+![Studio render of the fixture part](previews/hero.png)
+
+*The geometry-true studio render.*
+EOF
+  }
+
+  st_write_conf() {   # one manifest line per argument
+    local line
+    : >"$st_root/designs/selftest-fixture/product-still.conf"
+    for line in "$@"; do
+      printf '%s\n' "$line" >>"$st_root/designs/selftest-fixture/product-still.conf"
+    done
+  }
+
+  st_run() {   # $1 = script copy to run, $2 = stub endpoint path
+    local run_rc=0
+    NO_PROXY="127.0.0.1,localhost" no_proxy="127.0.0.1,localhost" \
+    PATH="$st_path" ZAI_KEY="selftest-dummy-key" \
+    ZAI_ENDPOINT="http://127.0.0.1:${st_port}$2" \
+      "$1" --kind product-still selftest-fixture \
+      >"$ST_TMP/run.out" 2>"$ST_TMP/run.err" || run_rc=$?
+    return "$run_rc"
+  }
+
+  # -- 1. Two-shot live run: the --kind global must survive the parse, so
+  #       both README embeds carry product-still (never lifestyle) alt text.
+  echo "-- [live-alt-text] two-shot product-still run through the stub"
+  st_reset_fixture
+  st_write_conf \
+    "alpha | seed=hero | selftest prompt: bare part on white" \
+    "beta  | seed=hero | selftest prompt: bare part on gray"
+  rc=0; st_run "$st_script" /b64 || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    sed 's/^/    /' "$ST_TMP/run.err" >&2
+    st_fail live-alt-text "live-path run exited ${rc} (stderr above)"
+  elif [[ ! -f "$st_previews/product-still-alpha.png" || ! -f "$st_previews/product-still-beta.png" ]]; then
+    st_fail live-alt-text "expected both product-still PNGs to be written"
+  elif [[ "$(grep -c 'bare-part product still' "$st_readme")" != 2 ]] || \
+       grep -q 'staged in a real-world setting' "$st_readme"; then
+    st_fail live-alt-text "--kind global did not survive the parse: embeds lack product-still alt text"
+  else
+    st_ok live-alt-text
+  fi
+
+  # -- 2. The per-kind seed guard must still fire on the SECOND shot of a
+  #       multi-shot run — exactly what the old clobber disarmed (after shot
+  #       one, previews/product-still-alpha.png exists, so only the guard
+  #       stands between the manifest and an AI-seeded product still).
+  echo "-- [seed-guard-2nd-shot] guard must refuse an AI seed on shot two"
+  st_reset_fixture
+  st_write_conf \
+    "alpha | seed=hero | selftest prompt: bare part on white" \
+    "beta  | seed=product-still-alpha | selftest prompt: seeded from an AI still"
+  rc=0; st_run "$st_script" /b64 || rc=$?
+  if [[ $rc -eq 0 ]]; then
+    st_fail seed-guard-2nd-shot "run succeeded; the per-kind seed guard did not fire"
+  elif ! grep -q 'must seed from a geometry-true tier-1 render' "$ST_TMP/run.err"; then
+    sed 's/^/    /' "$ST_TMP/run.err" >&2
+    st_fail seed-guard-2nd-shot "run failed for a different reason (stderr above)"
+  elif [[ -f "$st_previews/product-still-beta.png" ]]; then
+    st_fail seed-guard-2nd-shot "second shot was generated despite the guard"
+  else
+    st_ok seed-guard-2nd-shot
+  fi
+
+  # -- 3. A non-JSON response must fail the run loudly.
+  echo "-- [malformed-fails-loudly] non-JSON response must fail the run"
+  st_reset_fixture
+  st_write_conf "alpha | seed=hero | selftest prompt: bare part"
+  rc=0; st_run "$st_script" /malformed || rc=$?
+  if [[ $rc -eq 0 ]]; then
+    st_fail malformed-fails-loudly "run succeeded on a non-JSON response"
+  elif ! grep -q 'non-JSON GLM-Image response' "$ST_TMP/run.err"; then
+    sed 's/^/    /' "$ST_TMP/run.err" >&2
+    st_fail malformed-fails-loudly "run failed for a different reason (stderr above)"
+  else
+    st_ok malformed-fails-loudly
+  fi
+
+  # -- 4. Valid JSON of the wrong shape must fail loudly too.
+  echo "-- [wrong-shape-fails-loudly] JSON without url/b64_json must fail"
+  st_reset_fixture
+  st_write_conf "alpha | seed=hero | selftest prompt: bare part"
+  rc=0; st_run "$st_script" /empty-item || rc=$?
+  if [[ $rc -eq 0 ]]; then
+    st_fail wrong-shape-fails-loudly "run succeeded on a shapeless response"
+  elif ! grep -q 'unexpected GLM-Image response shape' "$ST_TMP/run.err"; then
+    sed 's/^/    /' "$ST_TMP/run.err" >&2
+    st_fail wrong-shape-fails-loudly "run failed for a different reason (stderr above)"
+  else
+    st_ok wrong-shape-fails-loudly
+  fi
+
+  # -- 5/6. NEGATIVE CONTROLS: revert the resp_kind rename in a copy (the
+  #         exact regression #418 guards against) and require checks 1 and 2
+  #         to flip. If either sabotaged run still behaves correctly, this
+  #         selftest has lost the ability to catch the clobber — fail loudly.
+  echo "-- [negative-control] reverting the resp_kind rename must flip 1 and 2"
+  st_reverted="$st_root/scripts/lifestyle-shot-reverted.sh"
+  sed 's/resp_kind/kind/g' "$st_script" >"$st_reverted"
+  chmod +x "$st_reverted"
+
+  st_reset_fixture
+  st_write_conf \
+    "alpha | seed=hero | selftest prompt: bare part on white" \
+    "beta  | seed=hero | selftest prompt: bare part on gray"
+  rc=0; st_run "$st_reverted" /b64 || rc=$?
+  if [[ $rc -eq 0 ]] && grep -q 'staged in a real-world setting' "$st_readme" && \
+     ! grep -q 'bare-part product still' "$st_readme"; then
+    st_ok negative-control-alt-text
+  else
+    st_fail negative-control-alt-text "reverting resp_kind no longer corrupts the alt text — [live-alt-text] could not catch the clobber"
+  fi
+
+  st_reset_fixture
+  st_write_conf \
+    "alpha | seed=hero | selftest prompt: bare part on white" \
+    "beta  | seed=product-still-alpha | selftest prompt: seeded from an AI still"
+  rc=0; st_run "$st_reverted" /b64 || rc=$?
+  if [[ $rc -eq 0 && -f "$st_previews/product-still-beta.png" ]]; then
+    st_ok negative-control-seed-guard
+  else
+    st_fail negative-control-seed-guard "reverting resp_kind no longer disarms the seed guard — [seed-guard-2nd-shot] could not catch the clobber"
+  fi
+
+  if [[ $st_fails -ne 0 ]]; then
+    echo "lifestyle-shot.sh selftest: ${st_fails} check(s) FAILED" >&2
+    return 1
+  fi
+  echo "lifestyle-shot.sh selftest: all checks passed (live parse, seed guard, fail-loud, negative controls)"
   return 0
 }
 
