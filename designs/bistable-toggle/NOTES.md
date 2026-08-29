@@ -173,7 +173,7 @@ controls.
 | 4 | coupon 92/100: thin-wall 0.07 mm — period glyph dips ~0.28 below the baseline | label baseline offset 0.35 → 1.1 above the bar edge |
 | 5 | coupon thin-wall 0.04 mm — period kerns tight against the next digit | `spacing = 1.5` on the label `text()` |
 | 6 | green — production 100/100, coupon 100/100 (4 shells = 4 cells, intentional), both fitchecks ok | — |
-| 7 | review rounds 2–4 (PR #406): nub caged on all four sides — no reachable push face, a dead button, inherited by every coupon cell | mirrored push stems through lid/base windows, in the modules (`nub_2d`/`frame_2d`); stops relocated to the jambs; sweep grown to the stem column; coupon label right-aligned clear of the base window; green — 100/100 both parts, fitcheck empty, fitcheck_neg 168 facets |
+| 7 | review rounds 2–4 (PR #406): nub caged on all four sides — no reachable push face, a dead button, inherited by every coupon cell | mirrored push stems through lid/base windows, in the modules (`nub_2d`/`frame_2d`); stops relocated to the jambs; sweep grown to the stem column; coupon label right-aligned clear of the base window; green — production 100/100, coupon 92/100 on CI (four cells read as disconnected bodies, intentional), fitcheck empty, fitcheck_neg 168 facets |
 
 Also caught: coupon cells "3.0"/"2.0" cut loose the 0-glyph's enclosed counter
 as two 17 mm³ floating chips (6 shells). Labels now carry no "0". Scores

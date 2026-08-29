@@ -36,7 +36,7 @@ or sealing — cut in round 1); relaxing t below 0.8 via `--min-wall`.
 
 ## v1 — definition of done
 
-- [x] Gate green: production + coupon 100/100, test-slices, fitchecks
+- [x] Gate green: production 100/100; coupon 92/100 on CI (its four separate cells read as disconnected bodies — the intentional design), test-slices, fitchecks
       (empty + biting negative control).
 - [x] Coupon sweeps the bistability threshold with negative controls.
 - [x] A finger can switch it: one motion of one finger, in both stable

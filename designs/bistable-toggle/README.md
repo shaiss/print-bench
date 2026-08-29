@@ -40,11 +40,16 @@ the part's broad top face does nothing: that is the ~50× stiffer out-of-plane
 axis, and no push face lives there.)
 
 **Fixing & which way up:** there are no fastener holes by design — the frame is
-the ground, so fix the part by its base bar and end posts (superglue or VHB
-tape on the flat faces, or a printed pocket gripping the 6 mm frame), leaving
-both stem windows and the proud stem travel clear. Either face may be "up": the
-mechanism is symmetric through its plane — mount it so the stem you'll press
-most often faces the operator.
+the ground, so fix the part by its **end-post faces only**. Never bond the base
+bar's or lid's outer face flush: the hidden stem crosses that plane by 3.5 mm
+on every snap, so glue or tape there sits innocently flush and bricks the
+switch on the first press (if you must mount by that face, relieve ≥ 3.5 mm
+behind the window zone). A printed pocket should grip the **end posts** — a
+full-length slot on the 6 mm frame clamps the arch and stems solid, since
+everything on this part is the same 6 mm thick. Loose on a desk, the 6 g part
+skates under its own 3 N button — pinch the end posts or fix it first. Either
+face may be "up": the mechanism is symmetric through its plane — mount it so
+the stem you'll press most often faces the operator.
 
 ![Coupon strip: four cells, bistability dying left to right](previews/coupon.png)
 
