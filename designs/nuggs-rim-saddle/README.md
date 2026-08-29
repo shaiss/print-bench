@@ -8,8 +8,8 @@ the way it starts from a plywood bulkhead. The whole module is one straight
 80 mm-bore tube inclined 15° down into the enclosure: the port couples on the
 outside, and the internal ramp *is* the bore's invert — one smooth arc down,
 the same arc back up, no step anywhere (the welfare rule: an animal walks out
-the surface it walked in). The 80 mm bore takes a pouch-full adult with room to
-turn around. Default dimensions fit the IKEA Detolf (43 × 39 ×
+the surface it walked in). The 80 mm bore passes a pouch-full adult with
+clearance to spare. Default dimensions fit the IKEA Detolf (43 × 39 ×
 163 cm); every rim number is a parameter, so a different cabinet is a `-D`
 override plus a coupon print.
 
