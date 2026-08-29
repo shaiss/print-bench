@@ -110,6 +110,8 @@ REQUIRED_DENIES = {
     "Bash(./.claude/skills/label-issues/label-helper.sh:*)",
     "Bash(.claude/skills/product-scout/scout-helper.sh:*)",
     "Bash(./.claude/skills/product-scout/scout-helper.sh:*)",
+    "Bash(.claude/skills/wright/wright-helper.sh:*)",
+    "Bash(./.claude/skills/wright/wright-helper.sh:*)",
     "Write", "Edit", "NotebookEdit",
 }
 missing_required = sorted(REQUIRED_DENIES - deny_set)
@@ -164,7 +166,7 @@ selftest() {
 {"permissions":{"allow":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)"]}}
 EOF
   cat > "$tmp/good-assessor.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-assessor.json" 2>/dev/null; then
     echo "ok    selftest: complete deny coverage passes"
@@ -218,7 +220,7 @@ EOF
 {"permissions":{"allow":["Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)"]}}
 EOF
   cat > "$tmp/bad4-assessor.json" <<'EOF'
-{"permissions":{"deny":["Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/bad4-settings.json" "$tmp/bad4-assessor.json" 2>/dev/null; then
     echo "FAIL  selftest: a dropped required sibling-wrapper deny was NOT caught"; return 1

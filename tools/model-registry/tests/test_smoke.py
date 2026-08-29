@@ -469,3 +469,163 @@ def test_cli_classify_writes_class_to_gh_output(tmp_path, capsys, monkeypatch):
     assert main(["--path", str(p), "classify", "review", "--gh-output", str(gh)]) == 0
     assert "class=needs-human\n" in gh.read_text(encoding="utf-8")
     assert "CLASS review: needs-human" in capsys.readouterr().out
+
+
+# ── diagnose_chain: the finer CAUSE behind the action bucket (billing / quota /
+# auth / rate-limit / outage / bad id) — so a message can route the right fix
+# instead of the undifferentiated "needs-human". A positive case per reason, the
+# reason↔class consistency, and that the split preserves the coarse verdict.
+
+def test_reason_fine_reproduces_the_coarse_verdict_exactly():
+    # The load-bearing invariant of the split: _classify_fine is DERIVED from
+    # _reason_fine via _REASON_TO_FINE, so every reason maps to the same coarse
+    # verdict the smoke gate always exited on. If a reason is ever mapped to the
+    # wrong bucket, this fails before any workflow can act on a wrong route.
+    cases = [
+        (200, "{}", "served", "ok"),
+        (429, "slow down", "rate-limit", "transient"),
+        (408, "timeout", "outage", "transient"),
+        (503, "down", "outage", "transient"),
+        (520, "cf", "outage", "transient"),
+        (401, "invalid x-api-key", "auth", "needs_human"),
+        (400, "Your credit balance is too low", "billing", "needs_human"),
+        (400, "insufficient funds in your account", "billing", "needs_human"),
+        # Collision: a depleted balance worded with the generic "exhausted" quota
+        # marker must still read as billing (fund it), not quota (raise the cap) —
+        # billing is checked first. Pure quota (no billing marker) stays quota.
+        (400, "credit balance exhausted", "billing", "needs_human"),
+        (400, "monthly quota exceeded", "quota", "needs_human"),
+        (400, "weekly limit exhausted", "quota", "needs_human"),
+        (400, "rate limit exceeded", "rate-limit", "transient"),
+        (404, "model not found", "bad-model-id", "dead"),
+        (403, "insufficient permissions to access this model", "bad-model-id", "dead"),
+        (400, "invalid model id: nope", "bad-model-id", "dead"),
+    ]
+    for status, body, want_reason, want_fine in cases:
+        assert smoke._reason_fine(status, body) == want_reason, (status, body)
+        assert smoke._REASON_TO_FINE[want_reason] == want_fine
+        assert smoke._classify_fine(status, body) == want_fine, (status, body)
+
+
+def test_every_reason_maps_to_a_class():
+    # No reason may dangle: each must resolve through _REASON_TO_FINE and
+    # _FINE_TO_CLASS to one of the four aggregate classes the callers branch on.
+    for reason, fine in smoke._REASON_TO_FINE.items():
+        assert fine in smoke._FINE_TO_CLASS, reason
+        assert smoke._FINE_TO_CLASS[fine] in smoke._CLASS_PRECEDENCE, reason
+
+
+def test_diagnose_billing_vs_quota_are_distinct_reasons(tmp_path):
+    # The whole point: both are needs-human, but a depleted balance ("fund it")
+    # and an exhausted quota ("out of tokens — raise the cap / wait") route to
+    # different remediation, so they must surface as DIFFERENT reasons.
+    _, klass_b, reason_b = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(400, '{"error":{"message":"credit balance too low"}}'))
+    _, klass_q, reason_q = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(400, '{"error":{"message":"monthly quota exceeded"}}'))
+    assert klass_b == klass_q == "needs-human"   # same action bucket …
+    assert reason_b == "billing" and reason_q == "quota"   # … different cause
+
+
+def test_diagnose_auth_reason_is_distinct_from_billing(tmp_path):
+    _, klass, reason = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(401, '{"error":{"message":"invalid x-api-key"}}'))
+    assert klass == "needs-human" and reason == "auth"
+
+
+def test_diagnose_rate_limit_and_outage_split_the_transient_bucket(tmp_path):
+    _, k_rl, r_rl = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(429, '{"error":{"message":"slow down"}}'))
+    _, k_out, r_out = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"}, _post_status(520, "outage"))
+    assert k_rl == k_out == "transient"
+    assert r_rl == "rate-limit" and r_out == "outage"
+
+
+def test_diagnose_network_error_reason_is_outage(tmp_path):
+    def post(url, headers, payload):
+        raise OSError("connection refused")
+    lines, klass, reason = smoke.diagnose_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
+    assert klass == "transient" and reason == "outage"
+    assert any("connection refused" in l for l in lines)
+
+
+def test_diagnose_dead_id_reason_is_bad_model_id(tmp_path):
+    _, klass, reason = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(404, '{"error":{"message":"model not found"}}'))
+    assert klass == "dead" and reason == "bad-model-id"
+
+
+def test_diagnose_no_secret_reason_is_no_key(tmp_path):
+    # Distinct from billing/auth: nothing to fund or rotate — the secret is just
+    # not set. An escalation keys off this to say "set the key", not "fund it".
+    lines, klass, reason = smoke.diagnose_chain(load(tmp_path), "review", {}, _post_status(200, "{}"))
+    assert klass == "needs-human" and reason == "no-key"
+    assert any("[no-key]" in l for l in lines)
+
+
+def test_diagnose_aggregate_reason_follows_the_winning_class(tmp_path):
+    # Precedence: a dead id outranks a co-occurring billing failure, so BOTH the
+    # class and the reason come from the dead link — the reason must track the
+    # class that won, never a louder-but-lower one.
+    def post(url, headers, payload):
+        if b"claude-opus-5" in payload:
+            return 404, '{"error":{"message":"model not found"}}'
+        return 400, '{"error":{"message":"credit balance too low"}}'
+    _, klass, reason = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert klass == "dead" and reason == "bad-model-id"
+
+
+def test_diagnose_servable_reason_is_served(tmp_path):
+    def post(url, headers, payload):
+        if b"glm-5.2" in payload:
+            return 200, "{}"
+        return 400, '{"error":{"message":"credit balance too low"}}'
+    _, klass, reason = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
+    assert klass == "servable" and reason == "served"
+
+
+def test_classify_chain_facade_still_returns_the_2_tuple(tmp_path):
+    # Back-compat: the old 2-tuple shape every existing caller/test relies on is
+    # unchanged; only diagnose_chain carries the third (reason) element.
+    result = smoke.classify_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(400, "credit balance too low"))
+    assert len(result) == 2
+    lines, klass = result
+    assert klass == "needs-human"
+    assert lines[-1] == "CLASS review: needs-human"
+
+
+def test_diagnose_secret_values_never_reach_the_report(tmp_path):
+    lines, _, _ = smoke.diagnose_chain(
+        load(tmp_path), "review",
+        {"ZAI_KEY": "sec-zai-value", "ANTHROPIC_API_KEY": "sec-an-value"},
+        _post_status(400, "credit balance too low"))
+    joined = "\n".join(lines)
+    assert "sec-zai-value" not in joined and "sec-an-value" not in joined
+
+
+def test_cli_classify_writes_reason_alongside_class(tmp_path, capsys, monkeypatch):
+    # The workflow contract's new half: `classify --gh-output` appends
+    # `reason=<token>` next to `class=<token>`, and prints the REASON line, so a
+    # step routes billing vs out-of-tokens vs technical without a JSON parse.
+    p = tmp_path / "registry.conf"
+    p.write_text(textwrap.dedent(REG), encoding="utf-8")
+    gh = tmp_path / "gh_output"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ak")
+    monkeypatch.delenv("ZAI_KEY", raising=False)
+    monkeypatch.setattr(
+        smoke, "_post",
+        lambda url, headers, payload: (400, '{"error":{"message":"credit balance too low"}}'))
+    assert main(["--path", str(p), "classify", "review", "--gh-output", str(gh)]) == 0
+    written = gh.read_text(encoding="utf-8")
+    assert "class=needs-human\n" in written and "reason=billing\n" in written
+    assert "REASON review: billing" in capsys.readouterr().out

@@ -1,12 +1,21 @@
 name: Adoption-study assessor (scheduled advisory verdicts)
 
 # The scheduled heartbeat for the adoption-study assessor
-# (docs/adoption-study-assessor-proposal.md). On a weekly cadence it reads the
+# (docs/adoption-study-assessor-proposal.md). On a daily cadence it reads the
 # open `adoption-study` issues that carry no `disposition:*` label (the
 # "awaiting a disposition" set — docs/adoption-studies.md) and posts ONE
 # advisory split-verdict comment per study: the redundant / additive /
 # where-integration reading plus qualifying questions, modelled on the worked
 # example (issue #332). A human then applies the `disposition:*` label.
+#
+# Before the agent runs, a TRUSTED workflow step (scripts/assessor-context.sh)
+# fetches each selected study's vendor repository into .assessor-context/<n>/ so
+# the assessor compares the tool against the bench at a FEATURE and
+# CODE/FUNCTIONAL level — against the vendor's actual source, not only the
+# vendor's prose about it. The fetch is done here, in trusted bash, exactly the
+# way oracle.yml assembles .oracle-context/: the agent has NO network, NO git,
+# NO gh (all denied in the backstop) and only READS the fetched files, so this
+# adds no tool and does not widen the prompt-injection blast radius.
 #
 # THE ONE BOUNDARY (docs/adoption-study-assessor-proposal.md): the assessor
 # produces an advisory disposition a HUMAN acts on. It NEVER applies a label
@@ -50,14 +59,17 @@ name: Adoption-study assessor (scheduled advisory verdicts)
 
 on:
   schedule:
-    # Weekly, Monday 06:37 UTC — an off-peak slot after Reeve's daily 05:53
-    # bench-health report, so a freshly-drafted disposition shows up in the next
-    # report. Cron must be a literal — Actions evaluates no files or variables
-    # for on.schedule — so change the cadence by editing this line in a one-line
-    # PR (and the `cadence:` key in .github/adoption-assessor.conf to match). The
-    # two-key guard (ADOPTION_ASSESSOR_ENABLED + committed `enabled: true`) keeps
-    # the schedule harmless until deliberately armed.
-    - cron: '37 6 * * 1'
+    # Daily at 06:37 UTC — a filed study should not wait up to a week for its
+    # draft verdict, so the assessor sweeps the awaiting set every morning; 06:37
+    # stays the off-peak slot after Reeve's daily 05:53 bench-health report, so a
+    # freshly-drafted disposition shows up in the next report. A daily sweep is
+    # idempotent: the MCP write tool's duplicate guard makes an already-assessed
+    # study a no-op. Cron must be a literal — Actions evaluates no files or
+    # variables for on.schedule — so change the cadence by editing this line in a
+    # one-line PR (and the `cadence:` key in .github/adoption-assessor.conf to
+    # match). The two-key guard (ADOPTION_ASSESSOR_ENABLED + committed
+    # `enabled: true`) keeps the schedule harmless until deliberately armed.
+    - cron: '37 6 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -225,6 +237,38 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Assemble the vendor context with TRUSTED bash, before any agent starts:
+      # for each selected study, fetch the vendor repository it names into
+      # .assessor-context/<n>/ (scripts/assessor-context.sh — GitHub-only,
+      # shallow, hooks-disabled, size-capped, and NEVER installing or running the
+      # vendor package; the URL parser has a --selftest negative control). The
+      # assessor then READS that tree for its feature + code/functional
+      # comparison; it has no tool to fetch anything itself. A repo that is
+      # private / missing / oversized degrades to a manifest note and a
+      # filed-text-only verdict — a bad fetch never fails the routine. Gated to
+      # the exact conditions under which the agent actually runs, so nothing is
+      # cloned for a run that is about to skip.
+      - name: Assemble vendor context for each study
+        id: context
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUES: ${{ steps.select.outputs.issues }}
+        run: |
+          set -uo pipefail
+          for n in $ISSUES; do
+            if scripts/assessor-context.sh assemble "$n" ".assessor-context/$n"; then
+              :
+            else
+              echo "::notice::vendor context for #$n could not be assembled — the assessor will use the filed text only"
+            fi
+          done
+          echo "assembled vendor context under .assessor-context/ for: ${ISSUES}"
+
       # One explicit run step per provider — a provider is a reviewed,
       # git-tracked step because GitHub Actions can only reference a secret by
       # its literal name (secrets can't be selected by a runtime variable). The
@@ -242,8 +286,10 @@ jobs:
       # argument reads as shell structure — a JSON tool argument never touches a
       # command line, so that class of denial disappears. READING stays on the
       # narrow wrapper assessor-helper.sh (both path spellings) — trivial args
-      # that pass the matcher. Plus the read-only file tools; never Write, never a
-      # general Bash. --settings closes the additive allow leak from
+      # that pass the matcher. Plus the read-only file tools (Read/Grep/Glob),
+      # which also cover the trusted vendor tree the step above assembled under
+      # .assessor-context/<n>/ — the agent reads that fetched source, it never
+      # fetches; never Write, never a general Bash. --settings closes the additive allow leak from
       # settings.json with the assessor's OWN deny backstop
       # (.claude/adoption-assessor-settings.json — deny beats allow from every
       # source; it denies chunk-helper, label-helper AND scout-helper, none the

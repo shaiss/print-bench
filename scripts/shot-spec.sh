@@ -126,12 +126,13 @@ parse_seedable_line() {  # <line>  -> sets PSL_name / PSL_seed / PSL_prompt / PS
 }
 
 # Validate the parsed seed field for a tier. <loc> is "conf:n" for messages;
-# <tier> is lifestyle|still|motion and governs the allowed seed prefixes. Sets
-# `bad=1` (dynamic scope from cmd_check) on any problem. Catches the malformed
-# forms the generators reject at runtime — empty 'seed=' and 'seed=' with no
-# prompt — so `shot-spec check` fails BEFORE a paid CI generation does.
-check_seed_field() {  # <loc> <tier>
-  local loc="$1" tier="$2"
+# <tier> is lifestyle|still|motion and governs the allowed seed prefixes; <dir>
+# is the design directory, for the seed's presence check. Sets `bad=1` (dynamic
+# scope from cmd_check) on any problem. Catches the malformed forms the
+# generators reject at runtime — empty 'seed=' and 'seed=' with no prompt — so
+# `shot-spec check` fails BEFORE a paid CI generation does.
+check_seed_field() {  # <loc> <tier> <design-dir>
+  local loc="$1" tier="$2" dir="$3"
   [[ "$PSL_has_seed" == 1 ]] || return 0
   if [[ "$PSL_prompt" == seed=* ]]; then
     echo "  FAIL $loc — 'seed=' without a following '| <prompt>'"; bad=1; return 0
@@ -151,6 +152,15 @@ check_seed_field() {  # <loc> <tier>
       esac ;;
     motion) : ;;   # a clip may seed from any kebab ref (incl. an AI still)
   esac
+  # Presence, the third leg after shape and prefix class (issue #415): a typo'd
+  # ref is exactly as well-formed as a real one, and the difference only showed
+  # up when the paid generation died on it. An EXPLICIT seed names a specific
+  # committed render; the implicit default (no seed= field) is the generator's
+  # to resolve — it may legitimately substitute the first shots.conf shot — so
+  # only an explicit seed is presence-checked here.
+  if [[ ! -f "$dir/previews/$PSL_seed.png" ]]; then
+    echo "  FAIL $loc — seed '$PSL_seed' has no committed render (previews/$PSL_seed.png not found)"; bad=1
+  fi
 }
 
 # Every subcommand interpolates <design> into paths ("$ROOT/$design/..."), so a
@@ -582,6 +592,7 @@ check_shots() {  # <conf> ; sets rc via `bad`
 
 check_lifestyle() {  # <conf>
   local conf="$1" line name seed prompt
+  local dir; dir="$(dirname "$conf")"
   [[ -f "$conf" ]] || return 0
   local n=0
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -593,13 +604,14 @@ check_lifestyle() {  # <conf>
     [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>'"; bad=1; continue; }
     parse_seedable_line "$line"; name="$PSL_name"; prompt="$PSL_prompt"
     is_kebab "$name" || { echo "  FAIL $conf:$n — scene name '$name' not kebab-case"; bad=1; }
-    check_seed_field "$conf:$n" lifestyle
+    check_seed_field "$conf:$n" lifestyle "$dir"
     [[ -n "$prompt" ]] || { echo "  FAIL $conf:$n — empty scene prompt"; bad=1; }
   done <"$conf"
 }
 
 check_stills() {  # <conf>
   local conf="$1" line name seed prompt
+  local dir; dir="$(dirname "$conf")"
   [[ -f "$conf" ]] || return 0
   local n=0
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -609,13 +621,14 @@ check_stills() {  # <conf>
     [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<still> | seed=<ref> | <prompt>'"; bad=1; continue; }
     parse_seedable_line "$line"; name="$PSL_name"; prompt="$PSL_prompt"
     is_kebab "$name" || { echo "  FAIL $conf:$n — still name '$name' not kebab-case"; bad=1; }
-    check_seed_field "$conf:$n" still
+    check_seed_field "$conf:$n" still "$dir"
     [[ -n "$prompt" ]] || { echo "  FAIL $conf:$n — empty still prompt"; bad=1; }
   done <"$conf"
 }
 
 check_motion() {  # <conf>
   local conf="$1" line name seed prompt
+  local dir; dir="$(dirname "$conf")"
   [[ -f "$conf" ]] || return 0
   local n=0
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -625,7 +638,7 @@ check_motion() {  # <conf>
     [[ "$line" == *"|"* ]] || { echo "  FAIL $conf:$n — want '<shot> | <prompt>' or '<shot> | seed=<ref> | <prompt>'"; bad=1; continue; }
     parse_seedable_line "$line"; name="$PSL_name"; prompt="$PSL_prompt"
     is_kebab "$name" || { echo "  FAIL $conf:$n — clip name '$name' not kebab-case"; bad=1; }
-    check_seed_field "$conf:$n" motion
+    check_seed_field "$conf:$n" motion "$dir"
     [[ -n "$prompt" ]] || { echo "  FAIL $conf:$n — empty motion prompt"; bad=1; }
   done <"$conf"
 }
@@ -659,6 +672,11 @@ run_selftest() {
   local pass=1
   local root="$tmp/designs"
   mkdir -p "$root/gadget"
+  # The seed-existence check (below) reads previews/, so the fixture carries the
+  # renders its manifests seed from — touched, not rendered; `check` only tests -f.
+  mkdir -p "$root/gadget/previews"
+  touch "$root/gadget/previews/product-hero.png" "$root/gadget/previews/front.png" \
+        "$root/gadget/previews/product-still-hero.png" "$root/gadget/previews/lifestyle-on-desk.png"
 
   # Every subcommand reads its design tree from SHOTSPEC_DESIGNS_DIR, so point it
   # at the fixture and the file-writing verbs land in $tmp, never the real tree.
@@ -765,6 +783,10 @@ run_selftest() {
   # check: the seed-aware validators fire on corrupt manifests (a fresh fixture
   # so it can't be masked by widget's already-corrupt shots.conf).
   mkdir -p "$root/still-check"
+  # ...and its passing lines seed from renders the fixture carries (the
+  # existence check must not fail a line that is well-formed AND seeded).
+  mkdir -p "$root/still-check/previews"
+  touch "$root/still-check/previews/product-hero.png" "$root/still-check/previews/lifestyle-x.png"
   # a product still seeding from an AI image -> rejected
   printf 'bad | seed=product-still-x | a bare part\n' >"$root/still-check/product-still.conf"
   _run 1 "geometry-true tier-1 render" -- check still-check
@@ -796,6 +818,32 @@ run_selftest() {
   rm -f "$root/still-check/lifestyle.conf"
   printf 'clip | seed= | a motion\n' >"$root/still-check/motion.conf"
   _run 1 "empty 'seed='" -- check still-check
+
+  # seed EXISTENCE (issue #415): shape and prefix class are covered above;
+  # presence is the third leg. A typo'd ref is exactly as well-formed as a real
+  # one, so only the committed file separates them — and the difference used to
+  # show up only when the paid generation died. Failing case first (render
+  # absent), then the SAME manifest passes once the render exists, one round per
+  # tier: still, lifestyle, and an EXPLICIT motion seed.
+  mkdir -p "$root/seed-exist/previews"
+  printf 'iso | seed=ghost | a bare part\n' >"$root/seed-exist/product-still.conf"
+  _run 1 "no committed render" -- check seed-exist
+  touch "$root/seed-exist/previews/ghost.png"
+  _run 0 "well-formed" -- check seed-exist
+  printf 'scene | seed=phantom | a scene\n' >"$root/seed-exist/lifestyle.conf"
+  _run 1 "no committed render" -- check seed-exist
+  touch "$root/seed-exist/previews/phantom.png"
+  _run 0 "well-formed" -- check seed-exist
+  printf 'clip | seed=missing | a motion\n' >"$root/seed-exist/motion.conf"
+  _run 1 "no committed render" -- check seed-exist
+  touch "$root/seed-exist/previews/missing.png"
+  _run 0 "well-formed" -- check seed-exist
+  # An IMPLICIT motion seed (no seed= field) is deliberately NOT presence-
+  # checked: the generator resolves it (own name, else the first shots.conf
+  # shot) and announces the substitution, so `check` must not fail a manifest
+  # the generator handles by design.
+  printf 'clip2 | a motion\n' >"$root/seed-exist/motion.conf"
+  _run 0 "well-formed" -- check seed-exist
 
   if (( pass )); then echo "ok    shot-spec --selftest: every validator and the freeze guard fire"; return 0; fi
   echo "FAIL  shot-spec --selftest"; return 1
