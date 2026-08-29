@@ -311,6 +311,9 @@ detent's snap feel reads on this coupon too (same arch, same tooth).
   `drive_mouth` now gates the cam class on geometry.
 - Detent force estimate is model + coupon territory: the field-test log owns
   the real number — the README now labels the 3.8 / 5.7 N figures *modeled*.
+- Design language (round-2 triage): the square 90° thumb-edge profile is
+  **as-designed for v1**; chamfer polish is backlog B4, and B4 closes if the
+  square profile is declared deliberate design language.
 
 ## Lineage (the sibling recipes this reuses, per the brief's "reuse, don't
 re-derive")

@@ -450,7 +450,9 @@ module plunger() {
 part = "";  // "" gripper · "fitcheck" free-body intersection (empty) ·
             // "fitcheck_neg" interfering control · "drive_mouth" cam proof ·
             // "side_section" preview-only cross-section at the detent station
-            // (keeps x >= 65) — the z-stack review shot in cameras.conf
+            // (keeps x >= 65) — the z-stack review shot in cameras.conf ·
+            // "loaded" preview-only pose with a prop rod in the trough — the
+            // `loaded` shot in cameras.conf, never a printable part
 
 // PROOF the cam is connected, on the built geometry: the pin's own swept
 // body (r = pin_r, shrunk 0.05), above the blade's −y edge, must be free of
@@ -498,6 +500,21 @@ module main() {
             union() { frame(); jaw_side(); mirror([0, 1]) jaw_side(); plunger(); }
             translate([apex_x - 5, -40, -1]) cube([x_base1, 80, race_h + 2]);
         }
+    else if (part == "loaded") {
+        // Preview-only LOADED pose (round 2, Drik's "no preview shows it
+        // holding anything", PR #410): the as-printed part plus a PROP ROD —
+        // a Ø grip_od cut-dowel segment lying in the trough between the
+        // jaws, resting on the base deck (top = table_z1) and overhanging
+        // the front edge the way a real cut dowel does. The mechanism stays
+        // at its printed OPEN pose; the rod is a camera prop for the
+        // cameras.conf `loaded` shot, never a printable or gated part (not
+        // in ci.parts). Rear end stops 0.5 mm clear of the pin-arm bosses;
+        // the rod sinks 0.15 into the deck so the resting contact is a real
+        // intersection, not a tangency (a tangent union is non-manifold).
+        frame(); jaw_side(); mirror([0, 1]) jaw_side(); plunger();
+        translate([x_pad0 - 7, 0, table_z1 + half - 0.15]) rotate([0, 90, 0])
+            cylinder(h = x_base1 + 44 - (x_pad0 - 7), r = half);
+    }
     else {
         frame(); jaw_side(); mirror([0, 1]) jaw_side(); plunger();
     }
