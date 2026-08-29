@@ -81,6 +81,19 @@ values and the coupon is the calibration path.
   negative control crushes the arms inboard with a rigid shift — growing
   `grip_gap` would relocate the latch wall (one-knob rule) and trip the arm's
   own guard instead of the glass.
+- **Round 2 (Jane) caught the `bore_lead` branch-cross by hand-measuring the
+  mesh.** The module's two `dir` branch expressions were crossed: at the
+  in-tank mouth the lead cone was inverted (bore 40.000 at the exit face,
+  41.000 one mm inside — a ~1 mm annular groove behind a ~1 mm proud lip, a
+  toe-catch on the walking ramp, exactly the step N11 forbids and the
+  module's own "only ever widens the bore" contract denies), and at the port
+  face the cone spanned 99.9 % below its cutting plane, so that mouth shipped
+  with effectively no lead. Postmortem: a wrong-direction cut renders
+  watertight and scores printable — it is invisible to every gate in the
+  repo; Jane found it by projecting the rendered mesh's bore-band vertices
+  onto the axis and reading the radii. The fix (one translate/rotate swap so
+  the wide end sits at each face) was verified the same way: 41.000 at each
+  face tapering to 40.000 one mm inside, both mouths, no groove, no lip.
 - **G4 measured off the export, not the parameter** (issue #37 discipline).
   A gauge cylinder placed from the *declared* axis/incline and intersected
   with the rendered body: **Ø 79.6 passes the full ~145 mm clean** (empty

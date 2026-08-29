@@ -260,8 +260,14 @@ module port_tube_solid() {
 }
 
 // 45-degree lead at a bore mouth. Cut only; only ever widens the bore.
+// The wide end (ri + 1) sits AT the mouth face and the cone tapers to ri one
+// mm inside the material — for dir=1 the material lies below z so the cone
+// must grow downward (rotate 180), for dir=-1 it lies above z and grows up.
+// (Round-2 fix: the two dir branches were crossed, which inverted the in-tank
+// lead into a groove-behind-a-lip and dropped the port-face cone below its
+// own cutting plane — the exact "step" N11 forbids.)
 module bore_lead(z, dir = 1) {      // dir=1: mouth on +z; dir=-1: mouth on -z
-    translate([0, 0, dir > 0 ? z - 1 : z]) rotate([dir > 0 ? 0 : 180, 0, 0])
+    translate([0, 0, z]) rotate([dir > 0 ? 180 : 0, 0, 0])
         cylinder(r1 = ri + 1.0, r2 = ri - eps, h = 1.0 / tan(45));
 }
 

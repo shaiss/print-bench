@@ -18,6 +18,8 @@ override plus a coupon print.
 
 ![Section along the bore axis — one straight 15° bore, port face to mouth](previews/cutaway.png)
 
+![Tight section on the in-tank mouth — the 1 mm 45° lead widens the bore smoothly to the exit face, no step](previews/cutaway-tight.png)
+
 The clamp is two **identical** compliant arms (one spare serves either side).
 Each arm drops onto a flange at the foot of the outer skirt: its pad bears the
 frame lip while a hook latches under the bar. Both outboard tabs pulled
@@ -41,6 +43,10 @@ top-edge silicone seam, and a relief pocket keeps the bead zone clear.
 - `nuggs-rim-saddle-plate.3mf` — body + arms as a two-object plate: the
   printable deliverable (an assembled STL would slice as one fused lump)
 
+The assembled saddle puts **~208 g on the rim** (194.6 g body + 13.8 g arms,
+CI's slicer grams). **No load rating** — the number informs your own judgment
+about your cabinet; it is not a promise about what the rim carries.
+
 ## Print settings
 
 - **Material:** **PETG for the arms, mandatory** — a clamp is a bending
@@ -61,7 +67,9 @@ top-edge silicone seam, and a relief pocket keeps the bead zone clear.
   flat afterward: `seat_lift` is 0.2 mm of designed play, and one support
   nick eats all of it (the arm rocks, or seats high). Afterward **deburr
   every face that touches glass or frame**: a support nick under a pad is a
-  point load on tempered glass
+  point load on tempered glass. And feel the in-tank mouth rim and **stone
+  the feather dull before he finds it** — even a proper 1 mm 45° lead ends
+  in a feather edge at nose height, and first contact is a bite
 - **Overnighter expectations:** the body is a 13 h PETG print — set these
   before you sleep. Tree-support touch points will scar the shell where it
   grows off the tube; the scars are cosmetic (no bearing or coupling face
@@ -72,11 +80,11 @@ top-edge silicone seam, and a relief pocket keeps the bead zone clear.
   thin shell rings, and fast outer walls show it. And plainly: no setting
   de-risks a 13 h tall shell — if the first hours look wrong, stop and
   restart rather than hope
-- (Printcheck's remaining body caveat — thin walls, ~3 % of sampled surface,
+- (Printcheck's remaining body caveat — thin walls, ~4 % of sampled surface,
   thinnest ≈ 0.00 mm — is the port itself, by design: the rib/groove
   interlock detail at the port face samples as coincident flank faces, the
-  ≈ 0.00 mm reading, and the 45° lead chamfer tapers the last ~0.3 mm of
-  each bore-mouth rim below 0.8 mm. Every NUGGS port prints this same
+  ≈ 0.00 mm reading, and the 1 mm 45° lead at each bore mouth tapers the
+  rim's last fraction of a millimetre below 0.8 mm. Every NUGGS port prints this same
   detail; nothing to change in the slicer.)
 - **Brim:** body — **outer brim, mandatory** (155 mm tall standing on three
   sector tips ≈ 527 mm² of bed contact; the slicer itself flags stability);
@@ -103,6 +111,7 @@ top-edge silicone seam, and a relief pocket keeps the bead zone clear.
 | `skirt_h` | 42 mm | How far the skirts reach down over panel + lip. Must clear the latch zone (asserted) |
 | `grip_gap` | 0.20 mm | The one clamp-fit knob: standoff between the arm pad and the frame lip. Tune on the coupon in ±0.05 steps |
 | `incline_deg` | 15° | Bore incline down into the tank. **Asserted ≤ 15°** (the welfare cap) and > 0 |
+| `ramp_len` | 120 mm | Horizontal reach of the mouth into the tank from the rim plane. Set it for your bedding depth / interior bracing — the mouth should meet the berm |
 | `bore_d` | 80 mm | Internal bore, asserted ≥ 70 mm by the library — never lower that floor |
 | `port_tol` | 0.30 mm | The one fit knob of the port standard (same as every NUGGS module) |
 
@@ -118,13 +127,17 @@ number and re-run the coupon before reprinting the saddle.
    prints without a brim — but deburr the stub feet before judging:
    first-layer squish lands exactly on the sectors you're testing.
 2. Measure your actual rim: panel thickness, lip depth and height. Re-render
-   with your numbers if they differ from the Detolf defaults.
+   with your numbers if they differ from the Detolf defaults. The coupon
+   proves the clamp fits its fixture; your calipers prove it fits your rim.
 3. Slide the saddle over the rim — inner skirt inside the tank, bridge
    seated on the rim top, bead clear. Before the arms go in, run a needle
    file through both bridge strap slots — they print as ~25 mm unsupported
    PETG ceilings over the arm passage and sag a hair. Then push both arms
    down onto their flanges until the hooks latch. Removal is the reverse:
-   two-finger spread on the outboard tabs, one action.
+   two-finger spread on the outboard tabs, one action. Inside the tank the
+   mouth hangs above the bedding (roughly 5–20 cm in a Detolf-on-its-back,
+   depending on fill): rake a bedding berm up to the mouth, or set
+   `ramp_len` for your depth before printing.
 4. Couple your NUGGS run to the port at the insertion clocking, twist ~14°.
    **Run accounting:** this module contributes its own enclosed length only
    (port face to mouth ≈ 145 mm axial); the mouth discharges into the
