@@ -166,7 +166,9 @@ $fa = 3;
 $fs = 0.8;
 
 // Facets around each neck's tube section. Iterating: 48. Production: 64+.
-tube_fn = 48;
+// Ships at the production value: the bore is the walking surface, so
+// smoother is the product's own priority.
+tube_fn = 64;
 // Facets on the ellipsoid's latitudes. The chamber is the animal's turning
 // surface, so it gets the finer of the two presets.
 ell_fn = 96;

@@ -171,8 +171,8 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
 3. Forcing loose → raise `port_tol` in +0.05 steps and reprint the coupon.
    Will not lock / grinds → lower 0.05. If it inserts but the quarter-turn
    grinds near the lock, deburr the sector tips' first layer with a blade
-   before touching `port_tol` — or set elephant-foot compensation
-   (initial-layer horizontal expansion) to 0.2 mm for the coupon and the node.
+   before touching `port_tol` — or set Elephant foot compensation to 0.2 mm
+   for the coupon and the node.
    Caliper the bore while you're at it: under 79.0 mm means the printer is
    shrinking.
 4. Only then commit the full module (~195 mm tall, ~21 h and ~300 g at 0.2 mm — check the spool).
@@ -185,7 +185,8 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
   pose) and the 12.2 mm anchored web bridge (see above).
 - **Material:** PETG or PLA; the part is a pass-through, not a load-bearing
   joint, so either serves. PETG if the run lives in a warm room.
-- **Layer height:** 0.2 mm, 3 perimeters (wall 2.4 mm ≈ 3×0.4 nozzle exactly).
+- **Layer height:** 0.2 mm; the 2.4 mm wall is about six perimeters at a
+  stock 0.42 line width — leave wall loops at default.
 - **Brim:** off. Only the sector tips touch the bed — ~10 cm² total; the web
   is a bridge at the port plane, 10 mm up — so the first ~50 layers print as
   twelve small islands that merge at the port plane. Expected, not a fault; a
@@ -274,3 +275,14 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
   gable/tent … two straight sloping lines meet at a distinct corner/ridge
   point". Camera added to `previews/cameras.conf` (new line, nothing moved)
   and documented in `previews/CAMERAS.md`.
+- 2026-08-29: the PM triage's standing prose pass (README + NOTES copy only):
+  PETG price tag, supports-off clause, seam line, the perimeters wording in
+  both docs (about six perimeters at a stock 0.42 line width, not "exactly 3
+  at 0.4"), same-material + coupon-pair + islands-preview lines in the coupon
+  step, the "what you get" port-face pointer, bedding-strip and
+  footprint-orientation clauses, the sightline/noise trade
+  ("you will never see the turn"). One geometry change with it: **`tube_fn`
+  48 → 64** — the `.scad`'s own declared production preset; the bore is the
+  walking surface, so the iterating value was shipping under the file's own
+  "Production: 64+" comment. Re-rendered and re-gated
+  (`gate.sh --slice` green), previews re-rendered.
