@@ -185,6 +185,18 @@ else
   echo "-- plate selftest: skipped (prusa-slicer not on PATH)"
 fi
 
+# And this proves the `render` camera opt still works on the installed
+# OpenSCAD build (issue #400): --render is value-taking on some builds
+# (2021.01, the 2026.08 nightly) and a bare trailing flag makes the parser
+# swallow the source path; bool builds reject --render=1 instead. render.sh
+# asks the binary which kind it is, and this selftest drives all three opt
+# orders through render_previews plus the negative control — so it runs green
+# on BOTH the stable and nightly check jobs below, whatever each is running.
+echo "-- render selftest: scripts/render.sh --selftest"
+if ! ./scripts/render.sh --selftest; then
+  fail=1
+fi
+
 # And this proves the printer.conf mechanism still resolves the default when
 # nothing is measured and the profile's value when one is — reaching the
 # exported geometry, not just an echo. Same family as the two checks above: a
