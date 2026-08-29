@@ -1183,6 +1183,84 @@ def test_routine_guards_fire_on_a_reintroduced_literal(tmp_path, monkeypatch):
         "--model glm-5.2 — it has been weakened into a restatement")
 
 
+# ── Provider-failure triage wiring (smarter chain-exhaustion routing) ─────────
+#
+# Every chain-walking consumer must, when its chain fails on EVERY link, invoke
+# the shared provider-triage composite action with ITS OWN chain — so the cause
+# (billing / out-of-tokens / bad key / dead id / transient) is recovered and the
+# human-fixable ones escalate through the decision gate, instead of a silent
+# scheduled red. The action is the one tested home for that logic (the classify
+# core has its own suite in test_smoke.py); the guard below pins that each
+# consumer stays wired to it AND triages the same chain it walks — a mis-named
+# chain would diagnose a DIFFERENT registry chain than the one that just failed.
+
+TRIAGE_ACTION = REPO_ROOT / ".github" / "actions" / "provider-triage" / "action.yml"
+TRIAGE_CONSUMERS = {
+    "auto-review.yml": "review",
+    "backlog-burn.yml": "backlog-burn",
+    "design-run.yml": "design-run",
+    "chunker.yml": "chunker",
+    "labeler.yml": "labeler",
+}
+
+
+def _triage_chains(text: str) -> list[str]:
+    """The `chain:` input of every provider-triage invocation in a workflow."""
+    chains: list[str] = []
+    for chunk in re.split(r"\n      - ", text):
+        if "uses: ./.github/actions/provider-triage" not in chunk:
+            continue
+        m = re.search(r"^[ \t]*chain:[ \t]*(\S+)", chunk, re.MULTILINE)
+        chains.append(m.group(1) if m else None)
+    return chains
+
+
+def test_every_consumer_wires_provider_triage_to_its_own_chain():
+    for workflow, chain in TRIAGE_CONSUMERS.items():
+        text = (REPO_ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+        chains = _triage_chains(text)
+        assert chains, (
+            f"{workflow} no longer invokes ./.github/actions/provider-triage on "
+            "chain exhaustion — the smarter billing/tokens/technical routing is gone")
+        assert all(c == chain for c in chains), (
+            f"{workflow}: provider-triage is wired to chain(s) {chains}, but this "
+            f"workflow walks the {chain!r} chain — it would diagnose the wrong one")
+        # It must triage the SAME chain it resolves/walks.
+        assert f"model_registry resolve {chain}" in text, (
+            f"{workflow} triages chain {chain!r} but does not resolve it — the "
+            "walk and the diagnosis have drifted apart")
+
+
+def test_provider_triage_action_declares_the_io_its_callers_use():
+    # A rename or dropped input/output would break all five callers at once;
+    # actionlint catches an unknown `with:` key, and this pins the contract the
+    # callers depend on (the classify chain input, both provider keys, the token,
+    # the escalate switch, and the class/reason outputs the callers read).
+    action = TRIAGE_ACTION.read_text(encoding="utf-8")
+    for decl in ("chain:", "zai-key:", "anthropic-key:", "github-token:",
+                 "context:", "escalate:"):
+        assert decl in action, f"provider-triage no longer declares input {decl!r}"
+    assert re.search(r"^outputs:", action, re.MULTILINE), "provider-triage lost its outputs block"
+    for out in ("class:", "reason:"):
+        assert out in action, f"provider-triage no longer declares output {out!r}"
+    # The action must actually run the classifier that produces class+reason.
+    assert "model_registry classify" in action, (
+        "provider-triage no longer runs `model_registry classify` — its class/reason "
+        "outputs would be empty and every caller's branch would misfire")
+
+
+def test_triage_wiring_guard_discriminates_a_wrong_chain():
+    # NEGATIVE CONTROL: the same rule, run against a workflow whose triage chain
+    # was swapped to another consumer's, must NOT pass — or the guard proves
+    # nothing (a check that cannot fail is worthless, the repo's standing rule).
+    text = (REPO_ROOT / ".github" / "workflows" / "labeler.yml").read_text(encoding="utf-8")
+    tampered = text.replace("chain: labeler", "chain: review", 1)
+    assert tampered != text, "tamper target not found — the fixture is stale"
+    chains = _triage_chains(tampered)
+    assert not all(c == "labeler" for c in chains), (
+        "the triage-chain check did not react to a swapped chain — it has been "
+        "weakened into a restatement")
+
 
 # ── The agent forge (Wright + Reeve's sign-off, docs/agent-forge.md) ─────────
 #
