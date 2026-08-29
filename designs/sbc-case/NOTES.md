@@ -111,9 +111,10 @@ NopSCADlib vitamins (the brief's named source), read at build time:
    is exactly the design-layer opt-in `docs/licensing.md` describes: disclosed
    on the product page (readme-gate requirement 11), isolated to this design,
    shared core untouched (`license-boundary-check.sh` enforces that part).
-10. **Vents: five 12 × 4.5 stadium slots** in the +Y wall at z = 12 — tops are
-    12 mm bridges inside the bridgeable band; they sit opposite the fan's
-    exhaust path across the board.
+10. **Vents: four 12 × 4.5 stadium slots** in the +Y wall at z = 12, on a 15 mm
+    pitch (3 mm webs) — each slot top is a real 12 mm bridge inside the
+    bridgeable band; they sit opposite the fan's exhaust path across the board.
+    (First draft was five slots at 11.5 mm pitch — corrected, decision 13.)
 11. **`rounded_box` is corner-anchored — the shell needed a translate.** The
     first base render passed every presence-only gate with the shell
     displaced (+47.25, +38.10) from the origin-centred frame every other
@@ -150,6 +151,219 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     the BOM descriptions in assembly.conf state the same hardware — keep them
     in sync. Generator-side fix (emit `include` of the design file, or document
     the wrapper requirement) is a follow-up issue, not this design's diff.
+13. **Vent re-web (review round 2).** The five-slot layout (decision 10, first
+    draft) put 12 mm slots on an 11.5 mm pitch — a 0.5 mm overlap that fused
+    them into a single ~58 mm opening whose top bridged as one 58 mm curtain.
+    It passed printcheck 100/100 (watertight, sliceable), but a 58 mm bridge
+    sags in PETG — the README's first-listed material — exactly the bench
+    judgment no geometry gate produces (Jane, PR #371 review). Fix: four slots
+    on a 15 mm pitch, so 3 mm webs separate them and each top is a real 12 mm
+    bridge, at nearly the same ~57 mm overall span. "Supports: none" is now
+    honest in PETG too. Re-gated: base/lid/coupon 100/100, all four fitchecks
+    unchanged.
+14. **Round-2 product-page pass (PR #371 triage, Vera).** Merged v1 shipped
+    with the reviewers' act-now list open; this round lands it. Geometry: only
+    the vent re-web (decision 13). Everything else is manifests and page copy:
+    a `base-board` render pose (base + Pi on the standoffs, no lid) drives a
+    `product-populated` still that actually shows the board on the generated
+    standoffs — the empty `product-base` tray undersold the promise; a `notch`
+    preview camera (on the `base-board` pose, so the 2×20 header reaches through
+    the notch and the GPIO-access feature reads); the print-settings lines the
+    page lacked (seam, PETG textured plate, ASA enclosure, lid elephant-foot);
+    and the serviceability / care lines (lid-on SD swap, serviceable inserts,
+    adhesive feet, dust maintenance) plus the "shown for fit, purchased
+    separately" hero caption. The insert-seating fix is the assembly.conf
+    "flush with the post top" step; the stepped bore that would enforce it in
+    geometry is backlogged (PM.md B4). New shots/cameras are regen-owned — the
+    manifests and embeds are ours, CI renders the pixels.
+15. **Round 2b (PR #397 review round).** Jane and Drik passed again; Vera's
+    pm-triage act-now'd four copy/framing touches, no geometry: the `notch`
+    camera widened `dist` 170→230 while its freeze window was still open (this
+    was the first round to see it; at 170 it cropped the notch and 3 of 4
+    slots — verified the wider frame shows all four slots, both notch ends, the
+    wall top and the header); a vents "supports off / PETG slot droop is normal"
+    settings line; an ASA fits clause (ASA prints the register tighter than a
+    PETG coupon suggests, eating the 0.25 mm `fit_clearance` budget); and
+    softening the fan-life claim to "typically". SD-swap ergonomics parked as
+    B10 (a field-test on the first real print).
+16. **B0 — the floating skirt (round 2c, PR #397).** The three open-edge cuts
+    (+X / −X / −Y) carried `center = true` under a `translate(..., skirt_top)`,
+    so each cut was centred ON z = skirt_top (6.5), spanning z[−3.75, 16.75].
+    That deleted the 6.5 mm skirt and left the wall as a 9.25 mm band floating
+    16.75 mm over the bed on those three sides — anchored only at the corner
+    posts: unprintable, yet watertight, sliceable and 100/100 (angle-only
+    overhang logic can't see a vertical curtain over air, and the posts keep it
+    one connected body). It is the **second #69-class escape** on this design
+    (the 7-body `rounded_box` frame miss, decision 11, was the first) and it was
+    **inherited from merged #371** — `main` carried it until this PR repaired
+    it. Caught by Drik's round-2b "finger run up the wall from the bed," missed
+    by every gate; Jane passed the same head. Fix: **keep `center = true`** —
+    the translate points are the wall *centrelines*, so the cut must straddle
+    the wall in X/Y; deleting center (as both Drik and Vera proposed) shifts the
+    cut onto the centreline, leaving an inner sliver and missing the −Y wall —
+    and **lift the Z centre by half the cut height** so the cube *floor* rests
+    on skirt_top (z[6.5, 27]). Re-verified: skirt restored on all three edges
+    (ortho profile), base re-gated 100/100. The micro-SD-clearance consequence
+    of the restored −X rim is B10, measured on the first real print.
+17. **Round 3 — page currency & honesty (PR #397).** With B0 landed, both
+    reviewers passed at head `3984950` (Drik's block cleared; Jane re-signed,
+    making a wall-to-bed check on `part="base"` permanent in her routine).
+    Vera's triage ruled an act-now list that is **all page-side —
+    `sbc-case.scad` stays frozen**: (a) `previews/contact-sheet.png` was
+    byte-identical to the PR base `978c9ba` and `cameras.conf` carried no
+    `contact-sheet` row, so `render.sh --previews`/regen had **no path to
+    refresh it** — the page's only as-printed exhibit still showed the pre-B0
+    floating-skirt base. That is the **third #69-class escape** here (7-body
+    frame → decision 11; floating skirt → decision 16; ownerless exhibit →
+    this). Fix: add the bare `contact-sheet` row so regen re-renders it from the
+    fixed base every run and it tracks the source forever. (b) The README droop
+    clause "hidden once the lid is on" was false — the vents are in the
+    *external* +Y wall (z 9.75–14.25), not under the lid (z ≥ 26); rewritten to
+    the honest mechanism (droop faces down into the tunnel, seen only from vent
+    height). (c) The SD-swap promise was flatter than B10's own measurement,
+    softened to an interim "*should* come out — the first print verifies the
+    rim." (d) `product-populated.png` reads as an empty tray in monochrome — a
+    caption now points to the color `notch` view; the multi-color-render fix is
+    a pipeline property and was declined. (e) The coupon size (~14 → ~33 mm in
+    X, stale from 2c's own crop widen; measured 32.6 mm) and (f) the ASSEMBLY
+    step-1 "see NOTES.md backlog" pointer (trimmed to "a planned refinement" in
+    `assembly.conf`) were corrected in the same pass.
+18. **Round 4 — the last page nits (PR #397).** Both reviewers passed again at
+    `42b8bea`; act-now was two text lines and a free PR-body edit, no geometry —
+    the `sbc-case.scad` freeze held through rounds 3 and 4 (both page-only), so
+    the geometry verification stamped at 2c/3 is what ships. (a) The README
+    short-version "melt the inserts in" gained the **flush with the post top**
+    caveat — the one irreversible build step's warning had been one click deep
+    in ASSEMBLY.md step 1. (b) "Print this first" step 4 synced its print times
+    to the gate's (~5 h / ~2.5 h → ~2h45m / ~1h40m). (c) The PR description's
+    stale "only geometry change is the vent re-web" line was corrected to name
+    the B0 skirt repair. B10 widened to card + the four front-edge plugs (the
+    RPI4 vitamin draws USB-C / micro-HDMI / jack top-side, so no render can
+    witness overmold-vs-rim); Vera did not block a merge on the two passes at
+    this head.
+19. **Round 5 — BOM notation (PR #397).** Both reviewers passed again at
+    `47bd7ce` (geometry frozen since 2c). Act-now was three `assembly.conf` BOM
+    strings: the screw *lengths* `x6` / `x10` / `x20` read as *quantities* next
+    to the Qty-4 column, so they became `×6 mm` / `×10 mm` / `×20 mm` (regen
+    re-emits ASSEMBLY.md). The BOM is this design's N2 deliverable and the
+    strings are ours (authored, not vendored), so the fix was in-scope. Backlog:
+    **B7 above B4** (Drik's recoverability principle — a sunken insert walks back
+    with a soldering iron; a scraped card / blocked ribbon socket don't); new
+    **B11**, a fan-aperture finger guard (queued — N4 proof + airflow cost
+    checked when built). The `sbc-case.scad` freeze held rounds 3–5 (all
+    page-only), so the 2c/3 geometry verification is what ships.
+20. **Round 6 — hardware-honesty strings + the dome note (PR #397).** Both
+    reviewers' substance passed; Drik re-signed at `21325fc` (Jane's round here
+    failed to complete during a total LLM-provider outage, her `47bd7ce` pass one
+    text-only commit behind). Act-now was two N2-surface strings: the README
+    hardware line now tells the **three-cart** truth — the 8 heat-set inserts are
+    a separate purchase no screw assortment carries, so "one assortment plus a
+    fan, not five orders" had undercounted the shopping list by a cart — and the
+    `assembly.conf` insert BOM reads "4 **base** lid-screw posts, 4 **lid** fan
+    bosses" (it had read "4 lid posts, 4 fan bosses", backwards for two seconds).
+    Recorded, not changed: the **dome-screw choice** — M3×20 *dome* heads sit on
+    the lid's visible exterior under a washer, which is why the BOM specifies them
+    over caps (Drik's "dome or cap" is a future considered choice, not a
+    hunch-driven BOM edit). Two keep-guards for future page passes: the SD-swap
+    *should* asterisk stays until B10's first field test logs, and ASSEMBLY steps
+    1–6 stay verbatim (the fan bolts on **last** from outside the closed lid, so
+    the fan wire is never trapped — a pinch the step order avoids for free). The
+    `sbc-case.scad` freeze held rounds 3–6, all page-only since 2c.
+21. **Round 7 — assembly-doc completeness (PR #397).** Both reviewers passed
+    (Jane re-ran fresh at `5cada8f` after the outage, Drik at `9771d3f`). Three
+    text-only act-nows, all on the assemble-exactly-as-the-steps-say promise
+    (this design's whole point): (a) the vent line now names the **2.0 mm wall
+    span** the ceiling actually bridges (12 mm is the tunnel length) — "~12 mm
+    bridge" is the kind of scary number that makes a reader flip auto-supports
+    on, the failure the line guards against; (b) ASSEMBLY **step 7** now routes
+    the fan leads out the GPIO notch to the fan header (thermal, quieter) or a
+    5 V pin pair (constant) — the step had stopped at the mechanical bolt-on and
+    left the build with two loose wires; (c) the **adhesive feet** are now billed
+    on the README hardware line ("three carts" → "four carts, not five") — the
+    page's own anti-walk measure had gone unbilled. Recorded/queued: step-1 FLUSH
+    reinforces B4; the ASSEMBLY feet row is B6 (a glue-on dot isn't an N2 assembly
+    vitamin — the printed foot is the billable durable choice); B10 widened to
+    also log the fan-lead landing and the 1 a.m. noise. The `sbc-case.scad`
+    freeze held rounds 3–7, all page-only since 2c.
+22. **Rounds 8–9 — the page converges (PR #397).** Round 8 was the PR's first
+    all-confirmation round: both reviewers passed *fresh at the same head*
+    `5db3e7c` (Jane a formal APPROVE), every finding a `[saw-it]`/`[used-it]`
+    verification or queue-tier keep-guard, **zero act-now**. Round 9 landed the
+    last page batch (push `86a25c2`): Vera re-triaged the findings that arrived
+    after the round-8 triage (Drik's fuller re-review + Jane's re-run) and ruled
+    three text-only act-nows — (a) the fan-lead **tether**: the round-7 step-7
+    routing clause created it (leads go to the board, but the fan mounts to the
+    lid), so step 7 and the README "Serviceable where it counts" bullet now say
+    to **unplug the fan lead at the header before lifting the lid** — the
+    conservative unplug-first instruction is print-independent, and the
+    reach-with-slack refinement is B10's; (b) an **ASA** vent-ceiling clause (ASA
+    bridges the 2 mm ceiling fuzzier than PETG — same
+    reader-mistakes-a-normal-artifact-for-a-defect class as round 7's vent-span
+    line); (c) the coupon **global elephant-foot is fine** clause (the base crop's
+    fit is a vertical cavity wall the compensation never touches). Queued to B10:
+    the "quieter at night" wording — the `fan40x11` vitamin carries no wire count,
+    so the 1 a.m. noise log settles 2-wire on/off vs 4-wire PWM. **Standing rule
+    (Vera, round 9): the page is now retired to B10 — page-only findings queue
+    behind the first real print by default, unless they touch a non-negotiable or
+    page honesty.** The `sbc-case.scad` freeze held rounds 3–9, all page-only
+    since 2c.
+23. **Round 10 — the notch-caption honesty fix (PR #397).** Both reviewers
+    passed again (Jane fresh at `8ebc344`, Drik re-run; head `99fdc73` is CI's
+    regen commit-back). One act-now, the page-honesty exception the round-9
+    retirement rule reserves: the `notch` exhibit's alt text ("header reaching
+    through", README) and the matching `previews/CAMERAS.md` phrase claimed the
+    2×20 header reaches through the notch opening. It doesn't — the pin tops sit
+    at ~16.9 mm (`board_z` 7 + ~1.4 board + ~8.5 header) and
+    `gpio_notch_bottom = 17.5` (`sbc-case.scad:77`), so the pins are ~0.6 mm
+    **below** the notch lip, behind solid wall; the notch clears a jumper/Dupont
+    housing (~19.4 mm, over the 17.5 lip) with the lid on, which is what "GPIO
+    stays reachable" actually promises (the comment at the cut even says "a
+    notch, not a window, so nothing bridges"). The feature is sound — only the
+    caption was ahead of the pixels — so the fix is page-side only: both strings
+    reworded, the frozen camera untouched, `sbc-case.scad` unchanged. Tell that
+    it mattered: Drik's own round-10 review misread the exhibit ("the pins
+    visibly reach through the wall"), the caption fooling a careful reviewer.
+    Queued: shouldered-insert-tip stopgap → B4; occupied-notch guard (fan leads +
+    ribbon share the notch) → B7; the 2 a.m. by-feel framing → B10. The
+    `sbc-case.scad` freeze held rounds 3–10, all page-only since 2c.
+24. **Round 11 — the last page word before the print (PR #397).** Both reviewers
+    passed again (Jane fresh at `a220364`, Drik at `99fdc73`, one text-commit
+    behind). One act-now, a one-word honesty fix and the second use of the
+    round-9 retirement rule's page-honesty exception: the "Living with it"
+    SD-swap bullet cited the verification as "(the field test in NOTES)", but
+    NOTES has no `## Field test log` section yet — that entry *is* B10, still
+    pending — so a stranger following the parenthetical finds the engineering
+    log, not a test, and reads settled what is only promised. Fixed to "the
+    **planned** field test in NOTES" (README), which B10 makes true when it logs
+    the first print. Recorded keep-guard: `ports.png` and `top.png` stay
+    committed but off-page on purpose (`ports` is B9's reserved evidence image —
+    a future connectors-clear-the-rim claim takes a new `ports-rim` entry, never
+    a reframe; `top` is carried by the contact-sheet's own top view). Drik's
+    round-11 "header reaches through" read (reviewed at `99fdc73`, before the
+    round-10 caption fix landed) was the third such misread and is corrected by
+    the same evidence — the pins sit ~0.6 mm below the notch lip; the jumper-exit
+    promise the read rode is true. The `sbc-case.scad` freeze held rounds 3–11,
+    all page-only since 2c; the page is now retired to B10.
+25. **Round 12 — the page converges for real (PR #397).** Both reviewers pass
+    fresh at the same head `6dcebba` (Jane a formal APPROVE); the PR's first
+    zero-act-now round since round 8 — and unlike round 8 it holds, because the
+    round-9 retirement rule blocks any further page act-now, so only B10 (a
+    physical print) remains. Two queue-tier filings: Jane's lid-seating feel →
+    B10; Drik's exploded-view legibility → B8. `iso.png` byte-checked valid (a
+    reviewer reader refusal, not a corrupt file). Freeze held rounds 3–12.
+26. **Round 13 — the last caption straggler (PR #397).** One act-now, the
+    page-honesty exception's third use: the `product-populated` italic caption
+    (README) still said "gold header pins through the wall" — the round-3 wording
+    that outlived round 10's fix of the identical false claim in the notch
+    alt-text and CAMERAS.md, so the page contradicted its own corrected exhibit a
+    screen apart (Drik's image tool made the same misread unprompted). Fixed to
+    "seated just below the notch lip", consistent with CAMERAS.md's "pin tops fall
+    ~0.6 mm below the notch lip … the pins stay behind the wall". Bundled with the
+    carried round-12/13 charter bookkeeping in one push (Vera's economy: reset the
+    sign-offs once). Queued to B10: the "2 a.m. reflash needs no tools" tagline,
+    coupled to the field-test entry. Queued to B11: the finger guard must be a
+    co-planar grille in the lid plate, never a bar across the aperture
+    (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
 
 ## Print settings
 
@@ -169,7 +383,10 @@ NopSCADlib vitamins (the brief's named source), read at build time:
 ## Print this first
 
 Print `sbc-case-coupon.scad` (the `coupon` part) before the full case — it is
-two cropped corners of the real parts, ~40 min:
+two cropped corners of the real parts, ~40 min. Since PR #397 the base crop
+also carries the restored skirt rim and the leftmost vent slot, so it rehearses
+the **PETG bridge the full base stands on** — the coupon is now the fit *and*
+structure proof:
 
 1. **Insert fit:** an F1BM3 should press into the post's Ø4.0 hole and grab.
    Loose → drop `post_d` shell or check hole size first; the hole diameter is
@@ -181,7 +398,8 @@ two cropped corners of the real parts, ~40 min:
    steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
 3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
    the standoff sample and hold firm.
-4. Only then print `base` (~5 h) and `lid` (~2.5 h).
+4. Only then print `base` (~2h45m) and `lid` (~1h40m) — the head-stamped gate
+   times; your slicer and material may differ.
 
 ## Derivations worth keeping
 

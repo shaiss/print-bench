@@ -211,7 +211,7 @@ const app = document.getElementById("app");
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const AI_STILL = "AI-generated impression for general illustration only — geometry is approximate and may not exactly match the printed part; see the studio render and the STL for the true shape.";
-const AI_MOTION = "AI-generated motion impression for general illustration only — geometry is approximate, and the movement shown is illustrative, not a simulation; see the deterministic previews and the STL for the true shape.";
+const AI_MOTION = "AI-generated motion impression for general illustration only — geometry is approximate, and the motion is illustrative; see the deterministic previews and the STL for the true shape.";
 
 function tags(d) {
   const t = [];
