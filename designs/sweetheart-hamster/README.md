@@ -43,7 +43,11 @@ folds shut.
   pocket and eats the headroom a ring's stone needs. If the fit matters, **paint a
   support enforcer on the nest crown only** — a global "enable supports" drops
   pillars into the 0.5 mm parting gap (re-welding the seam this design is built to
-  keep open) and scabs the cheeks and the pocket the ring seats against. Note that
+  keep open) and scabs the cheeks and the pocket the ring seats against — and **no brim**
+  either: a brim laid across the two flat islands bridges the parting gap and
+  welds the seam at layer 1, which no elephant-foot compensation undoes on the
+  reprint (auto-brim rarely fires at this footprint, but switch it off to be
+  sure). Note that
   PETG (the recommended material) sags on that crown more than PLA does, so a
   truly stone-flush ceiling is really a PLA job — at the cost of the hinge (see
   **Material**).
@@ -56,7 +60,7 @@ folds shut.
   heart-reveal surface the whole gift points at. On **textured PEI** it comes out
   matte (expected — it reads like a flocked jewelry-box liner); expect a faint
   elephant-foot flare around the seam silhouette (nose, brow, ears, tail), which
-  0.2 mm elephant-foot compensation cleans up if you care. Don't chase a glossy
+  0.2 mm elephant-foot compensation cleans up. Enable it — on this part it isn't just cosmetic: a heavy flare can bridge the 0.5 mm parting gap, so if the halves won't part even after flexing (see **Assembly & use**), the flare is the cause, not `part_gap`. Don't chase a glossy
   reveal with PETG on **smooth** PEI without a glue-stick release — it welds to the
   plate and you'll chip the reveal face lifting the print. Textured PEI is the safe
   choice.
@@ -75,7 +79,7 @@ The handful worth tuning; all parameters are at the top of
 | `heart_proud` | 4 mm | How far the belly heart stands off the skin |
 | `nest_w` | 22 mm | Ring-nest heart cavity width |
 | `nest_depth` | 6 mm | Nest depth into each half (total ≈ 12 mm closed) |
-| `part_gap` | 0.5 mm | Seam parting clearance — raise if the halves fuse |
+| `part_gap` | 0.5 mm | Seam parting clearance. Seam won't part? Flex it, then enable 0.2 mm elephant-foot compensation; raise this only as a last resort, +0.1 mm on the coupon |
 | `web_t` | 0.7 mm | Living-hinge flexure thickness |
 | `fold` | 0 | Preview only: 0 = flat print pose, 90 = assembled |
 
@@ -103,8 +107,14 @@ small tab along the top of the spine between the ears — that's the living hing
 printed flat and folded up, and it stays on the finished piece. A light tack
 across the seam at the very first layer is normal elephant foot — flex the halves
 gently to break it before first use (a non-event in PETG; in PLA expect a faint
-whitened crack along the seam). If the halves fit tight at the seam, raise
-`part_gap` and reprint, tuned on the coupon first.
+whitened crack along the seam). If the halves fit tight and won't part after
+flexing, that's almost always first-layer flare, not the gap — turn on 0.2 mm
+elephant-foot compensation and reprint — coupon first; only a seam that still binds after that
+wants `part_gap` raised, +0.1 mm on the coupon first. And when you give it, hand
+it over with **"it folds like a locket — the spine's the hinge"** (or fold it
+open once in front of them): a first-timer's instinct is to pull the halves apart
+sideways, which strains the thin hinge web — worst in PLA — at the one moment you
+can't redo.
 
 The box has no catch — it holds shut by friction alone — so **carry the print
 flat and empty, and load the ring at the table** just before folding it shut: not
