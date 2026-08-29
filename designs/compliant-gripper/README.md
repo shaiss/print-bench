@@ -16,6 +16,12 @@ part of the print:
 
 ![The gripper with a Ø 25 mm prop rod lying in the trough between the jaws](previews/loaded.png)
 
+The same pose end-on down the trough: the rod's cross-section seated between
+the two pad faces, with the open pose's 4 mm running daylight visible on each
+side:
+
+![End view down the trough — the rod's cross-section as a circle between the two pad faces, per-side daylight visible](previews/loaded-end.png)
+
 ![3/4 view of the flat monolithic mechanism](previews/hero3q.png)
 
 ![Tilted top view — the mechanism layout](previews/top-plan.png)
@@ -79,7 +85,10 @@ into the valley on the plunger wing and holds the clamped state:
   PrusaSlicer's — translate for your slicer.
 - **Cooling:** keep part cooling up — PETG sags on bridges where PLA doesn't,
   and the part has two deliberate bridges (the race rail's underside, the wing
-  table); a saggy rail underside is what closes the plunger's roof gap
+  table); a saggy rail underside is what closes the plunger's roof gap. But
+  don't raise the global part fan for the bridges — leave the stock
+  overhang/bridge auto-cooling on; it cools the two bridges where they need
+  it and keeps the flexures tough
 - **Plate:** textured PEI prints it clean; brim only if the long corners lift
 - **Orientation:** as modelled, **flat on the bed** — the whole mechanism is one
   XY profile extruded in Z; printing it any other way breaks the flexures'
