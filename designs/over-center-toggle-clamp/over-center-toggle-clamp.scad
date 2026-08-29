@@ -22,14 +22,27 @@ fixed_face_x = 92;
 
 /* [Over-center linkage] */
 // Lever crank radius: pivot B to link pin P2 (mm)
-crank_r = 45;
-// Lever angle at the closed seat, degrees past dead center (positive = a
-// workpiece reaction torques the lever INTO the closed stop, self-locking)
-theta_closed = 5;
+crank_r = 42;
+// Lever angle at the closed seat (deg). Dead center is theta = 0 (P2 on the
+// B->P3 line, maximum jaw extension); the seat must be NEGATIVE — past dead
+// center — so a workpiece reaction torques the lever INTO the closed stop
+// (the over-center lock). A positive seat sits BEFORE center and the same
+// reaction throws the lever open (the round-1 sign error; see NOTES.md).
+theta_closed = -6;
 // Lever angle as printed / fully open (deg)
 theta_open = 44.8;
+// Jaw gap remaining at dead center (mm). The lever must CROSS dead center at
+// a positive gap or the empty jaws jam before center; workpieces thicker than
+// this are squeezed elastically while crossing, and the seat gap (echoed)
+// sets the bottom of the locked band. Retune to your stock: locked thickness
+// ~ dead_center_gap + 0.5 mm.
+dead_center_gap = 0.8;
 // Carrier pin P3 sits this far behind the moving jaw face (mm)
 p3_off = 13;
+// Estimated series stiffness of the clamping loop (N/mm): jaw walls, link,
+// pins. Used only in the echoed locked-band estimate, never in geometry;
+// calibrate against a real print if you care about the exact band.
+k_struct = 200;
 
 /* [Snap-through arch (PRBM, docs/advanced-techniques.md)] */
 // Tensile modulus of the printed material (MPa). PETG ~2000, PP ~1500.
@@ -121,26 +134,40 @@ eff_cam = part == "fused" ? -0.3 : cam_gap;
 // ---------------------------------------------------------------------------
 // Kinematics — closed-form. The link has one length L between P2 (on the
 // lever crank at angle t) and P3 (on the carrier, which only translates in X):
-// requiring the same L at theta_closed (jaw closed on the fixed face) and
-// theta_open (jaw_gap_max open) solves the pivot B_x analytically.
+// requiring the same L at dead center (theta = 0, where extension peaks at
+// jaw gap = dead_center_gap) and at theta_open (jaw_gap_max open) solves the
+// pivot B_x and L analytically. Solving at CENTER, not at the seat, is the
+// round-1 sign fix: the closed seat now lies past center at a slightly larger
+// gap (the retention bump), so a seated workpiece torques the lever into the
+// stop instead of throwing it open.
 // ---------------------------------------------------------------------------
-p3_closed_x = fixed_face_x - p3_off;
-p3_open_x   = p3_closed_x - jaw_gap_max;
+p3_dc_x   = fixed_face_x - dead_center_gap - p3_off;   // P3 at dead center
+p3_open_x = fixed_face_x - jaw_gap_max - p3_off;       // P3 as printed
 
-_ac = crank_r * cos(theta_closed);  _sc = crank_r * sin(theta_closed);
 _ao = crank_r * cos(theta_open);    _so = crank_r * sin(theta_open);
-_qc = p3_closed_x - _ac;            _qo = p3_open_x - _ao;
 
-// B_x = [(q_o² + s_o²) − (q_c² + s_c²)] / (2 (q_o − q_c))
-B_x = ((_qo * _qo + _so * _so) - (_qc * _qc + _sc * _sc)) / (2 * (_qo - _qc));
+// From  B_x + R + L = p3_dc_x  and  B_x + R cos(to) + sqrt(L² − (R sin to)²)
+// = p3_open_x:  L = (G² + (R sin to)²) / 2G  with  G = stroke − R(1 − cos to)
+_stroke = jaw_gap_max - dead_center_gap;
+_G = _stroke - crank_r * (1 - cos(theta_open));
+assert(_G > 0, str("linkage insolvable: jaw_gap_max - dead_center_gap = ",
+    _stroke, " must exceed crank_r*(1-cos(theta_open)) = ",
+    crank_r * (1 - cos(theta_open)), " — raise the stroke or drop theta_open"));
+L_link = (_G ^ 2 + _so ^ 2) / (2 * _G);
+B_x = p3_dc_x - crank_r - L_link;
 B_y = 0;
-L_link = sqrt((_qc - B_x) ^ 2 + _sc ^ 2);
 
 // Carrier pin / jaw face position at lever angle t (the + root: P3 is
 // outboard of P2 along +X through the whole sweep)
 function p3_at(t) =
     B_x + crank_r * cos(t) + sqrt(L_link ^ 2 - (crank_r * sin(t)) ^ 2);
 function face_at(t) = p3_at(t) + p3_off;
+// d p3 / d theta, per radian. Its sign at the seat is the whole lock: a
+// workpiece reaction R on the carrier (-X) torques the lever by -R*dp3_drad,
+// so dp3_drad > 0 at the seat means the reaction drives theta MORE negative —
+// into the closed stop, never toward open.
+function dp3_drad(t) = -crank_r * sin(t)
+    * (1 + crank_r * cos(t) / sqrt(L_link ^ 2 - (crank_r * sin(t)) ^ 2));
 
 // Cam map: where the flank holds the arch apex at lever angle t. Linear from
 // the printed (first stable) state at pick-up to just past the second stable
@@ -196,18 +223,47 @@ assert(arch_rise / arch_t >= 2.3,
 assert(arch_t >= 1.2, "arch beam under 3 perimeters (1.2 mm)");
 assert(abs(face_at(theta_open) - (fixed_face_x - jaw_gap_max)) < 1e-6,
     "linkage closure identity failed: open gap != jaw_gap_max");
-assert(theta_closed > 0 && theta_closed < 12,
-    "over-center margin: the closed seat must sit 0-12 deg past dead center");
+assert(abs(face_at(0) - (fixed_face_x - dead_center_gap)) < 1e-6,
+    "dead-center identity failed: gap at theta 0 != dead_center_gap");
+assert(dead_center_gap > 0,
+    "the lever must cross dead center at a positive jaw gap, or the empty jaws jam before center");
+assert(theta_closed < 0 && theta_closed > -12,
+    "over-center margin: the closed seat must sit 0-12 deg PAST dead center (theta_closed < 0) so a workpiece reaction torques the lever INTO the closed stop");
+assert(dp3_drad(theta_closed) > 0,
+    str("no self-lock: dp3/dtheta at the seat = ", dp3_drad(theta_closed),
+        " mm/rad must be > 0, so a seated workpiece reaction (-X on the",
+        " carrier) makes a NEGATIVE lever torque - driving the lever into",
+        " its stop, not toward open"));
 assert(F_handle >= 8 && F_handle <= 15,
     str("predicted switch force ", F_handle, " N outside the 8-15 N brief band"));
-assert(abs(face_at(theta_closed) - fixed_face_x) < 1e-6,
-    "closed seat does not close the jaws on the fixed face");
 // (plate bounds are derived below; the handle-sweep margin is asserted there)
 
+// Locked band and its neighbours (documentation math — k_struct never shapes
+// geometry). seat_gap is the jaw gap parked at the stop; retention is how far
+// the face must be re-advanced (re-squeezing the workpiece) to escape back
+// over center; theta_hump is where the arch's snap reverses direction.
+seat_gap   = fixed_face_x - face_at(theta_closed);
+retention  = face_at(0) - face_at(theta_closed);
+t_lock_min = seat_gap + 30 / k_struct;          // holds the full 30 N budget
+t_lock_max = dead_center_gap + 160 / k_struct;  // ~160 N crossing squeeze — a
+                                                // firm press via the diverging
+                                                // near-center advantage
+theta_hump = theta_engage
+    + arch_rise / (2 * arch_rise + preload_past) * (theta_closed - theta_engage);
+t_spring_max = fixed_face_x - face_at(theta_hump);
+
 echo(str("[over-center] pivot B = (", B_x, ", ", B_y, "), link L = ", L_link));
-echo(str("[over-center] jaw face: closed x = ", face_at(theta_closed),
-         ", open x = ", face_at(theta_open),
+echo(str("[over-center] jaw face: seat x = ", face_at(theta_closed),
+         " (gap ", seat_gap, "), dead center x = ", face_at(0),
+         " (gap ", dead_center_gap, "), open x = ", face_at(theta_open),
          " -> gap = ", fixed_face_x - face_at(theta_open)));
+echo(str("[over-center] LOCK: dp3/dtheta at seat = +", dp3_drad(theta_closed),
+         " mm/rad -> closed-state workpiece reaction torque is NEGATIVE",
+         " (into the stop); retention bump = ", retention, " mm"));
+echo(str("[over-center] locked band ~ ", t_lock_min, "-", t_lock_max,
+         " mm stock at k_struct = ", k_struct, " N/mm; spring-assisted hold",
+         " (arch past its hump) up to ~", t_spring_max,
+         " mm; thicker stock will not stay closed - retune dead_center_gap"));
 echo(str("[over-center] arch: f_snap = ", f_snap, " N, u_travel = ", u_travel,
          " mm, apex map ", apex_y_at(theta_engage), " -> ", apex_y_at(theta_closed)));
 echo(str("[over-center] switch force at handle rim = ", F_handle,
@@ -285,6 +341,32 @@ open_stop_ang   = theta_open + 2.5 + 180 + handle_half + asin(stop_post_d / 2 / 
 module stop_post(ang, r) translate([B_x + r * cos(ang), r * sin(ang), plate_t])
     cylinder(d = stop_post_d, h = lever_z1 - plate_t);
 
+// Printed-pose link pin P2 (world) — the crank eye centre as printed
+P2_open = [B_x + _ao, _so];
+
+// Sacrificial film shelves under the printed-pose lever band. Without them
+// the crank arm, handle paddle and crank eye extrude at lever_z0 over a
+// 5.4 mm void (Jane's block, PR #414): the band's first layer had nothing to
+// print on. Shelf tops sit at rail_z1 = lever_z0 - eff_z, so the band prints
+// the same separable 0.4 mm film it already prints over the rail tops — and
+// in the fused control (eff_z = 0) they weld, as every PIP interface must.
+// Footprints are inset from the band outline so the film's perimeter always
+// overhangs the shelf and cannot fuse laterally. The cam tail gets no shelf:
+// it already films over the arch beam and rail tops, and a shelf there would
+// either weld the arch span or block the carrier's swept volume.
+module band_shelves() {
+    // under the crank arm + eye (boss d16 / eye d13 -> shelf d10 / d8)
+    translate([0, 0, plate_t]) linear_extrude(rail_z1 - plate_t) hull() {
+        translate([B_x, B_y]) circle(d = 10);
+        translate([P2_open[0], P2_open[1]]) circle(d = 8);
+    }
+    // under the handle paddle (sector inset 2 mm radially, 1.5 deg angularly)
+    translate([B_x, B_y, plate_t]) linear_extrude(rail_z1 - plate_t)
+        annulus_sector(handle_r_in + 2, handle_r_out - 2,
+                       theta_open + 180 - handle_half + 1.5,
+                       theta_open + 180 + handle_half - 1.5);
+}
+
 module base() {
     lip_w = channel_half - jaw_depth / 2 + 2;   // reach in over the slab
     difference() {
@@ -292,6 +374,13 @@ module base() {
             translate([plate_x0, plate_y0, 0])
                 rounded_box([plate_x1 - plate_x0, plate_y1 - plate_y0, plate_t],
                             r = 6, bottom_chamfer = 0.6);
+            // plate tab under the printed-pose crank eye + P2 pin column,
+            // which otherwise stand past the plate's back edge (Jane's
+            // block): plate under the eye, then the shelf films above it
+            translate([P2_open[0] - 9, plate_y1 - 3, 0])
+                rounded_box([18, P2_open[1] + eye_d / 2 + 2.4 - (plate_y1 - 3),
+                             plate_t], r = 3, bottom_chamfer = 0.6);
+            band_shelves();
             // fixed jaw
             translate([fixed_face_x, -jaw_depth / 2, plate_t])
                 cube([face_t, jaw_depth, jaw_height]);
@@ -350,6 +439,20 @@ cam_sweep = concat([for (i = [theta_closed : 1 : theta_engage]) i],
                    [for (i = [theta_engage + 0.5 : 0.5 : theta_open - 0.25]) i],
                    [theta_open]);
 
+// Tail sector bounds, derived from the swept nub channel so a linkage
+// re-solve cannot strand the flank (hardcoded bounds sized for the round-1
+// pivot would leave the nub outside the tail at the new seat). The open-side
+// edge sits exactly at the channel edge — no end wall there, so the lever can
+// over-travel to its open stop — while the seat side keeps a 1.7 deg wall
+// beyond the channel (flank material past the parked nub).
+function nub_r_at(t)   = norm([arch_apex_x - B_x, apex_y_at(t) - B_y]);
+function nub_ang_at(t) = atan2(apex_y_at(t) - B_y, arch_apex_x - B_x) - t;
+tail_r_out = nub_r_at(theta_open) + r_nub + cam_gap + 0.6;
+tail_a0 = nub_ang_at(theta_open)
+    - asin((r_nub + cam_gap) / nub_r_at(theta_open));
+tail_a1 = nub_ang_at(theta_closed)
+    + asin((r_nub + cam_gap) / nub_r_at(theta_closed)) + 1.7;
+
 module cam_carve() {
     for (t = cam_sweep)
         rotate([0, 0, -t])
@@ -369,7 +472,7 @@ module lever() {                    // lever-local: pivot at origin, crank +X
                     }
                     annulus_sector(handle_r_in, handle_r_out,
                                    180 - handle_half, 180 + handle_half);
-                    annulus_sector(6, 48.5, -92, -36);   // cam tail
+                    annulus_sector(6, tail_r_out, tail_a0, tail_a1); // cam tail
                 }
             // link pin P2 rises from the crank eye; its head traps the link
             pin_col([crank_r, 0], lever_z1, link_z1);
