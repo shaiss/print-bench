@@ -43,7 +43,11 @@ folds shut.
   pocket and eats the headroom a ring's stone needs. If the fit matters, **paint a
   support enforcer on the nest crown only** — a global "enable supports" drops
   pillars into the 0.5 mm parting gap (re-welding the seam this design is built to
-  keep open) and scabs the cheeks and the pocket the ring seats against. Note that
+  keep open) and scabs the cheeks and the pocket the ring seats against — and **no brim**
+  either: a brim laid across the two flat islands bridges the parting gap and
+  welds the seam at layer 1, which no elephant-foot compensation undoes on the
+  reprint (auto-brim rarely fires at this footprint, but switch it off to be
+  sure). Note that
   PETG (the recommended material) sags on that crown more than PLA does, so a
   truly stone-flush ceiling is really a PLA job — at the cost of the hinge (see
   **Material**).
@@ -105,7 +109,7 @@ across the seam at the very first layer is normal elephant foot — flex the hal
 gently to break it before first use (a non-event in PETG; in PLA expect a faint
 whitened crack along the seam). If the halves fit tight and won't part after
 flexing, that's almost always first-layer flare, not the gap — turn on 0.2 mm
-elephant-foot compensation and reprint; only a seam that still binds after that
+elephant-foot compensation and reprint — coupon first; only a seam that still binds after that
 wants `part_gap` raised, +0.1 mm on the coupon first. And when you give it, hand
 it over with **"it folds like a locket — the spine's the hinge"** (or fold it
 open once in front of them): a first-timer's instinct is to pull the halves apart
