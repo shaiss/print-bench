@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "growth_queue": {
+      "command": "python3",
+      "args": [".claude/skills/growth-queue/queue_mcp.py"]
+    }
+  }
+}

@@ -98,7 +98,9 @@
       "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)",
       "Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)",
       "Bash(.claude/skills/label-issues/label-helper.sh:*)",
-      "Bash(./.claude/skills/label-issues/label-helper.sh:*)"
+      "Bash(./.claude/skills/label-issues/label-helper.sh:*)",
+      "mcp__growth_queue",
+      "mcp__growth_twitter"
     ]
   }
 }

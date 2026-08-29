@@ -96,6 +96,8 @@ REQUIRED_DENIES = [
     {"mcp__scout", "mcp__scout__file_design_brief"},
     {"mcp__assessor", "mcp__assessor__post_adoption_disposition"},
     {"mcp__oracle", "mcp__oracle__post_oracle_review"},
+    {"mcp__growth_queue", "mcp__growth_queue__queue_growth_post"},
+    {"mcp__growth_twitter", "mcp__growth_twitter__post_tweet"},
     CROSS,
     {"Write"}, {"Edit"}, {"NotebookEdit"},
 ]
@@ -182,7 +184,7 @@ selftest() {
 {"permissions":{"allow":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)"]}}
 EOF
   cat > "$tmp/good-wright.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__reeve_signoff","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__growth_queue","mcp__growth_twitter","mcp__reeve_signoff","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-wright.json" wright 2>/dev/null; then
     echo "ok    selftest: complete wright deny coverage passes"
@@ -192,7 +194,7 @@ EOF
 
   # The same list works as the signoff half only with the cross-deny swapped.
   cat > "$tmp/good-signoff.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__growth_queue","mcp__growth_twitter","mcp__wright","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-signoff.json" signoff 2>/dev/null; then
     echo "ok    selftest: complete signoff deny coverage passes"
@@ -214,7 +216,7 @@ EOF
   # mcp__reeve_signoff would let the proposer hold the arming tool. Coverage
   # alone would never catch it (the server is on no allow list).
   cat > "$tmp/bad2-wright.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__growth_queue","mcp__growth_twitter","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad2-wright.json" wright 2>/dev/null; then
     echo "FAIL  selftest: a dropped cross-tool deny (mcp__reeve_signoff) was NOT caught"; return 1
@@ -225,7 +227,7 @@ EOF
   # BAD 3: a required sibling-wrapper deny is dropped (assessor-helper's
   # ./-form) — the assessor-check BAD 4 pattern.
   cat > "$tmp/bad3-wright.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__reeve_signoff","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__growth_queue","mcp__growth_twitter","mcp__reeve_signoff","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad3-wright.json" wright 2>/dev/null; then
     echo "FAIL  selftest: a dropped sibling-wrapper deny was NOT caught"; return 1
@@ -235,7 +237,7 @@ EOF
 
   # BAD 4: the shared read wrapper itself is denied → must fail (fails closed).
   cat > "$tmp/bad4-wright.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__reeve_signoff","Write","Edit","NotebookEdit","Bash(.claude/skills/wright/wright-helper.sh:*)"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__growth_queue","mcp__growth_twitter","mcp__reeve_signoff","Write","Edit","NotebookEdit","Bash(.claude/skills/wright/wright-helper.sh:*)"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad4-wright.json" wright 2>/dev/null; then
     echo "FAIL  selftest: a denied read wrapper was NOT caught"; return 1
@@ -246,7 +248,7 @@ EOF
   # BAD 5: the signoff backstop denies its OWN posting tool (here via a
   # wildcard) → must fail — the scheduled sign-off could never rule.
   cat > "$tmp/bad5-signoff.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","Write","Edit","NotebookEdit","mcp__reeve_*"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__growth_queue","mcp__growth_twitter","mcp__wright","Write","Edit","NotebookEdit","mcp__reeve_*"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad5-signoff.json" signoff 2>/dev/null; then
     echo "FAIL  selftest: a wildcard deny blocking the sign-off tool was NOT caught"; return 1

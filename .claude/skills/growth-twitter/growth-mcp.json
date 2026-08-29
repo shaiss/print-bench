@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "growth_twitter": {
+      "command": "python3",
+      "args": [".claude/skills/growth-twitter/growth_mcp.py"]
+    }
+  }
+}

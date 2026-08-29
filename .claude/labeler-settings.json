@@ -92,7 +92,9 @@
       "Edit",
       "NotebookEdit",
       "Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)",
-      "Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)"
+      "Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)",
+      "mcp__growth_queue",
+      "mcp__growth_twitter"
     ]
   }
 }

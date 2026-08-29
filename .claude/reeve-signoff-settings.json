@@ -112,7 +112,9 @@
       "mcp__scout",
       "mcp__assessor",
       "mcp__oracle",
-      "mcp__wright"
+      "mcp__wright",
+      "mcp__growth_queue",
+      "mcp__growth_twitter"
     ]
   }
 }

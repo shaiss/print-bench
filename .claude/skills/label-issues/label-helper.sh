@@ -80,8 +80,13 @@ ROUTING_LABELS=(autonomy-ok declined-too-big design-brief needs-decision)
 # (docs/agent-forge.md), where arming/parking is Reeve's sign-off's decision
 # exclusively; a labeler-applied `autonomy-ok` would bypass that sign-off,
 # and a labeler-applied `needs-decision` would park a brief the sign-off is
-# about to rule on.
-NON_TRIAGE_LABELS=(agent-brief)
+# about to rule on. And `growth-queue` — the growth desk's queue
+# (docs/growth.md), drained by the channel agents on their own schedule: a
+# labeler-applied `needs-decision` would silently park a queued message
+# forever (the growth Select step and the posting tool both exclude parked
+# items), and a labeler-applied `autonomy-ok` would point the backlog burn's
+# /ship-issue at a message that is not code work.
+NON_TRIAGE_LABELS=(agent-brief growth-queue)
 
 # A mutating verb may only touch a label from ROUTING_LABELS — the labeler's
 # entire remit. Refuses anything else so a prompt-injected agent cannot stamp an
