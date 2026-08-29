@@ -110,7 +110,7 @@ welfare geometry fails the render instead of shipping.
    tips' first layer with a blade before touching `port_tol` — or set
    elephant-foot compensation (initial-layer horizontal expansion) to 0.2 mm
    for the coupon and the node.
-2. **Print the node** ports-down, no supports, optional brim.
+2. **Print the node** ports-down, no supports, no brim.
 3. **Fit it** between any two NUGGS faces: push together, twist a quarter turn
    either way, on both ports.
 4. **Place it** where the run doubles back. The animal enters, climbs the

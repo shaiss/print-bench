@@ -175,7 +175,7 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
    (initial-layer horizontal expansion) to 0.2 mm for the coupon and the node.
    Caliper the bore while you're at it: under 79.0 mm means the printer is
    shrinking.
-4. Only then commit the full module (~195 mm tall, ~7 h at 0.2 mm).
+4. Only then commit the full module (~195 mm tall, ~21 h and ~300 g at 0.2 mm — check the spool).
 
 ## Print settings
 
