@@ -444,6 +444,33 @@ jobs:
           LABEL: ${{ steps.policy.outputs.label }}
         run: echo "::notice::no issue is currently eligible (nothing carrying the '${LABEL}' label is unclaimed) — nothing to chunk"
 
+      # No SHIP-LOCK lifecycle here, so the terminal link failing IS the job
+      # failure — but before that stands, recover WHY the chain exhausted (the
+      # agent steps hide their provider error) and route the human-fixable causes
+      # — out of credit / out of tokens / bad key — to ONE deduped needs-decision
+      # issue, so a scheduled red nobody watches becomes an actionable ask. A bad
+      # model id or a transient blip is only diagnosed in the log. Advisory: it
+      # never fails the job. Fires (always(), so it survives the terminal link's
+      # failure) only when a key was present and the walk did not succeed — the
+      # same walk-outcome shape the record step reports as RUN.
+      - name: Diagnose the exhausted chain (billing / tokens / technical)
+        id: triage
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.policy.outputs.provider == 'zai' && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome) || (steps.run_anthropic_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome)) != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: chunker
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the chunker routine (issue #${{ steps.select.outputs.issue }})
+          escalate: "true"
+
       - name: Record the run outcome
         # Runs on success, failure or skip so the job summary always shows what
         # happened. This reports the *run* disposition; the authoritative

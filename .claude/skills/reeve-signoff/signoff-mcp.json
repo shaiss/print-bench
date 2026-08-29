@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "reeve_signoff": {
+      "command": "python3",
+      "args": [".claude/skills/reeve-signoff/signoff_mcp.py"]
+    }
+  }
+}

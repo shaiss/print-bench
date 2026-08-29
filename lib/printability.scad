@@ -61,9 +61,12 @@ module screw_hole(size = "M3", l = 10, head = "none", head_depth = undef) {
 }
 
 // Teardrop-profile horizontal hole: prints without supports when the axis is
-// horizontal. Axis along Y; the point of the teardrop faces +Z.
+// horizontal. Axis along Y; the point of the teardrop faces +Z — pinned by
+// lib/printability-mates.conf's independently-authored gauge plug, so a
+// rotation-sign flip fails mate-check.sh instead of shipping silently
+// (issue #398: the point faced -Z for years and nothing measured it).
 module teardrop_hole(d = 5, l = 10) {
-    rotate([-90, 0, 0]) linear_extrude(l, center = true) {
+    rotate([90, 0, 0]) linear_extrude(l, center = true) {
         circle(d = d);
         // 45° roof so the top bridges cleanly
         intersection() {

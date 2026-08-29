@@ -173,6 +173,9 @@ authorised by your real repository permission (write access needed).
     scheduled agents (backlog burn, idea→PR design run, issue chunker). Each
     also needs its committed `enabled: true` in the matching `.github/*.conf`;
     both keys must agree before it runs.
+  - `WRIGHT_ENABLED` — the agent forge (Wright's proposals + Reeve's sign-off,
+    [docs/agent-forge.md](docs/agent-forge.md)); same two-key rule, and its
+    `WRIGHT_AUTO_ARM` env in `wright.yml` demotes approves to advisory.
   - `PRINT_FEEDBACK_ENABLED` — the *Log a print result* form (single switch).
 - **Manual workflows** — several workflows are `workflow_dispatch` forms in the
   repository's **Actions** tab: *Log a print result*, *Regenerate avatar*,
@@ -269,6 +272,22 @@ surfaces studies awaiting a read live in
     (`.claude/adoption-assessor-settings.json`), which additionally denies
     `chunk-helper.sh`, `label-helper.sh` AND `scout-helper.sh` and must never
     deny its own `assessor-helper.sh`
+  - `wright-perms-check.sh` — the same drift check for BOTH halves of the
+    agent forge ([docs/agent-forge.md](docs/agent-forge.md)) in one script:
+    the propose half's backstop (`.claude/wright-settings.json`) must deny
+    the sign-off MCP server and the sign-off half's
+    (`.claude/reeve-signoff-settings.json`) must deny the filing server —
+    the proposer can never judge, the judge can never file — while neither
+    denies the shared read wrapper `wright-helper.sh` or its own write tool
+  - `assessor-context.sh` — the trusted vendor-fetch step behind the
+    adoption-study assessor: extracts the study's named GitHub repository and
+    shallow-clones it into `.assessor-context/<n>/` (GitHub-only, hooks
+    disabled, size-capped, package never run) so the assessor compares the tool
+    at a feature and code/functional level against the vendor's real source,
+    the way `oracle.yml` assembles `.oracle-context/`. The agent only reads the
+    fetched tree — it gains no network/`git`/`gh`. Its `--selftest` pins the
+    security-critical URL parser (only `https://github.com/<owner>/<repo>` is a
+    clone target) with negative controls
   - `cadence-sync-check.sh` — cadence-parity check for the scheduled autonomy
     routines (issue #276): the `cadence:` key in `.github/<routine>.conf` must
     resolve to the same schedule as the `cron:` literal in the matching
