@@ -34,9 +34,9 @@ supports in the slice profile (they would make the page's claim a lie).
       benign — teardrop-crown facets under nozzle width, see NOTES.md)
 - [x] G3 `readme-gate.sh` passes
 - [x] G4 every Must-fit row measured on the exported mesh, not the variable
-- [ ] G5 `/preflight` green (running at ship time)
-- [ ] Page previews depict current geometry (hero re-rendered by CI regen on
-      the PR — stale bytes until then are disclosed, not hidden)
+- [x] G5 `/preflight` green (at ship time, per the PR body)
+- [x] Page previews depict current geometry (regen `fd95e5f` re-rendered the
+      hero; verified against the tree by both reviewers, round 3)
 
 ## Product page & shots (art direction)
 
@@ -66,8 +66,9 @@ worse than no scene (see decision log).
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | Re-add a tier-2 lifestyle scene (write `lifestyle.conf` on main; the workflow auto-fires) | sells the use, not the technique | 1 conf line + CI key |
-| B2 | Knife-edge teardrop crown once #398's lib fix lands — clears the 92/100 caveat | honest perfect score | lib PR + re-gate |
+| B1 | Re-add a tier-2 lifestyle scene naming the **in-use** scene — shelf on a wall, board loaded (a new shot line, never a reframe; write `lifestyle.conf` on main; the workflow auto-fires) | sells the use, not the technique | 1 conf line + CI key |
+| B4 | Board locator + residual install notes — locator half **only if field tests ask** (round-1 ruling, reaffirmed round 3); notes half is two crumbs, "measure your stud" and "level the arm, not the bores" (the fasten-the-board sentence itself shipped with round 3) | tip-load statics answered on the page; the locator is geometry waiting on field evidence | page crumbs free; locator = geometry + re-gate |
+| B2 | Knife-edge teardrop crown once #398's lib fix lands — clears the 92/100 caveat — **plus a framed close-up proof line** (new `cameras.conf` line, never a reframe) | honest perfect score | lib PR + re-gate |
 | B3 | Deeper/heavier arm variant (`arm_d` 100+, thicker vault band) | only if field tests ask | one param sweep + print |
 
 ## Open decisions
@@ -85,3 +86,5 @@ resolved (no rib; the vault brace is the stiffener; derivation in NOTES.md).
 | 2026-08-24 | Tier-2 lifestyle scene removed, not regenerated | it depicted the old geometry; CI's lifestyle workflow only fires when a manifest lands on main — re-adding there is the designed path (B1) |
 | 2026-08-24 | Bore positions staggered x=20/z=10 and x=60/z=28 (assumed) | stagger resists pull-out better than a vertical pair; recorded as assumption in NOTES.md |
 | 2026-08-29 | Bores moved z 10/28 → 11/25 (x unchanged); head-envelope guards added | head-envelope clearance (Jane round-2 finding, Drik round-1): M5 socket head fouled the vault at z_hi=28 and kissed the arm at z_lo=10; the reviewed 10→9 lower move was sign-inverted (measured: 9 interferes 25.9 mm³, 11 clears), so 11 landed; stagger survives |
+| 2026-08-24 | No board locator — deliberate, clean reference top; revisit on field evidence | round-1 ruling (recorded late): a lip or dowel on the arm trades the clean reference top for a fixture no field test has asked for; the standing trigger is field evidence, tracked as B4 |
+| 2026-08-29 | Board tip hazard answered with a page note, not geometry | round 3: the ≈1.6 kg board's centroid sits ~100 mm out, forward of the 60 mm arm's support edge — the fasten-the-board sentence ships on the page; the locator stays deferred (B4); ASA-enclosure and snug-don't-crank/washer clauses land as page honesty |

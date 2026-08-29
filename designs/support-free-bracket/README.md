@@ -26,7 +26,9 @@ unsupported bridge roof. Every layer of the vault rests on the one below it.
 ![Front view: both teardrop bores](previews/front-bores.png)
 
 The M5 bores run horizontal in the print frame, so they are **teardrops** — a
-45° peaked roof self-supports where a round bore's roof would droop.
+45° peaked roof self-supports where a round bore's roof would droop. They are
+clearance holes the screws pass *through*, not keyhole slots to hang from —
+the point-up teardrop only borrows that shape.
 
 ![Bottom view: the proof shot](previews/bottom-iso.png)
 
@@ -39,6 +41,8 @@ flat downward-facing surface anywhere. Print it with supports turned **off**.
   shelf** — the layer planes cross the peel load all year, and PLA creeps
   under sustained load. PETG note: this is an 80 × 66 mm slab of first layer,
   and PETG welds to smooth PEI — use a textured plate (or glue-stick release).
+  (ASA wants an enclosed printer, or a draft shield — an open frame lifts the
+  corners of that first-layer slab long before the vault is built.)
 - **Layer height:** 0.2 mm
 - **Infill:** 20–40 %
 - **Seam:** Back — buries the ridge on the wall face (the default Aligned
@@ -70,10 +74,17 @@ Customizer sections; override on the command line with `-D 'arm_d=80'`.
 ## Assembly & use
 
 Fasten the plate to wall studs or anchors with two M5 screws, flip-mounted
-with the arm on top, and rest the shelf board on the arm. Socket heads land
+with the arm on top, and rest the shelf board on the arm — **and fasten the
+board to the arm** (a short screw up through it, or adhesive): a typical
+800 × 200 × 18 mm pine board is ≈1.6 kg with its centroid ~100 mm out,
+forward of the 60 mm arm's support edge, so an unfastened board is its own
+tip load before anything is shelved. Socket heads land
 inside the cavity, and the bore heights are placed — and guarded in the
 source — so the head clears the arm face and the vault ceiling; no counterbore
-needed. The vault-side screw is hex-key-only: the vault face closes in about
+needed. Snug, don't crank: the plate *is* the washer, and PLA under a socket
+head embeds under a load that never lets go, quietly relaxing the preload —
+a steel M5 washer under each head buys that back. The vault-side screw is
+hex-key-only: the vault face closes in about
 10 mm out from the plate at that height, so nothing straight follows the
 head — drive it with the short end of the L-key, and spend the ~$2 on wall
 anchors rated well past the load; they, not the bracket, are the real
