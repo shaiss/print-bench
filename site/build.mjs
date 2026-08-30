@@ -65,6 +65,7 @@ import {
   redirectPage,
   setAssetVersion,
   setNotifications,
+  setSiteUrl,
   FAVICON,
 } from "./lib/templates.mjs";
 import { createHash } from "node:crypto";
@@ -74,6 +75,10 @@ const REPO_ROOT = resolve(SITE_DIR, "..");
 const OWNER = "shaiss";
 const REPO = "print-bench";
 const GITHUB_BASE = `https://github.com/${OWNER}/${REPO}/blob/main`;
+// The deployed site's canonical origin. A constant (deterministic across every
+// build machine — canonical must point at production, not at whichever preview
+// deploy built the page), overridable via SITE_URL for a fork on another domain.
+const SITE_URL = process.env.SITE_URL || "https://printbench.xyz";
 
 function parseArgs(argv) {
   let out = join(REPO_ROOT, "build", "site");
@@ -206,6 +211,7 @@ async function main() {
     .digest("hex")
     .slice(0, 10);
   setAssetVersion(assetHash);
+  setSiteUrl(SITE_URL);
 
   const designs = readDesigns(REPO_ROOT);
   const styles = readStyles(REPO_ROOT);
