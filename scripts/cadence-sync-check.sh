@@ -42,17 +42,19 @@ cd "$(dirname "$0")/.."
 # named (backlog-burn, design-run, chunker, labeler), the three issue
 # #293 added (product-scout, backlog-groomer, reeve), the adoption-assessor,
 # wright (the agent forge, docs/agent-forge.md), growth-twitter (the growth
-# desk's Twitter/X agent, docs/growth.md) and reeve-growth (the growth desk's
+# desk's Twitter/X agent, docs/growth.md), reeve-growth (the growth desk's
 # generative PM-queueing routine, the "Scheduled PM queueing" step of
-# docs/growth.md). Keep in sync with those issues' tables; a routine not listed
-# here is not checked (see the script header for what that means) — extend the
-# list only with the issue that asks for it.
+# docs/growth.md) and spike-converter (#245 child C, issue #440 — the
+# spike-to-brief converter's scheduled sibling). Keep in sync with those
+# issues' tables; a routine not listed here is not checked (see the script
+# header for what that means) — extend the list only with the issue that
+# asks for it.
 #
 # reeve and backlog-groomer confs are parsed by their own tools, not by
 # `backlog-burn config` — the conf READER here is the same `key: value`
 # house format every one of those parsers uses (see the Python docstring
 # below), not a call into the shared parser.
-ROUTINES=(backlog-burn design-run chunker labeler product-scout backlog-groomer reeve adoption-assessor wright growth-twitter reeve-growth)
+ROUTINES=(backlog-burn design-run chunker labeler product-scout backlog-groomer reeve adoption-assessor wright growth-twitter reeve-growth spike-converter)
 
 # Compare one conf/workflow pair. Prints a diagnosis and returns non-zero on
 # drift. Kept as a function so --selftest can point it at fixtures.

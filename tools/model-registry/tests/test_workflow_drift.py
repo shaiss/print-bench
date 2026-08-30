@@ -312,6 +312,221 @@ def test_scout_no_hardcoded_model_literal_survives():
     assert not literals, f"hardcoded --model literal(s) in product-scout.yml: {literals}"
 
 
+# ── The spike converter (#245 child C, issue #440) ────────────────────────────
+#
+# The scheduled spike-to-brief converter is the scout's shape exactly: a
+# SINGLE-link chain (`spike-converter`, the scout tier — extraction and
+# reformatting of human-vetted text is cheap-to-be-wrong), one ship step per
+# provider, each sourcing `--model` from `steps.chain.outputs.link1_model`.
+# The guard below is the scout's, adapted only where the converter differs:
+# its ONE write is not its own MCP server but the scout's REUSED filing tool,
+# so the wiring test additionally pins the reuse — every ship step must pass
+# the converter's own deny backstop, the scout's mcp-config, and an allow-list
+# that names mcp__scout__file_design_brief. The file-side half of that
+# coupling (the backstop never denying the tool; the scout files still
+# existing) is scripts/spike-converter-perms-check.sh's.
+
+SPIKE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "spike-converter.yml"
+SPIKE_CONF = REPO_ROOT / ".github" / "spike-converter.conf"
+SPIKE_CHAIN = "spike-converter"
+
+
+def _spike_text() -> str:
+    return SPIKE_WORKFLOW.read_text(encoding="utf-8")
+
+
+def _spike_ship_steps(text: str) -> list[dict]:
+    """The converter job's claude-code-action ship steps, parsed for wiring."""
+    steps: list[dict] = []
+    for chunk in re.split(r"\n      - ", text):
+        if "uses: anthropics/claude-code-action" not in chunk:
+            continue
+        model = re.search(
+            r"--model \$\{\{ steps\.chain\.outputs\.link(\d+)_model \}\}", chunk)
+        secret = re.search(r"anthropic_api_key: \$\{\{ secrets\.(\w+) \}\}", chunk)
+        base = re.search(r"ANTHROPIC_BASE_URL: (\S+)", chunk)
+        settings = re.search(r"--settings (\S+)", chunk)
+        mcp = re.search(r"--mcp-config (\S+)", chunk)
+        allowed = re.search(r'--allowedTools "([^"]*)"', chunk)
+        steps.append({
+            "model_slot": int(model.group(1)) if model else None,
+            "secret": secret.group(1) if secret else None,
+            "base_url": base.group(1) if base else "",
+            "settings": settings.group(1) if settings else None,
+            "mcp_config": mcp.group(1) if mcp else None,
+            "allowed_tools": allowed.group(1) if allowed else "",
+        })
+    return steps
+
+
+def test_spike_converter_chain_exists_and_resolves():
+    # The chain issue #440 names. A registry edit that dropped it would fail
+    # the workflow's resolve step at run time — on the converter's weekly
+    # cadence, where nobody is watching. Catch it here instead.
+    links = Registry.load(str(REGISTRY)).resolve(SPIKE_CHAIN)
+    assert links, f"the `{SPIKE_CHAIN}` chain resolved to zero links"
+
+
+def test_spike_converter_ship_steps_are_pinned_to_its_registry_link():
+    """Every converter ship step reads its model from the resolved chain,
+    sources it from the resolve step's output, and carries exactly one
+    endpoint/secret pair per provider — the model id appears nowhere in the
+    YAML (the scout guard's split: the conf's `provider:` label picks which
+    step runs, so the non-current provider's step is checked structurally).
+    """
+    reg = Registry.load(str(REGISTRY))
+    link = reg.resolve(SPIKE_CHAIN)[0]
+    text = _spike_text()
+    steps = _spike_ship_steps(text)
+    assert steps, "no claude-code-action ship step found in spike-converter.yml"
+    secrets_by_provider = {p.id: p.secret for p in reg.providers.values()}
+    bases_by_provider = {p.id: p.base_url for p in reg.providers.values()}
+    matched_current = False
+    for step in steps:
+        assert step["model_slot"] == link.position, (
+            f"converter ship step: references link{step['model_slot']}_model "
+            f"but the `{SPIKE_CHAIN}` chain has its only model at position "
+            f"{link.position}.")
+        providers_with_secret = [pid for pid, s in secrets_by_provider.items()
+                                 if s == step["secret"]]
+        assert len(providers_with_secret) == 1, (
+            f"converter ship step: wires secrets.{step['secret']}, which "
+            f"matches no single registry provider "
+            f"(matches: {providers_with_secret}).")
+        step_provider = providers_with_secret[0]
+        assert step["base_url"] == bases_by_provider[step_provider], (
+            f"converter ship step: wires secrets.{step['secret']} with "
+            f"ANTHROPIC_BASE_URL {step['base_url']!r} but registry provider "
+            f"{step_provider!r} uses {bases_by_provider[step_provider]!r}.")
+        if step_provider == link.provider:
+            matched_current = True
+    assert matched_current, (
+        f"no converter ship step carries the `{SPIKE_CHAIN}` chain's provider "
+        f"{link.provider!r} (secret {link.secret}) — the configured provider "
+        f"would have no step to run, or would run one wired for another "
+        f"provider's endpoint.")
+
+
+def test_spike_converter_ship_steps_wire_the_reused_surface():
+    """The converter's tool surface is the #439/#440 reuse: its own backstop,
+    the SCOUT's mcp-config, and an allow-list of exactly the filing tool, its
+    own read wrapper (both spellings) and the read-only file tools. A step
+    that drops any of these either widens the unattended run's surface or —
+    for the mcp-config/allow-list — silently revokes its only write, so the
+    armed routine files nothing and fails without an error. This is the
+    workflow half of the coupling scripts/spike-converter-perms-check.sh
+    holds over the files.
+    """
+    text = _spike_text()
+    steps = _spike_ship_steps(text)
+    assert steps, "no claude-code-action ship step found in spike-converter.yml"
+    expected_allowed = (
+        "mcp__scout__file_design_brief,"
+        "Bash(.claude/skills/spike-converter/converter-helper.sh:*),"
+        "Bash(./.claude/skills/spike-converter/converter-helper.sh:*),"
+        "Read,Grep,Glob")
+    for step in steps:
+        assert step["settings"] == ".claude/spike-converter-settings.json", (
+            f"converter ship step: --settings is {step['settings']!r}, not the "
+            f"converter's own deny backstop")
+        assert step["mcp_config"] == ".claude/skills/product-scout/scout-mcp.json", (
+            f"converter ship step: --mcp-config is {step['mcp_config']!r}, not "
+            f"the reused scout filing server — filing a brief any other way "
+            f"breaks #439's one-filing-surface rule")
+        assert step["allowed_tools"] == expected_allowed, (
+            f"converter ship step: allow-list is {step['allowed_tools']!r}, "
+            f"expected exactly {expected_allowed!r}")
+        assert "--permission-mode dontAsk" in text, (
+            "the dontAsk mode is gone — without it the allow-list stops being "
+            "exclusive and a prompt-injected run gets prompted-for tools")
+
+
+def test_spike_converter_workflow_cross_checks_chain_and_conf_providers():
+    # The workflow itself must refuse a conf/chain provider mismatch at
+    # resolve time (before any key is spent), or the model would run against
+    # the wrong provider's endpoint and fail mid-run — issue #440's pinned
+    # acceptance criterion, so its presence is pinned too.
+    text = _spike_text()
+    assert re.search(r"link1_provider", text), (
+        "spike-converter.yml no longer reads link1_provider — the conf/chain "
+        "provider cross-check is gone")
+    assert "model_registry resolve spike-converter" in text, (
+        "spike-converter.yml no longer resolves the `spike-converter` chain")
+
+
+def test_spike_converter_conf_declares_the_chains_provider():
+    # The cross-check's subject, held still: .github/spike-converter.conf
+    # must keep declaring the provider its chain's link resolves to, or every
+    # armed run dies at the resolve step. (The runtime check reports this
+    # loudly; this pins it pre-merge, before a key is spent discovering it.)
+    reg = Registry.load(str(REGISTRY))
+    link = reg.resolve(SPIKE_CHAIN)[0]
+    conf = SPIKE_CONF.read_text(encoding="utf-8")
+    m = re.search(r"^provider:\s*(\S+)\s*$", conf, re.MULTILINE)
+    assert m, f"{SPIKE_CONF} carries no `provider:` key"
+    assert m.group(1) == link.provider, (
+        f"{SPIKE_CONF} declares provider {m.group(1)!r} but the "
+        f"`{SPIKE_CHAIN}` chain's link is on {link.provider!r} — the resolve "
+        f"cross-check will fail every armed run")
+
+
+def test_spike_converter_degraded_path_skips_with_a_notice():
+    """The secret-absent path stays a `::notice::` skip, not a hard fail.
+
+    The run steps' `if:` must gate on `key_present` (so an absent key skips
+    them), and the step that explains the skip must still emit a `::notice::`
+    naming the provider and its key — the scout's preserved degraded path,
+    verbatim.
+    """
+    text = _spike_text()
+    assert re.search(
+        r"steps\.policy\.outputs\.key_present\s*==\s*'1'", text), (
+        "the converter run steps no longer gate on key_present — an absent "
+        "key would not skip them")
+    assert "::notice::the configured provider" in text, (
+        "the secret-absent notice is gone — the degraded path must stay a "
+        "::notice:: skip")
+
+
+def test_spike_converter_no_hardcoded_model_literal_survives():
+    # No `--model` literal of ANY provider may appear in spike-converter.yml —
+    # every one must be a `${{ … }}` expression sourced from the resolve
+    # step's outputs.
+    text = _spike_text()
+    literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
+                if not tok.startswith("${{")]
+    assert not literals, f"hardcoded --model literal(s) in spike-converter.yml: {literals}"
+
+
+def test_spike_converter_two_key_arming_gates_the_job():
+    """Issue #440's disarm acceptance, pinned structurally: the job-level
+    `if:` must read the LIVE repo variable (key 1 — unset by default, so a
+    clone/fork cannot silently arm an issue-filing cron) AND the ship steps
+    must gate on the committed conf's `enabled` (key 2 — `steps.policy.outputs
+    .enabled`, read from .github/spike-converter.conf by the policy step).
+    Dropping either key from its condition re-arms the routine one-sidedly —
+    exactly the drift this pins, complementing the disarmed-notice job that
+    makes the unset-variable leg visible in the run log.
+    """
+    text = _spike_text()
+    convert_block = _job_blocks(text)["convert"]
+    job_if = re.search(
+        r"if: >-\n\s+vars\.SPIKE_CONVERTER_ENABLED == 'true'", convert_block)
+    assert job_if, (
+        "the convert job's `if:` no longer reads "
+        "vars.SPIKE_CONVERTER_ENABLED == 'true' — key 1 of the two-key arming "
+        "is gone, and a clone that sets only the conf would run")
+    assert re.search(
+        r"steps\.policy\.outputs\.enabled == 'true'", convert_block), (
+        "the converter run steps no longer gate on the committed conf's "
+        "`enabled` (steps.policy.outputs.enabled) — key 2 of the two-key "
+        "arming is gone, and a one-line conf edit would disarm nothing")
+    assert "enabled=\"$(backlog-burn config --get enabled --path \"$conf\")\"" \
+        in convert_block, (
+        "the policy step no longer reads `enabled` out of the conf — the "
+        "key-2 output the run steps gate on would be unfilled")
+
+
 # ── The Oracle reviewer (issue #333) ──────────────────────────────────────────
 #
 # The Oracle is the registry's third consumer: the cross-vendor, reasoning-blind
