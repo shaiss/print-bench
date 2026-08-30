@@ -1,0 +1,367 @@
+name: Spike converter (scheduled design-brief conversion)
+
+# The scheduled heartbeat for /spike-converter (#245 child C, issue #440; the
+# skill is child B #439, the deterministic extractor beneath it child A #438).
+# On a weekly cadence it takes the ONE decided research recommendation the
+# brief-sources extractor picks (deterministically — the model never chooses)
+# and reshapes it into a `design-brief` issue, every number cited to its
+# source doc section or marked as an assumption. It is the TRANSCRIBER lane of
+# the generative front — where /product-scout (Remy) ORIGINATES proposals from
+# catalog signals, the converter transcribes a decision a research doc already
+# records — feeding the same human-gated pipeline (/design-run, the backlog
+# burn).
+#
+# This is the SIBLING of product-scout.yml, backlog-burn.yml, design-run.yml,
+# chunker.yml and labeler.yml. It shares their config parser and their two-key
+# safety model. Like the scout it has no selector (the candidate is chosen by
+# the extractor inside the run, not by a label), and its one write is CREATING
+# a `design-brief` issue via the scout's REUSED MCP filing tool — one filing
+# surface, one audit (#439's "do not copy the server" rule).
+#
+# WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
+#   * Policy → committed, git-tracked: .github/spike-converter.conf holds
+#     `enabled`, the `provider` and the `cadence`. Change it with a reviewed
+#     one-line PR; a clone carries it.
+#   * Live arming / kill switch → the SPIKE_CONVERTER_ENABLED repo variable, a
+#     fast human-only toggle (Settings → Secrets and variables → Actions →
+#     Variables). Not in git on purpose: arming an agent that WRITES issues
+#     should be a conscious act a fresh clone/fork can't inherit, and flipping
+#     it off halts the routine in seconds without a PR.
+#   * Cadence → the `cron` literal below. Actions cannot read a file or
+#     variable for on.schedule, so the schedule must be literal here — kept in
+#     sync with the `cadence:` key in .github/spike-converter.conf by
+#     scripts/cadence-sync-check.sh.
+#
+# Safety properties (same as the siblings, plus the converter's own bounds):
+#   * TWO keys must agree to run: committed `enabled: true` AND
+#     SPIKE_CONVERTER_ENABLED == 'true'. Either off → inert. Shipped DISARMED:
+#     this workflow sets no repo variable (issue #440's acceptance) — arming is
+#     a human decision after watched attended output, the #245 sequencing.
+#   * Advisory-only + bounded: the run's only shell surface is the READ
+#     wrapper .claude/skills/spike-converter/converter-helper.sh (select /
+#     list-briefs / read-thread — GETs only), and its only write is the scout
+#     MCP tool, whose server hardcodes the `design-brief` label, requires the
+#     `Design brief:` title prefix and caps briefs per run at SCOUT_MAX_BRIEBS
+#     (1 here — the extractor's one-candidate-per-firing rule made structural).
+#     A prompt-injected run can at worst file one design-brief proposal —
+#     noise a human closes.
+#   * The converter's deny backstop (.claude/spike-converter-settings.json,
+#     via --settings) neutralizes the additive settings.json allows
+#     (chunk-helper, label-helper, assessor-helper AND the scout's own
+#     scout-helper included — the converter files via MCP only), kept honest
+#     by scripts/spike-converter-perms-check.sh.
+#
+# UNATTENDED FILING (the one place this sibling's semantics need saying out
+# loud): the skill's step 4 is dry-run-by-default with "only when the human
+# says file", because an attended run has a human to ask. This workflow has
+# none — arming it IS that human's standing "file it": the same courtesy the
+# scout's arming extends, watched attended output first (#245). The prompt
+# below says so explicitly, and SCOUT_MAX_BRIEFS=1 plus the extractor's
+# one-candidate rule bound what can be filed. A dry_run dispatch exists for
+# the watched case: it skips the agentic run entirely with a notice.
+
+on:
+  schedule:
+    # Weekly, Tuesday 05:59 UTC — an off-peak minute offset from the labeler's
+    # :11, the backlog burn's :17, the design run's :23, the chunker's :29,
+    # the groomer's :41, the product scout's :47 (Mondays) and Reeve's :53, so
+    # the routines don't fire simultaneously; the day after the scout's Monday
+    # run, so a human's proposal-culling load never stacks on one morning.
+    # Cron must be a literal — Actions evaluates no files or variables for
+    # on.schedule — so change the cadence by editing this line in a one-line PR
+    # (and the `cadence:` key in .github/spike-converter.conf to match). The
+    # two-key guard (SPIKE_CONVERTER_ENABLED + committed `enabled: true`)
+    # keeps the schedule harmless until deliberately armed.
+    - cron: '59 5 * * 2'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Log intent but do not invoke /spike-converter'
+        type: boolean
+        default: false
+
+# Scoped to what the unattended /spike-converter run actually does: it reads
+# the repo to run the skill (contents:read) and CREATES one design-brief issue
+# (issues:write). It pushes no branch and opens no PR, so it needs NEITHER
+# contents:write NOR pull-requests:write — the same tight grant as the scout,
+# labeler and chunker. The job is off unless SPIKE_CONVERTER_ENABLED is set
+# AND the committed config says enabled, and the writing step is skipped
+# without the provider's secret, so even these grants sit idle until the
+# routine is armed.
+permissions:
+  contents: read
+  issues: write
+
+# Never run two converters at once — this group serializes THIS workflow with
+# itself (the siblings use their own group strings, so it does not serialize
+# against them). Do not cancel an in-flight run.
+concurrency:
+  group: spike-converter
+  cancel-in-progress: false
+
+jobs:
+  convert:
+    name: Convert one research recommendation with /spike-converter
+    # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
+    # anything but 'true' pauses the whole job in seconds without a commit.
+    # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
+    # Also pin the run to the DEFAULT BRANCH: this job carries a write scope
+    # and a secret, and workflow_dispatch can target any in-repo branch — so a
+    # dispatch against a PR branch must not run that branch's skill code with
+    # the secret. On schedule github.ref_name is already the default branch.
+    if: >-
+      vars.SPIKE_CONVERTER_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    # A hung /spike-converter must not hold a runner for the 6-hour default
+    # while holding a secret, unwatched.
+    timeout-minutes: 40
+    env:
+      # Secrets cannot be read in a step `if:` directly, so surface each
+      # provider's key presence as a plain string and gate on it below.
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      # The per-run filing cap, enforced by the reused scout MCP server. The
+      # extractor emits ONE candidate per firing, so 1 is the structural
+      # ceiling — set explicitly (not omitted) so a future widening is a
+      # visible diff, the product-scout.yml pattern.
+      SCOUT_MAX_BRIEFS: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # Belt-and-braces with the job `if:` above: always check out the
+          # default branch, so the secret-bearing agent runs the reviewed,
+          # merged skill — never a dispatched branch's version.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install the config parser
+        # The converter reuses the backlog burn's config parser verbatim (only
+        # the `enabled`/`provider`/`cadence` keys — it has no selector).
+        run: pip install -e tools/backlog-burn
+
+      - name: Read policy (.github/spike-converter.conf)
+        id: policy
+        # Key 2 of 2: the committed, git-tracked source of truth. A malformed
+        # or typo'd config (bad key, unknown provider) fails this step loudly
+        # rather than running on a policy nobody wrote. It also resolves the
+        # configured provider to whether *that provider's* secret is present,
+        # so the run steps below gate on one `key_present` output. The model
+        # itself is NOT decided here — it comes from the registry chain below,
+        # so the provider label picks which ship step runs while the registry
+        # picks which model that step runs.
+        run: |
+          set -euo pipefail
+          conf=.github/spike-converter.conf
+          enabled="$(backlog-burn config --get enabled --path "$conf")"
+          provider="$(backlog-burn config --get provider --path "$conf")"
+          case "$provider" in
+            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
+            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          {
+            echo "enabled=$enabled"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      # Resolve the converter's model from the committed provider/model
+      # registry (issue #206) — the same step product-scout.yml runs.
+      # Stdlib-only, so it needs no install in front of it. A malformed
+      # registry, or one whose `spike-converter` chain went missing, fails
+      # this step loudly BEFORE any key is spent — and is caught pre-merge by
+      # the model-registry drift-guard tests, which fire on this workflow and
+      # on registry.conf. `link_count` plus `link1_model` are what the ship
+      # steps below read; the secret stays literal per step (the Actions
+      # constraint), so the registry decides the model, never the auth.
+      #
+      # The cross-check at the end guards the one way this migration could
+      # mis-run: the conf's `provider:` label picks which ship step (and so
+      # which endpoint + secret) runs, while the registry picks the model —
+      # and a model hosted elsewhere (glm-* on the Anthropic step, claude-* on
+      # the Z.AI step) would fail at request time with a key spent. Pointing
+      # the `spike-converter` chain at another provider is a real registry
+      # edit, but it has to travel with the conf label; saying so HERE, loudly,
+      # beats discovering it in the weekly run's logs.
+      - name: Resolve the converter model chain (issue #206)
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve spike-converter --gh-output "$GITHUB_OUTPUT"
+          link_provider="$(sed -n 's/^link1_provider=//p' "$GITHUB_OUTPUT" | head -1)"
+          conf_provider="$(backlog-burn config --get provider --path .github/spike-converter.conf)"
+          if [ "$link_provider" != "$conf_provider" ]; then
+            echo "::error::the registry's 'spike-converter' chain resolves to provider '$link_provider' but .github/spike-converter.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/spike-converter.conf."
+            exit 1
+          fi
+
+      - name: Note when disabled by committed policy
+        if: steps.policy.outputs.enabled != 'true'
+        run: echo "::notice::.github/spike-converter.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
+
+      # One explicit run step per provider — a provider is a reviewed,
+      # git-tracked step because GitHub Actions can only reference a secret by
+      # its literal name (secrets can't be selected by a runtime variable).
+      # The committed `provider:` label picks which one runs; the MODEL each
+      # runs comes from the registry's `spike-converter` chain
+      # (steps.chain.outputs), so swapping the converter to a different model
+      # is a registry edit, not a workflow edit. Both share the write
+      # permission, the `github_token` that authenticates the wrapper's gh
+      # reads and the MCP filing server, and the same /spike-converter prompt.
+      # The default GITHUB_TOKEN is fine: the converter opens no PR (issue
+      # writes run no CI), so the PAT reasoning the burn and design run carry
+      # does not apply.
+      #
+      # Tool surface: the skill drives every GitHub read through ONE committed
+      # wrapper, .claude/skills/spike-converter/converter-helper.sh
+      # (select-candidate / list-briefs / read-thread), so the CLI allow-list
+      # is that wrapper plus the READ-ONLY file tools. It is NOT unrestricted
+      # `Bash` and NOT `Write`: the run reads untrusted issue text while
+      # holding a provider key, so a general shell — or a file-write that
+      # could overwrite the wrapper and run it — would turn prompt-injection
+      # into arbitrary commands / key exfiltration. FILING is the scout's
+      # REUSED MCP tool (mcp__scout__file_design_brief, served by scout_mcp.py
+      # via --mcp-config) — one filing surface, one audit (#439): the brief
+      # body is rich multi-line markdown a JSON tool argument carries where no
+      # shell command line can. `--permission-mode dontAsk` makes the surface
+      # exclusive; --settings .claude/spike-converter-settings.json closes the
+      # additive allow leak from .claude/settings.json (deny beats allow from
+      # every source; it denies chunk-helper, label-helper, assessor-helper
+      # AND scout-helper — none is the converter's surface), kept in sync by
+      # scripts/spike-converter-perms-check.sh. The pin is the immutable
+      # commit behind the v1 tag.
+
+      - name: Run via Z.AI (GLM)
+        id: run_zai
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
+        # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
+        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the
+        # same ZAI_KEY is also passed as anthropic_api_key to satisfy the
+        # action's credential check. Reshaping human-vetted research text is
+        # the cheap-to-be-wrong case, so the cheap GLM tier is the right
+        # default — which model exactly is the registry's `spike-converter`
+        # chain's call, not this step's.
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          # The converter's WRITE surface is the reused scout MCP tool
+          # (scout_mcp.py), launched by Claude Code over a stdio pipe and
+          # inheriting this step's env. It authenticates to the GitHub REST
+          # API with this token (issues:write is all the job grants), and the
+          # READ wrapper's `gh issue list`/`view` GETs use it too — so it must
+          # be exported here. GITHUB_REPOSITORY / GITHUB_RUN_ID are set by
+          # Actions automatically, SCOUT_MAX_BRIEFS from the job env.
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          # show_full_output surfaces the agent's tool calls and any permission
+          # denials in the (public-repo) Actions log — the converter reads
+          # only public committed docs and public issue threads and writes one
+          # public design-brief issue, so its transcript carries nothing
+          # sensitive, and seeing it is what turns "filed zero, no error" from
+          # a guess into a diagnosis.
+          show_full_output: "true"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/spike-converter-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/spike-converter/converter-helper.sh:*),Bash(./.claude/skills/spike-converter/converter-helper.sh:*),Read,Grep,Glob"
+          prompt: |
+            /spike-converter
+
+            Unattended scheduled run (issue #440): nobody is watching, and there is no human to show a dry-run brief to. Arming this routine — SPIKE_CONVERTER_ENABLED, set by a human after watched attended output — IS the skill's step-4 "the human says file". So run the skill's procedure exactly as written: select the candidate via the wrapper (a printed NONE means stop and say so — quote it and end the run), read the source section it names, check the declined lane, then compose the brief and FILE it with mcp__scout__file_design_brief. SCOUT_MAX_BRIEFS=1 bounds the run to one brief; a human curates what was filed after the fact. Nothing else is yours to do: no labels but the tool's own, no comments elsewhere, no markers added or edited.
+
+      - name: Run via Anthropic (Claude)
+        id: run_anthropic
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
+        # right fit for an unattended bot — no OAuth token / subscription seat.
+        env:
+          # Same reason as the Z.AI step: the MCP filing tool and the read
+          # wrapper's gh GETs inherit this env and authenticate with it.
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          # Same tool surface, prompt and backstop as the Z.AI step (see its
+          # comments for why each is exactly this).
+          show_full_output: "true"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/spike-converter-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/spike-converter/converter-helper.sh:*),Bash(./.claude/skills/spike-converter/converter-helper.sh:*),Read,Grep,Glob"
+          prompt: |
+            /spike-converter
+
+            Unattended scheduled run (issue #440): nobody is watching, and there is no human to show a dry-run brief to. Arming this routine — SPIKE_CONVERTER_ENABLED, set by a human after watched attended output — IS the skill's step-4 "the human says file". So run the skill's procedure exactly as written: select the candidate via the wrapper (a printed NONE means stop and say so — quote it and end the run), read the source section it names, check the declined lane, then compose the brief and FILE it with mcp__scout__file_design_brief. SCOUT_MAX_BRIEFS=1 bounds the run to one brief; a human curates what was filed after the fact. Nothing else is yours to do: no labels but the tool's own, no comments elsewhere, no markers added or edited.
+
+      - name: Explain a skipped agentic run
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && (steps.policy.outputs.key_present != '1'
+              || github.event.inputs.dry_run == 'true')
+        env:
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — did not invoke /spike-converter"
+          else
+            echo "::notice::the configured provider '${PROVIDER}' has no key set (ZAI_KEY for zai, ANTHROPIC_API_KEY for anthropic) — skipping the unattended /spike-converter run"
+          fi
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+        run: |
+          {
+            echo "## Spike converter — run outcome"
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/spike-converter.conf \`enabled\` != true) — nothing ran"
+            else
+              echo "- provider: ${PROVIDER}"
+              echo "- run step: ${RUN:-skipped} (any filed brief is on the issue tracker, labelled \`design-brief\`; a \`NONE\` from the extractor is a clean run, not a failure)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    name: Explain a disarmed run
+    # The `convert` job is gated at job level, so an unset arming variable (the
+    # default clone/fork state) or a dispatch against a non-default ref skips
+    # it silently. This sibling makes that legible. No secrets, no write perms.
+    if: >-
+      vars.SPIKE_CONVERTER_ENABLED != 'true'
+      || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the routine did not run
+        env:
+          ARMED: ${{ vars.SPIKE_CONVERTER_ENABLED }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::notice::the spike converter is disarmed — set the SPIKE_CONVERTER_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/spike-converter.conf; both must agree before it runs."
+          else
+            echo "::notice::the spike converter only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
+          fi
