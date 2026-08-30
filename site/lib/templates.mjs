@@ -92,6 +92,20 @@ function asset(path) {
   return ASSET_VERSION ? `${path}?v=${ASSET_VERSION}` : path;
 }
 
+// The site's canonical origin, e.g. "https://printbench.xyz". Module-level
+// state set once per build by build.mjs (like ASSET_VERSION) so every page's
+// <link rel="canonical"> and og:url point at the production domain — never at
+// a per-deploy preview URL, which is exactly what a canonical must not do.
+// Empty by default: the lib's own unit tests render pages with no configured
+// origin and stay origin-free, and any build that doesn't set it emits no
+// canonical rather than a wrong relative one.
+let SITE_URL = "";
+export function setSiteUrl(v) {
+  // Strip trailing slashes so `${SITE_URL}${canonicalPath}` (canonicalPath
+  // always begins with "/") never doubles the separator.
+  SITE_URL = String(v || "").replace(/\/+$/, "");
+}
+
 // The header notification bell's data, set once per build (like ASSET_VERSION)
 // so every page's shared header renders the same tray without threading it
 // through every page function. build.mjs assembles the bundle from its sources
@@ -176,6 +190,14 @@ ${foot}
 const THEME_BOOTSTRAP = `(function(){try{var t=localStorage.getItem("print-bench-theme");if(t==="light"||t==="dark"){document.documentElement.setAttribute("data-theme",t)}}catch(e){}})();`;
 
 export function layout({ title, description, body, canonicalPath = "/", extraHead = "", extraScript = "" }) {
+  // Absolute canonical + og:url, emitted only when an origin is configured
+  // (see setSiteUrl). canonicalPath already carries its own leading and
+  // trailing slash, matching vercel.json's trailingSlash:true.
+  const canonical = SITE_URL
+    ? `<link rel="canonical" href="${escapeHtml(SITE_URL + canonicalPath)}">
+<meta property="og:url" content="${escapeHtml(SITE_URL + canonicalPath)}">
+`
+    : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -186,7 +208,7 @@ export function layout({ title, description, body, canonicalPath = "/", extraHea
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description || TAGLINE)}">
 <meta property="og:type" content="website">
-<link rel="stylesheet" href="${asset("/assets/site.css")}">
+${canonical}<link rel="stylesheet" href="${asset("/assets/site.css")}">
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <script>${THEME_BOOTSTRAP}</script>
 ${extraHead}
