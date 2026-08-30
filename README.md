@@ -327,6 +327,15 @@ surfaces studies awaiting a read live in
     exception to "every sibling denies both growth servers"; oracle-shaped,
     so EVERY Bash allow must be denied plus every sibling write surface and
     the poster
+  - `reeve-perms-check.sh` — the same drift check for the Reeve greenlight
+    loop's own deny backstop (`.claude/reeve-settings.json`, issue #442): the
+    greenlight drafter is an LLM reading untrusted parked-decision text, so it
+    carries the labeler containment pattern, not the v1 reporter exemption —
+    every non-wrapper Bash allow must be denied plus every sibling write
+    surface, while its own
+    `.claude/skills/reeve-greenlight/greenlight-helper.sh` (the loop's only
+    shell surface, whose `--selftest` pins every post-greenlight refusal) must
+    never be denied
   - `assessor-context.sh` — the trusted vendor-fetch step behind the
     adoption-study assessor: extracts the study's named GitHub repository and
     shallow-clones it into `.assessor-context/<n>/` (GitHub-only, hooks
