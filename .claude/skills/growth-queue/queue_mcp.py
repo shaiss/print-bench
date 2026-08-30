@@ -32,11 +32,14 @@ The channel side of the desk is a different tool entirely
 (mcp__growth_twitter__post_tweet, growth_mcp.py) held by a different agent:
 the poster's deny backstop denies THIS server (pinned by
 scripts/growth-perms-check.sh — the poster can never refill the queue it
-drains), and the reverse holds structurally rather than by a backstop — this
-skill is attended-only (no scheduled run, so no --settings surface to pin),
-a /growth-queue session never mounts the posting server's mcp-config, and
-every scheduled sibling's backstop denies both growth servers. Stdlib only;
-logs go to stderr so stdout carries nothing but JSON-RPC.
+drains). Two agents mount THIS server: the attended /growth-queue skill (a
+human is the trust boundary, so no --settings surface to pin), and the
+scheduled /reeve-growth routine, whose own deny backstop
+(.claude/reeve-growth-settings.json, pinned by
+scripts/reeve-growth-perms-check.sh) is the MIRROR of the poster's — it
+allows this queue tool and DENIES the poster, so a queuer can never post.
+Every OTHER scheduled sibling's backstop denies both growth servers. Stdlib
+only; logs go to stderr so stdout carries nothing but JSON-RPC.
 """
 
 import json

@@ -1,0 +1,311 @@
+name: Reeve growth (scheduled growth-post queueing)
+
+# The scheduled heartbeat for /reeve-growth (docs/growth.md, the "Scheduled PM
+# queueing" step). On a daily cadence Reeve reads the repo's committed signals
+# (CLAUDE.md, docs/, the design catalog and its NOTES.md field-test logs) and
+# files `growth-queue` + `channel:twitter` issues proposing forward-looking
+# posts — a platform feature and how to use it, a design's unique technique, a
+# pattern the bench established. It is the GENERATIVE front of the growth desk:
+# where Lark (/growth-twitter) DRAINS the queue and writes the channel copy,
+# this ORIGINATES the queue. The skill runs the same attended or unattended and
+# queues intent only (it never writes the tweet, posts, or approves); this
+# workflow just gives it a cadence.
+#
+# This is the SIBLING of product-scout.yml — the same config parser, the same
+# two-key safety model, no selector (it originates rather than picks). Unlike
+# the scout it is oracle-shaped: NO shell wrapper. Its one write is the growth
+# desk's queue-filing MCP tool (mcp__growth_queue__queue_growth_post, the SAME
+# server /growth-queue mounts) — "wiring the queue server into a scheduled
+# sibling", the exact path docs/growth.md's Future work named — and its reads
+# are the file tools over the checkout plus a workflow-assembled dedup context.
+#
+# DRY-RUN-FIRST BY CONSTRUCTION: this routine can never reach a channel. Its
+# backstop (.claude/reeve-growth-settings.json) DENIES the poster
+# (mcp__growth_twitter); everything it files is a draft a human culls, that Lark
+# dry-runs, and that still needs the human `approved-to-post` label to publish.
+#
+# WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
+#   * Policy → committed: .github/reeve-growth.conf (`enabled`/`provider`/`cadence`).
+#   * Live arming / kill switch → the REEVE_GROWTH_ENABLED repo variable, a fast
+#     human-only toggle. Not in git: arming an agent that WRITES issues should be
+#     a conscious act a fresh clone/fork can't inherit.
+#   * Cadence → the `cron` literal below, kept in sync with the conf's `cadence:`
+#     key (Actions reads no file for on.schedule; scripts/cadence-sync-check.sh
+#     enforces the parity).
+#
+# Safety properties (same as the siblings, plus the growth desk's own bounds):
+#   * TWO keys must agree to run: committed `enabled: true` AND
+#     REEVE_GROWTH_ENABLED == 'true'. Either off → inert.
+#   * Advisory-only + bounded: the run's ONLY write is the queue tool, which
+#     hardcodes the `growth-queue` + `channel:twitter` labels (never
+#     `approved-to-post`, `priority:high`, or any routing label) and caps items
+#     per run at GROWTHQ_MAX_POSTS. A prompt-injected run can at worst file a
+#     bounded number of draft queue items — noise a human closes.
+#   * The deny backstop (.claude/reeve-growth-settings.json, via --settings)
+#     neutralizes the additive settings.json allows AND denies the poster, kept
+#     honest by scripts/reeve-growth-perms-check.sh.
+
+on:
+  schedule:
+    # Daily at 07:13 UTC — the bench has plenty to share and Lark drains the
+    # queue daily, so a weekly generator would starve the pipeline; daily keeps
+    # fresh drafts flowing all week for a human to cull. :13 is an off-peak
+    # minute so it doesn't fire with the 05:4x routine cluster. Cron must be a
+    # literal — Actions evaluates no files for on.schedule — so change the
+    # cadence by editing this line (and the `cadence:` key in
+    # .github/reeve-growth.conf to match; cadence-sync-check.sh enforces it).
+    - cron: '13 7 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Log intent but do not invoke /reeve-growth'
+        type: boolean
+        default: false
+
+# Scoped to what the unattended /reeve-growth run does: read the repo to run the
+# skill (contents:read) and CREATE growth-queue issues (issues:write). It pushes
+# no branch and opens no PR, so it needs neither contents:write nor
+# pull-requests:write — the same tight grant as the product scout.
+permissions:
+  contents: read
+  issues: write
+
+# Never run two at once — this group serializes THIS workflow with itself (the
+# siblings use their own group strings). Do not cancel an in-flight run.
+concurrency:
+  group: reeve-growth
+  cancel-in-progress: false
+
+jobs:
+  reeve-growth:
+    name: Queue growth posts with /reeve-growth
+    # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
+    # anything but 'true' pauses the whole job in seconds without a commit. Key 2
+    # (committed `enabled: true`) is checked in the "Read policy" step. Also pin
+    # the run to the DEFAULT BRANCH: this job carries a write scope and a secret,
+    # and workflow_dispatch can target any in-repo branch — so a dispatch against
+    # a PR branch must not run that branch's skill code with the secret.
+    if: >-
+      vars.REEVE_GROWTH_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    # A hung /reeve-growth must not hold a runner for the 6-hour default while
+    # holding a secret, unwatched.
+    timeout-minutes: 40
+    env:
+      # Secrets cannot be read in a step `if:` directly, so surface each
+      # provider's key presence as a plain string and gate on it below.
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      # The per-run queue cap, enforced by the queue server (queue_mcp.py). With
+      # the daily cadence this is drafts/day: 2 → ~14/week, a healthy buffer over
+      # Lark's ~7 posts/week without flooding the human's review. Bump it for
+      # more supply; the human still culls every draft.
+      GROWTHQ_MAX_POSTS: '2'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # Belt-and-braces with the job `if:` above: always check out the
+          # default branch, so the secret-bearing agent runs the reviewed, merged
+          # skill — never a dispatched branch's version.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install the config parser
+        # Reuses the backlog burn's config parser verbatim (only the
+        # `enabled`/`provider`/`cadence` keys — no selector).
+        run: pip install -e tools/backlog-burn
+
+      - name: Read policy (.github/reeve-growth.conf)
+        id: policy
+        # Key 2 of 2: the committed source of truth. A malformed or typo'd config
+        # fails this step loudly. It also resolves the configured provider to
+        # whether *that provider's* secret is present, so the run steps below gate
+        # on one `key_present` output.
+        run: |
+          set -euo pipefail
+          conf=.github/reeve-growth.conf
+          enabled="$(backlog-burn config --get enabled --path "$conf")"
+          provider="$(backlog-burn config --get provider --path "$conf")"
+          case "$provider" in
+            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
+            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          {
+            echo "enabled=$enabled"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      # Resolve the routine's model from the committed provider/model registry
+      # (#206) — the same step product-scout.yml runs, stdlib-only. A malformed
+      # registry, or one whose `reeve-growth` chain went missing, fails loudly
+      # BEFORE any key is spent. The cross-check guards the one mis-run this
+      # migration could hit: the conf's `provider:` picks the ship step (endpoint
+      # + secret), the registry picks the model — a model hosted elsewhere would
+      # fail at request time with a key spent.
+      - name: Resolve the reeve-growth model chain (#206)
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve reeve-growth --gh-output "$GITHUB_OUTPUT"
+          link_provider="$(sed -n 's/^link1_provider=//p' "$GITHUB_OUTPUT" | head -1)"
+          conf_provider="$(backlog-burn config --get provider --path .github/reeve-growth.conf)"
+          if [ "$link_provider" != "$conf_provider" ]; then
+            echo "::error::the registry's 'reeve-growth' chain resolves to provider '$link_provider' but .github/reeve-growth.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/reeve-growth.conf."
+            exit 1
+          fi
+
+      - name: Note when disabled by committed policy
+        if: steps.policy.outputs.enabled != 'true'
+        run: echo "::notice::.github/reeve-growth.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
+
+      # Assemble the dedup context in TRUSTED workflow bash (not exposed to the
+      # agent): the currently-open growth-queue items, so /reeve-growth never
+      # re-queues one already open. The agent reads this file with Read/Grep/Glob;
+      # it holds no `gh` of its own (the .oracle-context / .growth-context
+      # pattern). Runs only when the routine will actually invoke the agent.
+      - name: Assemble the dedup context
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .reeve-growth-context
+          {
+            echo "# Currently-open growth-queue items (dedup — do not re-propose these)"
+            echo
+            gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --label growth-queue --limit 100 \
+              --json number,title,labels \
+              --jq 'sort_by(.number) | .[] | "- #\(.number) \(.title)  [\(.labels | map(.name) | join(", "))]"' \
+              || echo "(could not list open growth-queue items)"
+          } > .reeve-growth-context/queued.md
+          echo "assembled .reeve-growth-context/queued.md:"
+          cat .reeve-growth-context/queued.md
+
+      # One explicit run step per provider — a provider is a reviewed, git-tracked
+      # step because Actions can only reference a secret by its literal name. The
+      # committed `provider:` label picks which one runs; the MODEL comes from the
+      # registry's `reeve-growth` chain (steps.chain.outputs), so swapping the
+      # model is a registry edit, not a workflow edit.
+      #
+      # Tool surface (why exactly this): FILING is the MCP tool
+      # (mcp__growth_queue__queue_growth_post, the growth desk's shared queue
+      # server, wired via --mcp-config) because the queue-item body is rich
+      # multi-line markdown, and under --permission-mode dontAsk the Bash matcher
+      # denies any command whose argument reads as shell structure. An MCP tool
+      # takes its arguments as JSON over a pipe. READING is the file tools over
+      # the checkout + .reeve-growth-context/ (oracle-shaped — no wrapper). Never
+      # Write, never a general Bash, never the poster. The deny backstop
+      # (--settings) neutralises any Bash allow that leaks from settings.json AND
+      # denies mcp__growth_twitter (this routine queues, it never posts).
+
+      - name: Run via Z.AI (GLM)
+        id: run_zai
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          # The queue MCP tool (queue_mcp.py) inherits this step's env and
+          # authenticates the GitHub REST call with this token (issues:write is
+          # all the job grants). GITHUB_REPOSITORY / GITHUB_RUN_ID are set by
+          # Actions; GROWTHQ_MAX_POSTS from the job env.
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
+          prompt: "/reeve-growth"
+
+      - name: Run via Anthropic (Claude)
+        id: run_anthropic
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "true"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
+          prompt: "/reeve-growth"
+
+      - name: Explain a skipped agentic run
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && (steps.policy.outputs.key_present != '1'
+              || github.event.inputs.dry_run == 'true')
+        env:
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — did not invoke /reeve-growth"
+          else
+            echo "::notice::the configured provider '${PROVIDER}' has no key set (ZAI_KEY for zai, ANTHROPIC_API_KEY for anthropic) — skipping the unattended /reeve-growth run"
+          fi
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          ENABLED: ${{ steps.policy.outputs.enabled }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+        run: |
+          {
+            echo "## Reeve growth — run outcome"
+            if [ "${POLICY_OUTCOME}" != "success" ]; then
+              echo "- policy step did not complete (\`${POLICY_OUTCOME:-skipped}\`) — the config could not be read; see the log"
+            elif [ "${ENABLED}" != "true" ]; then
+              echo "- disabled by committed policy (.github/reeve-growth.conf \`enabled\` != true) — nothing ran"
+            else
+              echo "- provider: ${PROVIDER}"
+              echo "- run step: ${RUN:-skipped} (any queued items are on the issue tracker, labelled \`growth-queue\` + \`channel:twitter\`, awaiting a human's review and \`approved-to-post\`)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  disarmed-notice:
+    name: Explain a disarmed run
+    # The `reeve-growth` job is gated at job level, so an unset arming variable
+    # (the default clone/fork state) or a dispatch against a non-default ref skips
+    # it silently. This sibling makes that legible. No secrets, no write perms.
+    if: >-
+      vars.REEVE_GROWTH_ENABLED != 'true'
+      || github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the routine did not run
+        env:
+          ARMED: ${{ vars.REEVE_GROWTH_ENABLED }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::notice::reeve-growth is disarmed — set the REEVE_GROWTH_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/reeve-growth.conf; both must agree before it runs, and even armed it only files draft queue issues a human must approve before Lark can post."
+          else
+            echo "::notice::reeve-growth only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
+          fi

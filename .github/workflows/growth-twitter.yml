@@ -1,12 +1,17 @@
 name: Growth agent — Twitter/X (scheduled queue drain)
 
 # The scheduled heartbeat for Lark, the Twitter/X growth agent
-# (docs/growth.md). On a daily cadence it selects the open `growth-queue` +
-# `channel:twitter` issues — the messages product managers queued via
-# /growth-queue or the "Growth post (Twitter/X)" issue form — and drains at
-# most one per firing: the agent turns the queued intent into channel-native
-# copy strictly from the item's committed fact budget, and hands it to the
-# ONE posting tool.
+# (docs/growth.md). It fires at SEVERAL candidate hours across the day, but
+# only ONE firing per day ACTS: the `pick-slot` job computes today's chosen
+# slot (post-time jitter — tools/growth's `postslot`, a deterministic per-date
+# pick over the cadence's candidate hours) and gates `drain` on it, so the
+# post lands at a time that varies day to day instead of the same robotic
+# clock beat — while `max_posts_per_run` still floors it at one post a day. On
+# the acting firing it selects the open `growth-queue` + `channel:twitter`
+# issues — the messages product managers queued via /growth-queue or the
+# "Growth post (Twitter/X)" issue form — and drains at most one: the agent
+# turns the queued intent into channel-native copy strictly from the item's
+# committed fact budget, and hands it to the ONE posting tool.
 #
 # DRY-RUN IS THE DEFAULT. The posting tool (growth_mcp.py) publishes nothing
 # unless the separate live key (`GROWTH_TWITTER_LIVE` repo variable) AND all
@@ -40,20 +45,27 @@ name: Growth agent — Twitter/X (scheduled queue drain)
 #   * Going live on the channel → the GROWTH_TWITTER_LIVE repo variable plus
 #     the X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN / X_ACCESS_TOKEN_SECRET
 #     secrets, read only by the posting tool. Unset = every drain dry-runs.
-#   * Cadence → the `cron` literal below, kept in sync with the conf's
-#     `cadence:` key (scripts/cadence-sync-check.sh proves the parity).
+#   * Cadence → the `cron` literal below (the posting WINDOW — several
+#     candidate hours), kept in sync with the conf's `cadence:` key
+#     (scripts/cadence-sync-check.sh proves the parity). Which candidate hour
+#     actually posts on a given day is the `pick-slot` job's per-date choice,
+#     not stored anywhere — it is re-derived deterministically from the date.
 
 on:
   schedule:
-    # Daily at 13:19 UTC — mid-morning US East / early evening Europe: this
-    # routine's output IS the schedule (a post lands when readers are awake),
-    # unlike the build-slot siblings, while :19 keeps the family's off-peak
-    # minute convention. Cron must be a literal — Actions evaluates no files
+    # The posting WINDOW, not the post count: fires at 13:19 / 15:19 / 17:19 /
+    # 19:19 / 21:19 UTC — mid-morning US East through early evening Europe/US,
+    # all reader-awake hours (this routine's output IS the schedule, unlike the
+    # off-peak build-slot siblings), while :19 keeps the family's off-peak
+    # minute convention. Only ONE of these firings posts on a given day: the
+    # `pick-slot` job picks today's chosen hour deterministically from the date
+    # so the time varies day to day, and `max_posts_per_run` floors it at one
+    # post/day regardless. Cron must be a literal — Actions evaluates no files
     # or variables for on.schedule — so change the cadence by editing this
     # line and the `cadence:` key in .github/growth-twitter.conf together
     # (cadence-sync-check.sh fails on drift). The posting tool's marker guard
-    # makes the sweep idempotent: an already-drained item is a no-op.
-    - cron: '19 13 * * *'
+    # makes each firing idempotent: an already-drained item is a no-op.
+    - cron: '19 13-21/2 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -78,18 +90,75 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  drain:
-    name: Drain the Twitter/X growth queue
-    # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
-    # anything but 'true' pauses the whole job in seconds without a commit.
-    # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
-    # Also pin the run to the DEFAULT BRANCH: this job carries write scope and
-    # secrets, and workflow_dispatch can target any in-repo branch — so a
-    # dispatch against a PR branch must not run that branch's skill code with
-    # the secrets. On schedule github.ref_name is already the default branch.
+  # Post-time jitter (docs/growth.md): the cadence fires at several candidate
+  # hours a day, but only the day's CHOSEN hour posts. This cheap, secret-free
+  # gate computes whether THIS firing is that slot and hands `drain` a single
+  # boolean — keeping the ≤1-post/day floor structural (the drain never even
+  # starts on a non-chosen firing) while the post time walks the window across
+  # dates. The choice is `tools/growth`'s tested `postslot.is_post_slot`, not
+  # logic hidden in YAML. Gated by the SAME two rungs as `drain` (arming
+  # variable + default branch), so a disarmed or off-branch run skips this too
+  # and `drain` never runs; the `disarmed-notice` job explains those cases.
+  pick-slot:
+    name: Pick today's post slot (post-time jitter)
     if: >-
       vars.GROWTH_TWITTER_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      post_now: ${{ steps.slot.outputs.post_now }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Is now today's chosen post slot?
+        id: slot
+        env:
+          PYTHONPATH: tools/growth/src
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # A manual dispatch always acts: the jitter de-robotizes the
+          # SCHEDULED beat, and a human who dispatched the run means "now",
+          # not "wait for the dice". (The three arming rungs and the per-item
+          # approval label still gate whether that run posts anything live.)
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "post_now=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::manual dispatch — bypassing post-time jitter; this run acts as the day's slot"
+            exit 0
+          fi
+          # On schedule: read the cadence (the window) from the committed conf
+          # — one source of truth, the same value cadence-sync pins to the cron
+          # literal — and ask postslot whether this firing's hour is today's
+          # deterministic per-date pick among the window's candidate hours.
+          conf=.github/growth-twitter.conf
+          cadence="$(python3 -m growth config --get cadence --path "$conf")"
+          if [ "$(python3 -m growth postslot --cadence "$cadence")" = "true" ]; then
+            echo "post_now=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::this firing IS today's chosen post slot — draining the queue"
+          else
+            echo "post_now=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::this firing is a candidate hour but NOT today's chosen slot — holding (post-time jitter keeps ≤1 post/day at a time that varies day to day)"
+          fi
+
+  drain:
+    name: Drain the Twitter/X growth queue
+    # Gated on the pick-slot job's decision: `needs` requires pick-slot to have
+    # SUCCEEDED (so a disarmed/off-branch run, where pick-slot is skipped,
+    # skips drain too), and the `if` additionally requires this firing to be
+    # today's chosen post slot. pick-slot already enforces the two arming rungs
+    # (the GROWTH_TWITTER_ENABLED variable and the default-branch pin — this
+    # job carries write scope and secrets, and workflow_dispatch can target any
+    # in-repo branch, so a dispatch against a PR branch must never run that
+    # branch's skill code with the secrets), so they are not repeated here.
+    # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
+    needs: pick-slot
+    if: needs.pick-slot.outputs.post_now == 'true'
     runs-on: ubuntu-latest
     # A hung agent must not hold a runner for the 6-hour default while
     # holding channel credentials, unwatched.
@@ -397,9 +466,12 @@ jobs:
 
   disarmed-notice:
     name: Explain a disarmed run
-    # The `drain` job is gated at job level, so an unset arming variable (the
-    # default clone/fork state) or a dispatch against a non-default ref skips
-    # it silently. This sibling makes that legible. No secrets, no write perms.
+    # The `pick-slot` job is gated at job level (and `drain` needs it), so an
+    # unset arming variable (the default clone/fork state) or a dispatch
+    # against a non-default ref skips both silently. This sibling makes that
+    # legible. (A firing that IS armed and on-branch but is not today's chosen
+    # post slot is a normal hold, explained by pick-slot's own notice — not a
+    # disarmed run, so this job stays quiet for it.) No secrets, no write perms.
     if: >-
       vars.GROWTH_TWITTER_ENABLED != 'true'
       || github.ref_name != github.event.repository.default_branch
