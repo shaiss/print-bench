@@ -1,0 +1,9 @@
+# Printable parts to render and gate in CI (the default render is the assembled
+# preview, not a printable deliverable). The central-screw thread coupon is
+# auto-discovered by filename (preroll-elevator-coupon.scad) and needs no line.
+body
+lid
+screw-knob
+elevator
+retainer
+tab-fit-coupon

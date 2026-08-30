@@ -91,5 +91,36 @@ rotating.
 - Full-length body thread vs top-only — parameterized; default prominent for the
   bolt look.
 
-_(Numbers finalized during modeling — see the parameter block in
-`preroll-elevator.scad` and the design-panel synthesis.)_
+## Resolved dimensions (v1, dogwalker)
+
+From the design panel + gate iteration; full set with units in the `.scad`.
+
+- **Central screw:** d_major 10, depth 1.2, pitch 4, **single start**, tol 0.3,
+  seg 64. Root 7.6; female minor bore 8.2 (mandatory). Threaded run 48 (nut 12 +
+  travel 36). Guard: w_root 3.649 < lead 4 ✓. Self-locking (lead angle ≈ 8.3°).
+- **Lid thread:** d_major 42.6 (= body_id 37 + 2·1.6 + 2·1.2), depth 1.2, pitch 4,
+  single start, tol 0.3, seg 96. Minor bore 40.8 (mandatory). 8 mm engage = 2 turns.
+- **Packing (derived):** cup_id 7.6, cup_od 10.0, hub_od 13.8, BCD 25.4 (r_cup 12.7),
+  body_id 37.0, body_od 41.0. Cups clear the hub by g_in 0.8 and the bore by g_out 0.8.
+- **Anti-rotation:** 4 through-slots (open at the top rim), slot_w 4.0, tab_w 3.5
+  (0.5 total slop), tab_len 8, disk-rooted.
+- **Base:** hex knob AF 42, flange OD 18 (45° conical thrust seat), journal Ø12
+  (bore 12.5), retainer ring Ø23.8 into a Ø24 counterbore, retainer_float 0.4,
+  knob_body_gap 0.4 (flange cone is the sole down-stop).
+
+## Gate result
+
+`gate.sh --slice` exits 0. Body / screw-knob / elevator / retainer / coupons all
+100/100 watertight; lid 92/100 (inherent female-thread crest thin-wall sampling,
+same class as the reference `alcove-rod-socket` collar — a WARNING, not a fail).
+All four thread-mate fitchecks pass (central + lid, `empty` + 180° `interferes`
+controls). Plate = 5 separate objects.
+
+### Bug caught during modeling
+
+The first body had a ~0.39 mm **solid membrane** across the centre at z≈6 (a gap
+between the flange pocket and the retainer counterbore cuts) that would have
+blocked the screw journal — invisible in `assembly()` because union hides it,
+caught by printcheck's thin-wall/overhang flags on the body part. Fixed by making
+the central passage continuous; body then scored 100/100.
+
