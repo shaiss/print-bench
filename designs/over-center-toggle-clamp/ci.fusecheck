@@ -1,0 +1,22 @@
+# Deterministic fuse check for the print-in-place toggle clamp.
+# The whole mechanism legitimately prints as ONE watertight body (four moving
+# parts, all captured), so printcheck cannot see a weld: if any of the 0.4 mm
+# Z films or 0.25 mm XY films bridge during printing, the part still slices
+# green and the clamp arrives frozen. fusecheck answers it on the sliced STL.
+#
+# No `flexure` line, deliberately: nothing in this mechanism is joined THROUGH
+# a flexure — the moving parts are joined by pivot pins and films, and the arch
+# spring only ever PUSHES on the lever's cam flank through a contact, never
+# bridges material across it. So the raw shell count is the whole truth, and an
+# ignore-zone would only hide things (round 1's over-large arch AABB deleted
+# the nub weld it existed to ignore, masking a real defect — see NOTES.md).
+#
+# The sliced part must show its true shell count: base, carrier, lever, link,
+# plus the three trapped pin heads (head cones float one pip_z film above what
+# they retain) = 7. Any welded film merges two shells and drops the count.
+assert  over-center-toggle-clamp.stl 7
+
+# Mandatory negative control: `part="fused"` zeroes every print-in-place
+# clearance and makes the cam carve deliberately interfere 0.3 mm, reproducing
+# the weld as one solid. It must read exactly 1 body — proving the check fires.
+control fused 1

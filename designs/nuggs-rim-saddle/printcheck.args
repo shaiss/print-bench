@@ -1,0 +1,2 @@
+# Bambu P2S (256) - the brief asks every part to fit a 256x256 bed.
+--build-volume 256x256x256

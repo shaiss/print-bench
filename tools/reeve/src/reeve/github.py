@@ -50,8 +50,10 @@ ADOPTION_STUDY_LABEL = "adoption-study"
 
 # The scheduled routines whose death Reeve watches (the #312 incident class:
 # a run killed by its own timeout leaves conclusion "cancelled"/"failure" and
-# a ghost lock behind).
-ROUTINE_WORKFLOWS = ("design-run.yml", "backlog-burn.yml", "chunker.yml", "labeler.yml")
+# a ghost lock behind). growth-twitter is here because docs/growth.md names
+# this detector as the "routine silently stops" handler for the growth desk.
+ROUTINE_WORKFLOWS = ("design-run.yml", "backlog-burn.yml", "chunker.yml", "labeler.yml",
+                     "growth-twitter.yml")
 
 # Completed runs fetched per workflow — one page, newest-first as the API
 # returns them. config.py caps `routine_dead_runs` at this value, since a

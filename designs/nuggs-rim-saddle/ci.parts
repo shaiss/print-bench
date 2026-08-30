@@ -1,0 +1,5 @@
+# Printable parts (gate.sh renders each as build/nuggs-rim-saddle-<part>.stl).
+# body = the saddle shell + inclined tube + port (print port-down, as rendered);
+# arms = BOTH clamp arms, spaced (identical parts, print flat, PETG).
+body
+arms

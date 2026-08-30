@@ -1,0 +1,4 @@
+# The 3MF plate is the deliverable for this multi-part design (see NOTES.md):
+# body + the arm pair as distinct objects - never print the assembled render.
+body
+arms

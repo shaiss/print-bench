@@ -13,7 +13,7 @@
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
-#     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests,
+#     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests, growth_tests,
 #     styles, gate, gate_designs, regen, regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
@@ -44,11 +44,11 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 
 # --- classify: the shared decision -------------------------------------------
 # Reads the changed-file list from stdin (one path per line), reads the working
-# tree for existence/ARCHIVED/style.conf facts, and prints the 16 outputs.
+# tree for existence/ARCHIVED/style.conf facts, and prints the 17 outputs.
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
-  local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false docs_standards=false
+  local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false gwtests=false docs_standards=false
   local bstests=false
   local gate=false designs=""
   local regen=false regen_designs=""
@@ -57,7 +57,7 @@ classify() {
     # Default-branch push (or any non-PR trigger): run everything, gate and
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
-    bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; docs_standards=true
+    bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; gwtests=true; docs_standards=true
     bstests=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
@@ -128,6 +128,7 @@ classify() {
         tools/model-registry/*|.github/models/registry.conf|\
         tools/reeve/*|.github/reeve.conf|\
         tools/brief-sources/*|\
+        tools/growth/*|growth/*|.github/growth-twitter.conf|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
           soft_infra=true ;;
@@ -189,8 +190,9 @@ classify() {
       esac
       case "$f" in
         # The model registry (issue #206). auto-review.yml, product-scout.yml
-        # oracle.yml (issue #333) and the four scheduled routines (design-run,
-        # backlog-burn, chunker, labeler — issue #326) are here because the
+        # oracle.yml (issue #333), the four scheduled routines (design-run,
+        # backlog-burn, chunker, labeler — issue #326) and the agent forge's
+        # wright.yml (docs/agent-forge.md) are here because the
         # drift-guard test reads them — a change to any of those workflows' chain
         # wiring must re-run the guard that pins it to
         # .github/models/registry.conf, or a reintroduced hardcoded model literal
@@ -201,6 +203,7 @@ classify() {
         .github/workflows/oracle.yml|\
         .github/workflows/design-run.yml|.github/workflows/backlog-burn.yml|\
         .github/workflows/chunker.yml|.github/workflows/labeler.yml|\
+        .github/workflows/wright.yml|\
         .github/workflows/ci.yml) mrtests=true ;;
       esac
       case "$f" in
@@ -226,6 +229,13 @@ classify() {
         # must re-run the tests that would catch it.
         tools/brief-sources/*|docs/*.md|\
         .github/workflows/ci.yml) bstests=true ;;
+        # The growth desk (docs/growth.md): tools/growth's own tests. The
+        # posting server is here because test_server_parity.py pins its
+        # weighted-length copy to growth.tweetlen — a server-only edit that
+        # skipped these tests could drift the two rules apart unchecked.
+        tools/growth/*|growth/*|.github/growth-twitter.conf|\
+        .claude/skills/growth-twitter/growth_mcp.py|\
+        .github/workflows/ci.yml) gwtests=true ;;
       esac
       case "$f" in
         # The smart-ci selector's own unit tests. The registry is data the
@@ -258,6 +268,7 @@ classify() {
         tools/model-registry/*|.github/models/registry.conf|\
         tools/reeve/*|.github/reeve.conf|\
         tools/brief-sources/*|\
+        tools/growth/*|growth/*|.github/growth-twitter.conf|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
           scad=true ;;
@@ -355,6 +366,7 @@ classify() {
   echo "model_registry_tests=$mrtests"
   echo "reeve_tests=$rvtests"
   echo "brief_sources_tests=$bstests"
+  echo "growth_tests=$gwtests"
   echo "styles=$styles"
   echo "gate=$gate"
   echo "gate_designs=$designs"
@@ -536,6 +548,24 @@ selftest() {
   check "brief-sources-marker-drift" "$out" \
     "brief_sources_tests=true" "gate=false" "gate_designs=" "regen=false" \
     "docs_standards=true"
+  # 4g. The growth desk (docs/growth.md) is soft-infra like reeve: the engine,
+  #     the committed dry-run artifacts and the conf move no mesh and no
+  #     pixels, but a growth-only PR must still RUN the required contexts
+  #     (the ci.yml CAUTION on new top-level dirs).
+  out="$(run "tools/growth/src/growth/tweetlen.py")"
+  check "growth-only" "$out" \
+    "growth_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "reeve_tests=false"
+  out="$(run "growth/twitter/dryruns/overnight.md")"
+  check "growth-data" "$out" \
+    "growth_tests=true" "gate=true" "gate_designs=" "regen=false"
+  out="$(run ".github/growth-twitter.conf")"
+  check "growth-conf" "$out" \
+    "growth_tests=true" "gate=true" "gate_designs=" "regen=false"
+  # The posting server's weighted-length copy is parity-pinned by the tool's
+  # tests, so a server-only edit must re-run them.
+  out="$(run ".claude/skills/growth-twitter/growth_mcp.py")"
+  check "growth-server-parity-drift" "$out" "growth_tests=true"
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must

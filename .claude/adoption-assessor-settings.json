@@ -100,7 +100,13 @@
       "Bash(.claude/skills/label-issues/label-helper.sh:*)",
       "Bash(./.claude/skills/label-issues/label-helper.sh:*)",
       "Bash(.claude/skills/product-scout/scout-helper.sh:*)",
-      "Bash(./.claude/skills/product-scout/scout-helper.sh:*)"
+      "Bash(./.claude/skills/product-scout/scout-helper.sh:*)",
+      "Bash(.claude/skills/wright/wright-helper.sh:*)",
+      "Bash(./.claude/skills/wright/wright-helper.sh:*)",
+      "mcp__wright",
+      "mcp__reeve_signoff",
+      "mcp__growth_queue",
+      "mcp__growth_twitter"
     ]
   }
 }

@@ -258,8 +258,8 @@ a GIF within the animation budget, embeds it with the disclosure, runs
 - The disclosure rules above apply verbatim (inline embed only, `AI-styled
   scene` label, `geometry is approximate` caption) — the gate treats a
   `lifestyle-*.gif` exactly like a `lifestyle-*.png`, judged against the
-  animation-GIF budget. Write the caption's motion clause too: the movement
-  shown is illustrative, not a simulation.
+  animation-GIF budget. Write the caption's motion clause too: the motion is
+  illustrative.
 - **A clip is doubly cosmetic**: the geometry is an impression *and the
   motion is invented by the model* — it can show a mechanism the print
   cannot perform. The `animations.conf` GIF is the motion-true artifact; a

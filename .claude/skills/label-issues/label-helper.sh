@@ -74,6 +74,20 @@ need_num() { case "$1" in ''|*[!0-9]*) die "$2: '$1' is not an issue number";; e
 # whitelist and the skill's taxonomy cannot drift.
 ROUTING_LABELS=(autonomy-ok declined-too-big design-brief needs-decision)
 
+# Labels that mark an issue as OWNED BY ANOTHER ROUTINE'S pipeline, so the
+# labeler must neither sweep nor write to it even though it carries no
+# routing label yet. Today: `agent-brief` — the agent forge's queue
+# (docs/agent-forge.md), where arming/parking is Reeve's sign-off's decision
+# exclusively; a labeler-applied `autonomy-ok` would bypass that sign-off,
+# and a labeler-applied `needs-decision` would park a brief the sign-off is
+# about to rule on. And `growth-queue` — the growth desk's queue
+# (docs/growth.md), drained by the channel agents on their own schedule: a
+# labeler-applied `needs-decision` would silently park a queued message
+# forever (the growth Select step and the posting tool both exclude parked
+# items), and a labeler-applied `autonomy-ok` would point the backlog burn's
+# /ship-issue at a message that is not code work.
+NON_TRIAGE_LABELS=(agent-brief growth-queue)
+
 # A mutating verb may only touch a label from ROUTING_LABELS — the labeler's
 # entire remit. Refuses anything else so a prompt-injected agent cannot stamp an
 # arbitrary label or invent taxonomy.
@@ -101,6 +115,12 @@ reject_if_already_routed() {
   current="$(gh issue view "$n" --repo "$repo" --json labels --jq '.labels[].name')"
   for l in "${ROUTING_LABELS[@]}"; do
     grep -qxF "$l" <<<"$current" && die "#$n already carries routing label '$l'; refusing to re-route"
+  done
+  # An issue owned by another routine's pipeline is not the labeler's to
+  # route, whatever the (possibly stale) selection said — live check, same
+  # write-time discipline as the routing-label refusal above.
+  for l in "${NON_TRIAGE_LABELS[@]}"; do
+    grep -qxF "$l" <<<"$current" && die "#$n carries '$l' (another routine's pipeline); refusing to write"
   done
   return 0
 }
@@ -133,11 +153,14 @@ case "$cmd" in
       esac
     done
     # Exclude every routing label with a `-label:` search qualifier, so only
-    # issues carrying NONE of them come back. `gh issue list` returns issues
-    # only (never PRs). Oldest-first mirrors the burn/chunker selection bias:
-    # the longest-waiting untriaged issue is triaged first.
+    # issues carrying NONE of them come back — and every NON_TRIAGE label
+    # too, so an issue another routine's pipeline owns (an agent-brief
+    # awaiting Reeve's sign-off) is never handed to the labeler at all.
+    # `gh issue list` returns issues only (never PRs). Oldest-first mirrors
+    # the burn/chunker selection bias: the longest-waiting untriaged issue is
+    # triaged first.
     search=""
-    for l in "${ROUTING_LABELS[@]}"; do search="${search}-label:${l} "; done
+    for l in "${ROUTING_LABELS[@]}" "${NON_TRIAGE_LABELS[@]}"; do search="${search}-label:${l} "; done
     gh issue list --repo "$repo" --state open --search "$search" \
       --limit "$limit" --json number,title \
       --jq 'sort_by(.number) | .[] | "#\(.number) \(.title)"'

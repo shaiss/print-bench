@@ -12,6 +12,9 @@
 #                                # the design's coupon (or entry part) at
 #                                # param = start, start+step, ..., end ->
 #                                # build/<name>-sweep-<param>.stl + .png
+#   ./scripts/render.sh --selftest
+#                                # prove the `render` opt's flag form works
+#                                # on the installed OpenSCAD build (#400)
 #
 # Outputs per design:
 #   build/<name>.stl        — printable STL (full CGAL render)
@@ -26,7 +29,9 @@
 #   size    image size WxH (e.g. 1400x1000)
 #   camera  full fixed camera as tx,ty,tz,rx,ry,rz,dist (openscad --camera)
 #   opts    space-separated flags: `ortho` (--projection=o), `render`
-#           (--render, needed for section/cutaway shots), `src=<file>` to
+#           (full-render flag in the form the installed OpenSCAD build
+#           accepts — see render_flag; needed for section/cutaway shots),
+#           `src=<file>` to
 #           render a sibling file (e.g. a coupon wrapper) instead of the
 #           entry .scad
 #   defines optional space-separated -D payloads, e.g. part="cutaway"
@@ -50,6 +55,33 @@ export OPENSCADPATH="$PWD/lib:$PWD"
 # no --backend). Both default to the stable invocation.
 OPENSCAD_BIN="${OPENSCAD_BIN:-openscad}"
 read -ra OSC_ARGS <<<"${OPENSCAD_ARGS:-}"
+
+# The `render` camera opt's flag form is build-dependent (issue #400):
+# --render is value-taking on some builds — 2021.01 and the 2026.08 nightly
+# both print `--render arg` in --help — and a bare flag then makes the
+# parser swallow the next argv token. That token is the source path whenever
+# `render` is the last camera opt, so openscad prints its usage and exits 1
+# without rendering anything. Bool builds (older nightlies) work the other
+# way round and reject `--render=1`. Rather than pinning version numbers,
+# ask the binary this script is about to drive which kind it is, and emit
+# the form that build accepts — both forms full-render the PNG.
+RENDER_FLAG=""
+render_flag_from_help() {
+  # `--render arg` in the option list = value-taking. The [[:space:]]|$ tail
+  # keeps lookalike options (`--render-colors arg`) from matching.
+  if grep -qE '^[[:space:]]*--render[[:space:]]+arg([[:space:]]|$)' <<<"$1"; then
+    printf '%s' '--render=1'
+  else
+    printf '%s' '--render'
+  fi
+}
+render_flag() {
+  if [[ -z "$RENDER_FLAG" ]]; then
+    RENDER_FLAG="$(render_flag_from_help \
+      "$(xvfb-run -a "$OPENSCAD_BIN" --help 2>&1)")"
+  fi
+  printf '%s' "$RENDER_FLAG"
+}
 
 # label:rotx,roty,rotz — camera rotations for the four preview views
 VIEWS=("iso:55,0,25" "top:0,0,0" "front:90,0,0" "bottom:235,0,55")
@@ -132,7 +164,7 @@ render_previews() {
     for opt in $opts; do
       case "$opt" in
         ortho) args+=(--projection=o) ;;
-        render) args+=(--render) ;;
+        render) args+=("$(render_flag)") ;;
         src=*) src="designs/${name}/${opt#src=}" ;;
         *) echo "error: unknown opt '$opt' in $conf: $line" >&2; return 1 ;;
       esac
@@ -153,6 +185,81 @@ render_previews() {
     fi
   done <"$conf"
   echo "== ${name}: previews done -> ${outdir}/"
+}
+
+# Prove the `render` opt works on whatever OpenSCAD build is installed
+# (issue #400): detection picks the flag form that build accepts, the exact
+# cameras.conf shapes that used to fail render through render_previews
+# itself, and the form detection exists to avoid is refused in the trailing
+# position — without that failing half the pass would be worthless (#37).
+# The fixture lives in a dot-directory: `designs/*/` never matches it, so a
+# kill -9 between mkdir and the RETURN trap cannot leak it into the checks
+# that enumerate designs (readme-gate, gallery, gate.sh).
+selftest() {
+  local fail=0 expect actual
+
+  # -- detection, against canned --help lines from both build kinds
+  local stable_line='  --render arg                 for full geometry evaluation when exporting png'
+  local bool_line='  --render                     for full geometry evaluation when exporting png'
+  local decoy_line='  --render-colors arg          colors for --render export'
+  expect='--render=1'
+  actual="$(render_flag_from_help "$stable_line")"
+  [[ "$actual" == "$expect" ]] \
+    || { echo "SELFTEST FAIL  value-taking --help line -> '$actual', want '$expect'"; fail=1; }
+  expect='--render'
+  actual="$(render_flag_from_help "$bool_line")"
+  [[ "$actual" == "$expect" ]] \
+    || { echo "SELFTEST FAIL  bool --help line -> '$actual', want '$expect'"; fail=1; }
+  actual="$(render_flag_from_help "$decoy_line")"
+  [[ "$actual" == "$expect" ]] \
+    || { echo "SELFTEST FAIL  lookalike option '--render-colors arg' must not read as value-taking (got '$actual')"; fail=1; }
+  actual="$(render_flag_from_help "")"
+  [[ "$actual" == "$expect" ]] \
+    || { echo "SELFTEST FAIL  unreadable --help must fall back to the bare flag (got '$actual')"; fail=1; }
+
+  # -- what the installed build is, and that it is one of the two known kinds
+  local live; live="$(render_flag)"
+  case "$live" in
+    --render|--render=1) echo "selftest: $OPENSCAD_BIN takes flag form '$live'" ;;
+    *) echo "SELFTEST FAIL  render_flag returned '$live'"; return 1 ;;
+  esac
+
+  # -- end-to-end through render_previews: the three opt orders, `render`
+  #    alone being the exact shape from the issue
+  local fx="designs/.render-selftest"
+  rm -rf "$fx"; mkdir -p "$fx/previews"
+  trap 'rm -rf "$fx"' RETURN
+  printf 'cube(5);\n' > "$fx/.render-selftest.scad"
+  cat > "$fx/previews/cameras.conf" <<'CONF'
+trailing     | 200x150 | 0,0,0,55,0,25,80 | render |
+ortho-then-render | 200x150 | 0,0,0,55,0,25,80 | ortho render |
+render-then-ortho | 200x150 | 0,0,0,55,0,25,80 | render ortho |
+CONF
+  render_previews ".render-selftest" \
+    || { echo "SELFTEST FAIL  render_previews failed on the fixture cameras.conf"; fail=1; }
+  local shot
+  for shot in trailing ortho-then-render render-then-ortho; do
+    [[ -s "$fx/previews/${shot}.png" ]] \
+      || { echo "SELFTEST FAIL  previews/${shot}.png missing or empty"; fail=1; }
+  done
+
+  # -- negative control: the form detection did NOT pick must fail in the
+  #    trailing position on this build. On a build that accepts both forms
+  #    this goes red on purpose — the two-kind assumption is then stale.
+  local other
+  [[ "$live" == "--render=1" ]] && other="--render" || other="--render=1"
+  if xvfb-run -a "$OPENSCAD_BIN" ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
+      -o "$fx/previews/.neg.png" --imgsize=200,150 --camera=0,0,0,55,0,25,80 \
+      "$other" "$fx/.render-selftest.scad" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL  '$other' unexpectedly renders in the trailing position — this build accepts both forms; relax this control deliberately"
+    fail=1
+  fi
+
+  if [[ "$fail" == 0 ]]; then
+    echo "render.sh selftest OK — '$live' on $OPENSCAD_BIN, all three opt orders render, the other form is refused"
+    return 0
+  fi
+  return 1
 }
 
 # Tolerance-sweep strip: N labeled copies of the design's coupon (preferred)
@@ -331,6 +438,7 @@ for arg in "$@"; do
     --previews) MODE=previews ;;
     --sweep) MODE=sweep; expect_sweep=1 ;;
     --sweep=*) MODE=sweep; SWEEP_SPEC="${arg#--sweep=}" ;;
+    --selftest) MODE=selftest ;;
     -*) echo "error: unknown flag $arg" >&2; exit 2 ;;
     *) names+=("$arg") ;;
   esac
@@ -338,12 +446,13 @@ done
 if [[ "$MODE" == sweep && -z "$SWEEP_SPEC" ]]; then
   echo "error: --sweep wants param=start:end:step" >&2; exit 2
 fi
-if [[ "$MODE" != stl && ${#names[@]} -ne 1 ]]; then
+if [[ "$MODE" != stl && "$MODE" != selftest && ${#names[@]} -ne 1 ]]; then
   echo "error: --previews/--sweep take exactly one design name" >&2; exit 2
 fi
 
 case "$MODE" in
   previews) render_previews "${names[0]}" ;;
+  selftest) selftest ;;
   sweep) render_sweep "${names[0]}" "$SWEEP_SPEC" ;;
   stl)
     if [[ ${#names[@]} -ge 1 ]]; then

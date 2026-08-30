@@ -1,0 +1,60 @@
+# The hand-filed twin of /growth-queue: same shape, same labels, same
+# consumer (the matching channel agent — Lark, /growth-twitter). Field labels
+# below must stay identical to the `## ` headings in templates/growth-post.md
+# — that file is the canonical format. This form is the Twitter/X variant, so
+# it pins `channel:twitter` alongside `growth-queue` (a form cannot apply a
+# label conditionally); a future channel gets its own form, same template.
+name: Growth post (Twitter/X)
+description: Queue a message for the Twitter/X growth agent (Lark) — the PM's intent and fact budget; the channel agent writes the copy.
+title: "Growth post: "
+labels: ["growth-queue", "channel:twitter"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A growth post is the input contract of the growth desk
+        (`docs/growth.md`): what is worth saying, the one link, and the
+        fact budget the channel agent may compose from — captured up front.
+        Canonical format (with fuller guidance per section):
+        `templates/growth-post.md`. The channel agent may not invent a fact,
+        number, or link that is not in this issue or the repo's committed
+        text; live posting additionally waits for the `approved-to-post`
+        label.
+  - type: input
+    id: channel
+    attributes:
+      label: Channel
+      description: "One word: twitter (Lark) or youtube (reserved; no agent drains it yet). This form already applies the channel:twitter label."
+      placeholder: twitter
+    validations:
+      required: true
+  - type: textarea
+    id: message
+    attributes:
+      label: Message
+      description: "What to announce, in the PM's words — the intent, the angle, who should care. Not the finished copy."
+      placeholder: "The printable-threads library's 45° flank story — the measured before/after is the hook."
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Link
+      description: The one canonical URL the post should send readers to. It must already exist and resolve.
+      placeholder: "https://github.com/shaiss/print-bench"
+    validations:
+      required: true
+  - type: textarea
+    id: facts-sources
+    attributes:
+      label: Facts & sources
+      description: "The claims the post may make, one per line, each cited to a committed file, issue, or PR. This is the whole fact budget."
+      placeholder: "- flank |nz| = 0.707 measured on the export (lib/threads-fdm.scad header)"
+    validations:
+      required: true
+  - type: input
+    id: timing-priority
+    attributes:
+      label: Timing & priority
+      description: "priority: normal | high (apply the priority:high label too for high), plus any earliest-post date. Empty = normal, whenever the schedule reaches it."
+      placeholder: "priority: normal"

@@ -38,9 +38,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# The seven scheduled routines with a `cadence:` key — the four issue #276
-# named (backlog-burn, design-run, chunker, labeler) plus the three issue
-# #293 added (product-scout, backlog-groomer, reeve). Keep in sync with
+# The scheduled routines with a `cadence:` key — the four issue #276
+# named (backlog-burn, design-run, chunker, labeler), the three issue
+# #293 added (product-scout, backlog-groomer, reeve), the adoption-assessor,
+# wright (the agent forge, docs/agent-forge.md), and growth-twitter (the
+# growth desk's Twitter/X agent, docs/growth.md). Keep in sync with
 # those issues' tables; a routine not listed here is not checked (see the
 # script header for what that means) — extend the list only with the issue
 # that asks for it.
@@ -49,7 +51,7 @@ cd "$(dirname "$0")/.."
 # `backlog-burn config` — the conf READER here is the same `key: value`
 # house format every one of those parsers uses (see the Python docstring
 # below), not a call into the shared parser.
-ROUTINES=(backlog-burn design-run chunker labeler product-scout backlog-groomer reeve adoption-assessor)
+ROUTINES=(backlog-burn design-run chunker labeler product-scout backlog-groomer reeve adoption-assessor wright growth-twitter)
 
 # Compare one conf/workflow pair. Prints a diagnosis and returns non-zero on
 # drift. Kept as a function so --selftest can point it at fixtures.

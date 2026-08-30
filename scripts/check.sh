@@ -185,6 +185,18 @@ else
   echo "-- plate selftest: skipped (prusa-slicer not on PATH)"
 fi
 
+# And this proves the `render` camera opt still works on the installed
+# OpenSCAD build (issue #400): --render is value-taking on some builds
+# (2021.01, the 2026.08 nightly) and a bare trailing flag makes the parser
+# swallow the source path; bool builds reject --render=1 instead. render.sh
+# asks the binary which kind it is, and this selftest drives all three opt
+# orders through render_previews plus the negative control — so it runs green
+# on BOTH the stable and nightly check jobs below, whatever each is running.
+echo "-- render selftest: scripts/render.sh --selftest"
+if ! ./scripts/render.sh --selftest; then
+  fail=1
+fi
+
 # And this proves the printer.conf mechanism still resolves the default when
 # nothing is measured and the profile's value when one is — reaching the
 # exported geometry, not just an echo. Same family as the two checks above: a
@@ -361,6 +373,98 @@ if ! ./scripts/assessor-context.sh --selftest; then
   fail=1
 fi
 
+# Wright deny-backstop drift check: same reasoning as the chunker's family,
+# for BOTH halves of the agent forge (docs/agent-forge.md). One script checks
+# two backstops because the halves' allow/deny roles are opposite BY DESIGN:
+# the propose half (.claude/wright-settings.json) must deny the sign-off MCP
+# server (the proposer can never hold the arming tool) while the sign-off
+# half (.claude/reeve-signoff-settings.json) must deny the filing server (the
+# judge can never file what it judges) — and each must deny every dangerous
+# settings.json allow plus all four sibling wrappers, while never denying the
+# shared read wrapper wright-helper.sh or its OWN write tool (or the
+# scheduled forge fails closed with no other CI signal).
+echo "-- wright-perms selftest: scripts/wright-perms-check.sh --selftest"
+if ! ./scripts/wright-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- wright-perms check: scripts/wright-perms-check.sh"
+if ! ./scripts/wright-perms-check.sh; then
+  fail=1
+fi
+
+# Wright MCP filing tool: the propose half's WRITE surface is the
+# file_agent_brief MCP tool (.claude/skills/wright/wright_mcp.py), a
+# JSON-argument tool for the same dontAsk-matcher reason as the scout's. Its
+# --selftest proves the invariants a live run cannot show: the label is
+# hardcoded to agent-brief and unpassable, the title must carry the 'Agent
+# brief:' prefix, and the per-run cap fires.
+echo "-- wright MCP selftest: .claude/skills/wright/wright_mcp.py --selftest"
+if ! python3 .claude/skills/wright/wright_mcp.py --selftest; then
+  fail=1
+fi
+
+# Reeve sign-off MCP tool: the judging half's WRITE surface — the ONE
+# escalation-shaped write in the routine family, since an approve applies
+# `autonomy-ok`. Its --selftest proves every guard fires offline: write-time
+# target re-read (open / agent-brief / unruled / in the candidate set), the
+# closed verdict-label taxonomy, label-first fail-closed ordering, marker
+# dedup, the per-run cap, the WRIGHT_AUTO_ARM advisory demotion, and above
+# all the deterministic sensitive-path guard (an approve whose brief touches
+# protection machinery downgrades to needs-decision, with a
+# clean-brief negative control so the guard can't rot into always-firing).
+echo "-- reeve-signoff MCP selftest: .claude/skills/reeve-signoff/signoff_mcp.py --selftest"
+if ! python3 .claude/skills/reeve-signoff/signoff_mcp.py --selftest; then
+  fail=1
+fi
+
+# Growth deny-backstop drift check: same reasoning as the chunker's family,
+# for the Twitter/X growth agent's own backstop
+# (.claude/growth-twitter-settings.json — docs/growth.md). Lark is
+# oracle-shaped (NO shell wrapper; its one write is the MCP posting tool),
+# so like the Oracle's check the coverage rule has no wrapper exemption:
+# EVERY Bash allow in settings.json must be denied, PLUS every sibling write
+# surface AND the growth desk's own queue-filing server (the poster must
+# never refill the queue it drains) — while never denying
+# mcp__growth_twitter__post_tweet (or the scheduled agent fails closed with
+# no other CI signal, its dry-run comments just silently stopping). The
+# stakes are the highest in the family: this is the one write surface that
+# can eventually reach OUTSIDE the repo.
+echo "-- growth-perms selftest: scripts/growth-perms-check.sh --selftest"
+if ! ./scripts/growth-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- growth-perms check: scripts/growth-perms-check.sh"
+if ! ./scripts/growth-perms-check.sh; then
+  fail=1
+fi
+
+# Growth queue MCP filing tool: the PM-side half of the growth desk's
+# queuing seam (docs/growth.md) — the /growth-queue skill's ONE write, a
+# JSON-argument tool for the same dontAsk-matcher reason as the scout's. Its
+# --selftest proves the invariants a live run cannot show: the labels are
+# hardcoded to growth-queue + channel:<name> and unpassable (queuing can
+# never approve, prioritize, or route), the channel set is closed, the title
+# must carry the 'Growth post:' prefix, and the per-run cap fires.
+echo "-- growth-queue MCP selftest: .claude/skills/growth-queue/queue_mcp.py --selftest"
+if ! python3 .claude/skills/growth-queue/queue_mcp.py --selftest; then
+  fail=1
+fi
+
+# Growth posting MCP tool: Lark's ONE write and the most-guarded surface in
+# the family — the only one that can eventually publish OUTSIDE the repo.
+# Its --selftest proves offline what a live run must never show: dry-run is
+# the default (live needs the human GROWTH_TWITTER_LIVE key AND all four X
+# credentials AND, per policy, the human-applied approved-to-post label),
+# the weighted-length rule refuses over-280 copy (URLs = 23), write-time
+# target re-read (open / growth-queue / channel:twitter / not parked), the
+# one-post-per-item marker guards in both modes, candidate-set binding, the
+# per-run cap, and that a live post closes its drained queue item while a
+# dry run never does.
+echo "-- growth MCP selftest: .claude/skills/growth-twitter/growth_mcp.py --selftest"
+if ! python3 .claude/skills/growth-twitter/growth_mcp.py --selftest; then
+  fail=1
+fi
+
 # Cadence-parity check (issue #276): every scheduled autonomy routine stores
 # its cadence TWICE — the `cadence:` key in .github/<routine>.conf and the
 # `cron:` literal in .github/workflows/<routine>.yml (Actions can't read a
@@ -414,6 +518,20 @@ fi
 # in the include closure, an architecture doc, an unknown top-level dir).
 echo "-- vercel-ignore-build selftest: scripts/vercel-ignore-build.sh --selftest"
 if ! ./scripts/vercel-ignore-build.sh --selftest; then
+  fail=1
+fi
+
+# lifestyle-shot.sh selftest (issue #418): drives the LIVE parse branch — the
+# resp_kind assignment that once reused the 'kind' global, clobbering it so
+# product-still embeds got lifestyle alt text and the per-kind seed guard
+# stopped firing after the first shot — by running a sandboxed copy of the
+# real script against a localhost HTTP stub (no ZAI_KEY, no network beyond
+# 127.0.0.1), asserting the produced alt text, the second-shot seed-guard
+# refusal, and that malformed responses fail loudly. A sabotaged copy with
+# the rename reverted is the negative control proving the selftest still
+# fails when the clobber returns.
+echo "-- lifestyle-shot selftest: scripts/lifestyle-shot.sh --selftest"
+if ! ./scripts/lifestyle-shot.sh --selftest; then
   fail=1
 fi
 
