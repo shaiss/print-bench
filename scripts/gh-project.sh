@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-# gh-project.sh — emit a repeatable `gh` recipe that provisions the
-# "print-bench autonomy" GitHub Projects (v2) board (issue #148).
+# gh-project.sh — emit repeatable `gh` recipes that provision this repo's
+# GitHub Projects (v2) boards from a committed spec.
+#
+# TWO BOARDS, one emitter (pass `--board <name>` before the subcommand;
+# default `autonomy`):
+#   * autonomy — the roadmap board (issue #148): the autonomy loop's backlog,
+#     with a human-owned Stage and Story points. docs/roadmap-board.md.
+#   * growth   — the Lark approval board (docs/growth.md): where each queued
+#     Twitter/X post sits, so a human can see and approve them. Its Stage is a
+#     pure LENS the growth-board-sync workflow derives from each queue issue's
+#     state + labels + markers (growth.board.stage_of), so it has no Story
+#     points and its Stage is always set, never set-if-new.
 #
 # WHY a recipe you run, not an API call the automation makes: this session's
 # tooling cannot create or populate a Projects v2 board (the board/field/item
 # API is GraphQL-only and unavailable here), and a Project is settings-shaped
-# anyway. So the board's schema lives HERE as the committed source of truth, and
-# `setup` prints the exact, idempotent `gh` commands that create it — reviewable
-# before you run it, and repeatable in the future. Populating the board (adding
-# issues, setting fields) is the follow-up automation slice; see
-# docs/roadmap-board.md.
+# anyway. So each board's schema lives HERE as the committed source of truth,
+# and `setup` prints the exact, idempotent `gh` commands that create it —
+# reviewable before you run it, and repeatable in the future. Populating a board
+# (adding issues, setting fields) is done by a sync workflow; see
+# docs/roadmap-board.md (autonomy) and docs/growth.md (growth).
 #
 # Usage:
-#   scripts/gh-project.sh setup         # print the idempotent board-provisioning recipe
-#   scripts/gh-project.sh setup | bash  # run it (needs gh >= 2.30 + jq + the `project` scope)
-#   scripts/gh-project.sh add-item <issue-or-pr-url> [--stage <name> | --stage-if-new <name>] [--points <n>]
+#   scripts/gh-project.sh [--board <name>] setup         # print the idempotent board-provisioning recipe
+#   scripts/gh-project.sh [--board <name>] setup | bash  # run it (needs gh >= 2.30 + jq + the `project` scope)
+#   scripts/gh-project.sh [--board <name>] add-item <issue-or-pr-url> [--stage <name> | --stage-if-new <name>] [--points <n>]
 #                                       # print an idempotent recipe that adds ONE issue/PR to the
 #                                       # board and sets its Stage / Story points; pipe to bash to run.
 #                                       # --stage always sets the Stage; --stage-if-new sets it only when
@@ -33,20 +43,55 @@ SELF="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)/$(basename "$0")"
 
 die() { echo "gh-project: $*" >&2; exit 1; }
 
-# ---- the board spec: the committed source of truth -------------------------
-# Change these to reshape the board; the emitted recipe is idempotent, so
-# re-running it reconciles the live board to this spec.
-PROJECT_TITLE="print-bench autonomy"
+# ---- the board specs: the committed source of truth ------------------------
+# Change a spec to reshape its board; the emitted recipe is idempotent, so
+# re-running it reconciles the live board to the spec. `select_board` sets the
+# active spec into these globals; the emitters read them. Both boards live under
+# the same owner (a user, not an org).
 PROJECT_OWNER="shaiss"
-# Our pipeline stage, as a distinct SINGLE_SELECT field. GitHub gives every
-# board a built-in "Status" (Todo/In Progress/Done) the CLI cannot reshape, so
-# we add "Stage" instead and group the board by it in the UI (view config is
-# UI-only). Options are ordered; names only (the CLI can't set colours).
-STAGE_FIELD="Stage"
-STAGE_OPTIONS="Backlog,Ready,In progress,In review,Done"
-# Story points, a NUMBER field. Fibonacci 1/2/3/5/8 by convention: a chunked,
-# one-PR sub-issue is 1-3; a bigger estimate is a hint it should be re-chunked.
-POINTS_FIELD="Story points"
+DEFAULT_BOARD="autonomy"
+
+# The active spec, filled by select_board. STAGE_FIELD is a distinct
+# SINGLE_SELECT because GitHub gives every board a built-in "Status"
+# (Todo/In Progress/Done) the CLI cannot reshape, so we add "Stage" and group
+# the board by it in the UI (view config is UI-only). Options are ordered; names
+# only (the CLI can't set colours). POINTS_FIELD is a NUMBER field, or empty for
+# a board that does not estimate.
+PROJECT_TITLE=""
+STAGE_FIELD=""
+STAGE_OPTIONS=""
+POINTS_FIELD=""
+
+select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
+  BOARD="$1"
+  case "$1" in
+    autonomy)
+      PROJECT_TITLE="print-bench autonomy"
+      STAGE_FIELD="Stage"
+      STAGE_OPTIONS="Backlog,Ready,In progress,In review,Done"
+      # Story points, Fibonacci 1/2/3/5/8 by convention: a chunked one-PR
+      # sub-issue is 1-3; a bigger estimate is a hint it should be re-chunked.
+      POINTS_FIELD="Story points"
+      ;;
+    growth)
+      PROJECT_TITLE="print-bench growth"
+      STAGE_FIELD="Stage"
+      # The Lark approval pipeline. Kept in lockstep with
+      # growth.board.BOARD_STAGE_OPTIONS (tools/growth) — a drift test in
+      # tools/growth/tests/test_board.py reads this line and fails if the two
+      # disagree, so the provisioning recipe and the stage policy name the same
+      # stages. A queued post moves Queued -> Drafted (Lark's dry-run) ->
+      # Approved (a human's approved-to-post label) -> Posted; Parked is
+      # needs-decision, Attention is a live claim that never closed.
+      STAGE_OPTIONS="Queued,Drafted,Approved,Posted,Parked,Attention"
+      # Growth posts are not estimated: no Story points field.
+      POINTS_FIELD=""
+      ;;
+    *)
+      die "unknown board '$1' (known: autonomy, growth)"
+      ;;
+  esac
+}
 
 # Emit the provisioning recipe from the spec above. Deterministic and
 # side-effect-free: it only prints. The spec values are substituted into a
@@ -57,8 +102,8 @@ emit_recipe() {
   cat <<EOF
 #!/usr/bin/env bash
 # Provision the "$PROJECT_TITLE" GitHub Project (v2). Idempotent — re-run to
-# reconcile. GENERATED by scripts/gh-project.sh (issue #148): edit the spec
-# there, not this output. Needs gh >= 2.30 and jq.
+# reconcile. GENERATED by scripts/gh-project.sh: edit the board spec there, not
+# this output. Needs gh >= 2.30 and jq.
 set -euo pipefail
 
 OWNER="$PROJECT_OWNER"
@@ -67,6 +112,7 @@ STAGE_FIELD="$STAGE_FIELD"
 STAGE_OPTIONS="$STAGE_OPTIONS"
 POINTS_FIELD="$POINTS_FIELD"
 EOF
+  # Part A — steps 0-1 and the field_absent helper (every board has these).
   cat <<'EOF'
 
 # 0. `gh project` needs the `project` scope (not granted at login; not covered
@@ -97,6 +143,13 @@ field_absent() {  # $1 = field name
   [ -z "$(gh project field-list "$NUM" --owner "$OWNER" -L 200 --format json \
     --jq ".fields[] | select(.name==\"$1\") | .name")" ]
 }
+EOF
+
+  # Part B — the "Story points" (NUMBER) field, emitted ONLY for a board whose
+  # spec carries one. A board without points (growth) gets no Story-points bash
+  # in its recipe at all, rather than a runtime-inert guarded block.
+  if [ -n "$POINTS_FIELD" ]; then
+    cat <<'EOF'
 
 # 2. "Story points" (NUMBER) — create if absent.
 if field_absent "$POINTS_FIELD"; then
@@ -105,6 +158,11 @@ if field_absent "$POINTS_FIELD"; then
 else
   echo "field exists: $POINTS_FIELD"
 fi
+EOF
+  fi
+
+  # Part C — the "Stage" (SINGLE_SELECT) field (every board has one).
+  cat <<'EOF'
 
 # 3. "Stage" (SINGLE_SELECT) with our pipeline options — create if absent.
 #    The built-in "Status" field is left untouched (the CLI can't reshape it);
@@ -116,10 +174,21 @@ if field_absent "$STAGE_FIELD"; then
 else
   echo "field exists: $STAGE_FIELD"
 fi
-
-echo "done. add issues to the board with:"
-echo "  scripts/gh-project.sh add-item https://github.com/$OWNER/print-bench/issues/<N> --stage Backlog --points <n> | bash"
 EOF
+
+  # The closing add-item hint, matched to the board (points for autonomy, the
+  # first Stage option as the entry stage for a lens board like growth).
+  if [ -n "$POINTS_FIELD" ]; then
+    cat <<EOF
+echo "done. add issues to the board with:"
+echo "  scripts/gh-project.sh add-item https://github.com/$PROJECT_OWNER/print-bench/issues/<N> --stage ${STAGE_OPTIONS%%,*} --points <n> | bash"
+EOF
+  else
+    cat <<EOF
+echo "done. add issues to the board with:"
+echo "  scripts/gh-project.sh --board $BOARD add-item https://github.com/$PROJECT_OWNER/print-bench/issues/<N> --stage ${STAGE_OPTIONS%%,*} | bash"
+EOF
+  fi
 }
 
 # Emit an idempotent recipe that adds ONE issue/PR to the board and (optionally)
@@ -133,7 +202,7 @@ emit_add_item() {
   cat <<EOF
 #!/usr/bin/env bash
 # Add $url to the "$PROJECT_TITLE" board and set its fields. Idempotent — re-run
-# to reconcile. GENERATED by scripts/gh-project.sh (issue #148). Needs gh + jq.
+# to reconcile. GENERATED by scripts/gh-project.sh. Needs gh + jq.
 set -euo pipefail
 
 OWNER="$PROJECT_OWNER"
@@ -233,6 +302,7 @@ add_item_cli() {
     esac
   fi
   if [ -n "$points" ]; then
+    [ -n "$POINTS_FIELD" ] || die "add-item: board '$BOARD' has no Story points field; --points is not allowed"
     case "$points" in ''|*[!0-9]*) die "add-item: --points must be a non-negative integer" ;; esac
   fi
   emit_add_item "$url" "$stage" "$points" "$stage_if_new"
@@ -302,13 +372,53 @@ selftest() {
   "$SELF" add-item "https://github.com/shaiss/print-bench/issues/1" --stage Backlog --stage-if-new Ready >/dev/null 2>&1 \
     && die "selftest: add-item accepted both --stage and --stage-if-new" || true
 
+  # ---- the growth board (a second spec through the same emitter) ------------
+  # Provisioning recipe for --board growth: valid bash, its own title + stages,
+  # and NO Story points field (the growth board does not estimate).
+  select_board growth
+  local grec
+  grec="$(emit_recipe)"
+  select_board autonomy
+  bash -n <(printf '%s\n' "$grec") || die "selftest: growth setup recipe is not valid bash"
+  grep -qF 'TITLE="print-bench growth"' <<<"$grec"       || die "selftest: growth board title not substituted"
+  grep -qF 'Queued,Drafted,Approved,Posted,Parked,Attention' <<<"$grec" \
+    || die "selftest: growth stage options missing"
+  grep -qFe '--data-type NUMBER' <<<"$grec" \
+    && die "selftest: growth board must not emit a Story points NUMBER field" || true
+  grep -qFe '--data-type SINGLE_SELECT' <<<"$grec" || die "selftest: growth Stage single-select field missing"
+  # add-item on the growth board: a growth Stage is accepted and substituted.
+  local gadd
+  gadd="$("$SELF" --board growth add-item "https://github.com/shaiss/print-bench/issues/1" --stage Approved)"
+  bash -n <(printf '%s\n' "$gadd") || die "selftest: growth add-item recipe is not valid bash"
+  grep -qF 'TITLE="print-bench growth"' <<<"$gadd" || die "selftest: growth add-item title not substituted"
+  grep -qF 'STAGE="Approved"' <<<"$gadd"           || die "selftest: growth add-item stage not substituted"
+  # Negative controls: an autonomy stage is not a growth stage; --points is
+  # refused on a board with no points field; an unknown board is refused.
+  "$SELF" --board growth add-item "https://github.com/shaiss/print-bench/issues/1" --stage Backlog >/dev/null 2>&1 \
+    && die "selftest: growth add-item accepted a non-growth stage" || true
+  "$SELF" --board growth add-item "https://github.com/shaiss/print-bench/issues/1" --stage Queued --points 3 >/dev/null 2>&1 \
+    && die "selftest: growth add-item accepted --points on a board with no Story points field" || true
+  "$SELF" --board nope setup >/dev/null 2>&1 \
+    && die "selftest: accepted an unknown board name" || true
+
   echo "ok    gh-project.sh selftest passed"
 }
+
+# Parse the optional leading `--board <name>` global flag, then select the board
+# spec so every subcommand (and the selftest) reads the right one. Callers that
+# pass no --board get the default (autonomy), so existing invocations —
+# roadmap-sync.yml's `add-item …` — are unchanged.
+BOARD="$DEFAULT_BOARD"
+if [ "${1:-}" = "--board" ]; then
+  [ $# -ge 2 ] || die "--board requires a value"
+  BOARD="$2"; shift 2
+fi
+select_board "$BOARD"
 
 case "${1:-}" in
   setup)         emit_recipe ;;
   add-item)      shift; add_item_cli "$@" ;;
   --selftest)    selftest ;;
   -h|--help|"")  grep '^#' "$SELF" | sed 's/^# \{0,1\}//' ;;
-  *)             die "unknown argument: '$1' (try: setup | add-item | --selftest | --help)" ;;
+  *)             die "unknown argument: '$1' (try: [--board <name>] setup | add-item | --selftest | --help)" ;;
 esac

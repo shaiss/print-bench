@@ -16,6 +16,7 @@ judgment:
 | `growth.config` | The strict parser for `.github/growth-twitter.conf` — the committed policy (arming, provider, cadence, per-run post cap, approval requirement). Its own closed key set, like every sibling parser here: unknown keys fail loudly. |
 | `growth.tweetlen` | The weighted tweet-length rule (twitter-text v3 ranges; every URL counts 23). One implementation the composer, the posting tool and the simulator all obey — `tests/test_server_parity.py` pins the posting server's self-contained copy to it. |
 | `growth.queue` | The drain order: `priority:high` first, then oldest issue number — FIFO with one escape hatch. A pure function of a queue snapshot. |
+| `growth.board` | The approval-board Stage policy: `stage_of` maps one queue issue's state + labels + the two hidden markers to a `print-bench growth` board Stage (Queued/Drafted/Approved/Posted/Parked/Attention). A pure function, the single source `growth-board-sync.yml` reflects onto the board (docs/growth.md). Owns the marker strings; a test pins them to the posting tool and pins its stage set to `scripts/gh-project.sh`'s `growth` board spec. |
 | `growth.cron` | A minimal 5-field cron matcher (numbers, `*`, steps, lists, ranges) so the simulator can expand a cadence; anything fancier raises rather than simulating the wrong schedule. |
 | `growth.simulate` | The accelerated dry run: walk N days of firings over a snapshot + composed posts and render exactly what would have been posted, when — the committed artifact a human reads before arming anything live. Copy over the weighted 280 fails the simulation loudly. |
 | `growth.poster` | The X API v2 seam: OAuth 1.0a (HMAC-SHA1) signing by hand, stdlib-only, inert unless all four `X_*` credentials are present. Mechanics only — the policy (approval label, duplicate markers, caps) lives in the posting MCP tool beside the skill. |
@@ -36,6 +37,11 @@ python3 -m growth simulate --conf .github/growth-twitter.conf \
   --start 2026-08-29T09:00:00Z --days 7 \
   --out-md growth/twitter/dryruns/overnight.md \
   --out-ndjson growth/twitter/dryruns/overnight.ndjson
+
+# The approval-board Stage per queue item — one `<url>\t<stage>` line per card
+# the growth-board-sync workflow reflects onto the board (reads a JSON list of
+# item snapshots from a file or stdin):
+python3 -m growth board-stage --snapshot snapshot.json
 ```
 
 ## Tests

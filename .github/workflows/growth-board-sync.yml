@@ -1,0 +1,163 @@
+name: Sync the growth queue onto the approval board
+
+# Reflect every `growth-queue` issue onto the "print-bench growth" GitHub
+# Project (docs/growth.md) so a human can SEE where each queued Twitter/X post
+# sits and approve it at a glance. The sibling of roadmap-sync.yml (the autonomy
+# board, #148); it reuses the same committed schema-in-git recipe
+# (scripts/gh-project.sh --board growth), so the board's schema stays the
+# git-native source of truth and this workflow is just the trigger.
+#
+# THE BOARD IS A LENS, NOT A CONTROL SURFACE. Each card's Stage is DERIVED from
+# its issue's real state (growth.board.stage_of): Queued -> Drafted (Lark's
+# dry-run comment) -> Approved (the human-applied approved-to-post label) ->
+# Posted (published + closed); Parked is needs-decision, Attention is a live
+# claim that never closed. Approving a post is STILL applying the
+# `approved-to-post` label (now doable from the board card's side panel, where a
+# human sees every pending post at once) — the very label Lark's posting tool
+# reads. Dragging a card changes only the board's own Stage field, NOT that
+# label, so the sync always re-derives and re-sets Stage (never set-if-new): the
+# derived state is the truth. See docs/growth.md.
+#
+# GATED, off by default: GitHub Projects v2 needs a token with the `project`
+# scope, which neither GITHUB_TOKEN nor the repo's REGEN_TOKEN/GH_TOKEN carries.
+# So the board write only happens when a PROJECT_TOKEN secret (the SAME secret
+# roadmap-sync.yml uses — one Projects-scoped PAT covers every board under this
+# owner) is set; without it the workflow logs a ::notice:: and does nothing.
+# See docs/roadmap-board.md ("Auth / token scope").
+#
+# SECURITY: `issues` and `schedule` events run in the base repo's context from
+# the default branch — there is no PR head to execute — and the job pins itself
+# to the default branch so a workflow_dispatch against a PR branch can't run that
+# branch's tooling with PROJECT_TOKEN. The board write alone uses PROJECT_TOKEN
+# (Projects scope only, no repo write); the ambient GITHUB_TOKEN stays
+# contents:read + issues:read (list the queue, read its comment markers). Issue
+# URLs are GitHub-controlled and re-validated by `add-item` before use. Listed
+# in docs/actions-security.md.
+
+on:
+  issues:
+    # opened/labeled/unlabeled catch the approve gesture (the approved-to-post
+    # label) and parking (needs-decision) immediately; closed/reopened catch a
+    # live post's Posted transition. The dry-run -> Drafted transition arrives
+    # as a bot comment (no issues event), so the schedule below backstops it.
+    types: [opened, labeled, unlabeled, closed, reopened]
+  schedule:
+    # Every 3 hours at :39 (off-peak minute, the routine-family convention).
+    # This is a lightweight reconcile, not an armed routine — it is a no-op
+    # until PROJECT_TOKEN is set — so it needs no conf and no cadence-sync entry
+    # (scripts/cadence-sync-check.sh checks only the armed routines). Its only
+    # schedule-dependent job is catching Lark's once-daily dry-run comment as a
+    # Drafted card; every other transition is event-driven above.
+    - cron: '39 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read   # checkout the trusted default-branch scripts/ + tools/growth
+  issues: read     # list growth-queue issues and read their comment markers
+
+concurrency:
+  # Serialize this workflow with itself so two reconciles can't race the board.
+  group: growth-board-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Reflect the growth queue onto the board
+    # Pin to the default branch: this job holds PROJECT_TOKEN, and
+    # workflow_dispatch can target any in-repo branch — so a dispatch against a
+    # PR branch must not run that branch's tooling with the secret. On schedule
+    # and issues events github.ref_name is already the default branch.
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Decide whether to sync
+        id: guard
+        uses: actions/github-script@v9
+        env:
+          # Secrets aren't readable in a step `if:`, so surface presence here.
+          HAVE_TOKEN: ${{ secrets.PROJECT_TOKEN != '' }}
+        with:
+          script: |
+            if (process.env.HAVE_TOKEN !== 'true') {
+              core.notice('PROJECT_TOKEN is not set — growth-board sync is off. '
+                + 'Add a classic PAT with the `project` scope as PROJECT_TOKEN to enable '
+                + '(the same secret the autonomy roadmap board uses — see docs/roadmap-board.md).');
+              core.setOutput('act', 'false');
+              return;
+            }
+            // On an `issues` event, only reconcile when the changed issue is a
+            // growth-queue item — an unrelated label elsewhere in the repo must
+            // not fire a full reconcile. schedule/workflow_dispatch always run.
+            if (context.eventName === 'issues') {
+              const labels = (context.payload.issue.labels || []).map((l) => l.name);
+              if (!labels.includes('growth-queue')) {
+                core.notice(`#${context.issue.number} is not a growth-queue issue; not syncing.`);
+                core.setOutput('act', 'false');
+                return;
+              }
+            }
+            core.setOutput('act', 'true');
+
+      - name: Check out trusted tooling
+        if: steps.guard.outputs.act == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Reflect each growth-queue issue's stage onto the board
+        if: steps.guard.outputs.act == 'true'
+        env:
+          # Reads (issue list + comments) use the ambient token; the board write
+          # overrides GH_TOKEN with PROJECT_TOKEN per-invocation below.
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # 1. Working set: every growth-queue issue, most-recently-updated
+          #    first (so a just-closed Posted item is always in the window; old
+          #    settled cards already sit on the board and never change). With
+          #    --search, gh takes state/label from the query itself, not the
+          #    flags; no is:open/is:closed means BOTH states. The stage policy
+          #    drops closed-and-never-posted items, so rejected issues never
+          #    clutter the board.
+          gh issue list --repo "$REPO" \
+            --search 'label:growth-queue sort:updated-desc' --limit 300 \
+            --json number,url,state,labels > set.json
+
+          # 2. Enrich each with its concatenated comment bodies, so the stage
+          #    policy can read the dry-run / posted markers. growth.board owns
+          #    the marker strings (tests pin them to the posting tool); this
+          #    workflow passes raw comment text and hardcodes no marker itself.
+          : > snapshot.ndjson
+          while read -r n; do
+            [ -n "$n" ] || continue
+            bodies="$(gh api "repos/$REPO/issues/$n/comments" --paginate \
+              --jq '[.[].body] | join("\n")' 2>/dev/null || printf '')"
+            jq -c --argjson n "$n" --arg comments "$bodies" \
+              '.[] | select(.number==$n)
+                   | {number, url, state, labels: [.labels[].name], comments: $comments}' \
+              set.json >> snapshot.ndjson
+          done < <(jq -r '.[].number' set.json)
+          jq -s '.' snapshot.ndjson > snapshot.json
+
+          # 3. Derive each item's Stage from the committed policy (the single
+          #    source, tested in tools/growth/tests/test_board.py).
+          PYTHONPATH=tools/growth/src python3 -m growth board-stage \
+            --snapshot snapshot.json > stages.tsv
+
+          # 4. Reflect each derived Stage onto the board. Always --stage (never
+          #    --stage-if-new): a lens board's Stage is the derived truth, not a
+          #    human-dragged position, so a reconcile re-sets it. The board write
+          #    is the one step that needs PROJECT_TOKEN's `project` scope.
+          count=0
+          tab="$(printf '\t')"
+          while IFS="$tab" read -r url stage; do
+            [ -n "$url" ] || continue
+            scripts/gh-project.sh --board growth add-item "$url" --stage "$stage" \
+              | GH_TOKEN="$PROJECT_TOKEN" bash
+            count=$((count + 1))
+          done < stages.tsv
+          echo "::notice::growth-board sync reflected ${count} item(s) onto the board."

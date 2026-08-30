@@ -111,6 +111,13 @@ declines design requests). The queue is the contract between the seats:
 * **`growth/`** — the desk's committed artifacts: the accelerated dry-run
   timelines (`growth/twitter/dryruns/`) a human reads before arming
   anything.
+* **The approval board** — a GitHub Project (v2) where every queue issue is a
+  card grouped by a derived Stage, so a human sees where each post sits and
+  approves it at a glance. Its schema lives in git
+  (`scripts/gh-project.sh --board growth`), the Stage policy in
+  `tools/growth` (`growth.board.stage_of`), and `growth-board-sync.yml`
+  reflects each issue's state onto it. Detailed below; a LENS, not a control
+  surface — approving is still applying `approved-to-post`.
 
 ## The arming ladder — three human rungs, no agent on any of them
 
@@ -179,9 +186,66 @@ Two dry-run forms, both designed to be read:
    `model-smoke.yml` on the `growth-twitter` chain first.
 5. Approve items one at a time: read the dry-run comment on a queue issue,
    apply `approved-to-post`, let the next sweep post it. Un-label or close
-   to veto; `needs-decision` parks an item indefinitely.
+   to veto; `needs-decision` parks an item indefinitely. The **approval
+   board** (below) is the surface built for this step — every pending post in
+   one view, approved by applying the label from the card.
 6. To stop everything instantly: unset `GROWTH_TWITTER_ENABLED` (or
    `GROWTH_TWITTER_LIVE` to fall back to dry-runs).
+
+## The approval board (GitHub Projects)
+
+The queue is issues; the board is the **view a human approves from** — a
+GitHub Project (v2), `print-bench growth`, where every `growth-queue` issue is
+a card grouped by its Stage. It answers "where is each post, and which are
+waiting on me?" without scrolling the issue list. It is the exact sibling of
+the autonomy roadmap board (`docs/roadmap-board.md`): the schema lives in git
+and the board is provisioned by a committed, idempotent `gh` recipe, because
+this session's automation cannot create or populate a Projects v2 board (the
+API is GraphQL-only and unavailable here, and a Project is settings-shaped
+anyway).
+
+**The board is a LENS, not a control surface.** Each card's Stage is
+*derived* from its issue's real state by one tested pure function
+(`growth.board.stage_of` in `tools/growth`), not set by hand:
+
+| Stage | The issue state it reflects |
+|---|---|
+| **Queued** | open `growth-queue`, no dry-run yet — filed, awaiting Lark |
+| **Drafted** | open, carries the `<!-- growth-twitter:dry-run -->` comment — **awaiting your approval** |
+| **Approved** | open, carries the `approved-to-post` label — awaiting the next live sweep |
+| **Posted** | closed with the `<!-- growth-twitter:posted -->` marker — published |
+| **Parked** | open, `needs-decision` — a human paused it |
+| **Attention** | open with a posted marker that never closed — a mid-thread/in-flight post to check |
+
+Because the Stage is derived, **approving a post is still applying the
+`approved-to-post` label** — the very label Lark's posting tool reads — now
+doable from the card's side panel where you see every pending post at once.
+**Dragging a card does nothing to the post**: it changes only the board's own
+Stage field, not the label, and the next reconcile re-derives Stage from the
+real state anyway. This is the deliberate difference from the roadmap board,
+whose Stage is human-owned (a card a person drags, so its sync sets Stage
+only when the item is first added). The growth board's Stage is a reflection,
+so its sync always re-sets it.
+
+**Provisioning + wiring.**
+
+- Create the board once: `scripts/gh-project.sh --board growth setup | bash`
+  (needs `gh` + the `project` scope). Then, one-time in the UI, group the
+  Board view by `Stage` and — optionally — filter by the `channel:twitter`
+  label. View layout is UI-only, as on the roadmap board.
+- `.github/workflows/growth-board-sync.yml` reflects each queue issue's
+  derived Stage onto the board: on `issues` events (the approve/park/close
+  transitions land immediately) and every three hours (to catch Lark's
+  once-daily dry-run as a Drafted card). It is **gated on the same
+  `PROJECT_TOKEN`** the roadmap board uses — one Projects-scoped PAT covers
+  every board under this owner — and is a no-op until that secret is set, so
+  merging the desk provisions nothing on its own.
+
+The board adds **no new write to any issue**: the sync only reads the queue
+(labels + comment markers) and writes the Project. The posting tool still
+applies no labels, and `growth-queue` stays in the labeler's
+`NON_TRIAGE_LABELS` — the board is a reflection of the queue, never a second
+source of truth for it.
 
 ## Relationship to earlier decisions
 
