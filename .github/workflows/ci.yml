@@ -459,6 +459,22 @@ jobs:
           fi
           echo "regenerated:"
           git diff --cached --name-only | sed 's/^/  /'
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            # Default-branch push: every source change reaches the default
+            # branch through a PR (the repository ruleset forbids direct
+            # pushes), and that PR's own regen already committed fresh
+            # artifacts into the squash merge. A diff here is therefore
+            # cross-runner rendering noise, not a stale artifact — and pushing
+            # it is both redundant AND rejected by the ruleset (GH013 "Changes
+            # must be made through a pull request"), which is exactly what used
+            # to fail this required job and red `ci-ok` on every
+            # regen-touching push to the default branch. Report the diff for
+            # visibility and stop; do not commit or push it.
+            echo "::notice::default-branch push — committed artifacts already arrived fresh via the merged PR; the diff above is cross-runner rendering noise and is not pushed to ${BRANCH} (direct pushes to the default branch are disallowed by the ruleset; this is expected, not a failure)."
+            git reset >/dev/null
+            echo "sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$ALREADY" = "true" ]; then
             # Second pass, and the output STILL differs from what the first
             # pass committed. The sources didn't move, so this is the
@@ -1148,7 +1164,7 @@ jobs:
           # and the next default-branch run appends its own record anyway —
           # failing the required gate context over bookkeeping would be
           # backwards.
-          echo "::warning::could not push the telemetry record after 3 attempts — it is still available in the telemetry-record artifact"
+          echo "::warning::could not push the telemetry record after 3 attempts — most likely the default-branch ruleset rejecting the direct push (GH013 'Changes must be made through a pull request'). The record survives as the telemetry-record artifact. Telemetry pushes directly with GITHUB_TOKEN *by design* so it triggers no workflow (a PR would re-gate the catalog and loop forever), so landing it on the default branch needs github-actions[bot] on the ruleset bypass list for telemetry/log.ndjson + telemetry/REPORT.md — not a PR route. See the tracking issue."
       - name: Upsert sticky PR comment
         # Same-repo PRs only: fork PR tokens are read-only and the comment
         # would fail; this repo's PRs all come from session branches anyway.
