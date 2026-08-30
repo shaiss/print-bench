@@ -7,6 +7,9 @@ Subcommands, each a thin shell over one module:
   ``backlog-burn config``, over the growth desk's own closed key set).
 * ``growth length <text>`` — the weighted tweet length (URLs = 23), so a
   human or an attended session can check copy the way the posting tool will.
+* ``growth postslot --cadence <cron> [--now <iso>]`` — post-time jitter: print
+  ``true`` iff *now* (default: UTC now) is today's chosen slot among the
+  cadence's candidate hours, so Lark's workflow can gate the drain on it.
 * ``growth simulate --conf <conf> --snapshot <json> --posts <json>
   --start <iso> --days <n> --out-md <path> [--out-ndjson <path>]`` — the
   accelerated dry run (docs/growth.md): render what would have been posted.
@@ -18,7 +21,10 @@ import argparse
 import json
 import sys
 
+from datetime import datetime, timezone
+
 from . import config as config_mod
+from . import postslot as postslot_mod
 from . import simulate as simulate_mod
 from .tweetlen import tweet_weight
 
@@ -33,6 +39,12 @@ def main(argv: list[str] | None = None) -> int:
 
     p_len = sub.add_parser("length", help="weighted tweet length (URLs = 23)")
     p_len.add_argument("text")
+
+    p_slot = sub.add_parser("postslot", help="is now today's chosen post slot?")
+    p_slot.add_argument("--cadence", required=True,
+                        help="the 5-field cron literal (the posting window)")
+    p_slot.add_argument("--now", default="",
+                        help="ISO UTC timestamp to test (default: UTC now)")
 
     p_sim = sub.add_parser("simulate", help="accelerated dry-run timeline")
     p_sim.add_argument("--conf", default=config_mod.DEFAULT_PATH)
@@ -59,6 +71,24 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "length":
         print(tweet_weight(args.text))
+        return 0
+
+    if args.cmd == "postslot":
+        if args.now:
+            try:
+                now = datetime.fromisoformat(
+                    args.now.replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError as e:
+                print(f"growth postslot: bad --now {args.now!r}: {e}", file=sys.stderr)
+                return 1
+        else:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+        try:
+            hit = postslot_mod.is_post_slot(now, args.cadence)
+        except Exception as e:  # noqa: BLE001 — a bad cadence must fail loud, not post
+            print(f"growth postslot: {e}", file=sys.stderr)
+            return 1
+        print("true" if hit else "false")
         return 0
 
     if args.cmd == "simulate":
