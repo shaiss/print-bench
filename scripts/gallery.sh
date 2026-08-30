@@ -118,6 +118,21 @@ gallery() {
     exit 1
   fi
 
+  # Per-group promise blurbs, from the same authority (catalog.sh) as the order,
+  # so a heading and its promise can't drift from the vocabulary. Each line is
+  # <slug> \t <label> \t <blurb> (blurb empty for the navigational headings).
+  local groups_out
+  if ! groups_out="$(./scripts/catalog.sh groups)"; then
+    echo "gallery: ./scripts/catalog.sh groups failed" >&2
+    exit 1
+  fi
+  local -A group_blurb=()
+  local gslug gblurb
+  while IFS=$'\t' read -r gslug _ gblurb; do
+    [[ -n "$gslug" ]] || continue
+    group_blurb["$gslug"]="$gblurb"
+  done <<<"$groups_out"
+
   # A `### <group>` heading opens each group, followed by a fresh table header:
   # markdown breaks a table at a heading, so a genuine subheading forces one
   # table per group. The parent field (5th) is dropped on purpose: lineage_line
@@ -129,6 +144,9 @@ gallery() {
     [[ -n "$name" ]] || continue
     if [[ "$group" != "$cur_group" ]]; then
       printf '\n### %s\n\n' "$label"
+      if [[ -n "${group_blurb[$group]:-}" ]]; then
+        printf '_%s_\n\n' "${group_blurb[$group]}"
+      fi
       echo "| Design | |"
       echo "|---|---|"
       cur_group="$group"

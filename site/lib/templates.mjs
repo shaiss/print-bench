@@ -367,7 +367,9 @@ export function indexPage(designs, { rosters = new Map(), groups = null } = {}) 
       ? groups
           .map(
             (g) => `  <section class="design-group" aria-label="${escapeHtml(g.label)}">
-    <p class="group-label">${escapeHtml(g.label)}</p>
+    <p class="group-label">${escapeHtml(g.label)}</p>${
+      g.blurb ? `\n    <p class="group-blurb">${escapeHtml(g.blurb)}</p>` : ""
+    }
     <div class="grid">
 ${g.designs.map(cardOf).join("\n")}
     </div>

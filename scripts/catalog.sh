@@ -6,6 +6,8 @@
 #                                    # vocabulary, and the NUGGS cross-check holds
 #   ./scripts/catalog.sh order       # emit the GROUPED, lineage-ordered design
 #                                    # sequence both catalog surfaces consume
+#   ./scripts/catalog.sh groups      # emit "<slug> \t <label> \t <blurb>" per
+#                                    # group (the heading + optional promise line)
 #   ./scripts/catalog.sh --selftest  # pin the parser + the closed-vocabulary
 #                                    # refusal + the NUGGS cross-check with
 #                                    # negative controls (run by check.sh)
@@ -58,23 +60,42 @@ _set_has() { case "$NL$1$NL" in *"$NL$2$NL"*) return 0 ;; *) return 1 ;; esac; }
 # (the newline-delimited closed set for membership tests).
 declare -a VOCAB_ORDER=()
 declare -A LABEL=()
+declare -A BLURB=()
 VOCAB_SET=""
+
+# Trim leading/trailing whitespace from $1.
+_trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
 load_vocab() {
-  VOCAB_ORDER=(); LABEL=(); VOCAB_SET=""
+  VOCAB_ORDER=(); LABEL=(); BLURB=(); VOCAB_SET=""
   if [[ ! -f "$VOCAB_FILE" ]]; then
     err "vocabulary file ${VOCAB_FILE} is missing"
     return 1
   fi
-  local line slug label
+  # Each line is "<slug> | <label>" or "<slug> | <label> | <blurb>": the blurb
+  # is an optional promise line shown under the group's heading. Split on the
+  # FIRST two pipes explicitly — a naive "everything after the first |" would
+  # glue the blurb onto the label.
+  local line slug rest label blurb
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"                       # drop trailing/whole-line comments
     [[ "$line" =~ ^[[:space:]]*$ ]] && continue
     if [[ "$line" != *"|"* ]]; then
-      err "${VOCAB_FILE}: line '${line}' is not '<slug> | <label>'"
+      err "${VOCAB_FILE}: line '${line}' is not '<slug> | <label>[ | <blurb>]'"
       return 1
     fi
-    slug="${line%%|*}"; slug="$(printf '%s' "$slug" | tr -d '[:space:]')"
-    label="${line#*|}"; label="${label#"${label%%[![:space:]]*}"}"; label="${label%"${label##*[![:space:]]}"}"
+    slug="$(printf '%s' "${line%%|*}" | tr -d '[:space:]')"
+    rest="${line#*|}"                        # everything after the first |
+    if [[ "$rest" == *"|"* ]]; then
+      label="$(_trim "${rest%%|*}")"; blurb="$(_trim "${rest#*|}")"
+    else
+      label="$(_trim "$rest")"; blurb=""
+    fi
     if [[ -z "$slug" || -z "$label" ]]; then
       err "${VOCAB_FILE}: line '${line}' has an empty slug or label"
       return 1
@@ -85,12 +106,23 @@ load_vocab() {
     fi
     VOCAB_ORDER+=("$slug")
     LABEL["$slug"]="$label"
+    BLURB["$slug"]="$blurb"
     VOCAB_SET="${VOCAB_SET:+$VOCAB_SET$NL}$slug"
   done <"$VOCAB_FILE"
   if (( ${#VOCAB_ORDER[@]} == 0 )); then
     err "${VOCAB_FILE}: no categories defined"
     return 1
   fi
+}
+
+# Emit one line per group in display order: "<slug> \t <label> \t <blurb>"
+# (blurb may be empty). Both surfaces read this for the group headings.
+catalog_groups() {
+  load_vocab || return 1
+  local slug
+  for slug in "${VOCAB_ORDER[@]}"; do
+    printf '%s\t%s\t%s\n' "$slug" "${LABEL[$slug]}" "${BLURB[$slug]:-}"
+  done
 }
 
 # --- per-design signals ------------------------------------------------------
@@ -303,6 +335,24 @@ catalog_selftest() {
     echo "FAIL  selftest: order failed on a clean tree"; fails=$((fails + 1))
   fi
 
+  # groups emits the optional promise blurb for the promise headings and nothing
+  # for the navigational ones — and, the parser-trap Vera flagged, the label
+  # must NOT have absorbed the blurb (a naive "after the first |" would).
+  local grps
+  if grps="$(_run groups 2>/dev/null)"; then
+    local sf_blurb nuggs_blurb sf_label
+    sf_blurb="$(awk -F'\t' '$1=="support-free"{print $3}' <<<"$grps")"
+    nuggs_blurb="$(awk -F'\t' '$1=="nuggs"{print $3}' <<<"$grps")"
+    sf_label="$(awk -F'\t' '$1=="support-free"{print $2}' <<<"$grps")"
+    if [[ -n "$sf_blurb" && -z "$nuggs_blurb" && "$sf_label" != *"|"* && "$sf_label" != *"support"*"—"* ]]; then
+      echo "ok    selftest: groups splits label|blurb (support-free blurb present, label clean, nuggs blurb-less)"
+    else
+      echo "FAIL  selftest: groups label/blurb parse wrong (label='${sf_label}', sf_blurb='${sf_blurb}', nuggs_blurb='${nuggs_blurb}')"; fails=$((fails + 1))
+    fi
+  else
+    echo "FAIL  selftest: groups failed on a clean tree"; fails=$((fails + 1))
+  fi
+
   # ---- negative: a typo'd / free-text category is refused -------------------
   rm -rf "$tmp/designs"/*/ 2>/dev/null || true
   _mk typo compliant-mechanismz     # deliberate typo
@@ -348,7 +398,8 @@ catalog_main() {
     --selftest) local rc=0; catalog_selftest || rc=$?; return "$rc" ;;
     check)      catalog_check ;;
     order)      catalog_order ;;
-    *) echo "usage: $0 [--root DIR] check|order|--selftest" >&2; exit 2 ;;
+    groups)     catalog_groups ;;
+    *) echo "usage: $0 [--root DIR] check|order|groups|--selftest" >&2; exit 2 ;;
   esac
 }
 

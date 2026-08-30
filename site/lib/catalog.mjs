@@ -56,8 +56,11 @@ export function categoryOf(designDir, name) {
 
 /**
  * The closed vocabulary + display order from designs/categories.conf, as
- * [{slug, label}] in file order. "<slug> | <label>" per line, `#` comments and
- * blank lines ignored — the same file scripts/catalog.sh reads.
+ * [{slug, label, blurb}] in file order. Each line is "<slug> | <label>" or
+ * "<slug> | <label> | <blurb>" (the optional blurb is the promise line shown
+ * under a promise-bearing heading); `#` comments and blank lines ignored — the
+ * same file scripts/catalog.sh reads. Split on the pipes explicitly so a blurb
+ * never glues onto the label (the mirror of catalog.sh's load_vocab).
  */
 export function readCategories(repoRoot) {
   const raw = read(join(repoRoot, "designs", "categories.conf"));
@@ -66,10 +69,11 @@ export function readCategories(repoRoot) {
   for (const rawLine of raw.split("\n")) {
     const line = rawLine.split("#", 1)[0].trim();
     if (!line || !line.includes("|")) continue;
-    const at = line.indexOf("|");
-    const slug = line.slice(0, at).trim();
-    const label = line.slice(at + 1).trim();
-    if (slug && label) out.push({ slug, label });
+    const parts = line.split("|");
+    const slug = parts[0].trim();
+    const label = (parts[1] || "").trim();
+    const blurb = parts.slice(2).join("|").trim(); // keep any | inside a blurb
+    if (slug && label) out.push({ slug, label, blurb });
   }
   return out;
 }
@@ -89,7 +93,7 @@ export function readCategories(repoRoot) {
 export function groupDesigns(ordered, categories) {
   const OTHER = "__other__";
   const bySlug = new Map(
-    categories.map((c) => [c.slug, { slug: c.slug, label: c.label, designs: [] }])
+    categories.map((c) => [c.slug, { slug: c.slug, label: c.label, blurb: c.blurb || "", designs: [] }])
   );
   let rootGroup = null;
   for (const d of ordered) {

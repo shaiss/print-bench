@@ -32,8 +32,8 @@ const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const VOCAB = [
   "nuggs                  | NUGGS ecosystem",
   "compliant-mechanisms   | Compliant mechanisms",
-  "support-free           | Designing around supports",
-  "print-in-place         | Print-in-place kinematics",
+  "support-free           | Designing around supports   | Leave slicer supports off.",
+  "print-in-place         | Print-in-place kinematics   | Keep auto-supports off.",
   "everyday-functional    | Everyday functional prints",
 ].join("\n");
 
@@ -92,6 +92,29 @@ function jsPairs(root) {
   const designs = readDesigns(root);
   const groups = groupDesigns(designs, readCategories(root));
   return groups.flatMap((g) => g.designs.map((d) => [d.name, g.slug]));
+}
+
+/** `scripts/catalog.sh groups` as [{slug, label, blurb}], the authoritative side. */
+function catalogGroups(root) {
+  const res = spawnSync(
+    "bash",
+    [join(REPO_ROOT, "scripts", "catalog.sh"), "--root", root, "groups"],
+    { encoding: "utf8", env: { ...process.env } }
+  );
+  if (res.error) {
+    assert.fail(
+      `could not run scripts/catalog.sh groups (${res.error.message}). ` +
+        "bash is required to cross-check site/lib/catalog.mjs's blurb parsing."
+    );
+  }
+  assert.equal(res.status, 0, `catalog.sh groups failed: ${res.stderr}`);
+  return res.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [slug, label, blurb = ""] = line.split("\t");
+      return { slug, label, blurb };
+    });
 }
 
 test("categoryOf: NUGGS by name, catalog.conf otherwise, null when absent", () => {
@@ -197,11 +220,52 @@ test("indexPage renders one labelled section per group, in order, with the cards
   }
 });
 
+test("the optional promise blurb parses without gluing onto the label, and the port agrees with catalog.sh", () => {
+  const root = fixture({ "nuggs-open": {}, box: { category: "support-free" } });
+  try {
+    const cats = readCategories(root);
+    const bySlug = new Map(cats.map((c) => [c.slug, c]));
+    // The promise headings carry a blurb; the label must NOT have absorbed it.
+    assert.equal(bySlug.get("support-free").label, "Designing around supports");
+    assert.equal(bySlug.get("support-free").blurb, "Leave slicer supports off.");
+    assert.equal(bySlug.get("print-in-place").blurb, "Keep auto-supports off.");
+    // Navigational headings have no blurb.
+    assert.equal(bySlug.get("nuggs").blurb, "");
+    assert.equal(bySlug.get("everyday-functional").blurb, "");
+
+    // The port agrees with the authoritative catalog.sh on slug/label/blurb.
+    assert.deepEqual(
+      cats.map((c) => [c.slug, c.label, c.blurb]),
+      catalogGroups(root).map((g) => [g.slug, g.label, g.blurb])
+    );
+
+    // The blurb reaches the rendered index, under its group; a blurb-less group
+    // renders none.
+    const designs = readDesigns(root);
+    const groups = groupDesigns(designs, cats);
+    const html = indexPage(designs, { groups });
+    assert.match(html, /<p class="group-blurb">Leave slicer supports off\.<\/p>/);
+    const nuggsSection = html.slice(
+      html.indexOf("NUGGS ecosystem"),
+      html.indexOf("Designing around supports")
+    );
+    assert.doesNotMatch(nuggsSection, /group-blurb/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the real repo's site grouping agrees with scripts/catalog.sh", () => {
   // The regression that pins the port to the authority on the live catalog:
   // same designs, same groups, same order — membership, group order and
   // within-group nesting all at once, as [name, slug] pairs.
   assert.deepEqual(jsPairs(REPO_ROOT), catalogPairs(REPO_ROOT));
+
+  // And the same for the group headings + promise blurbs.
+  assert.deepEqual(
+    readCategories(REPO_ROOT).map((c) => [c.slug, c.label, c.blurb]),
+    catalogGroups(REPO_ROOT).map((g) => [g.slug, g.label, g.blurb])
+  );
 
   // Sanity: every real design is grouped (nothing lands in the Other bucket),
   // so the catalog signal covers the whole tree.

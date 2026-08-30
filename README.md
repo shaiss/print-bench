@@ -41,12 +41,16 @@ co-designer, and gated by automated printability checks before they ship.
 
 ### Designing around supports
 
+_Every design here prints without slicer supports — leave them off._
+
 | Design | |
 |---|---|
 | <a href="designs/aerochord/"><img src="designs/aerochord/previews/contact-sheet.png" width="320" alt="aerochord previews"></a> | **[aerochord](designs/aerochord/)** — A musical wind instrument that (a) prints in place as **one piece** with no supports, (b) does not correspond to any instrument in the historical record, and (c) is only really designable/printable with an FDM machine and a computed internal geometry. The brief was an explicit stress test of the whole co-design pipeline. |
 | <a href="designs/support-free-bracket/"><img src="designs/support-free-bracket/previews/contact-sheet.png" width="320" alt="support-free-bracket previews"></a> | **[support-free-bracket](designs/support-free-bracket/)** — A wall shelf bracket: an 80 × 50 wall plate fastened by 2 × M5 screws, with a 60 mm deep × 6 mm thick shelf arm, closing the cavity under the arm with a **vaulted ceiling ≤ 45°** so it never prints as a bridge roof. The point of the design is not the bracket; it is the demonstration that every support-needing feature can be designed out. |
 
 ### Print-in-place kinematics
+
+_These parts come off the bed already moving — keep auto-supports off._
 
 | Design | |
 |---|---|
