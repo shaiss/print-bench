@@ -47,7 +47,10 @@ UNION, not a hull
 Shell: convex hull of the two full-round neck shells (r=ro, z 0…95) plus the
 outer ellipsoid — the hull fills the 12.2 mm gap between the necks **solid**
 (the web; see Bridge below). Cavity: **union** of the two ri bores plus the
-inner ellipsoid. A hull for the cavity was considered and rejected explicitly:
+inner chamber — since #499 the chamber member is itself a pointwise-min
+**intersection**, min(ellipsoid, x-gable, y-hip), so it cannot outrun the
+shell anywhere (see the crown guards and the 2026-08-30 entry). A hull for
+the cavity was considered and rejected explicitly:
 the hull of the two bore cylinders bridges the gap *between* them at every
 height they span, hollowing the web out under the chamber floor and leaving a
 racetrack tunnel between the ports below the dish. The union keeps each bore a
@@ -84,10 +87,16 @@ N4 governs the walkable route, which this satisfies.
 
 ### The clear width (the N2 number)
 
-Clear internal width = the widest straight line through the cavity = 2·a_y =
-**200 mm ≥ 180** body length (asserted against `body_len_mm`). At floor level
+Clear internal width = the widest straight line through the cavity, measured
+on the **built** cavity (crown guard (4), added by #499): the max over height
+of min(ellipsoid slice, hip allowance) at x = 0 = **199.993 mm ≥ 180** body
+length. The maximum sits 0.38 mm *under* the equator, where the ellipsoid is
+again the binding surface — at the equator plane itself the hip trims to
+199.26 mm, which is why the guard samples the height and does not read
+`2·a_y`: that proxy stays 200 while a steeper hip narrows the bowl (negative
+control: a 65° hip measures 161.156 mm and fails the render). At floor level
 the cavity is narrower (±52.5 mm at the mouth lines) — the mouths sit inside
-that, and the *turn* happens in the bowl where the width is the full 200.
+that, and the *turn* happens in the bowl.
 
 ### Assembly bound
 
@@ -106,7 +115,7 @@ the bed plane (zc = 90 left it 2.4 mm *under*, hanging over air — ~800 mm² of
 measured unbridgeable overhang in iteration 3's facet scan). Pole-flush, the
 dome prints from the bed up, each layer resting on the one below (~one
 extrusion width of per-layer offset near the pole). The residual printcheck
-warning — 2% / 3449 mm² — is this surface near the pole plus the bore mouths:
+warning — 2% / 3441 mm² — is this surface near the pole plus the bore mouths:
 the den-class warning the family ships with (den: 4% @ 76/100; this design:
 2% @ 84/100), watched by printcheck + the test-slice gate.
 
@@ -200,6 +209,64 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
   under it and asserts 199 parametrically.
 
 ## Session log
+
+- 2026-08-30 (issue #499 — the roof was open to the air at the y-ends): the
+  crown cap as shipped was union(truncated ellipsoid, gable vault), and the
+  vault's ridge line runs **flat along y** at z = 181.39 while the outer dome
+  falls below that height beyond |y| = 27.57 — well inside the vault's own
+  |y| ≤ 84.87 footprint — so the union left a ~2000 mm² window to air at each
+  end. Nothing caught it: every crown guard sampled the y = 0 plane only, and
+  the part was watertight, sliceable and scored 84/100 — printcheck does not
+  judge a *cavity that was supposed to be enclosed*. Proven by re-running it
+  on the pre-fix export: identical 84/100, the same two warnings, the same
+  3441 mm² overhang figure.
+  **The fix — a pointwise-min cap**, backported from the tee's proven
+  `chamber_cavity()` (#435, PR #500): the crown is now ONE intersection —
+  min(inner ellipsoid, x-gable at 46.06°, y-hip at 46°) — so the cavity
+  cannot outrun the ellipsoid anywhere *by construction*, in either axis. The
+  hip's V-apex sits at z = 195.57 (y = 0) and is placed to pass 1.5 mm UNDER
+  the inner ellipsoid where that surface crosses ridge height (y = 15.14) —
+  the gable's own "just past 45°, just under the surface" rule, applied to
+  the y band the gable cannot see.
+  **Measured off the mesh, not the parameters:** shell genus 9 → 7 (old
+  F/V/E = 15116/7542/22674, χ = −16; new 14236/7106/21354, χ = −12; both
+  watertight, 0 non-manifold edges). Eight intended openings (2 bores +
+  6 vents) give exactly genus 7 — n openings make genus n − 1 — so the old
+  9 was the intended 7 plus one spurious handle per roof window. The cavity
+  is now enclosed by exactly its designed openings.
+  **Four sampled guards replace the y = 0-only checks**: (1) min roof shell
+  ≥ 2.3 mm over a 120×120 station grid (measures 2.62); (2) ellipsoid slope
+  ≥ 45° wherever the ellipsoid itself governs the roof (measures ≥ 63.3°);
+  (3) the hip passes ≥ 1.0 mm under the ellipsoid at the ridge crossing;
+  (4) N2's clear width measured on the built cavity — 199.993 mm (see The
+  clear width above). Negative controls, one per guard: a 90° hip fires (2);
+  margin 1.5 → 0.1 mm fires (3); ridge +10 mm fires the ridge-below-crown
+  assert; a 65° hip fires (4) at 161.156 mm **with (1)–(3) silent** — only
+  the new guard catches it, which is the hole the old `2·a_y` assert left;
+  `wall` 2.4 → 2.05 fires (1) at 2.272 mm (its firing envelope is the
+  thin-shell band — the upstream asserts consume the parameter paths above
+  it, and the library's anchor-bite assert consumes wall ≤ 2.0 below).
+  **What the guards cannot see, stated plainly:** they are analytic over the
+  pointwise-min *formula* — they hold the cap's parameters to the contract,
+  but an edit that flips the module body back to a `union()` leaves every one
+  of them green (tried: the union scratch copy renders with no assertion
+  failure; issue #37's formula-equals-itself trap). The proof the *built
+  mesh* honours the contract is the genus count above, taken off the export —
+  and that, not a shell-thickness formula, is the check that would have fired
+  on the original defect. It was a one-off measurement here, not a standing
+  gate; giving printcheck an opinion about cavities that were supposed to be
+  enclosed (handle counting on the sliced solid) is the general follow-up.
+  **Cost, recorded honestly:** the hip fills the y-ends — at |y| = 95 the
+  cavity ceiling drops 120.5 → 97.2 mm (−23.3 mm of headroom there). The
+  widest line is effectively untouched (199.993 vs 200), the route fitcheck
+  still clears (highest envelope point 124.8 mm against the hip at 145.4 mm
+  on the mouth line), all six vents still pierce (the genus), and the
+  printcheck overhang moved 3449 → 3441 mm² (2%, unchanged class). Gate green
+  at iteration 1 and re-certified at iteration 2 (guard (4) only, geometry
+  unchanged): turnaround 84/100 + sliced (1d 0h 15m, 349.60 g), coupon
+  92/100 + sliced (2h 17m 47s, 30.24 g). New frozen camera `cutaway-ridge`
+  (the x = 0 section — the plane the defect lived on) added to
+  `previews/cameras.conf` and `previews/CAMERAS.md`; nothing moved.
 
 - 2026-08-25: scaffolded from issue #394 (design-run). Topology, construction,
   dish/grade math, vents derivation, fitchecks and asserts written before the

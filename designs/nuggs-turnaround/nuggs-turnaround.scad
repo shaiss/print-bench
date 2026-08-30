@@ -60,8 +60,9 @@ use <printability.scad>   // teardrop_hole for the vents
 /* [What to render] */
 // turnaround = the printable part; coupon = fit stub; cutaway = section on the
 // port-axis plane; cutaway-cross = section across the turn axis at y = 0;
-// path-clear / path-clear-ctrl = the swept-animal fitchecks (ci.fitchecks)
-part = "turnaround";  // [turnaround, coupon, cutaway, cutaway-cross, path-clear, path-clear-ctrl]
+// cutaway-ridge = section on the ridge plane (x = 0), where the roof slot
+// lived (#499); path-clear / path-clear-ctrl = the swept-animal fitchecks
+part = "turnaround";  // [turnaround, coupon, cutaway, cutaway-cross, cutaway-ridge, path-clear, path-clear-ctrl]
 
 /* [The NUGGS standard - change these and nothing you already printed fits] */
 // Every value here is a nuggs_cfg() default: this module inherits the standard
@@ -106,7 +107,9 @@ port_tol = 0.30;
 // assembly bound the y-splitter asserts on its branch faces).
 port_gap = 97;
 // Chamber ellipsoid inner semi-axes (mm): x = use-vertical (headroom + dish),
-// y = across the turn (2*y is the clear internal width N2 gates), z = the
+// y = across the turn (the cavity's widest line along y is the clear internal
+// width N2 gates — measured by crown guard (4), since the hip can trim it),
+// z = the
 // print-pose vertical / use-travel direction at the mouths' height. 90 keeps
 // the total inside the 200 mm ceiling the gate's bare-default test-slice
 // enforces (see the bed-fit assert) once the centre sits flush (chamber_zc).
@@ -208,24 +211,36 @@ z_join = chamber_zc;
 
 // CROWN CAP (printability, den's recorded rule: "no flat internal ceiling —
 // close to a point"). Above the height crown_zt the cavity stops following
-// the ellipsoid and closes on a BARREL VAULT: a gable whose two roof planes
-// rise from the cross-section's x extremes at atan(h/xt) >= 45 deg (the
-// supportless enclosed-ceiling limit issue #34 measured) to a ridge along y,
-// clipped by the vertical elliptical prism over the crown_zt cross-section
-// (the y-end walls are then VERTICAL). Every surface of that cap is >= 45
-// deg from horizontal in every direction, so the chamber's far-end roof
-// self-supports layer on layer. Two dead ends are recorded here because
-// each looked right: (1) the ellipsoid's own polar cap is a near-horizontal
-// ceiling — everything within atan(a/c) = 27.6 deg of the top pole in x
-// exceeds 45 deg, ~9400 mm2 of printcheck-measured unbridgeable overhang
-// (gate iterations 2-3; a facet scan put the bulk at z = 160..180, the
-// crown — NOT the belly the first fix chased); (2) a single-apex ELLIPTIC
-// CONE over the same footprint went the WRONG way (9459 -> 15835 mm2,
-// iteration 4): one apex over a 39 x 83 base cannot be 45 deg in both
-// profiles — matching x forces the y-profile to a/b = 0.47, 25 deg from
-// horizontal, a WORSE ceiling over more area. The vault's base matches the
-// inner ellipsoid's cross-section at crown_zt exactly (no step; the passage
-// only ever widens downward), and it costs the animal nothing: the route's
+// the ellipsoid and closes on a HIP ROOF: the gable whose two roof planes
+// rise from the cross-section's x extremes at atan(vault_h / crown_xt) >= 45
+// deg (the supportless enclosed-ceiling limit issue #34 measured) to a ridge
+// along y, PLUS two hip planes descending in |y| at crown_hip_deg — the
+// cavity's crown boundary is the POINTWISE MINIMUM of (inner ellipsoid,
+// x-gable, y-hip), built as one intersection() in chamber_cavity below,
+// never a union. Three dead ends are recorded here because each looked
+// right: (1) the ellipsoid's own polar cap is a near-horizontal ceiling —
+// everything within atan(a/c) = 27.6 deg of the top pole in x exceeds 45
+// deg, ~9400 mm2 of printcheck-measured unbridgeable overhang (gate
+// iterations 2-3; a facet scan put the bulk at z = 160..180, the crown —
+// NOT the belly the first fix chased); (2) a single-apex ELLIPTIC CONE over
+// the same footprint went the WRONG way (9459 -> 15835 mm2, iteration 4):
+// one apex over a 39 x 83 base cannot be 45 deg in both profiles — matching
+// x forces the y-profile to a/b = 0.47, 25 deg from horizontal, a WORSE
+// ceiling over more area; (3) the BARREL VAULT alone (the cap as first
+// shipped, issue #499): a gable-and-prism vault UNIONED onto the truncated
+// ellipsoid. Its ridge line ran along y at constant height z = 181.4 while
+// the outer dome falls off in y — the dome crosses below the ridge at
+// |y| = 27.6 mm, well inside the vault's |y| <= 84.9 footprint, so the
+// cavity was OPEN TO THE AIR over both y-ends, up to ~60 mm wide (~2000 mm2
+// per end). The union was the bug: a unioned cap can rise past the shell
+// anywhere the outer surface falls faster than the cap does, and the y = 0
+// crown asserts could not see it (y = 0 is the one meridian where the shell
+// is thickest and the slot absent). An intersection cannot outrun the
+// ellipsoid anywhere — the ceiling IS the lowest of the three surfaces —
+// and the SAMPLED guards below hold shell over the whole crown, which is
+// the check that would have fired. The gable's eaves still meet the inner
+// ellipsoid's cross-section at crown_zt exactly (no step; the passage only
+// ever widens downward), and the cap costs the animal nothing: the route's
 // highest envelope point is chamber_zc + 32.4 = 124.8 mm.
 crown_zt = 140;
 
@@ -247,7 +262,7 @@ dish_grade_deg = dish_grade_at(port_gap / 2);
 
 echo(str("nuggs-turnaround: bore ", bore_d, " mm, ports ", port_gap,
          " mm apart, chamber ", 2 * chamber_ax, " x ", 2 * chamber_ay, " x ",
-         2 * chamber_az, " mm, clear internal width ", 2 * chamber_ay, " mm"));
+         2 * chamber_az, " mm"));
 echo(str("nuggs-turnaround: dish dips ", dish_at_mouth, " mm at the mouths,",
          " route grade peaks ", dish_grade_deg, " deg, overall ",
          2 * (chamber_ay + wall), " x ", 2 * (chamber_ax + wall), " x ",
@@ -273,14 +288,10 @@ assert(z_join >= z_top, str(
     " needs z_top = ", z_top, " mm of full-round shell behind the face or its",
     " inner sectors have no ring to fuse to."));
 
-// THE BREAK (charter N2): clear internal width >= body length. This is the
-// number that makes the module a legal run-resetter, asserted against
-// body_len_mm, not a hardcoded 180.
-assert(2 * chamber_ay >= body_len_mm, str(
-    "TURNAROUND CLEAR WIDTH: the chamber's clear internal width is ",
-    2 * chamber_ay, " mm against body_len_mm = ", body_len_mm,
-    ". Under it this module is NOT a break — a run through it still counts",
-    " its full enclosed length against N2. Widen chamber_ay."));
+// THE BREAK (charter N2): clear internal width >= body length — the number
+// that makes the module a legal run-resetter. Asserted with the crown guards
+// below (#499): the hip makes the built cavity's widest line a function of
+// the cap, so the check lives where the cap is defined.
 
 // THE FLOOR (N6/N11): the dish must meet the bore's own arc. Two conditions:
 // the dish never rises ABOVE the bore floor (that would be a lip into the
@@ -364,24 +375,125 @@ assert(chamber_zc - (chamber_az + wall) >= -eps, str(
     " mm below the port face plane — unbridgeable overhang under the web.",
     " Raise chamber_zc to at least chamber_az + wall."));
 
-// CROWN CAP FEASIBILITY: the cone must (a) start above the route's highest
-// envelope point + margin, and (b) close inside the shell — the apex stays
-// 0.5 mm under the inner ellipsoid's own crown, which is by construction a
-// wall inside the outer one. The vault's pitch is atan(vault_h / xt) with
-// vault_h = xt + 1.5 — just PAST 45 deg, so the roof planes clear the
-// supportless limit rather than sitting exactly on it.
+// CROWN CAP FEASIBILITY: the cap must (a) start above the route's highest
+// envelope point + margin, and (b) close inside the shell — the gable's
+// ridge stays 0.5 mm under the inner ellipsoid's own crown, which is by
+// construction a wall inside the outer one. The gable's pitch is
+// atan(vault_h / crown_xt) with vault_h = crown_xt + 1.5 — just PAST 45
+// deg, so the roof planes clear the supportless limit rather than sitting
+// exactly on it. These two are the y = 0 statement, and #499's hole is why
+// that stopped being enough on its own: the sampled guards below are what
+// actually hold the roof closed.
 crown_st = sqrt(1 - pow((crown_zt - chamber_zc) / chamber_az, 2));
-crown_xt = chamber_ax * crown_st;      // vault eaves / ridge half-span basis
-crown_yt = chamber_ay * crown_st;
+crown_xt = chamber_ax * crown_st;      // gable eaves / ridge half-span basis
 vault_h = crown_xt + 1.5;
+vault_k = vault_h / crown_xt;          // gable slope as tan; atan() ~ 46.05 deg
+vault_deg = atan(vault_k);
+crown_ridge = crown_zt + vault_h;      // the gable's ridge line, at x = 0
+// THE HIP (#499's repair): two planes descending in |y| at crown_hip_deg
+// (just past 45 deg, the gable's own "just past" rule), positioned to pass
+// 1.5 mm UNDER the inner ellipsoid where that surface crosses the ridge
+// height (y = crown_y_cross). The ellipsoid's shallow polar band in y is
+// then covered by a plane everywhere it would otherwise govern — exactly
+// what the gable does for its shallow band in x.
+crown_hip_deg = 46;
+crown_hip_k = tan(crown_hip_deg);
+crown_y_cross = chamber_ay * sqrt(1 - pow((crown_ridge - chamber_zc) / chamber_az, 2));
+crown_z_hip = crown_ridge - 1.5 + crown_hip_k * crown_y_cross;
 assert(crown_zt >= chamber_zc + 35, str(
-    "TURNAROUND CROWN: the vault cap starts at z = ", crown_zt,
+    "TURNAROUND CROWN: the cap starts at z = ", crown_zt,
     " mm, low enough to cut into the route's crossing envelope (which tops",
     " out at ", chamber_zc + 32.4, " mm). Raise crown_zt."));
-assert(crown_zt + vault_h <= chamber_zc + chamber_az - 0.5, str(
-    "TURNAROUND CROWN: the vault's ridge (z = ",
-    crown_zt + vault_h,
+assert(crown_ridge <= chamber_zc + chamber_az - 0.5, str(
+    "TURNAROUND CROWN: the gable's ridge (z = ", crown_ridge,
     " mm) pokes through the chamber crown — lower crown_zt or chamber_az."));
+
+// THE CAP'S SAMPLED GUARDS (#499 — the check that would have fired here).
+// The cavity's crown boundary pointwise, the shell over it, and the
+// ellipsoid's own slope where it governs:
+function roof_z_in(x, y) =
+    chamber_zc + chamber_az * sqrt(1 - pow(x / chamber_ax, 2)
+                                      - pow(y / chamber_ay, 2));
+function roof_z_out(x, y) =
+    chamber_zc + (chamber_az + wall)
+        * sqrt(1 - pow(x / (chamber_ax + wall), 2)
+                 - pow(y / (chamber_ay + wall), 2));
+function roof_z_cap(x, y) =
+    min(roof_z_in(x, y), crown_ridge - vault_k * abs(x),
+        crown_z_hip - crown_hip_k * abs(y));
+// (1) No poke, anywhere: shell over the ceiling at every sampled station of
+//     the roof — the old slot measures 0 here; the minimum sits at the
+//     ridge/hip handover. Stations on the footprint rim or at/below the
+//     equator are side wall, not roof, and are skipped.
+function roof_min_wall(n) =
+    min([for (i = [0 : n], j = [0 : n])
+            let (x = -chamber_ax + 2 * chamber_ax * i / n,
+                 y = -chamber_ay + 2 * chamber_ay * j / n)
+                (pow(x / chamber_ax, 2) + pow(y / chamber_ay, 2) >= 0.999
+                     || roof_z_cap(x, y) <= chamber_zc)
+                    ? 1000
+                    : roof_z_out(x, y) - roof_z_cap(x, y)]);
+roof_wall_min = roof_min_wall(120);
+assert(roof_wall_min >= 2.3, str(
+    "TURNAROUND CAP: the cavity's roof comes within ", roof_wall_min,
+    " mm of the outer surface somewhere off the y = 0 plane — the #499",
+    " roof-slot failure mode. Lower crown_ridge or crown_z_hip."));
+// (2) Every governing surface >= 45 deg: wherever the ellipsoid's own
+//     surface IS the roof (above the equator, under both plane pairs), its
+//     slope must already exceed 45 deg — the gable and the hip exist to
+//     cover its shallow polar bands, in x and in y respectively.
+function roof_z_slope(x, y) =
+    chamber_az * sqrt(pow(x / pow(chamber_ax, 2), 2)
+                    + pow(y / pow(chamber_ay, 2), 2))
+        / sqrt(1 - pow(x / chamber_ax, 2) - pow(y / chamber_ay, 2));
+function roof_min_gov_slope(n) =
+    min([for (i = [0 : n], j = [0 : n])
+            let (x = -chamber_ax + 2 * chamber_ax * i / n,
+                 y = -chamber_ay + 2 * chamber_ay * j / n)
+                (pow(x / chamber_ax, 2) + pow(y / chamber_ay, 2) >= 0.999
+                     || roof_z_in(x, y) >= min(crown_ridge - vault_k * abs(x),
+                                               crown_z_hip - crown_hip_k * abs(y))
+                     || roof_z_in(x, y) <= chamber_zc + 1)
+                    ? 1000
+                    : roof_z_slope(x, y)]);
+roof_gov_slope_min = roof_min_gov_slope(120);
+assert(roof_gov_slope_min >= 1.0, str(
+    "TURNAROUND CAP: the ellipsoid governs the roof at ",
+    atan(roof_gov_slope_min), " deg somewhere — a near-horizontal enclosed",
+    " ceiling (issue #34). Lower crown_z_hip so the hip covers the band."));
+// (3) The hip actually caps: its planes must sit under the ellipsoid at the
+//     ridge crossing with real margin, or the shallow sliver returns.
+assert(crown_z_hip - crown_hip_k * crown_y_cross
+       <= roof_z_in(0, crown_y_cross) - 1.0, str(
+    "TURNAROUND CAP: the hip planes pass only ",
+    roof_z_in(0, crown_y_cross) - (crown_z_hip - crown_hip_k * crown_y_cross),
+    " mm under the ellipsoid at the ridge crossing — raise crown_hip_deg or",
+    " lower crown_z_hip."));
+// (4) The break itself (charter N2, re-homed here by #499): clear internal
+//     width is the widest straight line through the BUILT cavity, not
+//     2*chamber_ay. Along x = 0 (the widest station) the half-span at height
+//     z is the min of the ellipsoid's slice and the hip's allowance — the
+//     gable never binds at x = 0 — and the max over z sits a fraction of a
+//     mm UNDER the equator, where the ellipsoid is again the binding surface.
+//     The old 2*chamber_ay form read green either way: a 65 deg hip narrows
+//     the bowl past body_len_mm with that assert silent, the same
+//     guard-samples-where-the-geometry-isn't hole the roof slot came through.
+function cavity_half_span(z) =
+    min(chamber_ay * sqrt(1 - pow((z - chamber_zc) / chamber_az, 2)),
+        (crown_z_hip - z) / crown_hip_k);
+clear_w = 2 * max([for (i = [0 : 720])
+                       cavity_half_span(chamber_zc - chamber_az
+                                            + 2 * chamber_az * i / 720)]);
+assert(clear_w >= body_len_mm, str(
+    "TURNAROUND CLEAR WIDTH: the cavity's widest line is ", clear_w,
+    " mm against body_len_mm = ", body_len_mm,
+    ". Under it this module is NOT a break — a run through it still counts",
+    " its full enclosed length against N2. Widen chamber_ay or lower",
+    " crown_hip_deg: the hip is trimming the bowl."));
+echo(str("nuggs-turnaround: crown cap = min(ellipsoid, ", vault_deg,
+         " deg gable, ", crown_hip_deg, " deg hip); sampled min roof shell ",
+         roof_wall_min, " mm, ellipsoid governs at >= ",
+         atan(roof_gov_slope_min), " deg; cavity widest line ", clear_w, " mm"));
 
 // VENTS: enough open area to matter, small enough to stay a teardrop, and —
 // the welfare line — every vent strictly on the CEILING half of the chamber's
@@ -426,36 +538,33 @@ module chamber(sx, sy, sz) {
     translate([0, 0, chamber_zc]) scale([sx, sy, sz]) sphere(1, $fn = ell_fn);
 }
 
-// The cavity's far-end cap: the barrel vault from crown_zt (see the crown_zt
-// derivation above — including why this is a vault and not the single-apex
-// cone, whose y-profile was 25 deg from horizontal over most of the roof).
-// Two pieces, intersected: a gable (triangle in x-z extruded along y — two
-// roof planes at atan(vault_h / crown_xt) >= 45 deg meeting at a ridge line)
-// and the vertical elliptic prism over the inner ellipsoid's own
-// cross-section at crown_zt, which clips the gable's y-end corners back to
-// the chamber wall (the y-end surfaces are then vertical, not sloping). The
-// base perimeter matches that cross-section exactly, so the union with the
-// truncated ellipsoid below is continuous with no step.
-module crown_vault() {
-    translate([0, 0, crown_zt])
-        intersection() {
-            rotate([90, 0, 0])
-                linear_extrude(height = 2 * crown_yt + 2, center = true)
-                    polygon([[-crown_xt, 0], [0, vault_h], [crown_xt, 0]]);
-            scale([crown_xt, crown_yt, 500])
-                cylinder(r = 1, h = 1, center = true, $fn = ell_fn);
-        }
+// One descending plane pair, as an oversized rotated-cube half-space: the
+// solid below z <= z0 - tan(slope_deg) * |u|, where u is x (rotated about y)
+// or y (rotated about x). Two cubes, one per plane, intersected.
+module roof_wedge(z0, slope_deg, about_x) {
+    intersection() {
+        translate([0, 0, z0])
+            rotate(about_x ? [slope_deg, 0, 0] : [0, slope_deg, 0])
+                translate([-500, -500, -1000]) cube(1000);
+        translate([0, 0, z0])
+            rotate(about_x ? [-slope_deg, 0, 0] : [0, -slope_deg, 0])
+                translate([-500, -500, -1000]) cube(1000);
+    }
 }
 
-// The chamber's inner cavity up to the crown cap: the ellipsoid truncated at
-// crown_zt, closed by the vault above it.
+// The chamber's inner cavity, crown cap included (#499's repair): the crown
+// boundary is the POINTWISE MINIMUM of the inner ellipsoid, the x-gable and
+// the y-hip — one intersection(), never a union. The old cap unioned a
+// gable-and-prism vault onto the truncated ellipsoid; its ridge ran along y
+// at constant height past where the outer dome falls off in y, and the
+// cavity poked through the roof for |y| > 27.6 mm. An intersection cannot
+// outrun the ellipsoid anywhere — the ceiling is the lowest of the three
+// surfaces — and the sampled asserts above hold shell over all of it.
 module chamber_cavity() {
-    union() {
-        intersection() {
-            chamber(chamber_ax, chamber_ay, chamber_az);
-            translate([-500, -500, -500]) cube([1000, 1000, 500 + crown_zt]);
-        }
-        crown_vault();
+    intersection() {
+        chamber(chamber_ax, chamber_ay, chamber_az);
+        roof_wedge(crown_ridge, vault_deg, false);    // the x-gable
+        roof_wedge(crown_z_hip, crown_hip_deg, true); // the y-hip
     }
 }
 
@@ -626,6 +735,16 @@ else if (part == "cutaway-cross")
     difference() {
         nuggs_turnaround();
         translate([-300, 0, -200]) cube([600, 300, 600]);
+    }
+else if (part == "cutaway-ridge")
+    // Section on the ridge plane (x = 0) — the plane the roof slot lived on
+    // (#499). The ceiling reads as the flat ridge band, then hands over to
+    // the two >= 45 deg hip planes that close ahead of the outer dome's
+    // y-falloff. The y = 0 sections cannot show this: the slot started
+    // 27.6 mm off that plane, which is exactly how it survived review.
+    difference() {
+        nuggs_turnaround();
+        translate([0, -300, -200]) cube([300, 600, 600]);
     }
 else if (part == "path-clear") fit_path_clear();
 else if (part == "path-clear-ctrl") fit_path_ctrl();
