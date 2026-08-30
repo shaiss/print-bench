@@ -203,3 +203,31 @@ def test_an_empty_or_comment_only_list_is_legitimately_empty():
     # and `printf '' | select -` is the documented way to ask for it.
     assert parse_briefs("") == []
     assert parse_briefs("\n\n# a comment\n") == []
+
+
+# --- rail 2 addendum: a briefed slug claims itself against a later dup ------
+
+def test_a_decided_dup_of_a_briefed_slug_does_not_reselect(root):
+    # Negative control (rail 2): a `briefed` marker claims its slug, so a
+    # later duplicate-slug `decided` marker collapses to it and selects
+    # nothing — otherwise a subject whose brief was closed-as-declined (not
+    # caught by the designs/ rail) could be silently re-filed.
+    write_doc(root, "research.md", "\n".join([
+        marker("gamma-clip", "gamma-clip — filed", status="briefed", ref=100),
+        marker("gamma-clip", "gamma-clip — decided again", status="decided"),
+    ]))
+    cands = extract(root)
+    assert [c.status for c in cands] == ["briefed", "decided"]
+    assert select(cands, [], []) is None
+
+
+def test_a_decided_new_slug_after_a_briefed_one_selects(root):
+    # Positive control: the briefed slug is claimed, but a *different* decided
+    # slug is untouched by that claim and selects — proving the drop above is
+    # the duplicate-slug rail, not the mere presence of a briefed marker.
+    write_doc(root, "research.md", "\n".join([
+        marker("gamma-clip", "gamma-clip — filed", status="briefed", ref=100),
+        marker("delta-clip", "delta-clip — fresh", status="decided"),
+    ]))
+    got = select(extract(root), [], [])
+    assert got is not None and got.slug == "delta-clip"

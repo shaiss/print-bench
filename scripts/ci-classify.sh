@@ -229,6 +229,8 @@ classify() {
         # must re-run the tests that would catch it.
         tools/brief-sources/*|docs/*.md|\
         .github/workflows/ci.yml) bstests=true ;;
+      esac
+      case "$f" in
         # The growth desk (docs/growth.md): tools/growth's own tests. The
         # posting server is here because test_server_parity.py pins its
         # weighted-length copy to growth.tweetlen — a server-only edit that

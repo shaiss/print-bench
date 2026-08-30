@@ -182,3 +182,25 @@ def test_root_flag_wins_over_the_cwd(root, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "fixture-only-candidate" in out
     assert "support-free-bracket" not in out
+
+
+# --- multiple markers on one line (regression) -----------------------------
+
+def test_two_markers_on_one_line_are_both_extracted(root):
+    # A line may carry more than one marker. The parser must iterate every
+    # one — a second decision sharing a line is a decided recommendation
+    # nobody acts on, the exact silent drop this tool exists to prevent.
+    m1 = marker("alpha-widget", "alpha-widget — one", status="decided")
+    m2 = marker("beta-widget", "beta-widget — two", status="decided")
+    write_doc(root, "research.md", f"{m1} {m2}")
+    assert [c.slug for c in extract(root)] == ["alpha-widget", "beta-widget"]
+
+
+def test_one_marker_per_line_is_the_positive_control(root):
+    # Positive control: the same two markers, one per line, extract the same
+    # two candidates — so the two-on-one-line result is the parser iterating,
+    # not an accident of the fixture.
+    m1 = marker("alpha-widget", "alpha-widget — one", status="decided")
+    m2 = marker("beta-widget", "beta-widget — two", status="decided")
+    write_doc(root, "research.md", f"{m1}\n{m2}")
+    assert [c.slug for c in extract(root)] == ["alpha-widget", "beta-widget"]

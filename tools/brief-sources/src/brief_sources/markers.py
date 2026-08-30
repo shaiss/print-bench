@@ -183,16 +183,17 @@ def extract(root: Path) -> list[Candidate]:
             if in_fence:
                 continue  # displayed markup, not a decision
             line = _INLINE_CODE_RE.sub("", raw)
-            m = _MARKER_RE.search(line)
-            if not m:
-                continue
             where = f"{rel}:{lineno}"
-            fields = parse_marker(m.group("body"), where=where)
-            if fields["doc"] != rel:
-                raise MarkerError(
-                    f"{where}: source names {fields['doc']!r} but the marker "
-                    f"sits in {rel!r} — provenance must be the containing doc"
-                )
-            out.append(Candidate(order=order, **fields))
-            order += 1
+            # A line may carry more than one marker; iterate every one so a
+            # second decision sharing a line is never silently dropped — the
+            # exact quiet failure this tool exists to prevent.
+            for m in _MARKER_RE.finditer(line):
+                fields = parse_marker(m.group("body"), where=where)
+                if fields["doc"] != rel:
+                    raise MarkerError(
+                        f"{where}: source names {fields['doc']!r} but the marker "
+                        f"sits in {rel!r} — provenance must be the containing doc"
+                    )
+                out.append(Candidate(order=order, **fields))
+                order += 1
     return out

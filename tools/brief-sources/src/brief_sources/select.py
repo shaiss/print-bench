@@ -139,11 +139,13 @@ def select(
     """
     seen: set[str] = set()
     for cand in candidates:
-        if cand.status == "briefed":
-            continue  # already filed — never re-file
         if cand.slug in seen:
             continue  # duplicate marker for the same subject; first wins
         seen.add(cand.slug)
+        if cand.status == "briefed":
+            # already filed — never re-file. The slug was claimed in `seen`
+            # above, so a later duplicate-slug `decided` marker can't slip past.
+            continue
         if any(matches_subject(cand, title) for _num, title in briefs):
             continue  # an open brief already covers this subject
         if any(matches_subject(cand, name) for name in design_names):

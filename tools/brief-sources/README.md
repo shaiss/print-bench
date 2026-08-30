@@ -77,9 +77,18 @@ real open-brief list must print `NONE`, and the test suite asserts it.
 provenance — or the single word `NONE`:
 
 1. **`status=briefed` never selects** — already filed, never re-file.
-2. **Duplicate slugs collapse** to the first occurrence.
+2. **Duplicate slugs collapse** to the first occurrence — whatever its
+   status, so a `briefed` first occurrence suppresses a later `decided`
+   duplicate of the same slug.
 3. **A matching open brief drops the candidate.**
 4. **A matching existing `designs/<name>/` drops the candidate.**
+
+Rail 3 sees only *open* briefs: a brief **closed as declined** matches
+nothing here, so a declined subject can be re-proposed. That is a deliberate
+gap, not an oversight — a re-filed declined brief is a *visible* duplicate a
+human closes in seconds, the cheap failure — but the reshaper that consumes
+these candidates (#439) should carry the same knowledge so it does not keep
+surfacing a subject a human has already turned down.
 
 Ordering is oldest-undone-first, defined as `extract`'s scan order: sorted
 doc path, then marker order within a doc. That is a deliberate definition —
