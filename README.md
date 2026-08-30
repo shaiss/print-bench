@@ -50,7 +50,7 @@ _Every design here prints without slicer supports — leave them off._
 
 ### Print-in-place kinematics
 
-_These parts come off the bed already moving — keep auto-supports off._
+_These parts come off the bed ready to move — flex them free, and keep auto-supports off._
 
 | Design | |
 |---|---|
