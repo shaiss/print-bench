@@ -170,6 +170,23 @@ jobs:
         if: steps.policy.outputs.enabled != 'true'
         run: echo "::notice::.github/growth-twitter.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
 
+      # The per-item human approval label must EXIST before a human can apply
+      # it — GitHub refuses `--add-label` for a label the repo does not have,
+      # and merging the growth desk's code never creates repo labels. Ensure it
+      # here (idempotent) so arming is one-and-done: the first armed run makes
+      # the label available, and applying it stays the human's gate. This is
+      # only label metadata; the routine still dry-runs until LIVE + creds +
+      # the applied label all line up.
+      - name: Ensure the approval label exists
+        if: steps.policy.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create approved-to-post --repo "$GITHUB_REPOSITORY" \
+            --color 2DA44E \
+            --description "Human approval to post this queued growth item live" \
+            2>/dev/null || true
+
       - name: Select queued Twitter posts
         id: select
         if: steps.policy.outputs.enabled == 'true'

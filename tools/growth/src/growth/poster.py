@@ -31,6 +31,7 @@ import json
 import os
 import secrets
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -91,12 +92,27 @@ def oauth1_header(
 
 
 def _http(url: str, headers: dict, body: bytes) -> dict:
-    """POST and decode JSON. Module-level so tests monkeypatch it."""
+    """POST and decode JSON. Module-level so tests monkeypatch it.
+
+    On an HTTP error, READ the response body and raise a PosterError carrying
+    the status and X's actual message — urllib's HTTPError otherwise stringifies
+    to a bare "HTTP Error 402: Payment Required" with the reason (e.g. "credits
+    depleted") stranded in the unread body, which is exactly what turned a
+    one-line X-side problem into a blind debugging hunt (issue: the swallowed
+    error body)."""
     req = urllib.request.Request(url, data=body, method="POST")
     for k, v in headers.items():
         req.add_header(k, v)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        raw = resp.read().decode()
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode()
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode(errors="replace")
+        except Exception:  # noqa: BLE001 — a body we can't read is still an error
+            pass
+        raise PosterError(f"X API HTTP {e.code}: {detail[:500]}".rstrip(": ")) from e
     return json.loads(raw) if raw else {}
 
 

@@ -1,0 +1,12 @@
+# Boolean thread-mate proofs — never printed or sliced, rendered by gate.sh.
+# Each 'empty' part must render zero facets (the thread mates at thread_tol);
+# each 'interferes' control must render non-empty (proves the check can fail).
+# Both threads are SINGLE-START, so the interfering control is a HALF-lead
+# (180 deg) rotation — a 90 deg control could still clear and pass vacuously.
+#
+# Central screw / elevator-nut pair:
+fit-mate           empty
+fit-mate-ctrl      interferes
+# Lid / cap-nut pair (second independent tuned fit):
+lid-fit-mate       empty
+lid-fit-mate-ctrl  interferes
