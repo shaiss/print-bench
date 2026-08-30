@@ -107,6 +107,10 @@ jobs:
         if: steps.guard.outputs.act == 'true'
         uses: actions/checkout@v7
         with:
+          # Pin the checkout to the default branch too, not just the job guard:
+          # defence in depth so the tooling this job runs with PROJECT_TOKEN is
+          # always the default branch's, never a dispatch-selected ref's.
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Reflect each growth-queue issue's stage onto the board
@@ -122,12 +126,13 @@ jobs:
 
           # 1. Working set: every growth-queue issue, most-recently-updated
           #    first (so a just-closed Posted item is always in the window; old
-          #    settled cards already sit on the board and never change). With
-          #    --search, gh takes state/label from the query itself, not the
-          #    flags; no is:open/is:closed means BOTH states. The stage policy
-          #    drops closed-and-never-posted items, so rejected issues never
-          #    clutter the board.
-          gh issue list --repo "$REPO" \
+          #    settled cards already sit on the board and never change).
+          #    `--state all` is REQUIRED: gh keeps its default `--state open`
+          #    filter even alongside `--search`, so without it every closed
+          #    growth-queue issue — i.e. every Posted item — is silently omitted
+          #    and never reaches the board. The stage policy still drops
+          #    closed-and-never-posted items, so rejected issues don't clutter it.
+          gh issue list --repo "$REPO" --state all \
             --search 'label:growth-queue sort:updated-desc' --limit 300 \
             --json number,url,state,labels > set.json
 

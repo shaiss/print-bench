@@ -19,7 +19,8 @@ git-native source of truth; the board is a **lens** over them.
 > under the owner). The difference is what owns a card's Stage: here it is
 > **human-owned** (a card you drag; the sync sets it only when the item is first
 > added — `--stage-if-new`), while the growth board's Stage is a pure **lens**
-> the sync re-derives from each issue's state on every run (`--stage`).
+> the sync re-derives from each issue's state and markers on every run
+> (`--stage`).
 
 ## Why the board is provisioned by a committed `gh` recipe
 

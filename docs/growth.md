@@ -115,9 +115,10 @@ declines design requests). The queue is the contract between the seats:
 * **`growth/`** — the desk's committed artifacts: the accelerated dry-run
   timelines (`growth/twitter/dryruns/`) a human reads before arming
   anything.
-* **The approval board** — a GitHub Project (v2) where every queue issue is a
-  card grouped by a derived Stage, so a human sees where each post sits and
-  approves it at a glance. Its schema lives in git
+* **The approval board** — a GitHub Project (v2) where each stageable queue
+  issue is a card grouped by its derived Stage, so a human sees where each post
+  sits and approves it at a glance (a closed, unposted item — a human's
+  rejection — has no Stage and is left off the board). Its schema lives in git
   (`scripts/gh-project.sh --board growth`), the Stage policy in
   `tools/growth` (`growth.board.stage_of`), and `growth-board-sync.yml`
   reflects each issue's state onto it. Detailed below; a LENS, not a control
@@ -279,9 +280,11 @@ approving any of them for Lark. Model from the `reeve-growth` registry chain
 ## The approval board (GitHub Projects)
 
 The queue is issues; the board is the **view a human approves from** — a
-GitHub Project (v2), `print-bench growth`, where every `growth-queue` issue is
-a card grouped by its Stage. It answers "where is each post, and which are
-waiting on me?" without scrolling the issue list. It is the exact sibling of
+GitHub Project (v2), `print-bench growth`, where each stageable `growth-queue`
+issue is a card grouped by its Stage. It answers "where is each post, and which
+are waiting on me?" without scrolling the issue list. (A closed `growth-queue`
+issue with no posted marker — one a human rejected — has no Stage, so it is
+excluded rather than shown.) It is the exact sibling of
 the autonomy roadmap board (`docs/roadmap-board.md`): the schema lives in git
 and the board is provisioned by a committed, idempotent `gh` recipe, because
 this session's automation cannot create or populate a Projects v2 board (the

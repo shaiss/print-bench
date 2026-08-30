@@ -418,7 +418,11 @@ select_board "$BOARD"
 case "${1:-}" in
   setup)         emit_recipe ;;
   add-item)      shift; add_item_cli "$@" ;;
-  --selftest)    selftest ;;
+  # The whole suite starts from the autonomy board (its first assertions are the
+  # autonomy recipe), then switches to growth itself — so reset here in case a
+  # caller passed `--board growth --selftest`, which would otherwise fail those
+  # opening assertions before reaching the growth checks.
+  --selftest)    select_board autonomy; selftest ;;
   -h|--help|"")  grep '^#' "$SELF" | sed 's/^# \{0,1\}//' ;;
   *)             die "unknown argument: '$1' (try: [--board <name>] setup | add-item | --selftest | --help)" ;;
 esac
