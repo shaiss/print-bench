@@ -1,0 +1,11 @@
+# Boolean fit gates (scripts/gate.sh): "<part> empty" must render zero
+# facets, "<part> interferes" is the mandatory negative control.
+#
+# fitcheck      — the frame's cage (deck footprint excluded: the movers never
+#                 reach its z band) intersected with everything that moves
+#                 across the FULL stroke AND the arch's full snap (band
+#                 mirrored through the chord). Must be empty.
+# fitcheck_neg  — the same sweep grown 0.5 mm past its clearances; must
+#                 interfere, proving the empty check can fail.
+fitcheck      empty
+fitcheck_neg  interferes

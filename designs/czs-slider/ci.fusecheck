@@ -1,0 +1,21 @@
+# Deterministic fuse detector (tools/printcheck fusecheck), run on the SLICED
+# STL. The production part is a monolith by design — the springs ARE the
+# slider-frame connection — so a raw body count proves nothing. Drop the
+# chamber (everything +Y of the stop bar: both flexures, the chamber walls,
+# the far bar) and require the remainder to fall into 2 separable bodies:
+# frame + slider. The remainder still carries every slide-path joint — the
+# channel, the deck capture, the knob slot, the tongue window — so a weld
+# anywhere on that path survives the drop and reads 1.
+#
+# flexure zone: y in [46, 200] (2 mm past the stop bar's +Y face, through
+# past the far bar), x in [-25.2, 67.6], z in [-0.1, 11.7] (STL coordinates
+# as drawn; render.sh does not recenter).
+flexure -25.2,46,-0.1:67.6,200,11.7
+assert czs-slider.stl 2
+# The coupon's seven bodies: the three fit-cell frames, their three FREE
+# sliders (each standing stop_clear off its label wall — iteration 1 caught
+# them seam-welded at zero gap, which read as 4) and the spring-tethered
+# feeler monolith.
+assert czs-slider-coupon.stl 7
+# Known-fused control: every clearance turned into 0.2 mm interference.
+control fused 1
