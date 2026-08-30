@@ -10,6 +10,18 @@ It is the *surface* job of the same three-part split as the decision gate
 ([`decision-gate.md`](decision-gate.md)): labels/ledger/issues stay the
 git-native source of truth; the board is a **lens** over them.
 
+> **A second board reuses this exact pattern.** `scripts/gh-project.sh` now
+> takes `--board <name>`: the default `autonomy` board is this one; `growth` is
+> the **Lark approval board** ([`growth.md`](growth.md)), where each queued
+> Twitter/X post is a card so a human can see and approve them. Both share this
+> committed-schema + emitted-recipe + `PROJECT_TOKEN`-gated-sync design and the
+> **same** `PROJECT_TOKEN` secret (one Projects-scoped PAT covers every board
+> under the owner). The difference is what owns a card's Stage: here it is
+> **human-owned** (a card you drag; the sync sets it only when the item is first
+> added — `--stage-if-new`), while the growth board's Stage is a pure **lens**
+> the sync re-derives from each issue's state and markers on every run
+> (`--stage`).
+
 ## Why the board is provisioned by a committed `gh` recipe
 
 This session's automation **cannot create or populate a Projects v2 board** — the

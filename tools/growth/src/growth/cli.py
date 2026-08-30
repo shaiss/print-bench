@@ -13,6 +13,11 @@ Subcommands, each a thin shell over one module:
 * ``growth simulate --conf <conf> --snapshot <json> --posts <json>
   --start <iso> --days <n> --out-md <path> [--out-ndjson <path>]`` — the
   accelerated dry run (docs/growth.md): render what would have been posted.
+* ``growth board-stage [--snapshot <json>]`` — derive the growth approval
+  board's Stage for each queue item (docs/growth.md, docs/roadmap-board.md);
+  reads a JSON list of item snapshots (file or stdin) and prints one
+  ``<url>\\t<stage>`` line per item that belongs on the board. The
+  growth-board-sync workflow's single source for where each post sits.
 """
 
 from __future__ import annotations
@@ -20,9 +25,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-
 from datetime import datetime, timezone
 
+from . import board as board_mod
 from . import config as config_mod
 from . import postslot as postslot_mod
 from . import simulate as simulate_mod
@@ -58,6 +63,12 @@ def main(argv: list[str] | None = None) -> int:
     p_sim.add_argument("--out-ndjson")
     p_sim.add_argument("--note", default="",
                        help="one provenance line rendered under the header")
+
+    p_board = sub.add_parser(
+        "board-stage", help="derive the growth approval board's Stage per item")
+    p_board.add_argument(
+        "--snapshot",
+        help="JSON file: a list of queue-item snapshots (default: read stdin)")
 
     args = parser.parse_args(argv)
 
@@ -118,6 +129,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"growth simulate: {len(result['slots'])} slot(s), "
               f"{len(result['unscheduled'])} left queued, "
               f"{len(result['skipped'])} skipped -> {args.out_md}")
+        return 0
+
+    if args.cmd == "board-stage":
+        try:
+            raw = (open(args.snapshot, encoding="utf-8").read()
+                   if args.snapshot else sys.stdin.read())
+            items = json.loads(raw)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"growth board-stage: {e}", file=sys.stderr)
+            return 1
+        if not isinstance(items, list):
+            print("growth board-stage: expected a JSON list of item snapshots",
+                  file=sys.stderr)
+            return 1
+        for item in items:
+            stage = board_mod.stage_of(item)
+            if stage is None:          # closed-and-never-posted: not a board card
+                continue
+            url = item.get("url")
+            if not url:                # a card needs a URL to add; flag, don't guess
+                print(f"growth board-stage: item #{item.get('number')} has no "
+                      f"url; skipping", file=sys.stderr)
+                continue
+            print(f"{url}\t{stage}")
         return 0
 
     return 2  # pragma: no cover — argparse enforces the subcommand set
