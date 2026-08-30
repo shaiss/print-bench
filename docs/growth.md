@@ -103,6 +103,9 @@ declines design requests). The queue is the contract between the seats:
 3. **This post, now** — per item, the human-applied `approved-to-post`
    label (while the committed policy says `require_approval: true`). The
    dry-run comment on the queue issue is exactly what is being approved.
+   The label itself is **auto-ensured by the first armed run** (the drain
+   job creates it idempotently), so it always exists for a human to apply —
+   merging the desk's code never creates repo labels.
 
 Turning `require_approval` off (a one-line reviewed PR) is the deliberate
 last step to a fully autonomous channel — never a default, and rungs 1–2
@@ -129,7 +132,8 @@ Two dry-run forms, both designed to be read:
 |---|---|
 | A prompt-injected queue item steers the agent | The item is DATA (the context banner); the agent's only write is `post_tweet`; the tool re-reads state, binds to the trusted candidate set, hardcodes markers, applies no labels — at worst the item's own copy is bad, which a human reads before it can go live |
 | The agent invents a fact, number, or link | The skill's fact-budget rule; the dry-run comment surfaces the copy for review before approval; the Link is the queue item's, verbatim |
-| A post goes out twice | The claim-first marker: the `posted` marker is written on the issue BEFORE the first tweet, so a partial live failure (mid-thread, or the bookkeeping comment) loses at most one post for a human to retry deliberately — it can never duplicate on the channel; all comment pages are walked |
+| A post goes out twice | The claim-first marker: the `posted` marker is written on the issue BEFORE the first tweet, so a *mid-thread* or bookkeeping failure keeps it and loses at most one post a human retries deliberately — never a channel duplicate; all comment pages are walked |
+| A rejected post strands the item behind a false claim | The complement of claim-first: a **first-tweet** rejection published nothing, so the tool **withdraws** the claim and records the reason — the `⚠️ Growth post failed` comment carries X's actual error body (`poster.py` reads it instead of swallowing the HTTP status), and the item stays retryable rather than frozen until a human hand-deletes a marker (the credits-depleted 402 lesson) |
 | Over-long copy burns an approval at the API | The weighted-length guard refuses at compose review time (tool + simulator), parity-pinned against the reference rule |
 | The poster refills its own queue | Its backstop denies `mcp__growth_queue` (pinned by `growth-perms-check.sh` with a negative control); the reverse holds structurally — the queue skill is attended-only with no scheduled run to backstop, never mounts the posting server's mcp-config, and every scheduled sibling's backstop denies both growth servers |
 | A sibling routine acquires either growth surface | Every sibling backstop denies both servers; oracle/wright's checks pin the denies in `REQUIRED_DENIES` |

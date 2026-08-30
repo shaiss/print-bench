@@ -103,3 +103,21 @@ def test_post_tweet_raises_on_idless_response(monkeypatch):
     env = {v: "x" for v in poster.ENV_VARS}
     with pytest.raises(poster.PosterError, match="no tweet id"):
         poster.post_tweet("t", env=env)
+
+
+def test_http_surfaces_the_x_error_body(monkeypatch):
+    # A real 4xx from X carries its reason in the response BODY; urllib's
+    # HTTPError stringifies without it. `_http` must read the body so the reason
+    # (e.g. "credits depleted") reaches the caller instead of a bare "HTTP 402".
+    import io
+    import urllib.error
+
+    def boom(req, timeout=30):
+        raise urllib.error.HTTPError(
+            req.full_url, 402, "Payment Required", {},
+            io.BytesIO(b'{"detail":"credits depleted","status":402}'))
+
+    monkeypatch.setattr(poster.urllib.request, "urlopen", boom)
+    env = {v: "x" for v in poster.ENV_VARS}
+    with pytest.raises(poster.PosterError, match="credits depleted"):
+        poster.post_tweet("t", env=env)
