@@ -63,11 +63,15 @@ concurrency:
 jobs:
   sync:
     name: Reflect the growth queue onto the board
-    # Pin to the default branch: this job holds PROJECT_TOKEN, and
-    # workflow_dispatch can target any in-repo branch — so a dispatch against a
-    # PR branch must not run that branch's tooling with the secret. On schedule
-    # and issues events github.ref_name is already the default branch.
-    if: github.ref_name == github.event.repository.default_branch
+    # Pin to the default BRANCH ref: this job holds PROJECT_TOKEN, and
+    # workflow_dispatch can target any in-repo ref — so a dispatch against a PR
+    # branch (or a TAG) must not run that ref's tooling with the secret. Compare
+    # github.ref against refs/heads/<default>, not github.ref_name against the
+    # bare name: github.ref_name would also match a tag NAMED like the default
+    # branch (refs/tags/main → "main"), letting a dispatch against such a tag
+    # slip through; github.ref carries the refs/tags/ prefix, so it never does.
+    # On schedule and issues events github.ref is already refs/heads/<default>.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -134,8 +138,18 @@ jobs:
           : > snapshot.ndjson
           while read -r n; do
             [ -n "$n" ] || continue
-            bodies="$(gh api "repos/$REPO/issues/$n/comments" --paginate \
-              --jq '[.[].body] | join("\n")' 2>/dev/null || printf '')"
+            # A FAILED comment fetch must not misclassify the issue: empty
+            # comments would read as "no markers" and drop a Posted/Drafted card
+            # back to Queued. So on a fetch error skip this issue for this run —
+            # its card keeps the stage a prior run set, and self-heals on the
+            # next reconcile — and surface the miss. An issue with genuinely no
+            # comments succeeds with an empty string, which is the correct
+            # Queued input; only a real API failure takes the skip branch.
+            if ! bodies="$(gh api "repos/$REPO/issues/$n/comments" --paginate \
+              --jq '[.[].body] | join("\n")' 2>/dev/null)"; then
+              echo "::warning::growth-board-sync: could not read comments for #${n}; leaving its board card unchanged this run"
+              continue
+            fi
             jq -c --argjson n "$n" --arg comments "$bodies" \
               '.[] | select(.number==$n)
                    | {number, url, state, labels: [.labels[].name], comments: $comments}' \
