@@ -85,11 +85,15 @@ rotating.
 
 ## Open decisions (non-blocking)
 
-- Central-screw pitch/starts vs travel (fast coarse multi-start vs smooth) —
-  default a coarse multi-start; confirmed by the design panel.
-- Retainer method: snap ring vs threaded base cap — default snap-fit.
-- Full-length body thread vs top-only — parameterized; default prominent for the
-  bolt look.
+All three v1 forks were settled during modelling (recorded in PM.md's decision
+log); none are open:
+
+- Central-screw starts → **single start** (self-locking is N1; multi-start
+  would back-drive). The earlier "default a coarse multi-start" line predates
+  the panel's resolution — superseded.
+- Retainer method → **snap ring** (retainer ring Ø23.8 into a Ø24 counterbore).
+- Body thread → **top neck only** (a round partially-threaded shank, like a real
+  bolt; the hex head + cap-nut carry the mechanical look).
 
 ## Resolved dimensions (v1, dogwalker)
 
@@ -115,6 +119,16 @@ From the design panel + gate iteration; full set with units in the `.scad`.
 same class as the reference `alcove-rod-socket` collar — a WARNING, not a fail).
 All four thread-mate fitchecks pass (central + lid, `empty` + 180° `interferes`
 controls). Plate = 5 separate objects.
+
+### Ghost payload gating (charter Never)
+
+The first `assembly()` drew the 4 ghost rolls unconditionally — and
+`shots.conf` exports `part="assembly"`, so the tier-1 studio shots would have
+rendered the user's rolls as printed geometry (charter: rolls never appear in
+geometry-true studio shots). Ghosts now live behind `ghost_rolls` (default
+**false**), opted into only by the deterministic previews: `cameras.conf`
+assembly/closed, the `elevator` GIF, and `cutaway()` (which passes it as a
+module arg). A future shot that forgets the flag gets the safe direction.
 
 ### Bug caught during modeling
 

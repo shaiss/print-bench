@@ -101,6 +101,11 @@ elevator_pos = 1; // [0:0.05:1]
 // Animation flag: when true, the elevator position follows $t (0->1->0) for the
 // elevator-raising GIF (animations.conf); the lid is shown removed beside it.
 animate = false;
+// Ghost payload in previews: the rolls are the user's, never printed geometry,
+// so they stay out of geometry-true studio shots (shots.conf — charter Never)
+// and appear only where a deterministic preview opts in (cameras.conf,
+// animations.conf, the cutaway).
+ghost_rolls = false;
 
 /* [Base / retainer / knob] */
 // Hex twist-knob (bolt head) across-flats (mm) — wider than the shank = a head
@@ -438,7 +443,7 @@ module lid_fit_mate(rot = 0) {
 // ===========================================================================
 // Assembly preview + section (never the deliverable — parts print separately)
 // ===========================================================================
-module assembly() {
+module assembly(show_payload = ghost_rolls) {
     // $t-driven position when animating (0->1->0), else the static preview position
     pos = animate ? (0.5 - 0.5 * cos(360 * $t)) : elevator_pos;
     z_nut = z_thread_start + pos * pop_up;
@@ -448,6 +453,7 @@ module assembly() {
     color("#c9c9cf") translate([0, 0, z_nut]) elevator();
     translate([0, 0, z_retainer_bot]) retainer();
     // ghost rolls (preview only) — rise with the elevator
+    if (show_payload)
     for (i = [0 : n_cups - 1])
         rotate([0, 0, cup_a(i)]) translate([r_cup, 0, z_nut + elevator_plate_t])
             color("#e8c39a") cylinder(d = roll_d, h = roll_len);
@@ -463,7 +469,7 @@ module assembly() {
 
 module cutaway() {
     difference() {
-        assembly();
+        assembly(show_payload = true);
         translate([0, -60, -40]) cube([60, 120, 220]);
     }
 }
