@@ -156,7 +156,7 @@ Two dry-run forms, both designed to be read:
 
 The queue has two ends. Lark *drains* it; **Reeve-growth** (`/reeve-growth`,
 `.github/workflows/reeve-growth.yml`) *fills* it — the "Scheduled PM queueing"
-the Future work below named, now built. On a weekly cadence Reeve (the
+the Future work below named, now built. On a daily cadence Reeve (the
 platform PM) reads the committed signals — `CLAUDE.md`, `docs/`, the design
 catalog and its `NOTES.md` field-test logs — and files `growth-queue` +
 `channel:twitter` issues proposing forward-looking posts: a platform feature
