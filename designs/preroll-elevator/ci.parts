@@ -3,7 +3,8 @@
 # auto-discovered by filename (preroll-elevator-coupon.scad) and needs no line.
 body
 lid
-screw-knob
+screw
+knob
 elevator
-retainer
+cap
 tab-fit-coupon
