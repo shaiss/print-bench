@@ -19,6 +19,29 @@ arming ladder below, the "posts" are review comments on the queue issues and
 committed accelerated-timeline reports under `growth/` — the feed you can
 read before it exists.
 
+## Voice — building in public
+
+The account has one voice, and it is deliberate: **a maker at the bench who
+shows their work** — sentence-case, first person, plain and a little dry, the
+register of someone talking to fellow makers as equals rather than a brand
+addressing an audience. print-bench is built in the open (human + AI, every
+claim gated in CI), and the account grows the same way: by being useful and
+honest post by post, never by hype. Two genres do the work — *here's how it
+works* (a technique, a measured number, a mechanism) and *here's what we got
+wrong* (the print that came out welded, the hinge that fused, and the gate
+each failure became). The failure genre is the stronger one; being wrong in
+public and fixing it in the open is the credibility, which is why the bench
+gates its own claims at all.
+
+This posture is **Reeve's** as the platform PM (`PM.md`): the growth desk is
+how the bench humbly grows a community around open code, so a PM queues the
+honest, technical, lesson-bearing stories and leaves hype off the queue. The
+register itself lives where Lark reads it — the *Voice* and *Channel craft*
+sections of `.claude/skills/growth-twitter/SKILL.md`, with a before/after
+calibration example — and the fact-budget rule keeps it honest by
+construction: a build-in-public voice with no source for a claim is still
+refused, so "sound human" never becomes "make something up".
+
 ## Why a queue, and why the agent is per-channel
 
 A PM knows *that* the printable-threads story is worth telling and *which
