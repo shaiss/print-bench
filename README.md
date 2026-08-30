@@ -291,6 +291,14 @@ surfaces studies awaiting a read live in
     Bash allow must be denied plus every sibling write surface AND the growth
     desk's own queue-filing server (the poster can never refill the queue it
     drains), while its one posting tool must never be denied
+  - `reeve-growth-perms-check.sh` — the MIRROR of `growth-perms-check.sh` for
+    the growth desk's generative PM-queueing routine (Reeve, `/reeve-growth`,
+    see [docs/growth.md](docs/growth.md)): it OWNS the queue-filing tool
+    (`mcp__growth_queue`, never denied) and DENIES the channel poster
+    (`mcp__growth_twitter`), the inverse of Lark's backstop and the one
+    exception to "every sibling denies both growth servers"; oracle-shaped,
+    so EVERY Bash allow must be denied plus every sibling write surface and
+    the poster
   - `assessor-context.sh` — the trusted vendor-fetch step behind the
     adoption-study assessor: extracts the study's named GitHub repository and
     shallow-clones it into `.assessor-context/<n>/` (GitHub-only, hooks

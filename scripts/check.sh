@@ -438,6 +438,23 @@ if ! ./scripts/growth-perms-check.sh; then
   fail=1
 fi
 
+# Reeve-growth permission drift: the MIRROR of growth-perms — the growth
+# desk's generative PM-queueing routine (Reeve, /reeve-growth,
+# docs/growth.md) OWNS the queue-filing tool (mcp__growth_queue) and must
+# DENY the poster (mcp__growth_twitter), the exact inverse of Lark's
+# backstop. Oracle-shaped (no wrapper), so every Bash allow must be denied,
+# plus each sibling write surface and the poster, while its own queue tool
+# must never be denied (or the scheduled routine fails closed, unable even to
+# file a draft). --selftest proves the check can pass AND fail.
+echo "-- reeve-growth-perms selftest: scripts/reeve-growth-perms-check.sh --selftest"
+if ! ./scripts/reeve-growth-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- reeve-growth-perms check: scripts/reeve-growth-perms-check.sh"
+if ! ./scripts/reeve-growth-perms-check.sh; then
+  fail=1
+fi
+
 # Growth queue MCP filing tool: the PM-side half of the growth desk's
 # queuing seam (docs/growth.md) — the /growth-queue skill's ONE write, a
 # JSON-argument tool for the same dontAsk-matcher reason as the scout's. Its
