@@ -424,11 +424,13 @@ surfaces studies awaiting a read live in
     checksums and the README's machine-readable print settings + a zip); the
     build half of the versioned-download UX (issue #102), driven by the
     "Release bundles" workflow
-  - `gh-project.sh` — emits the repeatable `gh` recipe that provisions the
-    autonomy roadmap board (GitHub Projects v2); the board schema is a spec at
-    the top of the script and the board is created by running the recipe, since
-    the automation can't create a board here (issue #148, see
-    [docs/roadmap-board.md](docs/roadmap-board.md))
+  - `gh-project.sh` — emits the repeatable `gh` recipes that provision this
+    repo's GitHub Projects (v2) boards; each board's schema is a spec at the top
+    of the script and the board is created by running the recipe, since the
+    automation can't create a board here. Two boards via `--board <name>`:
+    `autonomy` (default, the roadmap board, issue #148, see
+    [docs/roadmap-board.md](docs/roadmap-board.md)) and `growth` (the Lark
+    approval board, see [docs/growth.md](docs/growth.md))
   - `vercel-ignore-build.sh` — the Vercel *Ignored Build Step* gate: from a
     PR's changed-file list it skips a preview deployment when every changed
     path is one the served site never reads (CI, tooling, scripts, most docs),
@@ -487,8 +489,10 @@ surfaces studies awaiting a read live in
 - `tools/growth/` — the deterministic engine behind the growth desk
   (`docs/growth.md`): the growth-twitter policy parser, the weighted
   tweet-length rule (URLs = 23), the queue drain-order policy, the
-  accelerated dry-run simulator, and the stdlib-only OAuth 1.0a X poster
-  seam — see its [README](tools/growth/README.md)
+  accelerated dry-run simulator, the stdlib-only OAuth 1.0a X poster
+  seam, and the approval-board Stage policy (`growth.board`, the lens
+  `growth-board-sync.yml` reflects onto the Projects board) — see its
+  [README](tools/growth/README.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log
   into the report — see its [README](tools/telemetry/README.md)
