@@ -34,7 +34,9 @@
 # AUTH: `gh project` requires the `project` token scope, which login does NOT
 # grant by default and which a `contents:write` fine-grained PAT (e.g.
 # REGEN_TOKEN) does NOT include; the Actions GITHUB_TOKEN cannot touch Projects
-# v2 at all. The recipe runs `gh auth refresh -s project` first. For the
+# v2 at all. When run as a human with a stored gh login, the recipe grants the
+# scope for you (`gh auth refresh -s project`) only if it is missing, reading
+# from /dev/tty so the interactive flow works even under `setup | bash`. For the
 # automation slice, add the Projects (read/write) permission to the token — see
 # docs/roadmap-board.md.
 set -euo pipefail
@@ -116,15 +118,33 @@ EOF
   cat <<'EOF'
 
 # 0. `gh project` needs the `project` scope (not granted at login; not covered
-#    by a contents:write PAT). `gh auth refresh` manages STORED credentials and
-#    ERRORS on a token supplied via GH_TOKEN/GITHUB_TOKEN ("environment variable
-#    is being used for authentication") — which under `set -e` would abort this
-#    recipe. So only refresh stored creds; with an env-var token (CI/automation)
-#    the `project` scope must already be on the token itself.
+#    by a contents:write PAT). Four cases, in order:
+#      * an env-var token (CI/automation): `gh auth refresh` ERRORS on a
+#        GH_TOKEN/GITHUB_TOKEN ("environment variable is being used for
+#        authentication") and would abort under `set -e`, so we skip it — the
+#        scope must already be on that token;
+#      * a stored login that already has the scope: nothing to do;
+#      * a stored login missing the scope, with a terminal: grant it once,
+#        interactively, reading /dev/tty so `setup | bash` (which owns bash's
+#        stdin) can still prompt;
+#      * missing the scope with no terminal: print how to grant it and stop.
 if [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; then
   echo "auth: using a token from the environment — ensure it carries the 'project' scope" >&2
+elif gh auth status 2>&1 | grep -q "'project'"; then
+  echo "auth: your gh login already carries the 'project' scope" >&2
+elif [ -e /dev/tty ]; then
+  # Grant the scope once, interactively. `setup | bash` pipes THIS recipe into
+  # bash's stdin, so `gh auth refresh` (an interactive OAuth device flow) has no
+  # terminal to prompt on and errors with "--hostname required when not running
+  # interactively". Point it at the controlling terminal so the documented
+  # `… | bash` invocation still works.
+  echo "auth: granting gh the 'project' scope (interactive) …" >&2
+  gh auth refresh -s project < /dev/tty
 else
-  gh auth refresh -s project
+  echo "auth: gh is missing the 'project' scope and no terminal is available to" >&2
+  echo "      grant it. Run this once in your shell, then re-run the recipe:" >&2
+  echo "        gh auth refresh -s project" >&2
+  exit 1
 fi
 
 # 1. Board — create only if one with this title does not already exist.
@@ -219,8 +239,21 @@ EOF
 # Same env-var-token guard as the provisioning recipe (don't abort under set -e).
 if [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; then
   echo "auth: using a token from the environment — ensure it carries the 'project' scope" >&2
+elif gh auth status 2>&1 | grep -q "'project'"; then
+  echo "auth: your gh login already carries the 'project' scope" >&2
+elif [ -e /dev/tty ]; then
+  # Grant the scope once, interactively. `setup | bash` pipes THIS recipe into
+  # bash's stdin, so `gh auth refresh` (an interactive OAuth device flow) has no
+  # terminal to prompt on and errors with "--hostname required when not running
+  # interactively". Point it at the controlling terminal so the documented
+  # `… | bash` invocation still works.
+  echo "auth: granting gh the 'project' scope (interactive) …" >&2
+  gh auth refresh -s project < /dev/tty
 else
-  gh auth refresh -s project
+  echo "auth: gh is missing the 'project' scope and no terminal is available to" >&2
+  echo "      grant it. Run this once in your shell, then re-run the recipe:" >&2
+  echo "        gh auth refresh -s project" >&2
+  exit 1
 fi
 
 # The board must already exist — run `scripts/gh-project.sh setup | bash` first.
