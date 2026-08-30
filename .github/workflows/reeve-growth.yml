@@ -1,7 +1,7 @@
 name: Reeve growth (scheduled growth-post queueing)
 
 # The scheduled heartbeat for /reeve-growth (docs/growth.md, the "Scheduled PM
-# queueing" step). On a weekly cadence Reeve reads the repo's committed signals
+# queueing" step). On a daily cadence Reeve reads the repo's committed signals
 # (CLAUDE.md, docs/, the design catalog and its NOTES.md field-test logs) and
 # files `growth-queue` + `channel:twitter` issues proposing forward-looking
 # posts — a platform feature and how to use it, a design's unique technique, a
@@ -47,12 +47,14 @@ name: Reeve growth (scheduled growth-post queueing)
 
 on:
   schedule:
-    # Weekly, Monday 05:59 UTC — an off-peak minute offset from the product
-    # scout's :47 so the two generators don't fire together. Cron must be a
+    # Daily at 07:13 UTC — the bench has plenty to share and Lark drains the
+    # queue daily, so a weekly generator would starve the pipeline; daily keeps
+    # fresh drafts flowing all week for a human to cull. :13 is an off-peak
+    # minute so it doesn't fire with the 05:4x routine cluster. Cron must be a
     # literal — Actions evaluates no files for on.schedule — so change the
     # cadence by editing this line (and the `cadence:` key in
     # .github/reeve-growth.conf to match; cadence-sync-check.sh enforces it).
-    - cron: '59 5 * * 1'
+    - cron: '13 7 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -95,9 +97,11 @@ jobs:
       # provider's key presence as a plain string and gate on it below.
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
-      # The per-run queue cap, enforced by the queue server (queue_mcp.py). Bump
-      # it to let one run seed more of the queue; the human still culls.
-      GROWTHQ_MAX_POSTS: '3'
+      # The per-run queue cap, enforced by the queue server (queue_mcp.py). With
+      # the daily cadence this is drafts/day: 2 → ~14/week, a healthy buffer over
+      # Lark's ~7 posts/week without flooding the human's review. Bump it for
+      # more supply; the human still culls every draft.
+      GROWTHQ_MAX_POSTS: '2'
     steps:
       - uses: actions/checkout@v7
         with:

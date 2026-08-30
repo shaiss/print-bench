@@ -81,3 +81,17 @@ def test_ndjson_one_line_per_slot():
     lines = render_ndjson(r).strip().splitlines()
     assert len(lines) == 3
     assert all('"mode": "dry-run"' in line for line in lines)
+
+
+def test_multi_hour_cadence_posts_once_per_day_at_the_chosen_hour():
+    # A jittered cadence fires at five candidate hours a day, but the simulator
+    # slots exactly one post per day — at that date's chosen hour — so the
+    # dry-run timeline shows the real ~1/day cadence at varied times, not a
+    # post at every candidate firing.
+    cadence = "19 13-21/2 * * *"
+    r = simulate(cadence, 1, _snapshot(), _posts(), "2026-08-29T00:00:00Z", 3)
+    assert [s["number"] for s in r["slots"]] == [11, 10, 12]
+    days = {s["at"][:10] for s in r["slots"]}
+    assert days == {"2026-08-29", "2026-08-30", "2026-08-31"}  # one post each day
+    hours = {s["at"][11:13] for s in r["slots"]}
+    assert hours <= {"13", "15", "17", "19", "21"}  # only ever a candidate hour

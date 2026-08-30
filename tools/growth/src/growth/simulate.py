@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+from . import postslot
 from . import queue as queue_policy
 from .cron import Cron
 from .tweetlen import MAX_WEIGHT, tweet_weight
@@ -49,7 +50,14 @@ def simulate(
     [...]}``. Returns ``{"slots": [...], "unscheduled": [...], "skipped":
     [...]}`` where each slot is ``{"at": iso, "number": n, "title": ...,
     "text": ..., "thread": [...], "weight": n}``."""
-    firings = Cron(cadence).firings(_parse_start(start), days)
+    # Only the day's CHOSEN slot actually posts (post-time jitter): a cadence
+    # with several candidate hours fires many times a day but Lark posts once,
+    # at the per-date chosen hour. Filtering here keeps the dry-run timeline
+    # honest — it shows the real ~1/day cadence at the real varied times, not a
+    # post at every candidate firing. A single-candidate cadence is unaffected
+    # (its one hour is always the chosen one).
+    firings = [f for f in Cron(cadence).firings(_parse_start(start), days)
+               if postslot.is_post_slot(f, cadence)]
     ordered = queue_policy.drain_order(snapshot)
 
     composed, skipped = [], []

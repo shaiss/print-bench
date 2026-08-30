@@ -95,8 +95,9 @@ declines design requests). The queue is the contract between the seats:
   semantics); after a dry run it only comments.
 * **`tools/growth`** — the deterministic engine (strict conf parser, the
   weighted-length rule, the drain policy, a minimal cron matcher, the
-  accelerated-timeline simulator, the OAuth 1.0a X poster seam), stdlib-only
-  with its own pytest suite; see its README.
+  post-time jitter chooser (`postslot`), the accelerated-timeline simulator,
+  the OAuth 1.0a X poster seam), stdlib-only with its own pytest suite; see
+  its README.
 * **The routine** — `.github/workflows/growth-twitter.yml` +
   `.github/growth-twitter.conf` (enabled / provider / cadence /
   `max_posts_per_run` / `require_approval`, parsed by tools/growth's own
@@ -137,6 +138,35 @@ Turning `require_approval` off (a one-line reviewed PR) is the deliberate
 last step to a fully autonomous channel — never a default, and rungs 1–2
 still hold.
 
+## Post-time jitter — a human-looking cadence
+
+A fixed daily cron makes every tweet land at the same clock minute — a
+robotic drumbeat a reader clocks instantly, the opposite of "a maker posting
+when they have something to say". Lark keeps its **≤1 post/day** floor but
+varies *when* that post lands:
+
+* The cadence (`19 13-21/2 * * *`) is a **window**, not a single time — the
+  workflow fires at five candidate hours a day (13:19 / 15:19 / 17:19 /
+  19:19 / 21:19 UTC, all reader-awake).
+* Only **one** firing per day acts. A cheap, secret-free `pick-slot` job runs
+  `tools/growth`'s `postslot.is_post_slot`, which chooses one candidate hour
+  **deterministically from the UTC date** (a SHA-256 of the date indexes the
+  sorted candidate hours), and gates the `drain` job on it. The other firings
+  hold — `drain` never even starts — so the one-post-a-day floor is
+  *structural*, not a count the posting tool has to enforce after the fact.
+* The choice is **reproducible** (seeded by the date alone, no external
+  state), so a run is re-derivable and the simulator shows the real ~1/day
+  cadence at the real varied times. A **single-candidate** cadence (the shape
+  every other routine uses) always resolves to its one hour, so `postslot` is
+  inert there and nothing else on the bench changes.
+* A **manual dispatch** bypasses the jitter — a human who dispatched the run
+  means "now", not "wait for the dice" (the three arming rungs and the
+  per-item approval still gate whether that run posts anything live).
+
+Because the acting hour walks the window across dates, the feed reads like a
+person posting at different times, not a scheduler — while every safety rung
+above is untouched.
+
 ## Dry runs, and the accelerated timeline
 
 Two dry-run forms, both designed to be read:
@@ -156,7 +186,7 @@ Two dry-run forms, both designed to be read:
 
 The queue has two ends. Lark *drains* it; **Reeve-growth** (`/reeve-growth`,
 `.github/workflows/reeve-growth.yml`) *fills* it — the "Scheduled PM queueing"
-the Future work below named, now built. On a weekly cadence Reeve (the
+the Future work below named, now built. On a daily cadence Reeve (the
 platform PM) reads the committed signals — `CLAUDE.md`, `docs/`, the design
 catalog and its `NOTES.md` field-test logs — and files `growth-queue` +
 `channel:twitter` issues proposing forward-looking posts: a platform feature
@@ -216,6 +246,8 @@ approving any of them for Lark. Model from the `reeve-growth` registry chain
 | The routine silently stops (or silently starts) | Two-key arming + the `disarmed-notice` job; a disabled conf logs; an empty queue logs; Reeve's `routine-dead` detector reads run conclusions once armed |
 | A dead model id kills the sweep | Single-link by design — one daily sweep fails visibly and retries next morning; `model-registry smoke growth-twitter` proves the link before arming |
 | A hijacked run floods the channel | `GROWTH_MAX_POSTS` (default 1) per run, in-process, unreachable by the agent; live posts additionally need per-item labels no agent can apply |
+| The feed reads robotic (every post at the same clock minute) | Post-time jitter — the cadence is a window of candidate hours and `postslot` picks one per date, so the post time walks day to day (above); a single-candidate cadence is unaffected |
+| The jitter posts more than once a day | Structural, not a count: the multi-hour cron fires several times, but `pick-slot` gates `drain` so only the date's one chosen firing runs at all — `postslot` is tested to yield exactly one post slot per day, and `max_posts_per_run` still floors each run |
 
 ## Arming it (the morning-after checklist)
 

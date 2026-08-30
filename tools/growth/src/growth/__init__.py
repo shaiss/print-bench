@@ -17,6 +17,9 @@ never depend on a model's judgment:
   then oldest), a pure function of a queue snapshot.
 * :mod:`growth.cron` — a minimal 5-field cron matcher so the simulator can
   expand a routine's cadence into concrete firing times.
+* :mod:`growth.postslot` — post-time jitter: the cadence is a window of
+  candidate hours, and this picks exactly one per UTC date so Lark's post
+  time varies day to day while staying ≤1 post/day.
 * :mod:`growth.simulate` — the accelerated dry-run: walk N days of cadence
   over a queue snapshot and render exactly what would have been posted, when.
 * :mod:`growth.poster` — the X API v2 seam (OAuth 1.0a signing, stdlib-only);
@@ -29,6 +32,7 @@ policy straight from the checkout with no pip step in front of it.
 __all__ = [
     "config",
     "cron",
+    "postslot",
     "poster",
     "queue",
     "simulate",
