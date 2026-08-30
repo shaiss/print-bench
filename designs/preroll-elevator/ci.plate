@@ -1,0 +1,10 @@
+# Production parts for the multi-object 3MF plate deliverable,
+# build/preroll-elevator-plate.3mf (scripts/plate.sh, gate.sh --check). The
+# parts print SEPARATELY and assemble by hand, so the deliverable is the plate
+# (N distinct objects), never the assembled STL (imports as one welded body).
+# Coupons and the assembled preview are excluded.
+body
+lid
+screw-knob
+elevator
+retainer
