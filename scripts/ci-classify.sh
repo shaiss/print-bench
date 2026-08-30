@@ -13,7 +13,7 @@
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
-#     ci_gates_tests, model_registry_tests, reeve_tests, growth_tests,
+#     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests, growth_tests,
 #     styles, gate, gate_designs, regen, regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
@@ -49,6 +49,7 @@ classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
   local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false gwtests=false docs_standards=false
+  local bstests=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -57,6 +58,7 @@ classify() {
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
     bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; gwtests=true; docs_standards=true
+    bstests=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -125,6 +127,7 @@ classify() {
         tools/backlog-groomer/*|.github/backlog-groomer.conf|\
         tools/model-registry/*|.github/models/registry.conf|\
         tools/reeve/*|.github/reeve.conf|\
+        tools/brief-sources/*|\
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
@@ -217,6 +220,17 @@ classify() {
         .github/workflows/ci.yml) rvtests=true ;;
       esac
       case "$f" in
+        # brief-sources (#438, the deterministic half of the #245
+        # spike-to-brief converter): its own tests. docs/*.md is here for the
+        # same reason reeve.yml is in reeve's list — the live-control test
+        # reads those files (the seeded markers live in
+        # docs/advanced-techniques.md, and a malformed marker anywhere under
+        # docs/*.md makes extract raise), so a docs change that broke a marker
+        # must re-run the tests that would catch it.
+        tools/brief-sources/*|docs/*.md|\
+        .github/workflows/ci.yml) bstests=true ;;
+      esac
+      case "$f" in
         # The growth desk (docs/growth.md): tools/growth's own tests. The
         # posting server is here because test_server_parity.py pins its
         # weighted-length copy to growth.tweetlen — a server-only edit that
@@ -255,6 +269,7 @@ classify() {
         tools/backlog-groomer/*|.github/backlog-groomer.conf|\
         tools/model-registry/*|.github/models/registry.conf|\
         tools/reeve/*|.github/reeve.conf|\
+        tools/brief-sources/*|\
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
@@ -352,6 +367,7 @@ classify() {
   echo "ci_gates_tests=$cgtests"
   echo "model_registry_tests=$mrtests"
   echo "reeve_tests=$rvtests"
+  echo "brief_sources_tests=$bstests"
   echo "growth_tests=$gwtests"
   echo "styles=$styles"
   echo "gate=$gate"
@@ -424,7 +440,7 @@ selftest() {
   check "docs-only" "$out" \
     "scad=false" "gate=false" "gate_designs=" "regen=false" "styles=false" \
     "printcheck_tests=false" "docs_standards=true" "backlog_groomer_tests=false" \
-    "model_registry_tests=false"
+    "model_registry_tests=false" "brief_sources_tests=true"
   out="$(run ".claude/skills/preflight/SKILL.md")"
   check "skills-only" "$out" \
     "scad=false" "gate=false" "docs_standards=false" "printcheck_tests=false"
@@ -520,6 +536,20 @@ selftest() {
   out="$(run "scripts/preview-budget.sh")"
   check "reeve-budget-drift" "$out" "reeve_tests=true"
 
+  # 4g. brief-sources (#438, deterministic half of the #245 spike-to-brief
+  #     converter) is soft-infra like its tool siblings: its own tests run and
+  #     the required contexts RUN with an empty design list — it reads
+  #     committed docs and prints, moving no mesh and no pixels. The seeded
+  #     marker file is a drift-guard input (the live-control test reads it),
+  #     so a docs/advanced-techniques.md change re-runs the suite too.
+  out="$(run "tools/brief-sources/src/brief_sources/select.py")"
+  check "brief-sources-only" "$out" \
+    "brief_sources_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "reeve_tests=false"
+  out="$(run "docs/advanced-techniques.md")"
+  check "brief-sources-marker-drift" "$out" \
+    "brief_sources_tests=true" "gate=false" "gate_designs=" "regen=false" \
+    "docs_standards=true"
   # 4g. The growth desk (docs/growth.md) is soft-infra like reeve: the engine,
   #     the committed dry-run artifacts and the conf move no mesh and no
   #     pixels, but a growth-only PR must still RUN the required contexts
