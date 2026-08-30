@@ -450,6 +450,24 @@ pre code { background: none; padding: 0; }
 
 /* ---------- gallery ---------- */
 
+/* Catalog groups (issue #374): NUGGS + technique domains, each a labelled
+   section of the same card grid. The label mirrors .panel-label / .eyebrow —
+   an uppercase accent eyebrow with a top rule — so it themes with everything
+   else and reads as a section divider, not a page heading. */
+.design-group { margin-bottom: 2.5rem; }
+.design-group:last-child { margin-bottom: 0; }
+
+.group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-top: 2px solid var(--rule);
+  padding-top: 0.6rem;
+  margin: 0 0 1.1rem;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
