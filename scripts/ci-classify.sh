@@ -143,7 +143,13 @@ classify() {
         scripts/product-shot.sh|scripts/gallery.sh|\
         scripts/product-page.sh|scripts/preview-budget.sh|\
         scripts/regen-stamp.sh|scripts/lineage.sh|\
-        scripts/assembly.sh)
+        scripts/assembly.sh|\
+        scripts/catalog.sh|designs/categories.conf)
+          # catalog.sh emits the grouped gallery/site order and
+          # designs/categories.conf is its vocabulary + display order — a change
+          # to either regroups the WHOLE catalog, so the gallery regenerates for
+          # every design, not just a touched one (a per-design catalog.conf is
+          # scoped by the designs/*/ case below, like any other design edit).
           regen_all=true ;;
       esac
       case "$f" in
@@ -591,6 +597,21 @@ selftest() {
   out="$(run "scripts/assembly.sh")"
   check "assembly-script" "$out" "regen=true" "regen_designs=ALL"
 
+  # 4c'. catalog.sh emits the grouped gallery/site order, so editing it regroups
+  #      the whole catalog — regen ALL, like the other gallery generators. As a
+  #      scripts/* file it is also soft-infra (run, gate nothing).
+  out="$(run "scripts/catalog.sh")"
+  check "catalog-script" "$out" \
+    "regen=true" "regen_designs=ALL" "gate=true" "gate_designs=" "scad=true"
+
+  # 4c''. designs/categories.conf is the catalog vocabulary + display order: a
+  #       change regroups every design, so regen ALL. It is one level under
+  #       designs/ (not designs/<n>/<f>), so it gates no STL (gate=false) — the
+  #       whole-catalog check runs via check.sh (scad=true).
+  out="$(run "designs/categories.conf")"
+  check "categories-conf" "$out" \
+    "regen=true" "regen_designs=ALL" "gate=false" "gate_designs=" "scad=true"
+
   # 5. A design path whose entry point does not exist is dropped — the guard
   #    against gating a deleted/renamed design under the wrong name.
   out="$(run "designs/__nonexistent__/__nonexistent__.scad")"
@@ -618,6 +639,21 @@ selftest() {
     fi
   else
     echo "ok   [real-design] (skipped — no non-archived design in catalog)"
+  fi
+
+  # 6a. A per-design catalog.conf (the category signal) gates just that design,
+  #     the same as any other file inside its directory — a category change
+  #     re-gates and re-renders that one design's gallery row.
+  if [ -n "$real" ]; then
+    out="$(run "designs/$real/catalog.conf")"
+    if grep -qxF "gate=true" <<<"$out" && grep -qxF "regen=true" <<<"$out" \
+       && grep -qE "^gate_designs=([^=]* )?${real}( |\$)" <<<"$out"; then
+      echo "ok   [design-catalog-conf=$real]"
+    else
+      echo "FAIL [design-catalog-conf=$real]: expected gate=true, regen=true and $real gated" >&2
+      printf '%s\n' "$out" | sed 's/^/    /' >&2
+      fails=$((fails + 1))
+    fi
   fi
 
   # 7. An archived design pulled in only by a style it declares is NOT gated.

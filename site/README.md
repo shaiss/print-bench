@@ -66,6 +66,17 @@ parentage. Two surfaces of this repo silently disagreeing about what a design
 *is* was [issue #55](https://github.com/shaiss/print-bench/issues/55); the
 cross-check is what stops it recurring.
 
+**The index is grouped, and the grouping is ported the same way.** The catalog
+is split into a NUGGS ecosystem collection plus the technique domains from
+`docs/advanced-techniques.md` — the same groups, in the same order, the README
+gallery renders (issue #374). The authority is `scripts/catalog.sh`, driven by
+the closed vocabulary in `designs/categories.conf` and each design's
+`category:` key; `lib/catalog.mjs` re-implements that rule in JS (the deploy
+can't run bash+Python), and `test/catalog.test.mjs` runs both over the same
+trees — including the real repo — and fails on any disagreement about a
+design's group or the order, the `lineage.mjs` cross-check pattern again.
+Within a group, lineage order and derivative nesting are preserved.
+
 ## Scopes — build, deploy, served output
 
 Several of this site's guarantees read like one blanket "the site is sealed"
@@ -238,6 +249,7 @@ things keep it consistent with the rest of the site:
   its member's header derives) and peoplePage (the studio's data block)
 - `lib/content.mjs` — what exists: designs, styles, pitches, parts, previews
 - `lib/lineage.mjs` — `derives.conf` → gallery order and parentage, ported from `tools/lineage`
+- `lib/catalog.mjs` — `designs/categories.conf` + each design's `category:` → the index's catalog groups, ported from `scripts/catalog.sh` and cross-checked against it (issue #374)
 - `lib/markdown.mjs` — markdown → HTML, link resolution and rewriting
 - `lib/llms.mjs` — the AI-native serving layer: discovers the docs served
   verbatim (`docs/contributing/`, `docs/architecture/`), checks their local

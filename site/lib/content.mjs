@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import { declaredParents, parseDerivesConf, resolveLineage } from "./lineage.mjs";
 import { aiLifestyleEnabled, isAiLifestyle } from "./media.mjs";
+import { categoryOf } from "./catalog.mjs";
 
 export const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"]);
 
@@ -187,6 +188,10 @@ export function readDesigns(repoRoot) {
       readmePath,
       title: title(readme) || name,
       pitch: pitch(repoRoot, name),
+      // The catalog group (issue #374): "nuggs" for a NUGGS-named design, else
+      // designs/<name>/catalog.conf's category. build.mjs buckets the index by
+      // it; scripts/catalog.sh is the authority both surfaces agree with.
+      category: categoryOf(dir, name),
       warning: warningBanner(readme),
       parts,
       style: styleConf[0] || null,

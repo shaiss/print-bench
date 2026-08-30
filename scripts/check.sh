@@ -569,6 +569,22 @@ if ! ./scripts/lineage.sh check; then
   fail=1
 fi
 
+# catalog.sh is the design-category signal (issue #374): its --selftest pins the
+# closed-vocabulary refusal and the NUGGS cross-check with negative controls
+# (the only thing proving a typo'd or free-text category still fails), then the
+# real `check` validates every design's category and the grouping the README
+# gallery + site index consume. Ahead of docs-check for the lineage reason: it
+# calls the same resolver, and a bad category should read as a category error,
+# not as "README gallery is stale".
+echo "-- catalog selftest: scripts/catalog.sh --selftest"
+if ! ./scripts/catalog.sh --selftest; then
+  fail=1
+fi
+echo "-- catalog check: scripts/catalog.sh check"
+if ! ./scripts/catalog.sh check; then
+  fail=1
+fi
+
 echo "-- docs-drift check: scripts/docs-check.sh"
 if ! ./scripts/docs-check.sh; then
   fail=1

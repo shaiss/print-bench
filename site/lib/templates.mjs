@@ -348,12 +348,37 @@ function card(design, roster = null) {
 </article>`;
 }
 
-export function indexPage(designs, { rosters = new Map() } = {}) {
+export function indexPage(designs, { rosters = new Map(), groups = null } = {}) {
   // Parked decisions used to render here as a full-width panel above the
   // gallery; they now live in the header notification bell (see
   // notificationBell / setNotifications), so the index leads straight into the
   // designs. The bell is global, so every page surfaces the queue, not just
   // this one.
+  //
+  // The catalog is grouped (issue #374): NUGGS ecosystem + the technique
+  // domains, in the display order of designs/categories.conf, each a labelled
+  // section of the same card grid — within a group, lineage order and
+  // derivative nesting are preserved (the grouping came off the same
+  // scripts/catalog.sh order the README gallery uses). When no groups are
+  // passed the index falls back to one flat grid, unchanged.
+  const cardOf = (d) => card(d, rosters.get(d.name) || null);
+  const gallery =
+    groups && groups.length
+      ? groups
+          .map(
+            (g) => `  <section class="design-group" aria-label="${escapeHtml(g.label)}">
+    <p class="group-label">${escapeHtml(g.label)}</p>${
+      g.blurb ? `\n    <p class="group-blurb">${escapeHtml(g.blurb)}</p>` : ""
+    }
+    <div class="grid">
+${g.designs.map(cardOf).join("\n")}
+    </div>
+  </section>`
+          )
+          .join("\n")
+      : `  <section class="grid">
+${designs.map(cardOf).join("\n")}
+  </section>`;
   const body = `<div class="wrap">
   <section class="hero">
     <p class="eyebrow">${escapeHtml(String(designs.length))} designs · every one gated in CI</p>
@@ -362,9 +387,7 @@ export function indexPage(designs, { rosters = new Map() } = {}) {
     from source; a printability gate — watertight, overhang-checked,
     test-sliced — passes before merge.</p>
   </section>
-  <section class="grid">
-${designs.map((d) => card(d, rosters.get(d.name) || null)).join("\n")}
-  </section>
+${gallery}
 </div>`;
   return layout({
     title: `${SITE_NAME} — ${TAGLINE}`,
