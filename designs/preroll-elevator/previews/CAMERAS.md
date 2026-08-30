@@ -17,13 +17,26 @@ reviewed — add a line, never reframe one.
 - **body-print** — the body alone in its print orientation (base down, mouth up):
   the round bolt-shank, the 4 through-slots open to the rim, the external lid
   thread neck at the top.
-- **screw-knob** — the central screw + hex bolt-head knob alone, screw up (its
-  print orientation): the trapezoidal lead-screw, the capture flange, the journal.
+- **screw** — the central lead-screw alone, thread up (its print orientation):
+  the trapezoidal thread, the capture flange with its conical thrust underside,
+  the journal, and the hex torque stub at the bottom.
+- **knob** — the hex bolt-head knob alone (its hex socket presses onto the stub).
 - **elevator** — the carrier alone, cups up (its print orientation): the 4 cups,
   the central female nut, the 4 anti-rotation tabs on the base disk.
 - **lid** — the hex cap-nut alone.
-- **retainer** — the base capture ring alone.
 - **coupon** — the print-this-first central-thread coupon (male stub + female nut
   ring) the user prints first to dial `thread_tol`.
 - **body-bed** — the body's bed face from below: the first-layer footprint and
   the base's bed contact (overhang check).
+- **tab-slot** — a close-up of one anti-rotation tab seated in its body slot
+  (elevator at mid-travel), zoomed so the tab owns the frame with the slot walls
+  on either side for scale — the slide fit's 0.25 mm/side circumferential slop
+  with something to be 0.25 mm *of*. Lid and ghost rolls are off so the tab and
+  slot read clearly. (Re-framed round 5 to the reviewer/PM zoom-in spec; this is
+  the frozen frame.)
+- **elevator-nut** — the elevator from a low angle showing its underside: the
+  screw-clearance bore through the base disk (open, with the nut thread starting
+  above it) and the foot ring + tab bases that print at the bed. (After the disk
+  bore, the nut's first engaged turn starts above the bed, not at it.)
+- **cap** — the top cap alone: the press-on pop-up stop that caps the screw tip
+  after the elevator is threaded on. Its blind bore (underside) receives the tip.

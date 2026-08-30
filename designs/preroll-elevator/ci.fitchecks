@@ -1,12 +1,28 @@
-# Boolean thread-mate proofs — never printed or sliced, rendered by gate.sh.
-# Each 'empty' part must render zero facets (the thread mates at thread_tol);
+# Boolean fit proofs — never printed or sliced, rendered by gate.sh.
+# Each 'empty' part must render zero facets (the parts mate at their clearance);
 # each 'interferes' control must render non-empty (proves the check can fail).
-# Both threads are SINGLE-START, so the interfering control is a HALF-lead
-# (180 deg) rotation — a 90 deg control could still clear and pass vacuously.
 #
-# Central screw / elevator-nut pair:
+# Central screw / elevator-nut pair — single-start, so the interfering control is
+# a HALF-lead (180 deg) rotation (a 90 deg control could clear and pass vacuously):
 fit-mate           empty
 fit-mate-ctrl      interferes
-# Lid / cap-nut pair (second independent tuned fit):
+# Lid / cap-nut pair (second independent tuned thread), same 180 deg control:
 lid-fit-mate       empty
 lid-fit-mate-ctrl  interferes
+# Knob hex torque key / screw stub — 60-deg-symmetric hex, so the control is a
+# 30 deg (half-facet) rotation:
+knob-fit           empty
+knob-fit-ctrl      interferes
+# Base-disk screw clearance — the lead-screw passes THROUGH the elevator, so its
+# base disk must clear the crest. Unthreaded, so no clocking: the control is the
+# old SOLID disk (no bore) that blocked the screw. Absent, this let the bug ship.
+base-clear         empty
+base-clear-ctrl    interferes
+# Cap press fit — the top-cap bore over the screw tip (a tuned press, like the knob).
+cap-fit            empty
+cap-fit-ctrl       interferes
+# Assembly feasibility — the elevator nut must pass the screw tip during install
+# (the collar-class trap's proof in the mesh: no top feature wider than the nut
+# bore). The control oversizes the tip past the nut bore so the check can fire.
+tip-clear          empty
+tip-clear-ctrl     interferes

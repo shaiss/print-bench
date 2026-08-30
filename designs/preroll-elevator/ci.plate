@@ -5,6 +5,7 @@
 # Coupons and the assembled preview are excluded.
 body
 lid
-screw-knob
+screw
+knob
 elevator
-retainer
+cap
