@@ -106,8 +106,11 @@ declines design requests). The queue is the contract between the seats:
   `.claude/growth-twitter-settings.json` pinned by
   `scripts/growth-perms-check.sh` (no wrapper exemption; must deny every
   sibling write surface AND `mcp__growth_queue` — the poster can never
-  refill the queue it drains, and every sibling backstop denies both growth
-  servers in return, so no other routine can queue or post either).
+  refill the queue it drains. Every *other* sibling backstop denies both
+  growth servers in return; the one exception is `reeve-growth` (the
+  generative front, below), which owns the queue server and denies the poster
+  instead — the mirror of this backstop, pinned by
+  `scripts/reeve-growth-perms-check.sh`).
 * **`growth/`** — the desk's committed artifacts: the accelerated dry-run
   timelines (`growth/twitter/dryruns/`) a human reads before arming
   anything.
@@ -149,6 +152,55 @@ Two dry-run forms, both designed to be read:
   ever fired. Copy over the weighted 280 fails the simulation loudly — a dry
   run that renders an unpostable tweet is a lie.
 
+## Reeve-growth — the generative front (scheduled PM queueing)
+
+The queue has two ends. Lark *drains* it; **Reeve-growth** (`/reeve-growth`,
+`.github/workflows/reeve-growth.yml`) *fills* it — the "Scheduled PM queueing"
+the Future work below named, now built. On a weekly cadence Reeve (the
+platform PM) reads the committed signals — `CLAUDE.md`, `docs/`, the design
+catalog and its `NOTES.md` field-test logs — and files `growth-queue` +
+`channel:twitter` issues proposing forward-looking posts: a platform feature
+and how to use it, a design's unique technique, a pattern the bench
+established. It is the growth sibling of `/product-scout`: the scout
+originates *designs*, this originates *posts about the platform and its
+designs*.
+
+It reuses the desk's machinery rather than adding any:
+
+* **One write, the shared queue tool.** Reeve-growth mounts the SAME
+  `queue_growth_post` server (`mcp__growth_queue`) the attended `/growth-queue`
+  skill uses — it gets no second filing surface, and so inherits every
+  queue-tool guard: the hardcoded `growth-queue` + `channel:twitter` labels
+  (it can never approve, prioritize, or route), the `Growth post:` title
+  prefix, the closed channel set, and the `GROWTHQ_MAX_POSTS` per-run cap.
+* **It queues intent, never copy.** A filed item carries the message angle +
+  a fact budget cited to committed files — never the finished tweet. Lark
+  writes the words from those facts. The queue seam keeps finished copy off
+  both PMs' desks.
+* **It can never reach a channel — the backstop inversion.** Its deny backstop
+  (`.claude/reeve-growth-settings.json`) is the mirror of Lark's: where Lark
+  *owns* the poster and *denies* the queue server, Reeve-growth *owns* the
+  queue server and *denies* the poster (`mcp__growth_twitter`).
+  `scripts/reeve-growth-perms-check.sh` pins that inversion (no-wrapper
+  coverage of every Bash allow + every sibling surface + the poster, with the
+  queue tool asserted never-denied), and it is the one exception to "every
+  sibling denies both growth servers".
+* **Oracle-shaped.** No shell wrapper: reads are Read/Grep/Glob over the
+  checkout plus a trusted workflow-assembled `.reeve-growth-context/` (the open
+  queue, for dedup). The run allow-lists exactly the queue tool + the read-only
+  file tools.
+
+**Dry-run-first, and disarmed.** Everything Reeve-growth files is a *draft*: a
+human reads and culls the queue issue, Lark then dry-runs it, and it still
+needs the human `approved-to-post` label before a live post — so there is no
+path from this routine to a tweet without a human. It ships **disarmed** under
+the two-key model: committed `enabled: true` in `.github/reeve-growth.conf`,
+but the `REEVE_GROWTH_ENABLED` repo variable unset. Arming the *queue
+generation* is independent of Lark's live rungs: `gh variable set
+REEVE_GROWTH_ENABLED --body true`, then read the queue issues it files before
+approving any of them for Lark. Model from the `reeve-growth` registry chain
+(single-link `glm-5.3`); cadence parity is `cadence-sync-check.sh`-covered.
+
 ## Failure modes and what handles each
 
 | Failure | Handled by |
@@ -158,8 +210,8 @@ Two dry-run forms, both designed to be read:
 | A post goes out twice | The claim-first marker: the `posted` marker is written on the issue BEFORE the first tweet, so a *mid-thread* or bookkeeping failure keeps it and loses at most one post a human retries deliberately — never a channel duplicate; all comment pages are walked |
 | A rejected post strands the item behind a false claim | The complement of claim-first: a **first-tweet** rejection published nothing, so the tool **withdraws** the claim and records the reason — the `⚠️ Growth post failed` comment carries X's actual error body (`poster.py` reads it instead of swallowing the HTTP status), and the item stays retryable rather than frozen until a human hand-deletes a marker (the credits-depleted 402 lesson) |
 | Over-long copy burns an approval at the API | The weighted-length guard refuses at compose review time (tool + simulator), parity-pinned against the reference rule |
-| The poster refills its own queue | Its backstop denies `mcp__growth_queue` (pinned by `growth-perms-check.sh` with a negative control); the reverse holds structurally — the queue skill is attended-only with no scheduled run to backstop, never mounts the posting server's mcp-config, and every scheduled sibling's backstop denies both growth servers |
-| A sibling routine acquires either growth surface | Every sibling backstop denies both servers; oracle/wright's checks pin the denies in `REQUIRED_DENIES` |
+| The poster refills its own queue | Its backstop denies `mcp__growth_queue` (pinned by `growth-perms-check.sh` with a negative control); the reverse — the queuer reaching the channel — is closed the same way: `reeve-growth`, the one scheduled routine that *owns* the queue server, denies the poster `mcp__growth_twitter`, pinned by `reeve-growth-perms-check.sh` with its own negative control. Every *other* sibling backstop denies **both** growth servers |
+| A sibling routine acquires either growth surface | Every sibling backstop denies both servers — except the two owners, Lark (denies the queue server) and `reeve-growth` (denies the poster); each perms-check pins the denies in `REQUIRED_DENIES` and asserts the owner's one write surface is never denied |
 | The labeler sweeps a queue item (parking it `needs-decision`, or arming it `autonomy-ok` for the burn) | `growth-queue` is in the labeler's `NON_TRIAGE_LABELS` (label-helper.sh) — the sweep never selects a queue item, the agent-brief precedent |
 | The routine silently stops (or silently starts) | Two-key arming + the `disarmed-notice` job; a disabled conf logs; an empty queue logs; Reeve's `routine-dead` detector reads run conclusions once armed |
 | A dead model id kills the sweep | Single-link by design — one daily sweep fails visibly and retries next morning; `model-registry smoke growth-twitter` proves the link before arming |
@@ -202,10 +254,14 @@ lead stays primary") has to survive that step.
   (reserved in the filing tool); the agent, its skill, its credentials rung,
   and its form arrive as their own routine when the content-creation skills
   exist. Nothing in v1 needs changing to add it.
-* **Scheduled PM queueing** — letting Vera/Reeve/Remy's *unattended* runs
-  call `queue_growth_post` (today the skill is attended-only; wiring the
-  queue server into a scheduled sibling means widening that routine's
-  backstop deliberately, its own reviewed PR).
+* **Scheduled PM queueing — BUILT** (see the *Reeve-growth* section above).
+  Reeve's `/reeve-growth` routine wires the queue server into a scheduled
+  sibling exactly as this bullet anticipated — its own deny backstop
+  (`.claude/reeve-growth-settings.json`, the mirror of Lark's) allows the queue
+  tool and denies the poster, pinned by `reeve-growth-perms-check.sh`.
+  Extending the same shape to Vera (per-design, from a design's `PM.md`) or to
+  Remy is a follow-up: a new conf + workflow + registry chain pointed at the
+  same queue server, when wanted.
 * **Growth telemetry** — reading back post performance into `telemetry/` so
   queue priorities can be data-driven (the #93 pattern), and a ledger of
   live posts beyond the issue threads.
