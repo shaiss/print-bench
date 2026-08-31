@@ -455,6 +455,40 @@ if ! ./scripts/reeve-growth-perms-check.sh; then
   fail=1
 fi
 
+# Reeve-greenlight permission drift: the greenlight loop (issue #296 stage 2,
+# #442) reads untrusted issue text while holding a provider secret, so it
+# carries the labeler containment pattern, not the v1 reporter exemption. Its
+# backstop (.claude/reeve-settings.json) must deny every non-wrapper Bash
+# allow inherited from .claude/settings.json (claude-code-action loads it
+# additively via settingSources=project) plus every sibling routine's write
+# surface (chunk/labeler/scout/assessor/wright wrappers and the sibling MCP
+# servers) — while never denying its own greenlight-helper.sh, or the
+# scheduled run fails closed. --selftest proves the check can pass AND fail
+# (including the dropped-cross-deny case coverage alone can never catch).
+echo "-- reeve-perms selftest: scripts/reeve-perms-check.sh --selftest"
+if ! ./scripts/reeve-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- reeve-perms check: scripts/reeve-perms-check.sh"
+if ! ./scripts/reeve-perms-check.sh; then
+  fail=1
+fi
+
+# Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
+# greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
+# wrapper is the greenlight loop's ONE shell surface, and its --selftest is
+# the only thing proving offline what a live run must never show — a post
+# without a valid verdict, off the workflow-selected set, past the
+# greenlight_cap conf key, or onto an issue that already carries a greenlight
+# is refused and publishes nothing; a forged marker line in --body cannot
+# survive (the wrapper writes the marker from --verdict); and a refusal
+# consumes no cap. Offline against a recording gh stub — no network, no real
+# repository.
+echo "-- greenlight-helper selftest: .claude/skills/reeve-greenlight/greenlight-helper.sh --selftest"
+if ! .claude/skills/reeve-greenlight/greenlight-helper.sh --selftest; then
+  fail=1
+fi
+
 # Growth queue MCP filing tool: the PM-side half of the growth desk's
 # queuing seam (docs/growth.md) — the /growth-queue skill's ONE write, a
 # JSON-argument tool for the same dontAsk-matcher reason as the scout's. Its
