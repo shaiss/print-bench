@@ -117,10 +117,9 @@ hide, and lands at **407 g including the coupon**.
 
 **Storing it.** There is no tunnel to find a home for: assembled, the starred
 oval is flat and shelves as-is at about 406 × 246 mm (its footprint in the
-builds table above). Taken apart, the open troughs neither nest (identical walls
-meet face to face) nor stack (the end skirts stop a rim seating), so a loose pile
-wants *more* floor than the assembled oval, not less — so keep it assembled to
-store it.
+builds table above). Taken apart, the six parts neither nest (identical walls
+can't interleave) nor stack, so a loose pile wants *more* floor than the
+assembled oval, not less — so keep it assembled to store it.
 
 **Shorter run, more stops.** The evidence base for hamster welfare
 (Hauzenberger et al. 2006) puts substrate depth and foraging — not tunnel
