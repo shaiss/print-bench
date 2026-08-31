@@ -1,0 +1,14 @@
+# Boolean fit parts (scripts/gate.sh): each line is `<part> empty` (must
+# render ZERO facets — the swept-animal envelope never leaves the part's own
+# material, i.e. the route is clear wall-to-wall) or `<part> interferes` (the
+# mandatory negative control — a deliberately shifted envelope that MUST
+# intersect the walls, proving the check can still fail).
+#
+# path-clear: the Ø60 animal envelope swept along all three routes — A to B
+# (the parent's switchback, restated on the tee's chamber), then B back up
+# and over the bowl to the climb, up the port-C meridian to the dish/bore
+# handoff, and out port C past its face.
+# path-clear-ctrl: the same sweep shifted +6 mm toward the use-floor — every
+# leg closes on its floor wall, so it must interfere.
+path-clear empty
+path-clear-ctrl interferes
