@@ -345,6 +345,36 @@ test("a coupling-less nuggs-* name is a collision, grouped by its category on bo
   }
 });
 
+test("includesCoupling is line-oriented like catalog.sh — a wrapped directive isn't the coupling on either surface (#509)", () => {
+  // catalog.sh includes_coupling greps line-by-line; the port must too, or a
+  // nuggs-* design whose use/include directive wraps across a newline would be
+  // seen as a NUGGS module by the port but not by bash — grouped differently on
+  // each surface. Neither treats a wrapped directive as the coupling, so such a
+  // nuggs-* name is a collision that declares a category, and both must agree.
+  const root = mkdtempSync(join(tmpdir(), "print-bench-catalog-wrap-"));
+  try {
+    mkdirSync(join(root, "designs"), { recursive: true });
+    writeFileSync(join(root, "designs", "categories.conf"), `${VOCAB}\n`);
+    const mk = (name, scad, category) => {
+      const dir = join(root, "designs", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${name}.scad`), scad);
+      writeFileSync(join(dir, "README.md"), `# ${name}\n\nThe ${name} design.\n`);
+      if (category) writeFileSync(join(dir, "catalog.conf"), `category: ${category}\n`);
+    };
+    // The directive and its target are split across a newline — a line-based
+    // grep matches neither line, so this is NOT detected as the coupling.
+    mk("nuggs-wrapped", "// wrapped\nuse\n<nuggs-coupling.scad>\n", "everyday-functional");
+    mk("nuggs-real", "// real\ninclude <nuggs-coupling.scad>\n"); // single-line: a real NUGGS module
+    assert.equal(categoryOf(join(root, "designs", "nuggs-wrapped"), "nuggs-wrapped"), "everyday-functional");
+    assert.equal(categoryOf(join(root, "designs", "nuggs-real"), "nuggs-real"), "nuggs");
+    // The port agrees with the bash authority on both.
+    assert.deepEqual(jsPairs(root), catalogPairs(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the real repo's site grouping agrees with scripts/catalog.sh", () => {
   // The regression that pins the port to the authority on the live catalog:
   // same designs, same groups, same order — membership, group order and

@@ -37,7 +37,12 @@ export function isNuggs(name) {
 function includesCoupling(designDir, name) {
   const scad = read(join(designDir, `${name}.scad`));
   if (scad === null) return false;
-  return /(?:include|use)\s*<[^>]*nuggs-coupling\.scad>/.test(scad);
+  // Line-oriented, exactly like catalog.sh includes_coupling's `grep -qE` — a
+  // directive and its <...> target sit on one line — so the port and the bash
+  // authority can never disagree on a design's group over a wrapped directive.
+  return scad
+    .split("\n")
+    .some((line) => /(?:include|use)\s*<[^>]*nuggs-coupling\.scad>/.test(line));
 }
 
 /**

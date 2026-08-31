@@ -116,8 +116,9 @@ load_vocab() {
     err "${VOCAB_FILE}: no categories defined"
     return 1
   fi
-  # NUGGS is a DERIVED group — grouped by the nuggs/nuggs-* name prefix, never
-  # declared in a catalog.conf — so it never rides in on a per-design signal the
+  # NUGGS is a DERIVED group — grouped by the nuggs/nuggs-* name + the coupling
+  # include, never declared in a catalog.conf — so it never rides in on a
+  # per-design signal the
   # way the other groups do. It must still be LISTED here, because build_order
   # emits groups by walking this vocabulary: a vocabulary that omits `nuggs`
   # passes `check` (resolve_groups still assigns NUGGS designs to the group) yet
