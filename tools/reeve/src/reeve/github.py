@@ -4,9 +4,14 @@ Reeve's primary pulse stays committed files (``signals.py``); this module adds
 the run-health reads behind the ``routine-dead`` and ``lock-leak`` detectors
 (issue #313): the scheduled routines' completed workflow runs, the open issues
 carrying an active 🚢 SHIP-LOCK claim, and the open PRs/branches that would
-corroborate one. Everything here is a **GET** — no HTTP write verb appears
-anywhere in the reeve package (``tests/test_detectors.py`` scans for them),
-and the workflow's sticky-issue upsert stays the routine's sole write.
+corroborate one. It also serves the greenlight loop's selection (issue #443):
+``gather_greenlight_queue`` lists the open ``needs-decision`` issues and reads
+each thread to see which already carry a greenlight marker — the trusted
+workflow's Select step consumes it, so the agent is handed only issues that
+are genuinely parkable-for-a-verdict. Everything here is a **GET** — no HTTP
+write verb appears anywhere in the reeve package (``tests/test_detectors.py``
+scans for them), and the workflow's writes (the sticky-issue upsert, the
+wrapper-mediated greenlight comments) stay outside this package entirely.
 
 ``_get`` is the single network seam, so the tests monkeypatch it and no
 request ever leaves the process — the same discipline
@@ -47,6 +52,17 @@ SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 # surface studies awaiting a disposition — or flagged worth-raising — to the
 # platform lead. The disposition itself is read from the issue's own labels.
 ADOPTION_STUDY_LABEL = "adoption-study"
+
+# The label that parks an issue at the HITL decision gate (docs/decision-gate
+# .md, issue #161) — the queue the greenlight loop drafts advisory verdicts on.
+NEEDS_DECISION_LABEL = "needs-decision"
+
+# The marker comment prefix the greenlight wrapper writes (mirrored from
+# .claude/skills/reeve-greenlight/greenlight-helper.sh, not imported — the
+# tool must stay installable without the wrapper). Matched as a prefix so any
+# marker version and any verdict (yes/no/route) counts as "already
+# greenlighted", exactly the wrapper's own live idempotency check.
+GREENLIGHT_MARKER = "<!-- reeve-greenlight v"
 
 # The scheduled routines whose death Reeve watches (the #312 incident class:
 # a run killed by its own timeout leaves conclusion "cancelled"/"failure" and
@@ -220,3 +236,58 @@ def gather_run_health(
         "openPRs": open_prs,
         "branches": branches,
     }
+
+
+def carries_greenlight(comments: list[Any]) -> bool:
+    """Whether any comment in ``comments`` opens with a greenlight marker.
+
+    Pure, so the selection rule is testable without the seam: the wrapper
+    writes the marker as the comment's first line, and its live idempotency
+    check greps that same line — this is the read-side mirror, prefix-matched
+    so any marker version or verdict (yes/no/route) counts.
+    """
+    return any(
+        _first_line(c.get("body", "")).startswith(GREENLIGHT_MARKER)
+        for c in comments
+    )
+
+
+def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
+    """The greenlight loop's work-list, from the live repo (issue #443).
+
+    Every OPEN issue parked at the decision gate (``needs-decision``), plus
+    which of them already carry a greenlight marker comment — the trusted
+    workflow's Select step reads this and hands the agent only the rest, so
+    the drafter never even sees an issue it cannot post on (the wrapper
+    re-checks live at write time; this is the selection, not the enforcement).
+    Still GET-only: two listings per issue and nothing else.
+    """
+    parked: list[dict[str, Any]] = []
+    for item in _paged(
+        f"{API_ROOT}/repos/{repo}/issues"
+        f"?state=open&labels={NEEDS_DECISION_LABEL}&per_page=100",
+        token,
+    ):
+        if "pull_request" in item:
+            continue  # the issues endpoint interleaves PRs; drop them
+        parked.append(
+            {
+                "number": item["number"],
+                "title": item["title"],
+                "url": item.get("html_url", ""),
+            }
+        )
+
+    queue: list[dict[str, Any]] = []
+    for issue in parked:
+        comments = _paged(
+            f"{API_ROOT}/repos/{repo}/issues/{issue['number']}/comments?per_page=100",
+            token,
+        )
+        if not carries_greenlight(comments):
+            queue.append(issue)
+
+    # Oldest first (the sibling routines' bias — a decision parked longest
+    # gets its verdict first), by number as the wrapper's list-parked sorts.
+    queue.sort(key=lambda i: i["number"])
+    return {"parked": parked, "queue": queue}

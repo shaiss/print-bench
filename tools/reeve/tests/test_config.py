@@ -27,6 +27,7 @@ def test_defaults_are_fail_safe():
     assert cfg.cadence == ""
     assert cfg.greenlight is False     # the loop ships disarmed (#441)
     assert cfg.greenlight_cap == 6
+    assert cfg.provider == "zai"       # the greenlight step's provider (#443)
     assert cfg.low_headroom_pct == 15.0
     assert cfg.score_drop == 3
     assert cfg.score_floor == 80.0
@@ -43,6 +44,7 @@ def test_full_file_parses(tmp_path):
         cadence: 53 5 * * *
         greenlight: true
         greenlight_cap: 3
+        provider: anthropic
         low_headroom_pct: 20
         score_drop: 5
         score_floor: 75
@@ -55,6 +57,7 @@ def test_full_file_parses(tmp_path):
     assert cfg.cadence == "53 5 * * *"
     assert cfg.greenlight is True
     assert cfg.greenlight_cap == 3
+    assert cfg.provider == "anthropic"
     assert cfg.low_headroom_pct == 20.0
     assert cfg.score_drop == 5
     assert cfg.score_floor == 75.0
@@ -169,6 +172,37 @@ def test_duplicate_greenlight_raises(tmp_path):
 def test_duplicate_greenlight_cap_raises(tmp_path):
     with pytest.raises(ValueError, match="duplicate key 'greenlight_cap'"):
         config.load(_write(tmp_path, "greenlight_cap: 6\ngreenlight_cap: 3\n"))
+
+
+# The greenlight step's provider key (#443) — picks the ship step in reeve.yml;
+# closed set, fail-safe default, fail-loud on every failure mode.
+
+def test_provider_defaults_when_absent(tmp_path):
+    # A conf without the key parses and the servable default applies, so the
+    # greenlight job can never fall through to a silently-wrong endpoint.
+    cfg = config.load(_write(tmp_path, "enabled: true\n"))
+    assert cfg.provider == "zai"
+
+
+def test_provider_parses_each_known_value(tmp_path):
+    assert config.load(_write(tmp_path, "provider: zai\n")).provider == "zai"
+    assert config.load(_write(tmp_path, "provider: anthropic\n")).provider == "anthropic"
+
+
+def test_get_renders_provider_as_a_plain_string(tmp_path):
+    assert config.get("provider", _write(tmp_path, "provider: zai\n")) == "zai"
+
+
+@pytest.mark.parametrize("bad", ["GLM", "z.ai", "claude", ""])
+def test_unknown_provider_raises(tmp_path, bad):
+    # A typo'd provider would select no ship step at all — it must fail here.
+    with pytest.raises(ValueError, match="'provider' must be one of"):
+        config.load(_write(tmp_path, f"provider: {bad}\n"))
+
+
+def test_duplicate_provider_raises(tmp_path):
+    with pytest.raises(ValueError, match="duplicate key 'provider'"):
+        config.load(_write(tmp_path, "provider: zai\nprovider: anthropic\n"))
 
 
 @pytest.mark.parametrize("bad", ["0", "-3", "x", "2.5"])
