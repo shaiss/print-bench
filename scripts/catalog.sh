@@ -113,6 +113,17 @@ load_vocab() {
     err "${VOCAB_FILE}: no categories defined"
     return 1
   fi
+  # NUGGS is a DERIVED group — grouped by the nuggs/nuggs-* name prefix, never
+  # declared in a catalog.conf — so it never rides in on a per-design signal the
+  # way the other groups do. It must still be LISTED here, because build_order
+  # emits groups by walking this vocabulary: a vocabulary that omits `nuggs`
+  # passes `check` (resolve_groups still assigns NUGGS designs to the group) yet
+  # `order`/`groups` silently drop every NUGGS design from both catalog surfaces.
+  # Refuse the omission rather than ship a gallery missing a whole collection.
+  if ! _set_has "$VOCAB_SET" "nuggs"; then
+    err "${VOCAB_FILE}: the derived 'nuggs' group is missing — list it so NUGGS designs are not silently dropped"
+    return 1
+  fi
 }
 
 # Emit one line per group in display order: "<slug> \t <label> \t <blurb>"
@@ -389,6 +400,22 @@ catalog_selftest() {
   else
     echo "ok    selftest: a coupling include outside the nuggs- prefix is refused"
   fi
+
+  # ---- negative: a vocabulary that omits the derived 'nuggs' group is refused -
+  # The subtle one: NUGGS designs would still resolve (by name), so `check`'s
+  # resolve_groups is happy — but `order`/`groups` walk the vocabulary and would
+  # silently drop the whole NUGGS collection. The guard must fire before then.
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  printf 'compliant-mechanisms | Compliant mechanisms\neveryday-functional  | Everyday functional prints\n' \
+    >"$tmp/designs/categories.conf"
+  _mk gamma everyday-functional
+  _mk nuggs-ghost                   # a NUGGS design the nuggs-less vocab can't seat
+  if _run check >/dev/null 2>&1; then
+    echo "FAIL  selftest: a vocabulary missing the derived 'nuggs' group was accepted"; fails=$((fails + 1))
+  else
+    echo "ok    selftest: a vocabulary missing the derived 'nuggs' group is refused"
+  fi
+  cp "$VOCAB_FILE" "$tmp/designs/categories.conf"   # restore the real vocabulary
 
   return "$fails"
 }

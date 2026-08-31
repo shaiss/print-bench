@@ -255,6 +255,59 @@ test("the optional promise blurb parses without gluing onto the label, and the p
   }
 });
 
+test("readCategories refuses a malformed record, a duplicate slug or an empty label — and catalog.sh agrees (issue #374 parity)", () => {
+  const write = (body) => {
+    const root = mkdtempSync(join(tmpdir(), "print-bench-catalog-vocab-"));
+    mkdirSync(join(root, "designs"), { recursive: true });
+    writeFileSync(join(root, "designs", "categories.conf"), body);
+    return root;
+  };
+  // catalog.sh `groups` only loads the vocabulary (no designs needed), so it is
+  // the authority to cross-check the port's refusals against — both surfaces
+  // must reject the same records, or a Node-only deploy could publish what the
+  // bash gate would have blocked.
+  const catalogGroupsExit = (root) =>
+    spawnSync("bash", [join(REPO_ROOT, "scripts", "catalog.sh"), "--root", root, "groups"], {
+      encoding: "utf8",
+      env: { ...process.env },
+    }).status;
+
+  const cases = [
+    ["a non-blank record with no |", "nuggs | NUGGS ecosystem\nnot-a-record\n", /not '<slug>/],
+    ["a duplicate slug", "nuggs | NUGGS ecosystem\nnuggs | NUGGS again\n", /duplicate category slug 'nuggs'/],
+    ["an empty label", "nuggs | NUGGS ecosystem\nempty-label |\n", /empty slug or label/],
+  ];
+  for (const [why, body, rx] of cases) {
+    const root = write(body);
+    try {
+      assert.throws(() => readCategories(root), rx, `the port should refuse ${why}`);
+      assert.notEqual(catalogGroupsExit(root), 0, `catalog.sh should also refuse ${why}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  // Positive control: a well-formed vocabulary still parses on both sides (the
+  // refusal isn't a blanket throw), and they agree on slug/label/blurb.
+  const ok = write(
+    "nuggs | NUGGS ecosystem\nsupport-free | Designing around supports | Leave supports off.\n"
+  );
+  try {
+    const cats = readCategories(ok);
+    assert.deepEqual(
+      cats.map((c) => c.slug),
+      ["nuggs", "support-free"]
+    );
+    assert.equal(cats[1].blurb, "Leave supports off.");
+    assert.deepEqual(
+      cats.map((c) => [c.slug, c.label, c.blurb]),
+      catalogGroups(ok).map((g) => [g.slug, g.label, g.blurb])
+    );
+  } finally {
+    rmSync(ok, { recursive: true, force: true });
+  }
+});
+
 test("the real repo's site grouping agrees with scripts/catalog.sh", () => {
   // The regression that pins the port to the authority on the live catalog:
   // same designs, same groups, same order — membership, group order and

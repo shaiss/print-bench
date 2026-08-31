@@ -66,14 +66,31 @@ export function readCategories(repoRoot) {
   const raw = read(join(repoRoot, "designs", "categories.conf"));
   if (raw === null) return [];
   const out = [];
+  const seen = new Set();
   for (const rawLine of raw.split("\n")) {
     const line = rawLine.split("#", 1)[0].trim();
-    if (!line || !line.includes("|")) continue;
+    if (!line) continue;
+    // Match catalog.sh's load_vocab refusals: a non-blank record must be
+    // "<slug> | <label>[ | <blurb>]" with a non-empty slug and label, and no
+    // slug may repeat. The bash gate enforces this in CI, but the Vercel deploy
+    // runs only `node build.mjs` (no bash), so the port must refuse the same
+    // records itself — otherwise a malformed or duplicated categories.conf
+    // would silently publish a broken or doubled group. (issue #374 cross-check)
+    if (!line.includes("|")) {
+      throw new Error(`categories.conf: '${line}' is not '<slug> | <label>[ | <blurb>]'`);
+    }
     const parts = line.split("|");
-    const slug = parts[0].trim();
+    const slug = parts[0].replace(/\s+/g, ""); // catalog.sh strips all slug whitespace (tr -d)
     const label = (parts[1] || "").trim();
     const blurb = parts.slice(2).join("|").trim(); // keep any | inside a blurb
-    if (slug && label) out.push({ slug, label, blurb });
+    if (!slug || !label) {
+      throw new Error(`categories.conf: '${line}' has an empty slug or label`);
+    }
+    if (seen.has(slug)) {
+      throw new Error(`categories.conf: duplicate category slug '${slug}'`);
+    }
+    seen.add(slug);
+    out.push({ slug, label, blurb });
   }
   return out;
 }
