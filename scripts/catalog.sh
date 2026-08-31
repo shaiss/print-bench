@@ -20,10 +20,13 @@
 #
 #   - the closed vocabulary + display order live in designs/categories.conf
 #     ("<slug> | <label>", order = display order);
-#   - NUGGS is DERIVED — any design named "nuggs" or "nuggs-*" is in the nuggs
-#     group and carries no catalog.conf; it is cross-checked against the
-#     lib/nuggs-coupling.scad include (a non-NUGGS design that includes the
-#     coupling is mis-grouped and fails here);
+#   - NUGGS is DERIVED — a design named "nuggs"/"nuggs-*" that ALSO includes the
+#     lib/nuggs-coupling.scad standard is in the nuggs group and carries no
+#     catalog.conf. The cross-check runs BOTH directions: a design that includes
+#     the coupling but is not named nuggs-* is mis-grouped and fails, and a
+#     nuggs-*-NAMED design that does NOT include the coupling is a name collision
+#     (e.g. nuggs-yard, named for the hamster), not a NUGGS module — it is
+#     grouped by its declared category like any other design;
 #   - every other design declares `category: <slug>` in designs/<name>/catalog.conf.
 #
 # `order` re-uses `./scripts/lineage.sh order` for within-group ordering and
@@ -113,8 +116,9 @@ load_vocab() {
     err "${VOCAB_FILE}: no categories defined"
     return 1
   fi
-  # NUGGS is a DERIVED group — grouped by the nuggs/nuggs-* name prefix, never
-  # declared in a catalog.conf — so it never rides in on a per-design signal the
+  # NUGGS is a DERIVED group — grouped by the nuggs/nuggs-* name + the coupling
+  # include, never declared in a catalog.conf — so it never rides in on a
+  # per-design signal the
   # way the other groups do. It must still be LISTED here, because build_order
   # emits groups by walking this vocabulary: a vocabulary that omits `nuggs`
   # passes `check` (resolve_groups still assigns NUGGS designs to the group) yet
@@ -151,11 +155,48 @@ read_category() {
     || true
 }
 
-# Does the design's entry .scad pull in the NUGGS coupling standard?
+# Strip // line comments and /* ... */ block comments from a .scad file, so a
+# commented-out directive is never read as live code. Line-oriented and
+# newline-preserving on purpose: block-comment state is carried across lines but
+# each input line still emits one output line, so the match downstream stays
+# line-based (a directive must sit on one line to count) exactly as it did before
+# comments were stripped. The JS port (site/lib/catalog.mjs includesCoupling)
+# strips the same two forms with the identical line-preserving state machine, so
+# a directive split across a newline — or buried in a block comment — is the
+# coupling on neither surface; catalog.test.mjs pins that parity.
+strip_scad_comments() {
+  awk '
+    {
+      line = $0; out = ""; i = 1; n = length(line)
+      while (i <= n) {
+        two = substr(line, i, 2)
+        if (inblock) {
+          if (two == "*/") { inblock = 0; i = i + 2 } else { i = i + 1 }
+          continue
+        }
+        if (two == "//") { break }                      # line comment: drop to EOL
+        if (two == "/*") { inblock = 1; i = i + 2; continue }
+        out = out substr(line, i, 1); i = i + 1
+      }
+      print out
+    }
+  ' "$1"
+}
+
+# Does the design's entry .scad pull in the NUGGS coupling standard? A
+# commented-out include/use does NOT count (issue #509 / CodeRabbit) — strip
+# comments first, then match line by line.
 includes_coupling() {
   local entry="${DESIGNS_DIR}/$1/$1.scad"
   [[ -f "$entry" ]] || return 1
-  grep -qE '(include|use)[[:space:]]*<[^>]*nuggs-coupling\.scad>' "$entry"
+  # Capture the stripped text, then grep it — NOT `strip … | grep -q`. Under
+  # `set -o pipefail`, grep -q exits on its first match and closes the pipe, so
+  # awk takes SIGPIPE and the pipeline reports failure even though the coupling
+  # matched; the race only trips on files big enough that grep exits before awk
+  # finishes (the real designs, not the tiny selftest fixtures).
+  local stripped
+  stripped="$(strip_scad_comments "$entry")"
+  grep -qE '(include|use)[[:space:]]*<[^>]*nuggs-coupling\.scad>' <<<"$stripped"
 }
 
 # Resolve every design's group into the GROUP map. Returns non-zero and prints
@@ -169,20 +210,26 @@ resolve_groups() {
     name="$(basename "$d")"
     [[ -f "${DESIGNS_DIR}/${name}/${name}.scad" ]] || continue
 
-    if is_nuggs "$name"; then
-      # NUGGS is derived; a catalog.conf here would be a second, drifting source
-      # of truth for a group the name already decides.
+    if is_nuggs "$name" && includes_coupling "$name"; then
+      # A real NUGGS module: named nuggs-* AND using the coupling standard. The
+      # group is derived, so a catalog.conf here would be a second, drifting
+      # source of truth for a group the name+coupling already decide.
       cat="$(read_category "$name")"
       if [[ -n "$cat" ]]; then
-        err "designs/${name}: NUGGS designs are grouped by name, not by catalog.conf — remove the category key"
+        err "designs/${name}: NUGGS modules are grouped by name, not by catalog.conf — remove the category key"
         fails=$((fails + 1))
       fi
       GROUP["$name"]="nuggs"
       continue
     fi
 
-    # A non-NUGGS design that includes the coupling is mis-grouped: it belongs
-    # in the NUGGS collection but is not named for it. (#374 cross-check.)
+    # The NUGGS cross-check, both directions (#374). A design that includes the
+    # coupling but is NOT named nuggs-* belongs in NUGGS and should carry the
+    # prefix. A design NAMED nuggs-* that does NOT include the coupling is a name
+    # collision (e.g. nuggs-yard, named for the hamster, not the port), so it is
+    # not a NUGGS module: it falls through here and is grouped by its declared
+    # category like any other design — the reverse test just below cannot fire on
+    # it, since it has no coupling to flag.
     if includes_coupling "$name"; then
       err "designs/${name}: includes lib/nuggs-coupling.scad but is not named nuggs-* — a NUGGS module must carry the nuggs- prefix"
       fails=$((fails + 1))
@@ -190,7 +237,11 @@ resolve_groups() {
 
     cat="$(read_category "$name")"
     if [[ -z "$cat" ]]; then
-      err "designs/${name}: no 'category:' in designs/${name}/catalog.conf (see ${VOCAB_FILE})"
+      if is_nuggs "$name"; then
+        err "designs/${name}: named nuggs-* but does not include lib/nuggs-coupling.scad, so it is not a NUGGS module — declare a 'category:' in designs/${name}/catalog.conf like any other design (or add the coupling to make it a real NUGGS module)"
+      else
+        err "designs/${name}: no 'category:' in designs/${name}/catalog.conf (see ${VOCAB_FILE})"
+      fi
       fails=$((fails + 1))
       continue
     fi
@@ -318,6 +369,10 @@ catalog_selftest() {
     local n="$1" cat="${2:-}"
     mkdir -p "$tmp/designs/$n"
     printf '// %s fixture\n' "$n" >"$tmp/designs/$n/$n.scad"
+    # A real NUGGS module is named nuggs-* AND uses the coupling standard, so the
+    # nuggs-* fixtures get the include; the coupling-less-collision cases below
+    # build their own fixture by hand to exercise the fall-through.
+    case "$n" in nuggs | nuggs-*) printf 'include <nuggs-coupling.scad>\n' >>"$tmp/designs/$n/$n.scad" ;; esac
     printf '# %s\n\nThe %s design.\n' "$n" "$n" >"$tmp/designs/$n/README.md"
     [[ -n "$cat" ]] && printf 'category: %s\n' "$cat" >"$tmp/designs/$n/catalog.conf"
   }
@@ -399,6 +454,70 @@ catalog_selftest() {
     echo "FAIL  selftest: a non-NUGGS design that includes nuggs-coupling was accepted"; fails=$((fails + 1))
   else
     echo "ok    selftest: a coupling include outside the nuggs- prefix is refused"
+  fi
+
+  # ---- positive: a nuggs-* design that USES the coupling is a NUGGS module ----
+  # The forward half of the #374 cross-check: name + coupling => derived NUGGS.
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  _mk nuggs-real                    # _mk gives a nuggs-* fixture the coupling
+  local grp
+  if grp="$(_run order 2>/dev/null)" && [[ "$(awk -F'\t' '$4=="nuggs-real"{print $1}' <<<"$grp")" == "nuggs" ]]; then
+    echo "ok    selftest: a nuggs-* design that includes the coupling is a NUGGS module"
+  else
+    echo "FAIL  selftest: a real NUGGS module (nuggs-* + coupling) did not group as nuggs"; fails=$((fails + 1))
+  fi
+
+  # ---- negative: a nuggs-* NAME with no coupling and no category is refused ----
+  # The reverse half of the cross-check (the nuggs-yard collision): the nuggs-
+  # prefix alone no longer seats a design in the NUGGS collection.
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  mkdir -p "$tmp/designs/nuggs-collision"
+  printf '// nuggs-collision fixture (no coupling)\n' >"$tmp/designs/nuggs-collision/nuggs-collision.scad"
+  printf '# nuggs-collision\n\nThe nuggs-collision design.\n' >"$tmp/designs/nuggs-collision/README.md"
+  if _run check >/dev/null 2>&1; then
+    echo "FAIL  selftest: a coupling-less nuggs-* name with no category was accepted"; fails=$((fails + 1))
+  else
+    echo "ok    selftest: a coupling-less nuggs-* name with no category is refused"
+  fi
+
+  # ---- positive: that collision, once it declares a category, groups by it -----
+  # (NOT nuggs) — exactly nuggs-yard's resolution.
+  printf 'category: everyday-functional\n' >"$tmp/designs/nuggs-collision/catalog.conf"
+  if grp="$(_run order 2>/dev/null)" && [[ "$(awk -F'\t' '$4=="nuggs-collision"{print $1}' <<<"$grp")" == "everyday-functional" ]]; then
+    echo "ok    selftest: a coupling-less nuggs-* name groups by its declared category, not nuggs"
+  else
+    echo "FAIL  selftest: a coupling-less nuggs-* name with a category did not group by it"; fails=$((fails + 1))
+  fi
+
+  # ---- negative: a COMMENTED-OUT coupling directive does not seat a nuggs-* name -
+  # A `// include <nuggs-coupling.scad>` (or a block-commented, or newline-split
+  # one) is not the coupling: such a nuggs-* name is a collision that must declare
+  # a category, and does — grouped by it, not nuggs (issue #509 / CodeRabbit).
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  mkdir -p "$tmp/designs/nuggs-commented"
+  {
+    printf '// nuggs-commented fixture\n'
+    printf '// include <nuggs-coupling.scad>\n'      # line comment
+    printf '/* use <nuggs-coupling.scad> */\n'       # single-line block comment
+    printf 'use /* split\n*/ <nuggs-coupling.scad>\n' # directive split by a block comment
+  } >"$tmp/designs/nuggs-commented/nuggs-commented.scad"
+  printf '# nuggs-commented\n\nThe nuggs-commented design.\n' >"$tmp/designs/nuggs-commented/README.md"
+  printf 'category: everyday-functional\n' >"$tmp/designs/nuggs-commented/catalog.conf"
+  if grp="$(_run order 2>/dev/null)" && [[ "$(awk -F'\t' '$4=="nuggs-commented"{print $1}' <<<"$grp")" == "everyday-functional" ]]; then
+    echo "ok    selftest: a commented-out coupling directive does not make a nuggs-* name a NUGGS module"
+  else
+    echo "FAIL  selftest: a commented-out coupling directive was treated as the coupling"; fails=$((fails + 1))
+  fi
+
+  # ---- positive: a real directive AFTER a block comment still counts (no over-strip) -
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  mkdir -p "$tmp/designs/nuggs-livecode"
+  printf '/* header */ include <nuggs-coupling.scad>\n' >"$tmp/designs/nuggs-livecode/nuggs-livecode.scad"
+  printf '# nuggs-livecode\n\nThe nuggs-livecode design.\n' >"$tmp/designs/nuggs-livecode/README.md"
+  if grp="$(_run order 2>/dev/null)" && [[ "$(awk -F'\t' '$4=="nuggs-livecode"{print $1}' <<<"$grp")" == "nuggs" ]]; then
+    echo "ok    selftest: a live coupling directive after a block comment still makes a NUGGS module"
+  else
+    echo "FAIL  selftest: comment stripping ate a live coupling directive"; fails=$((fails + 1))
   fi
 
   # ---- negative: a vocabulary that omits the derived 'nuggs' group is refused -

@@ -11,7 +11,9 @@
 // same trees and fails on any disagreement about a design's group or the order.
 //
 // The grouping signal is minimal committed source, never a hand-grouped table
-// (charter N1): NUGGS is derived from the name; every other design declares
+// (charter N1): a NUGGS module is derived from the nuggs-* name AND the
+// lib/nuggs-coupling.scad include (a coupling-less nuggs-* name is a collision,
+// grouped by its declared category); every other design declares
 // `category: <slug>` in designs/<name>/catalog.conf; the closed vocabulary and
 // display order live in designs/categories.conf.
 
@@ -31,17 +33,51 @@ export function isNuggs(name) {
   return name === "nuggs" || name.startsWith("nuggs-");
 }
 
+/** Does the design's entry .scad pull in the NUGGS coupling standard? (Mirrors catalog.sh includes_coupling.) */
+function includesCoupling(designDir, name) {
+  const scad = read(join(designDir, `${name}.scad`));
+  if (scad === null) return false;
+  // Strip // line comments and /* ... */ block comments before matching, so a
+  // commented-out directive is not read as the coupling (issue #509 / CodeRabbit).
+  // The strip is line-oriented and newline-preserving — block-comment state is
+  // carried across lines but each line stays a line — so the match below stays
+  // line-based (a directive and its <...> target must sit on one line), the exact
+  // state machine catalog.sh strip_scad_comments runs. So the port and the bash
+  // authority can never disagree on a design's group over a wrapped or
+  // commented-out directive; catalog.test.mjs pins that parity.
+  let inBlock = false;
+  for (const raw of scad.split("\n")) {
+    let out = "";
+    for (let i = 0; i < raw.length; ) {
+      const two = raw.slice(i, i + 2);
+      if (inBlock) {
+        if (two === "*/") { inBlock = false; i += 2; } else { i += 1; }
+        continue;
+      }
+      if (two === "//") break; // line comment: drop the rest of the line
+      if (two === "/*") { inBlock = true; i += 2; continue; }
+      out += raw[i]; i += 1;
+    }
+    if (/(?:include|use)\s*<[^>]*nuggs-coupling\.scad>/.test(out)) return true;
+  }
+  return false;
+}
+
 /**
- * A design's category slug: "nuggs" for a NUGGS-named design, else the
- * `category:` key of designs/<name>/catalog.conf. Null when a non-NUGGS design
- * declares none — the build keeps it visible (groupDesigns' Other bucket)
- * rather than dropping it, and the cross-check test flags the divergence.
+ * A design's category slug: "nuggs" for a real NUGGS module (a `nuggs`/`nuggs-*`
+ * name that ALSO includes lib/nuggs-coupling.scad), else the `category:` key of
+ * designs/<name>/catalog.conf. A nuggs-*-named design without the coupling is a
+ * name collision (e.g. nuggs-yard), not a NUGGS module — it falls through to its
+ * declared category, matching catalog.sh resolve_groups (both directions of the
+ * #374 cross-check). Null when a non-NUGGS design declares none — the build keeps
+ * it visible (groupDesigns' Other bucket) rather than dropping it, and the
+ * cross-check test flags the divergence.
  *
  * `key: value` parsed the way site/lib/team.mjs parses it: trailing `#`
  * comments stripped, split on the first colon.
  */
 export function categoryOf(designDir, name) {
-  if (isNuggs(name)) return "nuggs";
+  if (isNuggs(name) && includesCoupling(designDir, name)) return "nuggs";
   const raw = read(join(designDir, "catalog.conf"));
   if (raw === null) return null;
   for (const rawLine of raw.split("\n")) {

@@ -40,11 +40,14 @@ const VOCAB = [
 /**
  * Build a throwaway designs/ tree.
  *
- * `spec` maps a design name to { category, derives } — category writes a
- * catalog.conf (omit/null for a NUGGS design or to test the no-category case),
- * derives writes a derives.conf. Every design gets the entry .scad + README.md
- * readDesigns and the Python discovery both require, and the tree gets the
- * shared categories.conf.
+ * `spec` maps a design name to { category, derives, noCoupling } — category
+ * writes a catalog.conf (omit/null for a NUGGS module or to test the no-category
+ * case), derives writes a derives.conf. A `nuggs`/`nuggs-*` design gets the
+ * coupling include by default (a real NUGGS module is named `nuggs`/`nuggs-*` AND
+ * uses the coupling); noCoupling: true withholds it to exercise the name-collision
+ * fall-through. Every design gets the entry .scad + README.md readDesigns and
+ * the Python discovery both require, and the tree gets the shared
+ * categories.conf.
  */
 function fixture(spec) {
   const root = mkdtempSync(join(tmpdir(), "print-bench-catalog-"));
@@ -53,7 +56,12 @@ function fixture(spec) {
   for (const [name, opts] of Object.entries(spec)) {
     const dir = join(root, "designs", name);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${name}.scad`), "// catalog fixture\n");
+    const isNuggsModule =
+      (name === "nuggs" || name.startsWith("nuggs-")) && !(opts && opts.noCoupling);
+    writeFileSync(
+      join(dir, `${name}.scad`),
+      isNuggsModule ? "// catalog fixture\ninclude <nuggs-coupling.scad>\n" : "// catalog fixture\n"
+    );
     writeFileSync(join(dir, "README.md"), `# ${name}\n\nThe ${name} design.\n`);
     if (opts && opts.category) writeFileSync(join(dir, "catalog.conf"), `category: ${opts.category}\n`);
     if (opts && opts.derives) writeFileSync(join(dir, "derives.conf"), opts.derives);
@@ -305,6 +313,101 @@ test("readCategories refuses a malformed record, a duplicate slug or an empty la
     );
   } finally {
     rmSync(ok, { recursive: true, force: true });
+  }
+});
+
+test("a coupling-less nuggs-* name is a collision, grouped by its category on both surfaces (issue #374)", () => {
+  // nuggs-yard's shape: a nuggs-* NAME with no coupling include is NOT a NUGGS
+  // module — it groups by its declared category, and the port must agree with
+  // catalog.sh, or the collision would land in a different aisle on each surface.
+  const root = fixture({
+    "nuggs-real": {}, // real NUGGS module (coupling via the fixture default)
+    "nuggs-yardish": { category: "everyday-functional", noCoupling: true }, // the collision
+    widget: { category: "compliant-mechanisms" },
+  });
+  try {
+    assert.equal(categoryOf(join(root, "designs", "nuggs-real"), "nuggs-real"), "nuggs");
+    assert.equal(
+      categoryOf(join(root, "designs", "nuggs-yardish"), "nuggs-yardish"),
+      "everyday-functional"
+    );
+    const groups = groupDesigns(readDesigns(root), readCategories(root));
+    const bySlug = new Map(groups.map((g) => [g.slug, g.designs.map((d) => d.name)]));
+    assert.deepEqual(bySlug.get("nuggs"), ["nuggs-real"]);
+    assert.ok(
+      bySlug.get("everyday-functional").includes("nuggs-yardish"),
+      "the coupling-less nuggs-* name groups by its declared category"
+    );
+    // And the port agrees with the authoritative script — membership and order.
+    assert.deepEqual(jsPairs(root), catalogPairs(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("includesCoupling is line-oriented like catalog.sh — a wrapped directive isn't the coupling on either surface (#509)", () => {
+  // catalog.sh includes_coupling greps line-by-line; the port must too, or a
+  // nuggs-* design whose use/include directive wraps across a newline would be
+  // seen as a NUGGS module by the port but not by bash — grouped differently on
+  // each surface. Neither treats a wrapped directive as the coupling, so such a
+  // nuggs-* name is a collision that declares a category, and both must agree.
+  const root = mkdtempSync(join(tmpdir(), "print-bench-catalog-wrap-"));
+  try {
+    mkdirSync(join(root, "designs"), { recursive: true });
+    writeFileSync(join(root, "designs", "categories.conf"), `${VOCAB}\n`);
+    const mk = (name, scad, category) => {
+      const dir = join(root, "designs", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${name}.scad`), scad);
+      writeFileSync(join(dir, "README.md"), `# ${name}\n\nThe ${name} design.\n`);
+      if (category) writeFileSync(join(dir, "catalog.conf"), `category: ${category}\n`);
+    };
+    // The directive and its target are split across a newline — a line-based
+    // grep matches neither line, so this is NOT detected as the coupling.
+    mk("nuggs-wrapped", "// wrapped\nuse\n<nuggs-coupling.scad>\n", "everyday-functional");
+    mk("nuggs-real", "// real\ninclude <nuggs-coupling.scad>\n"); // single-line: a real NUGGS module
+    assert.equal(categoryOf(join(root, "designs", "nuggs-wrapped"), "nuggs-wrapped"), "everyday-functional");
+    assert.equal(categoryOf(join(root, "designs", "nuggs-real"), "nuggs-real"), "nuggs");
+    // The port agrees with the bash authority on both.
+    assert.deepEqual(jsPairs(root), catalogPairs(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("includesCoupling is comment-aware like catalog.sh — a commented-out directive isn't the coupling on either surface (#509)", () => {
+  // catalog.sh strip_scad_comments drops // line and /* */ block comments (block
+  // state carried across lines) before matching; the port runs the identical
+  // line-preserving state machine. A nuggs-* design whose only coupling directive
+  // is commented out is therefore a collision that declares a category — and a
+  // live directive after a block comment is still the coupling. Both surfaces must
+  // agree, or the design would land in a different aisle on each.
+  const root = mkdtempSync(join(tmpdir(), "print-bench-catalog-comment-"));
+  try {
+    mkdirSync(join(root, "designs"), { recursive: true });
+    writeFileSync(join(root, "designs", "categories.conf"), `${VOCAB}\n`);
+    const mk = (name, scad, category) => {
+      const dir = join(root, "designs", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${name}.scad`), scad);
+      writeFileSync(join(dir, "README.md"), `# ${name}\n\nThe ${name} design.\n`);
+      if (category) writeFileSync(join(dir, "catalog.conf"), `category: ${category}\n`);
+    };
+    // Commented out three ways — line, single-line block, block split across a
+    // newline — none is the coupling, so each is a collision that groups by category.
+    mk("nuggs-linecmt", "// off\n// include <nuggs-coupling.scad>\n", "everyday-functional");
+    mk("nuggs-blockcmt", "/* include <nuggs-coupling.scad> */\n", "everyday-functional");
+    mk("nuggs-splitcmt", "use /* off\n*/ <nuggs-coupling.scad>\n", "everyday-functional");
+    // Live directive following a block comment on the same line — a real module.
+    mk("nuggs-live", "/* header */ include <nuggs-coupling.scad>\n");
+    assert.equal(categoryOf(join(root, "designs", "nuggs-linecmt"), "nuggs-linecmt"), "everyday-functional");
+    assert.equal(categoryOf(join(root, "designs", "nuggs-blockcmt"), "nuggs-blockcmt"), "everyday-functional");
+    assert.equal(categoryOf(join(root, "designs", "nuggs-splitcmt"), "nuggs-splitcmt"), "everyday-functional");
+    assert.equal(categoryOf(join(root, "designs", "nuggs-live"), "nuggs-live"), "nuggs");
+    // The port agrees with the bash authority on every one.
+    assert.deepEqual(jsPairs(root), catalogPairs(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
