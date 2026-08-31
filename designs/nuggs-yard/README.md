@@ -115,10 +115,13 @@ adding up the rounded per-part masses above can land a gram out.
 The starred build is the recommendation: it has the loop, the branch and the
 hide, and lands at **407 g including the coupon**.
 
-**Storing it.** There is no tunnel to find a home for: the modules are open
-troughs that lie flat, none longer than the `wye` (183 × 166 mm), so a
-disassembled build shelves in roughly its own footprint — about 406 × 246 mm for
-the starred oval — rather than needing a run's worth of space.
+**Storing it.** There is no tunnel to find a home for: assembled, the starred
+oval is flat and shelves as-is at about 406 × 246 mm (its footprint in the
+builds table above) — a tabletop or closet top, not a bookshelf. Taken apart,
+the six parts neither nest (identical walls can't interleave) nor stack, so a
+loose pile wants *more* floor than the assembled oval, not less. So keep it
+assembled — and carry it flat, a hand under each side or on a board, since the
+lap joints lift apart by design.
 
 **Shorter run, more stops.** The evidence base for hamster welfare
 (Hauzenberger et al. 2006) puts substrate depth and foraging — not tunnel
