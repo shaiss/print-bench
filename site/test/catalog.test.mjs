@@ -40,11 +40,14 @@ const VOCAB = [
 /**
  * Build a throwaway designs/ tree.
  *
- * `spec` maps a design name to { category, derives } — category writes a
- * catalog.conf (omit/null for a NUGGS design or to test the no-category case),
- * derives writes a derives.conf. Every design gets the entry .scad + README.md
- * readDesigns and the Python discovery both require, and the tree gets the
- * shared categories.conf.
+ * `spec` maps a design name to { category, derives, noCoupling } — category
+ * writes a catalog.conf (omit/null for a NUGGS module or to test the no-category
+ * case), derives writes a derives.conf. A nuggs-* design gets the coupling
+ * include by default (a real NUGGS module is named nuggs-* AND uses the
+ * coupling); noCoupling: true withholds it to exercise the name-collision
+ * fall-through. Every design gets the entry .scad + README.md readDesigns and
+ * the Python discovery both require, and the tree gets the shared
+ * categories.conf.
  */
 function fixture(spec) {
   const root = mkdtempSync(join(tmpdir(), "print-bench-catalog-"));
@@ -53,7 +56,12 @@ function fixture(spec) {
   for (const [name, opts] of Object.entries(spec)) {
     const dir = join(root, "designs", name);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${name}.scad`), "// catalog fixture\n");
+    const isNuggsModule =
+      (name === "nuggs" || name.startsWith("nuggs-")) && !(opts && opts.noCoupling);
+    writeFileSync(
+      join(dir, `${name}.scad`),
+      isNuggsModule ? "// catalog fixture\ninclude <nuggs-coupling.scad>\n" : "// catalog fixture\n"
+    );
     writeFileSync(join(dir, "README.md"), `# ${name}\n\nThe ${name} design.\n`);
     if (opts && opts.category) writeFileSync(join(dir, "catalog.conf"), `category: ${opts.category}\n`);
     if (opts && opts.derives) writeFileSync(join(dir, "derives.conf"), opts.derives);
@@ -305,6 +313,35 @@ test("readCategories refuses a malformed record, a duplicate slug or an empty la
     );
   } finally {
     rmSync(ok, { recursive: true, force: true });
+  }
+});
+
+test("a coupling-less nuggs-* name is a collision, grouped by its category on both surfaces (issue #374)", () => {
+  // nuggs-yard's shape: a nuggs-* NAME with no coupling include is NOT a NUGGS
+  // module — it groups by its declared category, and the port must agree with
+  // catalog.sh, or the collision would land in a different aisle on each surface.
+  const root = fixture({
+    "nuggs-real": {}, // real NUGGS module (coupling via the fixture default)
+    "nuggs-yardish": { category: "everyday-functional", noCoupling: true }, // the collision
+    widget: { category: "compliant-mechanisms" },
+  });
+  try {
+    assert.equal(categoryOf(join(root, "designs", "nuggs-real"), "nuggs-real"), "nuggs");
+    assert.equal(
+      categoryOf(join(root, "designs", "nuggs-yardish"), "nuggs-yardish"),
+      "everyday-functional"
+    );
+    const groups = groupDesigns(readDesigns(root), readCategories(root));
+    const bySlug = new Map(groups.map((g) => [g.slug, g.designs.map((d) => d.name)]));
+    assert.deepEqual(bySlug.get("nuggs"), ["nuggs-real"]);
+    assert.ok(
+      bySlug.get("everyday-functional").includes("nuggs-yardish"),
+      "the coupling-less nuggs-* name groups by its declared category"
+    );
+    // And the port agrees with the authoritative script — membership and order.
+    assert.deepEqual(jsPairs(root), catalogPairs(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

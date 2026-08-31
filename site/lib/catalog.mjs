@@ -11,7 +11,9 @@
 // same trees and fails on any disagreement about a design's group or the order.
 //
 // The grouping signal is minimal committed source, never a hand-grouped table
-// (charter N1): NUGGS is derived from the name; every other design declares
+// (charter N1): a NUGGS module is derived from the nuggs-* name AND the
+// lib/nuggs-coupling.scad include (a coupling-less nuggs-* name is a collision,
+// grouped by its declared category); every other design declares
 // `category: <slug>` in designs/<name>/catalog.conf; the closed vocabulary and
 // display order live in designs/categories.conf.
 
@@ -31,17 +33,28 @@ export function isNuggs(name) {
   return name === "nuggs" || name.startsWith("nuggs-");
 }
 
+/** Does the design's entry .scad pull in the NUGGS coupling standard? (Mirrors catalog.sh includes_coupling.) */
+function includesCoupling(designDir, name) {
+  const scad = read(join(designDir, `${name}.scad`));
+  if (scad === null) return false;
+  return /(?:include|use)\s*<[^>]*nuggs-coupling\.scad>/.test(scad);
+}
+
 /**
- * A design's category slug: "nuggs" for a NUGGS-named design, else the
- * `category:` key of designs/<name>/catalog.conf. Null when a non-NUGGS design
- * declares none — the build keeps it visible (groupDesigns' Other bucket)
- * rather than dropping it, and the cross-check test flags the divergence.
+ * A design's category slug: "nuggs" for a real NUGGS module (a nuggs-* name that
+ * ALSO includes lib/nuggs-coupling.scad), else the `category:` key of
+ * designs/<name>/catalog.conf. A nuggs-*-named design without the coupling is a
+ * name collision (e.g. nuggs-yard), not a NUGGS module — it falls through to its
+ * declared category, matching catalog.sh resolve_groups (both directions of the
+ * #374 cross-check). Null when a non-NUGGS design declares none — the build keeps
+ * it visible (groupDesigns' Other bucket) rather than dropping it, and the
+ * cross-check test flags the divergence.
  *
  * `key: value` parsed the way site/lib/team.mjs parses it: trailing `#`
  * comments stripped, split on the first colon.
  */
 export function categoryOf(designDir, name) {
-  if (isNuggs(name)) return "nuggs";
+  if (isNuggs(name) && includesCoupling(designDir, name)) return "nuggs";
   const raw = read(join(designDir, "catalog.conf"));
   if (raw === null) return null;
   for (const rawLine of raw.split("\n")) {

@@ -20,10 +20,13 @@
 #
 #   - the closed vocabulary + display order live in designs/categories.conf
 #     ("<slug> | <label>", order = display order);
-#   - NUGGS is DERIVED — any design named "nuggs" or "nuggs-*" is in the nuggs
-#     group and carries no catalog.conf; it is cross-checked against the
-#     lib/nuggs-coupling.scad include (a non-NUGGS design that includes the
-#     coupling is mis-grouped and fails here);
+#   - NUGGS is DERIVED — a design named "nuggs"/"nuggs-*" that ALSO includes the
+#     lib/nuggs-coupling.scad standard is in the nuggs group and carries no
+#     catalog.conf. The cross-check runs BOTH directions: a design that includes
+#     the coupling but is not named nuggs-* is mis-grouped and fails, and a
+#     nuggs-*-NAMED design that does NOT include the coupling is a name collision
+#     (e.g. nuggs-yard, named for the hamster), not a NUGGS module — it is
+#     grouped by its declared category like any other design;
 #   - every other design declares `category: <slug>` in designs/<name>/catalog.conf.
 #
 # `order` re-uses `./scripts/lineage.sh order` for within-group ordering and
@@ -169,20 +172,26 @@ resolve_groups() {
     name="$(basename "$d")"
     [[ -f "${DESIGNS_DIR}/${name}/${name}.scad" ]] || continue
 
-    if is_nuggs "$name"; then
-      # NUGGS is derived; a catalog.conf here would be a second, drifting source
-      # of truth for a group the name already decides.
+    if is_nuggs "$name" && includes_coupling "$name"; then
+      # A real NUGGS module: named nuggs-* AND using the coupling standard. The
+      # group is derived, so a catalog.conf here would be a second, drifting
+      # source of truth for a group the name+coupling already decide.
       cat="$(read_category "$name")"
       if [[ -n "$cat" ]]; then
-        err "designs/${name}: NUGGS designs are grouped by name, not by catalog.conf — remove the category key"
+        err "designs/${name}: NUGGS modules are grouped by name, not by catalog.conf — remove the category key"
         fails=$((fails + 1))
       fi
       GROUP["$name"]="nuggs"
       continue
     fi
 
-    # A non-NUGGS design that includes the coupling is mis-grouped: it belongs
-    # in the NUGGS collection but is not named for it. (#374 cross-check.)
+    # The NUGGS cross-check, both directions (#374). A design that includes the
+    # coupling but is NOT named nuggs-* belongs in NUGGS and should carry the
+    # prefix. A design NAMED nuggs-* that does NOT include the coupling is a name
+    # collision (e.g. nuggs-yard, named for the hamster, not the port), so it is
+    # not a NUGGS module: it falls through here and is grouped by its declared
+    # category like any other design — the reverse test just below cannot fire on
+    # it, since it has no coupling to flag.
     if includes_coupling "$name"; then
       err "designs/${name}: includes lib/nuggs-coupling.scad but is not named nuggs-* — a NUGGS module must carry the nuggs- prefix"
       fails=$((fails + 1))
@@ -190,7 +199,11 @@ resolve_groups() {
 
     cat="$(read_category "$name")"
     if [[ -z "$cat" ]]; then
-      err "designs/${name}: no 'category:' in designs/${name}/catalog.conf (see ${VOCAB_FILE})"
+      if is_nuggs "$name"; then
+        err "designs/${name}: named nuggs-* but does not include lib/nuggs-coupling.scad, so it is not a NUGGS module — declare a 'category:' in designs/${name}/catalog.conf like any other design (or add the coupling to make it a real NUGGS module)"
+      else
+        err "designs/${name}: no 'category:' in designs/${name}/catalog.conf (see ${VOCAB_FILE})"
+      fi
       fails=$((fails + 1))
       continue
     fi
@@ -318,6 +331,10 @@ catalog_selftest() {
     local n="$1" cat="${2:-}"
     mkdir -p "$tmp/designs/$n"
     printf '// %s fixture\n' "$n" >"$tmp/designs/$n/$n.scad"
+    # A real NUGGS module is named nuggs-* AND uses the coupling standard, so the
+    # nuggs-* fixtures get the include; the coupling-less-collision cases below
+    # build their own fixture by hand to exercise the fall-through.
+    case "$n" in nuggs | nuggs-*) printf 'include <nuggs-coupling.scad>\n' >>"$tmp/designs/$n/$n.scad" ;; esac
     printf '# %s\n\nThe %s design.\n' "$n" "$n" >"$tmp/designs/$n/README.md"
     [[ -n "$cat" ]] && printf 'category: %s\n' "$cat" >"$tmp/designs/$n/catalog.conf"
   }
@@ -399,6 +416,39 @@ catalog_selftest() {
     echo "FAIL  selftest: a non-NUGGS design that includes nuggs-coupling was accepted"; fails=$((fails + 1))
   else
     echo "ok    selftest: a coupling include outside the nuggs- prefix is refused"
+  fi
+
+  # ---- positive: a nuggs-* design that USES the coupling is a NUGGS module ----
+  # The forward half of the #374 cross-check: name + coupling => derived NUGGS.
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  _mk nuggs-real                    # _mk gives a nuggs-* fixture the coupling
+  local grp
+  if grp="$(_run order 2>/dev/null)" && [[ "$(awk -F'\t' '$4=="nuggs-real"{print $1}' <<<"$grp")" == "nuggs" ]]; then
+    echo "ok    selftest: a nuggs-* design that includes the coupling is a NUGGS module"
+  else
+    echo "FAIL  selftest: a real NUGGS module (nuggs-* + coupling) did not group as nuggs"; fails=$((fails + 1))
+  fi
+
+  # ---- negative: a nuggs-* NAME with no coupling and no category is refused ----
+  # The reverse half of the cross-check (the nuggs-yard collision): the nuggs-
+  # prefix alone no longer seats a design in the NUGGS collection.
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  mkdir -p "$tmp/designs/nuggs-collision"
+  printf '// nuggs-collision fixture (no coupling)\n' >"$tmp/designs/nuggs-collision/nuggs-collision.scad"
+  printf '# nuggs-collision\n\nThe nuggs-collision design.\n' >"$tmp/designs/nuggs-collision/README.md"
+  if _run check >/dev/null 2>&1; then
+    echo "FAIL  selftest: a coupling-less nuggs-* name with no category was accepted"; fails=$((fails + 1))
+  else
+    echo "ok    selftest: a coupling-less nuggs-* name with no category is refused"
+  fi
+
+  # ---- positive: that collision, once it declares a category, groups by it -----
+  # (NOT nuggs) — exactly nuggs-yard's resolution.
+  printf 'category: everyday-functional\n' >"$tmp/designs/nuggs-collision/catalog.conf"
+  if grp="$(_run order 2>/dev/null)" && [[ "$(awk -F'\t' '$4=="nuggs-collision"{print $1}' <<<"$grp")" == "everyday-functional" ]]; then
+    echo "ok    selftest: a coupling-less nuggs-* name groups by its declared category, not nuggs"
+  else
+    echo "FAIL  selftest: a coupling-less nuggs-* name with a category did not group by it"; fails=$((fails + 1))
   fi
 
   # ---- negative: a vocabulary that omits the derived 'nuggs' group is refused -
