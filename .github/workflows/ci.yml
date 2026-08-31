@@ -1122,49 +1122,78 @@ jobs:
           name: telemetry-record
           path: telemetry-record.ndjson
           if-no-files-found: warn
-      - name: Roll the record into the committed telemetry log
-        # Default-branch pushes only, and pushed with GITHUB_TOKEN ON
-        # PURPOSE — the opposite of the regen job's REGEN_TOKEN rule, for
-        # the same underlying fact: a GITHUB_TOKEN push triggers no
-        # workflow. Here that is the feature, not the trap. A telemetry
-        # commit that re-triggered CI would gate the whole catalog again,
-        # capture a new record, and commit forever; and unlike regen's PR
-        # commits, nothing needs checks to attach to a main commit after
-        # the fact. The retry loop covers the one same-run race: regen can
-        # push its own commit to main while this job runs.
+      - name: Roll the record into the telemetry data branch
+        # Telemetry lands on the unprotected `telemetry` branch, NOT the default
+        # branch (issue #481). The default-branch ruleset ("Copilot review for
+        # default branch") requires a pull request and rejects a direct push
+        # (GH013), and a repository ruleset cannot grant the Actions bot a bypass
+        # — so the direct-to-main push this used to attempt is impossible on this
+        # repo. A separate branch keeps telemetry's load-bearing property intact:
+        # this repo's CI triggers on `push: [main]` ONLY, so pushing to
+        # `telemetry` triggers no workflow — the same no-re-trigger guarantee that
+        # stops a telemetry commit from gating the catalog, recording itself, and
+        # committing forever (a PR route would reintroduce exactly that loop).
+        # The branch is a tiny squashed data store built entirely with git
+        # plumbing, so the checked-out main tree and index are never disturbed; it
+        # accumulates by seeding the log from its own tip each run, and
+        # `.github/workflows/reeve.yml` fetches it to read live data. reeve reads
+        # the seed committed on main only until the first record lands here.
         if: >-
           always() && github.event_name == 'push' &&
           needs.changes.outputs.gate_designs != ''
         env:
-          # Scoped to this step alone — see persist-credentials on the
-          # checkout. Actions masks it in the log.
+          # GITHUB_TOKEN is enough: the target branch is unprotected, and a
+          # GITHUB_TOKEN push still triggers no workflow (load-bearing here).
+          # Scoped to this step alone — see persist-credentials on the checkout.
           PUSH_TOKEN: ${{ github.token }}
+          DATA_BRANCH: telemetry
         run: |
           set -euo pipefail
           if [ ! -f telemetry-record.ndjson ]; then
             echo "no record captured — nothing to roll up"
             exit 0
           fi
-          cat telemetry-record.ndjson >> telemetry/log.ndjson
-          ./scripts/telemetry.sh report --out telemetry/REPORT.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add telemetry/log.ndjson telemetry/REPORT.md
-          git commit -m "Telemetry: record gate run ${GITHUB_RUN_ID}"
+          url="https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           for attempt in 1 2 3; do
-            if git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-                "HEAD:${GITHUB_REF_NAME}"; then
+            # Seed the accumulating log from the data branch's tip if it exists;
+            # the committed seed already in the checkout is the first-run fallback.
+            lease=""
+            if git fetch "$url" "$DATA_BRANCH" 2>/dev/null; then
+              git show FETCH_HEAD:telemetry/log.ndjson > telemetry/log.ndjson
+              lease="$(git rev-parse FETCH_HEAD)"
+            fi
+            cat telemetry-record.ndjson >> telemetry/log.ndjson
+            ./scripts/telemetry.sh report --out telemetry/REPORT.md
+            # Build a two-file tree with plumbing (never touching main's index or
+            # working tree), commit it as a single squashed root commit, and push.
+            log_blob="$(git hash-object -w telemetry/log.ndjson)"
+            rpt_blob="$(git hash-object -w telemetry/REPORT.md)"
+            subtree="$(printf '100644 blob %s\tlog.ndjson\n100644 blob %s\tREPORT.md\n' "$log_blob" "$rpt_blob" | git mktree)"
+            root="$(printf '040000 tree %s\ttelemetry\n' "$subtree" | git mktree)"
+            commit="$(git commit-tree "$root" -m "Telemetry: gate runs through ${GITHUB_RUN_ID}")"
+            # --force-with-lease keyed to the fetched tip makes a concurrent
+            # default-branch run (which advanced the branch) fail the push instead
+            # of silently clobbering its record; the retry then re-seeds from the
+            # new tip. The first run has no tip, so it creates the branch plainly.
+            if [ -n "$lease" ]; then
+              git push --force-with-lease="refs/heads/${DATA_BRANCH}:${lease}" \
+                "$url" "${commit}:refs/heads/${DATA_BRANCH}" && ok=1 || ok=0
+            else
+              git push "$url" "${commit}:refs/heads/${DATA_BRANCH}" && ok=1 || ok=0
+            fi
+            if [ "$ok" = 1 ]; then
+              echo "telemetry pushed to the ${DATA_BRANCH} branch ($(wc -l < telemetry/log.ndjson) records total)"
               exit 0
             fi
-            echo "push rejected (attempt ${attempt}) — the branch moved, rebasing"
-            git fetch origin "$GITHUB_REF_NAME"
-            git rebase "origin/${GITHUB_REF_NAME}"
+            echo "push contended (attempt ${attempt}) — ${DATA_BRANCH} advanced, re-seeding"
           done
-          # Non-fatal by design: the record survives as the artifact above,
-          # and the next default-branch run appends its own record anyway —
-          # failing the required gate context over bookkeeping would be
+          # Non-fatal by design: the record survives as the telemetry-record
+          # artifact above, and the next default-branch run appends its own —
+          # failing a required gate context over advisory bookkeeping would be
           # backwards.
-          echo "::warning::could not push the telemetry record after 3 attempts — most likely the default-branch ruleset rejecting the direct push (GH013 'Changes must be made through a pull request'). The record survives as the telemetry-record artifact. Telemetry pushes directly with GITHUB_TOKEN *by design* so it triggers no workflow (a PR would re-gate the catalog and loop forever), so landing it on the default branch needs github-actions[bot] on the ruleset bypass list for telemetry/log.ndjson + telemetry/REPORT.md — not a PR route. See the tracking issue."
+          echo "::warning::could not push the telemetry record to the ${DATA_BRANCH} branch after 3 attempts. The record survives as the telemetry-record artifact; the next run appends its own."
       - name: Upsert sticky PR comment
         # Same-repo PRs only: fork PR tokens are read-only and the comment
         # would fail; this repo's PRs all come from session branches anyway.
