@@ -29,6 +29,12 @@
 # `.claude/reeve-settings.json`, with writes bound to the selected set and
 # capped by `greenlight_cap`.
 #
+# The job's FIRST step is the loop's authority half (issue #444): the
+# deterministic, keyless approval poll — reactions on the routine's own prior
+# greenlight comments, permission-checked, pushed through decide.yml's
+# sequence via the API (never a posted command; labels via the workflow
+# token, the ledger via REGEN_TOKEN). See the poll step's own comment.
+#
 # TWO keys must agree to run: committed `enabled: true` in .github/reeve.conf
 # AND the repo variable REEVE_ENABLED == "true". Either off → inert. The
 # decision is code (`reeve armed`), unit-tested over the full 2×2 matrix, not
@@ -344,6 +350,63 @@ jobs:
         run: |
           echo "::notice::.github/reeve.conf says 'greenlight: ${CONF_GREENLIGHT}' — the deterministic report ran, the greenlight drafter stays off. Flip the key in a reviewed PR to light the loop."
 
+      # The loop's authority half (issue #444), and the FIRST thing an armed
+      # run does: GitHub fires no webhook for reactions, so each run polls
+      # its own prior greenlight comments — reads the reactions through the
+      # tool's GET seam, keeps only reactions from accounts whose REAL
+      # permission is write/maintain/admin (getCollaboratorPermissionLevel,
+      # the same check decide.yml makes; never author_association), lets an
+      # explicit authorized /decide comment outrank them, and pushes an
+      # approved verdict through decide.yml's own sequence VIA THE API —
+      # never a posted /decide command (the stage-1 lesson: the comment
+      # tooling's attribution footer neutralizes a bot-posted command while
+      # the run reports success). Keyless and deterministic: it runs
+      # whenever the loop is lit, with or without the drafter's provider
+      # key, so a lit loop still drains approvals on a keyless day. It runs
+      # BEFORE the Select step on purpose — resolving parked decisions
+      # shrinks the set the drafter is handed — and BEFORE the chain
+      # resolve, whose cross-check failure must stop the drafter (a key
+      # about to be spent on the wrong endpoint), not the poll.
+      #
+      # Tokens, on purpose: labels and the resolution reply use the ambient
+      # GITHUB_TOKEN (issues: write — a token-scoped label flip triggers no
+      # CI, right for the verdict half); the LEDGER commit authenticates
+      # with REGEN_TOKEN, the same PAT the regen job commits artifacts with
+      # — the Actions bot cannot push to the ruleset-protected default
+      # branch (the GH013 lesson behind telemetry's data branch), and a
+      # PAT-authored commit re-triggers CI so the ledger change lands
+      # verified (the classifier scopes a ledger-only commit to no design
+      # gates). The workflow therefore needs NOTHING wider than its present
+      # permissions: the ledger commit is not made with the workflow token.
+      # Without the PAT the append skips with a notice — the label carries
+      # the verdict, decide.yml's documented degradation.
+      - name: Poll prior greenlights for owner reactions
+        id: poll
+        if: >-
+          steps.policy.outputs.armed == 'true'
+          && steps.policy.outputs.greenlight == 'true'
+          && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGEN_TOKEN: ${{ secrets.REGEN_TOKEN }}
+        run: |
+          set -euo pipefail
+          reeve greenlight-poll --repo "$GITHUB_REPOSITORY" --gh-output "$GITHUB_OUTPUT"
+          {
+            echo "## Reeve greenlight — approval poll"
+            if [ -n "$(sed -n 's/^resolved=//p' "$GITHUB_OUTPUT" | head -1)" ]; then
+              echo "- resolved by 👍: #$(sed -n 's/^resolved=//p' "$GITHUB_OUTPUT" | head -1 | tr ' ' ' #')"
+            else
+              echo "- no greenlights approved by a qualifying reaction this run"
+            fi
+            if [ -n "$(sed -n 's/^overruled=//p' "$GITHUB_OUTPUT" | head -1)" ]; then
+              echo "- overruled by 👎 (gate stays parked): #$(sed -n 's/^overruled=//p' "$GITHUB_OUTPUT" | head -1 | tr ' ' ' #')"
+            fi
+            if [ -n "$(sed -n 's/^failed=//p' "$GITHUB_OUTPUT" | head -1)" ]; then
+              echo "- ⚠️ push-through FAILED (left parked for the next run to retry): #$(sed -n 's/^failed=//p' "$GITHUB_OUTPUT" | head -1 | tr ' ' ' #') — see the step log"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Resolve the drafter's model from the committed provider/model registry
       # (issue #206), and cross-check it against the conf's `provider:` label —
       # the #326 pattern. The conf label picks which ship step (and so which
@@ -503,6 +566,7 @@ jobs:
           GREENLIGHT: ${{ steps.policy.outputs.greenlight }}
           ARMED: ${{ steps.policy.outputs.armed }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          POLL_OUTCOME: ${{ steps.poll.outcome }}
           CHAIN_OUTCOME: ${{ steps.chain.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
           ISSUES: ${{ steps.select.outputs.issues }}
@@ -519,6 +583,8 @@ jobs:
               echo "- ⏸️ the routine is paused in git (conf enabled != true); the drafter did not run."
             elif [ "$GREENLIGHT" != "true" ]; then
               echo "- ⏸️ 'greenlight' is false in .github/reeve.conf — the loop is built but not lit."
+            elif [ "$POLL_OUTCOME" != "success" ] && [ "$POLL_OUTCOME" != "skipped" ]; then
+              echo "- ❌ the approval poll did not complete (${POLL_OUTCOME}) — see the poll step log; no verdict was pushed and nothing was drafted."
             elif [ "$CHAIN_OUTCOME" != "success" ]; then
               echo "- ❌ the reeve-greenlight model chain did not resolve (${CHAIN_OUTCOME:-skipped}) — see the resolve step log; no key was spent."
             elif [ "$SELECT_OUTCOME" != "success" ]; then

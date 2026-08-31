@@ -6,6 +6,7 @@
     reeve config    # read the committed policy file
     reeve armed     # the two-key arming decision, as an output
     reeve greenlight-select  # the draftable parked-decision queue, as numbers
+    reeve greenlight-poll    # poll prior greenlights' reactions; push approvals
 
 ``report`` is the pure, tested core; ``gather`` is the thin file read; ``run``
 composes them. The workflow stays a few lines of glue with no policy of its
@@ -24,6 +25,16 @@ marker yet (``github.gather_greenlight_queue``, GET-only) and prints the
 oldest ``greenlight_cap`` of them as space-separated numbers — the bounded
 set the workflow hands the drafter as ``$REEVE_SELECTED_ISSUES``, so the
 agent never sees an issue it cannot post on.
+
+``greenlight-poll`` (issue #444) is the loop's authority half: GitHub fires
+no webhook for reactions, so the NEXT run polls its own prior greenlight
+comments' reactions (permission-checked — only write/maintain/admin
+counts), and pushes an approved verdict through the decide.yml sequence via
+the API (never a posted ``/decide`` command). Its writes live in the
+package's one confined seam, ``pushthrough.py``; the ledger commit
+authenticates with ``REGEN_TOKEN`` — when that PAT is absent the append is
+skipped with a notice (the label still carries the verdict, decide.yml's
+documented degradation), never attempted with the workflow token.
 """
 
 from __future__ import annotations
@@ -149,6 +160,50 @@ def cmd_greenlight_select(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_greenlight_poll(args: argparse.Namespace) -> int:
+    """`greenlight-poll`: poll prior greenlights, push what is approved.
+
+    The authority half of the loop (issue #444): for every open parked
+    decision with a live greenlight, read the greenlight's reactions
+    (GET-only), keep only reactions from write/maintain/admin accounts, let
+    an explicit authorized `/decide` comment outrank them, and apply an
+    approval through decide.yml's own sequence — label-first fail-closed,
+    then `autonomy-ok` where the marker carried `arm=1`, then the PAT-backed
+    ledger append, then the resolution reply. Per-issue failures are
+    reported, never fatal to the rest: the fail-closed order leaves a
+    half-applied push parked for the next run to retry. Prints one line per
+    issue and appends `resolved=`/`overruled=`/`failed=` to
+    ``$GITHUB_OUTPUT`` (the workflow's summary reads them).
+    """
+    # Lazy like the other live commands: pushthrough.py is the package's one
+    # write-bearing seam, and importing it here would defeat the point of
+    # keeping it out of the offline commands entirely.
+    from .pushthrough import run_poll
+
+    pat = os.environ.get("REGEN_TOKEN") or ""
+    results = run_poll(args.repo, _token(), pat)
+
+    resolved = [str(r["number"]) for r in results if r.get("outcome") == "approved"]
+    overruled = [str(r["number"]) for r in results if r.get("outcome") == "overruled"]
+    failed = [str(r["number"]) for r in results if r.get("outcome") == "error"]
+    for result in results:
+        number = result["number"]
+        outcome = result.get("outcome", "?")
+        reason = result.get("reason", "")
+        detail = f" ({reason})" if reason else ""
+        notes = "".join(f" [{note}]" for note in result.get("notes", []))
+        print(f"#{number}: {outcome}{detail}{notes}")
+    if not pat:
+        print("notice: REGEN_TOKEN is not set — ledger appends skipped; the labels carry the verdicts")
+    gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a", encoding="utf-8") as fh:
+            fh.write(f"resolved={' '.join(resolved)}\n")
+            fh.write(f"overruled={' '.join(overruled)}\n")
+            fh.write(f"failed={' '.join(failed)}\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reeve", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -197,6 +252,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_gl.add_argument("--gh-output",
                       help="path to append `issues=` (defaults to $GITHUB_OUTPUT)")
     p_gl.set_defaults(func=cmd_greenlight_select)
+
+    p_poll = sub.add_parser("greenlight-poll",
+                            help="poll prior greenlights' reactions; push approvals")
+    p_poll.add_argument("--repo", required=True,
+                        help="owner/name — the repo to poll parked decisions on")
+    p_poll.add_argument("--gh-output",
+                        help="path to append resolved=/overruled=/failed= (defaults to $GITHUB_OUTPUT)")
+    p_poll.set_defaults(func=cmd_greenlight_poll)
 
     return parser
 
