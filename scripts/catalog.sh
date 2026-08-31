@@ -155,11 +155,48 @@ read_category() {
     || true
 }
 
-# Does the design's entry .scad pull in the NUGGS coupling standard?
+# Strip // line comments and /* ... */ block comments from a .scad file, so a
+# commented-out directive is never read as live code. Line-oriented and
+# newline-preserving on purpose: block-comment state is carried across lines but
+# each input line still emits one output line, so the match downstream stays
+# line-based (a directive must sit on one line to count) exactly as it did before
+# comments were stripped. The JS port (site/lib/catalog.mjs includesCoupling)
+# strips the same two forms with the identical line-preserving state machine, so
+# a directive split across a newline — or buried in a block comment — is the
+# coupling on neither surface; catalog.test.mjs pins that parity.
+strip_scad_comments() {
+  awk '
+    {
+      line = $0; out = ""; i = 1; n = length(line)
+      while (i <= n) {
+        two = substr(line, i, 2)
+        if (inblock) {
+          if (two == "*/") { inblock = 0; i = i + 2 } else { i = i + 1 }
+          continue
+        }
+        if (two == "//") { break }                      # line comment: drop to EOL
+        if (two == "/*") { inblock = 1; i = i + 2; continue }
+        out = out substr(line, i, 1); i = i + 1
+      }
+      print out
+    }
+  ' "$1"
+}
+
+# Does the design's entry .scad pull in the NUGGS coupling standard? A
+# commented-out include/use does NOT count (issue #509 / CodeRabbit) — strip
+# comments first, then match line by line.
 includes_coupling() {
   local entry="${DESIGNS_DIR}/$1/$1.scad"
   [[ -f "$entry" ]] || return 1
-  grep -qE '(include|use)[[:space:]]*<[^>]*nuggs-coupling\.scad>' "$entry"
+  # Capture the stripped text, then grep it — NOT `strip … | grep -q`. Under
+  # `set -o pipefail`, grep -q exits on its first match and closes the pipe, so
+  # awk takes SIGPIPE and the pipeline reports failure even though the coupling
+  # matched; the race only trips on files big enough that grep exits before awk
+  # finishes (the real designs, not the tiny selftest fixtures).
+  local stripped
+  stripped="$(strip_scad_comments "$entry")"
+  grep -qE '(include|use)[[:space:]]*<[^>]*nuggs-coupling\.scad>' <<<"$stripped"
 }
 
 # Resolve every design's group into the GROUP map. Returns non-zero and prints
@@ -450,6 +487,37 @@ catalog_selftest() {
     echo "ok    selftest: a coupling-less nuggs-* name groups by its declared category, not nuggs"
   else
     echo "FAIL  selftest: a coupling-less nuggs-* name with a category did not group by it"; fails=$((fails + 1))
+  fi
+
+  # ---- negative: a COMMENTED-OUT coupling directive does not seat a nuggs-* name -
+  # A `// include <nuggs-coupling.scad>` (or a block-commented, or newline-split
+  # one) is not the coupling: such a nuggs-* name is a collision that must declare
+  # a category, and does — grouped by it, not nuggs (issue #509 / CodeRabbit).
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  mkdir -p "$tmp/designs/nuggs-commented"
+  {
+    printf '// nuggs-commented fixture\n'
+    printf '// include <nuggs-coupling.scad>\n'      # line comment
+    printf '/* use <nuggs-coupling.scad> */\n'       # single-line block comment
+    printf 'use /* split\n*/ <nuggs-coupling.scad>\n' # directive split by a block comment
+  } >"$tmp/designs/nuggs-commented/nuggs-commented.scad"
+  printf '# nuggs-commented\n\nThe nuggs-commented design.\n' >"$tmp/designs/nuggs-commented/README.md"
+  printf 'category: everyday-functional\n' >"$tmp/designs/nuggs-commented/catalog.conf"
+  if grp="$(_run order 2>/dev/null)" && [[ "$(awk -F'\t' '$4=="nuggs-commented"{print $1}' <<<"$grp")" == "everyday-functional" ]]; then
+    echo "ok    selftest: a commented-out coupling directive does not make a nuggs-* name a NUGGS module"
+  else
+    echo "FAIL  selftest: a commented-out coupling directive was treated as the coupling"; fails=$((fails + 1))
+  fi
+
+  # ---- positive: a real directive AFTER a block comment still counts (no over-strip) -
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  mkdir -p "$tmp/designs/nuggs-livecode"
+  printf '/* header */ include <nuggs-coupling.scad>\n' >"$tmp/designs/nuggs-livecode/nuggs-livecode.scad"
+  printf '# nuggs-livecode\n\nThe nuggs-livecode design.\n' >"$tmp/designs/nuggs-livecode/README.md"
+  if grp="$(_run order 2>/dev/null)" && [[ "$(awk -F'\t' '$4=="nuggs-livecode"{print $1}' <<<"$grp")" == "nuggs" ]]; then
+    echo "ok    selftest: a live coupling directive after a block comment still makes a NUGGS module"
+  else
+    echo "FAIL  selftest: comment stripping ate a live coupling directive"; fails=$((fails + 1))
   fi
 
   # ---- negative: a vocabulary that omits the derived 'nuggs' group is refused -

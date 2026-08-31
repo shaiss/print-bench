@@ -189,7 +189,7 @@ export function readDesigns(repoRoot) {
       title: title(readme) || name,
       pitch: pitch(repoRoot, name),
       // The catalog group (issue #374): "nuggs" for a real NUGGS module (a
-      // nuggs-* name that ALSO includes lib/nuggs-coupling.scad), else
+      // nuggs/nuggs-* name that ALSO includes lib/nuggs-coupling.scad), else
       // designs/<name>/catalog.conf's category. build.mjs buckets the index by
       // it; scripts/catalog.sh is the authority both surfaces agree with.
       category: categoryOf(dir, name),

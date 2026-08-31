@@ -37,17 +37,35 @@ export function isNuggs(name) {
 function includesCoupling(designDir, name) {
   const scad = read(join(designDir, `${name}.scad`));
   if (scad === null) return false;
-  // Line-oriented, exactly like catalog.sh includes_coupling's `grep -qE` — a
-  // directive and its <...> target sit on one line — so the port and the bash
-  // authority can never disagree on a design's group over a wrapped directive.
-  return scad
-    .split("\n")
-    .some((line) => /(?:include|use)\s*<[^>]*nuggs-coupling\.scad>/.test(line));
+  // Strip // line comments and /* ... */ block comments before matching, so a
+  // commented-out directive is not read as the coupling (issue #509 / CodeRabbit).
+  // The strip is line-oriented and newline-preserving — block-comment state is
+  // carried across lines but each line stays a line — so the match below stays
+  // line-based (a directive and its <...> target must sit on one line), the exact
+  // state machine catalog.sh strip_scad_comments runs. So the port and the bash
+  // authority can never disagree on a design's group over a wrapped or
+  // commented-out directive; catalog.test.mjs pins that parity.
+  let inBlock = false;
+  for (const raw of scad.split("\n")) {
+    let out = "";
+    for (let i = 0; i < raw.length; ) {
+      const two = raw.slice(i, i + 2);
+      if (inBlock) {
+        if (two === "*/") { inBlock = false; i += 2; } else { i += 1; }
+        continue;
+      }
+      if (two === "//") break; // line comment: drop the rest of the line
+      if (two === "/*") { inBlock = true; i += 2; continue; }
+      out += raw[i]; i += 1;
+    }
+    if (/(?:include|use)\s*<[^>]*nuggs-coupling\.scad>/.test(out)) return true;
+  }
+  return false;
 }
 
 /**
- * A design's category slug: "nuggs" for a real NUGGS module (a nuggs-* name that
- * ALSO includes lib/nuggs-coupling.scad), else the `category:` key of
+ * A design's category slug: "nuggs" for a real NUGGS module (a `nuggs`/`nuggs-*`
+ * name that ALSO includes lib/nuggs-coupling.scad), else the `category:` key of
  * designs/<name>/catalog.conf. A nuggs-*-named design without the coupling is a
  * name collision (e.g. nuggs-yard), not a NUGGS module — it falls through to its
  * declared category, matching catalog.sh resolve_groups (both directions of the

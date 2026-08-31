@@ -115,6 +115,11 @@ adding up the rounded per-part masses above can land a gram out.
 The starred build is the recommendation: it has the loop, the branch and the
 hide, and lands at **407 g including the coupon**.
 
+**Storing it.** There is no tunnel to find a home for: the modules are open
+troughs that lie flat, none longer than the `wye` (183 × 166 mm), so a
+disassembled build shelves in roughly its own footprint — about 406 × 246 mm for
+the starred oval — rather than needing a run's worth of space.
+
 **Shorter run, more stops.** The evidence base for hamster welfare
 (Hauzenberger et al. 2006) puts substrate depth and foraging — not tunnel
 length — at the centre of enrichment. A 2 m circuit of bare channel is a
@@ -135,6 +140,10 @@ costs 0 g of filament and does more than another metre of channel.
 - **Orientation:** exactly as each part renders — flat on the bed; printcheck
   reports "current orientation is as good as any axis-aligned alternative"
   for all six.
+- **Seam position:** put the Z-seam on a **back or outer wall** (or use a
+  scarf/gradual seam). The skirts lap the *sidewalls*, so a seam blob left on
+  that mating band is what makes a good-fit joint feel gritty — an aligned seam
+  there reads as slop when the fit is fine.
 - **Brim:** not needed. Every module has a full flat footprint (unlike the
   `nuggs` straight, which stands 160 mm tall on a 2.4 mm ring and does).
 - **Plate:** a `straight` is 88.6 mm wide, so **two** fit side by side on a
@@ -180,6 +189,10 @@ run to free one piece in the middle.
 
 - **Rocks or falls off** → lower `joint_tol` by 0.05 and reprint.
 - **Will not seat, or the skirt splays** → raise it by 0.05.
+
+A proud **seam blob** on the lapped band can feel like a bad fit but isn't one —
+move the seam to a back wall (see Print settings) before you touch `joint_tol`,
+and judge the fit only once the seam is off the mating face.
 
 Do not commit 92 g to a refuge before a stub mates cleanly.
 
