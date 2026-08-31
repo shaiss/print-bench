@@ -50,11 +50,15 @@ and, at first-layer resolution, in
   and it meets each bore mouth ~1 mm *below* the bore floor — the route steps
   down, never onto a lip. The grade across the dish peaks at **14.6°**, inside
   the welfare ceiling of 15°, and eases to flat at the bottom of the bowl.
-- **A vault, not a dome.** An enclosed near-flat ceiling cannot print
+- **A hipped vault, not a dome.** An enclosed near-flat ceiling cannot print
   support-free, and a domed crown over a chamber this wide would be one. The
-  chamber closes instead on a **barrel vault** — two roof planes at ~46°
-  meeting at a ridge — every surface self-supporting by construction. That
-  took the printcheck overhang figure from 9% to 2% of surface.
+  chamber closes instead on a **hipped vault** — roof planes at ~46° meeting
+  at a ridge, hipped at the same angle down into the ends. Because the
+  ceiling is the pointwise *minimum* of the chamber and those planes, the
+  cavity cannot run past the shell anywhere — closing the end windows that
+  rule now guards against was issue #499. Every surface self-supporting by
+  construction; that shape took the printcheck overhang figure from 9% to 2%
+  of surface.
 - **Vents where the air is.** Six Ø9 mm teardrop vents on the use-ceiling,
   the same count and size the den's chimney derivation gives, over ~2.4× the
   air volume with the same one-animal occupancy. Open to ventilated space is
@@ -66,6 +70,8 @@ and, at first-layer resolution, in
 ![Section across the turn axis — the vaulted crown over the dish](previews/cutaway-cross.png)
 
 ![Crown profile, dead-on — the two roof planes and ridge of the vault](previews/cutaway-profile.png)
+
+![Section along the turn axis — the vault hipped down into the end](previews/cutaway-ridge.png)
 
 ## Print settings
 
@@ -79,7 +85,7 @@ and, at first-layer resolution, in
 - **Supports:** **none needed.** Ports down on their sector tips, the bore
   ceilings close at the coupling's proven 45° class, the web is a 12 mm
   anchored bridge, the belly dome is pole-flush on the bed, and the crown is
-  the vault above. The whole part is support-free as modelled. Keep
+  the hipped vault above. The whole part is support-free as modelled. Keep
   auto-supports **off** even if your slicer offers them: anything it builds
   inside the chamber is unreachable through six Ø9 mm vents.
 - **Orientation:** as modelled — both ports down, sector tips on the bed, the
@@ -104,7 +110,7 @@ at the top of [`nuggs-turnaround.scad`](nuggs-turnaround.scad).
 | `port_tol` | 0.30 mm | The one fit knob for the quarter-turn joint. Tune on the coupon in ±0.05 steps. |
 | `bore_d` | 80 mm | Internal bore — the shared NUGGS headline number. |
 | `body_len_mm` | 180 mm | The animal's body length. The clear-width assert keys on it: the chamber must stay at least this wide inside. |
-| `chamber_ay` | 100 mm | Chamber half-width along the turn axis — the clear internal width is 2× this (200 mm at defaults). |
+| `chamber_ay` | 100 mm | Chamber half-width along the turn axis — the cavity's widest line tracks 2× this (~200 mm at defaults; measured, because the roof's hip planes trim the ends). |
 | `chamber_ax` | 47 mm | Chamber half-width across the route — sets the dish the animal crosses and the bore-mouth handoff. |
 | `max_incline_deg` | 15° | The welfare ceiling on route grade. The dish-grade assert keys on it (14.6° at defaults). |
 | `n_vent` / `vent_d` | 6 / 9 mm | Ceiling vent count and diameter. |
