@@ -47,18 +47,24 @@ individual PR looks guilty of, and the one the ops data shows first.
 
 **Reeve's leash — what it may do without asking.**
 
-| v1 — on its own (shipped) | Staged behind a wrapper + deny-backstop | Never |
-|---|---|---|
-| Read the committed pulse and upsert **one** sticky "bench health" report issue | File / label follow-up issues per finding (an LLM step; needs the labeler's wrapper + `.claude/*-settings.json` deny backstop + a perms-check) | Push code, or edit any design's geometry, scripts, lib, or workflows |
-| Re-rank the platform backlog with stated reasons | — | Change a non-negotiable, or anything in "Never" |
-| Flag a telemetry regression in the report | — | Merge anything, ever |
+| Deterministic, on its own (shipped) | Bounded write behind the wrapper + deny-backstop (shipped, #296 stage 2) | Still staged | Never |
+|---|---|---|---|
+| Read the committed pulse and upsert **one** sticky "bench health" report issue | Draft **one** advisory greenlight comment per parked `needs-decision` issue (#443): a YES/NO verdict on system-level calls or a ROUTE note handing design taste to its design PM, citing the charter line, capped per run, never a label — advisory until a human 👍 | File / label follow-up issues per finding (the wider "hands"; the labeler's wrapper + a perms-check) | Push code, or edit any design's geometry, scripts, lib, or workflows |
+| Re-rank the platform backlog with stated reasons | — | — | Change a non-negotiable, or anything in "Never" |
+| Flag a telemetry regression in the report | — | — | Merge anything, ever |
 
 v1 is the deterministic reporter (`tools/reeve/`): no LLM, no provider secret,
 reads only committed files, one trusted sticky-issue write — the backlog
-groomer's proven-safe shape. The "hands" (auto-filing/labeling from model output)
-cross into agentic-writer territory and are staged as a follow-up carrying the
-same wrapper + deny-backstop the labeler and chunker ship, because that is what
-reading untrusted issue text with a key in scope requires.
+groomer's proven-safe shape — and it stays exactly that: the greenlight drafter
+(#296 stage 2) is a **separate job** that runs after the report, so the secret
+enters only where the agent runs. It is the first shipped "hand", and the
+narrowest one that was useful: an advisory comment through the #442 wrapper
+(`greenlight-helper.sh`, the agent's only shell surface) behind the
+`.claude/reeve-settings.json` deny backstop, bound to the workflow-selected
+issues and capped by `greenlight_cap`. The wider hands (auto-filing/labeling
+from model output) stay staged behind the same wrapper + deny-backstop pattern
+the labeler and chunker ship, because that is what reading untrusted issue text
+with a key in scope requires.
 
 ## Non-negotiables
 
@@ -141,7 +147,7 @@ interesting the build is.
 | Question | Blocking? | Assumption if unanswered |
 |---|---|---|
 | Arm Reeve (set the `REEVE_ENABLED` repo variable) once the first sticky report reads right? | No | Ships disarmed; the human arms it when ready |
-| When Reeve gains its "hands" (B2), does it also open PRs, or only file/label issues? | No | Issues/labels only — the ambient `GITHUB_TOKEN`, no PAT, matching the labeler |
+| When Reeve's remaining "hands" (B2, the file/label write) arrive, do they also open PRs, or only file/label issues? | No | Issues/labels only — the ambient `GITHUB_TOKEN`, no PAT, matching the labeler. The shipped greenlight loop (#296 stage 2) already holds the narrower line: comments only, never a label |
 | Where the non-NUGGS `category:` signal lives — a CI-gated closed-vocab key (a `catalog.conf`) vs derived from lib usage (B1, #374) | No | A small gated `category:` key per design; the implementing session proposes bucket assignments for `/pm` review |
 | When Reeve and a design PM conflict on taste, not ops? | No | Escalate to the human lead — "customer of last resort" per `people/shai.md` |
 
@@ -159,3 +165,4 @@ Append-only. A later session must be able to tell a considered choice from an ac
 | 2026-08-26 | Add **Wright** (`/wright`, `people/wright.md`), Reeve's subordinate toolwright, and delegate ONE write to Reeve — the sign-off (`/reeve-signoff`) on Wright's `agent-brief` proposals (approve arms for the burn behind a deterministic sensitive-path guard; decline/needs-human do not). The forge builds nothing itself: the burn ships draft PRs, the Oracle reviews, the human merges (N3). Shipped disarmed (`WRIGHT_ENABLED`); `WRIGHT_AUTO_ARM` demotes it to advisory in one line. A bounded slice of the leash's staged middle column — see `docs/agent-forge.md` | The pulse showed heal-class gaps (dead review chains, un-escalated failures) sitting unproposed; the forge closes the loop with existing machinery and one new guarded write |
 | 2026-08-23 | Adopt an **ecosystem-first + technique-domain** catalog taxonomy (#374): one derivable NUGGS collection (name-prefix / `nuggs-coupling` include) + the rest grouped by the `docs/advanced-techniques.md` Domains plus an everyday-functional bucket; the gallery stays generated (N1) and every grouping traces to committed source (N5). Ranked B1 | The catalog outgrew its flat presentation at ~29 designs and the lead flagged it; this class of drift (no single PR looks guilty) is exactly Reeve's beat and should have surfaced from the pulse. Ecosystem+technique is the cheapest high-value cut and reuses vocabulary the repo already has |
 | 2026-08-30 | Set the growth account's voice: a **maker building in public** (sentence-case workshop register, first person) that shares the tech and the lessons-learned — failure stories included — and never hype. Reeve backs this as the platform's community-growth posture: queue the honest, technical, lesson-bearing stories, leave hype off the queue. Encoded in Lark's skill (Voice + Channel craft + a before/after calibration example), `people/lark.md`, and `docs/growth.md` | Issue #456: the first dry-run read a touch announcer-y. A build-in-public voice is how an OSS bench humbly grows a community, and it doubles as an honesty guarantee — the fact-budget rule refuses a sourceless claim, so "sound human" can never become "make something up" |
+| 2026-08-31 | Ship the greenlight loop (#296 stage 2, #443) as a **separate job** after the keyless report: the drafter reads the workflow-selected parked `needs-decision` issues and posts ONE advisory comment through the #442 wrapper — a YES/NO verdict on system-level calls (citing the charter line) or a ROUTE note handing design taste to its design PM — never a label, never a resolved gate, advisory until a human 👍. Keyed on the conf's provider secret (absent ⇒ `::notice::` skip), capped by `greenlight_cap`, model from the registry's `reeve-greenlight` chain, and shipped **unlit** (`greenlight: false` in the conf) | A parked decision asks a human to reconstruct a whole thread before ruling; the drafter does that reconstruction so the human's job shrinks to a reaction. The narrowest shipped hand, per the leash: advisory comments only, and the reporter's keylessness is structural (the drift guard pins it) |
