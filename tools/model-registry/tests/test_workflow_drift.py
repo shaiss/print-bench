@@ -1452,3 +1452,195 @@ def test_wright_walk_outcome_guard_fires_on_a_stale_link1_expression():
     tampered = text.replace(stale, "(steps.signoff_zai_1.outcome)")
     with pytest.raises(AssertionError):
         _assert_wright_signoff_outcome_covers_every_link(tampered)
+
+
+# ── Reeve's greenlight drafter (issue #443, #296 stage 2) ────────────────────
+#
+# reeve.yml is the registry's next consumer, and an unusual one: ONE workflow,
+# TWO jobs with opposite security postures. The `report` job is the
+# deterministic, keyless reporter — every finding a recomputable fact, no
+# provider secret, no agent — and issue #443's contract is that it STAYS that
+# way: the LLM greenlight drafter is a SEPARATE job that runs after it, so the
+# secret enters only where the agent runs. The guard therefore pins both
+# directions: the greenlight job's wiring to the `reeve-greenlight` chain (the
+# routine guards' two-tier split — provider agreement, literal secret,
+# endpoint, link-per-step, the #442 containment surface), and the report job's
+# keylessness (no `secrets.` reference, no agent step), each with a negative
+# control proving the check can fail.
+
+REEVE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "reeve.yml"
+REEVE_CONF = ".github/reeve.conf"
+REEVE_CHAIN = "reeve-greenlight"
+# The drafter's own deny backstop (#442) and its single shell surface.
+REEVE_BACKSTOP = ".claude/reeve-settings.json"
+REEVE_WRAPPER = ".claude/skills/reeve-greenlight/greenlight-helper.sh"
+
+
+def _reeve_text() -> str:
+    return REEVE_WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_reeve_greenlight_chain_exists_and_matches_conf():
+    # The chain must exist AND sit on the provider .github/reeve.conf declares —
+    # the greenlight resolve step's run-time cross-check, caught pre-merge (a
+    # mismatched link would spend its key against the wrong endpoint).
+    reg = Registry.load(str(REGISTRY))
+    assert REEVE_CHAIN in reg.chains, (
+        f"the `{REEVE_CHAIN}` chain is missing from the registry — reeve.yml's "
+        "greenlight resolve step would fail at run time, before any key is spent")
+    conf_provider = _routine_provider(REEVE_CONF)
+    for link in reg.resolve(REEVE_CHAIN):
+        assert link.provider == conf_provider, (
+            f"reeve: link {link.position} of `{REEVE_CHAIN}` is on provider "
+            f"{link.provider!r} but {REEVE_CONF} declares {conf_provider!r} — "
+            "the drafter would run its model against the wrong endpoint")
+
+
+def test_reeve_greenlight_is_a_separate_job_after_the_report():
+    # The drafter must run in its OWN job that `needs:` the report — the report
+    # job's keylessness is structural, not incidental, so an agent step cannot
+    # creep into the reporter.
+    blocks = _job_blocks(_reeve_text())
+    assert "greenlight" in blocks, "reeve.yml has no `greenlight` job"
+    assert re.search(r"^    needs: report\b", blocks["greenlight"], re.MULTILINE), (
+        "reeve.yml's greenlight job does not `needs: report` — the drafter must "
+        "run after (and only after a successful) deterministic report")
+    # And it must be the workflow's resolve step that picks the model.
+    assert "model_registry resolve reeve-greenlight" in blocks["greenlight"], (
+        "the greenlight job no longer resolves the `reeve-greenlight` chain — "
+        "its model would have to come from somewhere the registry does not own")
+
+
+def test_reeve_greenlight_ship_steps_are_pinned_to_the_chain():
+    """Every greenlight ship step sources --model from a real chain link, wires
+    the link's provider's literal secret + endpoint, keeps the #442 containment
+    surface (dontAsk, its OWN backstop, the wrapper as the only Bash allow, no
+    MCP server, the committed skill as the prompt), and the steps on the conf's
+    provider match the chain exactly — one ship step per link, in order, so the
+    single-link chain cannot quietly grow a fallback the workflow never walks."""
+    reg = Registry.load(str(REGISTRY))
+    conf_provider = _routine_provider(REEVE_CONF)
+    secrets_by_provider = {p.id: p.secret for p in reg.providers.values()}
+    bases_by_provider = {p.id: p.base_url for p in reg.providers.values()}
+    links = reg.resolve(REEVE_CHAIN)
+    link_positions = {link.position for link in links}
+    steps = _routine_ship_steps(_job_blocks(_reeve_text())["greenlight"])
+    assert steps, "reeve.yml's greenlight job has no claude-code-action ship step"
+    current = []
+    for step in steps:
+        assert step["link"] in link_positions, (
+            f"reeve: a greenlight ship step references link{step['link']}_model "
+            f"but the `{REEVE_CHAIN}` chain has links {sorted(link_positions)}")
+        assert step["secret"] is not None, (
+            "reeve: a greenlight ship step wires no literal anthropic_api_key secret")
+        providers_with_secret = [pid for pid, s in secrets_by_provider.items()
+                                 if s == step["secret"]]
+        assert len(providers_with_secret) == 1, (
+            f"reeve: a ship step wires secrets.{step['secret']}, which matches "
+            f"no single registry provider ({providers_with_secret})")
+        step_provider = providers_with_secret[0]
+        assert step["base_url"] == bases_by_provider[step_provider], (
+            f"reeve: the {step_provider!r} step carries ANTHROPIC_BASE_URL "
+            f"{step['base_url']!r} but the registry endpoint is "
+            f"{bases_by_provider[step_provider]!r}")
+        # The #442 containment surface, which must not be quietly shed: dontAsk,
+        # the loop's OWN deny backstop (never a sibling's), the wrapper as the
+        # ONLY Bash allow plus the read-only file tools, no MCP server (the
+        # wrapper is both the read and the write surface), and the committed
+        # skill as the prompt — never an inline one that bypasses it.
+        assert "--permission-mode dontAsk" in step["chunk"], (
+            "reeve: a greenlight ship step no longer runs under "
+            "--permission-mode dontAsk")
+        assert f"--settings {REEVE_BACKSTOP}" in step["chunk"], (
+            f"reeve: a greenlight ship step no longer carries the deny backstop "
+            f"(--settings {REEVE_BACKSTOP})")
+        assert f"Bash({REEVE_WRAPPER}:*)" in step["chunk"], (
+            "reeve: a greenlight ship step no longer allows the greenlight "
+            "wrapper — the agent's only shell surface")
+        assert "Read,Grep,Glob" in step["chunk"], (
+            "reeve: a greenlight ship step dropped the read-only file tools the "
+            "charter grounding (repo-root PM.md) depends on")
+        assert "mcp__" not in step["chunk"] and "--mcp-config" not in step["chunk"], (
+            "reeve: a greenlight ship step allows an MCP server — the loop's "
+            "write surface is the wrapper, and no server exists to allow")
+        assert "prompt: /reeve-greenlight" in step["chunk"], (
+            "reeve: a greenlight ship step no longer invokes the committed "
+            "/reeve-greenlight skill — an inline prompt would bypass it")
+        if step_provider == conf_provider:
+            current.append(step)
+    assert [s["link"] for s in current] == [l.position for l in links], (
+        f"reeve: the {conf_provider} block's steps reference links "
+        f"{[s['link'] for s in current]} but the chain has "
+        f"{[l.position for l in links]} — one ship step per link in order, so "
+        "deepening the chain means wiring (and gating) its walk, not just "
+        "editing the registry")
+
+
+def test_reeve_greenlight_run_steps_gate_on_key_presence():
+    # The keyed-and-skippable requirement (#443's Done-when): every ship step
+    # gates on key_present, so an absent provider secret is a ::notice:: skip,
+    # never a red run — and the notice survives.
+    text = _reeve_text()
+    for step in _routine_ship_steps(_job_blocks(text)["greenlight"]):
+        assert step["gates_on_key"], (
+            "reeve: a greenlight ship step does not gate on key_present == '1' "
+            "— an absent provider key would fail the run red instead of skipping")
+    assert "::notice::the configured provider" in text, (
+        "reeve.yml's secret-absent notice is gone — the degraded path must stay "
+        "a ::notice:: skip")
+
+
+def test_reeve_key_gate_guard_fires_without_the_gate():
+    # NEGATIVE CONTROL: strip the key gate from a ship step and require the
+    # guard to FAIL — otherwise it proves nothing (a check that cannot fail is
+    # worthless, the repo's standing rule).
+    text = _reeve_text()
+    tampered = text.replace("          && steps.policy.outputs.key_present == '1'\n", "", 1)
+    assert tampered != text, (
+        "tamper target not found — the greenlight ship-step key gate moved "
+        "shape; update the mutation")
+    stripped = [s for s in _routine_ship_steps(_job_blocks(tampered)["greenlight"])
+                if not s["gates_on_key"]]
+    assert stripped, (
+        "the key-presence check did not react to a stripped gate — it has been "
+        "weakened into a restatement")
+
+
+def test_reeve_no_hardcoded_model_literal_survives():
+    text = _reeve_text()
+    literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
+                if not tok.startswith("${{")]
+    assert not literals, f"hardcoded --model literal(s) in reeve.yml: {literals}"
+
+
+def _assert_reeve_report_job_is_keyless(text: str) -> None:
+    """The deterministic reporter holds no secret and runs no agent (issue
+    #443's contract that it keeps running keyless and unchanged). Factored out
+    so the negative control can run it against tampered text."""
+    blocks = _job_blocks(text)
+    assert "report" in blocks, "reeve.yml has no `report` job"
+    assert "secrets." not in blocks["report"], (
+        "reeve.yml's report job references a secret — the deterministic "
+        "reporter is keyless by design; a secret-bearing step belongs in the "
+        "separate `greenlight` job")
+    assert "claude-code-action" not in blocks["report"], (
+        "reeve.yml's report job runs an agent step — the reporter is "
+        "deterministic by design; the LLM half lives in `greenlight`")
+
+
+def test_reeve_reporter_stays_keyless_and_agent_free():
+    _assert_reeve_report_job_is_keyless(_reeve_text())
+
+
+def test_reeve_reporter_keyless_guard_fires_on_a_secret_reference():
+    # NEGATIVE CONTROL: wire a secret into the report job and require the
+    # keylessness guard to FAIL — the reporter's keylessness is a security
+    # property, so its guard must be able to fail.
+    text = _reeve_text()
+    tampered = text.replace("GH_TOKEN: ${{ github.token }}",
+                            "GH_TOKEN: ${{ secrets.ZAI_KEY }}", 1)
+    assert tampered != text, "tamper target not found — the fixture is stale"
+    assert "secrets.ZAI_KEY" in _job_blocks(tampered)["report"], (
+        "the tamper landed outside the report job — the fixture is stale")
+    with pytest.raises(AssertionError):
+        _assert_reeve_report_job_is_keyless(tampered)

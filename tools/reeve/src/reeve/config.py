@@ -32,6 +32,7 @@ _KNOWN_KEYS = (
     "cadence",
     "greenlight",
     "greenlight_cap",
+    "provider",
     "low_headroom_pct",
     "score_drop",
     "score_floor",
@@ -40,6 +41,12 @@ _KNOWN_KEYS = (
     "routine_dead_runs",
     "lock_leak_hours",
 )
+
+# The providers a `provider:` value may name (#443): each is a reviewed ship
+# step in reeve.yml holding that provider's literal secret, so a typo'd name
+# must fail here rather than selecting no step at all. Mirrors the sibling
+# confs' closed provider sets.
+_KNOWN_PROVIDERS = ("anthropic", "zai")
 
 # github.py fetches only this many completed runs per workflow (_RUNS_FETCHED
 # there; duplicated as a literal so this pure module never imports the network
@@ -149,6 +156,12 @@ class Config:
     # are also today's committed values.
     greenlight: bool = False
     greenlight_cap: int = 6  # max greenlight comments per run (the stage-1 round size)
+    # The greenlight step's provider (#443) — the deterministic reporter this
+    # config otherwise serves is keyless, so this key is read only by the
+    # greenlight job's policy step. Defaults to the servable provider every
+    # scheduled sibling runs on, so an absent key is never a silently-wrong
+    # endpoint.
+    provider: str = "zai"
     low_headroom_pct: float = 15.0
     score_drop: int = 3
     score_floor: float = 80.0
@@ -185,6 +198,13 @@ def load(path: str = DEFAULT_PATH) -> Config:
                 cfg.cadence = value
             elif key == "greenlight":
                 cfg.greenlight = _parse_bool(value, key, where)
+            elif key == "provider":
+                if value not in _KNOWN_PROVIDERS:
+                    raise ValueError(
+                        f"{where}: 'provider' must be one of {list(_KNOWN_PROVIDERS)}, "
+                        f"got {value!r}"
+                    )
+                cfg.provider = value
             elif key in ("low_headroom_pct", "score_floor"):
                 setattr(cfg, key, _parse_pct(value, key, where))
             elif key == "walltime_ratio":

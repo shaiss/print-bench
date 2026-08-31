@@ -6,11 +6,28 @@
 # pulse: it runs the tools/reeve detectors over the committed telemetry log, the
 # live preview sizes and the routine confs, and upserts ONE sticky "bench
 # health" report issue. Advisory-only: no label edits, no closes, no comments
-# on other issues, and no LLM anywhere (every finding is a recomputable fact).
-# Because there is no agentic step, this workflow holds NO provider secret; the
-# only token it ever sees is the ambient GITHUB_TOKEN. Reeve's primary pulse is
-# committed files, plus GET-only run-health reads via src/reeve/github.py (the
-# groomer's pattern; issue #313) — the sticky upsert remains the sole write.
+# on other issues. The `report` job below is fully deterministic — no LLM
+# anywhere, every finding a recomputable fact — and holds NO provider secret;
+# the only token it ever sees is the ambient GITHUB_TOKEN. Reeve's primary
+# pulse is committed files, plus GET-only run-health reads via
+# src/reeve/github.py (the groomer's pattern; issue #313) — the sticky upsert
+# remains its sole write.
+#
+# The SECOND job, `greenlight` (issue #443, the #296 stage-2 loop's LLM step),
+# is the one agentic half: it drafts ONE advisory greenlight comment on each
+# workflow-selected open `needs-decision` issue — a YES/NO verdict on
+# system-level decisions, a ROUTE note handing design-taste calls to the design
+# PM — never resolving the gate, never labeling, never pushing. It runs AFTER
+# the report (needs: report), in its own job so the reporter stays byte-for-byte
+# keyless, and it is THREE-keyed: the routine's two arming keys (below) plus
+# `greenlight: true` in the conf (shipped `false` — the loop is built but not
+# lit) plus its provider's secret actually being set; a missing secret is a
+# `::notice::` skip, never a red run. Its model comes from the registry's
+# `reeve-greenlight` chain, cross-checked against the conf's `provider:` label
+# up front (the #326 pattern); its one shell surface is the #442 wrapper
+# (`.claude/skills/reeve-greenlight/`), behind the deny backstop
+# `.claude/reeve-settings.json`, with writes bound to the selected set and
+# capped by `greenlight_cap`.
 #
 # TWO keys must agree to run: committed `enabled: true` in .github/reeve.conf
 # AND the repo variable REEVE_ENABLED == "true". Either off → inert. The
@@ -20,8 +37,10 @@
 # Cadence lives twice by necessity (Actions cannot read a file for
 # on.schedule): the cron literal below and the conf's `cadence:` key must stay
 # identical (a test pins them). 05:53 UTC daily — an off-peak slot after the
-# sibling routines (:11/:17/:23/:29/:41/:47). Reeve reads committed telemetry
-# and preview sizes, not the issue backlog, so a calm daily cadence is right.
+# sibling routines (:11/:17/:23/:29/:41/:47). The report reads committed
+# telemetry and preview sizes, not the issue backlog; the greenlight loop does
+# read the decision-gate backlog, but its draft is advisory and a parked
+# decision already waits on a human, so a day never starves it.
 
 name: Reeve — bench health
 
@@ -223,6 +242,297 @@ jobs:
               echo "- ❌ report rendered but the upsert did not complete (${UPSERT_OUTCOME:-skipped}) — the sticky issue may be stale; see the upsert step log."
             else
               echo "- ✅ report rendered and upserted to the sticky report issue."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  greenlight:
+    name: Draft advisory greenlights on parked decisions
+    # The LLM half of the decision-gate loop (issue #443, #296 stage 2). Runs
+    # only AFTER a successful report (needs: report) — one routine, report
+    # first — and repeats the report job's own arming gate so the two halves
+    # can never disagree about whether Reeve is on. The default-branch pin is
+    # the same belt-and-braces as the assessor's: this job carries a write
+    # scope and a provider secret, and a hand-dispatch against a PR branch must
+    # not run that branch's skill code with either.
+    needs: report
+    if: >-
+      vars.REEVE_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+      && needs.report.result == 'success'
+    runs-on: ubuntu-latest
+    # A hung drafter must not hold a runner for the 6-hour default while
+    # holding a secret, unwatched (the assessor's bound; the report job keeps
+    # its own tighter 10-minute one — this job is the only agentic step).
+    timeout-minutes: 30
+    permissions:
+      # checkout + reading the charter/PM.md and the skill the drafter runs
+      contents: read
+      # the wrapper's ONE write: greenlight comments on the selected issues
+      issues: write
+    env:
+      # Secrets cannot be read in a step `if:` directly, so surface each
+      # provider's key presence as a plain string and gate on it below. The
+      # "Read policy" step turns these + the configured provider into a single
+      # `key_present` output (the assessor's pattern, verbatim).
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # Belt-and-braces with the job `if:` above: always check out the
+          # default branch — the secret-bearing drafter reads untrusted parked
+          # text, so it must run the reviewed, merged skill and wrapper.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install reeve
+        # The Select step is `reeve greenlight-select` — the tool's own GET-only
+        # seam, so the trusted workflow (not the agent) widens or narrows the
+        # candidate set. Stdlib-only; the [test] extra stays with CI's job.
+        run: pip install -e tools/reeve
+
+      - name: Read policy (.github/reeve.conf)
+        id: policy
+        # The same two-key decision the report job makes (same tool, same conf),
+        # plus this job's OWN third key: `greenlight: true` — the loop's
+        # conf-side switch, shipped false so landing the step lights nothing
+        # (the variable stays the live kill switch for the whole routine). Also
+        # resolves the conf's `provider:` to whether THAT provider's secret is
+        # present, so the ship steps below gate on one `key_present` output; a
+        # missing key is a ::notice:: skip below, never a red run.
+        env:
+          REEVE_VARIABLE: ${{ vars.REEVE_ENABLED }}
+        run: |
+          set -euo pipefail
+          conf=.github/reeve.conf
+          enabled="$(reeve config --get enabled --path "$conf")"
+          greenlight="$(reeve config --get greenlight --path "$conf")"
+          provider="$(reeve config --get provider --path "$conf")"
+          case "$provider" in
+            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
+            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            *) echo "::error::unknown provider '$provider'"; exit 1 ;;
+          esac
+          # The tested 2×2 decision, exactly as the report job computes it —
+          # and `reeve armed` appends armed=true/false to $GITHUB_OUTPUT
+          # itself (the report job's own invocation shape).
+          reeve armed --variable "$REEVE_VARIABLE" --conf-enabled "$enabled"
+          {
+            echo "enabled=$enabled"
+            echo "greenlight=$greenlight"
+            echo "provider=$provider"
+            echo "key_present=$key"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Paused in git
+        if: steps.policy.outputs.armed != 'true'
+        env:
+          CONF_ENABLED: ${{ steps.policy.outputs.enabled }}
+        run: |
+          echo "::notice::Reeve is armed (REEVE_ENABLED=true) but .github/reeve.conf says 'enabled: ${CONF_ENABLED}' — doing nothing (report or greenlight). Flip the conf in a reviewed PR to resume."
+
+      - name: Greenlight loop disabled in git
+        if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight != 'true'
+        env:
+          # Env indirection, never inline ${{ }} in run:.
+          CONF_GREENLIGHT: ${{ steps.policy.outputs.greenlight }}
+        run: |
+          echo "::notice::.github/reeve.conf says 'greenlight: ${CONF_GREENLIGHT}' — the deterministic report ran, the greenlight drafter stays off. Flip the key in a reviewed PR to light the loop."
+
+      # Resolve the drafter's model from the committed provider/model registry
+      # (issue #206), and cross-check it against the conf's `provider:` label —
+      # the #326 pattern. The conf label picks which ship step (and so which
+      # endpoint + secret) runs; the registry picks the model. A chain sitting
+      # on another provider would spend a key against the wrong endpoint, so
+      # the mismatch fails HERE, loudly, before any key is spent. Pointing the
+      # `reeve-greenlight` chain at another provider is a real registry edit,
+      # but it has to travel with the conf label.
+      - name: "Resolve the greenlight model chain (issue #206)"
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m model_registry resolve reeve-greenlight --gh-output "$GITHUB_OUTPUT"
+          link_provider="$(sed -n 's/^link1_provider=//p' "$GITHUB_OUTPUT" | head -1)"
+          conf_provider="$(reeve config --get provider --path .github/reeve.conf)"
+          if [ "$link_provider" != "$conf_provider" ]; then
+            echo "::error::the registry's 'reeve-greenlight' chain resolves to provider '$link_provider' but .github/reeve.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/reeve.conf."
+            exit 1
+          fi
+
+      - name: Select parked decisions needing a greenlight
+        id: select
+        if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The TRUSTED Select step: `reeve greenlight-select` lists the open
+          # needs-decision issues that carry no greenlight marker yet (GET-only,
+          # src/reeve/github.py) and prints the oldest greenlight_cap of them.
+          # The agent is handed only the resulting numbers — via $GITHUB_OUTPUT
+          # here and $REEVE_SELECTED_ISSUES at the ship step — so a
+          # prompt-injected run cannot widen its own candidate set, and the
+          # cap always covers every issue it is handed.
+          reeve greenlight-select --repo "$GITHUB_REPOSITORY" \
+            --conf .github/reeve.conf --gh-output "$GITHUB_OUTPUT"
+          nums="$(sed -n 's/^issues=//p' "$GITHUB_OUTPUT" | head -1)"
+          {
+            echo "## Reeve greenlight — selection"
+            if [ -z "$nums" ]; then
+              echo "- no parked decisions awaiting a greenlight (every open \`needs-decision\` issue already carries one)"
+            else
+              echo "- parked decisions to draft: #${nums// / #}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One explicit run step per provider — a provider is a reviewed,
+      # git-tracked step because Actions can reference a secret only by its
+      # literal name. The conf's `provider:` label picks which one runs; the
+      # MODEL comes from the registry's `reeve-greenlight` chain (single-link:
+      # a low-volume advisory drafter, and the workflow consumes only link1 —
+      # no fallback tail is promised, so none is configured). The ambient
+      # GITHUB_TOKEN is right for the wrapper's comments (a GITHUB_TOKEN
+      # comment triggers no CI), so the REGEN_TOKEN PAT reasoning does not
+      # apply. Tool surface: the #442 wrapper
+      # (.claude/skills/reeve-greenlight/greenlight-helper.sh, both path
+      # spellings) is the agent's ONLY shell surface — reading AND writing,
+      # which is why there is no MCP server here — plus the read-only file
+      # tools (Read/Grep/Glob) for the charter (repo-root PM.md, docs/, the
+      # skill). Never Write, never a general Bash. --settings closes the
+      # additive allow leak from settings.json with the loop's OWN deny
+      # backstop (.claude/reeve-settings.json — deny beats allow from every
+      # source), kept honest by scripts/reeve-perms-check.sh. The pin is the
+      # immutable commit behind the v1 tag.
+
+      - name: Run via Anthropic (Claude)
+        id: run_anthropic
+        if: >-
+          steps.policy.outputs.armed == 'true'
+          && steps.policy.outputs.greenlight == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'anthropic'
+          && steps.policy.outputs.key_present == '1'
+          && inputs.dry_run != true
+        env:
+          # The wrapper authenticates its `gh` calls with this token; the job
+          # grants issues:write and nothing more.
+          GH_TOKEN: ${{ github.token }}
+          # The trusted Select step's bounded set, bound into the agent's
+          # environment so the wrapper can refuse any issue not in it.
+          REEVE_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          # The per-run post counter's state file: fresh runner temp per run,
+          # so the cap counts THIS run's posts only.
+          REEVE_GREENLIGHT_STATE: ${{ runner.temp }}/reeve-greenlight-posts
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          # Keep the transcript off the public Actions log — this step holds a
+          # provider key and GITHUB_TOKEN with issues:write; the run-outcome
+          # summary and permission denials still surface.
+          show_full_output: "false"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-settings.json --allowedTools "Bash(.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Bash(./.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Read,Grep,Glob"
+          prompt: /reeve-greenlight
+
+      - name: Run via Z.AI (GLM)
+        id: run_zai
+        if: >-
+          steps.policy.outputs.armed == 'true'
+          && steps.policy.outputs.greenlight == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.provider == 'zai'
+          && steps.policy.outputs.key_present == '1'
+          && inputs.dry_run != true
+        # Z.AI GLM via its Anthropic-compatible endpoint (the conf's committed
+        # `provider: zai` label picks this step): ANTHROPIC_BASE_URL points at
+        # Z.AI (the /api/anthropic path matters), ANTHROPIC_AUTH_TOKEN becomes
+        # the Bearer token, and the same ZAI_KEY is passed as
+        # anthropic_api_key to satisfy the action's credential check. Which
+        # model exactly is the registry's `reeve-greenlight` chain's call (its
+        # first link's provider must match the conf label — the cross-check
+        # above). Same tool surface and transcript posture as the Anthropic
+        # step; effort is high because a greenlight a human may approve on a
+        # 👍 is expensive-to-be-wrong (the assessor's tier reasoning).
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+          GH_TOKEN: ${{ github.token }}
+          REEVE_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          REEVE_GREENLIGHT_STATE: ${{ runner.temp }}/reeve-greenlight-posts
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-settings.json --allowedTools "Bash(.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Bash(./.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Read,Grep,Glob"
+          prompt: /reeve-greenlight
+
+      - name: Explain a skipped drafter run
+        if: >-
+          steps.policy.outputs.armed == 'true'
+          && steps.policy.outputs.greenlight == 'true'
+          && steps.select.outputs.issues != ''
+          && (steps.policy.outputs.key_present != '1'
+              || inputs.dry_run == true)
+        env:
+          ISSUES: ${{ steps.select.outputs.issues }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — selected parked decisions (${ISSUES}) but did not invoke the greenlight drafter"
+          else
+            echo "::notice::the configured provider '${PROVIDER}' has no key set (ANTHROPIC_API_KEY for anthropic, ZAI_KEY for zai) — selected (${ISSUES}) but skipping the greenlight drafter. The report ran and is unaffected."
+          fi
+
+      - name: Explain an empty selection
+        if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight == 'true' && steps.select.outputs.issues == ''
+        run: echo "::notice::no parked decisions awaiting a greenlight — every open needs-decision issue already carries one; nothing to draft"
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          GREENLIGHT: ${{ steps.policy.outputs.greenlight }}
+          ARMED: ${{ steps.policy.outputs.armed }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          CHAIN_OUTCOME: ${{ steps.chain.outcome }}
+          SELECT_OUTCOME: ${{ steps.select.outcome }}
+          ISSUES: ${{ steps.select.outputs.issues }}
+          KEY_PRESENT: ${{ steps.policy.outputs.key_present }}
+          PROVIDER: ${{ steps.policy.outputs.provider }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+        run: |
+          {
+            echo "### Reeve greenlight — run outcome"
+            if [ "$POLICY_OUTCOME" != "success" ]; then
+              echo "- ❌ policy step did not complete (${POLICY_OUTCOME:-skipped}) — the conf did not parse; nothing ran."
+            elif [ "$ARMED" != "true" ]; then
+              echo "- ⏸️ the routine is paused in git (conf enabled != true); the drafter did not run."
+            elif [ "$GREENLIGHT" != "true" ]; then
+              echo "- ⏸️ 'greenlight' is false in .github/reeve.conf — the loop is built but not lit."
+            elif [ "$CHAIN_OUTCOME" != "success" ]; then
+              echo "- ❌ the reeve-greenlight model chain did not resolve (${CHAIN_OUTCOME:-skipped}) — see the resolve step log; no key was spent."
+            elif [ "$SELECT_OUTCOME" != "success" ]; then
+              echo "- ❌ the selection did not complete (${SELECT_OUTCOME:-skipped}) — see the select step log; nothing was drafted."
+            elif [ -z "$ISSUES" ]; then
+              echo "- ✅ nothing to draft: every parked decision already carries a greenlight."
+            elif [ "$DRY_RUN" = "true" ]; then
+              echo "- 🧪 dry run: selected #${ISSUES// / #} but did not draft."
+            elif [ "$KEY_PRESENT" != "1" ]; then
+              echo "- ⏭️ selected #${ISSUES// / #} but provider '${PROVIDER}' has no key — skipped by notice, never red."
+            elif [ "$RUN" != "success" ]; then
+              echo "- ❌ the drafter run did not complete (${RUN:-skipped}) — see the ship step log; the wrapper's refusals (cap, off-selection, already-greenlighted) each say why in the transcript summary."
+            else
+              echo "- ✅ drafter ran over #${ISSUES// / #} — check each thread for its greenlight comment."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

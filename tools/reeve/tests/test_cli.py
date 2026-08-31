@@ -104,3 +104,52 @@ def test_armed_disarmed_still_exits_zero(capsys):
     # The decision is the output; deciding not to run is not a failure.
     assert main(["armed", "--variable", "false", "--conf-enabled", "true"]) == 0
     assert capsys.readouterr().out.strip() == "false"
+
+
+# greenlight-select (issue #443): the trusted Select step the workflow hands
+# the drafter its bounded issue set through. gather_greenlight_queue is
+# monkeypatched at the module attribute the lazy in-function import resolves —
+# no request leaves the process.
+
+def _queue(*nums):
+    return {"parked": [{"number": n, "title": f"t{n}", "url": f"u/{n}"} for n in nums],
+            "queue": [{"number": n, "title": f"t{n}", "url": f"u/{n}"} for n in nums]}
+
+
+def test_greenlight_select_prints_numbers_and_appends_output(tmp_path, monkeypatch, capsys):
+    gh_out = tmp_path / "gh_output"
+    monkeypatch.setattr("reeve.github.gather_greenlight_queue",
+                        lambda repo, token: _queue(230, 265, 267))
+    monkeypatch.setenv("GH_TOKEN", "tok")
+    rc = main(["greenlight-select", "--repo", "o/r", "--gh-output", str(gh_out)])
+    assert rc == 0
+    assert capsys.readouterr().out == "230 265 267\n"
+    assert "issues=230 265 267" in gh_out.read_text(encoding="utf-8")
+
+
+def test_greenlight_select_bounds_the_queue_to_the_conf_cap(tmp_path, monkeypatch, capsys):
+    # cap 2 → only the two oldest parked issues are handed over, so every
+    # issue the drafter sees is postable within the same run's cap.
+    conf = tmp_path / "reeve.conf"
+    conf.write_text("greenlight_cap: 2\n", encoding="utf-8")
+    monkeypatch.setattr("reeve.github.gather_greenlight_queue",
+                        lambda repo, token: _queue(230, 265, 267, 269))
+    rc = main(["greenlight-select", "--repo", "o/r", "--conf", str(conf)])
+    assert rc == 0
+    assert capsys.readouterr().out == "230 265\n"
+
+
+def test_greenlight_select_empty_queue_is_a_clean_empty_line(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("reeve.github.gather_greenlight_queue",
+                        lambda repo, token: {"parked": [], "queue": []})
+    rc = main(["greenlight-select", "--repo", "o/r"])
+    assert rc == 0
+    assert capsys.readouterr().out == "\n"
+
+
+def test_greenlight_select_requires_repo():
+    # argparse's own usage error — a selection without a repo is a typo, not a
+    # quiet full-repo scan.
+    import pytest
+    with pytest.raises(SystemExit):
+        main(["greenlight-select"])

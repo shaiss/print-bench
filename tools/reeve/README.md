@@ -5,6 +5,10 @@ PM (issue #272). Reeve owns the *system* — the gates, the autonomy loop, the
 site, the telemetry — as a running whole, and this tool is how it reads the ops
 pulse. It is the platform-ops sibling of `tools/backlog-groomer`: same
 advisory-only, no-LLM, one-sticky-issue shape, pointed at a different question.
+That stays true of the *tool*: the package is deterministic end to end. The
+greenlight loop (#296 stage 2, #443) — an LLM drafter that advises on parked
+`needs-decision` issues — is built **on top of** this tool's GET seam, not into
+it; see "The greenlight loop" below.
 
 ## The PM split
 
@@ -40,6 +44,11 @@ pattern; issue #313) — only when `--repo` is passed:
   `claude/issue-<N>-*` branches that would corroborate one (the selector's
   lock semantics, mirrored from `tools/backlog-burn`, not imported).
 
+The same `github.py` serves the greenlight loop's trusted Select step (issue
+#443): `gather_greenlight_queue` lists the open `needs-decision` issues and
+reads each thread to see which already carry a greenlight marker — still all
+GET, still the only network-capable module in the package.
+
 ## The detectors
 
 Eight pure functions of one snapshot, deterministic order, byte-stable report:
@@ -66,20 +75,51 @@ a reason, never silently empty (the groomer's honesty rule); an offline run
   `PUT`/`DELETE`) appears anywhere in the package, and the pure core imports
   nothing network-capable — `github.py` is the one module allowed `urllib`,
   and everything it does is a GET.
-- The scheduled workflow's single write is upserting one marker-matched sticky
-  `reeve-report` issue, keyed belt-and-braces by its label and the body's first
-  line. No provider secret is held, so it needs no deny-backstop.
-- The LLM "hands" (auto-filing/labeling follow-up issues) are a staged
-  follow-up (charter backlog B1) carrying the labeler's wrapper + deny-backstop,
-  because acting on the pulse from model output over untrusted text crosses into
-  agentic-writer territory.
+- The scheduled workflow's `report` job has a single write: upserting one
+  marker-matched sticky `reeve-report` issue, keyed belt-and-braces by its label
+  and the body's first line. That job holds no provider secret and runs no
+  agent, so the package itself needs no deny-backstop — the drift guard pins
+  the keylessness structurally (`tools/model-registry/tests/`).
+- The first "hand" — the greenlight drafter — is shipped (#296 stage 2, #443)
+  as a **separate job** in the same workflow, so neither claim above leaks into
+  it: it holds the provider secret, and its write is a wrapper-mediated comment
+  behind `.claude/reeve-settings.json` (the #442 deny backstop), outside this
+  package. The wider hands (auto-filing/labeling follow-up issues) stay staged
+  behind the labeler's wrapper + deny-backstop, because acting on the pulse
+  from model output over untrusted text crosses into agentic-writer territory.
+
+## The greenlight loop (issue #443, #296 stage 2)
+
+The LLM half of the HITL decision gate, wired on this tool's containment
+pieces. A separate `greenlight` job in `.github/workflows/reeve.yml` runs after
+the keyless report and:
+
+- resolves the registry's `[chain:reeve-greenlight]` (`.github/models/
+  registry.conf`), cross-checked up front against the conf's `provider:` label
+  — the #326 pattern, no model id in the workflow;
+- selects the work **as trusted workflow code** (`reeve greenlight-select`):
+  the open `needs-decision` issues carrying no greenlight marker, oldest first,
+  bounded by the `greenlight_cap` conf key;
+- runs the drafter (`/reeve-greenlight`, `.claude/skills/reeve-greenlight/`)
+  with `--permission-mode dontAsk` over the #442 wrapper — its only shell
+  surface — behind `.claude/reeve-settings.json`, its writes bound to the
+  selected set and capped per run.
+
+It drafts **advisory** verdicts: a YES/NO on system-level decisions (citing the
+repo-root `PM.md` charter line) or a ROUTE note handing design taste to its
+design PM — never a label, never a resolved gate, advisory until a human 👍.
+The reaction poll and push-through are piece #444, deliberately not this.
 
 ## Arming (two keys, shipped disarmed)
 
 The routine runs only when **both** agree: `.github/reeve.conf`'s `enabled: true`
 (committed intent) **and** the `REEVE_ENABLED` repo variable (the live human-only
 switch). Shipped with the variable unset, so a clone/fork can't silently arm it.
-The 2×2 decision is code (`reeve armed`), unit-tested.
+The 2×2 decision is code (`reeve armed`), unit-tested. The greenlight job adds a
+third, keyless-until-lit gate of its own: `greenlight: true` in the conf
+(**shipped `false`** — the loop is built but not lit) plus the conf-declared
+provider's secret actually being set; a missing secret is a `::notice::` skip,
+never a red run.
 
 ## CLI
 
@@ -90,6 +130,7 @@ reeve run --root . --conf .github/reeve.conf # gather then report (the workflow)
 reeve run --root . --repo owner/name         # + the GET-only run-health read
 reeve config --get enabled                   # read the committed policy
 reeve armed --variable "$REEVE_ENABLED" --conf-enabled "$enabled"
+reeve greenlight-select --repo owner/name    # the draftable parked-decision queue
 ```
 
 `--repo` (on `gather` and `run`) attaches the run-health block; the token comes

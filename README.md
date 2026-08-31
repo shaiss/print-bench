@@ -334,8 +334,9 @@ surfaces studies awaiting a read live in
     every non-wrapper Bash allow must be denied plus every sibling write
     surface, while its own
     `.claude/skills/reeve-greenlight/greenlight-helper.sh` (the loop's only
-    shell surface, whose `--selftest` pins every post-greenlight refusal) must
-    never be denied
+    shell surface, whose `--selftest` pins every post-greenlight refusal and
+    the assembled comment shape — marker, `GREENLIGHT: YES|NO|ROUTE` verdict
+    line, reasoning, wrapper-appended approval footer) must never be denied
   - `assessor-context.sh` — the trusted vendor-fetch step behind the
     adoption-study assessor: extracts the study's named GitHub repository and
     shallow-clones it into `.assessor-context/<n>/` (GitHub-only, hooks
@@ -497,7 +498,12 @@ surfaces studies awaiting a read live in
   over the committed telemetry log and live preview sizes (budget tightening,
   gate failures, score/wall-time regressions, archived creep, report drift),
   advisory-only into one sticky report issue — the platform-ops sibling of the
-  backlog groomer — see its [README](tools/reeve/README.md) and the platform
+  backlog groomer — plus the **greenlight loop** (#296 stage 2, issue #443):
+  a separate keyed-and-skippable job after the keyless report whose LLM
+  drafter posts ONE advisory greenlight per parked `needs-decision` issue (a
+  YES/NO verdict on system-level calls, or a ROUTE note handing design taste
+  to its design PM) through the #442 wrapper — never a label, never a
+  resolved gate — see its [README](tools/reeve/README.md) and the platform
   charter [PM.md](PM.md)
 - `tools/growth/` — the deterministic engine behind the growth desk
   (`docs/growth.md`): the growth-twitter policy parser, the weighted
