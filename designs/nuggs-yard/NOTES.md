@@ -26,7 +26,9 @@ Product page: `README.md`. Design request and the measurements behind it:
 An open-top run for an adult Syrian hamster's **playpen** — free-roam time
 outside the cage. The ask was "loops and twists, turns, branches, all the
 stuff to keep him busy". It is a floor-standing kit of modules the owner
-lays out themselves, not a fixed object.
+lays out themselves, not a fixed object. Despite the `nuggs-` name, it is a
+sibling of the NUGGS tunnel system, not a module in it — its lap-skirt joint
+does not mate with the NUGGS port.
 
 This is *not* a change to `nuggs` and not a derivative of it: no shared
 geometry, no include, no `derives.conf`. `nuggs` is an enclosed bore that
