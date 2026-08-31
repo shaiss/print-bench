@@ -101,6 +101,31 @@ jobs:
         run: |
           echo "::notice::Reeve is armed (REEVE_ENABLED=true) but .github/reeve.conf says 'enabled: ${CONF_ENABLED}' — doing nothing. Flip the conf in a reviewed PR to resume."
 
+      - name: Overlay live telemetry from the data branch
+        # Telemetry is pushed to the unprotected `telemetry` branch by ci.yml's
+        # roll-up step, not the default branch (issue #481: the default-branch
+        # ruleset blocks a direct push and telemetry must not re-trigger CI).
+        # Overlay that live log + report into the checkout so reeve's gate-side
+        # detectors (gate-failing / score-regression / walltime-regression /
+        # archived-creep) read current data instead of the frozen seed committed
+        # on the default branch. A read-only fetch — the checkout's
+        # persist-credentials:false means auth is supplied per-fetch here. If the
+        # branch does not exist yet (no record has landed), reeve reads the seed,
+        # exactly as before, and those detectors stay 'not evaluated'.
+        if: steps.policy.outputs.armed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch --depth=1 "$url" telemetry 2>/dev/null; then
+            git show FETCH_HEAD:telemetry/log.ndjson > telemetry/log.ndjson
+            git show FETCH_HEAD:telemetry/REPORT.md  > telemetry/REPORT.md 2>/dev/null || true
+            echo "overlaid live telemetry ($(wc -l < telemetry/log.ndjson) records)"
+          else
+            echo "::notice::no telemetry data branch yet — reeve reads the committed seed; gate-side detectors will read 'not evaluated' until the first record lands"
+          fi
+
       - name: Build the report
         if: steps.policy.outputs.armed == 'true'
         id: report
