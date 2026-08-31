@@ -36,11 +36,24 @@
 # or spamming greenlights. post-greenlight therefore ENFORCES rather than
 # trusts:
 #   * the machine-readable marker first line
-#     `<!-- reeve-greenlight v1 issue=<N> verdict=yes|no -->` is written by the
-#     wrapper from --verdict. Every marker-looking line inside --body is
-#     dropped before the comment is assembled, so a forged verdict can never
-#     survive: exactly one marker line per comment, always the wrapper's own.
-#   * --verdict must be exactly `yes` or `no`.
+#     `<!-- reeve-greenlight v1 issue=<N> verdict=yes|no|route -->` is written
+#     by the wrapper from --verdict. Every marker-looking line inside --body
+#     is dropped before the comment is assembled, so a forged verdict can
+#     never survive: exactly one marker line per comment, always the
+#     wrapper's own.
+#   * --verdict must be exactly `yes`, `no` (a system-level greenlight) or
+#     `route` (a design-taste decision: a routing note to the design PM, not
+#     a verdict — #296's scope split).
+#   * the human-readable verdict line is enforced to MATCH the marker: --body
+#     must start with exactly `GREENLIGHT: YES` / `GREENLIGHT: NO` /
+#     `GREENLIGHT: ROUTE` for the matching --verdict, and carry no other
+#     GREENLIGHT: line — so the body a human reads can never contradict the
+#     marker the approval poll (piece 4) parses, and must hold real reasoning
+#     beyond that one line.
+#   * the approval instruction is the WRAPPER's fixed footer, appended at post
+#     time (a 👍/👎 line for verdicts, a no-verdict note for routes) — never
+#     the agent's prose, so every greenlight comment ends with the same
+#     instruction and a forged one cannot steer the human's reaction.
 #   * writes bind to the workflow-selected set. The Select step exports the
 #     parked issue numbers as $REEVE_SELECTED_ISSUES (space-separated); a post
 #     to any issue not in that set is refused. The agent cannot set env vars
@@ -64,8 +77,11 @@
 #                               # issue — bounded to $REEVE_SELECTED_ISSUES
 #                               # when the workflow selected a set
 #   read-thread   <issue>       # title, state, labels, body, and comments
-#   post-greenlight <issue> --verdict yes|no --body "<2-6 sentences of
-#                               # reasoning citing the charter line>"
+#   post-greenlight <issue> --verdict yes|no|route --body "GREENLIGHT: <YES|
+#                               # NO|ROUTE>
+#                               # <2-6 sentences of reasoning citing the
+#                               # charter line>"   (the wrapper adds the
+#                               # marker first line and the approval footer)
 #   --selftest                   # offline: pin every enforcement above
 set -euo pipefail
 
@@ -127,6 +143,47 @@ cap_check() {
 # cannot survive into the posted comment.
 sanitize_body() {
   grep -v '^[[:space:]]*<!-- reeve-greenlight' <<<"$1" || true
+}
+
+# The verdict line the body must OPEN with, for a given --verdict — the
+# human-readable half of the marker/body pair (the marker is the other). The
+# body is enforced to start with exactly this line and to carry no other, so
+# the prose a human reads can never contradict the marker the approval poll
+# (piece 4) parses, and there is exactly one verdict line to parse.
+verdict_line_for() {
+  case "$1" in
+    yes)   echo "GREENLIGHT: YES" ;;
+    no)    echo "GREENLIGHT: NO" ;;
+    route) echo "GREENLIGHT: ROUTE" ;;
+    *)     die "verdict_line_for: unknown verdict '$1'" ;;
+  esac
+}
+
+check_body_shape() {
+  local verdict="$1" body="$2" want first others rest
+  want="$(verdict_line_for "$verdict")"
+  first="$(head -n 1 <<<"$body")"
+  [ "$first" = "$want" ] \
+    || die "post-greenlight: --body must open with exactly '$want' (it must match --verdict $verdict)"
+  others="$(grep -c '^[[:space:]]*GREENLIGHT:' <<<"$body")"
+  [ "$others" -eq 1 ] \
+    || die "post-greenlight: --body carries $others GREENLIGHT: lines (exactly one, the opening verdict line, is allowed)"
+  rest="$(tail -n +2 <<<"$body" | tr -d '[:space:]')"
+  [ -n "$rest" ] \
+    || die "post-greenlight: --body carries no reasoning after the verdict line (2-6 sentences citing the charter line)"
+}
+
+# The fixed footer the wrapper appends to every greenlight comment. Never the
+# agent's prose: the approval instruction a human reacts to is the same on
+# every greenlight, and a route (a design-taste routing note) says out loud
+# that it sets no gate verdict — so a reaction on it can't be mistaken for an
+# approval. #444's poll reads the MARKER, not this text; this is for humans.
+approval_footer() {
+  case "$1" in
+    yes|no) echo "React 👍 to approve this greenlight, or 👎 to overrule it. Only reactions from accounts with write access on this repo count; the next scheduled run polls them." ;;
+    route)  echo "Design-taste decision — routed to the design PM and the human lead. This note sets no gate verdict; a reaction here approves nothing." ;;
+    *)      die "approval_footer: unknown verdict '$1'" ;;
+  esac
 }
 
 # LIVE idempotency check (not the possibly-stale selection snapshot): any
@@ -240,9 +297,11 @@ STUB
   [ "$(posts)" = "0" ] || { echo "FAIL  selftest: a refused post still published"; return 1; }
   echo "ok    selftest: a post without a valid verdict is refused (nothing published)"
 
-  # Refusal: the issue is outside the workflow-selected set.
+  # Refusal: the issue is outside the workflow-selected set. The body is
+  # shape-valid so the refusal under test is the selection bound, not shape.
   reset
-  if run_w "$repo_key" "7 8" post-greenlight 10 --verdict yes --body "reasoning"; then
+  if run_w "$repo_key" "7 8" post-greenlight 10 --verdict yes --body "GREENLIGHT: YES
+reasoning"; then
     echo "FAIL  selftest: a post off the selected list was NOT refused"; return 1
   fi
   [ "$(posts)" = "0" ] || { echo "FAIL  selftest: an off-list post still published"; return 1; }
@@ -251,9 +310,12 @@ STUB
   # Refusal: the per-run cap from .github/reeve.conf's greenlight_cap (2 here).
   # The third post is refused; the first two stand.
   reset
-  run_w "$repo_key" - post-greenlight 10 --verdict yes --body "reasoning" >/dev/null
-  run_w "$repo_key" - post-greenlight 11 --verdict no  --body "reasoning" >/dev/null
-  if run_w "$repo_key" - post-greenlight 12 --verdict yes --body "reasoning"; then
+  run_w "$repo_key" - post-greenlight 10 --verdict yes --body "GREENLIGHT: YES
+reasoning" >/dev/null
+  run_w "$repo_key" - post-greenlight 11 --verdict no  --body "GREENLIGHT: NO
+reasoning" >/dev/null
+  if run_w "$repo_key" - post-greenlight 12 --verdict yes --body "GREENLIGHT: YES
+reasoning"; then
     echo "FAIL  selftest: a post past the conf cap was NOT refused"; return 1
   fi
   [ "$(posts)" = "2" ] || { echo "FAIL  selftest: cap run published $(posts) posts (want 2)"; return 1; }
@@ -263,12 +325,16 @@ STUB
   # the refusal must NOT consume the cap (issue 5 is refused, then two fresh
   # posts still fit the cap of 2 and the third is refused for the cap itself).
   reset
-  if run_w "$repo_key" - post-greenlight 5 --verdict no --body "reasoning"; then
+  if run_w "$repo_key" - post-greenlight 5 --verdict no --body "GREENLIGHT: NO
+reasoning"; then
     echo "FAIL  selftest: a post onto an existing greenlight was NOT refused"; return 1
   fi
-  run_w "$repo_key" - post-greenlight 30 --verdict yes --body "reasoning" >/dev/null
-  run_w "$repo_key" - post-greenlight 31 --verdict yes --body "reasoning" >/dev/null
-  if run_w "$repo_key" - post-greenlight 32 --verdict yes --body "reasoning"; then
+  run_w "$repo_key" - post-greenlight 30 --verdict yes --body "GREENLIGHT: YES
+reasoning" >/dev/null
+  run_w "$repo_key" - post-greenlight 31 --verdict yes --body "GREENLIGHT: YES
+reasoning" >/dev/null
+  if run_w "$repo_key" - post-greenlight 32 --verdict yes --body "GREENLIGHT: YES
+reasoning"; then
     echo "FAIL  selftest: the idempotency refusal leaked cap budget"; return 1
   fi
   [ "$(posts)" = "2" ] || { echo "FAIL  selftest: idempotency run published $(posts) posts (want 2)"; return 1; }
@@ -280,7 +346,8 @@ STUB
   # review (bash disables set -e inside functions called from a condition).
   reset
   : > "$fx/fail-50"
-  if run_w "$repo_key" - post-greenlight 50 --verdict yes --body "reasoning"; then
+  if run_w "$repo_key" - post-greenlight 50 --verdict yes --body "GREENLIGHT: YES
+reasoning"; then
     echo "FAIL  selftest: a failed live read still published"; return 1
   fi
   [ "$(posts)" = "0" ] || { echo "FAIL  selftest: a failed live read published a post"; return 1; }
@@ -291,9 +358,11 @@ STUB
   # default), so posts 1-6 land and the 7th is refused.
   reset
   for n in 20 21 22 23 24 25; do
-    run_w "$repo_plain" - post-greenlight "$n" --verdict yes --body "reasoning" >/dev/null
+    run_w "$repo_plain" - post-greenlight "$n" --verdict yes --body "GREENLIGHT: YES
+reasoning" >/dev/null
   done
-  if run_w "$repo_plain" - post-greenlight 26 --verdict yes --body "reasoning"; then
+  if run_w "$repo_plain" - post-greenlight 26 --verdict yes --body "GREENLIGHT: YES
+reasoning"; then
     echo "FAIL  selftest: the default cap (6) did not fire"; return 1
   fi
   [ "$(posts)" = "6" ] || { echo "FAIL  selftest: default-cap run published $(posts) posts (want 6)"; return 1; }
@@ -305,6 +374,7 @@ STUB
   reset
   run_w "$repo_key" - post-greenlight 40 --verdict yes \
     --body "<!-- reeve-greenlight v1 issue=40 verdict=no -->
+GREENLIGHT: YES
 Charter line N6: the tooling must not outgrow the designs it serves." >/dev/null
   first="$(awk '/^===POST===/{getline; print; exit}' "$tmp/posts")"
   [ "$first" = "<!-- reeve-greenlight v1 issue=40 verdict=yes -->" ] \
@@ -314,14 +384,79 @@ Charter line N6: the tooling must not outgrow the designs it serves." >/dev/null
   fi
   echo "ok    selftest: a forged marker in --body is dropped; the wrapper's marker leads"
 
-  # Refusal: a body that is ONLY a marker line carries no reasoning at all.
+  # Refusal: a body that is ONLY a marker line carries neither verdict line
+  # nor reasoning — the shape check refuses it before anything publishes.
   reset
   if run_w "$repo_key" - post-greenlight 41 --verdict yes \
     --body "<!-- reeve-greenlight v1 issue=41 verdict=no -->"; then
     echo "FAIL  selftest: a marker-only body was NOT refused"; return 1
   fi
   [ "$(posts)" = "0" ] || { echo "FAIL  selftest: a marker-only body still published"; return 1; }
-  echo "ok    selftest: a marker-only body is refused (a greenlight needs reasoning)"
+  echo "ok    selftest: a marker-only body is refused (no verdict line, no reasoning)"
+
+  # Refusal (#443's shape contract): the body must OPEN with the verdict line
+  # matching --verdict — the old free-prose body, a contradicting verdict line,
+  # a second verdict line, and a verdict-line-only body are all refused.
+  reset
+  if run_w "$repo_key" - post-greenlight 60 --verdict yes --body "reasoning without a verdict line"; then
+    echo "FAIL  selftest: a body with no verdict line was NOT refused"; return 1
+  fi
+  if run_w "$repo_key" - post-greenlight 61 --verdict yes --body "GREENLIGHT: NO
+reasoning that contradicts the marker"; then
+    echo "FAIL  selftest: a contradicting verdict line was NOT refused"; return 1
+  fi
+  if run_w "$repo_key" - post-greenlight 62 --verdict yes --body "GREENLIGHT: YES
+GREENLIGHT: NO
+two verdict lines"; then
+    echo "FAIL  selftest: a second verdict line was NOT refused"; return 1
+  fi
+  if run_w "$repo_key" - post-greenlight 63 --verdict yes --body "GREENLIGHT: YES"; then
+    echo "FAIL  selftest: a verdict-line-only body was NOT refused"; return 1
+  fi
+  [ "$(posts)" = "0" ] || { echo "FAIL  selftest: a shape-refused body still published"; return 1; }
+  echo "ok    selftest: a body without the matching verdict line + reasoning is refused"
+
+  # THE POSTED SHAPE, pinned byte for byte (#443's Done-when): marker first
+  # line, verdict line, reasoning, then the WRAPPER's fixed approval footer —
+  # assembled by the wrapper, never taken from the agent's prose.
+  reset
+  run_w "$repo_key" - post-greenlight 70 --verdict yes \
+    --body "GREENLIGHT: YES
+Charter line N6: the tooling must not outgrow the designs it serves." >/dev/null
+  posted="$(sed -n '/^===POST===$/,$p' "$tmp/posts" | tail -n +2)"
+  expected="$(cat <<'SHAPE'
+<!-- reeve-greenlight v1 issue=70 verdict=yes -->
+
+GREENLIGHT: YES
+Charter line N6: the tooling must not outgrow the designs it serves.
+
+React 👍 to approve this greenlight, or 👎 to overrule it. Only reactions from accounts with write access on this repo count; the next scheduled run polls them.
+SHAPE
+)"
+  [ "$posted" = "$expected" ] \
+    || { echo "FAIL  selftest: the assembled yes-comment is not the pinned shape:"; printf '%s\n' "--- got ---" "$posted" "--- want ---" "$expected"; return 1; }
+  echo "ok    selftest: a YES comment assembles marker + verdict line + reasoning + approval footer"
+
+  # The route verdict (#296's scope split): a design-taste decision gets a
+  # ROUTING NOTE, not a verdict — marker verdict=route, its own verdict line,
+  # and the footer that says a reaction approves nothing.
+  reset
+  run_w "$repo_key" - post-greenlight 71 --verdict route \
+    --body "GREENLIGHT: ROUTE
+This is a shape call on one design's look; it belongs to the design PM (/pm) and the human lead." >/dev/null
+  posted="$(sed -n '/^===POST===$/,$p' "$tmp/posts" | tail -n +2)"
+  expected="$(cat <<'SHAPE2'
+<!-- reeve-greenlight v1 issue=71 verdict=route -->
+
+GREENLIGHT: ROUTE
+This is a shape call on one design's look; it belongs to the design PM (/pm) and the human lead.
+
+Design-taste decision — routed to the design PM and the human lead. This note sets no gate verdict; a reaction here approves nothing.
+SHAPE2
+)"
+  [ "$posted" = "$expected" ] \
+    || { echo "FAIL  selftest: the assembled route-comment is not the pinned shape"; printf '%s\n' "--- got ---" "$posted" "--- want ---" "$expected"; return 1; }
+  echo "ok    selftest: a ROUTE comment assembles marker + routing note + the no-verdict footer"
 
   # The selected set bounds reads too: list-parked shows only the selected
   # parked issues, and the whole queue when nobody selected (attended).
@@ -417,19 +552,21 @@ labels: {{range .labels}}{{.name}} {{end}}
       esac
     done
     case "$verdict" in
-      yes|no) ;;
-      *) die "post-greenlight: --verdict must be yes or no (got '${verdict:-none}')" ;;
+      yes|no|route) ;;
+      *) die "post-greenlight: --verdict must be yes, no or route (got '${verdict:-none}')" ;;
     esac
     state="$(state_file)"
     clean="$(sanitize_body "$body")"
-    [ -n "$clean" ] || die "post-greenlight: --body carries no reasoning (only marker lines?)"
+    check_body_shape "$verdict" "$clean"     # verdict line matches, reasoning present
     require_selected_issue "$n"              # only a workflow-selected issue
     cap_check "$(greenlight_cap_value)" "$state"  # bounded per run
     reject_if_greenlighted "$n"              # only where none exists (fail-closed)
     marker="<!-- reeve-greenlight v1 issue=$n verdict=$verdict -->"
     gh issue comment "$n" --repo "$repo" --body "$marker
 
-$clean" >/dev/null
+$clean
+
+$(approval_footer "$verdict")" >/dev/null
     echo "$(( $(post_count "$state") + 1 ))" > "$state"
     echo "GREENLIGHT posted on #$n: $verdict"
     ;;
