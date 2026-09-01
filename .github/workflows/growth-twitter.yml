@@ -260,29 +260,51 @@ jobs:
           # `gh api`) supports sort=updated and stays strongly consistent (not
           # the Search API); per_page=100 makes ">100 items updated today"
           # (impossible for a ≤1-post/day desk) the only way to overflow it.
-          touched_json="$(gh api \
-            "repos/$GITHUB_REPOSITORY/issues?labels=growth-queue,channel:twitter&state=all&sort=updated&direction=desc&per_page=100" \
-            2>/dev/null || echo '[]')"
-          touched_today="$(printf '%s' "$touched_json" \
-            | jq -r --arg t "$today" '[.[] | select((.updated_at // "")[0:10] >= $t)] | .[].number' 2>/dev/null || echo '')"
-          comments='[]'
-          for n in $touched_today; do
-            ic="$(gh issue view "$n" --json comments \
-              | jq '[.comments[] | {body: .body, createdAt: .createdAt}]' 2>/dev/null || echo '[]')"
-            comments="$(jq -n --argjson a "$comments" --argjson b "$ic" '$a + $b' 2>/dev/null || printf '%s' "$comments")"
-          done
-          held_today=0
-          if [ "$(printf '%s' "$comments" | PYTHONPATH=tools/growth/src python3 -m growth daycap --today "$today")" = "posted" ]; then
-            echo "::notice::a live post already went out today ($today) — holding to keep ≤1 live post/day"
+          #
+          # FAIL CLOSED: if any part of this scan cannot complete (a transient
+          # GitHub API / JSON failure), HOLD this firing rather than treat the
+          # day as clear — a fail-open here could publish a SECOND live post the
+          # same day. A later delivered firing retries after GitHub recovers.
+          held_today=0; hold_reason=""
+          if ! touched_json="$(gh api \
+              "repos/$GITHUB_REPOSITORY/issues?labels=growth-queue,channel:twitter&state=all&sort=updated&direction=desc&per_page=100")"; then
+            held_today=1; hold_reason="could not read the desk's issues to verify the daily post guard"
+          fi
+          if [ "$held_today" = "0" ] && ! touched_today="$(printf '%s' "$touched_json" \
+              | jq -r --arg t "$today" '[.[] | select((.updated_at // "")[0:10] >= $t)] | .[].number')"; then
+            held_today=1; hold_reason="could not parse the desk's issues"
+          fi
+          if [ "$held_today" = "0" ]; then
+            # Gather each touched-today issue's comments WITH AUTHOR. daycap only
+            # counts a `posted` marker from the trusted posting identity — the
+            # GITHUB_TOKEN posts marker comments as `github-actions[bot]` — so an
+            # outsider commenting the marker string on a public queue issue
+            # cannot suppress a day's post (a denial-of-service).
+            comments='[]'
+            for n in $touched_today; do
+              if ! ic="$(gh issue view "$n" --json comments \
+                  --jq '[.comments[] | {body: .body, createdAt: .createdAt, author: .author.login}]')"; then
+                held_today=1; hold_reason="could not read comments on issue #$n"; break
+              fi
+              if ! comments="$(jq -n --argjson a "$comments" --argjson b "$ic" '$a + $b')"; then
+                held_today=1; hold_reason="could not merge comment data"; break
+              fi
+            done
+          fi
+          if [ "$held_today" = "0" ] && [ "$(printf '%s' "$comments" \
+              | PYTHONPATH=tools/growth/src python3 -m growth daycap --today "$today" --author 'github-actions[bot]')" = "posted" ]; then
+            held_today=1; hold_reason="a live post already went out today ($today)"
+          fi
+          if [ "$held_today" = "1" ]; then
+            echo "::notice::holding this firing — ${hold_reason}; keeping ≤1 live post/day (a later firing retries)"
             nums=""
-            held_today=1
           fi
 
           echo "issues=$nums" >> "$GITHUB_OUTPUT"
           {
             echo "## Growth agent (Twitter/X) — selection"
             if [ "$held_today" = "1" ]; then
-              echo "- held: a live post already went out today ($today); ≤1 live post/day"
+              echo "- held: ${hold_reason}; ≤1 live post/day"
             elif [ -z "$nums" ]; then
               echo "- the queue is empty (no open \`growth-queue\` + \`channel:twitter\` issue outside \`needs-decision\`)"
             else

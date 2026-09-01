@@ -265,7 +265,7 @@ approving any of them for Lark. Model from the `reeve-growth` registry chain
 | A dead model id kills the sweep | Single-link by design — one daily sweep fails visibly and retries next morning; `model-registry smoke growth-twitter` proves the link before arming |
 | A hijacked run floods the channel | `GROWTH_MAX_POSTS` (default 1) per run, in-process, unreachable by the agent; live posts additionally need per-item labels no agent can apply |
 | The feed reads robotic (every post at the same clock minute) | The post time is whatever hour GitHub delivers the day's first firing — heavily and variably delayed by GitHub's own scheduler (observed 21:55 / 19:31 / 00:39 on consecutive days), so it walks widely on its own (above) |
-| Two posts land on the same day (GitHub delivers 2+ firings, or a re-run) | The per-UTC-day guard: `daycap.posted_today` (tested) holds the drain if a live `posted` marker is already dated today; runs serialize via the `concurrency` group, and the marker is written claim-first, so a later same-day run always sees it. `max_posts_per_run` still floors each run |
+| Two posts land on the same day (GitHub delivers 2+ firings, or a re-run) | The per-UTC-day guard: `daycap.posted_today` (tested) holds the drain if a live `posted` marker is already dated today; runs serialize via the `concurrency` group, and the marker is written claim-first, so a later same-day run always sees it (and the scan fails closed — a transient API error holds the drain rather than posting again). `max_posts_per_run` still caps each run |
 | GitHub drops all of a day's firings | 0 posts that day; the queue is durable, so it drains next day. The five slots are delivery redundancy precisely to make this rare |
 
 ## Arming it (the morning-after checklist)

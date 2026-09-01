@@ -7,10 +7,12 @@ Subcommands, each a thin shell over one module:
   ``backlog-burn config``, over the growth desk's own closed key set).
 * ``growth length <text>`` — the weighted tweet length (URLs = 23), so a
   human or an attended session can check copy the way the posting tool will.
-* ``growth daycap [--today <YYYY-MM-DD>]`` — the per-UTC-day live-post guard:
-  read the desk's marker comments as a JSON list on stdin and print ``posted``
-  iff a ``growth-twitter:posted`` marker is dated today (default: today UTC),
-  so Lark's Select step can hold the drain to ≤1 live post/day.
+* ``growth daycap --author <logins> [--today <YYYY-MM-DD>]`` — the per-UTC-day
+  live-post guard: read the desk's marker comments as a JSON list on stdin and
+  print ``posted`` iff a ``growth-twitter:posted`` marker dated today (default:
+  today UTC) was authored by one of the trusted ``--author`` logins (so an
+  outsider's comment can't), letting Lark's Select step hold the drain to ≤1
+  live post/day.
 * ``growth simulate --conf <conf> --snapshot <json> --posts <json>
   --start <iso> --days <n> --out-md <path> [--out-ndjson <path>]`` — the
   accelerated dry run (docs/growth.md): render what would have been posted.
@@ -49,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     p_daycap = sub.add_parser("daycap", help="has a live post already gone out today?")
     p_daycap.add_argument("--today", default="",
                           help="UTC date YYYY-MM-DD to test (default: today UTC)")
+    p_daycap.add_argument("--author", required=True,
+                          help="comma-separated GitHub logins the posting tool "
+                               "posts as; only a marker from these authors holds "
+                               "the drain (so an outsider's comment can't)")
 
     p_sim = sub.add_parser("simulate", help="accelerated dry-run timeline")
     p_sim.add_argument("--conf", default=config_mod.DEFAULT_PATH)
@@ -93,7 +99,11 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(comments, list):
             print("growth daycap: expected a JSON list of comments on stdin", file=sys.stderr)
             return 1
-        print("posted" if daycap_mod.posted_today(comments, today) else "clear")
+        trusted = {a.strip() for a in args.author.split(",") if a.strip()}
+        if not trusted:
+            print("growth daycap: --author must name at least one trusted login", file=sys.stderr)
+            return 1
+        print("posted" if daycap_mod.posted_today(comments, today, trusted) else "clear")
         return 0
 
     if args.cmd == "simulate":
