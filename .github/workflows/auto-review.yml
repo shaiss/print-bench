@@ -11,6 +11,30 @@ name: Auto design review (Jane / Drik / PM / coach)
 # before the next iteration acts on any of it. The reviewers are feedback,
 # the PM is the gate.
 #
+# Reviewer-job cost envelope (measured, issue #450 — a reviewer job drifting
+# materially above this is the contract regressing, so check against it before
+# adding work to the reviewer skills):
+#   * Jane review: ~19–25 min wall clock steady state (session 1107–1446 s,
+#     31–37 turns). Drik review: ~11–16 min (session 611–826 s, 23–36 turns).
+#     Measured on PRs #403 and #500 after the recast; the first two post-recast
+#     rounds (#328, #341) still ran 35–42 min of Jane — transition residue
+#     (in-session re-renders, provider-retry loops), not the envelope. The
+#     pre-recast baseline (PR #321) was 36–50 min of Jane at 92 turns and one
+#     45 min Drik round, with the reviewer apt-installing OpenSCAD/xvfb/
+#     PrusaSlicer mid-session, running a duplicate 200 s `gate.sh --slice` and
+#     re-rendering all five previews (Jane's #321 review documents all three).
+#   * The invariant the recast (PR #322) bought: the reviewer jobs' own steps
+#     are checkout/bun/claude-code-action only — nothing installs or runs the
+#     render toolchain. The sessions consume CI's printcheck+slice sticky and
+#     the committed previews instead of re-deriving. Regression signals: a
+#     reviewer job above this envelope; `apt-get` / `openscad` / `xvfb-run` /
+#     `prusa-slicer` / `scripts/gate.sh` / `scripts/render.sh` appearing in a
+#     reviewer job log; a review comment claiming local renders or gate runs.
+#     Caveat: claude-code-action runs the agent with its output hidden, so a
+#     log grep proves the job scaffolding clean, not the session — the wall
+#     time and the review comments are the behavioral evidence. Enforcement
+#     (a deny backstop) is sibling issue #451, not this comment.
+#
 # Scope guard (prevents spurious runs on backend/infra-only PRs):
 #   * The `design-changes` job checks whether the PR diff contains any file
 #     under `designs/`. If it does not, every downstream review job is skipped.
