@@ -34,6 +34,7 @@ drifts. Read the outputs and run §2 accordingly:
 | `gate` | the render gate (§2), scoped to `gate_designs` — a space-separated list, `ALL` for the whole catalog, or empty for "run but gate nothing" |
 | `scad` | `check.sh` |
 | `styles` | `style-check.sh` |
+| `docs_standards` | `docs-standards-check.sh` (selftest first, then the gate) |
 | `printcheck_tests` | `pytest tools/printcheck/tests` |
 | `stylelift_tests` | `pytest tools/stylelift/tests` |
 | `lineage_tests` | `pytest tools/lineage/tests` |
@@ -67,6 +68,7 @@ shellcheck --severity=warning scripts/*.sh .claude/hooks/*.sh
 actionlint .github/workflows/*.yml   # if missing: install pinned, same as ci.yml's lint job
 
 ./scripts/readme-gate.sh                             # product pages + committed GIFs + configured product shots (every PR)
+./scripts/docs-standards-check.sh --selftest && ./scripts/docs-standards-check.sh   # if docs_standards=true: docs/page wiring (selftest proves the gate still fires)
 ./scripts/check.sh                                   # if scad=true
 ./scripts/lineage.sh selftest                        # before any gate run: proves the derivative check still fires
 ./scripts/gate.sh --slice <gate_designs...>          # if gate=true: pass the gate_designs list; no args when it is ALL; skip entirely when it is empty ("run but gate nothing")
@@ -85,6 +87,15 @@ python -m pytest tools/ci-gates/tests -q             # if ci_gates_tests=true
 
 The `if <output>=true` conditions above are exactly §1's table — read them off
 `./scripts/ci-classify.sh --local`, don't re-derive them from the diff.
+
+The pytest lines presume the suite's package is importable. CI pip-installs each
+one before running it; locally the SessionStart hook installs only `printcheck`
+and `stylelift`. Of the rest, the suites whose tests bootstrap `src/` into
+`sys.path` themselves (`lineage`, `stylelift`, `model-registry`, `ci-gates`,
+`backlog-burn`) collect with no install, while `reeve`, `backlog-groomer`,
+`telemetry` and `brief-sources` die at collection with `ModuleNotFoundError` in
+a fresh session — run `pip install -e 'tools/<t>[test]'` on those first (the
+same command CI's job uses).
 
 Missing tools (openscad, prusa-slicer, printcheck, stylelift) mean the SessionStart
 hook hasn't run — run `.claude/hooks/session-start.sh` first, don't skip
