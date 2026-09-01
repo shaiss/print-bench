@@ -34,12 +34,20 @@ from .board import POSTED_MARKER
 def posted_today(comments: list[dict], today_iso: str) -> bool:
     """True iff any comment is a live-post marker dated ``today_iso`` (UTC
     ``YYYY-MM-DD``). ``comments`` is a list of ``{"body", "createdAt"}`` dicts
-    in GitHub's shape (``createdAt`` an ISO-8601 UTC timestamp). Missing keys
-    are treated as empty, never an error — a malformed comment must not crash
-    the guard into letting a second post through."""
+    in GitHub's shape (``createdAt`` an ISO-8601 UTC timestamp).
+
+    A malformed comment must never CRASH the guard: a raised exception in the
+    workflow's `growth daycap` call produces no ``posted`` on stdout, which the
+    Select step reads as "clear" and posts — i.e. an exception fails OPEN. So a
+    non-string ``body``/``createdAt`` (or a missing key) is coerced away and the
+    comment skipped, never `in`-tested or sliced. A skipped malformed comment
+    can only fail toward "clear", but GitHub always returns well-formed string
+    comment fields, so this is defensive, not a real path."""
     for c in comments:
-        body = c.get("body") or ""
-        created = (c.get("createdAt") or "")[:10]
-        if POSTED_MARKER in body and created == today_iso:
+        body = c.get("body")
+        created = c.get("createdAt")
+        if not isinstance(body, str) or not isinstance(created, str):
+            continue
+        if POSTED_MARKER in body and created[:10] == today_iso:
             return True
     return False

@@ -253,14 +253,18 @@ jobs:
           # The `concurrency` group serializes this workflow with itself, so a
           # later same-day run sees the earlier run's already-committed marker.
           today="$(date -u +%F)"
-          touched_json="$(gh issue list \
-            --state all \
-            --label growth-queue \
-            --label "channel:twitter" \
-            --limit 30 \
-            --json number,updatedAt)"
+          # Sort by UPDATED (most recent first), so an item that got a `posted`
+          # marker today is in the scan window even if it is an OLD issue —
+          # `gh issue list` sorts by creation, which could push a today-updated
+          # old item past the limit and miss it. The REST issues endpoint (via
+          # `gh api`) supports sort=updated and stays strongly consistent (not
+          # the Search API); per_page=100 makes ">100 items updated today"
+          # (impossible for a ≤1-post/day desk) the only way to overflow it.
+          touched_json="$(gh api \
+            "repos/$GITHUB_REPOSITORY/issues?labels=growth-queue,channel:twitter&state=all&sort=updated&direction=desc&per_page=100" \
+            2>/dev/null || echo '[]')"
           touched_today="$(printf '%s' "$touched_json" \
-            | jq -r --arg t "$today" '[.[] | select(.updatedAt != null and (.updatedAt[0:10]) >= $t)] | .[].number')"
+            | jq -r --arg t "$today" '[.[] | select((.updated_at // "")[0:10] >= $t)] | .[].number' 2>/dev/null || echo '')"
           comments='[]'
           for n in $touched_today; do
             ic="$(gh issue view "$n" --json comments \

@@ -51,12 +51,14 @@ def simulate(
     "text": ..., "thread": [...], "weight": n}``."""
     # Lark posts at most ONCE per UTC calendar day (the per-day live-post guard,
     # daycap): the multi-slot cadence fires several times a day for delivery
-    # redundancy, but the drain acts on whichever firing GitHub delivers FIRST
-    # that day and then holds. Collapsing the firings to one-per-date keeps the
-    # dry-run timeline honest — it shows the real ~1/day cadence, not a post at
-    # every firing — and its varied times reflect the delivery jitter that makes
-    # the cadence non-robotic. A single-candidate cadence already fires once a
-    # day, so it is unaffected.
+    # redundancy, but the drain acts on one firing per day and then holds.
+    # Collapsing the firings to one-per-date keeps the dry-run timeline honest —
+    # it shows the real ~1/day cadence, not a post at every firing. NOTE the
+    # collapsed time is the day's FIRST nominal slot (a deterministic stand-in,
+    # e.g. 13:19 for the current cadence); the simulator cannot model GitHub's
+    # real delivery jitter (it has no delivery times), so the LIVE post time
+    # varies while this projection does not. A single-candidate cadence already
+    # fires once a day, so it is unaffected.
     firings, _seen_days = [], set()
     for f in Cron(cadence).firings(_parse_start(start), days):
         if f.date() not in _seen_days:

@@ -60,9 +60,18 @@ def test_compares_on_calendar_date_not_time():
 
 
 def test_malformed_comment_never_crashes_into_a_double_post():
-    # Missing keys are treated as empty, not an error — a malformed comment
-    # must not throw (which a caller might swallow into "clear -> post again").
-    comments = [{}, {"body": None, "createdAt": None},
-                {"body": POSTED_MARKER, "createdAt": "2026-09-01T12:00:00Z"}]
+    # Missing keys, None, AND non-string truthy values are all skipped, not an
+    # error — a raised exception produces no "posted" on stdout, which the
+    # workflow reads as "clear" and posts (fails OPEN). `POSTED_MARKER in 5` or
+    # slicing an int would raise, so these must be coerced away, not tested.
+    comments = [
+        {},
+        {"body": None, "createdAt": None},
+        {"body": 5, "createdAt": 20260901},          # non-string truthy
+        {"body": ["x"], "createdAt": {"z": 1}},       # non-string truthy
+        {"body": POSTED_MARKER, "createdAt": "2026-09-01T12:00:00Z"},
+    ]
     assert daycap.posted_today(comments, TODAY) is True
-    assert daycap.posted_today([{}, {"body": None}], TODAY) is False
+    # No real marker anywhere → clear, and still no crash on the junk values.
+    assert daycap.posted_today([{}, {"body": None}, {"body": 5, "createdAt": 1}],
+                               TODAY) is False
