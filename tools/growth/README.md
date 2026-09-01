@@ -18,8 +18,8 @@ judgment:
 | `growth.queue` | The drain order: `priority:high` first, then oldest issue number — FIFO with one escape hatch. A pure function of a queue snapshot. |
 | `growth.board` | The approval-board Stage policy: `stage_of` maps one queue issue's state + labels + the two hidden markers to a `print-bench growth` board Stage (Queued/Drafted/Approved/Posted/Parked/Attention). A pure function, the single source `growth-board-sync.yml` reflects onto the board (docs/growth.md). Owns the marker strings; a test pins them to the posting tool and pins its stage set to `scripts/gh-project.sh`'s `growth` board spec. |
 | `growth.cron` | A minimal 5-field cron matcher (numbers, `*`, steps, lists, ranges) so the simulator can expand a cadence; anything fancier raises rather than simulating the wrong schedule. |
-| `growth.postslot` | Post-time jitter: the cadence is a *window* of candidate hours, and `is_post_slot` picks exactly ONE per UTC date (a hash of the date indexes the sorted candidate hours). The workflow's `pick-slot` job gates the drain on it, so Lark's post time walks day to day while the ≤1-post/day floor stays structural. A single-candidate cadence always resolves to its one hour, so it is inert for every other routine. |
-| `growth.simulate` | The accelerated dry run: walk N days of firings over a snapshot + composed posts (filtered through `postslot`, so the timeline shows the real ~1/day cadence at the real varied times) and render exactly what would have been posted, when — the committed artifact a human reads before arming anything live. Copy over the weighted 280 fails the simulation loudly. |
+| `growth.daycap` | The per-UTC-day live-post guard: given the desk's marker comments and today's UTC date, has a live post already gone out today? Keyed on the `<!-- growth-twitter:posted -->` marker (imported from `growth.board`, one pinned source) — so Lark holds at ≤1 live post/calendar-day whichever (delayed) firing GitHub delivers, and a dry-run never consumes the day. The workflow's Select step calls it; the decision is here, not in bash. |
+| `growth.simulate` | The accelerated dry run: walk N days of firings over a snapshot + composed posts (collapsed to one firing per UTC day, matching the per-day guard, so the timeline shows the real ~1/day cadence) and render exactly what would have been posted, when — the committed artifact a human reads before arming anything live. Copy over the weighted 280 fails the simulation loudly. |
 | `growth.poster` | The X API v2 seam: OAuth 1.0a (HMAC-SHA1) signing by hand, stdlib-only, inert unless all four `X_*` credentials are present. Mechanics only — the policy (approval label, duplicate markers, caps) lives in the posting MCP tool beside the skill. |
 
 ## CLI
@@ -32,10 +32,11 @@ python3 -m growth config --get enabled --path .github/growth-twitter.conf
 # The weighted length the posting tool will meter copy at:
 python3 -m growth length 'shipping day https://github.com/shaiss/print-bench'
 
-# Is now today's chosen post slot? (post-time jitter — the `pick-slot`
-# workflow job gates the drain on this; `true` iff this firing's hour is the
-# per-date pick among the cadence's candidate hours; --now defaults to UTC now):
-python3 -m growth postslot --cadence "$(python3 -m growth config --get cadence --path .github/growth-twitter.conf)"
+# Has a live post already gone out today? (the ≤1/day guard — the Select step
+# pipes the desk's marker comments in and holds the drain on "posted"; --today
+# defaults to today UTC):
+echo '[{"body":"<!-- growth-twitter:posted -->","createdAt":"2026-09-01T14:00:00Z"}]' \
+  | python3 -m growth daycap --today 2026-09-01
 
 # The accelerated dry run (see docs/growth.md for the artifact convention):
 python3 -m growth simulate --conf .github/growth-twitter.conf \

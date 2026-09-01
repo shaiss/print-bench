@@ -7,9 +7,10 @@ Subcommands, each a thin shell over one module:
   ``backlog-burn config``, over the growth desk's own closed key set).
 * ``growth length <text>`` — the weighted tweet length (URLs = 23), so a
   human or an attended session can check copy the way the posting tool will.
-* ``growth postslot --cadence <cron> [--now <iso>]`` — post-time jitter: print
-  ``true`` iff *now* (default: UTC now) is today's chosen slot among the
-  cadence's candidate hours, so Lark's workflow can gate the drain on it.
+* ``growth daycap [--today <YYYY-MM-DD>]`` — the per-UTC-day live-post guard:
+  read the desk's marker comments as a JSON list on stdin and print ``posted``
+  iff a ``growth-twitter:posted`` marker is dated today (default: today UTC),
+  so Lark's Select step can hold the drain to ≤1 live post/day.
 * ``growth simulate --conf <conf> --snapshot <json> --posts <json>
   --start <iso> --days <n> --out-md <path> [--out-ndjson <path>]`` — the
   accelerated dry run (docs/growth.md): render what would have been posted.
@@ -29,7 +30,7 @@ from datetime import datetime, timezone
 
 from . import board as board_mod
 from . import config as config_mod
-from . import postslot as postslot_mod
+from . import daycap as daycap_mod
 from . import simulate as simulate_mod
 from .tweetlen import tweet_weight
 
@@ -45,11 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     p_len = sub.add_parser("length", help="weighted tweet length (URLs = 23)")
     p_len.add_argument("text")
 
-    p_slot = sub.add_parser("postslot", help="is now today's chosen post slot?")
-    p_slot.add_argument("--cadence", required=True,
-                        help="the 5-field cron literal (the posting window)")
-    p_slot.add_argument("--now", default="",
-                        help="ISO UTC timestamp to test (default: UTC now)")
+    p_daycap = sub.add_parser("daycap", help="has a live post already gone out today?")
+    p_daycap.add_argument("--today", default="",
+                          help="UTC date YYYY-MM-DD to test (default: today UTC)")
 
     p_sim = sub.add_parser("simulate", help="accelerated dry-run timeline")
     p_sim.add_argument("--conf", default=config_mod.DEFAULT_PATH)
@@ -84,22 +83,17 @@ def main(argv: list[str] | None = None) -> int:
         print(tweet_weight(args.text))
         return 0
 
-    if args.cmd == "postslot":
-        if args.now:
-            try:
-                now = datetime.fromisoformat(
-                    args.now.replace("Z", "+00:00")).replace(tzinfo=None)
-            except ValueError as e:
-                print(f"growth postslot: bad --now {args.now!r}: {e}", file=sys.stderr)
-                return 1
-        else:
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if args.cmd == "daycap":
+        today = args.today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         try:
-            hit = postslot_mod.is_post_slot(now, args.cadence)
-        except Exception as e:  # noqa: BLE001 — a bad cadence must fail loud, not post
-            print(f"growth postslot: {e}", file=sys.stderr)
+            comments = json.loads(sys.stdin.read() or "[]")
+        except json.JSONDecodeError as e:
+            print(f"growth daycap: bad comments JSON on stdin: {e}", file=sys.stderr)
             return 1
-        print("true" if hit else "false")
+        if not isinstance(comments, list):
+            print("growth daycap: expected a JSON list of comments on stdin", file=sys.stderr)
+            return 1
+        print("posted" if daycap_mod.posted_today(comments, today) else "clear")
         return 0
 
     if args.cmd == "simulate":
