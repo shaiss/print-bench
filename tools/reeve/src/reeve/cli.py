@@ -6,6 +6,8 @@
     reeve config    # read the committed policy file
     reeve armed     # the two-key arming decision, as an output
     reeve greenlight-select  # the draftable parked-decision queue, as numbers
+    reeve greenlight-context  # the drafter's precedent digest (log + owner replies)
+    reeve greenlight-append   # records for newly-resolved rounds + the updated log
 
 ``report`` is the pure, tested core; ``gather`` is the thin file read; ``run``
 composes them. The workflow stays a few lines of glue with no policy of its
@@ -24,6 +26,16 @@ marker yet (``github.gather_greenlight_queue``, GET-only) and prints the
 oldest ``greenlight_cap`` of them as space-separated numbers — the bounded
 set the workflow hands the drafter as ``$REEVE_SELECTED_ISSUES``, so the
 agent never sees an issue it cannot post on.
+
+``greenlight-context`` and ``greenlight-append`` (issue #445) are the loop's
+learning half. The first renders the drafter's precedent digest — the most
+recent ``greenlight_precedent_cap`` records of the committed log plus the
+inline owner replies on their threads (GET-only gather) — as the prompt
+fragment the workflow injects. The second is the observer: it gathers every
+greenlighted thread's resolution state, derives the records for rounds that
+resolved and are not yet recorded (``greenlights.derive_records``, pure), and
+writes the updated log; the push to the ``telemetry`` data branch is trusted
+workflow bash, so this package still writes nothing.
 """
 
 from __future__ import annotations
@@ -35,6 +47,7 @@ import sys
 from typing import Any, Optional
 
 from . import config as config_mod
+from . import greenlights
 from .detectors import evaluate
 from .report import render
 
@@ -149,6 +162,98 @@ def cmd_greenlight_select(args: argparse.Namespace) -> int:
     return 0
 
 
+def _read_text(path: str) -> str:
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def cmd_greenlight_context(args: argparse.Namespace) -> int:
+    """`greenlight-context`: print the drafter's precedent digest.
+
+    The load half of the learning loop (issue #445): the most recent
+    ``greenlight_precedent_cap`` records of ``--log``, plus the inline owner
+    replies on their threads (a GET-only gather, skipped when the log is
+    empty — no records, nothing to read). The digest is printed and appended
+    to ``$GITHUB_OUTPUT`` as the multiline ``digest`` (heredoc form), which
+    the workflow splices into the drafter's prompt — trusted workflow code
+    assembles the context, never the agent.
+    """
+    # Lazy for the same reason as greenlight-select: the purity test.
+    from . import greenlights
+    from .github import gather_greenlight_rounds
+
+    cfg = _load_config(args.conf)
+    records = greenlights.parse_log(_read_text(args.log or greenlights.LOG_PATH))
+    replies: dict[int, list[dict[str, Any]]] = {}
+    if records and args.repo:
+        by_number = {
+            t["number"]: t for t in gather_greenlight_rounds(args.repo, _token())["threads"]
+        }
+        recent_issues = sorted(
+            records, key=lambda r: (r["recorded_at"], r["issue"]), reverse=True
+        )[: cfg.greenlight_precedent_cap]
+        replies = {
+            r["issue"]: by_number[r["issue"]].get("owner_replies", [])
+            for r in recent_issues
+            if r["issue"] in by_number
+        }
+    digest = greenlights.context_digest(records, replies, cfg.greenlight_precedent_cap)
+    sys.stdout.write(digest + "\n")
+    gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a", encoding="utf-8") as fh:
+            fh.write("digest<<REEVE_GL_DIGEST_EOF\n" + digest + "\nREEVE_GL_DIGEST_EOF\n")
+    return 0
+
+
+def cmd_greenlight_append(args: argparse.Namespace) -> int:
+    """`greenlight-append`: derive and write records for resolved rounds.
+
+    The observing half (issue #445): gather every greenlighted thread's
+    resolution state (GET-only), read the decide.yml ledger and the committed
+    log, derive the records for rounds that resolved and are not yet
+    recorded, and write the updated log to ``--out`` (in place by default —
+    the workflow overlays the live log from the data branch first). The
+    count is appended to ``$GITHUB_OUTPUT`` as ``appended=`` so the workflow
+    pushes the data branch only when something actually landed; the push
+    itself is trusted workflow bash, not this package.
+    """
+    # Lazy for the same reason as greenlight-select: the purity test.
+    from datetime import datetime, timezone
+
+    from . import greenlights
+    from .github import gather_greenlight_rounds
+
+    cfg = _load_config(args.conf)
+    log_text = _read_text(args.log or greenlights.LOG_PATH)
+    records = greenlights.parse_log(log_text)
+    ledger_rows = greenlights.parse_ledger(_read_text(args.ledger or greenlights.LEDGER_PATH))
+    threads = gather_greenlight_rounds(args.repo, _token())["threads"]
+    for thread in threads:
+        thread["ledger_reaction"] = greenlights.ledger_reaction(
+            ledger_rows, thread["number"]
+        )
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    fresh = greenlights.derive_records(
+        threads, [r["issue"] for r in records], now
+    )
+    for record in fresh:
+        sys.stdout.write(greenlights.render_line(record) + "\n")
+    if fresh:
+        updated = greenlights.append_records(log_text, fresh)
+        if args.out == "-":
+            sys.stdout.write("\n" + updated)
+        else:
+            out = args.out or (args.log or greenlights.LOG_PATH)
+            with open(out, "w", encoding="utf-8") as fh:
+                fh.write(updated)
+    gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a", encoding="utf-8") as fh:
+            fh.write(f"appended={len(fresh)}\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reeve", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -197,6 +302,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_gl.add_argument("--gh-output",
                       help="path to append `issues=` (defaults to $GITHUB_OUTPUT)")
     p_gl.set_defaults(func=cmd_greenlight_select)
+
+    p_ctx = sub.add_parser("greenlight-context",
+                           help="the drafter's precedent digest (log + owner replies)")
+    p_ctx.add_argument("--repo", required=True,
+                       help="owner/name — the repo to read owner replies from")
+    p_ctx.add_argument("--conf",
+                       help="policy file for greenlight_precedent_cap (default: built-in)")
+    p_ctx.add_argument("--log", default=None,
+                       help=f"precedent log (default: {greenlights.LOG_PATH})")
+    p_ctx.add_argument("--gh-output",
+                       help="path to append the multiline `digest` (defaults to $GITHUB_OUTPUT)")
+    p_ctx.set_defaults(func=cmd_greenlight_context)
+
+    p_app = sub.add_parser("greenlight-append",
+                           help="records for newly-resolved rounds + the updated log")
+    p_app.add_argument("--repo", required=True,
+                       help="owner/name — the repo to read greenlighted threads from")
+    p_app.add_argument("--conf", help="policy file (default: built-in defaults)")
+    p_app.add_argument("--log", default=None,
+                       help=f"precedent log (default: {greenlights.LOG_PATH})")
+    p_app.add_argument("--ledger", default=None,
+                       help=f"decide.yml ledger (default: {greenlights.LEDGER_PATH})")
+    p_app.add_argument("--out", default=None,
+                       help="where to write the updated log (default: in place; `-` prints it)")
+    p_app.add_argument("--gh-output",
+                       help="path to append `appended=` (defaults to $GITHUB_OUTPUT)")
+    p_app.set_defaults(func=cmd_greenlight_append)
 
     return parser
 

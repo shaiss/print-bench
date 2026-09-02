@@ -32,6 +32,7 @@ _KNOWN_KEYS = (
     "cadence",
     "greenlight",
     "greenlight_cap",
+    "greenlight_precedent_cap",
     "provider",
     "low_headroom_pct",
     "score_drop",
@@ -156,6 +157,11 @@ class Config:
     # are also today's committed values.
     greenlight: bool = False
     greenlight_cap: int = 6  # max greenlight comments per run (the stage-1 round size)
+    # The learning half's context bound (issue #445): how many of the most
+    # recent precedent records (plus their threads' owner replies) the
+    # drafter's prompt carries. Default = the stage-1 round size, so a fresh
+    # clone loads the whole seed and no more.
+    greenlight_precedent_cap: int = 6
     # The greenlight step's provider (#443) — the deterministic reporter this
     # config otherwise serves is keyless, so this key is read only by the
     # greenlight job's policy step. Defaults to the servable provider every
@@ -219,7 +225,7 @@ def load(path: str = DEFAULT_PATH) -> Config:
                 cfg.routine_dead_runs = parsed
             elif key == "lock_leak_hours":
                 cfg.lock_leak_hours = _parse_positive_float(value, key, where)
-            else:  # score_drop, walltime_min_seconds, greenlight_cap
+            else:  # score_drop, walltime_min_seconds, greenlight_cap, greenlight_precedent_cap
                 setattr(cfg, key, _parse_positive_int(value, key, where))
     return cfg
 

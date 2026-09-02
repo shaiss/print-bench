@@ -1159,18 +1159,27 @@ jobs:
           for attempt in 1 2 3; do
             # Seed the accumulating log from the data branch's tip if it exists;
             # the committed seed already in the checkout is the first-run fallback.
+            # The precedent log rides along UNCHANGED (issue #445): it is reeve's
+            # to append (reeve.yml's observe job), and re-seeding it here merely
+            # preserves whatever records the observer already pushed — without
+            # this line the two-file mktree below would rebuild the branch
+            # WITHOUT the file and silently delete them.
             lease=""
             if git fetch "$url" "$DATA_BRANCH" 2>/dev/null; then
               git show FETCH_HEAD:telemetry/log.ndjson > telemetry/log.ndjson
+              git show FETCH_HEAD:telemetry/reeve-greenlights.ndjson \
+                > telemetry/reeve-greenlights.ndjson 2>/dev/null || true
               lease="$(git rev-parse FETCH_HEAD)"
             fi
             cat telemetry-record.ndjson >> telemetry/log.ndjson
             ./scripts/telemetry.sh report --out telemetry/REPORT.md
-            # Build a two-file tree with plumbing (never touching main's index or
-            # working tree), commit it as a single squashed root commit, and push.
+            # Build a three-file tree with plumbing (never touching main's index
+            # or working tree), commit it as a single squashed root commit, and
+            # push.
             log_blob="$(git hash-object -w telemetry/log.ndjson)"
             rpt_blob="$(git hash-object -w telemetry/REPORT.md)"
-            subtree="$(printf '100644 blob %s\tlog.ndjson\n100644 blob %s\tREPORT.md\n' "$log_blob" "$rpt_blob" | git mktree)"
+            gl_blob="$(git hash-object -w telemetry/reeve-greenlights.ndjson)"
+            subtree="$(printf '100644 blob %s\tlog.ndjson\n100644 blob %s\tREPORT.md\n100644 blob %s\treeve-greenlights.ndjson\n' "$log_blob" "$rpt_blob" "$gl_blob" | git mktree)"
             root="$(printf '040000 tree %s\ttelemetry\n' "$subtree" | git mktree)"
             commit="$(git commit-tree "$root" -m "Telemetry: gate runs through ${GITHUB_RUN_ID}")"
             # --force-with-lease keyed to the fetched tip makes a concurrent
