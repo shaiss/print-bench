@@ -312,3 +312,156 @@ def test_greenlight_queue_never_reads_a_pr_thread(monkeypatch):
 ])
 def test_carries_greenlight_matches_the_marker_first_line(body, expected):
     assert github.carries_greenlight([{"body": body}]) is expected
+
+
+# ---------------------------------------------------------------------------
+# The greenlight rounds gather (issue #445): every greenlighted thread with its
+# resolution state — the observer's snapshot. Same discipline, _get monkeypatched.
+# ---------------------------------------------------------------------------
+
+def _search_url():
+    import urllib.parse
+
+    query = urllib.parse.quote(
+        f'repo:{REPO} {github._SEARCH_PHRASE} type:issue', safe=""
+    )
+    return f"{github.API_ROOT}/search/issues?q={query}&per_page=100"
+
+
+def _rounds_responses():
+    """URL -> (json body, Link header) for the rounds gather."""
+    responses = {}
+    # Search candidates: a resolved thread, an open one, and a body that merely
+    # QUOTES the marker (issue #296's spec) — the third must not count.
+    responses[_search_url()] = (
+        {
+            "total_count": 3,
+            "incomplete_results": False,
+            "items": [
+                {
+                    "number": 502, "title": "Decision: live one", "state": "open",
+                    "labels": [{"name": "needs-decision"}],
+                },
+                {
+                    "number": 501, "title": "Decision: resolved one", "state": "closed",
+                    "labels": [],
+                },
+                # A quoted marker is mid-body, no real first-line marker: dropped.
+                {
+                    "number": 503, "title": "The spec issue", "state": "open",
+                    "labels": [{"name": "needs-decision"}],
+                },
+            ],
+        },
+        "",
+    )
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/501/comments?per_page=100"] = ([
+        {"body": "parking this", "created_at": "2026-09-01T05:00:00Z",
+         "author_association": "OWNER", "author": {"login": "the-owner"}},
+        {"body": "<!-- reeve-greenlight v1 issue=501 verdict=yes -->\nGREENLIGHT: YES\nbecause",
+         "created_at": "2026-09-01T06:00:00Z", "author_association": "NONE"},
+        # Owner reply AFTER the greenlight — counts.
+        {"body": "good call, approved",
+         "created_at": "2026-09-01T07:00:00Z",
+         "author_association": "OWNER", "author": {"login": "the-owner"}},
+        # Before the greenlight — does not.
+        {"body": "earlier owner note", "created_at": "2026-09-01T04:00:00Z",
+         "author_association": "OWNER", "author": {"login": "the-owner"}},
+        # After, but not write-associated — an outsider's reply is not the owner's.
+        {"body": "random commenter", "created_at": "2026-09-01T08:00:00Z",
+         "author_association": "NONE", "author": {"login": "rando"}},
+    ], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/502/comments?per_page=100"] = ([
+        {"body": "<!-- reeve-greenlight v1 issue=502 verdict=route -->\nGREENLIGHT: ROUTE\nhanding off",
+         "created_at": "2026-09-01T06:00:00Z", "author_association": "NONE"},
+    ], "")
+    # 503's comments: no real marker first line — the verify step drops it.
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/503/comments?per_page=100"] = ([
+        {"body": 'the spec says the marker is "<!-- reeve-greenlight v1 ... -->"',
+         "created_at": "2026-08-30T05:00:00Z", "author_association": "NONE"},
+    ], "")
+    # The closing-PR timeline read — closed threads only.
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/501/timeline?per_page=100"] = ([
+        {"event": "commented"},
+        {"event": "cross-referenced", "source": {"issue": {"number": 499}}},
+        {"event": "cross-referenced", "source": {
+            "issue": {"number": 512, "pull_request": {"url": "..."}}}},
+    ], "")
+    return responses
+
+
+def test_greenlight_rounds_gathers_verified_threads_with_resolution_state(monkeypatch):
+    _gl_fake(monkeypatch, _rounds_responses())
+    out = github.gather_greenlight_rounds(REPO, "tok")
+    assert [t["number"] for t in out["threads"]] == [501, 502]  # 503 was a quoted body
+    resolved, live = out["threads"]
+    assert resolved["state"] == "closed"
+    assert resolved["greenlight_verdict"] == "yes"
+    assert "because" in resolved["greenlight_reasoning"]
+    assert resolved["closing_pr"] == 512  # the LAST cross-referenced PR
+    # Owner replies: after the greenlight, write-associated, markers excluded.
+    assert [r["author"] for r in resolved["owner_replies"]] == ["the-owner"]
+    assert resolved["owner_replies"][0]["text"] == "good call, approved"
+    assert live["state"] == "open"
+    assert live["greenlight_verdict"] == "route"
+    assert live["closing_pr"] is None  # open thread, no timeline read
+
+
+def test_greenlight_rounds_skips_the_closing_pr_read_for_open_threads(monkeypatch):
+    calls: list[str] = []
+
+    def _fake(url, token):
+        calls.append(url)
+        return _rounds_responses()[url]
+
+    monkeypatch.setattr(github, "_get", _fake)
+    github.gather_greenlight_rounds(REPO, "tok")
+    assert any("/issues/501/timeline" in url for url in calls)
+    assert not any("/issues/502/timeline" in url for url in calls)
+
+
+def test_greenlight_rounds_bounds_replies_at_three(monkeypatch):
+    responses = _rounds_responses()
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/501/comments?per_page=100"] = ([
+        {"body": "<!-- reeve-greenlight v1 issue=501 verdict=yes -->\nGREENLIGHT: YES",
+         "created_at": "2026-09-01T06:00:00Z", "author_association": "NONE"},
+    ] + [
+        {"body": f"owner note {i}", "created_at": f"2026-09-01T0{i}:30:00Z",
+         "author_association": "OWNER", "author": {"login": "the-owner"}}
+        for i in (7, 8, 9, 10)
+    ], "")
+    _gl_fake(monkeypatch, responses)
+    threads = github.gather_greenlight_rounds(REPO, "tok")["threads"]
+    resolved = next(t for t in threads if t["number"] == 501)
+    assert [r["text"] for r in resolved["owner_replies"]] == [
+        "owner note 7", "owner note 8", "owner note 9",
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"total_count": 0, "incomplete_results": True, "items": []},   # truncated
+        {"total_count": 101, "incomplete_results": False, "items": []},  # over the page bound
+        {"total_count": 0},                                            # no items list
+        [1, 2, 3],                                                     # not an object at all
+    ],
+)
+def test_greenlight_rounds_refuses_a_bad_search_payload(monkeypatch, payload):
+    responses = {_search_url(): (payload, "")}
+    _gl_fake(monkeypatch, responses)
+    with pytest.raises(RuntimeError):
+        github.gather_greenlight_rounds(REPO, "tok")
+
+
+def test_greenlight_rounds_a_marker_naming_another_issue_does_not_count(monkeypatch):
+    # A copied marker bound to a different issue is not this thread's greenlight.
+    responses = _rounds_responses()
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/501/comments?per_page=100"] = ([
+        {"body": "<!-- reeve-greenlight v1 issue=999 verdict=yes -->\nGREENLIGHT: YES",
+         "created_at": "2026-09-01T06:00:00Z", "author_association": "NONE"},
+    ], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/502/comments?per_page=100"] = ([], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/503/comments?per_page=100"] = ([], "")
+    _gl_fake(monkeypatch, responses)
+    assert github.gather_greenlight_rounds(REPO, "tok")["threads"] == []

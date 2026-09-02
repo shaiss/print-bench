@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -291,3 +292,163 @@ def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
     # gets its verdict first), by number as the wrapper's list-parked sorts.
     queue.sort(key=lambda i: i["number"])
     return {"parked": parked, "queue": queue}
+
+
+# The greenlight marker line's shape (the wrapper's own first line; mirrored,
+# not imported). Captures the version, the issue the wrapper bound it to, and
+# the verdict — the fields the observer reads back out of a thread. The
+# resolution-execution comments (#201/#202's ``resolution=approved`` lines)
+# use a different marker shape the ``verdict=`` capture rejects.
+_GREENLIGHT_MARKER_RE = re.compile(
+    r"^<!-- reeve-greenlight v(\d+) issue=(\d+) verdict=(\w+) -->$"
+)
+
+# The author associations that imply write-ish access — a filter for picking
+# "owner replies" out of a thread AS CONTEXT (advisory evidence), never an
+# authorization check. Whose reaction actually resolves a gate is #444's
+# permission-level poll; this is the load half reading what the owner said.
+_OWNER_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
+
+# The search probe's phrase: the marker text as a quoted phrase. The search
+# index also matches bodies that merely QUOTE the marker (issue #296's spec
+# body does), so every candidate is verified against a real marker first line
+# before it counts.
+_SEARCH_PHRASE = '"reeve-greenlight v1"'
+
+
+def _greenlight_of(comments: list[Any], number: int) -> Optional[dict[str, Any]]:
+    """The thread's greenlight comment, or None — verified, not assumed.
+
+    The FIRST comment whose first line is a well-formed marker naming THIS
+    issue: the wrapper writes exactly one marker per greenlight, and a marker
+    naming another issue (a quoted or copied comment) does not count.
+    """
+    for comment in comments:
+        match = _GREENLIGHT_MARKER_RE.match(_first_line(comment.get("body", "")))
+        if match and int(match.group(2)) == number:
+            body = comment.get("body", "")
+            reasoning = "\n".join(body.splitlines()[1:])
+            return {
+                "verdict": match.group(3),
+                "reasoning": reasoning,
+                "posted_at": comment.get("created_at", ""),
+            }
+    return None
+
+
+def _owner_replies_after(comments: list[Any], posted_at: str) -> list[dict[str, Any]]:
+    """Write-access replies posted after the greenlight, in thread order.
+
+    Marker-led comments are the loop's own (the greenlight, the resolution
+    execution) — never counted as owner replies. Bounded at three per thread:
+    this feeds a digest, not an archive.
+    """
+    replies: list[dict[str, Any]] = []
+    for comment in comments:
+        if comment.get("created_at", "") <= posted_at:
+            continue
+        if _GREENLIGHT_MARKER_RE.match(_first_line(comment.get("body", ""))):
+            continue
+        if comment.get("author_association") not in _OWNER_ASSOCIATIONS:
+            continue
+        replies.append(
+            {
+                "author": (comment.get("author") or {}).get("login", ""),
+                "text": (comment.get("body") or "")[:400],
+            }
+        )
+        if len(replies) >= 3:
+            break
+    return replies
+
+
+def _closing_pr(repo: str, token: str, number: int) -> Optional[int]:
+    """The last PR that cross-referenced a closed thread, or None.
+
+    A digest heuristic, honestly bounded: GitHub exposes no "closed by PR"
+    field on the issue side, so the timeline's cross-references are the best
+    available signal (the PR that closed it is virtually always the last one
+    to reference it). One bounded GET, only for closed verified threads.
+    """
+    events, _ = _get(
+        f"{API_ROOT}/repos/{repo}/issues/{number}/timeline?per_page=100", token
+    )
+    if not isinstance(events, list):
+        raise RuntimeError(
+            f"unexpected timeline payload for #{number} (not a list) — "
+            "refusing to build a snapshot from it"
+        )
+    closing: Optional[int] = None
+    for event in events:
+        if event.get("event") != "cross-referenced":
+            continue
+        source = event.get("source") or {}
+        issue = source.get("issue") or {}
+        if "pull_request" in issue:
+            closing = issue.get("number")
+    return closing
+
+
+def gather_greenlight_rounds(repo: str, token: str) -> dict[str, Any]:
+    """Every greenlighted thread with its resolution state (issue #445).
+
+    The observer's snapshot: discovery by a search probe over the marker phrase
+    (it sees open AND closed threads — a resolved thread may be closed or
+    label-flipped out of the parked listing, so the probe is the only listing
+    that sees it whole), then per-candidate verification by reading the
+    thread's comments for a real marker first line. Each verified thread
+    carries what ``greenlights.derive_records`` reads: the greenlight's verdict
+    and reasoning, the thread's state and labels, the inline owner replies
+    after the greenlight, and (closed threads only) the closing PR.
+
+    Search-index freshness is eventual: a thread greenlighted or resolved
+    minutes ago may be missing until the index catches up — the next run
+    records it. Still GET-only, like every seam here.
+    """
+    query = urllib.parse.quote(f"repo:{repo} {_SEARCH_PHRASE} type:issue", safe="")
+    body, _ = _get(f"{API_ROOT}/search/issues?q={query}&per_page=100", token)
+    if not isinstance(body, dict) or not isinstance(body.get("items"), list):
+        raise RuntimeError(
+            "unexpected search payload (no items list) — refusing to build a "
+            "snapshot from it"
+        )
+    if body.get("incomplete_results"):
+        raise RuntimeError(
+            "the greenlight search probe returned incomplete results — "
+            "refusing to build a silently-truncated snapshot; retry next run"
+        )
+    if body.get("total_count", 0) > 100:
+        raise RuntimeError(
+            f"more than 100 issues match the greenlight probe ({body['total_count']}) — "
+            "the one-page bound is wrong for this repo now; widen it deliberately"
+        )
+
+    threads: list[dict[str, Any]] = []
+    for item in body["items"]:
+        number = item.get("number")
+        if not isinstance(number, int):
+            continue
+        comments = _paged(
+            f"{API_ROOT}/repos/{repo}/issues/{number}/comments?per_page=100",
+            token,
+        )
+        greenlight = _greenlight_of(comments, number)
+        if greenlight is None:
+            continue  # a body that quotes the marker, not a greenlight thread
+        threads.append(
+            {
+                "number": number,
+                "title": item.get("title", ""),
+                "state": item.get("state", ""),
+                "labels": [lbl.get("name", "") for lbl in item.get("labels", [])],
+                "greenlight_verdict": greenlight["verdict"],
+                "greenlight_reasoning": greenlight["reasoning"],
+                "owner_replies": _owner_replies_after(comments, greenlight["posted_at"]),
+                "closing_pr": (
+                    _closing_pr(repo, token, number)
+                    if item.get("state") == "closed" else None
+                ),
+            }
+        )
+    threads.sort(key=lambda t: t["number"])
+    return {"threads": threads}
