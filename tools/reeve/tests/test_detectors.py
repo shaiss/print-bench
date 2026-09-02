@@ -363,16 +363,23 @@ def test_evaluate_is_pure_and_repeatable():
 
 _PKG = pathlib.Path(detectors.__file__).parent
 _FORBIDDEN_IMPORTS = {"urllib", "socket", "http", "subprocess", "requests"}
+# The package's ONE write-bearing module (issue #444): pushthrough.py applies
+# an approved greenlight through decide.yml's own sequence — the confined-seam
+# exemption the parent issue names. The purity tests below hold every OTHER
+# module to read-only and pin that this one is real, so the exemption cannot
+# rot into "everything is exempt".
+WRITE_SEAM = "pushthrough.py"
 # Includes signals.py — the committed-files seam, which reads only os/glob/json.
-# The one excluded module is github.py, the opt-in GET-only live-read seam
+# The excluded modules are github.py — the opt-in GET-only live-read seam
 # (issue #313's run health, and issue #443's greenlight queue — the open
 # needs-decision issues plus their comment threads): it genuinely uses urllib,
-# exactly like the groomer's, and test_github.py holds it to GET-only. The
-# greenlight loop's WRITE (the wrapper-mediated comment) lives outside this
-# package entirely, in .claude/skills/reeve-greenlight/, so these guards stay
-# the proof that the package itself still never writes. cli.py stays in this
-# list because it imports github.py lazily, inside the --repo / greenlight-
-# select paths only.
+# exactly like the groomer's, and test_github.py holds it to GET-only — and
+# pushthrough.py, the write seam above (test_pushthrough.py holds it to the
+# fail-closed order and the no-/decide-comment rule). The wrapper-mediated
+# greenlight comments live outside this package entirely, in
+# .claude/skills/reeve-greenlight/. cli.py stays in this list because it
+# imports github.py and pushthrough.py lazily, inside the --repo /
+# greenlight-select / greenlight-poll paths only.
 _PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py", "signals.py")
 
 
@@ -392,15 +399,73 @@ def test_pure_modules_import_nothing_network_capable():
         assert not _imports_of(_PKG / module) & _FORBIDDEN_IMPORTS, module
 
 
-def test_package_contains_no_write_verbs():
+def test_package_contains_no_write_verbs_outside_the_confined_seam():
     # GET/read-only by construction: no POST/PATCH/PUT/DELETE anywhere in the
-    # package (word-bounded, so GITHUB_OUTPUT's "PUT" doesn't trip it). Reeve
-    # reads only committed files plus the GET-only live seams (run health,
-    # greenlight selection); the workflow's upsert and the greenlight
-    # wrapper's comments are the writes, and both live outside this package.
+    # package (word-bounded, so GITHUB_OUTPUT's "PUT" doesn't trip it) except
+    # pushthrough.py — the ONE confined seam the greenlight loop's approval
+    # push-through (issue #444) needed, the backlog groomer's github.py shape
+    # the parent issue named: every write verb in the package lives there, and
+    # a test (below) pins that the exemption is not vacuous. Everything else
+    # still reads only committed files plus the GET-only live seams.
     import re as _re
 
     verb_re = _re.compile(r"\b(POST|PATCH|PUT|DELETE)\b")
     for path in _PKG.glob("*.py"):
+        if path.name == WRITE_SEAM:
+            continue
         match = verb_re.search(path.read_text(encoding="utf-8"))
         assert match is None, f"{path.name} mentions {match.group(0) if match else ''}"
+
+
+def test_write_verbs_are_confined_to_the_seam_and_the_seam_is_real():
+    # The other half of the confinement (issue #444's purity guard): the seam
+    # module must actually exist and actually carry write verbs — an exemption
+    # for a file that isn't there, or one that drifted read-only while some
+    # sibling quietly grew the verbs instead, is a hole dressed as a rule. And
+    # the seam must import no module outside {github, greenlight} + stdlib, so
+    # a write verb can never travel back into a pure module through it.
+    import re as _re
+
+    seam = _PKG / WRITE_SEAM
+    assert seam.is_file(), f"the write seam {WRITE_SEAM} is missing"
+    verbs = _re.findall(r"\b(POST|PUT|DELETE|PATCH)\b", seam.read_text(encoding="utf-8"))
+    assert set(verbs) >= {"POST", "PUT", "DELETE"}, (
+        f"{WRITE_SEAM} no longer performs the pushes it exists for: {sorted(set(verbs))}"
+    )
+    # The read side it builds on stays the GET seam; the pure side stays pure.
+    assert _imports_of(seam) & {"urllib"} == {"urllib"}
+    local_imports = _relative_imports_of(seam.read_text(encoding="utf-8"))
+    assert local_imports <= {"config", "detectors", "greenlight", "github", "report", "signals"}, (
+        f"{WRITE_SEAM} imports outside the package's own modules: {sorted(local_imports)}"
+    )
+
+
+def _relative_imports_of(source: str) -> set[str]:
+    """The top-level package modules a source's relative imports resolve to.
+
+    `from . import github` names the module in the alias; `from .github
+    import _get` names it in `node.module` — the alias there is a symbol
+    (`_get`), not a module. Collecting only alias names let `from
+    .unapproved_module import github` pass the seam's import guard, because
+    the alias `github` sat in the allowed set while the module did not.
+    """
+    tree = ast.parse(source)
+    return {
+        (node.module or alias.name).split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.level == 1
+        for alias in node.names
+    }
+
+
+def test_seam_import_guard_reads_the_module_not_the_alias():
+    # The guard's own negative control: a relative import that names an
+    # unapproved MODULE while aliasing an approved NAME must be caught — the
+    # shape the alias-only collector let through.
+    allowed = {"config", "detectors", "greenlight", "github", "report", "signals"}
+    assert _relative_imports_of("from . import greenlight, github") <= allowed
+    assert _relative_imports_of("from .github import _get") <= allowed
+    smuggled = _relative_imports_of("from .unapproved_module import github")
+    assert not smuggled <= allowed, smuggled
+    nested = _relative_imports_of("from .unapproved_pkg.sub import github")
+    assert not nested <= allowed, nested

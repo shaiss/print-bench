@@ -155,6 +155,64 @@ def test_greenlight_select_requires_repo():
         main(["greenlight-select"])
 
 
+# greenlight-poll (issue #444): the loop's authority half. run_poll is
+# monkeypatched at the module attribute the lazy in-function import resolves —
+# the seam's own behaviour is pinned in test_pushthrough.py; this holds the
+# glue: one line per issue, the GITHUB_OUTPUT keys, the PAT notice, exit 0
+# even when issues failed (per-issue resilience is the driver's contract, not
+# a red run).
+
+def test_greenlight_poll_prints_lines_appends_output_and_notices_missing_pat(
+    tmp_path, monkeypatch, capsys
+):
+    gh_out = tmp_path / "gh_output"
+    monkeypatch.setattr(
+        "reeve.pushthrough.run_poll",
+        lambda repo, token, pat, now=None: [
+            {"number": 201, "outcome": "approved", "notes": ["ledger skipped"]},
+            {"number": 202, "outcome": "overruled", "reason": "👎 overrule"},
+            {"number": 203, "outcome": "error", "reason": "could not apply decision-approved"},
+            {"number": 204, "outcome": "wait", "reason": "no qualifying reactions yet"},
+        ],
+    )
+    monkeypatch.delenv("REGEN_TOKEN", raising=False)
+    monkeypatch.setenv("GH_TOKEN", "tok")
+    rc = main(["greenlight-poll", "--repo", "o/r", "--gh-output", str(gh_out)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "#201: approved [ledger skipped]" in out
+    assert "#202: overruled (👎 overrule)" in out
+    assert "#203: error (could not apply decision-approved)" in out
+    assert "#204: wait (no qualifying reactions yet)" in out
+    assert "REGEN_TOKEN is not set" in out
+    written = gh_out.read_text(encoding="utf-8")
+    assert "resolved=201\n" in written
+    assert "overruled=202\n" in written
+    assert "failed=203\n" in written
+
+
+def test_greenlight_poll_passes_both_tokens_and_exits_clean(monkeypatch, capsys):
+    seen = {}
+
+    def fake_run_poll(repo, token, pat, now=None):
+        seen.update(repo=repo, token=token, pat=pat)
+        return []
+
+    monkeypatch.setattr("reeve.pushthrough.run_poll", fake_run_poll)
+    monkeypatch.setenv("GH_TOKEN", "workflow-token")
+    monkeypatch.setenv("REGEN_TOKEN", "the-pat")
+    rc = main(["greenlight-poll", "--repo", "o/r"])
+    assert rc == 0
+    assert seen == {"repo": "o/r", "token": "workflow-token", "pat": "the-pat"}
+    assert capsys.readouterr().out == ""   # an empty poll is a legitimate, quiet run
+
+
+def test_greenlight_poll_requires_repo():
+    import pytest
+    with pytest.raises(SystemExit):
+        main(["greenlight-poll"])
+
+
 # greenlight-context / greenlight-append (issue #445): the learning half's two
 # verbs. gather_greenlight_rounds is monkeypatched the same way the select
 # tests patch their gather — no request leaves the process.

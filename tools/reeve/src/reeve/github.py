@@ -9,9 +9,11 @@ corroborate one. It also serves the greenlight loop's selection (issue #443):
 each thread to see which already carry a greenlight marker — the trusted
 workflow's Select step consumes it, so the agent is handed only issues that
 are genuinely parkable-for-a-verdict. Everything here is a **GET** — no HTTP
-write verb appears anywhere in the reeve package (``tests/test_detectors.py``
-scans for them), and the workflow's writes (the sticky-issue upsert, the
-wrapper-mediated greenlight comments) stay outside this package entirely.
+write verb appears in this module or anywhere else in the reeve package
+outside the one confined seam (``tests/test_detectors.py`` scans for them;
+``pushthrough.py`` is the deliberate, test-confined exception), and the
+workflow's other writes (the sticky-issue upsert, the wrapper-mediated
+greenlight comments) stay outside this package entirely.
 
 ``_get`` is the single network seam, so the tests monkeypatch it and no
 request ever leaves the process — the same discipline
@@ -19,6 +21,13 @@ request ever leaves the process — the same discipline
 Pagination follows the ``Link: rel="next"`` header with a hard page cap that
 raises rather than silently truncating: a partial snapshot would make the
 report lie about coverage.
+
+The greenlight loop's approval poll (issue #444) reads through this same
+seam and stays GET-only: the parked threads **with their comment ids**
+(``gather_greenlight_poll``), one comment's reactions (``list_reactions``),
+and each reactor's real repository permission (``permission_of``). The
+writes that follow an approved reaction — the label flip, the ledger
+commit, the resolution reply — live in ``pushthrough.py``, never here.
 """
 
 from __future__ import annotations
@@ -292,6 +301,95 @@ def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
     # gets its verdict first), by number as the wrapper's list-parked sorts.
     queue.sort(key=lambda i: i["number"])
     return {"parked": parked, "queue": queue}
+
+
+def permission_of(repo: str, token: str, username: str) -> str:
+    """One user's real repository permission, e.g. ``"write"``/``"read"``.
+
+    ``GET /repos/{repo}/collaborators/{username}/permission`` — the same
+    authorization check ``decide.yml`` makes before honouring a ``/decide``
+    (``getCollaboratorPermissionLevel`` in the JS client), because a
+    reaction may resolve a gate only when its author could have typed the
+    command. Never ``author_association``: that field describes prior
+    participation (``CONTRIBUTOR`` for one merged PR, ``NONE`` for a
+    first-timer), not current access, so it both over- and under-counts
+    exactly the people this check exists to bound. The poll counts a
+    reaction only for ``admin``/``maintain``/``write`` — the mapping lives
+    beside the aggregation in ``greenlight.AUTHORIZED_PERMISSIONS``.
+    """
+    body, _ = _get(f"{API_ROOT}/repos/{repo}/collaborators/{username}/permission", token)
+    if not isinstance(body, dict) or "permission" not in body:
+        raise RuntimeError(
+            f"unexpected permission payload for {username} on {repo} — "
+            "refusing to authorize a reaction from it"
+        )
+    return body["permission"]
+
+
+def list_reactions(repo: str, token: str, comment_id: int) -> list[dict[str, Any]]:
+    """One issue comment's reactions as ``[{"user": {...}, "content": ...}]``.
+
+    GitHub fires no webhook for reactions, which is why the *next* run
+    polls: this is that read. Content values are ``+1`` (👍), ``-1`` (👎)
+    and the decorative set — the aggregation in ``greenlight.poll_outcome``
+    keeps only the first two.
+    """
+    return [
+        {
+            "user": r.get("user") or {},
+            "content": r.get("content", ""),
+        }
+        for r in _paged(
+            f"{API_ROOT}/repos/{repo}/issues/comments/{comment_id}/reactions?per_page=100",
+            token,
+        )
+    ]
+
+
+def gather_greenlight_poll(repo: str, token: str) -> list[dict[str, Any]]:
+    """Every open parked decision's thread, ids intact (issue #444).
+
+    The poll's own work-list: each open ``needs-decision`` issue with its
+    body and its comments **including comment ids and authors** —
+    ``gather_greenlight_queue`` drops both (the drafter's selection needs
+    neither), while the poll must address a specific comment to read its
+    reactions and must authorize ``/decide`` authors by login. Oldest first,
+    the sibling bias. Still two GET-only listings per issue.
+    """
+    parked: list[dict[str, Any]] = []
+    for item in _paged(
+        f"{API_ROOT}/repos/{repo}/issues"
+        f"?state=open&labels={NEEDS_DECISION_LABEL}&per_page=100",
+        token,
+    ):
+        if "pull_request" in item:
+            continue  # the issues endpoint interleaves PRs; drop them
+        parked.append(
+            {
+                "number": item["number"],
+                "title": item["title"],
+                "url": item.get("html_url", ""),
+                "body": item.get("body") or "",
+            }
+        )
+
+    threads: list[dict[str, Any]] = []
+    for issue in parked:
+        comments = [
+            {
+                "id": c.get("id"),
+                "user": c.get("user") or {},
+                "created_at": c.get("created_at", ""),
+                "body": c.get("body", ""),
+            }
+            for c in _paged(
+                f"{API_ROOT}/repos/{repo}/issues/{issue['number']}/comments?per_page=100",
+                token,
+            )
+        ]
+        threads.append({**issue, "comments": comments})
+    threads.sort(key=lambda t: t["number"])
+    return threads
 
 
 # The greenlight marker line's shape (the wrapper's own first line; mirrored,

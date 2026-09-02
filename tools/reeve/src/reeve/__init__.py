@@ -9,28 +9,44 @@ preview sizes and the routine confs, so the report can be trusted the way a
 gate is trusted.
 
 It is **advisory-only**: the tool itself never writes. Its primary pulse is
-committed files (`signals.py`); the one other seam is `github.py` — an
+committed files (`signals.py`); the one other read seam is `github.py` — an
 opt-in, GET-only live read that runs only when a repo is named: the run-health
 gather (issue #313: the routines' workflow-run conclusions and any leaked 🚢
 SHIP-LOCK claims), the greenlight queue (issue #443: the open
 `needs-decision` issues and which already carry a greenlight marker — the
 input to the LLM drafter's trusted Select step, `cli.py greenlight-select`),
 and the greenlight rounds gather (issue #445: every greenlighted thread with
-its resolution state — the observer's snapshot). No HTTP write verb appears
-anywhere in the package (a test scans for them).
+its resolution state — the observer's snapshot). The package gained exactly
+one confined write seam in #444 — `pushthrough.py`, the greenlight loop's
+push-through (below) — and a test confines every HTTP write verb to that
+module alone; everything else stays GET-only by scan.
 
 The scheduled workflow's `report` job writes exactly one thing: the
 marker-matched sticky "bench health" report issue — keyless, agent-free (the
 model-registry drift guard pins both). The greenlight loop (#296 stage 2,
-issue #443) — an LLM drafter that posts ONE advisory greenlight comment per
-parked decision, through the wrapper in `.claude/skills/reeve-greenlight/`
-behind its own deny backstop — is a **separate job** built on this tool's
-reads, not a part of it: the package stays deterministic, and its writes stay
-outside. The loop's **learning half** (issue #445) keeps that line: the
-precedent log's pure core (`greenlights.py` — parse, derive, load) lives here,
-its two verbs (`cli.py greenlight-context` / `greenlight-append`) only read
-threads and write a local file, and the push of the updated log to the
-`telemetry` data branch is trusted workflow bash in reeve.yml's keyless
-`observe` job. Humans (or the other routines) act on what it surfaces; Reeve
-mutates nothing else. The charter it serves is `PM.md` at the repo root.
+issues #443, #444 and #445) — an LLM drafter that posts ONE advisory
+greenlight comment per parked decision, through the wrapper in
+`.claude/skills/reeve-greenlight/` behind its own deny backstop, plus the
+deterministic approval poll that follows — is a **separate job** built on
+this tool's reads, not a part of it: the package stays deterministic. The
+loop's authority half (#444) lives in this package because it is pure
+decision logic plus fixed API calls, nothing model-shaped: the NEXT
+scheduled run polls its own prior greenlights' reactions (GitHub fires no
+webhook for them), counts only reactions from write/maintain/admin accounts
+(`getCollaboratorPermissionLevel`, never `author_association`), lets an
+explicit authorized `/decide` comment outrank any reaction, and applies an
+approval through decide.yml's own sequence — the fail-closed label flip
+first, then `autonomy-ok` where the marker carried `arm=1`, then the
+PAT-backed ledger append, then the resolution reply. Never a posted
+`/decide` command: decide.yml anchors on a bare command and the comment
+tooling appends an attribution footer, so a bot-posted command is silently
+neutralized while the run reports success — observed live in stage 1, and
+the reason the push goes through the API. The loop's **learning half**
+(issue #445) keeps the deterministic line: the precedent log's pure core
+(`greenlights.py` — parse, derive, load) lives here, its two verbs (`cli.py
+greenlight-context` / `greenlight-append`) only read threads and write a
+local file, and the push of the updated log to the `telemetry` data branch
+is trusted workflow bash in reeve.yml's keyless `observe` job. Humans (or
+the other routines) act on what it surfaces; Reeve mutates nothing else.
+The charter it serves is `PM.md` at the repo root.
 """

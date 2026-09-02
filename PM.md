@@ -52,6 +52,7 @@ individual PR looks guilty of, and the one the ops data shows first.
 | Read the committed pulse and upsert **one** sticky "bench health" report issue | Draft **one** advisory greenlight comment per parked `needs-decision` issue (#443): a YES/NO verdict on system-level calls or a ROUTE note handing design taste to its design PM, citing the charter line, capped per run, never a label — advisory until a human 👍 | File / label follow-up issues per finding (the wider "hands"; the labeler's wrapper + a perms-check) | Push code, or edit any design's geometry, scripts, lib, or workflows |
 | Re-rank the platform backlog with stated reasons | — | — | Change a non-negotiable, or anything in "Never" |
 | Flag a telemetry regression in the report | — | — | Merge anything, ever |
+| Poll prior greenlights' reactions and push what a **write-permission human approved** (#444): decide.yml's own sequence via the API — verdict label first (fail-closed), `arm=1`-gated `autonomy-ok`, the `REGEN_TOKEN` ledger row, one resolution reply; never a posted `/decide` command, never armed without an approved greenlight | — | — | Resolve a gate on anything but an authorized human's 👍 or `/decide` |
 
 v1 is the deterministic reporter (`tools/reeve/`): no LLM, no provider secret,
 reads only committed files, one trusted sticky-issue write — the backlog
@@ -65,6 +66,14 @@ issues and capped by `greenlight_cap`. The wider hands (auto-filing/labeling
 from model output) stay staged behind the same wrapper + deny-backstop pattern
 the labeler and chunker ship, because that is what reading untrusted issue text
 with a key in scope requires.
+
+The loop's second half (#444) is deterministic, not agentic, so it sits on the
+leash's left side: the approval poll that turns a write-permission human's 👍
+into decide.yml's own resolution sequence, applied through the API (never a
+posted `/decide` command — stage 1 showed the comment tooling's attribution
+footer silently neutralizes one) and never armed without that approval. It is
+the one write the `tools/reeve` package performs, confined to `pushthrough.py`
+and test-pinned there.
 
 ## Non-negotiables
 
@@ -147,7 +156,7 @@ interesting the build is.
 | Question | Blocking? | Assumption if unanswered |
 |---|---|---|
 | Arm Reeve (set the `REEVE_ENABLED` repo variable) once the first sticky report reads right? | No | Ships disarmed; the human arms it when ready |
-| When Reeve's remaining "hands" (B2, the file/label write) arrive, do they also open PRs, or only file/label issues? | No | Issues/labels only — the ambient `GITHUB_TOKEN`, no PAT, matching the labeler. The shipped greenlight loop (#296 stage 2) already holds the narrower line: comments only, never a label |
+| When Reeve's remaining "hands" (B2, the file/label write) arrive, do they also open PRs, or only file/label issues? | No | Issues/labels only — the ambient `GITHUB_TOKEN`, no PAT, matching the labeler. The shipped greenlight loop (#296 stage 2) already holds the narrower line: comments only, never a label — except the loop's own #444 push-through, which applies an **approved** verdict's labels (the human's 👍, not the agent's judgement) and commits its ledger row with `REGEN_TOKEN` because the schedule-triggered job cannot push the default branch with the bot token |
 | Where the non-NUGGS `category:` signal lives — a CI-gated closed-vocab key (a `catalog.conf`) vs derived from lib usage (B1, #374) | No | A small gated `category:` key per design; the implementing session proposes bucket assignments for `/pm` review |
 | When Reeve and a design PM conflict on taste, not ops? | No | Escalate to the human lead — "customer of last resort" per `people/shai.md` |
 
@@ -166,3 +175,4 @@ Append-only. A later session must be able to tell a considered choice from an ac
 | 2026-08-23 | Adopt an **ecosystem-first + technique-domain** catalog taxonomy (#374): one derivable NUGGS collection (name-prefix / `nuggs-coupling` include) + the rest grouped by the `docs/advanced-techniques.md` Domains plus an everyday-functional bucket; the gallery stays generated (N1) and every grouping traces to committed source (N5). Ranked B1 | The catalog outgrew its flat presentation at ~29 designs and the lead flagged it; this class of drift (no single PR looks guilty) is exactly Reeve's beat and should have surfaced from the pulse. Ecosystem+technique is the cheapest high-value cut and reuses vocabulary the repo already has |
 | 2026-08-30 | Set the growth account's voice: a **maker building in public** (sentence-case workshop register, first person) that shares the tech and the lessons-learned — failure stories included — and never hype. Reeve backs this as the platform's community-growth posture: queue the honest, technical, lesson-bearing stories, leave hype off the queue. Encoded in Lark's skill (Voice + Channel craft + a before/after calibration example), `people/lark.md`, and `docs/growth.md` | Issue #456: the first dry-run read a touch announcer-y. A build-in-public voice is how an OSS bench humbly grows a community, and it doubles as an honesty guarantee — the fact-budget rule refuses a sourceless claim, so "sound human" can never become "make something up" |
 | 2026-08-31 | Ship the greenlight loop (#296 stage 2, #443) as a **separate job** after the keyless report: the drafter reads the workflow-selected parked `needs-decision` issues and posts ONE advisory comment through the #442 wrapper — a YES/NO verdict on system-level calls (citing the charter line) or a ROUTE note handing design taste to its design PM — never a label, never a resolved gate, advisory until a human 👍. Keyed on the conf's provider secret (absent ⇒ `::notice::` skip), capped by `greenlight_cap`, model from the registry's `reeve-greenlight` chain, and shipped **unlit** (`greenlight: false` in the conf) | A parked decision asks a human to reconstruct a whole thread before ruling; the drafter does that reconstruction so the human's job shrinks to a reaction. The narrowest shipped hand, per the leash: advisory comments only, and the reporter's keylessness is structural (the drift guard pins it) |
+| 2026-08-31 | Ship the loop's authority half (#444): the next scheduled run **polls its own prior greenlights' reactions** — counting only write/maintain/admin accounts, the same permission check `/decide` makes — and applies an approval through decide.yml's own sequence **via the API, never a posted `/decide` comment** (stage 1 proved the comment tooling's footer silently neutralizes a bot-posted command). Fail-closed label order, `arm=1`-gated `autonomy-ok` (the drafter marks it, the wrapper discloses it in the footer, the human's 👍 grants it), the ledger row committed with `REGEN_TOKEN`, and a `resolution=` reply that spends the greenlight. An authorized `/decide` always outranks a reaction; a route's reactions approve nothing; a contested greenlight fails closed to overrule | The reaction is the whole point of drafting: shrinking a human's ruling to one click is worthless if nothing then reads the click. The push is deterministic code in the package's one confined write seam, so the authority stays with the human who reacted, never with the model that drafted |

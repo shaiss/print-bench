@@ -193,10 +193,15 @@ a mergeable PR are documented in [`actions-security.md`](actions-security.md)
   `needs-decision`, so this order guarantees a partial failure leaves the issue
   **still paused** (never un-paused with no verdict, never a ledger row claiming a
   decision the label never received); a `/decide` re-run heals it.
-- **GITHUB_TOKEN, not a PAT.** A decision-ledger commit must *not* re-trigger CI
-  (the telemetry-commit reason: a re-triggering commit on the default branch
-  would gate the whole catalog on every decision); the async selector re-reads
-  the state on its own schedule regardless.
+- **GITHUB_TOKEN, not a PAT** — for `/decide` itself. A decision-ledger commit
+  must *not* re-trigger CI (the telemetry-commit reason: a re-triggering commit
+  on the default branch would gate the whole catalog on every decision); the
+  async selector re-reads the state on its own schedule regardless. The
+  greenlight loop's push-through is the one deliberate exception, and only for
+  the ledger half: it runs on `schedule`, where the default-branch ruleset
+  refuses the Actions bot's push outright, so it commits with `REGEN_TOKEN`
+  (the `regen` precedent — see the greenlight section below for the full
+  reasoning); its labels and replies still use the workflow token.
 
 ## Automated raisers
 
@@ -227,6 +232,66 @@ just "provider down". A `dead` id (an unservable model — a registry defect) st
 reds its workflow; a `rate-limit`/`outage` just retries next run. Same rules as
 the Oracle raiser: label created on demand, deduped per chain, trusted
 base-branch `github-script`, advisory (it never fails the job on its own).
+
+## The advisory greenlight loop (drafted verdicts, reaction-resolved)
+
+The gate's async rhythm — park, wait for a human, resume next firing — leaves
+the human reading the whole thread to reconstruct what is even being asked.
+The **greenlight loop** (#296 stage 2) shortens that: Reeve's `greenlight` job
+(`.github/workflows/reeve.yml`) drafts ONE advisory verdict comment per parked
+decision — `GREENLIGHT: YES` or `NO` on system-level calls (citing the
+repo-root `PM.md` charter line), a `GREENLIGHT: ROUTE` note handing design
+taste to its design PM — and the owner answers with a **reaction**: 👍 to
+approve, 👎 to overrule. The draft is advisory-only by construction (wrapper
+enforcement, deny backstop, per-run cap — see `tools/reeve/README.md`); the
+authority is the reaction.
+
+GitHub fires no webhook for reactions, so the **next** scheduled run polls its
+own prior greenlights (`reeve greenlight-poll`, issue #444 — keyless,
+deterministic, and the job's first step):
+
+- **Whose reaction counts.** Only accounts whose real repository permission is
+  `admin`/`maintain`/`write` — the same `getCollaboratorPermissionLevel` check
+  `/decide` makes before honouring a typed command, so a reaction can resolve
+  exactly when its author could have typed the command. `author_association` is
+  never used: it describes prior participation, not current access. One
+  qualifying 👍 resolves; one qualifying 👎 overrules; a contested greenlight
+  (both) fails closed to overrule — not resolving is the recoverable direction,
+  and a human `/decide` breaks the tie. A 👍 on a `ROUTE` note approves
+  nothing, by design.
+- **What outranks a reaction.** An explicit `/decide` comment by an authorized
+  author, always. The poll yields to `decide.yml` rather than parsing a typed
+  command twice; a footered or read-only `/decide` outranks nothing (the
+  command workflow would refuse it, so this loop must not honour it either).
+- **What an approval does.** `tools/reeve/src/reeve/pushthrough.py` applies the
+  `/decide` sequence **through the API directly — never a posted `/decide`
+  comment**. Stage 1 proved why: the comment tooling appends an attribution
+  footer and `decide.yml` anchors on a bare command, so a bot-posted command is
+  silently neutralized while the run reports success. The order is the same
+  fail-closed sequence (verdict label first — a failure there records nothing;
+  then the best-effort removals; then the ledger row; then the resolution
+  reply, marked `resolution=approved` so the greenlight is spent and never
+  re-polled). Where the greenlight's marker carried `arm=1` and the verdict is
+  yes, it also applies `autonomy-ok`: the existing backlog burn / design run
+  pick the work up on their own schedule — pull-based resume, no new executor,
+  and never armed without an approved greenlight.
+- **The token difference, on purpose.** `decide.yml` commits its ledger row
+  with the ambient `GITHUB_TOKEN` (a decision-ledger commit must not
+  re-trigger CI). The greenlight poll cannot: it runs on `schedule`, and the
+  default-branch ruleset refuses a push from the Actions bot outright (the
+  GH013 lesson behind telemetry's own data branch) — every append would be
+  refused. So it authenticates the ledger commit with **`REGEN_TOKEN`**, the
+  fine-grained PAT, exactly as the `regen` job commits its artifacts: the push
+  lands, and the PAT author re-triggers CI so the ledger change is verified
+  like any other commit (a ledger-only commit gates no designs — the
+  classifier scopes it to nothing). The workflow's other writes — labels, the
+  resolution reply — stay on the workflow's `issues: write` token, which is
+  why the job needs no permission wider than it already had. Without the PAT
+  the append is skipped and reported; the label still carries the verdict,
+  exactly the degradation `/decide` documents for a refused commit.
+- **An overrule** — one reply recording it, the gate stays parked, and the
+  thread's marker means no new greenlight is drafted on it; the next move is a
+  human's.
 
 ## Follow-ups (not in this slice)
 

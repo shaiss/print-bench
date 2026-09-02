@@ -47,11 +47,15 @@ pattern; issue #313) — only when `--repo` is passed:
 The same `github.py` serves the greenlight loop's trusted Select step (issue
 #443): `gather_greenlight_queue` lists the open `needs-decision` issues and
 reads each thread to see which already carry a greenlight marker — and the
-loop's **learning half** (issue #445): `gather_greenlight_rounds` finds every
+loop's approval poll (issue #444): `gather_greenlight_poll` returns the same
+threads with comment ids intact, `list_reactions` one greenlight's reactions,
+and `permission_of` each reactor's real permission — and the loop's
+**learning half** (issue #445): `gather_greenlight_rounds` finds every
 greenlighted thread (a search probe over the marker phrase, per-candidate
 verified against a real marker first line, so a body that merely quotes the
-marker never counts) with its resolution state — still all GET, still the only
-network-capable module in the package.
+marker never counts) with its resolution state. Still all GET, still the only
+network-capable *read* module in the package; the writes those reads can earn
+live in `pushthrough.py`, never here.
 
 ## The detectors
 
@@ -75,10 +79,14 @@ a reason, never silently empty (the groomer's honesty rule); an offline run
 
 ## Advisory-only, checkable
 
-- The tool never writes: a test asserts no HTTP write verb (`POST`/`PATCH`/
-  `PUT`/`DELETE`) appears anywhere in the package, and the pure core imports
-  nothing network-capable — `github.py` is the one module allowed `urllib`,
-  and everything it does is a GET.
+- The tool never writes — with exactly one confined exception: a test asserts
+  no HTTP write verb (`POST`/`PATCH`/`PUT`/`DELETE`) appears anywhere in the
+  package **outside `pushthrough.py`**, and a second test pins that the seam
+  is real (it exists and still carries the pushes it exists for) and imports
+  nothing beyond the package's own modules — the backlog groomer's `github.py`
+  shape the greenlight loop's parent issue named. The pure core imports
+  nothing network-capable — `github.py` is the one read module allowed
+  `urllib`, and everything it does is a GET.
 - The scheduled workflow's `report` job has a single write: upserting one
   marker-matched sticky `reeve-report` issue, keyed belt-and-braces by its label
   and the body's first line. That job holds no provider secret and runs no
@@ -88,9 +96,11 @@ a reason, never silently empty (the groomer's honesty rule); an offline run
   as a **separate job** in the same workflow, so neither claim above leaks into
   it: it holds the provider secret, and its write is a wrapper-mediated comment
   behind `.claude/reeve-settings.json` (the #442 deny backstop), outside this
-  package. The wider hands (auto-filing/labeling follow-up issues) stay staged
-  behind the labeler's wrapper + deny-backstop, because acting on the pulse
-  from model output over untrusted text crosses into agentic-writer territory.
+  package. Its follow-through — the approval poll and push-through (#444) —
+  joined it as the job's first step and is deterministic, keyless code (below).
+  The wider hands (auto-filing/labeling follow-up issues) stay staged behind
+  the labeler's wrapper + deny-backstop, because acting on the pulse from
+  model output over untrusted text crosses into agentic-writer territory.
 
 ## The greenlight loop (issue #443, #296 stage 2)
 
@@ -112,7 +122,55 @@ the keyless report and:
 It drafts **advisory** verdicts: a YES/NO on system-level decisions (citing the
 repo-root `PM.md` charter line) or a ROUTE note handing design taste to its
 design PM — never a label, never a resolved gate, advisory until a human 👍.
-The reaction poll and push-through are piece #444, deliberately not this.
+A ROUTE note's footer says a reaction on it approves nothing, and the poll
+agrees structurally: `route` markers are never resolved by reactions.
+
+### The approval poll and push-through (issue #444)
+
+The loop's authority half — the job's **first** step, keyless and deterministic
+so it runs even without the provider secret, and before `greenlight-select` so
+a resolution this run shrinks the drafter's set. GitHub fires no webhook for
+reactions, so the NEXT scheduled run polls its own prior marker-carrying
+greenlights (`reeve greenlight-poll`):
+
+- **whose reaction counts** — only accounts whose real repository permission is
+  `admin`/`maintain`/`write`, read per user via the collaborators permission
+  endpoint. That is the same check `decide.yml` makes before honouring a typed
+  command; `author_association` is never used (it describes prior
+  participation, not current access). One 👍 resolves, one 👎 overrules, none
+  keeps waiting, and a contested greenlight fails closed to overrule.
+- **what outranks a reaction** — an explicit `/decide` comment by an authorized
+  author, always. The loop yields to `decide.yml` rather than parsing a human's
+  typed command twice; a read-only author's `/decide` outranks nothing (the
+  command workflow itself would refuse it).
+- **what an approval does** — `pushthrough.py` applies decide.yml's own
+  sequence **via the API, never a posted `/decide` comment**: the stage-1
+  lesson, observed live, is that the comment tooling appends an attribution
+  footer and `decide.yml` anchors on a bare command, so a bot-posted command
+  is silently neutralized while the run reports success. The order is
+  fail-closed: verdict label first (a failure there records nothing at all),
+  then best-effort removals of the opposite label and `needs-decision`, then
+  `autonomy-ok` where the marker carried `arm=1` **and** the verdict is yes
+  (the existing backlog burn / design run pick the work up — pull-based
+  resume, no new executor), then the ledger row, then the resolution reply.
+- **two tokens, on purpose** — labels and comments use the workflow's
+  `issues: write` token; the ledger commit to the default branch uses
+  `REGEN_TOKEN`, the fine-grained PAT, exactly as the `regen` job commits its
+  artifacts: the default-branch ruleset refuses a push from the Actions bot
+  (the GH013 lesson), and a PAT-authored commit re-triggers CI so the ledger
+  change lands verified. The workflow therefore needs no permission wider
+  than its present `issues: write`. Without the PAT the append is skipped and
+  reported — decide.yml's documented degradation: the label is the
+  authoritative verdict.
+- **an overrule** — one reply recording it, the gate stays parked, and the
+  thread's resolution marker means no new greenlight is drafted on it.
+
+`greenlight.py` holds the pure decision table and the ledger append (mirrored
+from `decide.yml`'s own algorithm, round-tripped through its parser in the
+tests); `pushthrough.py` is the one write seam; `test_pushthrough.py` pins the
+five Done-when cases from the issue, including the injected mid-sequence
+failure that must leave `decision-approved` set with `needs-decision` still in
+place — never the reverse.
 
 ## The learning half (issue #445)
 
@@ -175,6 +233,8 @@ reeve run --root . --repo owner/name         # + the GET-only run-health read
 reeve config --get enabled                   # read the committed policy
 reeve armed --variable "$REEVE_ENABLED" --conf-enabled "$enabled"
 reeve greenlight-select --repo owner/name    # the draftable parked-decision queue
+reeve greenlight-poll --repo owner/name      # poll prior greenlights; push approvals
+                                             # (reads REGEN_TOKEN for the ledger commit)
 reeve greenlight-context --repo owner/name   # the drafter's precedent digest (#445)
 reeve greenlight-append --repo owner/name    # records for newly-resolved rounds (#445)
 ```
