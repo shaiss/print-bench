@@ -35,6 +35,20 @@
 # sequence via the API (never a posted command; labels via the workflow
 # token, the ledger via REGEN_TOKEN). See the poll step's own comment.
 #
+# The LEARNING half (issue #445) threads through the same loop: the greenlight
+# job's trusted workflow code assembles the drafter's precedent context
+# (`.reeve-context/precedent.md` — the most recent records of
+# `telemetry/reeve-greenlights.ndjson` plus the inline owner replies on their
+# threads, both capped by `greenlight_precedent_cap`), and the THIRD job,
+# `observe`, records every round whose gate resolved since the last run
+# (closed, or verdict-labeled by decide.yml): it derives one ndjson record per
+# newly-resolved round (`reeve greenlight-append`) and pushes the updated log
+# to the `telemetry` data branch with GITHUB_TOKEN — ci.yml's roll-up vehicle,
+# which triggers no workflow. `observe` is its own job so the secret-bearing
+# agent job keeps contents:read only: the observer is deterministic, keyless,
+# and runs after the drafter (a round resolved mid-run is recorded by the next
+# run — the loop learns across runs, not within one).
+#
 # TWO keys must agree to run: committed `enabled: true` in .github/reeve.conf
 # AND the repo variable REEVE_ENABLED == "true". Either off → inert. The
 # decision is code (`reeve armed`), unit-tested over the full 2×2 matrix, not
@@ -455,6 +469,50 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Overlay the live precedent log from the data branch
+        # The learning half's read (issue #445): the precedent log's live copy
+        # lives on the `telemetry` data branch (appended by the `observe` job
+        # below and ci.yml's roll-up), not the default-branch seed. Overlay it
+        # so the drafter's context and (in `observe`) the append both read
+        # current records. Read-only fetch, per-fetch auth — the same shape as
+        # the report job's overlay.
+        if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch --depth=1 "$url" telemetry 2>/dev/null; then
+            if git show FETCH_HEAD:telemetry/reeve-greenlights.ndjson \
+                > telemetry/reeve-greenlights.ndjson 2>/dev/null; then
+              echo "overlaid the live precedent log ($(wc -l < telemetry/reeve-greenlights.ndjson) records)"
+            else
+              echo "::notice::the telemetry branch carries no precedent log yet — the drafter reads the committed seed"
+            fi
+          else
+            echo "::notice::no telemetry data branch yet — the drafter reads the committed seed"
+          fi
+
+      - name: Assemble the drafter's precedent context
+        # The load half (issue #445): trusted workflow code — never the agent —
+        # renders the digest (most recent greenlight_precedent_cap records plus
+        # the inline owner replies on their threads, GET-only gather) to
+        # `.reeve-context/precedent.md`, which the skill Reads as evidence of
+        # the bar the owner actually applies. The `.oracle-context/` pattern:
+        # the agent cannot widen its own context, and replies arrive framed as
+        # evidence, never instructions. Read-only, so a dry run still builds it.
+        id: context
+        if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .reeve-context
+          reeve greenlight-context --repo "$GITHUB_REPOSITORY" \
+            --conf .github/reeve.conf --gh-output "$GITHUB_OUTPUT" \
+            > .reeve-context/precedent.md
+          echo "precedent digest: $(wc -l < .reeve-context/precedent.md) lines → .reeve-context/precedent.md"
+
       # One explicit run step per provider — a provider is a reviewed,
       # git-tracked step because Actions can reference a secret only by its
       # literal name. The conf's `provider:` label picks which one runs; the
@@ -599,6 +657,183 @@ jobs:
               echo "- ❌ the drafter run did not complete (${RUN:-skipped}) — see the ship step log; the wrapper's refusals (cap, off-selection, already-greenlighted) each say why in the transcript summary."
             else
               echo "- ✅ drafter ran over #${ISSUES// / #} — check each thread for its greenlight comment."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  observe:
+    name: Record resolved greenlight rounds into the precedent log
+    # The learning half's write (issue #445): every greenlighted thread whose
+    # gate RESOLVED since the last run — closed, or verdict-labeled by
+    # decide.yml — yields one record in telemetry/reeve-greenlights.ndjson
+    # (verdict, reasoning digest, the owner's reaction, the outcome), pushed to
+    # the `telemetry` data branch so future drafter runs load it as precedent.
+    # Its OWN job, not a late step in `greenlight`, so the secret-bearing agent
+    # job keeps contents:read only: this job holds no provider secret and runs
+    # no agent — it is `reeve greenlight-append` plus trusted git plumbing, the
+    # ci.yml roll-up's exact vehicle (GITHUB_TOKEN, which triggers no workflow;
+    # a PAT like REGEN_TOKEN would work here too but buys nothing). Runs after
+    # the drafter regardless of its outcome: a round that resolved yesterday is
+    # recorded today even if today's drafting died — the deterministic half
+    # keeps learning through an agent outage.
+    needs: greenlight
+    if: >-
+      always()
+      && needs.greenlight.result != 'skipped'
+      && vars.REEVE_ENABLED == 'true'
+      && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # the data-branch push below (the job's one write)
+      contents: write
+      # the rounds gather (src/reeve/github.py): search, thread comments,
+      # timelines — all GET
+      issues: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # Belt-and-braces with the job `if:` — this job carries a write
+          # scope, so it must not run a dispatched branch's tool code either.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install reeve
+        run: pip install -e tools/reeve
+
+      - name: Read policy (.github/reeve.conf)
+        id: policy
+        # The same gates the greenlight job reads, re-read here because this
+        # job must decide for itself even when the drafter job failed early.
+        env:
+          REEVE_VARIABLE: ${{ vars.REEVE_ENABLED }}
+        run: |
+          set -euo pipefail
+          enabled="$(reeve config --get enabled --path .github/reeve.conf)"
+          greenlight="$(reeve config --get greenlight --path .github/reeve.conf)"
+          reeve armed --variable "$REEVE_VARIABLE" --conf-enabled "$enabled"
+          {
+            echo "enabled=$enabled"
+            echo "greenlight=$greenlight"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Paused in git
+        if: steps.policy.outputs.armed != 'true'
+        env:
+          CONF_ENABLED: ${{ steps.policy.outputs.enabled }}
+        run: |
+          echo "::notice::Reeve is armed (REEVE_ENABLED=true) but .github/reeve.conf says 'enabled: ${CONF_ENABLED}' — the observer records nothing. Flip the conf in a reviewed PR to resume."
+
+      - name: Greenlight loop disabled in git
+        if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight != 'true'
+        env:
+          CONF_GREENLIGHT: ${{ steps.policy.outputs.greenlight }}
+        run: |
+          echo "::notice::.github/reeve.conf says 'greenlight: ${CONF_GREENLIGHT}' — the loop is not lit, so the observer records nothing (no greenlights exist to resolve)."
+
+      - name: Dry run — skipping the append
+        if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight == 'true' && inputs.dry_run
+        run: |
+          echo "::notice::dry run — the observer derives nothing and pushes nothing."
+
+      - name: Derive and push records for newly-resolved rounds
+        id: append
+        if: >-
+          steps.policy.outputs.armed == 'true'
+          && steps.policy.outputs.greenlight == 'true'
+          && inputs.dry_run != true
+        env:
+          # GITHUB_TOKEN is enough: the target branch is unprotected and the
+          # push triggers no workflow (CI runs on push: [main] only) — the
+          # ci.yml roll-up's reasoning, verbatim.
+          PUSH_TOKEN: ${{ github.token }}
+          DATA_BRANCH: telemetry
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          url="https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          for attempt in 1 2 3; do
+            # Seed the live files from the data branch's tip if it exists; the
+            # committed seeds in the checkout are the first-run fallback. The
+            # re-seed on retry matters: a contended branch advanced under us,
+            # and greenlight-append re-derives against whatever the new tip
+            # holds (idempotent — a recorded round derives nothing).
+            lease=""
+            if git fetch "$url" "$DATA_BRANCH" 2>/dev/null; then
+              git show FETCH_HEAD:telemetry/log.ndjson > telemetry/log.ndjson
+              git show FETCH_HEAD:telemetry/REPORT.md > telemetry/REPORT.md 2>/dev/null || true
+              git show FETCH_HEAD:telemetry/reeve-greenlights.ndjson \
+                > telemetry/reeve-greenlights.ndjson 2>/dev/null || true
+              lease="$(git rev-parse FETCH_HEAD)"
+            fi
+            reeve greenlight-append --repo "$GITHUB_REPOSITORY" \
+              --conf .github/reeve.conf --ledger .github/decisions/ledger.conf \
+              --gh-output "$GITHUB_OUTPUT"
+            appended="$(sed -n 's/^appended=//p' "$GITHUB_OUTPUT" | tail -1)"
+            if [ "${appended:-0}" = "0" ]; then
+              echo "no newly-resolved greenlight rounds — nothing to push"
+              exit 0
+            fi
+            # Rebuild the THREE-file data branch with plumbing (never touching
+            # main's index or working tree) — ci.yml's roll-up shape, plus the
+            # precedent log. log.ndjson/REPORT.md ride along unchanged from the
+            # tip so this push can never clobber a gate-run record.
+            log_blob="$(git hash-object -w telemetry/log.ndjson)"
+            rpt_blob="$(git hash-object -w telemetry/REPORT.md)"
+            gl_blob="$(git hash-object -w telemetry/reeve-greenlights.ndjson)"
+            subtree="$(printf '100644 blob %s\tlog.ndjson\n100644 blob %s\tREPORT.md\n100644 blob %s\treeve-greenlights.ndjson\n' \
+              "$log_blob" "$rpt_blob" "$gl_blob" | git mktree)"
+            root="$(printf '040000 tree %s\ttelemetry\n' "$subtree" | git mktree)"
+            commit="$(git commit-tree "$root" -m "Reeve greenlights: resolved rounds through run ${GITHUB_RUN_ID}")"
+            if [ -n "$lease" ]; then
+              git push --force-with-lease="refs/heads/${DATA_BRANCH}:${lease}" \
+                "$url" "${commit}:refs/heads/${DATA_BRANCH}" && ok=1 || ok=0
+            else
+              git push "$url" "${commit}:refs/heads/${DATA_BRANCH}" && ok=1 || ok=0
+            fi
+            if [ "$ok" = "1" ]; then
+              echo "recorded ${appended} newly-resolved round(s) — precedent log pushed to the ${DATA_BRANCH} branch"
+              exit 0
+            fi
+            echo "push contended (attempt ${attempt}) — ${DATA_BRANCH} advanced, re-seeding and re-deriving"
+          done
+          # Non-fatal by design (the roll-up's stance): the rounds re-derive
+          # next run, so advisory bookkeeping must not redden a run whose
+          # drafting already succeeded.
+          echo "::warning::could not push the precedent log after 3 attempts — the rounds re-derive next run."
+
+      - name: Record the run outcome
+        if: always()
+        env:
+          ARMED: ${{ steps.policy.outputs.armed }}
+          GREENLIGHT: ${{ steps.policy.outputs.greenlight }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+          APPEND_OUTCOME: ${{ steps.append.outcome }}
+          APPENDED: ${{ steps.append.outputs.appended }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "### Reeve greenlight — precedent log"
+            if [ "$POLICY_OUTCOME" != "success" ]; then
+              echo "- ❌ policy step did not complete (${POLICY_OUTCOME:-skipped}) — the conf did not parse; nothing recorded."
+            elif [ "$ARMED" != "true" ]; then
+              echo "- ⏸️ the routine is paused in git; the observer recorded nothing."
+            elif [ "$GREENLIGHT" != "true" ]; then
+              echo "- ⏸️ 'greenlight' is false in .github/reeve.conf; the observer recorded nothing."
+            elif [ "$DRY_RUN" = "true" ]; then
+              echo "- 🧪 dry run: the observer derived and pushed nothing."
+            elif [ "$APPEND_OUTCOME" != "success" ]; then
+              echo "- ❌ the observer did not complete (${APPEND_OUTCOME:-skipped}) — see the append step log; nothing was pushed."
+            elif [ "${APPENDED:-0}" = "0" ]; then
+              echo "- ✅ no newly-resolved rounds — the precedent log is current."
+            else
+              echo "- ✅ recorded ${APPENDED} newly-resolved round(s) to the telemetry branch's precedent log."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

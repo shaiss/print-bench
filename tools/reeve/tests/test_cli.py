@@ -211,3 +211,172 @@ def test_greenlight_poll_requires_repo():
     import pytest
     with pytest.raises(SystemExit):
         main(["greenlight-poll"])
+
+
+# greenlight-context / greenlight-append (issue #445): the learning half's two
+# verbs. gather_greenlight_rounds is monkeypatched the same way the select
+# tests patch their gather — no request leaves the process.
+
+from reeve import greenlights as _gl  # noqa: E402  (kept beside its tests)
+
+
+def _rounds(*threads):
+    return {"threads": list(threads)}
+
+
+def _thread(number, **overrides):
+    base = {
+        "number": number, "title": f"t{number}", "state": "open",
+        "labels": ["needs-decision"], "greenlight_verdict": "yes",
+        "greenlight_reasoning": "GREENLIGHT: YES\nbounded scope",
+        "owner_replies": [], "closing_pr": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def _seed_log(tmp_path):
+    log = tmp_path / "reeve-greenlights.ndjson"
+    log.write_text(
+        _gl.render_line({"issue": 500, "verdict": "yes",
+                         "reasoning": "already recorded",
+                         "owner_reaction": "/decide approved (x) by o",
+                         "outcome": "closed", "recorded_at": "2026-08-16T22:47:03Z"}) + "\n",
+        encoding="utf-8",
+    )
+    return log
+
+
+def test_greenlight_context_prints_and_appends_the_multiline_digest(
+    tmp_path, monkeypatch, capsys
+):
+    gh_out = tmp_path / "gh_output"
+    log = _seed_log(tmp_path)
+    monkeypatch.setattr(
+        "reeve.github.gather_greenlight_rounds",
+        lambda repo, token: _rounds(
+            _thread(500, owner_replies=[{"author": "o", "text": "push it through"}])
+        ),
+    )
+    rc = main(["greenlight-context", "--repo", "o/r", "--log", str(log),
+               "--gh-output", str(gh_out)])
+    assert rc == 0
+    digest = capsys.readouterr().out.rstrip("\n")
+    assert "#500 · yes" in digest
+    assert "o on #500: push it through" in digest
+    written = gh_out.read_text(encoding="utf-8")
+    assert "digest<<REEVE_GL_DIGEST_EOF\n" + digest + "\nREEVE_GL_DIGEST_EOF\n" in written
+
+
+def test_greenlight_context_bounds_the_digest_to_the_conf_cap(
+    tmp_path, monkeypatch, capsys
+):
+    conf = tmp_path / "reeve.conf"
+    conf.write_text("greenlight_precedent_cap: 1\n", encoding="utf-8")
+    log = tmp_path / "reeve-greenlights.ndjson"
+    log.write_text(
+        _gl.render_line({"issue": 500, "verdict": "yes", "reasoning": "older",
+                         "owner_reaction": "none observed", "outcome": "closed",
+                         "recorded_at": "2026-08-16T22:47:03Z"}) + "\n"
+        + _gl.render_line({"issue": 501, "verdict": "yes", "reasoning": "newer",
+                           "owner_reaction": "none observed", "outcome": "closed",
+                           "recorded_at": "2026-08-17T22:47:03Z"}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("reeve.github.gather_greenlight_rounds",
+                        lambda repo, token: _rounds())
+    rc = main(["greenlight-context", "--repo", "o/r", "--log", str(log),
+               "--conf", str(conf)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "most recent 1, capped at 1" in out
+    assert "#501 ·" in out and "#500 ·" not in out
+
+
+def test_greenlight_context_empty_log_never_touches_the_network(
+    tmp_path, monkeypatch, capsys
+):
+    log = tmp_path / "reeve-greenlights.ndjson"
+    log.write_text("", encoding="utf-8")
+
+    def _boom(repo, token):  # pragma: no cover — must not be called
+        raise AssertionError("no records means no gather")
+
+    monkeypatch.setattr("reeve.github.gather_greenlight_rounds", _boom)
+    rc = main(["greenlight-context", "--repo", "o/r", "--log", str(log)])
+    assert rc == 0
+    assert "no precedent records yet" in capsys.readouterr().out
+
+
+def test_greenlight_append_writes_derived_records_and_counts_them(
+    tmp_path, monkeypatch, capsys
+):
+    gh_out = tmp_path / "gh_output"
+    log = _seed_log(tmp_path)
+    ledger = tmp_path / "ledger.conf"
+    ledger.write_text(
+        "ship-it | approved | #501 | o | 2026-09-01T07:00:00Z\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "reeve.github.gather_greenlight_rounds",
+        lambda repo, token: _rounds(
+            _thread(501, state="closed", closing_pr=512),
+            _thread(502),  # still parked — no record
+        ),
+    )
+    rc = main(["greenlight-append", "--repo", "o/r", "--log", str(log),
+               "--ledger", str(ledger), "--gh-output", str(gh_out)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert '"issue": 501' in out and '"issue": 502' not in out
+    assert "/decide approved (ship-it) by o" in out  # the ledger reaction fed the record
+    records = _gl.parse_log(log.read_text(encoding="utf-8"))
+    assert [r["issue"] for r in records] == [500, 501]  # spliced, not replaced
+    assert "appended=1" in gh_out.read_text(encoding="utf-8")
+
+
+def test_greenlight_append_is_idempotent_against_a_recorded_round(
+    tmp_path, monkeypatch, capsys
+):
+    log = _seed_log(tmp_path)
+    ledger = tmp_path / "ledger.conf"
+    ledger.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "reeve.github.gather_greenlight_rounds",
+        lambda repo, token: _rounds(_thread(500, state="closed")),
+    )
+    rc = main(["greenlight-append", "--repo", "o/r", "--log", str(log),
+               "--ledger", str(ledger)])
+    assert rc == 0
+    assert capsys.readouterr().out == ""  # already recorded → nothing derived
+    assert len(_gl.parse_log(log.read_text(encoding="utf-8"))) == 1  # log untouched
+
+
+def test_greenlight_append_can_print_to_stdout_instead_of_writing(
+    tmp_path, monkeypatch, capsys
+):
+    log = _seed_log(tmp_path)
+    ledger = tmp_path / "ledger.conf"
+    ledger.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "reeve.github.gather_greenlight_rounds",
+        lambda repo, token: _rounds(_thread(501, state="closed")),
+    )
+    before = log.read_text(encoding="utf-8")
+    rc = main(["greenlight-append", "--repo", "o/r", "--log", str(log),
+               "--ledger", str(ledger), "--out", "-"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert '"issue": 501' in out
+    assert log.read_text(encoding="utf-8") == before  # untouched
+
+
+def test_greenlight_append_refuses_a_malformed_log(tmp_path, monkeypatch, capsys):
+    log = tmp_path / "reeve-greenlights.ndjson"
+    log.write_text("{oops\n", encoding="utf-8")
+    monkeypatch.setattr("reeve.github.gather_greenlight_rounds",
+                        lambda repo, token: _rounds())
+    rc = main(["greenlight-append", "--repo", "o/r", "--log", str(log),
+               "--ledger", str(tmp_path / "ledger.conf")])
+    assert rc == 1
+    assert "error:" in capsys.readouterr().err

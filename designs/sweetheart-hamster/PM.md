@@ -61,9 +61,9 @@ reveal), contact-sheet (as-printed). Frozen; add rows, never repurpose.
 |---|---|---|---|
 | B1 | Closure / friction detent + ring retention | The hot path is cycle #2 (the handover); a box that flops open pre-spoils the surprise, and a loose ring rattles | v0.3 geometry |
 | B2 | Nest-on coupon variant | The coupon insures the hinge but ships `nest_on=false`, so the payload fit is untested until the full print | new gated part |
-| B3 | `fold=85` closed-pose hero (new camera) | Shows the hinge tab the closed gift actually carries | new `cameras.conf` line |
+| B3 | `fold=85` closed-pose hero + seam close-up (new cameras) | Shows the hinge tab the closed gift actually carries; the bed-level parting-gap close-up (a slice of each island in frame) is the visual anchor every flare-vs-gap round has lacked — the 0.5 mm seam is sub-pixel at whole-part scale | two new `cameras.conf` lines, one camera pass |
 | B4 | Rattle / concealment revisit | A snug band (B1's `nest_w` guidance) barely rattles; confirm after the first field test | page + field test |
-| B5 | Page tips: cold-PLA clause, two-color pause-and-swap belly heart | Cheap honesty + a nice gift trick; ride the next page pass | page only |
+| B5 | Page tips: cold-PLA clause, two-color pause-and-swap belly heart, won't-part ladder consolidation | Cheap honesty + a nice gift trick; one canonical ladder telling in **First layer** with the `part_gap` cell and the Assembly paragraph pointing there — five homes is five chances to re-drift; ride the next page pass | page only |
 
 ## Open decisions
 
@@ -78,3 +78,4 @@ reveal), contact-sheet (as-printed). Frozen; add rows, never repurpose.
 | 2026-08-23 | v0.2: raise `hinge_z` above the ear-top | v0.1 hinge printed fused; material above the fold axis welded across the seam |
 | 2026-08-23 | v0.2: land the cut faces on the bed (`translate([0,0,-gg])` in `half_flat`) | halves hovered 0.25 mm; only the web touched the plate, so the first layer wouldn't adhere |
 | 2026-08-23 | `pip_hinge` stays deferred | ~5 folds ever — a many-cycle hinge solves a problem this object doesn't have |
+| 2026-08-29 | Round 4 (post-merge, PR #411): the NOTES supports straggler and the README tack-break flex direction ruled act-now as one copy-only follow-up commit on main (round 3's clause had merged unlanded); seam close-up camera routed to B3's camera pass, five-home ladder consolidation routed to B5 | The round-4 PM triage's ruling; the copy edits landed as #462 |

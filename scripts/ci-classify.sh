@@ -221,7 +221,11 @@ classify() {
         # them for drift guards (the cadence↔cron pin and the budget-caps pin),
         # the same way model-registry's tests trigger on auto-review.yml — so a
         # change to either that skips reeve can't slip a drift past the guard.
+        # The precedent-log seed (issue #445) joins for the same reason: the
+        # golden round-trip test reads the committed file itself, so a hand
+        # edit that broke the parse/render identity must re-run these tests.
         tools/reeve/*|.github/reeve.conf|\
+        telemetry/reeve-greenlights.ndjson|\
         .github/workflows/reeve.yml|scripts/preview-budget.sh|\
         .github/workflows/ci.yml) rvtests=true ;;
       esac
@@ -541,6 +545,10 @@ selftest() {
   check "reeve-workflow-drift" "$out" "reeve_tests=true"
   out="$(run "scripts/preview-budget.sh")"
   check "reeve-budget-drift" "$out" "reeve_tests=true"
+  # The precedent-log seed (#445) is a drift-guard input too: the golden
+  # round-trip test reads the committed file itself.
+  out="$(run "telemetry/reeve-greenlights.ndjson")"
+  check "reeve-precedent-seed-drift" "$out" "reeve_tests=true"
 
   # 4g. brief-sources (#438, deterministic half of the #245 spike-to-brief
   #     converter) is soft-infra like its tool siblings: its own tests run and

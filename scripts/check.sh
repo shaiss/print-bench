@@ -455,6 +455,26 @@ if ! ./scripts/reeve-growth-perms-check.sh; then
   fail=1
 fi
 
+# Spike-converter permission drift: the scheduled spike-to-brief converter
+# (#245 child C, issue #440) — the backstop mirror-image of every sibling:
+# it DENIES the scout's wrapper (scout-helper.sh carries a file-brief verb;
+# #439's rule is that the converter files via the reused MCP tool only)
+# while NEVER denying that same tool (mcp__scout__file_design_brief) or its
+# own read wrapper (converter-helper.sh) — the siblings all deny mcp__scout,
+# this one depends on it. It also pins the REUSE coupling no sibling needs:
+# the scout mcp config + server file the workflow's --mcp-config points at
+# still exist and still name the server the tool id is keyed on, so a moved
+# or renamed scout filing surface cannot silently arm a routine whose only
+# write is denied. --selftest proves the check can pass AND fail.
+echo "-- spike-converter-perms selftest: scripts/spike-converter-perms-check.sh --selftest"
+if ! ./scripts/spike-converter-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- spike-converter-perms check: scripts/spike-converter-perms-check.sh"
+if ! ./scripts/spike-converter-perms-check.sh; then
+  fail=1
+fi
+
 # Reeve-greenlight permission drift: the greenlight loop (issue #296 stage 2,
 # #442) reads untrusted issue text while holding a provider secret, so it
 # carries the labeler containment pattern, not the v1 reporter exemption. Its
@@ -473,6 +493,15 @@ echo "-- reeve-perms check: scripts/reeve-perms-check.sh"
 if ! ./scripts/reeve-perms-check.sh; then
   fail=1
 fi
+
+	echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
+	if ! ./scripts/reviewer-perms-check.sh --selftest; then
+	  fail=1
+	fi
+	echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
+	if ! ./scripts/reviewer-perms-check.sh; then
+	  fail=1
+	fi
 
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
