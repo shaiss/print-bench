@@ -145,7 +145,8 @@ x_thr0   = x_blk1 + 0.5;       // thread rear start (clear of the bore)
 x_thr1   = 25.5;               // thread front end
 x_tip1   = 27.5;               // screw tip, 1.5 clear of the fixed jaw face
 x_face   = 29;                 // fixed jaw clamping face
-x_rail1  = x_face;             // rails end at the fixed jaw face
+x_rail1  = x_face;             // saddle/channel front line (the fixed jaw
+                               // face; the rails themselves run to x_base1)
 y_rail_i = jaw_w / 2 + clr_h;  // rail inner face (20.3)
 y_rail_o = y_rail_i + wall_t;  // rail outer face (24.3)
 nut_bore_d = thread_d + 2 * thread_tol;  // female crest dia (12.6); also the
@@ -256,10 +257,16 @@ module body(fused = false) {
                 cube([x_blk1 - x_blk0, y_rail_o * 2,
                       axis_z + d_core / 2 + 4 - base_t]);
             // rail walls: the jaw's side key, inner faces clr_h off the
-            // 40 mm jaw width, full channel length
+            // 40 mm jaw width, full channel length. They run to the base
+            // FRONT edge, not just the fixed jaw face: ending at x_face
+            // left the rail end meeting the flank gusset's side plane on a
+            // zero-area line, and that pinch exported as two non-manifold
+            // edges (gate iteration 1). Overlapping the gusset in x makes
+            // the contact a face — the rear block sits on the base the
+            // same way and renders manifold.
             for (s = [-1, 1])
                 translate([x_blk1, s > 0 ? y_rail_i : -y_rail_o, base_t])
-                    cube([x_rail1 - x_blk1, wall_t, rail_h]);
+                    cube([x_base1 - x_blk1, wall_t, rail_h]);
             // centre saddle: carries the screw's whole exposed underside
             translate([x_blk1, -saddle_hw, base_t])
                 cube([x_rail1 - x_blk1, saddle_hw * 2, saddle_top - base_t]);
@@ -276,9 +283,14 @@ module body(fused = false) {
         }
         // the two M5 base through-holes on the brief's 40 mm x-grid. M5 is
         // the workshop-utility pack's one deliberate deviation (its hole
-        // vocabulary is M3) — recorded in NOTES.md.
+        // vocabulary is M3) — recorded in NOTES.md. Depth reaches THROUGH
+        // the saddle (both ±20 sit under it, y ±7): the cut tops out
+        // saddle_top + 0.15, which clears the screw's lowest crest
+        // (axis_z - thread_d/2 = 9.0) by 0.25 — pinned by the assert in
+        // main(). base_t + 2 alone left a 1.6 mm cap of saddle over each
+        // hole: positionally right, not a through-hole at all.
         for (hx = [-20, 20])
-            translate([hx, 0, -1]) screw_hole("M5", base_t + 2);
+            translate([hx, 0, -1]) screw_hole("M5", saddle_top + 1.15);
         // shaft bore + collar chamber (skip in fused mode: the overlaps
         // themselves are the weld being proven)
         if (!fused) {
@@ -379,14 +391,25 @@ cp_tols = [0.25, 0.30, 0.35];
 
 // one screw/nut cell: stub stands on the pad, nut beside it
 module coupon_thread_cell(tol, idx) {
-    translate([7, 0, cp_t])
+    // stub x: its Ø12 crest reaches x + 6, and the nut's near face is at
+    // x 12 — at 7 the two overlapped 1 mm of solid (the bore is centred on
+    // the nut, so the overlap sat in nut wall), welding nut-to-stub and so
+    // nut-to-plate even after the 0.6 pad lift: that lift cured the bed-face
+    // weld, not this lateral one (fusecheck still read 4 bodies, iter 2).
+    // 5.4 + 6 = 11.4 leaves the same 0.6 the nut rides over the pad.
+    translate([5.4, 0, cp_t])
         thread_neck(thread_d, thread_depth, pitch, thread_starts, 14,
                     seg = 64);
     difference() {
-        translate([12, -8, cp_t]) cube([16, 16, 9]);
+        // nut rides 0.6 over the pad — the battleship's proven
+        // flat-over-a-plate clearance. Flush on the pad it printed as a
+        // bed-level face weld (fusecheck iteration 1: the coupon read 4
+        // bodies, not 7 — plate + 3 welded nuts + 3 sliders), the same
+        // zero-gap-stop-face lesson as the print pose.
+        translate([12, -8, cp_t + 0.6]) cube([16, 16, 9]);
         translate([20, 0, cp_t - 1])
             cylinder(d = d_core + 2 * tol, h = 11, $fn = 64);
-        translate([20, 0, cp_t])
+        translate([20, 0, cp_t + 0.6])
             thread_bore_cut(thread_d, thread_depth, pitch, thread_starts,
                             9, tol, over = 1, seg = 64);
         // station digit on the camera-facing (+y) nut face — the one surface
@@ -400,7 +423,7 @@ module coupon_thread_cell(tol, idx) {
         // as its mirror's mirror). Upright AND front-facing is a reflection,
         // not a rotation, so the mirror([1,0,0]) is load-bearing. It flips
         // about the halign="center" origin, so the glyph stays put.
-        translate([20, 8.2, cp_t + 2.8]) rotate([90, 0, 0])
+        translate([20, 8.2, cp_t + 0.6 + 2.8]) rotate([90, 0, 0])
             linear_extrude(1.4)
                 mirror([1, 0, 0])
                     text(idx, size = 5.5, halign = "center",
@@ -509,6 +532,8 @@ module main() {
     assert(x_tip1 <= x_face - 1.5, "screw tip must clear the fixed jaw face");
     assert(jaw_x0(travel) >= x_blk1 + 4,
            "jaw leaves the rails at full open");
+    assert(saddle_top + 0.15 <= axis_z - thread_d / 2 - 0.2,
+           "M5 through-cut must clear the screw's lowest crest by >= 0.2");
     echo(str("G4: lead ", screw_lead, " mm/turn, single-start (pitch ",
              pitch, "), nominal dia ", thread_d, " mm"));
     echo(str("G4: travel ", travel, " mm; jaw faces ", jaw_w, " x ", jaw_d,

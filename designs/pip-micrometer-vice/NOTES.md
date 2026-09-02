@@ -127,6 +127,37 @@ Per the brief (issue #516), all rows given unless marked:
     row 2 sweeps the straddle the vice actually ships. A hardcoded slot
     half-width would keep sweeping a stale value as `clr_h` moves.
 
+12. **Three gate fixes from the iteration loop, one lesson.** (a) Rails
+    extended to `x_base1`: they ended at the saddle, so the jaw reached
+    the open end of its travel pinched between rails that had already
+    stopped — a non-manifold crush at full open. (b) The coupon's
+    nut-to-plate weld needed **two** fixes: lifting the nut 0.6 off the
+    pad cured the bed-face weld, yet `fusecheck` still read 4 bodies —
+    the surviving weld was *lateral*, the stud's Ø12 crest reaching
+    x 13 against the nut's near face at x 12, a 1 mm solid overlap
+    invisible to a vertical-separation check. Stub moved to x 5.4 (crest
+    11.4, the same 0.6 the nut rides over the pad) → 7 bodies, `fusecheck`
+    ok. (c) The M5 saddle through-cut capped at the saddle top, leaving
+    an un-drilled ceiling over the screw — `screw_hole("M5",
+    saddle_top + 1.15)` plus an assert that the cut clears the screw's
+    lowest crest by ≥ 0.2. The lesson: a weld between two parts can have
+    **more than one contact**, so after each fix re-run the check that
+    failed — the first diagnosis being right does not make it complete.
+13. **Digit visibility is proven by a difference mask, not an eye.**
+    The frozen coupon camera shows the digits as *filled* glyphs (the
+    recess floor shades a step darker at 52° — more readable than the
+    thin-outline reading decision 9's face-on trap predicts). The proof:
+    render the identical camera with the digit cut suppressed
+    (`linear_extrude(0.001)` — sub-pixel at ~14 px/mm), `compare -metric
+    AE -fuzz 4%` → 3110 px, and the difference mask's connected
+    components are three glyph blobs at **exactly the cell pitch**
+    (452 px), with area signature 864 / 1129 / 1117 px — "1" far smaller
+    than "2"≈"3", the ordering the for-loop types. Two independent
+    vision reads at downscaled resolution called the wrong digit on
+    these same pixels (misreads 8–9); the controlled A/B is the ground
+    truth, extending decision 9's edge-density method from face-on
+    views to 3/4 views.
+
 ## Print settings
 
 - Orientation: as rendered — base down, screw and jaw axes along x. No
