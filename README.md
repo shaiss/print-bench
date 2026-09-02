@@ -338,6 +338,14 @@ surfaces studies awaiting a read live in
     shell surface, whose `--selftest` pins every post-greenlight refusal and
     the assembled comment shape — marker, `GREENLIGHT: YES|NO|ROUTE` verdict
     line, reasoning, wrapper-appended approval footer) must never be denied
+  - `reviewer-perms-check.sh` — the same drift check for the auto-review
+    reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
+    Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):
+    every reviewer ship step in `auto-review.yml` must pass its backstop, the
+    backstop must deny the whole render toolchain (openscad, xvfb-run,
+    prusa-slicer, printcheck, the render/gate/check scripts) and never deny
+    the read surface a review needs; `--selftest` with a positive and a
+    negative control, run by check.sh.
   - `spike-converter-perms-check.sh` — the same drift check for the scheduled
     spike-to-brief converter's own deny backstop
     (`.claude/spike-converter-settings.json`, #245 child C / issue #440), the
