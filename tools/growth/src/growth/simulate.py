@@ -43,7 +43,7 @@ def simulate(
     posts: dict[str, dict],
     start: str,
     days: int,
-    max_posts_per_day: int = 1,
+    max_posts_per_day: int,
 ) -> dict:
     """Assign composed posts to firing slots. ``posts`` maps the queue issue
     number (as a string — JSON object keys) to ``{"text": ..., "thread":
