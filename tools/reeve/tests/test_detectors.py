@@ -434,13 +434,38 @@ def test_write_verbs_are_confined_to_the_seam_and_the_seam_is_real():
     )
     # The read side it builds on stays the GET seam; the pure side stays pure.
     assert _imports_of(seam) & {"urllib"} == {"urllib"}
-    tree = ast.parse(seam.read_text(encoding="utf-8"))
-    local_imports = {
-        alias.name
+    local_imports = _relative_imports_of(seam.read_text(encoding="utf-8"))
+    assert local_imports <= {"config", "detectors", "greenlight", "github", "report", "signals"}, (
+        f"{WRITE_SEAM} imports outside the package's own modules: {sorted(local_imports)}"
+    )
+
+
+def _relative_imports_of(source: str) -> set[str]:
+    """The top-level package modules a source's relative imports resolve to.
+
+    `from . import github` names the module in the alias; `from .github
+    import _get` names it in `node.module` — the alias there is a symbol
+    (`_get`), not a module. Collecting only alias names let `from
+    .unapproved_module import github` pass the seam's import guard, because
+    the alias `github` sat in the allowed set while the module did not.
+    """
+    tree = ast.parse(source)
+    return {
+        (node.module or alias.name).split(".")[0]
         for node in ast.walk(tree)
         if isinstance(node, ast.ImportFrom) and node.level == 1
         for alias in node.names
     }
-    assert local_imports <= {"config", "detectors", "greenlight", "github", "report", "signals"}, (
-        f"{WRITE_SEAM} imports outside the package's own modules: {sorted(local_imports)}"
-    )
+
+
+def test_seam_import_guard_reads_the_module_not_the_alias():
+    # The guard's own negative control: a relative import that names an
+    # unapproved MODULE while aliasing an approved NAME must be caught — the
+    # shape the alias-only collector let through.
+    allowed = {"config", "detectors", "greenlight", "github", "report", "signals"}
+    assert _relative_imports_of("from . import greenlight, github") <= allowed
+    assert _relative_imports_of("from .github import _get") <= allowed
+    smuggled = _relative_imports_of("from .unapproved_module import github")
+    assert not smuggled <= allowed, smuggled
+    nested = _relative_imports_of("from .unapproved_pkg.sub import github")
+    assert not nested <= allowed, nested
