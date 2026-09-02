@@ -26,18 +26,22 @@ name: Wright (scheduled agent forge — propose + Reeve sign-off)
 #
 # This is the SIBLING of backlog-burn.yml, design-run.yml, chunker.yml,
 # labeler.yml, product-scout.yml and adoption-assessor.yml. It shares their
-# config parser and their two-key safety model. Like the assessor it has a
-# trusted Select step that hands each agent only a bounded set of issue
-# numbers; like the scout its propose half CREATES issues; unlike any sibling
-# its sign-off half may APPLY the arming label — which is why that write goes
-# through the most-guarded MCP tool in the family (target re-read at write
-# time, a deterministic sensitive-path downgrade, a fixed label taxonomy, a
-# duplicate guard, and a per-run cap; see signoff_mcp.py).
+# config parser, their two-key safety model and — since issue #544 Part B —
+# their cross-provider chain walk (one ship step per registry link, the GLM
+# head then the Anthropic tail), carried ONCE PER JOB here: the propose job
+# walks the `wright` chain (the scout's three-link shape), the signoff job
+# the `wright-signoff` chain (the labeler's five-link shape). Like the
+# assessor it has a trusted Select step that hands each agent only a bounded
+# set of issue numbers; like the scout its propose half CREATES issues;
+# unlike any sibling its sign-off half may APPLY the arming label — which is
+# why that write goes through the most-guarded MCP tool in the family (target
+# re-read at write time, a deterministic sensitive-path downgrade, a fixed
+# label taxonomy, a duplicate guard, and a per-run cap; see signoff_mcp.py).
 #
 # WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
 #   * Policy → committed, git-tracked: .github/wright.conf holds `enabled`,
-#     the `provider` and the `cadence`. Change it with a reviewed one-line PR;
-#     a clone carries it.
+#     the `provider` (the HEAD of both walks) and the `cadence`. Change it
+#     with a reviewed one-line PR; a clone carries it.
 #   * Live arming / kill switch → the WRIGHT_ENABLED repo variable, a fast
 #     human-only toggle (Settings → Secrets and variables → Actions →
 #     Variables). Not in git on purpose: arming an agent that writes issues
@@ -69,6 +73,9 @@ name: Wright (scheduled agent forge — propose + Reeve sign-off)
 #     the additive settings.json allows AND each other's write tool — the
 #     propose agent cannot sign off, the sign-off agent cannot file — kept
 #     honest by scripts/wright-perms-check.sh.
+#   * Every link of each walk carries the SAME surface, backstop, cap, bound
+#     and prompt as its half's head link — only the model, secret and
+#     endpoint differ per step.
 
 on:
   schedule:
@@ -96,11 +103,14 @@ on:
 # the skills (contents:read), CREATES agent-brief issues, COMMENTS verdicts,
 # and ADDS labels (issues:write). It pushes no branch and opens no PR, so it
 # needs NEITHER contents:write NOR pull-requests:write — the same tight grant
-# as the labeler, scout and assessor. The default GITHUB_TOKEN is fine: issue
-# writes run no CI, so the REGEN_TOKEN/PAT reasoning the burn and design run
-# carry does not apply. The job is off unless WRIGHT_ENABLED is set AND the
-# committed config says enabled, and the writing steps are skipped without the
-# provider's secret, so even these grants sit idle until the routine is armed.
+# as the labeler, scout and assessor. Each job's provider-triage step's one
+# escalation (a deduped needs-decision issue on a human-fixable provider
+# failure) is an issue write too, so issues:write covers both jobs. The
+# default GITHUB_TOKEN is fine: issue writes run no CI, so the
+# REGEN_TOKEN/PAT reasoning the burn and design run carry does not apply. The
+# jobs are off unless WRIGHT_ENABLED is set AND the committed config says
+# enabled, and the writing steps are skipped without a provider secret, so
+# even these grants sit idle until the routine is armed.
 permissions:
   contents: read
   issues: write
@@ -132,12 +142,28 @@ jobs:
       vars.WRIGHT_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # A hung sign-off must not hold a runner for the 6-hour default while
-    # holding a secret, unwatched.
-    timeout-minutes: 40
+    # Job budget 45 = head-step timeout (20) + one tail-step timeout (20) + 5
+    # min headroom. A sign-off run judges at most SIGNOFF_MAX_VERDICTS briefs,
+    # but the walk below is five ship steps in a row (three GLM links, then
+    # the Anthropic tail — issue #544 Part B), each with its own 20-minute
+    # timeout, and the budget must let at least ONE full fallback link
+    # complete after a head link STALLS to its step timeout (a model stall,
+    # not the seconds a quota/billing rejection takes): head 20 + one fallback
+    # 20 + the pre-run steps. The per-step timeout is what keeps a hung
+    # /reeve-signoff from holding a runner and a secret for the whole job
+    # budget, unwatched — before #544 the single step could hold it for 40.
+    # Two consecutive stalls are not budgeted — a second stalled link dies
+    # with the job — because a stall is a provider-wide symptom, and the fast
+    # failures the tail exists for reject in seconds. Well inside GitHub's
+    # 360-minute hosted-job cap (the drift guard pins <= 360).
+    timeout-minutes: 45
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
-      # provider's key presence as a plain string and gate on it below.
+      # provider's key presence as a plain string and gate on it below. The
+      # "Read policy" step turns these into per-provider `zai_key_present` /
+      # `anthropic_key_present` outputs (each provider's ship steps gate on
+      # their own) plus `key_present` = either one (the any-key gate the
+      # triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
       # The per-run verdict cap, enforced by signoff_mcp.py.
@@ -170,9 +196,12 @@ jobs:
         id: policy
         # Key 2 of 2: the committed, git-tracked source of truth. A malformed
         # or typo'd config (bad key, unknown provider) fails this step loudly
-        # rather than running on a policy nobody wrote. It also resolves the
-        # configured provider to whether *that provider's* secret is present,
-        # so the run steps below gate on one `key_present` output. The model
+        # rather than running on a policy nobody wrote. The conf's `provider:`
+        # is the walk's HEAD provider (issue #544) — validated here, emitted
+        # for the resolve step's shape check and the summary. Key presence is
+        # emitted PER PROVIDER (each provider's ship steps gate on their own,
+        # so the tail can run when the head's key is absent) plus the any-key
+        # `key_present` the triage / red / skip-notice gates read. The model
         # itself is NOT decided here — it comes from the registry chain below.
         run: |
           set -euo pipefail
@@ -180,13 +209,17 @@ jobs:
           enabled="$(backlog-burn config --get enabled --path "$conf")"
           provider="$(backlog-burn config --get provider --path "$conf")"
           case "$provider" in
-            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
-            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            anthropic|zai) ;;
             *) echo "::error::unknown provider '$provider'"; exit 1 ;;
           esac
+          [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
+          [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "provider=$provider"
+            echo "zai_key_present=$zai_key"
+            echo "anthropic_key_present=$anthropic_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
@@ -196,13 +229,24 @@ jobs:
       # registry, or one whose `wright-signoff` chain went missing, fails this
       # step loudly BEFORE any key is spent; the same drift is caught
       # pre-merge by the model-registry drift-guard tests, which pin this
-      # workflow to the registry.
+      # workflow to the registry. `link<N>_model` is what the ship steps
+      # below read; the secret stays literal per step (the Actions
+      # constraint), so the registry decides the model, never the auth.
       #
-      # The cross-check walks EVERY link, not just the first: the conf's
-      # `provider:` label picks which ship-step block (and so which endpoint +
-      # literal secret) runs, while the registry picks the models — the walk
-      # below reaches link2, link3 only after link1 died, so a tail on another
-      # provider would spend its key against the wrong endpoint mid-walk.
+      # The shape check guards the one way the conf/chain split can mis-run
+      # (issue #544): the walk below is a FIXED sequence of literal ship steps
+      # — its layout, one provider per step in file order (three Z.AI GLM
+      # steps, then two Anthropic steps), because Actions can only reference
+      # a secret by its literal name — while the registry picks the MODEL
+      # each step runs. A link on the wrong slot's provider (claude-* on a
+      # Z.AI step, glm-* on an Anthropic step) would fail at request time
+      # with a key already spent, and a chain longer or shorter than the walk
+      # leaves a step without a link or a link without a step. So the conf's
+      # `provider:` must be link 1's (it names the HEAD of the walk), and
+      # link N's provider must be step N's — `model-registry shape` applies
+      # the same pure rule the drift guard pins pre-merge, so the two cannot
+      # drift, and the `--layout` literal below is what the drift guard
+      # compares against the steps' actual wiring.
       - name: Resolve the sign-off model chain (issue #206)
         id: signoff_chain
         env:
@@ -211,16 +255,9 @@ jobs:
           set -euo pipefail
           python3 -m model_registry resolve wright-signoff --gh-output "$GITHUB_OUTPUT"
           conf_provider="$(backlog-burn config --get provider --path .github/wright.conf)"
-          n="$(sed -n 's/^link_count=//p' "$GITHUB_OUTPUT" | head -1)"
-          i=1
-          while [ "$i" -le "$n" ]; do
-            link_provider="$(sed -n "s/^link${i}_provider=//p" "$GITHUB_OUTPUT" | head -1)"
-            if [ "$link_provider" != "$conf_provider" ]; then
-              echo "::error::link ${i} of the registry's 'wright-signoff' chain resolves to provider '$link_provider' but .github/wright.conf says provider '$conf_provider' — the walk would spend that link's key against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/wright.conf."
-              exit 1
-            fi
-            i=$((i + 1))
-          done
+          # One layout entry per sign-off step below, in file order.
+          python3 -m model_registry shape wright-signoff --head "$conf_provider" \
+            --conf .github/wright.conf --layout zai,zai,zai,anthropic,anthropic
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -271,18 +308,36 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # One explicit run step per CHAIN LINK, inside one block per provider —
-      # a provider is a reviewed, git-tracked step because GitHub Actions can
-      # only reference a secret by its literal name. The committed `provider:`
-      # label picks which BLOCK runs; the registry's `wright-signoff` chain
-      # (steps.signoff_chain.outputs) picks which MODEL each link runs. The
-      # links walk in chain order: each is gated on the earlier links NOT
-      # having succeeded, so the first success short-circuits the rest and a
-      # dead model falls through to the next instead of killing the run
-      # (#327). Non-terminal links are continue-on-error; the terminal link
-      # keeps none, so a total-walk failure fails the job. The anthropic block
-      # stays single-step and latent (the conf says zai; see the labeler's
-      # tail comment for the reason).
+      # One explicit ship step per CHAIN LINK, walked in file order ACROSS
+      # providers (issue #544 Part B): links 1-3 are the Z.AI GLM steps,
+      # links 4-5 the Anthropic tail. A provider is a reviewed, git-tracked
+      # step because GitHub Actions can only reference a secret by its
+      # literal name (secrets can't be selected by a runtime variable), so
+      # the walk's provider LAYOUT is fixed here and the registry's
+      # `wright-signoff` chain (steps.signoff_chain.outputs) picks which
+      # MODEL each link runs — swapping a link to another model is a registry
+      # edit, not a workflow edit; the resolve step above refuses a chain
+      # that does not fit this layout. The committed `provider:` label names
+      # the HEAD provider (link 1 must sit on it); it no longer selects a
+      # whole block. Each link is gated on EVERY earlier link NOT having
+      # succeeded — a skipped step's outcome is 'skipped', not 'success', so
+      # the Anthropic tail runs whether the GLM links failed or were skipped
+      # for want of ZAI_KEY — so the first success short-circuits the rest
+      # and a dead model, or a whole dead provider, falls through instead of
+      # killing the run. Each provider's steps gate on THEIR OWN key
+      # (zai_key_present / anthropic_key_present), never the other's.
+      # Deepening the chain is a same-PR pair: add the model to the registry
+      # AND the matching ship step here (and its slot in the resolve step's
+      # --layout) — the drift guard fails either half shipped alone.
+      #
+      # Failure model: no SHIP-LOCK lifecycle here, so the non-terminal links
+      # (1-4) are continue-on-error so a dead id falls through, and the
+      # TERMINAL link (5) keeps none — a total-walk failure then fails the
+      # step, and the job, exactly as the last GLM link did before the tail
+      # existed. The "Turn an exhausted walk red" step at the end covers the
+      # one case that rule misses: a walk exhausted with the tail SKIPPED
+      # (only ZAI_KEY set, every GLM link dead) has no failed non-coe step to
+      # fail the job.
       #
       # Tool surface: WRITING is the MCP tool mcp__reeve_signoff__post_reeve_-
       # signoff (served by signoff_mcp.py via --mcp-config) — a JSON-argument
@@ -299,23 +354,27 @@ jobs:
       # from settings.json with the sign-off's OWN deny backstop
       # (.claude/reeve-signoff-settings.json — which also denies Wright's
       # filing tool, so the judge cannot file briefs), kept honest by
-      # scripts/wright-perms-check.sh. The pin is the immutable commit behind
-      # the v1 tag.
+      # scripts/wright-perms-check.sh. Every link carries that contract
+      # verbatim. The pin is the immutable commit behind the v1 tag.
       - name: Sign off via Z.AI (GLM, chain link 1)
         id: signoff_zai_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
-        # Z.AI GLM via its Anthropic-compatible endpoint. Judging whether the
-        # bench grows a new agent is expensive-to-be-wrong (the review tier),
-        # so the chain leads with the top GLM link; which model exactly is the
-        # registry's call. Non-terminal, so continue-on-error: a dead head id
-        # must FALL THROUGH to link 2, not fail the job before the walk starts
-        # (the backlog-burn link-1 shape).
+        # continue-on-error so the walk reaches link 2 (and the tail) when
+        # this id or provider is dead; the step timeout keeps a stalled model
+        # from eating the job budget the fallback links need.
+        timeout-minutes: 20
         continue-on-error: true
+        # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
+        # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
+        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the
+        # same ZAI_KEY is also passed as anthropic_api_key to satisfy the
+        # action's credential check. Judging whether the bench grows a new
+        # agent is expensive-to-be-wrong (the review tier), so the chain leads
+        # with the top GLM link; which model exactly is the registry's call.
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -336,15 +395,18 @@ jobs:
           claude_args: --model ${{ steps.signoff_chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
           prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
 
+      # The GLM tail (#327): links 2 and 3 of the registry's `wright-signoff`
+      # chain, reached only when every earlier link did not succeed — the
+      # same env/bound/pin/backstop/prompt as link 1, only the model differs.
       - name: Sign off via Z.AI (GLM, chain link 2)
         id: signoff_zai_2
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.signoff_zai_1.outcome != 'success'
+        timeout-minutes: 20
         continue-on-error: true
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
@@ -365,13 +427,14 @@ jobs:
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.signoff_zai_1.outcome != 'success'
           && steps.signoff_zai_2.outcome != 'success'
-        # The TERMINAL link: no continue-on-error, so the last id dying fails
-        # the step (and the job) — the walk is over.
+        # The last GLM link is no longer terminal (#544): continue-on-error so
+        # a dead GLM provider falls through to the Anthropic tail below.
+        timeout-minutes: 20
+        continue-on-error: true
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -386,17 +449,61 @@ jobs:
           claude_args: --model ${{ steps.signoff_chain.outputs.link3_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
           prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
 
-      - name: Sign off via Anthropic (Claude, chain link 1)
-        id: signoff_anthropic_1
+      # The cross-provider tail (issue #544 Part B): links 4 and 5 of the
+      # registry's `wright-signoff` chain on Anthropic's native endpoint,
+      # reached only when EVERY GLM link did not succeed (failed, or skipped
+      # for want of ZAI_KEY) and gated on the Anthropic key's own presence.
+      # Claude via api.anthropic.com: a plain API key (pay-per-token) is the
+      # right fit for an unattended bot — no OAuth token / subscription seat.
+      # The same pin, permission, github_token, effort, verdict cap, MCP
+      # write tool, wrapper read verbs, sign-off backstop, selection bound,
+      # transcript posture and prompt as the GLM links — only the model,
+      # secret and endpoint differ. Which model runs is the registry's call
+      # (the cheap Anthropic tier, review tier or not — the account's monthly
+      # cap must not be spent by an unattended fallback).
+      - name: Sign off via Anthropic (Claude, chain link 4)
+        id: signoff_anthropic_4
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
-          && steps.policy.outputs.provider == 'anthropic'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
-        # Claude via api.anthropic.com — the latent block (wright.conf says
-        # zai); flips live by editing the conf AND the chain together (the
-        # resolve step's cross-check refuses one without the other).
+          && steps.signoff_zai_1.outcome != 'success'
+          && steps.signoff_zai_2.outcome != 'success'
+          && steps.signoff_zai_3.outcome != 'success'
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          # Same reasons as the Z.AI steps: the MCP write tool inherits this
+          # env and authenticates with it, and refuses any issue outside the
+          # trusted Select step's bound.
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          # Same surface as the Z.AI steps: MCP write tool + wrapper read verbs
+          # + read-only file tools + sign-off deny backstop + dontAsk + the
+          # transcript kept out of the log (see link 1 for why exactly this).
+          show_full_output: "false"
+          claude_args: --model ${{ steps.signoff_chain.outputs.link4_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
+
+      - name: Sign off via Anthropic (Claude, chain link 5)
+        id: signoff_anthropic_5
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.signoff_zai_1.outcome != 'success'
+          && steps.signoff_zai_2.outcome != 'success'
+          && steps.signoff_zai_3.outcome != 'success'
+          && steps.signoff_anthropic_4.outcome != 'success'
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over.
+        timeout-minutes: 20
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
@@ -405,7 +512,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           show_full_output: "false"
-          claude_args: --model ${{ steps.signoff_chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model ${{ steps.signoff_chain.outputs.link5_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
           prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
 
       - name: Explain a skipped agentic run
@@ -422,12 +529,42 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "::notice::dry run — selected pending briefs (${ISSUES}) but did not invoke /reeve-signoff"
           else
-            echo "::notice::the configured provider '${PROVIDER}' has no key set (ZAI_KEY for zai, ANTHROPIC_API_KEY for anthropic) — selected (${ISSUES}) but skipping the unattended /reeve-signoff run"
+            echo "::notice::no key is set for ANY provider in the wright-signoff chain (ZAI_KEY for the zai links, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — selected (${ISSUES}) but skipping the unattended /reeve-signoff run"
           fi
 
       - name: Explain an empty selection
         if: steps.policy.outputs.enabled == 'true' && steps.select.outputs.issues == ''
         run: echo "::notice::no pending agent briefs — every open agent-brief issue already carries a verdict label; nothing to sign off"
+
+      # No SHIP-LOCK lifecycle here, so the terminal link failing IS the job
+      # failure — but before that stands, recover WHY the chain exhausted (the
+      # agent steps hide their provider error) and route the human-fixable
+      # causes — out of credit / out of tokens / bad key — to ONE deduped
+      # needs-decision issue, so a scheduled red nobody watches becomes an
+      # actionable ask. A bad model id or a transient blip is only diagnosed
+      # in the log. Advisory: it never fails the job. Fires (always()) only
+      # when a key was present and the walk did not succeed — the same
+      # five-link walk-outcome expression the record step reports as RUN.
+      # Both keys go in so classify probes both halves of the chain. Its own
+      # chain (`wright-signoff`), so an exhausted sign-off is diagnosed apart
+      # from an exhausted propose walk in the sibling job.
+      - name: Diagnose the exhausted chain (billing / tokens / technical)
+        id: triage
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome)) != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: wright-signoff
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the agent forge's Reeve sign-off routine
+          escalate: "true"
 
       - name: Record the run outcome
         if: always()
@@ -437,13 +574,47 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          # The walk's outcome (#327): success if ANY link of the block the
-          # conf's provider label selected succeeded (the anthropic block is
-          # the latent single-step one); the last zai link's outcome
-          # otherwise. No SHIP-LOCK lifecycle here, so the terminal link
-          # failing IS the failure.
-          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.signoff_anthropic_1.outcome || (steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome) }}
+          # The walk's outcome (#327, #544): 'success' if ANY of the five
+          # links across both providers succeeded; otherwise the outcome of
+          # the LAST LINK THAT ACTUALLY RAN — the nested tail walks backwards
+          # over 'skipped' links, so 'skipped' means every link was skipped
+          # (no key for any provider), never "the tail had no key" after the
+          # head failed. The terminal link failing fails the job; the "Turn
+          # an exhausted walk red" step below covers a walk exhausted with
+          # the tail skipped.
+          RUN: ${{ steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome) }}
+          # Per-link outcomes + the chain the resolve step emitted, so the
+          # summary can name WHICH link served and warn when the head
+          # provider fell through (a GLM outage must stay visible even though
+          # the run is green — #544).
+          L1: ${{ steps.signoff_zai_1.outcome }}
+          L2: ${{ steps.signoff_zai_2.outcome }}
+          L3: ${{ steps.signoff_zai_3.outcome }}
+          L4: ${{ steps.signoff_anthropic_4.outcome }}
+          L5: ${{ steps.signoff_anthropic_5.outcome }}
+          M1: ${{ steps.signoff_chain.outputs.link1_model }}
+          M2: ${{ steps.signoff_chain.outputs.link2_model }}
+          M3: ${{ steps.signoff_chain.outputs.link3_model }}
+          M4: ${{ steps.signoff_chain.outputs.link4_model }}
+          M5: ${{ steps.signoff_chain.outputs.link5_model }}
+          P1: ${{ steps.signoff_chain.outputs.link1_provider }}
+          P2: ${{ steps.signoff_chain.outputs.link2_provider }}
+          P3: ${{ steps.signoff_chain.outputs.link3_provider }}
+          P4: ${{ steps.signoff_chain.outputs.link4_provider }}
+          P5: ${{ steps.signoff_chain.outputs.link5_provider }}
         run: |
+          # Which link served: the first (only) link whose outcome is success.
+          served=""
+          for i in 1 2 3 4 5; do
+            o="L$i"; m="M$i"; p="P$i"
+            if [ "${!o}" = "success" ]; then
+              served="link $i ${!m} (${!p})"
+              if [ "${!p}" != "${PROVIDER}" ]; then
+                echo "::warning::the Reeve sign-off fell through to ${!p}: every '${PROVIDER}' (head provider) link failed or was skipped and link $i ${!m} served — the run is green, but the head provider is down or keyless; check its quota/key"
+              fi
+              break
+            fi
+          done
           {
             echo "## Reeve sign-off — run outcome"
             if [ "${POLICY_OUTCOME}" != "success" ]; then
@@ -456,10 +627,35 @@ jobs:
               echo "- selected: none (every open agent-brief issue already carries a verdict label)"
             else
               echo "- selected pending briefs: #${ISSUES// / #}"
-              echo "- provider: ${PROVIDER}"
+              echo "- provider: ${PROVIDER} (head)"
               echo "- run step: ${RUN:-skipped} (each verdict is a comment + label on its brief; an armed brief joins the backlog burn's queue)"
+              if [ -n "${served}" ]; then
+                echo "- served by: ${served}"
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Turn an exhausted walk red
+        # The terminal link (5) carries no continue-on-error, so its failure
+        # fails the job — but a walk that exhausted with the tail SKIPPED
+        # (only ZAI_KEY set and every GLM link dead) has no failed non-coe
+        # step, and would leave the run green: exactly the silent-success
+        # disguise the burn's red-on-death step exists for. Restore the
+        # failure last, after the triage and the record have run. Same
+        # walk-outcome expression as the triage gate and RUN above.
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome)) != 'success'
+        env:
+          ISSUES: ${{ steps.select.outputs.issues }}
+          RUN: ${{ steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome) }}
+        run: |
+          echo "::error::the /reeve-signoff agent step for (${ISSUES}) did not succeed on any link of the wright-signoff chain (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
+          exit 1
 
   propose:
     name: Propose agent briefs with /wright
@@ -468,8 +664,16 @@ jobs:
       vars.WRIGHT_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Job budget 45 = head-step timeout (20) + one tail-step timeout (20) + 5
+    # min headroom — the signoff job's reasoning, for a three-link walk (the
+    # GLM head, then the Anthropic tail — issue #544 Part B): one stalled
+    # head link plus one full fallback link must fit, two consecutive stalls
+    # are not budgeted. Well inside the 360-minute hosted-job cap.
+    timeout-minutes: 45
     env:
+      # Per-provider key presence, turned into `zai_key_present` /
+      # `anthropic_key_present` + the any-key `key_present` by the "Read
+      # policy" step (see the signoff job's env for why).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
       # The per-run brief cap, enforced by wright_mcp.py's filing tool. One
@@ -495,26 +699,38 @@ jobs:
 
       - name: Read policy (.github/wright.conf)
         id: policy
+        # The signoff job's policy step, verbatim: the conf's `provider:` is
+        # the HEAD of this job's walk too, key presence is emitted per
+        # provider plus the any-key `key_present`.
         run: |
           set -euo pipefail
           conf=.github/wright.conf
           enabled="$(backlog-burn config --get enabled --path "$conf")"
           provider="$(backlog-burn config --get provider --path "$conf")"
           case "$provider" in
-            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
-            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            anthropic|zai) ;;
             *) echo "::error::unknown provider '$provider'"; exit 1 ;;
           esac
+          [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
+          [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "provider=$provider"
+            echo "zai_key_present=$zai_key"
+            echo "anthropic_key_present=$anthropic_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
-      # Resolve the propose half's model from the registry (#206). Single-link
-      # like the scout's chain — proposing is the cheap-to-be-wrong case (a
-      # bad brief is one Reeve declines), and a failed run costs nothing at
-      # this cadence: the next firing is at most six hours away.
+      # Resolve the propose half's model chain from the registry (#206) — the
+      # scout's shape: proposing is the cheap-to-be-wrong case (a bad brief is
+      # one Reeve declines), so the chain leads with the cheap GLM link and,
+      # since #544 Part B, crosses to the Anthropic tail on the two ship
+      # steps below instead of silencing the forge for a GLM outage. The
+      # shape check is the signoff job's (see its resolve step): the conf's
+      # `provider:` must be link 1's, and link N's provider must be ship step
+      # N's — one Z.AI step, then two Anthropic steps — checked by the same
+      # pure rule the drift guard pins, before any key is spent.
       - name: Resolve the propose model chain (issue #206)
         id: propose_chain
         env:
@@ -523,16 +739,9 @@ jobs:
           set -euo pipefail
           python3 -m model_registry resolve wright --gh-output "$GITHUB_OUTPUT"
           conf_provider="$(backlog-burn config --get provider --path .github/wright.conf)"
-          n="$(sed -n 's/^link_count=//p' "$GITHUB_OUTPUT" | head -1)"
-          i=1
-          while [ "$i" -le "$n" ]; do
-            link_provider="$(sed -n "s/^link${i}_provider=//p" "$GITHUB_OUTPUT" | head -1)"
-            if [ "$link_provider" != "$conf_provider" ]; then
-              echo "::error::link ${i} of the registry's 'wright' chain resolves to provider '$link_provider' but .github/wright.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/wright.conf."
-              exit 1
-            fi
-            i=$((i + 1))
-          done
+          # One layout entry per propose step below, in file order.
+          python3 -m model_registry shape wright --head "$conf_provider" \
+            --conf .github/wright.conf --layout zai,anthropic,anthropic
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -572,7 +781,21 @@ jobs:
             echo "- proposing this firing: $propose"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # One explicit run step per provider (the scout's single-link shape).
+      # One explicit ship step per CHAIN LINK, walked in file order ACROSS
+      # providers (issue #544 Part B, the scout's shape): link 1 is the Z.AI
+      # GLM step, links 2-3 the Anthropic tail. The layout is fixed here (a
+      # secret can only be referenced by its literal name) and the registry's
+      # `wright` chain (steps.propose_chain.outputs) picks which MODEL each
+      # link runs; the resolve step above refuses a chain that does not fit.
+      # Each link is gated on every earlier link NOT having succeeded and on
+      # its OWN provider's key, so a dead GLM id — or a keyless GLM provider
+      # — falls through to the Anthropic tail instead of killing the run;
+      # non-terminal links (1-2) are continue-on-error, the terminal link (3)
+      # keeps none, and the "Turn an exhausted walk red" step at the end
+      # covers a walk exhausted with the tail skipped. Every link also
+      # inherits the backpressure gate (`propose == 'yes'`), so a full queue
+      # skips the whole walk before any key is spent.
+      #
       # Tool surface: FILING is the MCP tool mcp__wright__file_agent_brief
       # (served by wright_mcp.py via --mcp-config) — a JSON-argument tool so a
       # rich multi-line brief body never touches a shell command line; it
@@ -583,15 +806,20 @@ jobs:
       # Bash. --settings closes the additive allow leak from settings.json
       # with Wright's OWN deny backstop (.claude/wright-settings.json — which
       # also denies the sign-off tool, so the proposer can never judge its own
-      # briefs), kept honest by scripts/wright-perms-check.sh.
-      - name: Propose via Z.AI (GLM)
-        id: propose_zai
+      # briefs), kept honest by scripts/wright-perms-check.sh. Every link
+      # carries that contract verbatim.
+      - name: Propose via Z.AI (GLM, chain link 1)
+        id: propose_zai_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.propose == 'yes'
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+        # continue-on-error so the walk reaches the tail when this id or
+        # provider is dead; the step timeout keeps a stalled model from
+        # eating the job budget the fallback links need.
+        timeout-minutes: 20
+        continue-on-error: true
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -610,14 +838,53 @@ jobs:
           claude_args: --model ${{ steps.propose_chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/wright-settings.json --mcp-config .claude/skills/wright/wright-mcp.json --allowedTools "mcp__wright__file_agent_brief,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
           prompt: "/wright"
 
-      - name: Propose via Anthropic (Claude)
-        id: propose_anthropic
+      # The cross-provider tail (issue #544 Part B): links 2 and 3 of the
+      # registry's `wright` chain on Anthropic's native endpoint, reached only
+      # when the GLM link did not succeed (failed, or skipped for want of
+      # ZAI_KEY) and gated on the Anthropic key's own presence. Claude via
+      # api.anthropic.com: a plain API key (pay-per-token) is the right fit
+      # for an unattended bot — no OAuth token / subscription seat. The same
+      # pin, permission, github_token, effort, cap, MCP filing tool, wrapper
+      # read verbs, backstop, transcript posture and prompt as the GLM link —
+      # only the model, secret and endpoint differ. Which model runs is the
+      # registry's call (the cheap Anthropic tier).
+      - name: Propose via Anthropic (Claude, chain link 2)
+        id: propose_anthropic_2
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.propose == 'yes'
-          && steps.policy.outputs.provider == 'anthropic'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.propose_zai_1.outcome != 'success'
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          # Same reason as the Z.AI step: the MCP filing tool inherits this
+          # env and authenticates with it.
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          # Same tool surface as the Z.AI step: MCP filing tool + wrapper read
+          # verbs + read-only file tools + Wright's deny backstop + dontAsk +
+          # show_full_output (see its comment for why it is exactly this).
+          show_full_output: "true"
+          claude_args: --model ${{ steps.propose_chain.outputs.link2_model }} --effort medium --permission-mode dontAsk --settings .claude/wright-settings.json --mcp-config .claude/skills/wright/wright-mcp.json --allowedTools "mcp__wright__file_agent_brief,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/wright"
+
+      - name: Propose via Anthropic (Claude, chain link 3)
+        id: propose_anthropic_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.propose == 'yes'
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.propose_zai_1.outcome != 'success'
+          && steps.propose_anthropic_2.outcome != 'success'
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over.
+        timeout-minutes: 20
         env:
           GITHUB_TOKEN: ${{ github.token }}
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
@@ -625,7 +892,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           show_full_output: "true"
-          claude_args: --model ${{ steps.propose_chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/wright-settings.json --mcp-config .claude/skills/wright/wright-mcp.json --allowedTools "mcp__wright__file_agent_brief,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model ${{ steps.propose_chain.outputs.link3_model }} --effort medium --permission-mode dontAsk --settings .claude/wright-settings.json --mcp-config .claude/skills/wright/wright-mcp.json --allowedTools "mcp__wright__file_agent_brief,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
           prompt: "/wright"
 
       - name: Explain a skipped agentic run
@@ -645,8 +912,32 @@ jobs:
           elif [ "$PROPOSE" != "yes" ]; then
             echo "::notice::backpressure — ${PENDING} agent briefs already pending or armed-unbuilt (cap ${WRIGHT_MAX_PENDING}); proposing nothing this firing"
           else
-            echo "::notice::the configured provider '${PROVIDER}' has no key set (ZAI_KEY for zai, ANTHROPIC_API_KEY for anthropic) — skipping the unattended /wright run"
+            echo "::notice::no key is set for ANY provider in the wright chain (ZAI_KEY for the zai link, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — skipping the unattended /wright run"
           fi
+
+      # The signoff job's triage step for THIS job's chain (`wright`): recover
+      # WHY the propose walk exhausted and route the human-fixable causes to
+      # ONE deduped needs-decision issue. Advisory: it never fails the job.
+      # Fires (always()) only when a key was present, the backpressure gate
+      # let the walk run, and the walk did not succeed — the same three-link
+      # walk-outcome expression the record step reports as RUN.
+      - name: Diagnose the exhausted chain (billing / tokens / technical)
+        id: triage
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.propose == 'yes'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome)) != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: wright
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the agent forge's Wright propose routine
+          escalate: "true"
 
       - name: Record the run outcome
         if: always()
@@ -656,8 +947,41 @@ jobs:
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           PROPOSE: ${{ steps.select.outputs.propose }}
           PENDING: ${{ steps.select.outputs.pending }}
-          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.propose_anthropic.outcome || steps.propose_zai.outcome }}
+          # The walk's outcome (#544): 'success' if ANY of the three links
+          # across both providers succeeded; otherwise the outcome of the
+          # LAST LINK THAT ACTUALLY RAN — the nested tail walks backwards
+          # over 'skipped' links, so 'skipped' means every link was skipped
+          # (no key for any provider), never "the tail had no key" after the
+          # head failed. The terminal link failing fails the job; the "Turn
+          # an exhausted walk red" step below covers a walk exhausted with
+          # the tail skipped.
+          RUN: ${{ steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome) }}
+          # Per-link outcomes + the chain the resolve step emitted, so the
+          # summary can name WHICH link served and warn when the head
+          # provider fell through (a GLM outage must stay visible even though
+          # the run is green — #544).
+          L1: ${{ steps.propose_zai_1.outcome }}
+          L2: ${{ steps.propose_anthropic_2.outcome }}
+          L3: ${{ steps.propose_anthropic_3.outcome }}
+          M1: ${{ steps.propose_chain.outputs.link1_model }}
+          M2: ${{ steps.propose_chain.outputs.link2_model }}
+          M3: ${{ steps.propose_chain.outputs.link3_model }}
+          P1: ${{ steps.propose_chain.outputs.link1_provider }}
+          P2: ${{ steps.propose_chain.outputs.link2_provider }}
+          P3: ${{ steps.propose_chain.outputs.link3_provider }}
         run: |
+          # Which link served: the first (only) link whose outcome is success.
+          served=""
+          for i in 1 2 3; do
+            o="L$i"; m="M$i"; p="P$i"
+            if [ "${!o}" = "success" ]; then
+              served="link $i ${!m} (${!p})"
+              if [ "${!p}" != "${PROVIDER}" ]; then
+                echo "::warning::Wright fell through to ${!p}: every '${PROVIDER}' (head provider) link failed or was skipped and link $i ${!m} served — the run is green, but the head provider is down or keyless; check its quota/key"
+              fi
+              break
+            fi
+          done
           {
             echo "## Wright — run outcome"
             if [ "${POLICY_OUTCOME}" != "success" ]; then
@@ -667,10 +991,34 @@ jobs:
             elif [ "${PROPOSE}" != "yes" ]; then
               echo "- backpressure: ${PENDING:-?} briefs already pending — proposed nothing this firing"
             else
-              echo "- provider: ${PROVIDER}"
+              echo "- provider: ${PROVIDER} (head)"
               echo "- run step: ${RUN:-skipped} (any filed agent-brief issues are on the tracker, labelled \`agent-brief\`, awaiting Reeve's sign-off)"
+              if [ -n "${served}" ]; then
+                echo "- served by: ${served}"
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Turn an exhausted walk red
+        # The terminal link (3) carries no continue-on-error, so its failure
+        # fails the job — but a walk that exhausted with the tail SKIPPED
+        # (only ZAI_KEY set and the GLM link dead) has no failed non-coe
+        # step, and would leave the run green: exactly the silent-success
+        # disguise the burn's red-on-death step exists for. Restore the
+        # failure last, after the triage and the record have run. Same
+        # walk-outcome expression as the triage gate and RUN above.
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.propose == 'yes'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome)) != 'success'
+        env:
+          RUN: ${{ steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome) }}
+        run: |
+          echo "::error::the /wright agent step did not succeed on any link of the wright chain (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
+          exit 1
 
   disarmed-notice:
     name: Explain a disarmed run
