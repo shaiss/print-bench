@@ -3,7 +3,8 @@
 auto-review.yml only runs on design PRs, so this PR's CI does not live-exercise the
 migrated review pipeline. This test is the standing proof that the registry drives
 the workflow and stays consistent with it. product-scout.yml (issue #243) is the
-second consumer, guarded the same way at the bottom of this file.
+second consumer — since #544 Part B a row of the ROUTINES table below, guarded
+by the routine pins like every other chain-walking scheduled routine.
 
 The load-bearing check parses each reviewer job's ordered ship steps and asserts,
 **position for position, derived from `Registry.resolve("review")`**:
@@ -163,46 +164,27 @@ def test_no_hardcoded_model_literal_survives():
     assert not literals, f"hardcoded --model literal(s) in auto-review.yml: {literals}"
 
 
-# ── The product scout (issue #243) ────────────────────────────────────────────
+# ── The product scout (issue #243; #544 Part B) ───────────────────────────────
 #
-# The scout is the registry's second consumer, migrated in #243. Its shape is
-# the groomer-narrative one, not the review one: a SINGLE-link chain, and the
-# workflow resolves it in the same job that consumes it (`steps.chain.outputs`,
-# not a `needs.`-scoped job output). The guard below proves the same property
-# the reviewer guard proves — the registry drives the model, the YAML carries
-# only literal secrets — adapted to that shape: one ship step per provider,
-# each sourcing `--model` from `steps.chain.outputs.link1_model`, each wiring
-# the secret the registry says its link's provider uses, each endpoint matching
-# the link's base_url.
-#
-# The degraded path is part of what's pinned: when the configured provider's
-# secret is absent the run steps must be SKIPPED and the notice step must fire,
-# never silently run (and never hard-fail) — that is the skip #243 requires to
-# survive the migration verbatim.
+# The scout was the registry's second consumer (#243), pinned here as a
+# single-link chain with one ship step per provider, the conf's `provider:`
+# picking which one ran. Since #544 Part B it walks the cross-provider chain
+# like the four scheduled routines — the GLM head, then the Anthropic tail —
+# and is the "scout" row of the ROUTINES table below, covered by every generic
+# pin: the chain fits the walk (head on the conf provider, one step per link
+# wired to its link's provider, the row's layout), the walk order, the
+# per-provider key gates, the any-provider skip notice, the outcome
+# simulation, the exhaustion gates (the red step and provider-triage), the job
+# budget, the no-literal rule and the triage wiring. The two #243 properties
+# that survive the walk unchanged stay explicit here: the chain resolves
+# in-workflow, and the degraded path stays a ::notice:: skip — now firing only
+# when NO provider in the chain has a key, never on the head's key alone.
 
 SCOUT_CHAIN = "scout"
 
 
 def _scout_text() -> str:
     return SCOUT_WORKFLOW.read_text(encoding="utf-8")
-
-
-def _scout_ship_steps(text: str) -> list[dict]:
-    """The scout job's claude-code-action ship steps, parsed for their wiring."""
-    steps: list[dict] = []
-    for chunk in re.split(r"\n      - ", text):
-        if "uses: anthropics/claude-code-action" not in chunk:
-            continue
-        model = re.search(
-            r"--model \$\{\{ steps\.chain\.outputs\.link(\d+)_model \}\}", chunk)
-        secret = re.search(r"anthropic_api_key: \$\{\{ secrets\.(\w+) \}\}", chunk)
-        base = re.search(r"ANTHROPIC_BASE_URL: (\S+)", chunk)
-        steps.append({
-            "model_slot": int(model.group(1)) if model else None,
-            "secret": secret.group(1) if secret else None,
-            "base_url": base.group(1) if base else "",
-        })
-    return steps
 
 
 def test_scout_chain_exists_and_resolves():
@@ -213,104 +195,29 @@ def test_scout_chain_exists_and_resolves():
     assert links, f"the `{SCOUT_CHAIN}` chain resolved to zero links"
 
 
-def test_scout_ship_steps_are_pinned_to_its_registry_link():
-    """Every scout ship step reads its model from the resolved chain, sources it
-    from the resolve step's output, and carries exactly one endpoint/secret pair
-    per provider — the model id itself appears nowhere in the YAML.
-
-    The chain's link pins the CURRENT provider's wiring (secret + endpoint
-    must match the link's provider exactly); the other provider's step is
-    checked structurally (a `${{ }}` model reference, and a secret/endpoint
-    belonging to a declared registry provider) because the conf's `provider:`
-    label — not the chain — picks which step runs. A conf/chain provider
-    mismatch is caught at run time by the workflow's own cross-check and
-    pre-merge by the test below this one.
-    """
-    reg = Registry.load(str(REGISTRY))
-    link = reg.resolve(SCOUT_CHAIN)[0]
-    text = _scout_text()
-    steps = _scout_ship_steps(text)
-    assert steps, "no claude-code-action ship step found in product-scout.yml"
-    secrets_by_provider = {p.id: p.secret for p in reg.providers.values()}
-    bases_by_provider = {p.id: p.base_url for p in reg.providers.values()}
-    matched_current = False
-    for step in steps:
-        # Every step — whichever provider it belongs to — must take its model
-        # from the resolve step's output at the link's position. A literal here
-        # is the regression #243 exists to remove.
-        assert step["model_slot"] == link.position, (
-            f"scout ship step: references link{step['model_slot']}_model but the "
-            f"`{SCOUT_CHAIN}` chain has its only model at position {link.position}.")
-        # The step's secret must belong to a DECLARED provider, and together
-        # with its endpoint must identify exactly one — a rewired or invented
-        # secret is caught here.
-        providers_with_secret = [pid for pid, s in secrets_by_provider.items()
-                                 if s == step["secret"]]
-        assert len(providers_with_secret) == 1, (
-            f"scout ship step: wires secrets.{step['secret']}, which matches no "
-            f"single registry provider (matches: {providers_with_secret}).")
-        step_provider = providers_with_secret[0]
-        assert step["base_url"] == bases_by_provider[step_provider], (
-            f"scout ship step: wires secrets.{step['secret']} with "
-            f"ANTHROPIC_BASE_URL {step['base_url']!r} but registry provider "
-            f"{step_provider!r} uses {bases_by_provider[step_provider]!r}.")
-        if step_provider == link.provider:
-            # The step that will actually run (the conf label selects it when
-            # it matches the chain's provider) must match the link exactly.
-            matched_current = True
-    assert matched_current, (
-        f"no scout ship step carries the `{SCOUT_CHAIN}` chain's provider "
-        f"{link.provider!r} (secret {link.secret}) — the configured provider "
-        f"would have no step to run, or would run one wired for another "
-        f"provider's endpoint.")
-
-
-def test_scout_workflow_cross_checks_chain_and_conf_providers():
-    # The workflow itself must refuse a conf/chain provider mismatch at resolve
-    # time (before any key is spent), or the model would run against the wrong
-    # provider's endpoint and fail mid-run. This pins that guard's presence so
-    # it cannot be dropped as "unreachable" cleanup later.
-    text = _scout_text()
-    assert re.search(r"link1_provider", text), (
-        "product-scout.yml no longer reads link1_provider — the conf/chain "
-        "provider cross-check is gone")
-
-
 def test_scout_resolves_its_chain_in_workflow():
     # The resolve step must target the `scout` chain, or every ship step's
-    # `link1_model` reference reads an empty output and the action errors.
+    # `link<N>_model` reference reads an empty output and the action errors.
     text = _scout_text()
     assert f"model_registry resolve {SCOUT_CHAIN}" in text, (
         "product-scout.yml no longer resolves the `scout` chain")
 
 
-def test_scout_degraded_path_skips_with_a_notice():
-    """The secret-absent path stays a `::notice::` skip, not a hard fail.
-
-    #243 requires the degraded path preserved verbatim: the run steps' `if:`
-    must gate on `key_present` (so an absent key skips them), and the step that
-    explains the skip must still emit a `::notice::` naming the provider and
-    its key. Reverting either — running without a key, or failing loudly —
-    changes what the issue pinned as unchanged.
+def test_scout_degraded_path_skips_with_a_notice_only_when_no_key_is_present():
+    """The secret-absent path stays a `::notice::` skip, not a hard fail —
+    the #243 property — reworded by #544 Part B: it fires only when NO
+    provider in the chain has a key (the pre-#544 "the configured provider
+    has no key" notice would announce a skip while the Anthropic tail ran,
+    or skip the whole run on a keyless head). The generic rule proves the
+    gate; this pins that the old single-provider wording is gone with it.
     """
+    row = ROUTINES["scout"]
     text = _scout_text()
-    assert re.search(
-        r"steps\.policy\.outputs\.key_present\s*==\s*'1'", text), (
-        "the scout run steps no longer gate on key_present — an absent key "
-        "would not skip them")
-    assert "::notice::the configured provider" in text, (
-        "the secret-absent notice is gone — the degraded path must stay a "
-        "::notice:: skip, per #243")
-
-
-def test_scout_no_hardcoded_model_literal_survives():
-    # The #243 acceptance criterion as a test: no `--model` literal of ANY
-    # provider may appear in product-scout.yml — every one must be a `${{ … }}`
-    # expression sourced from the resolve step's outputs.
-    text = _scout_text()
-    literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
-                if not tok.startswith("${{")]
-    assert not literals, f"hardcoded --model literal(s) in product-scout.yml: {literals}"
+    _assert_routine_skip_notice_fires_only_without_any_key(row, text)
+    assert "::notice::the configured provider" not in text, (
+        "product-scout.yml still carries the single-provider secret-absent "
+        "notice — under the cross-provider walk a keyless head is a fall-"
+        "through, not a skip")
 
 
 # ── The spike converter (#245 child C, issue #440) ────────────────────────────
@@ -850,6 +757,15 @@ ROUTINES = {
         conf=".github/labeler.conf", job="label",
         resolve_id="chain", prefix="run",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+    # #544 Part B: the formerly single-link routines, one row each as their
+    # workflows convert. The scout is the template — the GLM head, then the
+    # two-link Anthropic tail.
+    "scout": Routine(
+        workflow="product-scout.yml", chain="scout",
+        conf=".github/product-scout.conf", job="scout",
+        resolve_id="chain", prefix="run",
+        layout=("zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
 }
 

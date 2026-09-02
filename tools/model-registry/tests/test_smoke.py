@@ -264,7 +264,7 @@ def test_auth_401_is_inconclusive_not_a_dead_id(tmp_path):
 
 
 def test_routine_chains_are_smokeable_from_their_head_provider():
-    """#327 / #544 AC: the four routine chains resolve to >1 link, their HEAD
+    """#327 / #544 AC: the routine chains resolve to >1 link, their HEAD
     on the routine's conf provider and their tail crossing to a second
     declared provider whose secret the smoke can also hold — so a model-smoke
     run (the model-smoke.yml workflow smokes EVERY chain on any registry
@@ -282,6 +282,9 @@ def test_routine_chains_are_smokeable_from_their_head_provider():
         "backlog-burn": "zai",
         "chunker": "zai",
         "labeler": "zai",
+        # #544 Part B: the formerly single-link routines join as their
+        # workflows convert (the scout first; the rest with their walks).
+        "scout": "zai",
     }
     for chain_id, head in routines.items():
         links = reg.resolve(chain_id)
