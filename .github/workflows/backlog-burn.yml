@@ -28,12 +28,14 @@ name: Backlog burn (scheduled /ship-issue)
 #   * One issue per firing: a hard cap in the selector means a bad night costs
 #     one PR, not five.
 #
-# Auth: the agentic run uses the existing ANTHROPIC_API_KEY secret (a plain
-# API key is the right fit for an unattended bot — pay-per-token, no
-# subscription seat). With that secret unset the job still selects and logs
-# its pick, then emits a ::notice:: and stops — exactly how ci.yml skips
-# product-page drafting without the key. So this workflow is useful (and
-# testable) before any secret exists.
+# Auth: the agentic run walks the registry's `backlog-burn` chain across BOTH
+# providers (issue #544) — the GLM links on ZAI_KEY first, then the Anthropic
+# tail on ANTHROPIC_API_KEY (a plain API key is the right fit for an unattended
+# bot — pay-per-token, no subscription seat). With one key unset that
+# provider's links skip and the walk continues on the other; with NEITHER set
+# the job still selects and logs its pick, then emits a ::notice:: and stops —
+# exactly how ci.yml skips product-page drafting without the key. So this
+# workflow is useful (and testable) before any secret exists.
 
 on:
   schedule:
@@ -63,9 +65,9 @@ on:
 # posts its SHIP-LOCK claim and outcome (issues:write). Selection alone only
 # needs reads, but permissions are per-job not per-step, and this single job
 # both selects and ships. The job is off unless BACKLOG_BURN_ENABLED is set
-# AND the committed config says enabled, and the writing step is skipped
-# entirely without the ANTHROPIC_API_KEY secret, so these grants sit idle
-# until the routine is deliberately switched on.
+# AND the committed config says enabled, and the writing steps are skipped
+# entirely without a provider secret, so these grants sit idle until the
+# routine is deliberately switched on.
 permissions:
   contents: write
   issues: write
@@ -95,22 +97,34 @@ jobs:
       vars.BACKLOG_BURN_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # Job budget 120 = ship step 105 + 15 min headroom: the pre-ship steps
-    # (checkout, pip, policy, select — low single-digit minutes in practice)
-    # and the lock cleanup must both fit inside it, so the job timeout can
-    # never fire before the ship step's own timeout does.
+    # Job budget 225 = 2 × ship-step timeout (105) + 15 min headroom. The walk
+    # below is five ship steps in a row (three GLM links, then the Anthropic
+    # tail — issue #544), each with its own 105-minute timeout, and the budget
+    # must let at least ONE full fallback link complete after a head link
+    # STALLS to its step timeout (a model stall or tool loop, not the seconds
+    # a quota/billing rejection takes): head 105 + one fallback 105 + the
+    # pre-ship steps (checkout, pip, policy, select — low single-digit minutes
+    # in practice) and the lock cleanup, all inside the job. A walk of two
+    # stalls in a row is not budgeted — the third link and the tail then die
+    # with the job — because a stall is a provider-wide symptom, not a
+    # per-model one, and the fast failures the tail exists for (429 quota,
+    # 400 billing) reject in seconds. 225 sits well inside GitHub's 360-minute
+    # hosted-job cap (the drift guard pins job budget <= 360 and >= longest
+    # head step + longest tail step + 5 for every routine).
     # A job-level kill cancels every remaining step, so a run that died after
     # posting its SHIP-LOCK left the claim standing and starved the issue
     # (issue #312) — the ship STEP timeout dies first on purpose, keeping the
     # cleanup reachable while a hung /ship-issue (model stall, tool loop)
     # still never holds a runner and a provider-key secret for the 6-hour
     # default, unwatched, every hour.
-    timeout-minutes: 120
+    timeout-minutes: 225
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
-      # "Read policy" step turns these + the configured provider into a single
-      # `key_present` output.
+      # "Read policy" step turns these into per-provider `zai_key_present` /
+      # `anthropic_key_present` outputs (each provider's ship steps gate on
+      # their own) plus `key_present` = either one (the any-key gate the lock
+      # cleanup, triage, red-on-death and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
       # Surfaced the same way so a step can note when the CI-triggering PAT is
@@ -137,24 +151,31 @@ jobs:
         id: policy
         # Key 2 of 2: the committed, git-tracked source of truth. A malformed
         # or typo'd config (bad key, unknown provider) fails this step loudly
-        # rather than running on a policy nobody wrote. It also resolves the
-        # configured provider to whether *that provider's* secret is present,
-        # so the ship steps below gate on one `key_present` output.
-        # HAS_ANTHROPIC_KEY / HAS_ZAI_KEY come from the job-level env above.
+        # rather than running on a policy nobody wrote. The conf's `provider:`
+        # is the walk's HEAD provider (issue #544) — validated here, emitted
+        # for the resolve step's shape check and the summary. Key presence is
+        # emitted PER PROVIDER (each provider's ship steps gate on their own,
+        # so the tail can run when the head's key is absent) plus the any-key
+        # `key_present` the lock cleanup / triage / red-on-death / skip-notice
+        # gates read. HAS_ANTHROPIC_KEY / HAS_ZAI_KEY come from the job env.
         run: |
           set -euo pipefail
           enabled="$(backlog-burn config --get enabled)"
           label="$(backlog-burn config --get label)"
           provider="$(backlog-burn config --get provider)"
           case "$provider" in
-            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
-            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            anthropic|zai) ;;
             *) echo "::error::unknown provider '$provider'"; exit 1 ;;
           esac
+          [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
+          [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "label=$label"
             echo "provider=$provider"
+            echo "zai_key_present=$zai_key"
+            echo "anthropic_key_present=$anthropic_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
@@ -166,15 +187,21 @@ jobs:
       # mismatch is caught pre-merge by the model-registry drift-guard tests,
       # which fire on this workflow and on registry.conf.
       #
-      # The cross-check guards the one way the conf/chain split can mis-run:
-      # the conf's `provider:` label picks which ship step (and so which
-      # endpoint + literal secret) runs, while the registry picks the model —
-      # a model hosted elsewhere (glm-* on the Anthropic step, claude-* on the
-      # Z.AI step) would fail at request time with a key already spent. Every
-      # link must agree with the conf, not just the first: the walk below
-      # reaches link2, link3… only after link1 died, so a tail on another
-      # provider would spend its key against the wrong endpoint mid-walk.
-      # Saying so HERE, loudly, beats discovering it in the hourly run's logs.
+      # The shape check guards the one way the conf/chain split can mis-run
+      # (issue #544): the walk below is a FIXED sequence of literal ship steps
+      # — its layout, one provider per step in file order (three Z.AI GLM
+      # steps, then two Anthropic steps), because Actions can only reference a
+      # secret by its literal name — while the registry picks the MODEL each
+      # step runs. A link on the wrong slot's provider (claude-* on a Z.AI
+      # step, glm-* on an Anthropic step) would fail at request time with a
+      # key already spent, and a chain longer or shorter than the walk leaves
+      # a step without a link or a link without a step. So the conf's
+      # `provider:` must be link 1's (it names the HEAD of the walk), and link
+      # N's provider must be ship step N's — `model-registry shape` applies
+      # the same pure rule the drift guard pins pre-merge, so the two cannot
+      # drift, and the `--layout` literal below is what the drift guard
+      # compares against the ship steps' actual wiring. Saying so HERE,
+      # loudly, beats discovering it in the hourly run's logs.
       - name: Resolve the burn's model chain (issue #326)
         id: chain
         env:
@@ -183,16 +210,9 @@ jobs:
           set -euo pipefail
           python3 -m model_registry resolve backlog-burn --gh-output "$GITHUB_OUTPUT"
           conf_provider="$(backlog-burn config --get provider)"
-          n="$(sed -n 's/^link_count=//p' "$GITHUB_OUTPUT" | head -1)"
-          i=1
-          while [ "$i" -le "$n" ]; do
-            link_provider="$(sed -n "s/^link${i}_provider=//p" "$GITHUB_OUTPUT" | head -1)"
-            if [ "$link_provider" != "$conf_provider" ]; then
-              echo "::error::link ${i} of the registry's 'backlog-burn' chain resolves to provider '$link_provider' but .github/backlog-burn.conf says provider '$conf_provider' — the walk would spend that link's key against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/backlog-burn.conf."
-              exit 1
-            fi
-            i=$((i + 1))
-          done
+          # One layout entry per ship step below, in file order.
+          python3 -m model_registry shape backlog-burn --head "$conf_provider" \
+            --conf .github/backlog-burn.conf --layout zai,zai,zai,anthropic,anthropic
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -212,23 +232,33 @@ jobs:
           # $GITHUB_OUTPUT and a markdown block to $GITHUB_STEP_SUMMARY.
           backlog-burn run --repo "$GITHUB_REPOSITORY" --label "$LABEL"
 
-      # One explicit ship step per CHAIN LINK, inside one block per provider —
-      # a provider is a reviewed, git-tracked step because GitHub Actions can
-      # only reference a secret by its literal name (secrets can't be selected
-      # by a runtime variable). The committed `provider:` label picks which
-      # BLOCK runs; the registry's `backlog-burn` chain (steps.chain.outputs)
-      # picks which MODEL each link in it runs, so swapping the burn to another
-      # model is a registry edit, not a workflow edit (#326). The links walk in
-      # chain order: each is continue-on-error and gated on the earlier links
-      # NOT having succeeded, so the first success short-circuits the rest and
-      # a dead model falls through to the next instead of killing the run —
-      # the job goes red on the agent only when EVERY link failed — the red-on-death
-      # step fires unless the walk produced a success.
+      # One explicit ship step per CHAIN LINK, walked in file order ACROSS
+      # providers (issue #544): links 1-3 are the Z.AI GLM steps, links 4-5
+      # the Anthropic tail. A provider is a reviewed, git-tracked step because
+      # GitHub Actions can only reference a secret by its literal name
+      # (secrets can't be selected by a runtime variable), so the walk's
+      # provider LAYOUT is fixed here and the registry's `backlog-burn` chain
+      # (steps.chain.outputs) picks which MODEL each link runs — swapping the
+      # burn to another model is a registry edit, not a workflow edit (#326);
+      # the resolve step above refuses a chain that does not fit this layout.
+      # The committed `provider:` label names the HEAD provider (link 1 must
+      # sit on it); it no longer selects a whole block. Each link is
+      # continue-on-error and gated on EVERY earlier link NOT having succeeded
+      # — a skipped step's outcome is 'skipped', not 'success', so the
+      # Anthropic tail runs whether the GLM links failed or were skipped for
+      # want of ZAI_KEY — so the first success short-circuits the rest and a
+      # dead model, or a whole dead provider, falls through instead of killing
+      # the run; the job goes red on the agent only when EVERY link failed —
+      # the red-on-death step fires unless the walk produced a success.
+      # Each provider's steps gate on THEIR OWN key (zai_key_present /
+      # anthropic_key_present), never the other's, so a missing key skips that
+      # provider's links rather than spending an empty credential.
       # Deepening the chain (#327) is still a same-PR pair: add the model to
-      # the registry AND the matching ship step here in the same PR — the
-      # drift guard fails either half shipped alone.
+      # the registry AND the matching ship step here (and its slot in the
+      # resolve step's --layout) in the same PR — the drift guard fails either
+      # half shipped alone.
       #
-      # Both blocks share the pin, the write permissions, the `github_token`
+      # All five steps share the pin, the write permissions, the `github_token`
       # that authenticates the action's own git push / PR creation, and the
       # same /ship-issue prompt. github_token is wired to the GH_TOKEN secret
       # (a PAT) with a fallback: a PR opened with the default GITHUB_TOKEN does
@@ -243,42 +273,18 @@ jobs:
       # silently change what runs with write perms + a secret. Re-pin
       # deliberately to adopt a new release.
 
-      - name: Ship via Anthropic (Claude, chain link 1)
-        id: ship_anthropic_1
-        if: >-
-          steps.policy.outputs.enabled == 'true'
-          && steps.select.outputs.issue != ''
-          && steps.policy.outputs.provider == 'anthropic'
-          && steps.policy.outputs.key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-        # The step must die inside a live job (step timeout < job timeout) so
-        # the lock cleanup below runs as a normal step, not in a cancellation
-        # grace window; continue-on-error keeps the job alive for it (the
-        # "Turn a dead agentic run red" step restores the failure).
-        timeout-minutes: 105
-        continue-on-error: true
-        # Claude via api.anthropic.com. A plain API key (pay-per-token) is the
-        # right fit for an unattended bot — no OAuth token / subscription seat.
-        # Maximum reasoning effort: an unattended ship run is exactly the
-        # correctness-over-cost case. Which model runs is the registry's call.
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GH_TOKEN || github.token }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link1_model }} --effort max
-          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
-
       - name: Ship via Z.AI (GLM, chain link 1)
         id: ship_zai_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
-        # Same as the Anthropic link: die inside a live job so the lock
-        # cleanup below runs as a normal step; continue-on-error keeps the
-        # job alive for it (the red-on-death step restores the failure).
+        # The step must die inside a live job (step timeout < job timeout) so
+        # the lock cleanup below runs as a normal step, not in a cancellation
+        # grace window; continue-on-error keeps the job alive for it (the
+        # "Turn a dead agentic run red" step restores the failure) and lets
+        # the walk reach the next link.
         timeout-minutes: 105
         continue-on-error: true
         # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
@@ -300,18 +306,15 @@ jobs:
           claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link1_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
-      # The walk's tail (#327): links 2 and 3 of the registry's `backlog-burn`
-      # chain, reached only when every earlier link of this block failed — the
-      # same env/secret/pin/prompt as link 1, only the model differs. The
-      # anthropic block above stays single-step (backlog-burn.conf says zai, so
-      # that block is latent; see the design-run tail comment for the reason).
+      # The GLM tail (#327): links 2 and 3 of the registry's `backlog-burn`
+      # chain, reached only when every earlier link did not succeed — the
+      # same env/secret/pin/prompt as link 1, only the model differs.
       - name: Ship via Z.AI (GLM, chain link 2)
         id: ship_zai_2
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.ship_zai_1.outcome != 'success'
         timeout-minutes: 105
@@ -332,8 +335,7 @@ jobs:
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.ship_zai_1.outcome != 'success'
           && steps.ship_zai_2.outcome != 'success'
@@ -348,6 +350,55 @@ jobs:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
           claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link3_model }} --effort max
+          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+
+      # The cross-provider tail (issue #544): links 4 and 5 of the registry's
+      # `backlog-burn` chain on Anthropic's native endpoint, reached only when
+      # EVERY GLM link did not succeed (failed, or skipped for want of
+      # ZAI_KEY) and gated on the Anthropic key's own presence. Claude via
+      # api.anthropic.com: a plain API key (pay-per-token) is the right fit
+      # for an unattended bot — no OAuth token / subscription seat. The same
+      # pin, permissions, github_token, effort and prompt as the GLM links —
+      # only the model, secret and endpoint differ. Which model runs is the
+      # registry's call (the cheap Anthropic tier, since a GLM outage shifts
+      # this hourly routine's whole spend here).
+      - name: Ship via Anthropic (Claude, chain link 4)
+        id: ship_anthropic_4
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+          && steps.ship_zai_3.outcome != 'success'
+        timeout-minutes: 105
+        continue-on-error: true
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GH_TOKEN || github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link4_model }} --effort max
+          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Ship via Anthropic (Claude, chain link 5)
+        id: ship_anthropic_5
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+          && steps.ship_zai_3.outcome != 'success'
+          && steps.ship_anthropic_4.outcome != 'success'
+        timeout-minutes: 105
+        continue-on-error: true
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GH_TOKEN || github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link5_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
       - name: Withdraw a dead run's SHIP-LOCK
@@ -371,12 +422,23 @@ jobs:
           ISSUE: ${{ steps.select.outputs.issue }}
           # .outcome, never .conclusion — continue-on-error rewrites a failed
           # step's conclusion to success; outcome keeps the real result.
-          # The walk's outcome (#327): success if ANY link of the block the
-          # conf's provider label selected succeeded; the LAST link's outcome
-          # otherwise — which is what a total-walk failure means. The drift
-          # guard (test_routine_walk_outcome_covers_every_link) pins the
-          # disjunct to the chain's link count.
-          AGENT_OUTCOME: ${{ steps.policy.outputs.provider == 'zai' && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome) || steps.ship_anthropic_1.outcome }}
+          # The walk's outcome (#327, #544): 'success' if ANY of the five
+          # links across both providers succeeded; otherwise the outcome of
+          # the LAST LINK THAT ACTUALLY RAN. The nested tail walks backwards
+          # over 'skipped' links (a provider's links are skipped when its key
+          # is absent), so the walk reads 'skipped' only when EVERY link was
+          # skipped — no key for any provider, the agent never ran. That
+          # distinction is load-bearing: routine-lock-cleanup.sh treats
+          # 'skipped' as "nothing ran, nothing to release" and no-ops. A bare
+          # last-link read (`|| steps.<link5>.outcome`) reported 'skipped'
+          # whenever only ZAI_KEY was set and the three GLM links FAILED
+          # while the keyless Anthropic tail was skipped — so a dead run's
+          # SHIP-LOCK was left standing and the issue starved, the #312
+          # orphan-claim livelock through a different door. The drift guard
+          # (test_routine_walk_outcome_covers_every_link) simulates every
+          # outcome combination against the chain's link count and pins the
+          # last-ran rule, with the bare-tail form as its negative control.
+          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome) }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
@@ -394,7 +456,7 @@ jobs:
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && env.HAS_GH_TOKEN != 'true'
-          && (steps.policy.outputs.provider == 'zai' && (steps.ship_zai_1.outcome == 'success' || steps.ship_zai_2.outcome == 'success' || steps.ship_zai_3.outcome == 'success') || steps.ship_anthropic_1.outcome == 'success')
+          && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome)) == 'success'
         run: |
           echo "::notice::the draft PR for #${{ steps.select.outputs.issue }} was opened with GITHUB_TOKEN, so CI will not auto-run on it — push any commit, or set the GH_TOKEN repo secret (a PAT with contents + pull-requests + issues write) so future ships trigger checks automatically."
 
@@ -412,7 +474,7 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "::notice::dry run — selected #${ISSUE} but did not invoke /ship-issue"
           else
-            echo "::notice::the configured provider '${PROVIDER}' has no key set (ANTHROPIC_API_KEY for anthropic, ZAI_KEY for zai) — selected #${ISSUE} but skipping the unattended /ship-issue run"
+            echo "::notice::no key is set for ANY provider in the backlog-burn chain (ZAI_KEY for the zai links, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — selected #${ISSUE} but skipping the unattended /ship-issue run"
           fi
 
       - name: Explain an empty selection
@@ -437,17 +499,47 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          # Only the step matching the configured provider runs; the other is
-          # 'skipped'. Report the one that actually ran.
-          # The walk's outcome (#327) — any link of the selected block
-          # succeeding means the run succeeded.
-          SHIP: ${{ steps.policy.outputs.provider == 'zai' && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome) || steps.ship_anthropic_1.outcome }}
+          # The walk's outcome (#327, #544) — the same five-link walk
+          # expression as AGENT_OUTCOME (any link's success is the run's;
+          # otherwise the last link that actually ran).
+          SHIP: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome) }}
+          # Per-link outcomes + the chain the resolve step emitted, so the
+          # summary can name WHICH link served and warn when the head
+          # provider fell through (a GLM outage must stay visible even though
+          # the run is green — #544).
+          L1: ${{ steps.ship_zai_1.outcome }}
+          L2: ${{ steps.ship_zai_2.outcome }}
+          L3: ${{ steps.ship_zai_3.outcome }}
+          L4: ${{ steps.ship_anthropic_4.outcome }}
+          L5: ${{ steps.ship_anthropic_5.outcome }}
+          M1: ${{ steps.chain.outputs.link1_model }}
+          M2: ${{ steps.chain.outputs.link2_model }}
+          M3: ${{ steps.chain.outputs.link3_model }}
+          M4: ${{ steps.chain.outputs.link4_model }}
+          M5: ${{ steps.chain.outputs.link5_model }}
+          P1: ${{ steps.chain.outputs.link1_provider }}
+          P2: ${{ steps.chain.outputs.link2_provider }}
+          P3: ${{ steps.chain.outputs.link3_provider }}
+          P4: ${{ steps.chain.outputs.link4_provider }}
+          P5: ${{ steps.chain.outputs.link5_provider }}
           LOCK_WITHDRAWN: ${{ steps.lock_cleanup.outputs.withdrawn }}
           # $GITHUB_STEP_SUMMARY does not auto-link a bare #N, so build a real
           # link to the issue holding the authoritative verdict.
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
         run: |
+          # Which link served: the first (only) link whose outcome is success.
+          served=""
+          for i in 1 2 3 4 5; do
+            o="L$i"; m="M$i"; p="P$i"
+            if [ "${!o}" = "success" ]; then
+              served="link $i ${!m} (${!p})"
+              if [ "${!p}" != "${PROVIDER}" ]; then
+                echo "::warning::backlog burn fell through to ${!p}: every '${PROVIDER}' (head provider) link failed or was skipped and link $i ${!m} served #${ISSUE} — the run is green, but the head provider is down or keyless; check its quota/key (a provider-wide failure shifts this hourly routine's spend to the tail while it lasts)"
+              fi
+              break
+            fi
+          done
           {
             echo "## Backlog burn — run outcome"
             if [ "${POLICY_OUTCOME}" != "success" ]; then
@@ -460,8 +552,11 @@ jobs:
               echo "- selected: none (nothing eligible)"
             else
               echo "- selected: [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE})"
-              echo "- provider: ${PROVIDER}"
+              echo "- provider: ${PROVIDER} (head)"
               echo "- ship step: ${SHIP:-skipped} (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /ship-issue verdict and any draft PR)"
+              if [ -n "${served}" ]; then
+                echo "- served by: ${served}"
+              fi
               if [ "${LOCK_WITHDRAWN}" = "true" ]; then
                 echo "- lock cleanup: withdrew the dead run's SHIP-LOCK on #${ISSUE} so the next firing can re-select it"
               fi
@@ -485,7 +580,7 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.policy.outputs.provider == 'zai' && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome) || steps.ship_anthropic_1.outcome) != 'success'
+          && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome)) != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: backlog-burn
@@ -507,12 +602,13 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.policy.outputs.provider == 'zai' && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome) || steps.ship_anthropic_1.outcome) != 'success'
+          && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome)) != 'success'
         env:
           ISSUE: ${{ steps.select.outputs.issue }}
-          # The walk's outcome (#327) — same shape as AGENT_OUTCOME in the lock
-          # cleanup above: any link succeeding means the run succeeded.
-          AGENT_OUTCOME: ${{ steps.policy.outputs.provider == 'zai' && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome) || steps.ship_anthropic_1.outcome }}
+          # The walk's outcome (#327, #544) — byte-identical to AGENT_OUTCOME
+          # in the lock cleanup above (the drift guard pins that): any link's
+          # success is the run's; otherwise the last link that actually ran.
+          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome) }}
         run: |
           echo "::error::the /ship-issue agent step for #${ISSUE} did not succeed (outcome: ${AGENT_OUTCOME}) — its SHIP-LOCK cleanup ran above; failing the job so the death is visible"
           exit 1

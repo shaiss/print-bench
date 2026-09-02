@@ -6,6 +6,8 @@
     model-registry show                  # human summary of providers/models/chains
     model-registry smoke <chain>         # live 1-token ping of each configured link
     model-registry classify <chain>      # diagnose an exhausted chain -> one class
+    model-registry shape <chain> --head <provider> --layout p1,p2,…
+                                         # does the chain fit a workflow's walk?
 
 ``resolve`` is what a workflow calls: it appends ``link_count`` plus
 ``link<N>_model`` / ``link<N>_provider`` lines to ``$GITHUB_OUTPUT`` (the same
@@ -158,6 +160,39 @@ def cmd_classify(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_shape(args: argparse.Namespace) -> int:
+    """`shape <chain> --head <p> --layout p1,p2,…`: does the chain fit the walk?
+
+    The runtime half of the cross-provider walk contract (issue #544). A
+    routine workflow's walk is a fixed sequence of literal ship steps — its
+    LAYOUT, one provider per step in file order — and the conf's `provider:`
+    names the HEAD. This applies `walk_shape_errors` (the same pure rule the
+    drift guard pins pre-merge, so the two cannot drift) to the resolved chain
+    and prints one `::error::` per violation, naming the registry file, the
+    conf and the offending link, exiting 1 — so a mismatch fails the run
+    BEFORE any key is spent rather than mid-walk against the wrong endpoint.
+    """
+    reg = _load(args)
+    links = reg.resolve(args.chain)
+    layout = [p.strip() for p in args.layout.split(",") if p.strip()]
+    undeclared = sorted({p for p in layout if p not in reg.providers})
+    errors = ([f"the walk layout names provider(s) {undeclared} the registry "
+               f"does not declare (known: {sorted(reg.providers)})"]
+              if undeclared else [])
+    errors += reg_mod.walk_shape_errors(links, args.head, layout)
+    registry_path = args.path or reg_mod.DEFAULT_PATH
+    conf_label = f" / {args.conf}" if args.conf else ""
+    for err in errors:
+        print(f"::error::{registry_path} [chain:{args.chain}]{conf_label}: {err}. "
+              "Edit the chain in the registry and the workflow's ship steps "
+              "(and its conf's provider:) together.")
+    if errors:
+        return 1
+    print(f"ok: chain {args.chain} walks layout {','.join(layout)} from head "
+          f"provider {args.head}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="model-registry", description=__doc__)
     parser.add_argument("--path", default=None,
@@ -193,6 +228,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--gh-output",
         help="path to append `class=<token>` and `reason=<token>` (defaults to $GITHUB_OUTPUT)")
     p_classify.set_defaults(func=cmd_classify)
+
+    p_shape = sub.add_parser(
+        "shape",
+        help="check a chain fits a workflow's literal ship-step walk (issue #544)")
+    p_shape.add_argument("chain", help="the chain id to check")
+    p_shape.add_argument(
+        "--head", required=True,
+        help="the provider the routine's conf names — link 1 must sit on it")
+    p_shape.add_argument(
+        "--layout", required=True,
+        help="the workflow's ship-step providers in file order, comma-separated "
+             "(one per step, e.g. zai,zai,zai,anthropic,anthropic)")
+    p_shape.add_argument(
+        "--conf", default=None,
+        help="the conf file the head provider was read from (named in errors)")
+    p_shape.set_defaults(func=cmd_shape)
 
     return parser
 

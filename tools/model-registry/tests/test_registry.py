@@ -195,3 +195,128 @@ def test_percent_in_notes_is_literal_not_interpolated(tmp_path):
     reg = load(tmp_path, GOOD.replace(
         "notes = older glm fallback", "notes = ~50% cheaper than opus"))
     assert reg.models["glm-4.6"].notes == "~50% cheaper than opus"
+
+
+# ---------------------------------------------------------------------------
+# The walk-shape rule (issue #544): does a chain fit a workflow's literal walk?
+# A positive case and a negative control per rule, like every rule above.
+# ---------------------------------------------------------------------------
+
+from model_registry.registry import walk_shape_errors  # noqa: E402
+
+MIXED = """\
+[provider:zai]
+secret = ZAI_KEY
+base_url = https://api.z.ai/api/anthropic
+
+[provider:anthropic]
+secret = ANTHROPIC_API_KEY
+
+[model:glm-5.2]
+provider = zai
+notes = head
+
+[model:glm-5.1]
+provider = zai
+notes = second GLM
+
+[model:claude-sonnet-5]
+provider = anthropic
+notes = the cross-provider tail
+
+[chain:routine]
+models = glm-5.2, glm-5.1, claude-sonnet-5
+"""
+
+
+def test_walk_shape_accepts_a_chain_that_fits_the_layout(tmp_path):
+    links = load(tmp_path, MIXED).resolve("routine")
+    assert walk_shape_errors(links, "zai", ["zai", "zai", "anthropic"]) == []
+
+
+def test_walk_shape_rejects_a_head_off_the_conf_provider(tmp_path):
+    # NEGATIVE CONTROL: the conf names the HEAD provider; a chain whose link 1
+    # sits elsewhere would start the walk on the wrong endpoint.
+    links = load(tmp_path, MIXED).resolve("routine")
+    errors = walk_shape_errors(links, "anthropic", ["zai", "zai", "anthropic"])
+    assert any("link 1" in e and "head provider" in e for e in errors), errors
+
+
+def test_walk_shape_rejects_a_link_on_the_wrong_slot_provider(tmp_path):
+    # NEGATIVE CONTROL: a zai link after an anthropic one (the monotone rule)
+    # is a link whose slot is wired for the other provider.
+    reg = load(tmp_path, MIXED.replace(
+        "models = glm-5.2, glm-5.1, claude-sonnet-5",
+        "models = glm-5.2, claude-sonnet-5, glm-5.1"))
+    errors = walk_shape_errors(reg.resolve("routine"), "zai",
+                               ["zai", "zai", "anthropic"])
+    assert any("link 2" in e and "wired for 'zai'" in e for e in errors), errors
+    assert any("link 3" in e and "wired for 'anthropic'" in e for e in errors), errors
+
+
+def test_walk_shape_rejects_a_link_count_the_walk_cannot_carry(tmp_path):
+    # NEGATIVE CONTROL: a chain shorter than the walk leaves a ship step
+    # reading an empty model output; longer leaves links nothing walks.
+    links = load(tmp_path, MIXED).resolve("routine")
+    short = walk_shape_errors(links, "zai", ["zai", "zai", "anthropic", "anthropic"])
+    assert any("3 links" in e and "4 ship steps" in e for e in short), short
+    long = walk_shape_errors(links, "zai", ["zai", "zai"])
+    assert any("3 links" in e and "2 ship steps" in e for e in long), long
+
+
+def test_walk_shape_rejects_an_empty_chain():
+    assert walk_shape_errors([], "zai", ["zai"]) == ["the chain resolved to zero links"]
+
+
+# The monotone rule: the walk is contiguous provider runs, head first, and a
+# provider never reappears after a different one has started — in the layout
+# AND in the chain. Slot-for-slot agreement alone cannot see this: a chain
+# that mirrors a bouncing layout agrees with it slot for slot.
+
+MIXED_FIVE = MIXED.replace(
+    "[chain:routine]\nmodels = glm-5.2, glm-5.1, claude-sonnet-5",
+    "[model:claude-haiku-4-5]\nprovider = anthropic\nnotes = the tail's tail\n\n"
+    "[chain:routine]\nmodels = glm-5.2, glm-5.1, glm-5.2, claude-sonnet-5, claude-haiku-4-5")
+
+
+def test_walk_shape_accepts_a_monotone_two_run_walk(tmp_path):
+    # POSITIVE: the shipped shape — a GLM run, then an Anthropic run — fits.
+    links = load(tmp_path, MIXED_FIVE).resolve("routine")
+    assert walk_shape_errors(
+        links, "zai", ["zai", "zai", "zai", "anthropic", "anthropic"]) == []
+    # And a single-provider walk is trivially monotone.
+    single = load(tmp_path, MIXED.replace(
+        "models = glm-5.2, glm-5.1, claude-sonnet-5", "models = glm-5.2, glm-5.1"))
+    assert walk_shape_errors(single.resolve("routine"), "zai", ["zai", "zai"]) == []
+
+
+def test_walk_shape_rejects_a_layout_that_bounces_between_providers(tmp_path):
+    # NEGATIVE CONTROL: zai,anthropic,zai,zai,anthropic mirrored by a chain
+    # of the same providers agrees slot for slot — the pre-monotone rule
+    # accepted exactly this — and must be refused: the layout AND the chain
+    # each bounce back to a provider that already had its turn.
+    bouncing = MIXED_FIVE.replace(
+        "models = glm-5.2, glm-5.1, glm-5.2, claude-sonnet-5, claude-haiku-4-5",
+        "models = glm-5.2, claude-sonnet-5, glm-5.1, glm-5.2, claude-haiku-4-5")
+    links = load(tmp_path, bouncing).resolve("routine")
+    layout = ["zai", "anthropic", "zai", "zai", "anthropic"]
+    errors = walk_shape_errors(links, "zai", layout)
+    assert errors, "a bouncing walk was accepted"
+    assert not any("wired for" in e for e in errors), (
+        "the chain mirrors the layout slot for slot — only the monotone rule "
+        f"may fire here: {errors}")
+    assert any("the workflow's walk is not monotone" in e and "'zai' reappears at position 3" in e
+               for e in errors), errors
+    assert any("the chain is not monotone" in e and "'zai' reappears at position 3" in e
+               for e in errors), errors
+
+
+def test_walk_shape_rejects_a_layout_opening_on_the_tail_provider(tmp_path):
+    # NEGATIVE CONTROL: a layout whose first slot is the tail provider is not
+    # the head-first shape even when the chain (rejected on its own by the
+    # head rule) agrees with it slot for slot.
+    links = load(tmp_path, MIXED.replace(
+        "models = glm-5.2, glm-5.1, claude-sonnet-5",
+        "models = claude-sonnet-5, glm-5.2, glm-5.1")).resolve("routine")
+    errors = walk_shape_errors(links, "zai", ["anthropic", "zai", "zai"])
+    assert any("the workflow's walk starts on provider 'anthropic'" in e for e in errors), errors

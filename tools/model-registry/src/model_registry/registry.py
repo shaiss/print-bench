@@ -227,6 +227,95 @@ class Registry:
         return links
 
 
+def walk_shape_errors(links: list[ResolvedLink], head_provider: str,
+                      layout: list[str]) -> list[str]:
+    """Why a resolved chain does NOT fit a workflow's literal ship-step walk.
+
+    A routine workflow cannot select a secret at run time, so its walk is a
+    fixed sequence of literal ship steps — a LAYOUT, one provider per step in
+    file order (e.g. ``["zai", "zai", "zai", "anthropic", "anthropic"]``: three
+    GLM steps, then the Anthropic tail). The registry chain supplies only the
+    MODEL each step runs, so the two must agree slot for slot, or a link's key
+    is spent against another provider's endpoint mid-walk (issue #544's
+    cross-provider tail made this the contract in place of "every link on the
+    conf's provider"). The rules, each an error string when broken:
+
+    * link 1 sits on ``head_provider`` — the provider the routine's conf
+      names, which now means the HEAD of the walk, not the whole walk;
+    * the chain has exactly one link per ship step (a shorter chain leaves a
+      step reading an empty model output; a longer one has links nothing
+      walks);
+    * link N's provider is the provider ship step N is wired for, since the
+      layout IS the file's step order;
+    * the walk is MONOTONE — a sequence of contiguous provider runs with the
+      head provider first (``zai* then anthropic*``): a provider must never
+      reappear after a different provider has started, in the layout or in
+      the chain. The slot-for-slot rule alone would accept any layout the
+      chain happens to mirror, ``zai,anthropic,zai`` included — a walk whose
+      fallback bounces back to a provider that already failed, and whose
+      "the tail runs after the head" gating no longer describes the file.
+
+    Pure and stdlib-only so the workflow's resolve step (``model-registry
+    shape``) and the drift guard's pre-merge pin call the SAME rule and cannot
+    drift apart. An empty list means the chain fits.
+    """
+    errors: list[str] = []
+    if not links:
+        return ["the chain resolved to zero links"]
+    if links[0].provider != head_provider:
+        errors.append(
+            f"link 1 ({links[0].model}) is on provider {links[0].provider!r} but "
+            f"the routine's conf names {head_provider!r} as the head provider — "
+            "the walk would start on the wrong endpoint")
+    if len(links) != len(layout):
+        errors.append(
+            f"the chain has {len(links)} links but the workflow's walk carries "
+            f"{len(layout)} ship steps ({','.join(layout)}) — one ship step per "
+            "link, in order; add/remove the step and the link together")
+    for link, slot in zip(links, layout):
+        if link.provider != slot:
+            errors.append(
+                f"link {link.position} ({link.model}) is on provider "
+                f"{link.provider!r} but ship step {link.position} of the walk is "
+                f"wired for {slot!r} — the walk would spend that link's key "
+                "against the wrong endpoint")
+    errors.extend(_monotone_errors("the workflow's walk", layout, head_provider))
+    errors.extend(_monotone_errors(
+        "the chain", [link.provider for link in links], head_provider))
+    return errors
+
+
+def _monotone_errors(what: str, providers: list[str], head_provider: str) -> list[str]:
+    """The monotone rule for one provider sequence (a layout, or a chain's
+    link providers): contiguous runs, the head provider's run first, and no
+    provider reappearing once a different one has started. Position numbers
+    in the messages are 1-based like link positions."""
+    errors: list[str] = []
+    if not providers:
+        return errors
+    if providers[0] != head_provider:
+        # The head-provider rule above already reports a chain whose link 1
+        # is off the conf; report the layout's own head here so a layout
+        # literal that starts on the tail provider is named as such.
+        errors.append(
+            f"{what} starts on provider {providers[0]!r} but the head provider "
+            f"is {head_provider!r} — the walk must open with the head "
+            "provider's run")
+    seen: list[str] = [providers[0]]
+    for pos, provider in enumerate(providers[1:], start=2):
+        if provider == seen[-1]:
+            continue
+        if provider in seen:
+            errors.append(
+                f"{what} is not monotone: provider {provider!r} reappears at "
+                f"position {pos} after {seen[-1]!r} started — the walk must be "
+                "contiguous provider runs (e.g. zai,zai,zai,anthropic,"
+                "anthropic), never bouncing back to a provider that already "
+                "had its turn")
+        seen.append(provider)
+    return errors
+
+
 def find_root(start: str = ".") -> str:
     """Walk up from ``start`` to the directory containing ``.github/models``.
 

@@ -138,22 +138,26 @@ purpose).
 
 ### Choosing the LLM provider
 
-`provider:` selects which PROVIDER runs `/ship-issue` — not which model. Each
-known provider (`KNOWN_PROVIDERS`) has an explicit ship step in the workflow —
-a provider is a reviewed, git-tracked step because GitHub Actions can only
-reference a secret by its literal name, so a runtime label can't pick the
-secret on its own:
+`provider:` selects which PROVIDER the `/ship-issue` walk STARTS on — the
+head provider (issue #544) — not which model. Each known provider
+(`KNOWN_PROVIDERS`) has explicit ship steps in the workflow — a provider is a
+reviewed, git-tracked step because GitHub Actions can only reference a secret
+by its literal name, so a runtime label can't pick the secret on its own:
 
-- `anthropic` — Claude via `api.anthropic.com`, secret `ANTHROPIC_API_KEY` (default).
+- `anthropic` — Claude via `api.anthropic.com`, secret `ANTHROPIC_API_KEY`.
 - `zai` — Z.AI GLM via its Anthropic-compatible endpoint
-  (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`), secret `ZAI_KEY`.
+  (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`), secret `ZAI_KEY`
+  (the default head).
 
-Which MODEL the run uses is the registry's call (issue #326): the workflow
+Which MODEL each link runs is the registry's call (issue #326): the workflow
 resolves `[chain:backlog-burn]` from `.github/models/registry.conf` and walks
-its links — the design-run, chunker and labeler siblings each resolve their own
-chain the same way — so swapping a model is a registry edit, not a workflow
-edit. The chain's links must sit on the provider this conf names; the
-workflow's resolve step cross-checks that before any key is spent.
+its links in file order across both providers (three GLM links, then the
+Anthropic tail) — the design-run, chunker and labeler siblings each resolve
+their own chain the same way — so swapping a model is a registry edit, not a
+workflow edit. Link 1 of the chain must sit on the provider this conf names,
+and every link must sit on the provider its ship step is wired for; the
+workflow's resolve step (`model-registry shape`) checks that before any key is
+spent.
 
 Switching is this one line in the config. Adding a new provider is a new ship
 step in the workflow plus its label in `KNOWN_PROVIDERS`. Note: `/ship-issue`

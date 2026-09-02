@@ -211,6 +211,13 @@ done < <(awk '/awalsh128\/cache-apt-pkgs-action/{f=1}
                 print FILENAME ":" $0; f=0
               }' .github/workflows/*.yml)
 
+# 10. The contributor guide must not regress to the pre-#544 vendor claim.
+#     The four chain-walking routines walk GLM links then an Anthropic tail,
+#     so "never cross vendors" is false; a mechanical literal check (the
+#     phrase is absent), not a judgment about the prose that replaced it.
+grep -qiF "never cross vendors" docs/contributing/autonomy.md \
+  && err "docs/contributing/autonomy.md still says chains 'never cross vendors' — the routines walk a cross-provider tail since #544; describe the head-provider + layout rule instead"
+
 if [[ "$fail" == 0 ]]; then
   echo "ok    docs match the tree"
 fi
