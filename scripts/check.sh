@@ -474,6 +474,15 @@ if ! ./scripts/reeve-perms-check.sh; then
   fail=1
 fi
 
+	echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
+	if ! ./scripts/reviewer-perms-check.sh --selftest; then
+	  fail=1
+	fi
+	echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
+	if ! ./scripts/reviewer-perms-check.sh; then
+	  fail=1
+	fi
+
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
 # wrapper is the greenlight loop's ONE shell surface, and its --selftest is
