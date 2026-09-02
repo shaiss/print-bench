@@ -1,17 +1,26 @@
 name: Growth agent — Twitter/X (scheduled queue drain)
 
 # The scheduled heartbeat for Lark, the Twitter/X growth agent
-# (docs/growth.md). It fires at SEVERAL candidate hours across the day, but
-# only ONE firing per day ACTS: the `pick-slot` job computes today's chosen
-# slot (post-time jitter — tools/growth's `postslot`, a deterministic per-date
-# pick over the cadence's candidate hours) and gates `drain` on it, so the
-# post lands at a time that varies day to day instead of the same robotic
-# clock beat — while `max_posts_per_run` still floors it at one post a day. On
-# the acting firing it selects the open `growth-queue` + `channel:twitter`
-# issues — the messages product managers queued via /growth-queue or the
-# "Growth post (Twitter/X)" issue form — and drains at most one: the agent
-# turns the queued intent into channel-native copy strictly from the item's
-# committed fact budget, and hands it to the ONE posting tool.
+# (docs/growth.md). It fires at several hours across the day for DELIVERY
+# REDUNDANCY — GitHub's scheduled-workflow queue is best-effort and drops most
+# cron slots under load, so more slots means more chances one lands — but the
+# drain acts on WHATEVER firing GitHub actually delivers. ≤1 LIVE post per UTC
+# calendar day is held not by an hour lottery but by a per-day guard: the
+# trusted Select step asks `growth daycap` whether a `growth-twitter:posted`
+# marker is already dated today, and if so it holds. The post TIME varies day
+# to day on its own, because GitHub delivers these firings heavily and
+# unpredictably delayed (observed: 21:55, 19:31, 00:39 UTC on consecutive
+# days) — that delivery jitter IS the "not the same robotic clock beat". On an
+# acting firing it selects the open `growth-queue` + `channel:twitter` issues —
+# the messages product managers queued via /growth-queue or the "Growth post
+# (Twitter/X)" issue form — and drains at most one (`max_posts_per_run`): the
+# agent turns the queued intent into channel-native copy strictly from the
+# item's committed fact budget, and hands it to the ONE posting tool.
+#
+# (History: this replaces a `pick-slot`/`postslot` gate that required the one
+# delivered firing to equal a per-date "chosen hour" — under GitHub's unreliable
+# scheduler that firing almost never matched, so the drain was skipped every day
+# and nothing posted. The per-day marker guard is the robust replacement.)
 #
 # DRY-RUN IS THE DEFAULT. The posting tool (growth_mcp.py) publishes nothing
 # unless the separate live key (`GROWTH_TWITTER_LIVE` repo variable) AND all
@@ -45,26 +54,28 @@ name: Growth agent — Twitter/X (scheduled queue drain)
 #   * Going live on the channel → the GROWTH_TWITTER_LIVE repo variable plus
 #     the X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN / X_ACCESS_TOKEN_SECRET
 #     secrets, read only by the posting tool. Unset = every drain dry-runs.
-#   * Cadence → the `cron` literal below (the posting WINDOW — several
-#     candidate hours), kept in sync with the conf's `cadence:` key
-#     (scripts/cadence-sync-check.sh proves the parity). Which candidate hour
-#     actually posts on a given day is the `pick-slot` job's per-date choice,
-#     not stored anywhere — it is re-derived deterministically from the date.
+#   * Cadence → the `cron` literal below (several firing slots for DELIVERY
+#     REDUNDANCY, not several post times), kept in sync with the conf's
+#     `cadence:` key (scripts/cadence-sync-check.sh proves the parity). The one
+#     post/day is enforced by the per-day marker guard in Select, not by the
+#     slot count; the post time is whenever GitHub happens to deliver the day's
+#     first firing.
 
 on:
   schedule:
-    # The posting WINDOW, not the post count: fires at 13:19 / 15:19 / 17:19 /
-    # 19:19 / 21:19 UTC — mid-morning US East through early evening Europe/US,
-    # all reader-awake hours (this routine's output IS the schedule, unlike the
-    # off-peak build-slot siblings), while :19 keeps the family's off-peak
-    # minute convention. Only ONE of these firings posts on a given day: the
-    # `pick-slot` job picks today's chosen hour deterministically from the date
-    # so the time varies day to day, and `max_posts_per_run` floors it at one
-    # post/day regardless. Cron must be a literal — Actions evaluates no files
-    # or variables for on.schedule — so change the cadence by editing this
-    # line and the `cadence:` key in .github/growth-twitter.conf together
-    # (cadence-sync-check.sh fails on drift). The posting tool's marker guard
-    # makes each firing idempotent: an already-drained item is a no-op.
+    # Delivery-redundancy slots, not five post times: nominal 13:19 / 15:19 /
+    # 17:19 / 19:19 / 21:19 UTC — reader-awake hours (mid-morning US East
+    # through early evening Europe/US), :19 keeping the family's off-peak-minute
+    # convention. GitHub delivers these heavily delayed and drops most of them,
+    # so the extra slots are chances for at least one to land each day; whichever
+    # lands FIRST drains, and the per-day marker guard in Select holds the rest
+    # of the day (≤1 live post/UTC-day). The post time therefore varies with
+    # GitHub's own delivery jitter — no computed pick. Cron must be a literal —
+    # Actions evaluates no files or variables for on.schedule — so change the
+    # cadence by editing this line and the `cadence:` key in
+    # .github/growth-twitter.conf together (cadence-sync-check.sh fails on
+    # drift). The posting tool's per-item marker makes each firing idempotent
+    # too: an already-drained item is a no-op.
     - cron: '19 13-21/2 * * *'
   workflow_dispatch:
     inputs:
@@ -90,75 +101,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Post-time jitter (docs/growth.md): the cadence fires at several candidate
-  # hours a day, but only the day's CHOSEN hour posts. This cheap, secret-free
-  # gate computes whether THIS firing is that slot and hands `drain` a single
-  # boolean — keeping the ≤1-post/day floor structural (the drain never even
-  # starts on a non-chosen firing) while the post time walks the window across
-  # dates. The choice is `tools/growth`'s tested `postslot.is_post_slot`, not
-  # logic hidden in YAML. Gated by the SAME two rungs as `drain` (arming
-  # variable + default branch), so a disarmed or off-branch run skips this too
-  # and `drain` never runs; the `disarmed-notice` job explains those cases.
-  pick-slot:
-    name: Pick today's post slot (post-time jitter)
+  drain:
+    name: Drain the Twitter/X growth queue
+    # Key 1 of 2 (arming): the GROWTH_TWITTER_ENABLED repo variable. Plus the
+    # default-branch pin — this job carries write scope and secrets, and
+    # workflow_dispatch can target any in-repo branch, so a dispatch against a
+    # PR branch must never run that branch's skill code with the secrets. On
+    # schedule github.ref_name is already the default branch. Key 2 (committed
+    # `enabled: true`) is checked in the "Read policy" step. There is no chosen-
+    # hour gate: the drain runs on WHATEVER firing GitHub delivers, and the
+    # per-UTC-day marker guard inside Select holds it to ≤1 live post/day (so a
+    # second firing the same day, or GitHub delivering two slots, no-ops).
     if: >-
       vars.GROWTH_TWITTER_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      post_now: ${{ steps.slot.outputs.post_now }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-          ref: ${{ github.event.repository.default_branch }}
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - name: Is now today's chosen post slot?
-        id: slot
-        env:
-          PYTHONPATH: tools/growth/src
-          EVENT: ${{ github.event_name }}
-        run: |
-          set -euo pipefail
-          # A manual dispatch always acts: the jitter de-robotizes the
-          # SCHEDULED beat, and a human who dispatched the run means "now",
-          # not "wait for the dice". (The three arming rungs and the per-item
-          # approval label still gate whether that run posts anything live.)
-          if [ "$EVENT" = "workflow_dispatch" ]; then
-            echo "post_now=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::manual dispatch — bypassing post-time jitter; this run acts as the day's slot"
-            exit 0
-          fi
-          # On schedule: read the cadence (the window) from the committed conf
-          # — one source of truth, the same value cadence-sync pins to the cron
-          # literal — and ask postslot whether this firing's hour is today's
-          # deterministic per-date pick among the window's candidate hours.
-          conf=.github/growth-twitter.conf
-          cadence="$(python3 -m growth config --get cadence --path "$conf")"
-          if [ "$(python3 -m growth postslot --cadence "$cadence")" = "true" ]; then
-            echo "post_now=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::this firing IS today's chosen post slot — draining the queue"
-          else
-            echo "post_now=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::this firing is a candidate hour but NOT today's chosen slot — holding (post-time jitter keeps ≤1 post/day at a time that varies day to day)"
-          fi
-
-  drain:
-    name: Drain the Twitter/X growth queue
-    # Gated on the pick-slot job's decision: `needs` requires pick-slot to have
-    # SUCCEEDED (so a disarmed/off-branch run, where pick-slot is skipped,
-    # skips drain too), and the `if` additionally requires this firing to be
-    # today's chosen post slot. pick-slot already enforces the two arming rungs
-    # (the GROWTH_TWITTER_ENABLED variable and the default-branch pin — this
-    # job carries write scope and secrets, and workflow_dispatch can target any
-    # in-repo branch, so a dispatch against a PR branch must never run that
-    # branch's skill code with the secrets), so they are not repeated here.
-    # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
-    needs: pick-slot
-    if: needs.pick-slot.outputs.post_now == 'true'
     runs-on: ubuntu-latest
     # A hung agent must not hold a runner for the 6-hour default while
     # holding channel credentials, unwatched.
@@ -282,10 +238,74 @@ jobs:
             --json number,labels \
             --jq 'sort_by([(if any(.labels[]?; .name == "priority:high") then 0 else 1 end), .number]) | .[].number')"
           nums="$(printf '%s\n' "$list" | sed '/^$/d' | tr '\n' ' ' | sed 's/ *$//')"
+
+          # PER-UTC-DAY LIVE-POST GUARD (≤1 live post per calendar day). GitHub
+          # delivers this workflow heavily delayed and drops most cron slots, so
+          # the drain runs on WHATEVER firing lands rather than a chosen hour —
+          # this guard is what keeps a second same-day firing (or GitHub
+          # delivering two slots) from posting twice. A live post writes
+          # `<!-- growth-twitter:posted -->` CLAIM-FIRST (before the tweet) and
+          # closes the item, so "already posted today" = a posted marker dated
+          # today (UTC) on any desk issue touched today. Read via the REST
+          # list + REST comments (NOT the eventually-consistent Search API); the
+          # DECISION lives in the tested `growth daycap` helper, not this bash.
+          # Keyed on the LIVE marker only, so a dry-run never consumes the day.
+          # The `concurrency` group serializes this workflow with itself, so a
+          # later same-day run sees the earlier run's already-committed marker.
+          today="$(date -u +%F)"
+          # Sort by UPDATED (most recent first), so an item that got a `posted`
+          # marker today is in the scan window even if it is an OLD issue —
+          # `gh issue list` sorts by creation, which could push a today-updated
+          # old item past the limit and miss it. The REST issues endpoint (via
+          # `gh api`) supports sort=updated and stays strongly consistent (not
+          # the Search API); per_page=100 makes ">100 items updated today"
+          # (impossible for a ≤1-post/day desk) the only way to overflow it.
+          #
+          # FAIL CLOSED: if any part of this scan cannot complete (a transient
+          # GitHub API / JSON failure), HOLD this firing rather than treat the
+          # day as clear — a fail-open here could publish a SECOND live post the
+          # same day. A later delivered firing retries after GitHub recovers.
+          held_today=0; hold_reason=""
+          if ! touched_json="$(gh api \
+              "repos/$GITHUB_REPOSITORY/issues?labels=growth-queue,channel:twitter&state=all&sort=updated&direction=desc&per_page=100")"; then
+            held_today=1; hold_reason="could not read the desk's issues to verify the daily post guard"
+          fi
+          if [ "$held_today" = "0" ] && ! touched_today="$(printf '%s' "$touched_json" \
+              | jq -r --arg t "$today" '[.[] | select((.updated_at // "")[0:10] >= $t)] | .[].number')"; then
+            held_today=1; hold_reason="could not parse the desk's issues"
+          fi
+          if [ "$held_today" = "0" ]; then
+            # Gather each touched-today issue's comments WITH AUTHOR. daycap only
+            # counts a `posted` marker from the trusted posting identity — the
+            # GITHUB_TOKEN posts marker comments as `github-actions[bot]` — so an
+            # outsider commenting the marker string on a public queue issue
+            # cannot suppress a day's post (a denial-of-service).
+            comments='[]'
+            for n in $touched_today; do
+              if ! ic="$(gh issue view "$n" --json comments \
+                  --jq '[.comments[] | {body: .body, createdAt: .createdAt, author: .author.login}]')"; then
+                held_today=1; hold_reason="could not read comments on issue #$n"; break
+              fi
+              if ! comments="$(jq -n --argjson a "$comments" --argjson b "$ic" '$a + $b')"; then
+                held_today=1; hold_reason="could not merge comment data"; break
+              fi
+            done
+          fi
+          if [ "$held_today" = "0" ] && [ "$(printf '%s' "$comments" \
+              | PYTHONPATH=tools/growth/src python3 -m growth daycap --today "$today" --author 'github-actions[bot]')" = "posted" ]; then
+            held_today=1; hold_reason="a live post already went out today ($today)"
+          fi
+          if [ "$held_today" = "1" ]; then
+            echo "::notice::holding this firing — ${hold_reason}; keeping ≤1 live post/day (a later firing retries)"
+            nums=""
+          fi
+
           echo "issues=$nums" >> "$GITHUB_OUTPUT"
           {
             echo "## Growth agent (Twitter/X) — selection"
-            if [ -z "$nums" ]; then
+            if [ "$held_today" = "1" ]; then
+              echo "- held: ${hold_reason}; ≤1 live post/day"
+            elif [ -z "$nums" ]; then
               echo "- the queue is empty (no open \`growth-queue\` + \`channel:twitter\` issue outside \`needs-decision\`)"
             else
               echo "- queued items, in drain order: #${nums// / #}"
@@ -431,9 +451,9 @@ jobs:
             echo "::notice::the configured provider '${PROVIDER}' has no key set (ANTHROPIC_API_KEY for anthropic, ZAI_KEY for zai) — selected (${ISSUES}) but skipping the unattended run"
           fi
 
-      - name: Explain an empty queue
+      - name: Explain nothing to drain
         if: steps.policy.outputs.enabled == 'true' && steps.select.outputs.issues == ''
-        run: echo "::notice::the Twitter growth queue is empty — PMs queue messages with /growth-queue or the 'Growth post (Twitter/X)' issue form; nothing to drain"
+        run: echo "::notice::nothing to drain this run — either a live post already went out today (≤1/day guard) or the queue is empty (PMs queue messages with /growth-queue or the 'Growth post (Twitter/X)' issue form); the Select step summary says which"
 
       - name: Record the run outcome
         if: always()
@@ -466,12 +486,12 @@ jobs:
 
   disarmed-notice:
     name: Explain a disarmed run
-    # The `pick-slot` job is gated at job level (and `drain` needs it), so an
-    # unset arming variable (the default clone/fork state) or a dispatch
-    # against a non-default ref skips both silently. This sibling makes that
-    # legible. (A firing that IS armed and on-branch but is not today's chosen
-    # post slot is a normal hold, explained by pick-slot's own notice — not a
-    # disarmed run, so this job stays quiet for it.) No secrets, no write perms.
+    # The `drain` job is gated at job level, so an unset arming variable (the
+    # default clone/fork state) or a dispatch against a non-default ref skips it
+    # silently. This sibling makes that legible. (A firing that IS armed and
+    # on-branch but has already posted today is a normal hold, explained by the
+    # Select step's own notice — not a disarmed run, so this job stays quiet for
+    # it.) No secrets, no write perms.
     if: >-
       vars.GROWTH_TWITTER_ENABLED != 'true'
       || github.ref_name != github.event.repository.default_branch
