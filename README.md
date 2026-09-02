@@ -346,6 +346,16 @@ surfaces studies awaiting a read live in
     prusa-slicer, printcheck, the render/gate/check scripts) and never deny
     the read surface a review needs; `--selftest` with a positive and a
     negative control, run by check.sh.
+  - `spike-converter-perms-check.sh` — the same drift check for the scheduled
+    spike-to-brief converter's own deny backstop
+    (`.claude/spike-converter-settings.json`, #245 child C / issue #440), the
+    family's mirror-image case: it DENIES the scout's `scout-helper.sh` (the
+    converter files via the reused MCP tool only) while NEVER denying that
+    same tool (`mcp__scout__file_design_brief`) or its own read wrapper
+    (`converter-helper.sh`) — every sibling denies the scout MCP server, this
+    one depends on it — and it pins the reuse coupling (the scout's mcp
+    config and server file still exist under the names the workflow's
+    allow-list is keyed on)
   - `assessor-context.sh` — the trusted vendor-fetch step behind the
     adoption-study assessor: extracts the study's named GitHub repository and
     shallow-clones it into `.assessor-context/<n>/` (GitHub-only, hooks
