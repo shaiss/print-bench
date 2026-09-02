@@ -227,6 +227,55 @@ class Registry:
         return links
 
 
+def walk_shape_errors(links: list[ResolvedLink], head_provider: str,
+                      layout: list[str]) -> list[str]:
+    """Why a resolved chain does NOT fit a workflow's literal ship-step walk.
+
+    A routine workflow cannot select a secret at run time, so its walk is a
+    fixed sequence of literal ship steps — a LAYOUT, one provider per step in
+    file order (e.g. ``["zai", "zai", "zai", "anthropic", "anthropic"]``: three
+    GLM steps, then the Anthropic tail). The registry chain supplies only the
+    MODEL each step runs, so the two must agree slot for slot, or a link's key
+    is spent against another provider's endpoint mid-walk (issue #544's
+    cross-provider tail made this the contract in place of "every link on the
+    conf's provider"). The rules, each an error string when broken:
+
+    * link 1 sits on ``head_provider`` — the provider the routine's conf
+      names, which now means the HEAD of the walk, not the whole walk;
+    * the chain has exactly one link per ship step (a shorter chain leaves a
+      step reading an empty model output; a longer one has links nothing
+      walks);
+    * link N's provider is the provider ship step N is wired for — which
+      implies the monotone ``zai* then anthropic*`` shape and the
+      per-provider step counts, since the layout IS the file's step order.
+
+    Pure and stdlib-only so the workflow's resolve step (``model-registry
+    shape``) and the drift guard's pre-merge pin call the SAME rule and cannot
+    drift apart. An empty list means the chain fits.
+    """
+    errors: list[str] = []
+    if not links:
+        return ["the chain resolved to zero links"]
+    if links[0].provider != head_provider:
+        errors.append(
+            f"link 1 ({links[0].model}) is on provider {links[0].provider!r} but "
+            f"the routine's conf names {head_provider!r} as the head provider — "
+            "the walk would start on the wrong endpoint")
+    if len(links) != len(layout):
+        errors.append(
+            f"the chain has {len(links)} links but the workflow's walk carries "
+            f"{len(layout)} ship steps ({','.join(layout)}) — one ship step per "
+            "link, in order; add/remove the step and the link together")
+    for link, slot in zip(links, layout):
+        if link.provider != slot:
+            errors.append(
+                f"link {link.position} ({link.model}) is on provider "
+                f"{link.provider!r} but ship step {link.position} of the walk is "
+                f"wired for {slot!r} — the walk would spend that link's key "
+                "against the wrong endpoint")
+    return errors
+
+
 def find_root(start: str = ".") -> str:
     """Walk up from ``start`` to the directory containing ``.github/models``.
 

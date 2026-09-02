@@ -12,6 +12,8 @@ literal name (the same constraint ``backlog-burn.yml`` documents).  This tool
 picks which model and in what order; the YAML owns the secrets.
 """
 
-from .registry import Chain, Model, Provider, Registry, ResolvedLink
+from .registry import (Chain, Model, Provider, Registry, ResolvedLink,
+                       walk_shape_errors)
 
-__all__ = ["Registry", "Provider", "Model", "Chain", "ResolvedLink"]
+__all__ = ["Registry", "Provider", "Model", "Chain", "ResolvedLink",
+           "walk_shape_errors"]

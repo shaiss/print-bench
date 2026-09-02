@@ -195,3 +195,74 @@ def test_percent_in_notes_is_literal_not_interpolated(tmp_path):
     reg = load(tmp_path, GOOD.replace(
         "notes = older glm fallback", "notes = ~50% cheaper than opus"))
     assert reg.models["glm-4.6"].notes == "~50% cheaper than opus"
+
+
+# ---------------------------------------------------------------------------
+# The walk-shape rule (issue #544): does a chain fit a workflow's literal walk?
+# A positive case and a negative control per rule, like every rule above.
+# ---------------------------------------------------------------------------
+
+from model_registry.registry import walk_shape_errors  # noqa: E402
+
+MIXED = """\
+[provider:zai]
+secret = ZAI_KEY
+base_url = https://api.z.ai/api/anthropic
+
+[provider:anthropic]
+secret = ANTHROPIC_API_KEY
+
+[model:glm-5.2]
+provider = zai
+notes = head
+
+[model:glm-5.1]
+provider = zai
+notes = second GLM
+
+[model:claude-sonnet-5]
+provider = anthropic
+notes = the cross-provider tail
+
+[chain:routine]
+models = glm-5.2, glm-5.1, claude-sonnet-5
+"""
+
+
+def test_walk_shape_accepts_a_chain_that_fits_the_layout(tmp_path):
+    links = load(tmp_path, MIXED).resolve("routine")
+    assert walk_shape_errors(links, "zai", ["zai", "zai", "anthropic"]) == []
+
+
+def test_walk_shape_rejects_a_head_off_the_conf_provider(tmp_path):
+    # NEGATIVE CONTROL: the conf names the HEAD provider; a chain whose link 1
+    # sits elsewhere would start the walk on the wrong endpoint.
+    links = load(tmp_path, MIXED).resolve("routine")
+    errors = walk_shape_errors(links, "anthropic", ["zai", "zai", "anthropic"])
+    assert any("link 1" in e and "head provider" in e for e in errors), errors
+
+
+def test_walk_shape_rejects_a_link_on_the_wrong_slot_provider(tmp_path):
+    # NEGATIVE CONTROL: a zai link after an anthropic one (the monotone rule)
+    # is a link whose slot is wired for the other provider.
+    reg = load(tmp_path, MIXED.replace(
+        "models = glm-5.2, glm-5.1, claude-sonnet-5",
+        "models = glm-5.2, claude-sonnet-5, glm-5.1"))
+    errors = walk_shape_errors(reg.resolve("routine"), "zai",
+                               ["zai", "zai", "anthropic"])
+    assert any("link 2" in e and "wired for 'zai'" in e for e in errors), errors
+    assert any("link 3" in e and "wired for 'anthropic'" in e for e in errors), errors
+
+
+def test_walk_shape_rejects_a_link_count_the_walk_cannot_carry(tmp_path):
+    # NEGATIVE CONTROL: a chain shorter than the walk leaves a ship step
+    # reading an empty model output; longer leaves links nothing walks.
+    links = load(tmp_path, MIXED).resolve("routine")
+    short = walk_shape_errors(links, "zai", ["zai", "zai", "anthropic", "anthropic"])
+    assert any("3 links" in e and "4 ship steps" in e for e in short), short
+    long = walk_shape_errors(links, "zai", ["zai", "zai"])
+    assert any("3 links" in e and "2 ship steps" in e for e in long), long
+
+
+def test_walk_shape_rejects_an_empty_chain():
+    assert walk_shape_errors([], "zai", ["zai"]) == ["the chain resolved to zero links"]

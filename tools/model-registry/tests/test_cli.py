@@ -98,3 +98,48 @@ def test_show_summarizes_without_secret_names(tmp_path, capsys):
     assert "provider zai: url=https://api.z.ai/api/anthropic" in out
     assert "chain review: glm-5.2 -> claude-opus-4-8" in out
     assert "ZAI_KEY" not in out and "ANTHROPIC_API_KEY" not in out
+
+
+# ── `shape` (issue #544): the runtime half of the walk-shape rule ─────────────
+
+def test_shape_ok_when_the_chain_fits_the_walk(tmp_path, capsys):
+    rc = main(["--path", conf(tmp_path), "shape", "review",
+               "--head", "zai", "--layout", "zai,anthropic"])
+    assert rc == 0
+    assert "ok: chain review walks layout zai,anthropic" in capsys.readouterr().out
+
+
+def test_shape_fails_loud_naming_the_offending_link(tmp_path, capsys):
+    # NEGATIVE CONTROL: the workflow walks anthropic then zai (the mirror of
+    # the chain) — every link is on the wrong slot's provider, and the errors
+    # name the registry file, the conf, and each link.
+    rc = main(["--path", conf(tmp_path), "shape", "review",
+               "--head", "zai", "--layout", "anthropic,zai",
+               "--conf", ".github/example.conf"])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "::error::" in out and "[chain:review]" in out
+    assert ".github/example.conf" in out
+    assert "link 1 (glm-5.2)" in out and "wired for 'anthropic'" in out
+    assert "link 2 (claude-opus-4-8)" in out and "wired for 'zai'" in out
+
+
+def test_shape_fails_on_a_head_off_the_conf_provider(tmp_path, capsys):
+    rc = main(["--path", conf(tmp_path), "shape", "review",
+               "--head", "anthropic", "--layout", "zai,anthropic"])
+    assert rc == 1
+    assert "head provider" in capsys.readouterr().out
+
+
+def test_shape_fails_on_a_layout_naming_an_undeclared_provider(tmp_path, capsys):
+    rc = main(["--path", conf(tmp_path), "shape", "review",
+               "--head", "zai", "--layout", "zai,openai"])
+    assert rc == 1
+    assert "does not declare" in capsys.readouterr().out
+
+
+def test_shape_unknown_chain_is_a_legible_error(tmp_path, capsys):
+    rc = main(["--path", conf(tmp_path), "shape", "nope",
+               "--head", "zai", "--layout", "zai"])
+    assert rc == 1
+    assert "error:" in capsys.readouterr().err
