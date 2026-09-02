@@ -263,16 +263,18 @@ def test_auth_401_is_inconclusive_not_a_dead_id(tmp_path):
     assert any(l.startswith("WARN") and "NOT PROVEN" in l for l in lines)
 
 
-def test_routine_chains_are_smokeable_and_within_their_provider():
-    """#327 AC: the four routine chains resolve to >1 link, all on the routine's
-    conf provider, so a model-smoke run (the model-smoke.yml workflow smokes
-    EVERY chain on any registry edit, and dispatch accepts any chain name)
-    actually exercises the deepened tails.
+def test_routine_chains_are_smokeable_from_their_head_provider():
+    """#327 / #544 AC: the four routine chains resolve to >1 link, their HEAD
+    on the routine's conf provider and their tail crossing to a second
+    declared provider whose secret the smoke can also hold — so a model-smoke
+    run (the model-smoke.yml workflow smokes EVERY chain on any registry
+    edit, and dispatch accepts any chain name) actually exercises the
+    deepened, cross-provider tails.
 
     This is the smoke-side half of the drift guard's chain checks: not that
-    the workflows walk (test_workflow_drift proves that), but that what they
-    walk can be PROVEN callable — every link resolvable and skippable by
-    secret presence, none dangling.
+    the workflows walk (test_workflow_drift proves that, including the
+    walk's provider layout), but that what they walk can be PROVEN callable —
+    every link resolvable and skippable by secret presence, none dangling.
     """
     reg = Registry.load(REGISTRY_PATH)
     routines = {
@@ -281,19 +283,34 @@ def test_routine_chains_are_smokeable_and_within_their_provider():
         "chunker": "zai",
         "labeler": "zai",
     }
-    for chain_id, provider in routines.items():
+    for chain_id, head in routines.items():
         links = reg.resolve(chain_id)
         assert len(links) > 1, (
             f"the `{chain_id}` chain has {len(links)} link(s) — #327 requires "
             "a multi-model tail so one unservable id cannot kill the routine")
+        assert links[0].provider == head, (
+            f"the `{chain_id}` chain's link 1 ({links[0].model}) is on provider "
+            f"{links[0].provider!r} but .github/{chain_id}.conf declares "
+            f"{head!r} as the walk's head")
         for link in links:
-            assert link.provider == provider, (
+            assert link.provider in reg.providers and link.secret, (
                 f"the `{chain_id}` chain's link {link.position} ({link.model}) "
-                f"is on provider {link.provider!r} but .github/{chain_id}.conf "
-                f"declares {provider!r} — the run holds only that provider's "
-                "secret, so the walk cannot reach this link")
-    # And the smoke itself runs end-to-end over a routine chain with all its
-    # provider's secrets absent: exit 1 "proves nothing" (the documented
+                "has no declared provider secret — the smoke could not skip or "
+                "probe it by secret presence")
+        assert {l.provider for l in links} > {head}, (
+            f"the `{chain_id}` chain sits entirely on {head!r} — the #544 "
+            "cross-provider tail the smoke must exercise is gone")
+    # With ONLY the tail's secret present the smoke still attempts the tail
+    # links (skipping the head's) — the cross-provider walk's degraded path
+    # is smokeable too, not a "proves nothing" for want of the head key.
+    def post(url, headers, payload):
+        return 200, '{"id":"msg","content":[{"type":"text","text":"ok"}]}'
+    lines, code = smoke.smoke_chain(reg, "chunker", {"ANTHROPIC_API_KEY": "ak"}, post)
+    assert code == 0, lines
+    assert any(l.startswith("skip") for l in lines), lines
+    assert any(l.startswith("ok") or l.startswith("OK") for l in lines), lines
+    # And the smoke itself runs end-to-end over a routine chain with every
+    # provider's secret absent: exit 1 "proves nothing" (the documented
     # misconfiguration verdict), not a crash on the deepened tail.
     lines, code = smoke.smoke_chain(reg, "chunker", {}, post=None)
     assert code == 1
