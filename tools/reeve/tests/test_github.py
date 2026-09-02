@@ -1,4 +1,4 @@
-"""Run-health gather tests — ``_get`` is the single network seam.
+"""Run-health + greenlight-queue gather tests — ``_get`` is the single network seam.
 
 Every test monkeypatches ``_get``; no request ever leaves the process (the
 same discipline ``tools/backlog-groomer/tests/test_github.py`` states). The
@@ -236,3 +236,79 @@ def test_github_module_stays_get_only():
     verb_re = re.compile(r"\b(POST|PATCH|PUT|DELETE)\b")
     match = verb_re.search(src.read_text(encoding="utf-8"))
     assert match is None, f"github.py mentions {match.group(0) if match else ''}"
+
+
+# ---------------------------------------------------------------------------
+# The greenlight queue (issue #443): open needs-decision issues that carry no
+# greenlight marker comment yet. Same discipline — _get monkeypatched, no
+# request leaves the process.
+# ---------------------------------------------------------------------------
+
+def _gl_responses():
+    """URL -> (json body, Link header) for the greenlight endpoints."""
+    responses = {}
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues"
+              f"?state=open&labels={github.NEEDS_DECISION_LABEL}&per_page=100"] = ([
+        # A PR wearing the gate label — dropped as a PR, never queued.
+        {"number": 12, "title": "PR parked?", "pull_request": {"url": "..."}},
+        # Parked, no comments at all — queued (a comments GET still happens:
+        # the marker scan is per-comment, and an empty list carries none).
+        {"number": 230, "title": "Decision: platform X", "html_url": "u/230"},
+        # Parked, comments but no marker — queued.
+        {"number": 265, "title": "Decision: platform Y", "html_url": "u/265"},
+        # Parked and already greenlighted — NOT queued (the loop posts only
+        # where no marker exists, any verdict, any version).
+        {"number": 267, "title": "Decision: platform Z", "html_url": "u/267"},
+        # Parked, marker NOT on the comment's first line — a greenlight always
+        # opens with the marker, so this is ordinary text; queued.
+        {"number": 269, "title": "Decision: quoted marker mid-body", "html_url": "u/269"},
+    ], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/230/comments?per_page=100"] = ([], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/265/comments?per_page=100"] = ([
+        {"body": "parking this for the lead", "created_at": "2026-08-20T05:00:00Z"},
+    ], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/267/comments?per_page=100"] = ([
+        {"body": "some discussion", "created_at": "2026-08-20T05:00:00Z"},
+        {"body": "<!-- reeve-greenlight v1 issue=267 verdict=no -->\nGREENLIGHT: NO\nreasoning"},
+        {"body": "<!-- reeve-greenlight v2 issue=267 verdict=route -->\nGREENLIGHT: ROUTE"},
+    ], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/269/comments?per_page=100"] = ([
+        {"body": "\n\n  an ordinary comment quoting \"<!-- reeve-greenlight v1 ...\" mid-body\n"},
+    ], "")
+    return responses
+
+
+def _gl_fake(monkeypatch, responses):
+    def _fake(url, token):
+        return responses[url]
+    monkeypatch.setattr(github, "_get", _fake)
+
+
+def test_greenlight_queue_lists_unmarked_parked_issues(monkeypatch):
+    _gl_fake(monkeypatch, _gl_responses())
+    out = github.gather_greenlight_queue(REPO, "tok")
+    assert [i["number"] for i in out["queue"]] == [230, 265, 269]  # oldest first
+    assert [i["number"] for i in out["parked"]] == [230, 265, 267, 269]  # PR dropped
+
+
+def test_greenlight_queue_never_reads_a_pr_thread(monkeypatch):
+    calls: list[str] = []
+    responses = _gl_responses()
+
+    def _fake(url, token):
+        calls.append(url)
+        return responses[url]
+
+    monkeypatch.setattr(github, "_get", _fake)
+    github.gather_greenlight_queue(REPO, "tok")
+    assert not any("/issues/12/" in url for url in calls)
+
+
+@pytest.mark.parametrize("body,expected", [
+    ("<!-- reeve-greenlight v1 issue=5 verdict=yes -->\nGREENLIGHT: YES", True),
+    ("\n\n  <!-- reeve-greenlight v1 issue=5 verdict=no -->\nNO", True),  # first non-blank line
+    ("a comment that merely mentions reeve-greenlight", False),
+    ("", False),
+])
+def test_carries_greenlight_matches_the_marker_first_line(body, expected):
+    assert github.carries_greenlight([{"body": body}]) is expected

@@ -79,6 +79,13 @@ Comment on the issue/PR (write access required):
 /decide status         # dump the current ledger
 ```
 
+The comment must contain the command **only**. The workflow matches the command
+with an anchored pattern over the whole trimmed comment body, so a comment that
+adds any rationale alongside it — `/decide yes lock-clearance-loosen — agreed,
+the rattle is the worse evil` — matches nothing and is silently invalid (the
+workflow reacts `confused` and posts the usage). Put the reasoning in a separate
+comment if you want it on the thread.
+
 The `decide.yml` workflow authorizes the commenter by their **real repository
 permission** (`getCollaboratorPermissionLevel`, one of `admin`/`maintain`/
 `write`), parses the command against an anchored strict pattern, then:

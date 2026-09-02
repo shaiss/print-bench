@@ -33,6 +33,17 @@ region gets a new `cameras.conf` line, never a moved one.
   the ridge corner at the top of the cavity are not hidden behind the outer
   dome's silhouette. This is the shot that shows the crown-cap decision
   directly.
+- **cutaway-ridge.png** — section **along** the turn axis (the x = 0 plane,
+  the one the #499 roof defect lived on), dead-on. This is the shot that shows
+  what the gable alone could not do: the vault's ridge line ran flat along y
+  while the outer dome falls away toward the y-ends, so the old union cavity
+  was open to the air beyond |y| ≈ 27.6. The ceiling now reads as the gable's
+  short flat ridge segment (27 mm wide, centre) handing off at |y| ≈ 13.7 to
+  the two **hip planes** at 46°, which descend to close on the equator at
+  |y| ≈ 99.6 — where the cavity's widest line still spans ≈ 199.3 mm. The
+  solid band between the hip lines and the outer dome's silhouette is the
+  end-wall material the hip added; the six vents read as through-holes in the
+  far interior wall.
 - **bed-contact.png** — low, tight three-quarter on one port's castellated
   sector-tip feet, the part's **only** bed contact: the tips, the gaps between
   them, and a slice of the neighbouring ring fill the frame, with the

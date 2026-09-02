@@ -83,43 +83,74 @@ lineage_line() {
 
 gallery() {
   echo "$BEGIN"
-  echo "| Design | |"
-  echo "|---|---|"
-  # No fallback to a flat glob when the resolver fails. A gallery that quietly
-  # drops its nesting is the same silent-wrong-output failure the derivative
-  # machinery exists to catch: the page still renders, still looks finished,
-  # and is wrong about which design is whose.
+  # Order AND grouping come from scripts/catalog.sh (issue #374): the one
+  # authoritative grouped, lineage-ordered sequence both this gallery and the
+  # site index consume, so the two surfaces can't disagree about a design's
+  # group. Each line is
+  #   <group-slug> \t <group-label> \t <depth> \t <name> \t <parent>
+  # with groups in the display order of designs/categories.conf and, within a
+  # group, lineage order (a derivative still nests under its parent, and both
+  # sit in the same group). No fallback to a flat glob when it fails: a gallery
+  # that quietly drops its nesting or grouping is the same silent-wrong-output
+  # failure the derivative machinery exists to catch — the page still renders,
+  # still looks finished, and is wrong about which design is whose.
   local order
-  if ! order="$(./scripts/lineage.sh order)"; then
-    echo "gallery: ./scripts/lineage.sh order failed — refusing to emit a gallery with the lineage missing" >&2
+  if ! order="$(./scripts/catalog.sh order)"; then
+    echo "gallery: ./scripts/catalog.sh order failed — refusing to emit a gallery with the grouping missing" >&2
     exit 1
   fi
 
-  # Census cross-check. `lineage order` and the glob below are both meant to
-  # mean "a directory under designs/ with a .scad matching its name"; if they
-  # ever stop meaning the same thing, the symptom is a design silently absent
-  # from the gallery, with docs-check.sh's staleness check none the wiser
-  # because the generated file still matches the committed one.
+  # Census cross-check. `catalog order` (field 4 is the name) and the glob below
+  # are both meant to mean "a directory under designs/ with a .scad matching its
+  # name"; if they ever stop meaning the same thing, the symptom is a design
+  # silently absent from the gallery, with docs-check.sh's staleness check none
+  # the wiser because the generated file still matches the committed one.
   local from_order from_glob dir
-  from_order="$(awk -F'\t' 'NF { print $2 }' <<<"$order" | sort)"
+  from_order="$(awk -F'\t' 'NF { print $4 }' <<<"$order" | sort)"
   from_glob="$(for dir in designs/*/; do
       dir="$(basename "$dir")"
       [[ -f "designs/${dir}/${dir}.scad" ]] || continue
       echo "$dir"
     done | sort)"
   if [[ "$from_order" != "$from_glob" ]]; then
-    echo "gallery: lineage order and designs/*/ disagree about which designs exist:" >&2
+    echo "gallery: catalog order and designs/*/ disagree about which designs exist:" >&2
     diff <(printf '%s\n' "$from_glob") <(printf '%s\n' "$from_order") >&2 || true
     exit 1
   fi
 
-  # The third field (the primary parent) is dropped on purpose: lineage_line
+  # Per-group promise blurbs, from the same authority (catalog.sh) as the order,
+  # so a heading and its promise can't drift from the vocabulary. Each line is
+  # <slug> \t <label> \t <blurb> (blurb empty for the navigational headings).
+  local groups_out
+  if ! groups_out="$(./scripts/catalog.sh groups)"; then
+    echo "gallery: ./scripts/catalog.sh groups failed" >&2
+    exit 1
+  fi
+  local -A group_blurb=()
+  local gslug gblurb
+  while IFS=$'\t' read -r gslug _ gblurb; do
+    [[ -n "$gslug" ]] || continue
+    group_blurb["$gslug"]="$gblurb"
+  done <<<"$groups_out"
+
+  # A `### <group>` heading opens each group, followed by a fresh table header:
+  # markdown breaks a table at a heading, so a genuine subheading forces one
+  # table per group. The parent field (5th) is dropped on purpose: lineage_line
   # re-asks for the whole include-ordered parent list, of which the primary
   # parent is only the first entry, and a row that named one parent while the
   # design declared two would be exactly the half-truth this nesting is for.
-  local depth name
-  while IFS=$'\t' read -r depth name _; do
+  local cur_group="" group label depth name
+  while IFS=$'\t' read -r group label depth name _; do
     [[ -n "$name" ]] || continue
+    if [[ "$group" != "$cur_group" ]]; then
+      printf '\n### %s\n\n' "$label"
+      if [[ -n "${group_blurb[$group]:-}" ]]; then
+        printf '_%s_\n\n' "${group_blurb[$group]}"
+      fi
+      echo "| Design | |"
+      echo "|---|---|"
+      cur_group="$group"
+    fi
     local thumb="designs/${name}/previews/contact-sheet.png"
     if [[ ! -f "$thumb" ]]; then
       if [[ "$CHECK" == 1 ]]; then

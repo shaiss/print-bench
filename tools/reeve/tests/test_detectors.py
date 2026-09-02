@@ -364,10 +364,15 @@ def test_evaluate_is_pure_and_repeatable():
 _PKG = pathlib.Path(detectors.__file__).parent
 _FORBIDDEN_IMPORTS = {"urllib", "socket", "http", "subprocess", "requests"}
 # Includes signals.py — the committed-files seam, which reads only os/glob/json.
-# The one excluded module is github.py, the opt-in GET-only run-health seam
-# (issue #313): it genuinely uses urllib, exactly like the groomer's, and
-# test_github.py holds it to GET-only. cli.py stays in this list because it
-# imports github.py lazily, inside the --repo path only.
+# The one excluded module is github.py, the opt-in GET-only live-read seam
+# (issue #313's run health, and issue #443's greenlight queue — the open
+# needs-decision issues plus their comment threads): it genuinely uses urllib,
+# exactly like the groomer's, and test_github.py holds it to GET-only. The
+# greenlight loop's WRITE (the wrapper-mediated comment) lives outside this
+# package entirely, in .claude/skills/reeve-greenlight/, so these guards stay
+# the proof that the package itself still never writes. cli.py stays in this
+# list because it imports github.py lazily, inside the --repo / greenlight-
+# select paths only.
 _PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py", "signals.py")
 
 
@@ -390,7 +395,9 @@ def test_pure_modules_import_nothing_network_capable():
 def test_package_contains_no_write_verbs():
     # GET/read-only by construction: no POST/PATCH/PUT/DELETE anywhere in the
     # package (word-bounded, so GITHUB_OUTPUT's "PUT" doesn't trip it). Reeve
-    # reads only committed files; the workflow's upsert is the sole write.
+    # reads only committed files plus the GET-only live seams (run health,
+    # greenlight selection); the workflow's upsert and the greenlight
+    # wrapper's comments are the writes, and both live outside this package.
     import re as _re
 
     verb_re = _re.compile(r"\b(POST|PATCH|PUT|DELETE)\b")

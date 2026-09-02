@@ -8,11 +8,11 @@ what the next session reads.
 ## Goal
 
 A **terminal** NUGGS module — the first one in the system that is not a run of
-bore. `nuggs` is the straight (the Bin Bridge); `nuggs-yard` is an open
-playpen; the `nuggs` backlog lists elbow / node / open module / wye, all of
-them still tube. This is the end-cap: a single-port rounded **refuge bulb**
-that turns the dead flat wall at the end of a run into a place to sit, hoard
-and hide.
+bore. `nuggs` is the straight (the Bin Bridge), and the `nuggs` backlog lists
+elbow / node / open module / wye, all of them still tube; `nuggs-yard` shares
+the `nuggs-` name but not the port, so it is a sibling, not a system module.
+This is the end-cap: a single-port rounded **refuge bulb** that turns the dead
+flat wall at the end of a run into a place to sit, hoard and hide.
 
 It is deliberately framed as "the module a Syrian hamster would ask for." The
 four features below are each a piece of hamster husbandry that a person

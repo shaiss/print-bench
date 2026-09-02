@@ -30,6 +30,9 @@ DEFAULT_PATH = ".github/reeve.conf"
 _KNOWN_KEYS = (
     "enabled",
     "cadence",
+    "greenlight",
+    "greenlight_cap",
+    "provider",
     "low_headroom_pct",
     "score_drop",
     "score_floor",
@@ -38,6 +41,12 @@ _KNOWN_KEYS = (
     "routine_dead_runs",
     "lock_leak_hours",
 )
+
+# The providers a `provider:` value may name (#443): each is a reviewed ship
+# step in reeve.yml holding that provider's literal secret, so a typo'd name
+# must fail here rather than selecting no step at all. Mirrors the sibling
+# confs' closed provider sets.
+_KNOWN_PROVIDERS = ("anthropic", "zai")
 
 # github.py fetches only this many completed runs per workflow (_RUNS_FETCHED
 # there; duplicated as a literal so this pure module never imports the network
@@ -61,11 +70,11 @@ CADENCE_PRESETS: dict[str, str] = {
 _CRON_RE = re.compile(r"^[^'\s]\S*(?:\s+[^'\s]\S*){4}$")
 
 
-def _parse_bool(value: str, where: str) -> bool:
+def _parse_bool(value: str, key: str, where: str) -> bool:
     low = value.strip().lower()
     if low in ("true", "false"):
         return low == "true"
-    raise ValueError(f"{where}: 'enabled' must be 'true' or 'false', got {value!r}")
+    raise ValueError(f"{where}: {key!r} must be 'true' or 'false', got {value!r}")
 
 
 def _parse_positive_int(value: str, key: str, where: str) -> int:
@@ -135,12 +144,24 @@ def _validate_cadence(value: str, where: str) -> str:
 class Config:
     """Reeve's committed policy.
 
-    Defaults are the documented ones from issue #272; ``enabled`` defaults to
-    False so an incomplete file never reads as "on".
+    Defaults are the documented ones from issues #272 and #441; ``enabled``
+    and ``greenlight`` default to False so an incomplete file never reads as
+    "on".
     """
 
     enabled: bool = False
     cadence: str = ""  # preset name or raw cron ("" = workflow's literal is authoritative)
+    # The greenlight loop's vocabulary (#296 stage 2, landed in #441 before its
+    # consumers): inert until a later piece reads them, so the defaults below
+    # are also today's committed values.
+    greenlight: bool = False
+    greenlight_cap: int = 6  # max greenlight comments per run (the stage-1 round size)
+    # The greenlight step's provider (#443) — the deterministic reporter this
+    # config otherwise serves is keyless, so this key is read only by the
+    # greenlight job's policy step. Defaults to the servable provider every
+    # scheduled sibling runs on, so an absent key is never a silently-wrong
+    # endpoint.
+    provider: str = "zai"
     low_headroom_pct: float = 15.0
     score_drop: int = 3
     score_floor: float = 80.0
@@ -171,10 +192,19 @@ def load(path: str = DEFAULT_PATH) -> Config:
                 raise ValueError(f"{where}: duplicate key {key!r}")
             seen.add(key)
             if key == "enabled":
-                cfg.enabled = _parse_bool(value, where)
+                cfg.enabled = _parse_bool(value, key, where)
             elif key == "cadence":
                 _validate_cadence(value, where)  # validate but keep original string
                 cfg.cadence = value
+            elif key == "greenlight":
+                cfg.greenlight = _parse_bool(value, key, where)
+            elif key == "provider":
+                if value not in _KNOWN_PROVIDERS:
+                    raise ValueError(
+                        f"{where}: 'provider' must be one of {list(_KNOWN_PROVIDERS)}, "
+                        f"got {value!r}"
+                    )
+                cfg.provider = value
             elif key in ("low_headroom_pct", "score_floor"):
                 setattr(cfg, key, _parse_pct(value, key, where))
             elif key == "walltime_ratio":
@@ -189,7 +219,7 @@ def load(path: str = DEFAULT_PATH) -> Config:
                 cfg.routine_dead_runs = parsed
             elif key == "lock_leak_hours":
                 cfg.lock_leak_hours = _parse_positive_float(value, key, where)
-            else:  # score_drop, walltime_min_seconds
+            else:  # score_drop, walltime_min_seconds, greenlight_cap
                 setattr(cfg, key, _parse_positive_int(value, key, where))
     return cfg
 
@@ -198,7 +228,8 @@ def get(key: str, path: str = DEFAULT_PATH) -> str:
     """Return one config value as a plain string, for the workflow to read.
 
     ``enabled`` renders as ``"true"``/``"false"`` so a workflow step can gate
-    on it directly; numbers render bare (``15.0``, ``3``).
+    on it directly; numbers render bare (``15.0``, ``3``). Boolean keys render
+    as words the same way.
     """
     if key not in _KNOWN_KEYS:
         raise KeyError(f"unknown config key: {key!r} (known: {list(_KNOWN_KEYS)})")

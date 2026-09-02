@@ -7,12 +7,20 @@ Subcommands, each a thin shell over one module:
   ``backlog-burn config``, over the growth desk's own closed key set).
 * ``growth length <text>`` — the weighted tweet length (URLs = 23), so a
   human or an attended session can check copy the way the posting tool will.
-* ``growth postslot --cadence <cron> [--now <iso>]`` — post-time jitter: print
-  ``true`` iff *now* (default: UTC now) is today's chosen slot among the
-  cadence's candidate hours, so Lark's workflow can gate the drain on it.
+* ``growth daycap --author <logins> [--today <YYYY-MM-DD>]`` — the per-UTC-day
+  live-post guard: read the desk's marker comments as a JSON list on stdin and
+  print ``posted`` iff a ``growth-twitter:posted`` marker dated today (default:
+  today UTC) was authored by one of the trusted ``--author`` logins (so an
+  outsider's comment can't), letting Lark's Select step hold the drain to ≤1
+  live post/day.
 * ``growth simulate --conf <conf> --snapshot <json> --posts <json>
   --start <iso> --days <n> --out-md <path> [--out-ndjson <path>]`` — the
   accelerated dry run (docs/growth.md): render what would have been posted.
+* ``growth board-stage [--snapshot <json>]`` — derive the growth approval
+  board's Stage for each queue item (docs/growth.md, docs/roadmap-board.md);
+  reads a JSON list of item snapshots (file or stdin) and prints one
+  ``<url>\\t<stage>`` line per item that belongs on the board. The
+  growth-board-sync workflow's single source for where each post sits.
 """
 
 from __future__ import annotations
@@ -20,11 +28,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-
 from datetime import datetime, timezone
 
+from . import board as board_mod
 from . import config as config_mod
-from . import postslot as postslot_mod
+from . import daycap as daycap_mod
 from . import simulate as simulate_mod
 from .tweetlen import tweet_weight
 
@@ -40,11 +48,13 @@ def main(argv: list[str] | None = None) -> int:
     p_len = sub.add_parser("length", help="weighted tweet length (URLs = 23)")
     p_len.add_argument("text")
 
-    p_slot = sub.add_parser("postslot", help="is now today's chosen post slot?")
-    p_slot.add_argument("--cadence", required=True,
-                        help="the 5-field cron literal (the posting window)")
-    p_slot.add_argument("--now", default="",
-                        help="ISO UTC timestamp to test (default: UTC now)")
+    p_daycap = sub.add_parser("daycap", help="has a live post already gone out today?")
+    p_daycap.add_argument("--today", default="",
+                          help="UTC date YYYY-MM-DD to test (default: today UTC)")
+    p_daycap.add_argument("--author", required=True,
+                          help="comma-separated GitHub logins the posting tool "
+                               "posts as; only a marker from these authors holds "
+                               "the drain (so an outsider's comment can't)")
 
     p_sim = sub.add_parser("simulate", help="accelerated dry-run timeline")
     p_sim.add_argument("--conf", default=config_mod.DEFAULT_PATH)
@@ -58,6 +68,12 @@ def main(argv: list[str] | None = None) -> int:
     p_sim.add_argument("--out-ndjson")
     p_sim.add_argument("--note", default="",
                        help="one provenance line rendered under the header")
+
+    p_board = sub.add_parser(
+        "board-stage", help="derive the growth approval board's Stage per item")
+    p_board.add_argument(
+        "--snapshot",
+        help="JSON file: a list of queue-item snapshots (default: read stdin)")
 
     args = parser.parse_args(argv)
 
@@ -73,22 +89,21 @@ def main(argv: list[str] | None = None) -> int:
         print(tweet_weight(args.text))
         return 0
 
-    if args.cmd == "postslot":
-        if args.now:
-            try:
-                now = datetime.fromisoformat(
-                    args.now.replace("Z", "+00:00")).replace(tzinfo=None)
-            except ValueError as e:
-                print(f"growth postslot: bad --now {args.now!r}: {e}", file=sys.stderr)
-                return 1
-        else:
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if args.cmd == "daycap":
+        today = args.today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         try:
-            hit = postslot_mod.is_post_slot(now, args.cadence)
-        except Exception as e:  # noqa: BLE001 — a bad cadence must fail loud, not post
-            print(f"growth postslot: {e}", file=sys.stderr)
+            comments = json.loads(sys.stdin.read() or "[]")
+        except json.JSONDecodeError as e:
+            print(f"growth daycap: bad comments JSON on stdin: {e}", file=sys.stderr)
             return 1
-        print("true" if hit else "false")
+        if not isinstance(comments, list):
+            print("growth daycap: expected a JSON list of comments on stdin", file=sys.stderr)
+            return 1
+        trusted = {a.strip() for a in args.author.split(",") if a.strip()}
+        if not trusted:
+            print("growth daycap: --author must name at least one trusted login", file=sys.stderr)
+            return 1
+        print("posted" if daycap_mod.posted_today(comments, today, trusted) else "clear")
         return 0
 
     if args.cmd == "simulate":
@@ -118,6 +133,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"growth simulate: {len(result['slots'])} slot(s), "
               f"{len(result['unscheduled'])} left queued, "
               f"{len(result['skipped'])} skipped -> {args.out_md}")
+        return 0
+
+    if args.cmd == "board-stage":
+        try:
+            raw = (open(args.snapshot, encoding="utf-8").read()
+                   if args.snapshot else sys.stdin.read())
+            items = json.loads(raw)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"growth board-stage: {e}", file=sys.stderr)
+            return 1
+        if not isinstance(items, list):
+            print("growth board-stage: expected a JSON list of item snapshots",
+                  file=sys.stderr)
+            return 1
+        for item in items:
+            stage = board_mod.stage_of(item)
+            if stage is None:          # closed-and-never-posted: not a board card
+                continue
+            url = item.get("url")
+            if not url:                # a card needs a URL to add; flag, don't guess
+                print(f"growth board-stage: item #{item.get('number')} has no "
+                      f"url; skipping", file=sys.stderr)
+                continue
+            print(f"{url}\t{stage}")
         return 0
 
     return 2  # pragma: no cover — argparse enforces the subcommand set

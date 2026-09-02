@@ -25,6 +25,9 @@ def test_defaults_are_fail_safe():
     cfg = config.Config()
     assert cfg.enabled is False        # an incomplete file never reads as "on"
     assert cfg.cadence == ""
+    assert cfg.greenlight is False     # the loop ships disarmed (#441)
+    assert cfg.greenlight_cap == 6
+    assert cfg.provider == "zai"       # the greenlight step's provider (#443)
     assert cfg.low_headroom_pct == 15.0
     assert cfg.score_drop == 3
     assert cfg.score_floor == 80.0
@@ -39,6 +42,9 @@ def test_full_file_parses(tmp_path):
         # a comment
         enabled: true
         cadence: 53 5 * * *
+        greenlight: true
+        greenlight_cap: 3
+        provider: anthropic
         low_headroom_pct: 20
         score_drop: 5
         score_floor: 75
@@ -49,6 +55,9 @@ def test_full_file_parses(tmp_path):
     """.replace("        ", "")))
     assert cfg.enabled is True
     assert cfg.cadence == "53 5 * * *"
+    assert cfg.greenlight is True
+    assert cfg.greenlight_cap == 3
+    assert cfg.provider == "anthropic"
     assert cfg.low_headroom_pct == 20.0
     assert cfg.score_drop == 5
     assert cfg.score_floor == 75.0
@@ -109,6 +118,91 @@ def test_duplicate_key_raises(tmp_path):
 def test_bad_bool_raises(tmp_path):
     with pytest.raises(ValueError, match="'enabled' must be 'true' or 'false'"):
         config.load(_write(tmp_path, "enabled: yes\n"))
+
+
+# ---------------------------------------------------------------------------
+# The greenlight loop keys (#296 stage 2, vocabulary landed in #441) —
+# optional with built-in defaults, fail-loud on every failure mode
+# ---------------------------------------------------------------------------
+
+def test_greenlight_keys_default_when_absent(tmp_path):
+    # The low_headroom_pct pattern: a conf without the keys parses and the
+    # built-in defaults apply, so the reporter behaves identically (the loop
+    # ships disarmed even for a clone that never carries the keys).
+    cfg = config.load(_write(tmp_path, "enabled: true\n"))
+    assert cfg.greenlight is False
+    assert cfg.greenlight_cap == 6
+
+
+def test_greenlight_keys_parse_when_present(tmp_path):
+    cfg = config.load(_write(tmp_path, "greenlight: true\ngreenlight_cap: 3\n"))
+    assert cfg.greenlight is True
+    assert cfg.greenlight_cap == 3
+
+
+def test_get_renders_greenlight_keys(tmp_path):
+    path = _write(tmp_path, "greenlight: false\ngreenlight_cap: 6\n")
+    assert config.get("greenlight", path) == "false"
+    assert config.get("greenlight_cap", path) == "6"
+
+
+def test_greenlight_typo_is_an_unknown_key(tmp_path):
+    # The keys joined the closed set, so only their exact names parse — a
+    # look-alike must still fail loudly rather than read as a synonym.
+    with pytest.raises(ValueError, match="unknown key 'greenlight_enabled'"):
+        config.load(_write(tmp_path, "greenlight_enabled: true\n"))
+
+
+def test_bad_greenlight_bool_raises(tmp_path):
+    with pytest.raises(ValueError, match="'greenlight' must be 'true' or 'false'"):
+        config.load(_write(tmp_path, "greenlight: maybe\n"))
+
+
+@pytest.mark.parametrize("bad", ["0", "-3", "x", "2.5"])
+def test_bad_greenlight_cap_raises(tmp_path, bad):
+    with pytest.raises(ValueError, match="'greenlight_cap' must be a positive integer"):
+        config.load(_write(tmp_path, f"greenlight_cap: {bad}\n"))
+
+
+def test_duplicate_greenlight_raises(tmp_path):
+    with pytest.raises(ValueError, match="duplicate key 'greenlight'"):
+        config.load(_write(tmp_path, "greenlight: false\ngreenlight: true\n"))
+
+
+def test_duplicate_greenlight_cap_raises(tmp_path):
+    with pytest.raises(ValueError, match="duplicate key 'greenlight_cap'"):
+        config.load(_write(tmp_path, "greenlight_cap: 6\ngreenlight_cap: 3\n"))
+
+
+# The greenlight step's provider key (#443) — picks the ship step in reeve.yml;
+# closed set, fail-safe default, fail-loud on every failure mode.
+
+def test_provider_defaults_when_absent(tmp_path):
+    # A conf without the key parses and the servable default applies, so the
+    # greenlight job can never fall through to a silently-wrong endpoint.
+    cfg = config.load(_write(tmp_path, "enabled: true\n"))
+    assert cfg.provider == "zai"
+
+
+def test_provider_parses_each_known_value(tmp_path):
+    assert config.load(_write(tmp_path, "provider: zai\n")).provider == "zai"
+    assert config.load(_write(tmp_path, "provider: anthropic\n")).provider == "anthropic"
+
+
+def test_get_renders_provider_as_a_plain_string(tmp_path):
+    assert config.get("provider", _write(tmp_path, "provider: zai\n")) == "zai"
+
+
+@pytest.mark.parametrize("bad", ["GLM", "z.ai", "claude", ""])
+def test_unknown_provider_raises(tmp_path, bad):
+    # A typo'd provider would select no ship step at all — it must fail here.
+    with pytest.raises(ValueError, match="'provider' must be one of"):
+        config.load(_write(tmp_path, f"provider: {bad}\n"))
+
+
+def test_duplicate_provider_raises(tmp_path):
+    with pytest.raises(ValueError, match="duplicate key 'provider'"):
+        config.load(_write(tmp_path, "provider: zai\nprovider: anthropic\n"))
 
 
 @pytest.mark.parametrize("bad", ["0", "-3", "x", "2.5"])

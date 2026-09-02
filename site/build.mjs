@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 
 import { ALL_AVATAR_STYLES } from "./lib/avatars.mjs";
 import { readDesigns, readStyles } from "./lib/content.mjs";
+import { readCategories, groupDesigns } from "./lib/catalog.mjs";
 import { readTeam } from "./lib/team.mjs";
 import {
   shouldFetchReleases,
@@ -217,6 +218,12 @@ async function main() {
   const styles = readStyles(REPO_ROOT);
 
   if (designs.length === 0) fail("no designs found under designs/");
+
+  // Group the index by catalog category (issue #374): the same NUGGS +
+  // technique-domain grouping the README gallery renders, off the same signal
+  // (designs/categories.conf + each design's catalog.conf), consumed by
+  // indexPage below. Deterministic and offline — pure reads of committed files.
+  const designGroups = groupDesigns(designs, readCategories(REPO_ROOT));
 
   // Release download links (issue #139). Best-effort and Vercel-scoped: on the
   // deploy (which has network) each design's latest-release manifest becomes
@@ -544,7 +551,7 @@ async function main() {
 
   for (const page of rendered) write(out, page.path, page.contents);
 
-  write(out, "index.html", indexPage(designs, { rosters: team.rosters }));
+  write(out, "index.html", indexPage(designs, { rosters: team.rosters, groups: designGroups }));
   if (styles.length) write(out, "styles/index.html", stylesIndexPage(styles, designs));
 
   let assetBytes = 0;

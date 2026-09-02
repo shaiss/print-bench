@@ -95,7 +95,7 @@ declines design requests). The queue is the contract between the seats:
   semantics); after a dry run it only comments.
 * **`tools/growth`** — the deterministic engine (strict conf parser, the
   weighted-length rule, the drain policy, a minimal cron matcher, the
-  post-time jitter chooser (`postslot`), the accelerated-timeline simulator,
+  per-UTC-day live-post guard (`daycap`), the accelerated-timeline simulator,
   the OAuth 1.0a X poster seam), stdlib-only with its own pytest suite; see
   its README.
 * **The routine** — `.github/workflows/growth-twitter.yml` +
@@ -115,6 +115,14 @@ declines design requests). The queue is the contract between the seats:
 * **`growth/`** — the desk's committed artifacts: the accelerated dry-run
   timelines (`growth/twitter/dryruns/`) a human reads before arming
   anything.
+* **The approval board** — a GitHub Project (v2) where each stageable queue
+  issue is a card grouped by its derived Stage, so a human sees where each post
+  sits and approves it at a glance (a closed, unposted item — a human's
+  rejection — has no Stage and is left off the board). Its schema lives in git
+  (`scripts/gh-project.sh --board growth`), the Stage policy in
+  `tools/growth` (`growth.board.stage_of`), and `growth-board-sync.yml`
+  reflects each issue's state onto it. Detailed below; a LENS, not a control
+  surface — approving is still applying `approved-to-post`.
 
 ## The arming ladder — three human rungs, no agent on any of them
 
@@ -138,34 +146,44 @@ Turning `require_approval` off (a one-line reviewed PR) is the deliberate
 last step to a fully autonomous channel — never a default, and rungs 1–2
 still hold.
 
-## Post-time jitter — a human-looking cadence
+## Cadence — one post a day, at a time GitHub varies for us
 
 A fixed daily cron makes every tweet land at the same clock minute — a
 robotic drumbeat a reader clocks instantly, the opposite of "a maker posting
-when they have something to say". Lark keeps its **≤1 post/day** floor but
-varies *when* that post lands:
+when they have something to say". Lark keeps its **≤1 live post/day** floor
+but varies *when* that post lands — and it does so by leaning into, rather
+than fighting, how GitHub actually runs scheduled workflows.
 
-* The cadence (`19 13-21/2 * * *`) is a **window**, not a single time — the
-  workflow fires at five candidate hours a day (13:19 / 15:19 / 17:19 /
-  19:19 / 21:19 UTC, all reader-awake).
-* Only **one** firing per day acts. A cheap, secret-free `pick-slot` job runs
-  `tools/growth`'s `postslot.is_post_slot`, which chooses one candidate hour
-  **deterministically from the UTC date** (a SHA-256 of the date indexes the
-  sorted candidate hours), and gates the `drain` job on it. The other firings
-  hold — `drain` never even starts — so the one-post-a-day floor is
-  *structural*, not a count the posting tool has to enforce after the fact.
-* The choice is **reproducible** (seeded by the date alone, no external
-  state), so a run is re-derivable and the simulator shows the real ~1/day
-  cadence at the real varied times. A **single-candidate** cadence (the shape
-  every other routine uses) always resolves to its one hour, so `postslot` is
-  inert there and nothing else on the bench changes.
-* A **manual dispatch** bypasses the jitter — a human who dispatched the run
-  means "now", not "wait for the dice" (the three arming rungs and the
-  per-item approval still gate whether that run posts anything live).
+The load-bearing fact is that **GitHub's scheduled-workflow queue is
+best-effort**: it delivers runs heavily delayed (tens of minutes to hours),
+at an arbitrary time, and drops most of a day's cron slots under load.
+Observed on this repo across three consecutive days, the workflow was
+delivered *once* each day at **21:55, 19:31 and 00:39 UTC** — not at any of
+its nominal slot minutes, one even past midnight. So:
 
-Because the acting hour walks the window across dates, the feed reads like a
-person posting at different times, not a scheduler — while every safety rung
-above is untouched.
+* The cadence (`19 13-21/2 * * *`) is **delivery redundancy**, not five post
+  times: five reader-awake slots (13:19 / 15:19 / 17:19 / 19:19 / 21:19 UTC)
+  are five chances for GitHub to land at least one firing on a given day. The
+  drain runs on **whichever firing GitHub delivers** — there is no chosen-hour
+  gate. (An earlier design *did* gate on a per-date chosen hour; because the
+  one delivered firing almost never equalled it, the drain was skipped every
+  day and **nothing posted** — the failure this section's design replaces.)
+* **≤1 live post per UTC calendar day** is held by a per-day guard, not a slot
+  count. A live post writes the `<!-- growth-twitter:posted -->` marker
+  *claim-first* and closes the item; the trusted Select step asks
+  `tools/growth`'s tested `daycap.posted_today` whether any desk issue carries
+  that marker dated today (UTC), reading via the REST list + comments (not the
+  eventually-consistent Search API), and if so it holds. The workflow's
+  `concurrency` group serializes its own runs, so a later same-day firing sees
+  the earlier run's committed marker. The guard is keyed on the **live**
+  marker only, so a dry-run never consumes the day.
+* The post **time** varies day to day for free — it is whatever hour GitHub
+  delivered the day's first firing, which the run history shows is wide and
+  unpredictable. That delivery jitter is the "not a robotic drumbeat", with no
+  computed pick and no new persistent state.
+
+Everything above is orthogonal to the safety rungs: dry-run stays the default
+and the arming ladder is untouched.
 
 ## Dry runs, and the accelerated timeline
 
@@ -246,8 +264,9 @@ approving any of them for Lark. Model from the `reeve-growth` registry chain
 | The routine silently stops (or silently starts) | Two-key arming + the `disarmed-notice` job; a disabled conf logs; an empty queue logs; Reeve's `routine-dead` detector reads run conclusions once armed |
 | A dead model id kills the sweep | Single-link by design — one daily sweep fails visibly and retries next morning; `model-registry smoke growth-twitter` proves the link before arming |
 | A hijacked run floods the channel | `GROWTH_MAX_POSTS` (default 1) per run, in-process, unreachable by the agent; live posts additionally need per-item labels no agent can apply |
-| The feed reads robotic (every post at the same clock minute) | Post-time jitter — the cadence is a window of candidate hours and `postslot` picks one per date, so the post time walks day to day (above); a single-candidate cadence is unaffected |
-| The jitter posts more than once a day | Structural, not a count: the multi-hour cron fires several times, but `pick-slot` gates `drain` so only the date's one chosen firing runs at all — `postslot` is tested to yield exactly one post slot per day, and `max_posts_per_run` still floors each run |
+| The feed reads robotic (every post at the same clock minute) | The post time is whatever hour GitHub delivers the day's first firing — heavily and variably delayed by GitHub's own scheduler (observed 21:55 / 19:31 / 00:39 on consecutive days), so it walks widely on its own (above) |
+| Two posts land on the same day (GitHub delivers 2+ firings, or a re-run) | The per-UTC-day guard: `daycap.posted_today` (tested) holds the drain if a live `posted` marker is already dated today; runs serialize via the `concurrency` group, and the marker is written claim-first, so a later same-day run always sees it (and the scan fails closed — a transient API error holds the drain rather than posting again). `max_posts_per_run` still caps each run |
+| GitHub drops all of a day's firings | 0 posts that day; the queue is durable, so it drains next day. The five slots are delivery redundancy precisely to make this rare |
 
 ## Arming it (the morning-after checklist)
 
@@ -263,9 +282,68 @@ approving any of them for Lark. Model from the `reeve-growth` registry chain
    `model-smoke.yml` on the `growth-twitter` chain first.
 5. Approve items one at a time: read the dry-run comment on a queue issue,
    apply `approved-to-post`, let the next sweep post it. Un-label or close
-   to veto; `needs-decision` parks an item indefinitely.
+   to veto; `needs-decision` parks an item indefinitely. The **approval
+   board** (below) is the surface built for this step — every pending post in
+   one view, approved by applying the label from the card.
 6. To stop everything instantly: unset `GROWTH_TWITTER_ENABLED` (or
    `GROWTH_TWITTER_LIVE` to fall back to dry-runs).
+
+## The approval board (GitHub Projects)
+
+The queue is issues; the board is the **view a human approves from** — a
+GitHub Project (v2), `print-bench growth`, where each stageable `growth-queue`
+issue is a card grouped by its Stage. It answers "where is each post, and which
+are waiting on me?" without scrolling the issue list. (A closed `growth-queue`
+issue with no posted marker — one a human rejected — has no Stage, so it is
+excluded rather than shown.) It is the exact sibling of
+the autonomy roadmap board (`docs/roadmap-board.md`): the schema lives in git
+and the board is provisioned by a committed, idempotent `gh` recipe, because
+this session's automation cannot create or populate a Projects v2 board (the
+API is GraphQL-only and unavailable here, and a Project is settings-shaped
+anyway).
+
+**The board is a LENS, not a control surface.** Each card's Stage is
+*derived* from its issue's real state by one tested pure function
+(`growth.board.stage_of` in `tools/growth`), not set by hand:
+
+| Stage | The issue state it reflects |
+|---|---|
+| **Queued** | open `growth-queue`, no dry-run yet — filed, awaiting Lark |
+| **Drafted** | open, carries the `<!-- growth-twitter:dry-run -->` comment — **awaiting your approval** |
+| **Approved** | open, carries the `approved-to-post` label — awaiting the next live sweep |
+| **Posted** | closed with the `<!-- growth-twitter:posted -->` marker — published |
+| **Parked** | open, `needs-decision` — a human paused it |
+| **Attention** | open with a posted marker that never closed — a mid-thread/in-flight post to check |
+
+Because the Stage is derived, **approving a post is still applying the
+`approved-to-post` label** — the very label Lark's posting tool reads — now
+doable from the card's side panel where you see every pending post at once.
+**Dragging a card does nothing to the post**: it changes only the board's own
+Stage field, not the label, and the next reconcile re-derives Stage from the
+real state anyway. This is the deliberate difference from the roadmap board,
+whose Stage is human-owned (a card a person drags, so its sync sets Stage
+only when the item is first added). The growth board's Stage is a reflection,
+so its sync always re-sets it.
+
+**Provisioning + wiring.**
+
+- Create the board once: `scripts/gh-project.sh --board growth setup | bash`
+  (needs `gh` + the `project` scope). Then, one-time in the UI, group the
+  Board view by `Stage` and — optionally — filter by the `channel:twitter`
+  label. View layout is UI-only, as on the roadmap board.
+- `.github/workflows/growth-board-sync.yml` reflects each queue issue's
+  derived Stage onto the board: on `issues` events (the approve/park/close
+  transitions land immediately) and every three hours (to catch Lark's
+  once-daily dry-run as a Drafted card). It is **gated on the same
+  `PROJECT_TOKEN`** the roadmap board uses — one Projects-scoped PAT covers
+  every board under this owner — and is a no-op until that secret is set, so
+  merging the desk provisions nothing on its own.
+
+The board adds **no new write to any issue**: the sync only reads the queue
+(labels + comment markers) and writes the Project. The posting tool still
+applies no labels, and `growth-queue` stays in the labeler's
+`NON_TRIAGE_LABELS` — the board is a reflection of the queue, never a second
+source of truth for it.
 
 ## Relationship to earlier decisions
 

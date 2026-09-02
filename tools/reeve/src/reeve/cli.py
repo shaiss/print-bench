@@ -5,6 +5,7 @@
     reeve run       # gather then report (what the workflow runs)
     reeve config    # read the committed policy file
     reeve armed     # the two-key arming decision, as an output
+    reeve greenlight-select  # the draftable parked-decision queue, as numbers
 
 ``report`` is the pure, tested core; ``gather`` is the thin file read; ``run``
 composes them. The workflow stays a few lines of glue with no policy of its
@@ -16,6 +17,13 @@ unit-tested.
 when set, the GET-only run-health read (``github.gather_run_health``) is
 attached to the snapshot as ``runHealth``. Without it the run stays entirely
 offline and the two run-health detectors read "not evaluated".
+
+``greenlight-select`` (issue #443) is the greenlight loop's trusted Select
+step: it lists the open ``needs-decision`` issues that carry no greenlight
+marker yet (``github.gather_greenlight_queue``, GET-only) and prints the
+oldest ``greenlight_cap`` of them as space-separated numbers — the bounded
+set the workflow hands the drafter as ``$REEVE_SELECTED_ISSUES``, so the
+agent never sees an issue it cannot post on.
 """
 
 from __future__ import annotations
@@ -115,6 +123,32 @@ def cmd_armed(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_greenlight_select(args: argparse.Namespace) -> int:
+    """`greenlight-select`: print the draftable parked-decision queue.
+
+    One line of space-separated issue numbers — the open ``needs-decision``
+    issues with no greenlight marker yet, oldest first, bounded by the conf's
+    ``greenlight_cap`` (so every issue the drafter is handed is postable
+    within the same run's cap). The same string is appended to
+    ``$GITHUB_OUTPUT`` as ``issues=`` (the ``armed`` precedent), so the
+    workflow needs no stdout scraping. An empty queue prints an empty line
+    and writes ``issues=`` — a legitimate state, not a failure.
+    """
+    # Lazy for the same reason as in _gather: github.py is the one
+    # network-capable module, and cli.py stays on the purity test's list.
+    from .github import gather_greenlight_queue
+
+    cfg = _load_config(args.conf)
+    queue = gather_greenlight_queue(args.repo, _token())["queue"]
+    nums = " ".join(str(issue["number"]) for issue in queue[: cfg.greenlight_cap])
+    sys.stdout.write(nums + "\n")
+    gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a", encoding="utf-8") as fh:
+            fh.write(f"issues={nums}\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reeve", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -154,6 +188,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_armed.add_argument("--gh-output",
                          help="path to append `armed=` (defaults to $GITHUB_OUTPUT)")
     p_armed.set_defaults(func=cmd_armed)
+
+    p_gl = sub.add_parser("greenlight-select",
+                          help="the draftable parked-decision queue (GET-only)")
+    p_gl.add_argument("--repo", required=True,
+                      help="owner/name — the repo to list parked issues from")
+    p_gl.add_argument("--conf", help="policy file for greenlight_cap (default: built-in)")
+    p_gl.add_argument("--gh-output",
+                      help="path to append `issues=` (defaults to $GITHUB_OUTPUT)")
+    p_gl.set_defaults(func=cmd_greenlight_select)
 
     return parser
 
