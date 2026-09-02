@@ -1,7 +1,9 @@
 """The CLI surface the workflow's policy step and the dry run consume."""
 
+import io
 import json
 
+from growth.board import POSTED_MARKER
 from growth.cli import main
 
 CONF = """\
@@ -34,6 +36,37 @@ def test_config_get_missing_file_fails(tmp_path, capsys):
 def test_length(capsys):
     assert main(["length", "hello https://a.io"]) == 0
     assert capsys.readouterr().out.strip() == str(6 + 23)
+
+
+def _daycap(monkeypatch, capsys, comments_json, args):
+    monkeypatch.setattr("sys.stdin", io.StringIO(comments_json))
+    rc = main(["daycap", *args])
+    return rc, capsys.readouterr().out.strip()
+
+
+def test_daycap_counts_and_holds_at_the_cap(monkeypatch, capsys):
+    # Authors carry the gh GraphQL spelling ("github-actions", no "[bot]") — the
+    # exact string the Select step feeds — while the caller trusts the REST
+    # spelling. The guard must still count them, then hold at the cap.
+    marker = f"{POSTED_MARKER}\nlive"
+    one = json.dumps([{"body": marker, "createdAt": "2026-09-01T13:00:00Z",
+                       "author": "github-actions"}])
+    two = json.dumps([{"body": marker, "createdAt": "2026-09-01T13:00:00Z",
+                       "author": "github-actions"},
+                      {"body": marker, "createdAt": "2026-09-01T15:00:00Z",
+                       "author": "github-actions"}])
+    common = ["--today", "2026-09-01", "--author", "github-actions[bot]"]
+
+    assert _daycap(monkeypatch, capsys, one, [*common, "--cap", "2"]) == (0, "clear")
+    assert _daycap(monkeypatch, capsys, two, [*common, "--cap", "2"]) == (0, "hold")
+    # default cap of 1: the first post already holds
+    assert _daycap(monkeypatch, capsys, one, common) == (0, "hold")
+
+
+def test_daycap_bad_stdin_json_fails(monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
+    assert main(["daycap", "--author", "github-actions[bot]"]) == 1
+    assert "bad comments JSON" in capsys.readouterr().err
 
 
 def test_simulate_end_to_end(tmp_path, capsys):

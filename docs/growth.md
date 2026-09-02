@@ -95,12 +95,12 @@ declines design requests). The queue is the contract between the seats:
   semantics); after a dry run it only comments.
 * **`tools/growth`** — the deterministic engine (strict conf parser, the
   weighted-length rule, the drain policy, a minimal cron matcher, the
-  per-UTC-day live-post guard (`daycap`), the accelerated-timeline simulator,
+  per-UTC-day live-post cap (`daycap`), the accelerated-timeline simulator,
   the OAuth 1.0a X poster seam), stdlib-only with its own pytest suite; see
   its README.
 * **The routine** — `.github/workflows/growth-twitter.yml` +
   `.github/growth-twitter.conf` (enabled / provider / cadence /
-  `max_posts_per_run` / `require_approval`, parsed by tools/growth's own
+  `max_posts_per_run` / `max_posts_per_day` / `require_approval`, parsed by tools/growth's own
   strict parser), cadence-parity-checked by `scripts/cadence-sync-check.sh`,
   model from the `[chain:growth-twitter]` registry chain (frontier tier,
   single-link — the adoption-assessor's reasoning), deny backstop
@@ -146,13 +146,14 @@ Turning `require_approval` off (a one-line reviewed PR) is the deliberate
 last step to a fully autonomous channel — never a default, and rungs 1–2
 still hold.
 
-## Cadence — one post a day, at a time GitHub varies for us
+## Cadence — a bounded number of posts a day, at times GitHub varies for us
 
 A fixed daily cron makes every tweet land at the same clock minute — a
 robotic drumbeat a reader clocks instantly, the opposite of "a maker posting
-when they have something to say". Lark keeps its **≤1 live post/day** floor
-but varies *when* that post lands — and it does so by leaning into, rather
-than fighting, how GitHub actually runs scheduled workflows.
+when they have something to say". Lark keeps its **≤`max_posts_per_day`
+(default 2) live posts/day** cap but varies *when* those posts land — and it
+does so by leaning into, rather than fighting, how GitHub actually runs
+scheduled workflows.
 
 The load-bearing fact is that **GitHub's scheduled-workflow queue is
 best-effort**: it delivers runs heavily delayed (tens of minutes to hours),
@@ -168,15 +169,34 @@ its nominal slot minutes, one even past midnight. So:
   gate. (An earlier design *did* gate on a per-date chosen hour; because the
   one delivered firing almost never equalled it, the drain was skipped every
   day and **nothing posted** — the failure this section's design replaces.)
-* **≤1 live post per UTC calendar day** is held by a per-day guard, not a slot
-  count. A live post writes the `<!-- growth-twitter:posted -->` marker
-  *claim-first* and closes the item; the trusted Select step asks
-  `tools/growth`'s tested `daycap.posted_today` whether any desk issue carries
-  that marker dated today (UTC), reading via the REST list + comments (not the
-  eventually-consistent Search API), and if so it holds. The workflow's
-  `concurrency` group serializes its own runs, so a later same-day firing sees
-  the earlier run's committed marker. The guard is keyed on the **live**
-  marker only, so a dry-run never consumes the day.
+* **≤`max_posts_per_day` live posts per UTC calendar day** is held by a
+  per-day guard, not a slot count. A live post writes the
+  `<!-- growth-twitter:posted -->` marker *claim-first* (exactly one per post —
+  the closing comment carries only the header) and closes the item; the trusted
+  Select step asks `tools/growth`'s tested `daycap` how many desk issues carry
+  that marker dated today (UTC) — reading via the REST list + comments (not the
+  eventually-consistent Search API) — and holds once the count reaches the cap.
+  The workflow's `concurrency` group serializes its own runs, so a later
+  same-day firing sees the earlier run's committed marker. The guard is keyed
+  on the **live** marker only, so a dry-run never consumes a slot. **Changing
+  the cap** is a reviewed one-line diff to `max_posts_per_day` in
+  `.github/growth-twitter.conf` that you PR and merge (or a future
+  `/growth-twitter set` comment command); nothing in the agent path can change
+  it.
+
+  > **Author identity — the bug this design originally carried.** The guard
+  > only counts a marker from the posting identity (an outsider commenting the
+  > marker string on a public queue issue must not suppress or, with a count,
+  > mis-tally a day). GitHub names the Actions bot two ways: the REST API's
+  > `user.login` is `github-actions[bot]`, but the GraphQL `author.login` that
+  > `gh issue view --json comments` returns (what the Select step reads) is
+  > `github-actions`, with no `[bot]` suffix. An early hardening trusted the
+  > REST spelling literally, so the guard rejected its *own* posting tool's
+  > markers and never held — the daily cap was silently disabled, and it
+  > slipped through because the unit test fed the REST spelling the live scan
+  > never produces. `daycap` now normalizes both spellings (stripping a
+  > trailing `[bot]`); the DoS guard is unweakened, because GitHub reserves the
+  > real bot names so no human can register one that normalizes to the poster.
 * The post **time** varies day to day for free — it is whatever hour GitHub
   delivered the day's first firing, which the run history shows is wide and
   unpredictable. That delivery jitter is the "not a robotic drumbeat", with no
@@ -265,7 +285,7 @@ approving any of them for Lark. Model from the `reeve-growth` registry chain
 | A dead model id kills the sweep | Single-link by design — one daily sweep fails visibly and retries next morning; `model-registry smoke growth-twitter` proves the link before arming |
 | A hijacked run floods the channel | `GROWTH_MAX_POSTS` (default 1) per run, in-process, unreachable by the agent; live posts additionally need per-item labels no agent can apply |
 | The feed reads robotic (every post at the same clock minute) | The post time is whatever hour GitHub delivers the day's first firing — heavily and variably delayed by GitHub's own scheduler (observed 21:55 / 19:31 / 00:39 on consecutive days), so it walks widely on its own (above) |
-| Two posts land on the same day (GitHub delivers 2+ firings, or a re-run) | The per-UTC-day guard: `daycap.posted_today` (tested) holds the drain if a live `posted` marker is already dated today; runs serialize via the `concurrency` group, and the marker is written claim-first, so a later same-day run always sees it (and the scan fails closed — a transient API error holds the drain rather than posting again). `max_posts_per_run` still caps each run |
+| More posts than the cap land on the same day (GitHub delivers 2+ firings, or a re-run) | The per-UTC-day cap: `daycap` (tested) counts today's live `posted` markers and holds the drain once the count reaches `max_posts_per_day`; runs serialize via the `concurrency` group, and each marker is written claim-first, so a later same-day run always sees the earlier ones (and the scan fails closed — a transient API error holds the drain rather than posting again). The count matches the poster across the bot's REST/GraphQL login spellings (`[bot]`-suffix normalization), so it recognizes its own markers. `max_posts_per_run` still caps each run |
 | GitHub drops all of a day's firings | 0 posts that day; the queue is durable, so it drains next day. The five slots are delivery redundancy precisely to make this rare |
 
 ## Arming it (the morning-after checklist)

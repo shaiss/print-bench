@@ -35,9 +35,19 @@ def test_window_shorter_than_queue_leaves_items_queued():
 
 
 def test_max_posts_per_run_drains_faster():
-    r = simulate("0 9 * * *", 2, _snapshot(), _posts(), "2026-08-29T00:00:00Z", 1)
+    # A per-run cap of 2 drains two items in one firing — but the per-DAY cap
+    # bounds the day's total, so raise it to 2 as well to exercise the per-run
+    # cap alone (with the default per-day cap of 1, only one would post).
+    r = simulate("0 9 * * *", 2, _snapshot(), _posts(), "2026-08-29T00:00:00Z", 1, 2)
     assert [s["number"] for s in r["slots"]] == [11, 10]
     assert {s["at"] for s in r["slots"]} == {"2026-08-29T09:00:00Z"}
+
+
+def test_per_day_cap_bounds_a_high_per_run_cap():
+    # The per-day cap is the outer bound: even a per-run cap of 5 posts only
+    # `max_posts_per_day` in a day (the negative control for the test above).
+    r = simulate("0 9 * * *", 5, _snapshot(), _posts(), "2026-08-29T00:00:00Z", 1, 1)
+    assert [s["number"] for s in r["slots"]] == [11]  # one firing, capped at 1/day
 
 
 def test_uncomposed_item_is_skipped_and_reported_never_invented():
@@ -85,14 +95,25 @@ def test_ndjson_one_line_per_slot():
 
 def test_multi_slot_cadence_posts_once_per_utc_day():
     # A multi-slot cadence fires several times a day (delivery redundancy), but
-    # the live drain posts at most once per UTC calendar day (the per-day
-    # guard). The simulator models that by collapsing each day's firings to the
-    # first, so the dry-run timeline shows the real ~1/day cadence — not a post
-    # at every candidate firing.
+    # the live drain holds once the day's cap is met (the per-day guard). With
+    # the default cap of 1 that is one post/day, at each day's FIRST firing —
+    # the dry-run timeline shows the real cadence, not a post at every firing.
     cadence = "19 13-21/2 * * *"
-    r = simulate(cadence, 1, _snapshot(), _posts(), "2026-08-29T00:00:00Z", 3)
+    r = simulate(cadence, 1, _snapshot(), _posts(), "2026-08-29T00:00:00Z", 3)  # cap defaults to 1
     assert [s["number"] for s in r["slots"]] == [11, 10, 12]
     days = [s["at"][:10] for s in r["slots"]]
     assert days == ["2026-08-29", "2026-08-30", "2026-08-31"]  # one post each day
     # Each day's post lands on that day's FIRST firing (13:19), deterministically.
     assert all(s["at"][11:16] == "13:19" for s in r["slots"])
+
+
+def test_daily_cap_of_two_places_two_posts_on_a_day():
+    # With max_posts_per_day=2 (the shipped default), two of a day's firings
+    # post — the first two nominal slots (13:19, 15:19) — mirroring daycap
+    # holding at the cap rather than after the first post.
+    cadence = "19 13-21/2 * * *"
+    r = simulate(cadence, 1, _snapshot(), _posts(), "2026-08-29T00:00:00Z", 3, 2)
+    assert [s["number"] for s in r["slots"]] == [11, 10, 12]
+    times = [(s["at"][:10], s["at"][11:16]) for s in r["slots"]]
+    assert times == [("2026-08-29", "13:19"), ("2026-08-29", "15:19"),
+                     ("2026-08-30", "13:19")]  # 2 on day one, the third on day two
