@@ -245,9 +245,15 @@ def walk_shape_errors(links: list[ResolvedLink], head_provider: str,
     * the chain has exactly one link per ship step (a shorter chain leaves a
       step reading an empty model output; a longer one has links nothing
       walks);
-    * link N's provider is the provider ship step N is wired for — which
-      implies the monotone ``zai* then anthropic*`` shape and the
-      per-provider step counts, since the layout IS the file's step order.
+    * link N's provider is the provider ship step N is wired for, since the
+      layout IS the file's step order;
+    * the walk is MONOTONE — a sequence of contiguous provider runs with the
+      head provider first (``zai* then anthropic*``): a provider must never
+      reappear after a different provider has started, in the layout or in
+      the chain. The slot-for-slot rule alone would accept any layout the
+      chain happens to mirror, ``zai,anthropic,zai`` included — a walk whose
+      fallback bounces back to a provider that already failed, and whose
+      "the tail runs after the head" gating no longer describes the file.
 
     Pure and stdlib-only so the workflow's resolve step (``model-registry
     shape``) and the drift guard's pre-merge pin call the SAME rule and cannot
@@ -273,6 +279,40 @@ def walk_shape_errors(links: list[ResolvedLink], head_provider: str,
                 f"{link.provider!r} but ship step {link.position} of the walk is "
                 f"wired for {slot!r} — the walk would spend that link's key "
                 "against the wrong endpoint")
+    errors.extend(_monotone_errors("the workflow's walk", layout, head_provider))
+    errors.extend(_monotone_errors(
+        "the chain", [link.provider for link in links], head_provider))
+    return errors
+
+
+def _monotone_errors(what: str, providers: list[str], head_provider: str) -> list[str]:
+    """The monotone rule for one provider sequence (a layout, or a chain's
+    link providers): contiguous runs, the head provider's run first, and no
+    provider reappearing once a different one has started. Position numbers
+    in the messages are 1-based like link positions."""
+    errors: list[str] = []
+    if not providers:
+        return errors
+    if providers[0] != head_provider:
+        # The head-provider rule above already reports a chain whose link 1
+        # is off the conf; report the layout's own head here so a layout
+        # literal that starts on the tail provider is named as such.
+        errors.append(
+            f"{what} starts on provider {providers[0]!r} but the head provider "
+            f"is {head_provider!r} — the walk must open with the head "
+            "provider's run")
+    seen: list[str] = [providers[0]]
+    for pos, provider in enumerate(providers[1:], start=2):
+        if provider == seen[-1]:
+            continue
+        if provider in seen:
+            errors.append(
+                f"{what} is not monotone: provider {provider!r} reappears at "
+                f"position {pos} after {seen[-1]!r} started — the walk must be "
+                "contiguous provider runs (e.g. zai,zai,zai,anthropic,"
+                "anthropic), never bouncing back to a provider that already "
+                "had its turn")
+        seen.append(provider)
     return errors
 
 
