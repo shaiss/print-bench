@@ -102,8 +102,9 @@ declines design requests). The queue is the contract between the seats:
   `.github/growth-twitter.conf` (enabled / provider / cadence /
   `max_posts_per_run` / `max_posts_per_day` / `require_approval`, parsed by tools/growth's own
   strict parser), cadence-parity-checked by `scripts/cadence-sync-check.sh`,
-  model from the `[chain:growth-twitter]` registry chain (frontier tier,
-  single-link — the adoption-assessor's reasoning), deny backstop
+  model from the `[chain:growth-twitter]` registry chain (a GLM head, then
+  the Anthropic tail `claude-sonnet-5` → `claude-haiku-4-5`, walked across
+  providers since #544 — the adoption-assessor's reasoning), deny backstop
   `.claude/growth-twitter-settings.json` pinned by
   `scripts/growth-perms-check.sh` (no wrapper exemption; must deny every
   sibling write surface AND `mcp__growth_queue` — the poster can never
@@ -267,7 +268,8 @@ but the `REEVE_GROWTH_ENABLED` repo variable unset. Arming the *queue
 generation* is independent of Lark's live rungs: `gh variable set
 REEVE_GROWTH_ENABLED --body true`, then read the queue issues it files before
 approving any of them for Lark. Model from the `reeve-growth` registry chain
-(single-link `glm-5.3`); cadence parity is `cadence-sync-check.sh`-covered.
+(a GLM head, then the Anthropic tail, walked across providers since #544);
+cadence parity is `cadence-sync-check.sh`-covered.
 
 ## Failure modes and what handles each
 
@@ -282,7 +284,7 @@ approving any of them for Lark. Model from the `reeve-growth` registry chain
 | A sibling routine acquires either growth surface | Every sibling backstop denies both servers — except the two owners, Lark (denies the queue server) and `reeve-growth` (denies the poster); each perms-check pins the denies in `REQUIRED_DENIES` and asserts the owner's one write surface is never denied |
 | The labeler sweeps a queue item (parking it `needs-decision`, or arming it `autonomy-ok` for the burn) | `growth-queue` is in the labeler's `NON_TRIAGE_LABELS` (label-helper.sh) — the sweep never selects a queue item, the agent-brief precedent |
 | The routine silently stops (or silently starts) | Two-key arming + the `disarmed-notice` job; a disabled conf logs; an empty queue logs; Reeve's `routine-dead` detector reads run conclusions once armed |
-| A dead model id kills the sweep | Single-link by design — one daily sweep fails visibly and retries next morning; `model-registry smoke growth-twitter` proves the link before arming |
+| A dead model id kills the sweep | The chain walks past it since #544: a dead GLM head falls through to the Anthropic tail (`claude-sonnet-5` → `claude-haiku-4-5`), and total exhaustion runs `provider-triage` → `classify`, escalating a human-fixable cause (billing, a bad key) once through the `needs-decision` gate instead of a silent red; `model-registry smoke growth-twitter` proves every link before arming |
 | A hijacked run floods the channel | `GROWTH_MAX_POSTS` (default 1) per run, in-process, unreachable by the agent; live posts additionally need per-item labels no agent can apply |
 | The feed reads robotic (every post at the same clock minute) | The post time is whatever hour GitHub delivers the day's first firing — heavily and variably delayed by GitHub's own scheduler (observed 21:55 / 19:31 / 00:39 on consecutive days), so it walks widely on its own (above) |
 | More posts than the cap land on the same day (GitHub delivers 2+ firings, or a re-run) | The per-UTC-day cap: `daycap` (tested) counts today's live `posted` markers and holds the drain once the count reaches `max_posts_per_day`; runs serialize via the `concurrency` group, and each marker is written claim-first, so a later same-day run always sees the earlier ones (and the scan fails closed — a transient API error holds the drain rather than posting again). The count matches the poster across the bot's REST/GraphQL login spellings (`[bot]`-suffix normalization), so it recognizes its own markers. `max_posts_per_run` still caps each run |

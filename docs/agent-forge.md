@@ -141,7 +141,7 @@ dedup, and for `needs-decision` threads whose answer is a small tool).
 | Duplicate verdicts / re-judging | verdict-label re-read + marker dedup, both at write time |
 | Verdict label applied but comment lost | label-first ordering — the label is the operative record; the next Select excludes the brief, so no re-rule |
 | Sign-off model chain head dies | the `wright-signoff` chain walks (3 GLM links, labeler-style); total exhaustion fails the job red in the Actions run list. Reeve's `routine-dead` detector does **not** watch wright.yml yet (`ROUTINE_WORKFLOWS` covers the four #326 routines) — extending it is a named first agent-brief (see Future work) |
-| Propose model dies | single-link by design (scout precedent) — the firing fails, retries ≤6h later, sign-off is unaffected (separate job) |
+| Propose model dies | the `wright` chain walks past it since #544 (scout precedent): a dead GLM head falls through to the Anthropic tail (`claude-sonnet-5` → `claude-haiku-4-5`), and total exhaustion runs `provider-triage` → `classify`, escalating a human-fixable cause once through the `needs-decision` gate; sign-off is unaffected (separate job, its own walk) |
 | A build run dies mid-flight after arming | the burn's existing `routine-lock-cleanup.sh` (SHIP-LOCK withdrawal + red-on-death) — the forge adds no new lock machinery |
 | An armed brief is actually too big | `/ship-issue` declines → `declined-too-big` → the chunker splits → the burn ships the pieces (the existing loop) |
 | The forge proposing forge changes | Wright's mandate forbids it; the sensitive-path guard backstops it deterministically (`wright.yml`, `wright.conf`, `wright_mcp`, `signoff_mcp` are sensitive patterns) |
