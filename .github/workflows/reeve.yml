@@ -21,10 +21,12 @@
 # the report (needs: report), in its own job so the reporter stays byte-for-byte
 # keyless, and it is THREE-keyed: the routine's two arming keys (below) plus
 # `greenlight: true` in the conf (shipped `false` — the loop is built but not
-# lit) plus its provider's secret actually being set; a missing secret is a
-# `::notice::` skip, never a red run. Its model comes from the registry's
-# `reeve-greenlight` chain, cross-checked against the conf's `provider:` label
-# up front (the #326 pattern); its one shell surface is the #442 wrapper
+# lit) plus at least one of its providers' secrets actually being set; no key
+# for any provider is a `::notice::` skip, never a red run. Its models come
+# from the registry's `reeve-greenlight` chain, walked link by link ACROSS
+# providers — the GLM head the conf's `provider:` names, then the Anthropic
+# tail (issue #544 Part B) — the walk's shape checked against the conf up
+# front (the #326 pattern, generalized); its one shell surface is the #442 wrapper
 # (`.claude/skills/reeve-greenlight/`), behind the deny backstop
 # `.claude/reeve-settings.json`, with writes bound to the selected set and
 # capped by `greenlight_cap`.
@@ -280,20 +282,39 @@ jobs:
       && github.ref_name == github.event.repository.default_branch
       && needs.report.result == 'success'
     runs-on: ubuntu-latest
-    # A hung drafter must not hold a runner for the 6-hour default while
-    # holding a secret, unwatched (the assessor's bound; the report job keeps
-    # its own tighter 10-minute one — this job is the only agentic step).
-    timeout-minutes: 30
+    # Job budget 55 = 2 × run-step timeout (25) + 5 min headroom. A drafter
+    # run is a read of the charter and the precedent digest plus at most
+    # greenlight_cap parked threads, but the walk below is three run steps in
+    # a row (the GLM head, then the Anthropic tail — issue #544 Part B), each
+    # with its own 25-minute timeout, and the budget must let at least ONE
+    # full fallback link complete after a head link STALLS to its step
+    # timeout (a model stall, not the seconds a quota/billing rejection
+    # takes): head 25 + one fallback 25 + the pre-run steps (poll, select,
+    # context). The per-step timeout is what keeps a hung drafter from
+    # holding a runner and a secret for the whole job budget, unwatched —
+    # before #544 the single step could hold it for the job's 30. Two
+    # consecutive stalls are not budgeted — a second stalled link dies with
+    # the job — because a stall is a provider-wide symptom, and the fast
+    # failures the tail exists for reject in seconds. Well inside GitHub's
+    # 360-minute hosted-job cap (the drift guard pins <= 360). The report job
+    # keeps its own tighter 10-minute bound — this job is the only agentic
+    # one.
+    timeout-minutes: 55
     permissions:
       # checkout + reading the charter/PM.md and the skill the drafter runs
       contents: read
-      # the wrapper's ONE write: greenlight comments on the selected issues
+      # the wrapper's ONE write: greenlight comments on the selected issues.
+      # The provider-triage step's one escalation (a deduped needs-decision
+      # issue on a human-fixable provider failure) is an issue write too, so
+      # this grant covers the whole job.
       issues: write
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
-      # "Read policy" step turns these + the configured provider into a single
-      # `key_present` output (the assessor's pattern, verbatim).
+      # "Read policy" step turns these into per-provider `zai_key_present` /
+      # `anthropic_key_present` outputs (each provider's run steps gate on
+      # their own) plus `key_present` = either one (the any-key gate the
+      # triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
     steps:
@@ -321,10 +342,15 @@ jobs:
         # The same two-key decision the report job makes (same tool, same conf),
         # plus this job's OWN third key: `greenlight: true` — the loop's
         # conf-side switch, shipped false so landing the step lights nothing
-        # (the variable stays the live kill switch for the whole routine). Also
-        # resolves the conf's `provider:` to whether THAT provider's secret is
-        # present, so the ship steps below gate on one `key_present` output; a
-        # missing key is a ::notice:: skip below, never a red run.
+        # (the variable stays the live kill switch for the whole routine). The
+        # conf's `provider:` is the walk's HEAD provider (issue #544) —
+        # validated here, emitted for the resolve step's shape check and the
+        # summary. Key presence is emitted PER PROVIDER (each provider's run
+        # steps gate on their own, so the tail can run when the head's key is
+        # absent) plus the any-key `key_present` the triage / red / skip-notice
+        # gates read; no key for any provider is a ::notice:: skip below, never
+        # a red run. The model itself is NOT decided here — it comes from the
+        # registry chain below.
         env:
           REEVE_VARIABLE: ${{ vars.REEVE_ENABLED }}
         run: |
@@ -334,10 +360,12 @@ jobs:
           greenlight="$(reeve config --get greenlight --path "$conf")"
           provider="$(reeve config --get provider --path "$conf")"
           case "$provider" in
-            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
-            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            anthropic|zai) ;;
             *) echo "::error::unknown provider '$provider'"; exit 1 ;;
           esac
+          [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
+          [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
           # The tested 2×2 decision, exactly as the report job computes it —
           # and `reeve armed` appends armed=true/false to $GITHUB_OUTPUT
           # itself (the report job's own invocation shape).
@@ -346,6 +374,8 @@ jobs:
             echo "enabled=$enabled"
             echo "greenlight=$greenlight"
             echo "provider=$provider"
+            echo "zai_key_present=$zai_key"
+            echo "anthropic_key_present=$anthropic_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
@@ -375,11 +405,11 @@ jobs:
       # never a posted /decide command (the stage-1 lesson: the comment
       # tooling's attribution footer neutralizes a bot-posted command while
       # the run reports success). Keyless and deterministic: it runs
-      # whenever the loop is lit, with or without the drafter's provider
-      # key, so a lit loop still drains approvals on a keyless day. It runs
+      # whenever the loop is lit, with or without a drafter provider key,
+      # so a lit loop still drains approvals on a keyless day. It runs
       # BEFORE the Select step on purpose — resolving parked decisions
       # shrinks the set the drafter is handed — and BEFORE the chain
-      # resolve, whose cross-check failure must stop the drafter (a key
+      # resolve, whose shape-check failure must stop the drafter (a key
       # about to be spent on the wrong endpoint), not the poll.
       #
       # Tokens, on purpose: labels and the resolution reply use the ambient
@@ -421,14 +451,30 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Resolve the drafter's model from the committed provider/model registry
-      # (issue #206), and cross-check it against the conf's `provider:` label —
-      # the #326 pattern. The conf label picks which ship step (and so which
-      # endpoint + secret) runs; the registry picks the model. A chain sitting
-      # on another provider would spend a key against the wrong endpoint, so
-      # the mismatch fails HERE, loudly, before any key is spent. Pointing the
-      # `reeve-greenlight` chain at another provider is a real registry edit,
-      # but it has to travel with the conf label.
+      # Resolve the drafter's model chain from the committed provider/model
+      # registry (issue #206) — the same resolve step the scout and the
+      # labeler run, stdlib-only so it needs no install in front of it. A
+      # malformed registry, or one whose `reeve-greenlight` chain went
+      # missing, fails this step loudly BEFORE any key is spent — and is
+      # caught pre-merge by the model-registry drift-guard tests, which fire
+      # on this workflow and on registry.conf. `link<N>_model` is what the
+      # run steps below read; the secret stays literal per step (the Actions
+      # constraint), so the registry decides the model, never the auth.
+      #
+      # The shape check guards the one way the conf/chain split can mis-run
+      # (issue #544): the walk below is a FIXED sequence of literal run steps
+      # — its layout, one provider per step in file order (one Z.AI GLM step,
+      # then two Anthropic steps), because Actions can only reference a
+      # secret by its literal name — while the registry picks the MODEL each
+      # step runs. A link on the wrong slot's provider (claude-* on the Z.AI
+      # step, glm-* on an Anthropic step) would fail at request time with a
+      # key already spent, and a chain longer or shorter than the walk leaves
+      # a step without a link or a link without a step. So the conf's
+      # `provider:` must be link 1's (it names the HEAD of the walk), and
+      # link N's provider must be step N's — `model-registry shape` applies
+      # the same pure rule the drift guard pins pre-merge, so the two cannot
+      # drift, and the `--layout` literal below is what the drift guard
+      # compares against the steps' actual wiring.
       - name: "Resolve the greenlight model chain (issue #206)"
         id: chain
         env:
@@ -436,12 +482,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m model_registry resolve reeve-greenlight --gh-output "$GITHUB_OUTPUT"
-          link_provider="$(sed -n 's/^link1_provider=//p' "$GITHUB_OUTPUT" | head -1)"
           conf_provider="$(reeve config --get provider --path .github/reeve.conf)"
-          if [ "$link_provider" != "$conf_provider" ]; then
-            echo "::error::the registry's 'reeve-greenlight' chain resolves to provider '$link_provider' but .github/reeve.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/reeve.conf."
-            exit 1
-          fi
+          # One layout entry per run step below, in file order.
+          python3 -m model_registry shape reeve-greenlight --head "$conf_provider" \
+            --conf .github/reeve.conf --layout zai,anthropic,anthropic
 
       - name: Select parked decisions needing a greenlight
         id: select
@@ -513,35 +557,80 @@ jobs:
             > .reeve-context/precedent.md
           echo "precedent digest: $(wc -l < .reeve-context/precedent.md) lines → .reeve-context/precedent.md"
 
-      # One explicit run step per provider — a provider is a reviewed,
-      # git-tracked step because Actions can reference a secret only by its
-      # literal name. The conf's `provider:` label picks which one runs; the
-      # MODEL comes from the registry's `reeve-greenlight` chain (single-link:
-      # a low-volume advisory drafter, and the workflow consumes only link1 —
-      # no fallback tail is promised, so none is configured). The ambient
-      # GITHUB_TOKEN is right for the wrapper's comments (a GITHUB_TOKEN
-      # comment triggers no CI), so the REGEN_TOKEN PAT reasoning does not
-      # apply. Tool surface: the #442 wrapper
+      # One explicit run step per CHAIN LINK, walked in file order ACROSS
+      # providers (issue #544 Part B): link 1 is the Z.AI GLM step, links 2-3
+      # the Anthropic tail. A provider is a reviewed, git-tracked step because
+      # Actions can reference a secret only by its literal name (secrets
+      # can't be selected by a runtime variable), so the walk's provider
+      # LAYOUT is fixed here and the registry's `reeve-greenlight` chain
+      # (steps.chain.outputs) picks which MODEL each link runs — swapping the
+      # drafter to another model is a registry edit, not a workflow edit; the
+      # resolve step above refuses a chain that does not fit this layout. The
+      # committed `provider:` label names the HEAD provider (link 1 must sit
+      # on it); it no longer selects a whole block. Each link is gated on
+      # EVERY earlier link NOT having succeeded — a skipped step's outcome is
+      # 'skipped', not 'success', so the Anthropic tail runs whether the GLM
+      # link failed or was skipped for want of ZAI_KEY — so the first success
+      # short-circuits the rest and a dead model, or a whole dead provider,
+      # falls through instead of killing the run. Each provider's steps gate
+      # on THEIR OWN key (zai_key_present / anthropic_key_present), never the
+      # other's. Deepening the chain is a same-PR pair: add the model to the
+      # registry AND the matching run step here (and its slot in the resolve
+      # step's --layout) — the drift guard fails either half shipped alone.
+      #
+      # Failure model: the drafter carries no SHIP-LOCK lifecycle, so the
+      # non-terminal links (1-2) are continue-on-error so a dead id falls
+      # through, and the TERMINAL link (3) keeps none — a total-walk failure
+      # then fails the step, and the job, exactly as the single step did
+      # before the tail existed. The "Turn an exhausted walk red" step at the
+      # end covers the one case that rule misses: a walk exhausted with the
+      # tail SKIPPED (only ZAI_KEY set, the GLM link dead) has no failed
+      # non-coe step to fail the job. Either way `observe` still runs after
+      # this job (always()), so the loop keeps learning through a drafter
+      # outage.
+      #
+      # All three steps share the pin, the write permission, the ambient
+      # GITHUB_TOKEN (right for the wrapper's comments — a GITHUB_TOKEN
+      # comment triggers no CI, so the REGEN_TOKEN PAT reasoning does not
+      # apply), the Select step's bound set, the post-cap state file, the
+      # effort (high: a greenlight a human may approve on a 👍 is
+      # expensive-to-be-wrong — the assessor's tier reasoning), the
+      # transcript posture and the same /reeve-greenlight prompt. Tool
+      # surface: the #442 wrapper
       # (.claude/skills/reeve-greenlight/greenlight-helper.sh, both path
       # spellings) is the agent's ONLY shell surface — reading AND writing,
       # which is why there is no MCP server here — plus the read-only file
       # tools (Read/Grep/Glob) for the charter (repo-root PM.md, docs/, the
-      # skill). Never Write, never a general Bash. --settings closes the
-      # additive allow leak from settings.json with the loop's OWN deny
-      # backstop (.claude/reeve-settings.json — deny beats allow from every
-      # source), kept honest by scripts/reeve-perms-check.sh. The pin is the
-      # immutable commit behind the v1 tag.
+      # skill) and the precedent digest the context step assembled. Never
+      # Write, never a general Bash. --settings closes the additive allow
+      # leak from settings.json with the loop's OWN deny backstop
+      # (.claude/reeve-settings.json — deny beats allow from every source),
+      # kept honest by scripts/reeve-perms-check.sh. The pin is the immutable
+      # commit behind the v1 tag.
 
-      - name: Run via Anthropic (Claude)
-        id: run_anthropic
+      - name: Run via Z.AI (GLM, chain link 1)
+        id: run_zai_1
         if: >-
           steps.policy.outputs.armed == 'true'
           && steps.policy.outputs.greenlight == 'true'
           && steps.select.outputs.issues != ''
-          && steps.policy.outputs.provider == 'anthropic'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && inputs.dry_run != true
+        # continue-on-error so the walk reaches the tail when this id or
+        # provider is dead; the step timeout keeps a stalled model from eating
+        # the job budget the fallback links need.
+        timeout-minutes: 25
+        continue-on-error: true
+        # Z.AI GLM via its Anthropic-compatible endpoint: ANTHROPIC_BASE_URL
+        # points at Z.AI (the /api/anthropic path matters), ANTHROPIC_AUTH_TOKEN
+        # becomes the Bearer token, and the same ZAI_KEY is passed as
+        # anthropic_api_key to satisfy the action's credential check. Which
+        # model exactly is the registry's `reeve-greenlight` chain's call —
+        # its top GLM link, the head the conf names.
         env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
           # The wrapper authenticates its `gh` calls with this token; the job
           # grants issues:write and nothing more.
           GH_TOKEN: ${{ github.token }}
@@ -549,11 +638,15 @@ jobs:
           # environment so the wrapper can refuse any issue not in it.
           REEVE_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
           # The per-run post counter's state file: fresh runner temp per run,
-          # so the cap counts THIS run's posts only.
+          # so the cap counts THIS run's posts only. Shared by every link of
+          # the walk on purpose — a link that posted and then died still
+          # counts against the cap when the next link runs (and the wrapper's
+          # already-greenlighted refusal keeps that link from re-drafting a
+          # thread the dead one finished).
           REEVE_GREENLIGHT_STATE: ${{ runner.temp }}/reeve-greenlight-posts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           # Keep the transcript off the public Actions log — this step holds a
           # provider key and GITHUB_TOKEN with issues:write; the run-outcome
@@ -562,38 +655,63 @@ jobs:
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-settings.json --allowedTools "Bash(.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Bash(./.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Read,Grep,Glob"
           prompt: /reeve-greenlight
 
-      - name: Run via Z.AI (GLM)
-        id: run_zai
+      # The cross-provider tail (issue #544 Part B): links 2 and 3 of the
+      # registry's `reeve-greenlight` chain on Anthropic's native endpoint,
+      # reached only when the GLM link did not succeed (failed, or skipped
+      # for want of ZAI_KEY) and gated on the Anthropic key's own presence.
+      # Claude via api.anthropic.com: a plain API key (pay-per-token) is the
+      # right fit for an unattended bot — no OAuth token / subscription seat.
+      # The same pin, permission, token, bound set, state file, effort,
+      # wrapper, backstop, transcript posture and prompt as the GLM link —
+      # only the model, secret and endpoint differ. Which model runs is the
+      # registry's call (the cheap Anthropic tier, for the monthly-cap reason
+      # the registry records).
+      - name: Run via Anthropic (Claude, chain link 2)
+        id: run_anthropic_2
         if: >-
           steps.policy.outputs.armed == 'true'
           && steps.policy.outputs.greenlight == 'true'
           && steps.select.outputs.issues != ''
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.anthropic_key_present == '1'
           && inputs.dry_run != true
-        # Z.AI GLM via its Anthropic-compatible endpoint (the conf's committed
-        # `provider: zai` label picks this step): ANTHROPIC_BASE_URL points at
-        # Z.AI (the /api/anthropic path matters), ANTHROPIC_AUTH_TOKEN becomes
-        # the Bearer token, and the same ZAI_KEY is passed as
-        # anthropic_api_key to satisfy the action's credential check. Which
-        # model exactly is the registry's `reeve-greenlight` chain's call (its
-        # first link's provider must match the conf label — the cross-check
-        # above). Same tool surface and transcript posture as the Anthropic
-        # step; effort is high because a greenlight a human may approve on a
-        # 👍 is expensive-to-be-wrong (the assessor's tier reasoning).
+          && steps.run_zai_1.outcome != 'success'
+        timeout-minutes: 25
+        continue-on-error: true
         env:
-          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
-          API_TIMEOUT_MS: "3000000"
           GH_TOKEN: ${{ github.token }}
           REEVE_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
           REEVE_GREENLIGHT_STATE: ${{ runner.temp }}/reeve-greenlight-posts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
-          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           show_full_output: "false"
-          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-settings.json --allowedTools "Bash(.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Bash(./.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Read,Grep,Glob"
+          claude_args: --model ${{ steps.chain.outputs.link2_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-settings.json --allowedTools "Bash(.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Bash(./.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Read,Grep,Glob"
+          prompt: /reeve-greenlight
+
+      - name: Run via Anthropic (Claude, chain link 3)
+        id: run_anthropic_3
+        if: >-
+          steps.policy.outputs.armed == 'true'
+          && steps.policy.outputs.greenlight == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && inputs.dry_run != true
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_anthropic_2.outcome != 'success'
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over.
+        timeout-minutes: 25
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REEVE_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          REEVE_GREENLIGHT_STATE: ${{ runner.temp }}/reeve-greenlight-posts
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-settings.json --allowedTools "Bash(.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Bash(./.claude/skills/reeve-greenlight/greenlight-helper.sh:*),Read,Grep,Glob"
           prompt: /reeve-greenlight
 
       - name: Explain a skipped drafter run
@@ -611,12 +729,42 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "::notice::dry run — selected parked decisions (${ISSUES}) but did not invoke the greenlight drafter"
           else
-            echo "::notice::the configured provider '${PROVIDER}' has no key set (ANTHROPIC_API_KEY for anthropic, ZAI_KEY for zai) — selected (${ISSUES}) but skipping the greenlight drafter. The report ran and is unaffected."
+            echo "::notice::no key is set for ANY provider in the reeve-greenlight chain (ZAI_KEY for the zai link, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — selected (${ISSUES}) but skipping the greenlight drafter. The report ran and is unaffected."
           fi
 
       - name: Explain an empty selection
         if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight == 'true' && steps.select.outputs.issues == ''
         run: echo "::notice::no parked decisions awaiting a greenlight — every open needs-decision issue already carries one; nothing to draft"
+
+      # No SHIP-LOCK lifecycle here, so the terminal link failing IS the job
+      # failure — but before that stands, recover WHY the chain exhausted (the
+      # agent steps hide their provider error) and route the human-fixable
+      # causes — out of credit / out of tokens / bad key — to ONE deduped
+      # needs-decision issue, so a scheduled red nobody watches becomes an
+      # actionable ask. A bad model id or a transient blip is only diagnosed
+      # in the log. Advisory: it never fails the job. Fires (always()) only
+      # when the loop is lit, a selection existed, a key was present and the
+      # walk did not succeed — the same three-link walk-outcome expression the
+      # record step reports as RUN. Both keys go in so classify probes both
+      # halves of the chain.
+      - name: Diagnose the exhausted chain (billing / tokens / technical)
+        id: triage
+        if: >-
+          always()
+          && steps.policy.outputs.armed == 'true'
+          && steps.policy.outputs.greenlight == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.key_present == '1'
+          && inputs.dry_run != true
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: reeve-greenlight
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the Reeve greenlight drafter
+          escalate: "true"
 
       - name: Record the run outcome
         if: always()
@@ -631,8 +779,41 @@ jobs:
           KEY_PRESENT: ${{ steps.policy.outputs.key_present }}
           PROVIDER: ${{ steps.policy.outputs.provider }}
           DRY_RUN: ${{ inputs.dry_run }}
-          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+          # The walk's outcome (#544): 'success' if ANY of the three links
+          # across both providers succeeded; otherwise the outcome of the
+          # LAST LINK THAT ACTUALLY RAN — the nested tail walks backwards
+          # over 'skipped' links, so 'skipped' means every link was skipped
+          # (no key for any provider), never "the tail had no key" after the
+          # head failed. The terminal link failing fails the job; the "Turn
+          # an exhausted walk red" step below covers a walk exhausted with
+          # the tail skipped.
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
+          # Per-link outcomes + the chain the resolve step emitted, so the
+          # summary can name WHICH link served and warn when the head
+          # provider fell through (a GLM outage must stay visible even though
+          # the run is green — #544).
+          L1: ${{ steps.run_zai_1.outcome }}
+          L2: ${{ steps.run_anthropic_2.outcome }}
+          L3: ${{ steps.run_anthropic_3.outcome }}
+          M1: ${{ steps.chain.outputs.link1_model }}
+          M2: ${{ steps.chain.outputs.link2_model }}
+          M3: ${{ steps.chain.outputs.link3_model }}
+          P1: ${{ steps.chain.outputs.link1_provider }}
+          P2: ${{ steps.chain.outputs.link2_provider }}
+          P3: ${{ steps.chain.outputs.link3_provider }}
         run: |
+          # Which link served: the first (only) link whose outcome is success.
+          served=""
+          for i in 1 2 3; do
+            o="L$i"; m="M$i"; p="P$i"
+            if [ "${!o}" = "success" ]; then
+              served="link $i ${!m} (${!p})"
+              if [ "${!p}" != "${PROVIDER}" ]; then
+                echo "::warning::the greenlight drafter fell through to ${!p}: every '${PROVIDER}' (head provider) link failed or was skipped and link $i ${!m} served — the run is green, but the head provider is down or keyless; check its quota/key"
+              fi
+              break
+            fi
+          done
           {
             echo "### Reeve greenlight — run outcome"
             if [ "$POLICY_OUTCOME" != "success" ]; then
@@ -644,7 +825,7 @@ jobs:
             elif [ "$POLL_OUTCOME" != "success" ] && [ "$POLL_OUTCOME" != "skipped" ]; then
               echo "- ❌ the approval poll did not complete (${POLL_OUTCOME}) — see the poll step log; no verdict was pushed and nothing was drafted."
             elif [ "$CHAIN_OUTCOME" != "success" ]; then
-              echo "- ❌ the reeve-greenlight model chain did not resolve (${CHAIN_OUTCOME:-skipped}) — see the resolve step log; no key was spent."
+              echo "- ❌ the reeve-greenlight model chain did not resolve or fit the walk (${CHAIN_OUTCOME:-skipped}) — see the resolve step log; no key was spent."
             elif [ "$SELECT_OUTCOME" != "success" ]; then
               echo "- ❌ the selection did not complete (${SELECT_OUTCOME:-skipped}) — see the select step log; nothing was drafted."
             elif [ -z "$ISSUES" ]; then
@@ -652,13 +833,39 @@ jobs:
             elif [ "$DRY_RUN" = "true" ]; then
               echo "- 🧪 dry run: selected #${ISSUES// / #} but did not draft."
             elif [ "$KEY_PRESENT" != "1" ]; then
-              echo "- ⏭️ selected #${ISSUES// / #} but provider '${PROVIDER}' has no key — skipped by notice, never red."
+              echo "- ⏭️ selected #${ISSUES// / #} but no provider in the reeve-greenlight chain has a key (head provider '${PROVIDER}') — skipped by notice, never red."
             elif [ "$RUN" != "success" ]; then
-              echo "- ❌ the drafter run did not complete (${RUN:-skipped}) — see the ship step log; the wrapper's refusals (cap, off-selection, already-greenlighted) each say why in the transcript summary."
+              echo "- provider: ${PROVIDER} (head)"
+              echo "- ❌ the drafter did not complete on any link of the walk (walk outcome: ${RUN:-skipped}; links: ${L1:-skipped} / ${L2:-skipped} / ${L3:-skipped}) — see the ship step logs; the wrapper's refusals (cap, off-selection, already-greenlighted) each say why in the transcript summary."
             else
+              echo "- provider: ${PROVIDER} (head)"
               echo "- ✅ drafter ran over #${ISSUES// / #} — check each thread for its greenlight comment."
+              echo "- served by: ${served}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The terminal link (3) carries no continue-on-error, so its failure
+      # fails the job — but a walk that exhausted with the tail SKIPPED (only
+      # ZAI_KEY set and the GLM link dead) has no failed non-coe step, and
+      # would leave the run green: exactly the silent-success disguise the
+      # burn's red-on-death step exists for. Restore the failure last, after
+      # the triage and the record have run (`observe` still follows — it
+      # needs this job under always()). Same walk-outcome expression as the
+      # triage gate and RUN above.
+      - name: Turn an exhausted walk red
+        if: >-
+          always()
+          && steps.policy.outputs.armed == 'true'
+          && steps.policy.outputs.greenlight == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.key_present == '1'
+          && inputs.dry_run != true
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
+        env:
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
+        run: |
+          echo "::error::the /reeve-greenlight drafter did not succeed on any link of the reeve-greenlight chain (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
+          exit 1
 
   observe:
     name: Record resolved greenlight rounds into the precedent log
