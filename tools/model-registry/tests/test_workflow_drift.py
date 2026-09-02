@@ -1367,15 +1367,18 @@ _PROVIDER_UNDER_TEST = "zai"
 def _walk_states(n_links: int):
     """Every combination of link outcomes worth distinguishing, labeled.
 
-    The full 3^N cartesian set (243 rows for the five-link cross-provider
+    The full 4^N cartesian set (1024 rows for the five-link cross-provider
     walk, #544 — still trivial), so the simulation is exhaustive rather than
     sampled: every state where any link succeeded must read success, every
-    all-dead state must not. 'skipped' matters as much as 'failure': a whole
-    provider's links are skipped when its key is absent, and the walk must
-    read through them to the other provider's links.
+    all-dead state must not — and must read as the LAST link that actually
+    ran. 'skipped' matters as much as 'failure': a whole provider's links are
+    skipped when its key is absent, and the walk must read through them to
+    the other provider's links. 'cancelled' is what a step killed by its own
+    timeout (or a job cancel) reports; the walk must pass it through like a
+    failure, never mistake it for a skip.
     """
     from itertools import product
-    values = ("success", "failure", "skipped")
+    values = ("success", "failure", "skipped", "cancelled")
     for combo in product(values, repeat=n_links):
         yield combo
 
@@ -1400,8 +1403,14 @@ def _assert_routine_walk_outcome_covers_every_link(
     Resolve the chain, take the walk's step ids in link order, and evaluate
     each AGENT_OUTCOME / RUN / SHIP expression under every outcome
     combination of those steps. Any state where a link succeeded must yield
-    'success' — and the all-dead states must not. Factored out so the
-    negative control can run it against tampered text.
+    'success' — and the all-dead states must not. The all-dead states must
+    further yield the outcome of the LAST LINK THAT ACTUALLY RAN (the last
+    non-'skipped' link), and 'skipped' only when EVERY link was skipped:
+    routine-lock-cleanup.sh reads 'skipped' as "the agent never ran, nothing
+    to release", so a walk that reported 'skipped' after the GLM links FAILED
+    and the keyless Anthropic tail was skipped left a dead run's SHIP-LOCK
+    standing (the bare `|| steps.<link5>.outcome` tail did exactly that).
+    Factored out so the negative controls can run it against tampered text.
     """
     global _PROVIDER_UNDER_TEST
     _PROVIDER_UNDER_TEST = _routine_provider(conf)
@@ -1427,6 +1436,15 @@ def _assert_routine_walk_outcome_covers_every_link(
                         f"{workflow}: {var} read {got!r} with no link having "
                         f"succeeded ({state}) — the walk claims a success "
                         "nobody produced")
+                    ran = [o for o in state if o != "skipped"]
+                    want = ran[-1] if ran else "skipped"
+                    assert got == want, (
+                        f"{workflow}: {var} read {got!r} with link outcomes "
+                        f"{outcomes} — expected {want!r}, the outcome of the "
+                        "last link that actually ran ('skipped' only when "
+                        "every link was skipped); a 'skipped' with a link that "
+                        "ran tells routine-lock-cleanup the agent never ran "
+                        "and leaves a dead run's SHIP-LOCK standing")
 
 
 def test_routine_walk_outcome_covers_every_link():
@@ -1663,6 +1681,144 @@ def test_walk_outcome_guard_fires_on_a_single_provider_expression():
         _assert_gate_fires_on_whole_walk_failure(
             reg, workflow, "backlog-burn", ".github/backlog-burn.conf", tampered,
             "Diagnose the exhausted chain (billing / tokens / technical)")
+
+
+def _bare_tail_copy(workflow: str) -> str:
+    """A copy of the workflow whose EVERY walk-outcome expression is reverted
+    to the bare-last-link tail (`… || steps.<link5>.outcome`, the original
+    #544 form): derived from the live expression by stripping the nested
+    last-ran fallback, never from a hand-copied literal."""
+    text = _routine_text(workflow)
+    live = _live_walk_expression(text, workflow)
+    bare = re.sub(
+        r" \|\| steps\.(\w+)\.outcome == 'success' && 'success' \|\| "
+        r"\(steps\.\1\.outcome == 'skipped' && .*\)$",
+        r" || steps.\1.outcome", live)
+    assert bare != live, (
+        f"{workflow}: the live walk expression carries no nested last-ran "
+        "fallback to strip — the negative-control derivation is stale")
+    assert text.count(live) >= 2
+    return text.replace(live, bare)
+
+
+def test_walk_outcome_guard_fires_on_a_bare_tail_expression():
+    """Negative control for the last-ran rule: the bare-tail form reads
+    'skipped' whenever the tail was skipped for want of its key — even after
+    the head links FAILED — so routine-lock-cleanup would no-op on a dead run
+    and leave its SHIP-LOCK standing. The simulation must reject it, for every
+    routine, on exactly that rule (the any-success half still passes: the bare
+    tail does cover every link's success)."""
+    reg = Registry.load(str(REGISTRY))
+    for workflow, (chain_id, conf) in ROUTINES.items():
+        tampered = _bare_tail_copy(workflow)
+        with pytest.raises(AssertionError, match="last link that actually ran"):
+            _assert_routine_walk_outcome_covers_every_link(
+                reg, workflow, chain_id, conf, tampered)
+
+
+# ── The job budget vs GitHub's hosted-job cap ────────────────────────────────
+#
+# A hosted job is hard-capped at 360 minutes; a larger `timeout-minutes` is
+# clamped, so a budget "2 × 220 + 20 = 460" budgeted nothing — a head link
+# that stalled to its 220 would have the PLATFORM kill the fallback link
+# mid-walk, and with it the lock cleanup (the #312 guillotine, one level up).
+# The rule: job budget <= 360, and >= the longest HEAD step timeout + the
+# longest TAIL step timeout + 5, so one stalled head plus one full fallback
+# link always fits. The tail steps' timeout-minutes is therefore allowed to
+# differ from their GLM siblings' on purpose (design-run: 220 head, 120 tail)
+# — no pin here compares the step chunks byte for byte.
+
+_PLATFORM_JOB_CAP_MINUTES = 360
+_JOB_BUDGET_HEADROOM_MINUTES = 5
+
+
+def _routine_job_timeout(text: str, workflow: str) -> int:
+    """The routine JOB's timeout-minutes (4-space indent = job level; the
+    ship steps' own timeouts sit deeper)."""
+    found = re.findall(r"^ {4}timeout-minutes: (\d+)$", text, re.MULTILINE)
+    assert len(found) == 1, (
+        f"{workflow}: expected exactly one job-level timeout-minutes, found {found}")
+    return int(found[0])
+
+
+def _routine_step_timeouts(reg: Registry, chain_id: str, text: str,
+                           workflow: str) -> tuple[int, int]:
+    """(longest head-provider ship-step timeout, longest tail-provider one).
+    The head provider is the chain's link-1 provider; a walk with no tail
+    reports 0 for it."""
+    links = {link.position: link for link in reg.resolve(chain_id)}
+    head_provider = links[1].provider
+    head, tail = 0, 0
+    for step in _routine_ship_steps(text):
+        m = re.search(r"^\s*timeout-minutes: (\d+)$", step["chunk"], re.MULTILINE)
+        assert m, f"{workflow}: the link-{step['link']} ship step carries no timeout-minutes"
+        minutes = int(m.group(1))
+        if links[step["link"]].provider == head_provider:
+            head = max(head, minutes)
+        else:
+            tail = max(tail, minutes)
+    return head, tail
+
+
+def _assert_routine_job_budget_fits_the_platform_cap(
+        reg: Registry, workflow: str, chain_id: str, text: str) -> None:
+    job = _routine_job_timeout(text, workflow)
+    head, tail = _routine_step_timeouts(reg, chain_id, text, workflow)
+    assert job <= _PLATFORM_JOB_CAP_MINUTES, (
+        f"{workflow}: job timeout-minutes {job} exceeds GitHub's "
+        f"{_PLATFORM_JOB_CAP_MINUTES}-minute hosted-job cap — the platform clamps "
+        "it, so the budget the comment claims is fiction and a stalled head "
+        "link lets the platform kill the fallback link (and the lock cleanup) "
+        "mid-walk")
+    need = head + tail + _JOB_BUDGET_HEADROOM_MINUTES
+    assert job >= need, (
+        f"{workflow}: job timeout-minutes {job} does not budget one stalled head "
+        f"link ({head}) plus one full tail link ({tail}) plus "
+        f"{_JOB_BUDGET_HEADROOM_MINUTES} headroom = {need} — shorten a step "
+        "timeout or raise the job budget (within the cap)")
+
+
+def test_every_routine_job_budget_fits_the_platform_cap():
+    reg = Registry.load(str(REGISTRY))
+    for workflow, (chain_id, _conf) in ROUTINES.items():
+        _assert_routine_job_budget_fits_the_platform_cap(
+            reg, workflow, chain_id, _routine_text(workflow))
+
+
+def test_job_budget_guard_rejects_a_budget_over_the_platform_cap():
+    # NEGATIVE CONTROL: design-run's pre-fix 460 — a copy with the job budget
+    # over the cap must fail on the cap rule.
+    reg = Registry.load(str(REGISTRY))
+    workflow = "design-run.yml"
+    text = _routine_text(workflow)
+    live = _routine_job_timeout(text, workflow)
+    tampered = text.replace(f"\n    timeout-minutes: {live}\n",
+                            "\n    timeout-minutes: 460\n", 1)
+    assert tampered != text, "tamper target not found — the fixture is stale"
+    with pytest.raises(AssertionError, match="hosted-job cap"):
+        _assert_routine_job_budget_fits_the_platform_cap(
+            reg, workflow, "design-run", tampered)
+
+
+def test_job_budget_guard_rejects_a_tail_step_the_budget_cannot_carry():
+    # NEGATIVE CONTROL: raise design-run's tail steps back to the head's 220
+    # — 220 + 220 + 5 > 360, so one stalled head no longer leaves room for a
+    # full fallback link. Derived from the live head timeout, no literals.
+    reg = Registry.load(str(REGISTRY))
+    workflow = "design-run.yml"
+    text = _routine_text(workflow)
+    head, tail = _routine_step_timeouts(reg, "design-run", text, workflow)
+    assert tail < head, "the fixture is stale — design-run's tail is no longer budgeted shorter"
+    tampered = text
+    for link in (4, 5):
+        chunk = _tail_step_chunk(tampered, link)
+        tampered = tampered.replace(
+            chunk, chunk.replace(f"timeout-minutes: {tail}\n",
+                                 f"timeout-minutes: {head}\n", 1), 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match="does not budget one stalled head"):
+        _assert_routine_job_budget_fits_the_platform_cap(
+            reg, workflow, "design-run", tampered)
 
 
 def test_no_hardcoded_model_literal_in_any_routine():

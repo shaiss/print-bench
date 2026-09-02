@@ -118,23 +118,29 @@ jobs:
       vars.DESIGN_RUN_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # Job budget 460 = 2 × agent-step timeout (220) + 20 min headroom. The walk
-    # below is five agent steps in a row (three GLM links, then the Anthropic
-    # tail — issue #544), each with its own 220-minute timeout, and the budget
-    # must let at least ONE full fallback link complete after a head link
-    # STALLS to its step timeout (a model stall or tool loop, not the seconds
-    # a quota/billing rejection takes): head 220 + one fallback 220 + the
+    # Job budget 360 — GitHub's hard cap on a hosted job (a larger value is
+    # silently clamped to 360, so a 460 here budgeted nothing). The
+    # constraint runs the other way: the walk below is five agent steps in a
+    # row (three GLM links, then the Anthropic tail — issue #544), and the
+    # job must let at least ONE full fallback link complete after a head
+    # link STALLS to its step timeout (a model stall or tool loop, not the
+    # seconds a quota/billing rejection takes). So the head links keep 220,
+    # the tail links are budgeted SHORTER on purpose at 120, and 220 (one
+    # stalled head) + 120 (one full tail link) + 20 headroom for the
     # pre-agent steps (checkout, pip, policy, select — low single-digit
-    # minutes in practice) and the lock cleanup, all inside the job. Two
-    # stalls in a row are not budgeted — a stall is a provider-wide symptom,
-    # and the fast failures the tail exists for reject in seconds.
+    # minutes in practice) and the lock cleanup = 360 exactly. Two
+    # consecutive stalls are NOT budgeted — a second stalled link dies with
+    # the job, guillotining the cleanup — because a stall is a provider-wide
+    # symptom, and the fast failures the tail exists for reject in seconds.
+    # The drift guard pins job budget <= 360 and >= longest head step +
+    # longest tail step + 5 for every routine.
     # The old 60 was the livelock's guillotine (issue #312): it killed the
     # agent after it posted its SHIP-LOCK on the selected brief but before it
     # could deliver or withdraw, and the orphaned claim made every later
     # firing a green no-op. The agent STEP timeout dies first on purpose, so
     # a hung run still never holds the runner (and a secret) for the 6-hour
     # default while the cleanup stays reachable inside a live job.
-    timeout-minutes: 460
+    timeout-minutes: 360
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
@@ -399,7 +405,7 @@ jobs:
           && steps.run_zai_1.outcome != 'success'
           && steps.run_zai_2.outcome != 'success'
           && steps.run_zai_3.outcome != 'success'
-        timeout-minutes: 220
+        timeout-minutes: 120
         continue-on-error: true
         # registry-secret-alias: CLAUDE_KEY=ANTHROPIC_API_KEY — design-run's
         # anthropic links wire secrets.CLAUDE_KEY, a historical alias for the
@@ -425,7 +431,7 @@ jobs:
           && steps.run_zai_2.outcome != 'success'
           && steps.run_zai_3.outcome != 'success'
           && steps.run_anthropic_4.outcome != 'success'
-        timeout-minutes: 220
+        timeout-minutes: 120
         continue-on-error: true
         # registry-secret-alias: CLAUDE_KEY=ANTHROPIC_API_KEY — same alias as
         # link 4 (the marker must sit inside every step chunk the drift guard
@@ -458,14 +464,23 @@ jobs:
           ISSUE: ${{ steps.select.outputs.issue }}
           # .outcome, never .conclusion — continue-on-error rewrites a failed
           # step's conclusion to success; outcome keeps the real result.
-          # The walk's outcome (#327, #544): one flat disjunct over all five
-          # links across both providers — success if ANY link succeeded; the
-          # LAST link's outcome otherwise, which is what a total-walk failure
-          # means (a 'skipped' there is a tail never reached for want of its
-          # key, still not a success). The drift guard
+          # The walk's outcome (#327, #544): 'success' if ANY of the five
+          # links across both providers succeeded; otherwise the outcome of
+          # the LAST LINK THAT ACTUALLY RAN. The nested tail walks backwards
+          # over 'skipped' links (a provider's links are skipped when its key
+          # is absent), so the walk reads 'skipped' only when EVERY link was
+          # skipped — no key for any provider, the agent never ran. That
+          # distinction is load-bearing: routine-lock-cleanup.sh treats
+          # 'skipped' as "nothing ran, nothing to release" and no-ops. A bare
+          # last-link read (`|| steps.<link5>.outcome`) reported 'skipped'
+          # whenever only ZAI_KEY was set and the three GLM links FAILED
+          # while the keyless Anthropic tail was skipped — so a dead run's
+          # SHIP-LOCK was left standing and the issue starved, the #312
+          # orphan-claim livelock through a different door. The drift guard
           # (test_routine_walk_outcome_covers_every_link) simulates every
-          # outcome combination against the chain's link count.
-          AGENT_OUTCOME: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome }}
+          # outcome combination against the chain's link count and pins the
+          # last-ran rule, with the bare-tail form as its negative control.
+          AGENT_OUTCOME: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_anthropic_5.outcome == 'skipped' && (steps.run_anthropic_4.outcome == 'skipped' && (steps.run_zai_3.outcome == 'skipped' && (steps.run_zai_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_zai_2.outcome) || steps.run_zai_3.outcome) || steps.run_anthropic_4.outcome) || steps.run_anthropic_5.outcome) }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
@@ -510,9 +525,10 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          # The walk's outcome (#327, #544) — the same flat five-link disjunct
-          # as AGENT_OUTCOME: any link succeeding means the run succeeded.
-          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome }}
+          # The walk's outcome (#327, #544) — the same five-link walk
+          # expression as AGENT_OUTCOME (any link's success is the run's;
+          # otherwise the last link that actually ran).
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_anthropic_5.outcome == 'skipped' && (steps.run_anthropic_4.outcome == 'skipped' && (steps.run_zai_3.outcome == 'skipped' && (steps.run_zai_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_zai_2.outcome) || steps.run_zai_3.outcome) || steps.run_anthropic_4.outcome) || steps.run_anthropic_5.outcome) }}
           # Per-link outcomes + the chain the resolve step emitted, so the
           # summary can name WHICH link served and warn when the head
           # provider fell through (a GLM outage must stay visible even though
@@ -589,7 +605,7 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome) != 'success'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_anthropic_5.outcome == 'skipped' && (steps.run_anthropic_4.outcome == 'skipped' && (steps.run_zai_3.outcome == 'skipped' && (steps.run_zai_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_zai_2.outcome) || steps.run_zai_3.outcome) || steps.run_anthropic_4.outcome) || steps.run_anthropic_5.outcome)) != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: design-run
@@ -611,14 +627,15 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome) != 'success'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_anthropic_5.outcome == 'skipped' && (steps.run_anthropic_4.outcome == 'skipped' && (steps.run_zai_3.outcome == 'skipped' && (steps.run_zai_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_zai_2.outcome) || steps.run_zai_3.outcome) || steps.run_anthropic_4.outcome) || steps.run_anthropic_5.outcome)) != 'success'
         env:
           ISSUE: ${{ steps.select.outputs.issue }}
-          # The walk's outcome (#327, #544) — the same flat five-link disjunct
-          # as AGENT_OUTCOME above: any link succeeding means the run
-          # succeeded, so cleanup and this gate agree on what "the agent step
-          # succeeded" means across the walk.
-          AGENT_OUTCOME: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome }}
+          # The walk's outcome (#327, #544) — byte-identical to AGENT_OUTCOME
+          # in the lock cleanup above (the drift guard pins that): any link's
+          # success is the run's; otherwise the last link that actually ran,
+          # so cleanup and this gate agree on what "the agent step
+          # succeeded" — and "never ran" — mean across the walk.
+          AGENT_OUTCOME: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_anthropic_5.outcome == 'skipped' && (steps.run_anthropic_4.outcome == 'skipped' && (steps.run_zai_3.outcome == 'skipped' && (steps.run_zai_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_zai_2.outcome) || steps.run_zai_3.outcome) || steps.run_anthropic_4.outcome) || steps.run_anthropic_5.outcome) }}
         run: |
           echo "::error::the /design-run agent step for #${ISSUE} did not succeed (outcome: ${AGENT_OUTCOME}) — its SHIP-LOCK cleanup ran above; failing the job so the death is visible"
           exit 1

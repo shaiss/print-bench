@@ -119,6 +119,10 @@ jobs:
     # fallback 20 + the pre-run steps. The per-step timeout is what keeps a
     # hung /label-issues from holding a runner and a secret for the whole job
     # budget, unwatched — before #544 the single step could hold it for 30.
+    # Two consecutive stalls are not budgeted — a second stalled link dies
+    # with the job — because a stall is a provider-wide symptom, and the
+    # fast failures the tail exists for reject in seconds. Well inside
+    # GitHub's 360-minute hosted-job cap (the drift guard pins <= 360).
     timeout-minutes: 45
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
@@ -472,7 +476,7 @@ jobs:
       # issue, so a scheduled red nobody watches becomes an actionable ask. A bad
       # model id or a transient blip is only diagnosed in the log. Advisory: it
       # never fails the job. Fires (always()) only when a key was present and the
-      # walk did not succeed — the same flat five-link walk-outcome shape the
+      # walk did not succeed — the same five-link walk-outcome expression the
       # record step reports as RUN. Both keys go in so classify probes both
       # halves of the chain.
       - name: Diagnose the exhausted chain (billing / tokens / technical)
@@ -483,7 +487,7 @@ jobs:
           && steps.select.outputs.issues != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome) != 'success'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_anthropic_5.outcome == 'skipped' && (steps.run_anthropic_4.outcome == 'skipped' && (steps.run_zai_3.outcome == 'skipped' && (steps.run_zai_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_zai_2.outcome) || steps.run_zai_3.outcome) || steps.run_anthropic_4.outcome) || steps.run_anthropic_5.outcome)) != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: labeler
@@ -501,12 +505,15 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          # The walk's outcome (#327, #544): one flat disjunct over all five
-          # links across both providers — success if ANY link succeeded; the
-          # last link's outcome otherwise. The terminal link failing fails
-          # the job; the "Turn an exhausted walk red" step below covers a
-          # walk exhausted with the tail skipped.
-          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome }}
+          # The walk's outcome (#327, #544): 'success' if ANY of the five
+          # links across both providers succeeded; otherwise the outcome of
+          # the LAST LINK THAT ACTUALLY RAN — the nested tail walks backwards
+          # over 'skipped' links, so 'skipped' means every link was skipped
+          # (no key for any provider), never "the tail had no key" after the
+          # head failed. The terminal link failing fails the job; the "Turn
+          # an exhausted walk red" step below covers a walk exhausted with
+          # the tail skipped.
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_anthropic_5.outcome == 'skipped' && (steps.run_anthropic_4.outcome == 'skipped' && (steps.run_zai_3.outcome == 'skipped' && (steps.run_zai_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_zai_2.outcome) || steps.run_zai_3.outcome) || steps.run_anthropic_4.outcome) || steps.run_anthropic_5.outcome) }}
           # Per-link outcomes + the chain the resolve step emitted, so the
           # summary can name WHICH link served and warn when the head
           # provider fell through (a GLM outage must stay visible even though
@@ -567,18 +574,18 @@ jobs:
         # (only ZAI_KEY set and every GLM link dead) has no failed non-coe
         # step, and would leave the run green: exactly the silent-success
         # disguise the burn's red-on-death step exists for. Restore the
-        # failure last, after the triage and the record have run. Same flat
-        # walk-outcome shape as the triage gate and RUN above.
+        # failure last, after the triage and the record have run. Same
+        # walk-outcome expression as the triage gate and RUN above.
         if: >-
           always()
           && steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome) != 'success'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_anthropic_5.outcome == 'skipped' && (steps.run_anthropic_4.outcome == 'skipped' && (steps.run_zai_3.outcome == 'skipped' && (steps.run_zai_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_zai_2.outcome) || steps.run_zai_3.outcome) || steps.run_anthropic_4.outcome) || steps.run_anthropic_5.outcome)) != 'success'
         env:
           ISSUES: ${{ steps.select.outputs.issues }}
-          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome }}
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_anthropic_5.outcome == 'skipped' && (steps.run_anthropic_4.outcome == 'skipped' && (steps.run_zai_3.outcome == 'skipped' && (steps.run_zai_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_zai_2.outcome) || steps.run_zai_3.outcome) || steps.run_anthropic_4.outcome) || steps.run_anthropic_5.outcome) }}
         run: |
           echo "::error::the /label-issues agent step for (${ISSUES}) did not succeed on any link of the labeler chain (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
           exit 1
