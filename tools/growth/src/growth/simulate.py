@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from . import postslot
 from . import queue as queue_policy
 from .cron import Cron
 from .tweetlen import MAX_WEIGHT, tweet_weight
@@ -50,14 +49,21 @@ def simulate(
     [...]}``. Returns ``{"slots": [...], "unscheduled": [...], "skipped":
     [...]}`` where each slot is ``{"at": iso, "number": n, "title": ...,
     "text": ..., "thread": [...], "weight": n}``."""
-    # Only the day's CHOSEN slot actually posts (post-time jitter): a cadence
-    # with several candidate hours fires many times a day but Lark posts once,
-    # at the per-date chosen hour. Filtering here keeps the dry-run timeline
-    # honest — it shows the real ~1/day cadence at the real varied times, not a
-    # post at every candidate firing. A single-candidate cadence is unaffected
-    # (its one hour is always the chosen one).
-    firings = [f for f in Cron(cadence).firings(_parse_start(start), days)
-               if postslot.is_post_slot(f, cadence)]
+    # Lark posts at most ONCE per UTC calendar day (the per-day live-post guard,
+    # daycap): the multi-slot cadence fires several times a day for delivery
+    # redundancy, but the drain acts on one firing per day and then holds.
+    # Collapsing the firings to one-per-date keeps the dry-run timeline honest —
+    # it shows the real ~1/day cadence, not a post at every firing. NOTE the
+    # collapsed time is the day's FIRST nominal slot (a deterministic stand-in,
+    # e.g. 13:19 for the current cadence); the simulator cannot model GitHub's
+    # real delivery jitter (it has no delivery times), so the LIVE post time
+    # varies while this projection does not. A single-candidate cadence already
+    # fires once a day, so it is unaffected.
+    firings, _seen_days = [], set()
+    for f in Cron(cadence).firings(_parse_start(start), days):
+        if f.date() not in _seen_days:
+            _seen_days.add(f.date())
+            firings.append(f)
     ordered = queue_policy.drain_order(snapshot)
 
     composed, skipped = [], []
