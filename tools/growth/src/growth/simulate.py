@@ -43,27 +43,23 @@ def simulate(
     posts: dict[str, dict],
     start: str,
     days: int,
+    max_posts_per_day: int,
 ) -> dict:
     """Assign composed posts to firing slots. ``posts`` maps the queue issue
     number (as a string — JSON object keys) to ``{"text": ..., "thread":
     [...]}``. Returns ``{"slots": [...], "unscheduled": [...], "skipped":
     [...]}`` where each slot is ``{"at": iso, "number": n, "title": ...,
     "text": ..., "thread": [...], "weight": n}``."""
-    # Lark posts at most ONCE per UTC calendar day (the per-day live-post guard,
-    # daycap): the multi-slot cadence fires several times a day for delivery
-    # redundancy, but the drain acts on one firing per day and then holds.
-    # Collapsing the firings to one-per-date keeps the dry-run timeline honest —
-    # it shows the real ~1/day cadence, not a post at every firing. NOTE the
-    # collapsed time is the day's FIRST nominal slot (a deterministic stand-in,
-    # e.g. 13:19 for the current cadence); the simulator cannot model GitHub's
-    # real delivery jitter (it has no delivery times), so the LIVE post time
-    # varies while this projection does not. A single-candidate cadence already
-    # fires once a day, so it is unaffected.
-    firings, _seen_days = [], set()
-    for f in Cron(cadence).firings(_parse_start(start), days):
-        if f.date() not in _seen_days:
-            _seen_days.add(f.date())
-            firings.append(f)
+    # Lark posts at most ``max_posts_per_day`` times per UTC calendar day (the
+    # per-day live-post cap, daycap): the multi-slot cadence fires several times
+    # a day for delivery redundancy, but the drain holds once the day's cap is
+    # met. So the timeline shows a post at the day's FIRST ``max_posts_per_day``
+    # nominal firings and nothing at the rest — the real ~cap/day cadence, not a
+    # post at every firing. NOTE these are the nominal cron slots (a
+    # deterministic stand-in, e.g. 13:19/15:19 for the current cadence); the
+    # simulator cannot model GitHub's real delivery jitter (it has no delivery
+    # times), so the LIVE post time varies while this projection does not.
+    firings = list(Cron(cadence).firings(_parse_start(start), days))
     ordered = queue_policy.drain_order(snapshot)
 
     composed, skipped = [], []
@@ -83,9 +79,15 @@ def simulate(
         composed.append((item, post))
 
     slots, i = [], 0
+    posts_on_day: dict = {}
     for at in firings:
+        day = at.date()
         for _ in range(max_posts_per_run):
             if i >= len(composed):
+                break
+            # The per-UTC-day cap holds a firing once the day's live-post budget
+            # is spent — mirroring daycap in the live workflow.
+            if posts_on_day.get(day, 0) >= max_posts_per_day:
                 break
             item, post = composed[i]
             slots.append({
@@ -96,6 +98,7 @@ def simulate(
                 "thread": list(post.get("thread") or []),
                 "weight": tweet_weight(post["text"]),
             })
+            posts_on_day[day] = posts_on_day.get(day, 0) + 1
             i += 1
     unscheduled = [{"number": item["number"], "title": item.get("title", "")}
                    for item, _ in composed[i:]]

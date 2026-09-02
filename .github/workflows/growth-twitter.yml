@@ -4,10 +4,11 @@ name: Growth agent — Twitter/X (scheduled queue drain)
 # (docs/growth.md). It fires at several hours across the day for DELIVERY
 # REDUNDANCY — GitHub's scheduled-workflow queue is best-effort and drops most
 # cron slots under load, so more slots means more chances one lands — but the
-# drain acts on WHATEVER firing GitHub actually delivers. ≤1 LIVE post per UTC
-# calendar day is held not by an hour lottery but by a per-day guard: the
-# trusted Select step asks `growth daycap` whether a `growth-twitter:posted`
-# marker is already dated today, and if so it holds. The post TIME varies day
+# drain acts on WHATEVER firing GitHub actually delivers. The per-UTC-day live
+# cap (`max_posts_per_day`, default 2) is held not by an hour lottery but by a
+# per-day guard: the trusted Select step asks `growth daycap --cap` how many
+# `growth-twitter:posted` markers are already dated today, and holds once the
+# cap is met. The post TIME varies day
 # to day on its own, because GitHub delivers these firings heavily and
 # unpredictably delayed (observed: 21:55, 19:31, 00:39 UTC on consecutive
 # days) — that delivery jitter IS the "not the same robotic clock beat". On an
@@ -69,7 +70,7 @@ on:
     # convention. GitHub delivers these heavily delayed and drops most of them,
     # so the extra slots are chances for at least one to land each day; whichever
     # lands FIRST drains, and the per-day marker guard in Select holds the rest
-    # of the day (≤1 live post/UTC-day). The post time therefore varies with
+    # of the day once the daily cap is met. The post time therefore varies with
     # GitHub's own delivery jitter — no computed pick. Cron must be a literal —
     # Actions evaluates no files or variables for on.schedule — so change the
     # cadence by editing this line and the `cadence:` key in
@@ -110,8 +111,8 @@ jobs:
     # schedule github.ref_name is already the default branch. Key 2 (committed
     # `enabled: true`) is checked in the "Read policy" step. There is no chosen-
     # hour gate: the drain runs on WHATEVER firing GitHub delivers, and the
-    # per-UTC-day marker guard inside Select holds it to ≤1 live post/day (so a
-    # second firing the same day, or GitHub delivering two slots, no-ops).
+    # per-UTC-day marker guard inside Select holds it to `max_posts_per_day`
+    # live posts/day (so firings past the cap the same day no-op).
     if: >-
       vars.GROWTH_TWITTER_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
@@ -153,6 +154,7 @@ jobs:
           enabled="$(python3 -m growth config --get enabled --path "$conf")"
           provider="$(python3 -m growth config --get provider --path "$conf")"
           max_posts="$(python3 -m growth config --get max_posts_per_run --path "$conf")"
+          max_per_day="$(python3 -m growth config --get max_posts_per_day --path "$conf")"
           require_approval="$(python3 -m growth config --get require_approval --path "$conf")"
           case "$provider" in
             anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
@@ -163,6 +165,7 @@ jobs:
             echo "enabled=$enabled"
             echo "provider=$provider"
             echo "max_posts=$max_posts"
+            echo "max_per_day=$max_per_day"
             echo "require_approval=$require_approval"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
@@ -239,19 +242,21 @@ jobs:
             --jq 'sort_by([(if any(.labels[]?; .name == "priority:high") then 0 else 1 end), .number]) | .[].number')"
           nums="$(printf '%s\n' "$list" | sed '/^$/d' | tr '\n' ' ' | sed 's/ *$//')"
 
-          # PER-UTC-DAY LIVE-POST GUARD (≤1 live post per calendar day). GitHub
-          # delivers this workflow heavily delayed and drops most cron slots, so
-          # the drain runs on WHATEVER firing lands rather than a chosen hour —
-          # this guard is what keeps a second same-day firing (or GitHub
-          # delivering two slots) from posting twice. A live post writes
-          # `<!-- growth-twitter:posted -->` CLAIM-FIRST (before the tweet) and
-          # closes the item, so "already posted today" = a posted marker dated
-          # today (UTC) on any desk issue touched today. Read via the REST
-          # list + REST comments (NOT the eventually-consistent Search API); the
-          # DECISION lives in the tested `growth daycap` helper, not this bash.
-          # Keyed on the LIVE marker only, so a dry-run never consumes the day.
-          # The `concurrency` group serializes this workflow with itself, so a
-          # later same-day run sees the earlier run's already-committed marker.
+          # PER-UTC-DAY LIVE-POST CAP (`max_posts_per_day` live posts/calendar
+          # day, default 2). GitHub delivers this workflow heavily delayed and
+          # drops most cron slots, so the drain runs on WHATEVER firing lands
+          # rather than a chosen hour — this guard is what keeps firings past
+          # the cap the same day (or GitHub delivering two slots) from posting
+          # over the cap. Each live post writes exactly one
+          # `<!-- growth-twitter:posted -->` marker CLAIM-FIRST (before the
+          # tweet) and closes the item, so today's live-post COUNT = posted
+          # markers dated today (UTC) on any desk issue touched today. Read via
+          # the REST list + REST comments (NOT the eventually-consistent Search
+          # API); the DECISION lives in the tested `growth daycap` helper (which
+          # counts and compares to --cap), not this bash. Keyed on the LIVE
+          # marker only, so a dry-run never consumes a slot. The `concurrency`
+          # group serializes this workflow with itself, so a later same-day run
+          # sees the earlier run's already-committed marker.
           today="$(date -u +%F)"
           # Sort by UPDATED (most recent first), so an item that got a `posted`
           # marker today is in the scan window even if it is an OLD issue —
@@ -259,7 +264,8 @@ jobs:
           # old item past the limit and miss it. The REST issues endpoint (via
           # `gh api`) supports sort=updated and stays strongly consistent (not
           # the Search API); per_page=100 makes ">100 items updated today"
-          # (impossible for a ≤1-post/day desk) the only way to overflow it.
+          # (impossible for a low-volume, single-digit-per-day desk) the only
+          # way to overflow it.
           #
           # FAIL CLOSED: if any part of this scan cannot complete (a transient
           # GitHub API / JSON failure), HOLD this firing rather than treat the
@@ -292,11 +298,12 @@ jobs:
             done
           fi
           if [ "$held_today" = "0" ] && [ "$(printf '%s' "$comments" \
-              | PYTHONPATH=tools/growth/src python3 -m growth daycap --today "$today" --author 'github-actions[bot]')" = "posted" ]; then
-            held_today=1; hold_reason="a live post already went out today ($today)"
+              | PYTHONPATH=tools/growth/src python3 -m growth daycap --today "$today" \
+                  --author 'github-actions[bot]' --cap "${{ steps.policy.outputs.max_per_day }}")" = "hold" ]; then
+            held_today=1; hold_reason="the daily live-post cap (${{ steps.policy.outputs.max_per_day }}/day) is already met for today ($today)"
           fi
           if [ "$held_today" = "1" ]; then
-            echo "::notice::holding this firing — ${hold_reason}; keeping ≤1 live post/day (a later firing retries)"
+            echo "::notice::holding this firing — ${hold_reason}; keeping within the daily live-post cap (a later firing retries)"
             nums=""
           fi
 
@@ -304,7 +311,7 @@ jobs:
           {
             echo "## Growth agent (Twitter/X) — selection"
             if [ "$held_today" = "1" ]; then
-              echo "- held: ${hold_reason}; ≤1 live post/day"
+              echo "- held: ${hold_reason}; within the daily live-post cap"
             elif [ -z "$nums" ]; then
               echo "- the queue is empty (no open \`growth-queue\` + \`channel:twitter\` issue outside \`needs-decision\`)"
             else
@@ -453,7 +460,7 @@ jobs:
 
       - name: Explain nothing to drain
         if: steps.policy.outputs.enabled == 'true' && steps.select.outputs.issues == ''
-        run: echo "::notice::nothing to drain this run — either a live post already went out today (≤1/day guard) or the queue is empty (PMs queue messages with /growth-queue or the 'Growth post (Twitter/X)' issue form); the Select step summary says which"
+        run: echo "::notice::nothing to drain this run — either the day's live-post cap is already met (the per-day guard) or the queue is empty (PMs queue messages with /growth-queue or the 'Growth post (Twitter/X)' issue form); the Select step summary says which"
 
       - name: Record the run outcome
         if: always()

@@ -17,9 +17,10 @@ never depend on a model's judgment:
   then oldest), a pure function of a queue snapshot.
 * :mod:`growth.cron` — a minimal 5-field cron matcher so the simulator can
   expand a routine's cadence into concrete firing times.
-* :mod:`growth.daycap` — the per-UTC-day live-post guard: given the desk's
-  marker comments, has a live post already gone out today? Holds Lark to ≤1
-  live post per calendar day whichever (delayed) firing GitHub delivers.
+* :mod:`growth.daycap` — the per-UTC-day live-post cap: given the desk's
+  marker comments, how many live posts have gone out today? Holds Lark to
+  ``max_posts_per_day`` live posts per calendar day (a configurable cap,
+  default 2) whichever (delayed) firings GitHub delivers.
 * :mod:`growth.simulate` — the accelerated dry-run: walk N days of cadence
   over a queue snapshot and render exactly what would have been posted, when.
 * :mod:`growth.poster` — the X API v2 seam (OAuth 1.0a signing, stdlib-only);

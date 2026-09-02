@@ -33,6 +33,7 @@ _KNOWN_KEYS = (
     "provider",
     "cadence",
     "max_posts_per_run",
+    "max_posts_per_day",
     "require_approval",
 )
 
@@ -41,11 +42,12 @@ _DEFAULTS = {
     "provider": "zai",
     "cadence": "",
     "max_posts_per_run": 1,
+    "max_posts_per_day": 2,
     "require_approval": True,
 }
 
 _BOOL_KEYS = ("enabled", "require_approval")
-_INT_KEYS = ("max_posts_per_run",)
+_INT_KEYS = ("max_posts_per_run", "max_posts_per_day")
 
 # A raw 5-field cron literal: five whitespace-separated fields, none quoted.
 _CRON_RE = re.compile(r"^\S+(?:\s+\S+){4}$")
@@ -63,6 +65,7 @@ class GrowthConfig:
     provider: str
     cadence: str
     max_posts_per_run: int
+    max_posts_per_day: int
     require_approval: bool
 
 

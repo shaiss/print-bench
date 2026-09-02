@@ -7,12 +7,13 @@ Subcommands, each a thin shell over one module:
   ``backlog-burn config``, over the growth desk's own closed key set).
 * ``growth length <text>`` — the weighted tweet length (URLs = 23), so a
   human or an attended session can check copy the way the posting tool will.
-* ``growth daycap --author <logins> [--today <YYYY-MM-DD>]`` — the per-UTC-day
-  live-post guard: read the desk's marker comments as a JSON list on stdin and
-  print ``posted`` iff a ``growth-twitter:posted`` marker dated today (default:
-  today UTC) was authored by one of the trusted ``--author`` logins (so an
-  outsider's comment can't), letting Lark's Select step hold the drain to ≤1
-  live post/day.
+* ``growth daycap --author <logins> --cap <n> [--today <YYYY-MM-DD>]`` — the
+  per-UTC-day live-post cap: read the desk's marker comments as a JSON list on
+  stdin and print ``hold`` iff the number of ``growth-twitter:posted`` markers
+  dated today (default: today UTC) authored by one of the trusted ``--author``
+  logins (so an outsider's comment can't; matched with ``[bot]``-suffix
+  normalization) has reached ``--cap`` — otherwise ``clear``. Lets Lark's Select
+  step hold the drain to ≤``max_posts_per_day`` live posts/day.
 * ``growth simulate --conf <conf> --snapshot <json> --posts <json>
   --start <iso> --days <n> --out-md <path> [--out-ndjson <path>]`` — the
   accelerated dry run (docs/growth.md): render what would have been posted.
@@ -48,13 +49,17 @@ def main(argv: list[str] | None = None) -> int:
     p_len = sub.add_parser("length", help="weighted tweet length (URLs = 23)")
     p_len.add_argument("text")
 
-    p_daycap = sub.add_parser("daycap", help="has a live post already gone out today?")
+    p_daycap = sub.add_parser("daycap", help="is the day's live-post cap reached?")
     p_daycap.add_argument("--today", default="",
                           help="UTC date YYYY-MM-DD to test (default: today UTC)")
     p_daycap.add_argument("--author", required=True,
                           help="comma-separated GitHub logins the posting tool "
-                               "posts as; only a marker from these authors holds "
-                               "the drain (so an outsider's comment can't)")
+                               "posts as; only a marker from these authors counts "
+                               "(so an outsider's comment can't); matched with "
+                               "[bot]-suffix normalization")
+    p_daycap.add_argument("--cap", type=int, default=1,
+                          help="max live posts per UTC day (max_posts_per_day); "
+                               "hold once today's count reaches it (default 1)")
 
     p_sim = sub.add_parser("simulate", help="accelerated dry-run timeline")
     p_sim.add_argument("--conf", default=config_mod.DEFAULT_PATH)
@@ -103,7 +108,14 @@ def main(argv: list[str] | None = None) -> int:
         if not trusted:
             print("growth daycap: --author must name at least one trusted login", file=sys.stderr)
             return 1
-        print("posted" if daycap_mod.posted_today(comments, today, trusted) else "clear")
+        if args.cap < 1:
+            print("growth daycap: --cap must be a positive integer", file=sys.stderr)
+            return 1
+        count = daycap_mod.posts_today(comments, today, trusted)
+        # A stderr note aids the workflow log without polluting the stdout
+        # decision word the Select step reads.
+        print(f"daycap: {count}/{args.cap} live post(s) today ({today})", file=sys.stderr)
+        print("hold" if count >= args.cap else "clear")
         return 0
 
     if args.cmd == "simulate":
@@ -115,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
                 posts = json.load(fh)
             result = simulate_mod.simulate(
                 cfg.cadence, cfg.max_posts_per_run, snapshot, posts,
-                args.start, args.days,
+                args.start, args.days, cfg.max_posts_per_day,
             )
         except (config_mod.ConfigError, simulate_mod.SimulationError,
                 OSError, json.JSONDecodeError) as e:
