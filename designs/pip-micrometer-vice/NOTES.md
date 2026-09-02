@@ -158,6 +158,25 @@ Per the brief (issue #516), all rows given unless marked:
     truth, extending decision 9's edge-density method from face-on
     views to 3/4 views.
 
+14. **Teardrop bores, not round — the printability-review round's
+    finding.** The guide bore and collar chamber were plain circular
+    horizontal cuts: each roof closes as a bridge (chord ~8.4 mm and
+    ~12.3 mm) printing 0.5 mm above a surface that *rotates* (shaft,
+    thrust collar). PLA bridges sag, and a 0.1–0.2 mm droop there is a
+    weld in the drivetrain — the exact failure this design exists to
+    disprove, and one `fusecheck` could only catch after the fact (a
+    printed weld, not a designed one). Both bores are now
+    `teardrop_hole()` (45° self-supporting roof, point up) wrapped in
+    `rotate([0,0,90])` to run along x, which required raising the rear
+    block to cover the teardrop tips: top now `axis_z + 0.8 ×
+    chamber_dia + 1.2` = 30.1 (the round-bore top at 24.45 would have
+    left the tips breaching). Part grows 26.6 → 30.1 tall; base
+    footprint and every fit unchanged; gate re-run green (92/84,
+    fusecheck ok, control fires). The frozen `section` camera still
+    frames it — content bbox same height/top, grown 55 px leftward,
+    135 px headroom — so the freeze holds. Vision claimed bottom/right
+    clipping the trim box contradicts (misread 10).
+
 ## Print settings
 
 - Orientation: as rendered — base down, screw and jaw axes along x. No
@@ -165,7 +184,7 @@ Per the brief (issue #516), all rows given unless marked:
   is the exact failure `ci.fusecheck` exists to catch.
 - Material: PLA or PETG; layer 0.2, ≥3 perimeters, 25% infill for the
   base/jaws.
-- Bed: 80 × 58 × ~27 mm — fits any 220 mm printer.
+- Bed: 80 × 58 × ~30 mm — fits any 220 mm printer.
 
 ## Print this first
 

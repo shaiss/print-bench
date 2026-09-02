@@ -13,7 +13,7 @@ down through two M5 holes.
 ## What you get
 
 - `pip-micrometer-vice` — the whole vice, printed in place as one job
-  (approx. 80 × 58 × 27 mm): the base, a captive screw with its grip knob,
+  (approx. 80 × 58 × 30 mm): the base, a captive screw with its grip knob,
   and the moving jaw. Three bodies, one bed.
 - `pip-micrometer-vice-coupon` — the print-first fit coupon (approx.
   100 × 54 × 18 mm): three screw/nut pairs and three channel/slider pairs
@@ -40,6 +40,9 @@ not the printed thread.
   can't happen. Leave slicer auto-supports off.
 - **Orientation:** exactly as rendered — base flat on the bed, screw axis
   horizontal
+- **Seam:** set Back (or scarf) — the default Aligned seam stacks a ridge
+  straight through the thread crest and the saddle rails, and a ridge on a
+  rotating or sliding surface is a fit you didn't tune
 - **Print first:** the coupon, and read it before printing the vice
 
 ![Fit coupon](previews/coupon.png)

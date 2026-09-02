@@ -224,18 +224,25 @@ module knob_solid() {
 // jaw and the screw are separate bodies (they must stay separable), so
 // body() is the static half of the print only.
 
-// plain guide bore for the shaft, world-placed, full length of the block
+// plain guide bore for the shaft, world-placed, full length of the block.
+// TEARDROP, not a round bore: a horizontal round bore closes its roof as a
+// bridge whose chord passes 45 degrees near the top, 0.5 mm over a shaft
+// that SPINS — bridge sag there welds the drivetrain, the one failure this
+// design exists to prove cannot happen (the printability-review round's
+// finding; the 45-degree roof prints self-supporting, lib/printability's
+// teardrop_hole, point up).
 module screw_guide_bore(tol) {
-    translate([x_blk0 - 1, 0, axis_z]) rotate([0, 90, 0])
-        cylinder(d = d_core + 2 * tol, h = x_blk1 - x_blk0 + 2, $fn = 64);
+    translate([(x_blk0 + x_blk1) / 2, 0, axis_z]) rotate([0, 0, 90])
+        teardrop_hole(d = d_core + 2 * tol, l = x_blk1 - x_blk0 + 2);
 }
 
 // collar chamber: the pocket the thrust collar spins in, sealed from the
 // thread channel by the block's front wall (the thread starts 0.5 clear
-// of it, so swarf never reaches the chamber)
+// of it, so swarf never reaches the chamber). Same teardrop reasoning, at
+// collar scale: the round roof would bridge ~12 mm over a rotating collar.
 module collar_chamber(tol) {
-    translate([cl_x0 - 0.75 - tol, 0, axis_z]) rotate([0, 90, 0])
-        cylinder(d = cl_d + 2 * tol, h = cl_w + 2 * (0.75 + tol), $fn = 64);
+    translate([cl_x0 + cl_w / 2, 0, axis_z]) rotate([0, 0, 90])
+        teardrop_hole(d = cl_d + 2 * tol, l = cl_w + 2 * (0.75 + tol));
 }
 
 module body(fused = false) {
@@ -252,10 +259,14 @@ module body(fused = false) {
                 rounded_box([base[0], base[1], base_t],
                             r = style_corner_r,
                             bottom_chamfer = style_edge_chamfer);
-            // rear block: base top to above the guide bore, rail width
+            // rear block: base top to above the collar chamber's teardrop
+            // point — 0.8 * chamber dia (teardrop_hole's tip height) + a
+            // 1.2 wall. The round-bore predecessor stopped at
+            // axis_z + d_core / 2 + 4, which the teardrop points would
+            // breach (guide bore tip z 24.5, chamber tip z 28.9).
             translate([x_blk0, -y_rail_o, base_t])
                 cube([x_blk1 - x_blk0, y_rail_o * 2,
-                      axis_z + d_core / 2 + 4 - base_t]);
+                      axis_z + 0.8 * (cl_d + 2 * 0.5) + 1.2 - base_t]);
             // rail walls: the jaw's side key, inner faces clr_h off the
             // 40 mm jaw width, full channel length. They run to the base
             // FRONT edge, not just the fixed jaw face: ending at x_face

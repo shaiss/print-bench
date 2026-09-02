@@ -77,6 +77,7 @@ Revisit after the first FIELD-TEST.
 | B3 | Multi-start lead (faster travel, coarser force) | annoyance-driven, only after real use | parameter flip + coupon re-sweep + re-gate |
 | B4 | Replaceable jaw pads | sacrificial faces; brief deferred to v1+ | new part + plate question |
 | B5 | Clamp-edge mount (18–20 mm bench lip) | drops the screw-hole dependency; owner's open question | base redesign, M5 row changes (N5) |
+| B6 | Slim the coupon (3 h 31 m / 29.55 g today) | the brief promised "printable in minutes"; near-half the vice's cost defeats "print this first" | thin the plate, 1 station per row, re-gate |
 
 ## Open decisions
 
@@ -93,3 +94,4 @@ Revisit after the first FIELD-TEST.
 | 2026-09-02 | Charter written from brief #516 | §5 PM checkpoint of the design run; every row transcribed from the brief, none invented — written after the geometry existed but sourced only from the brief thread |
 | 2026-09-02 | Guideway = plain rails + saddle straddle + screw keying, not `slide_rail`/`slide_tab` lips | the lips occupy the y-band a 40 mm face sweeps (NOTES decision 3) — recorded as a brief-vocabulary deviation, accepted by gates |
 | 2026-09-02 | M5 holes kept, clamp-edge not built | M5 is the given Must-fit row; the alternative is backlog B5 pending the owner |
+| 2026-09-02 | Printability-review triage: bore-roof fix + seam note acted on now; coupon cost queued as B6 | the teardrop fix guards N1/N3 (a bridged bore roof is a designed weld); the coupon's 3.5 h is a real deviation from the brief's "minutes" prose but N7 (two-station coupon) ships first and honest — noted in the PR body |
