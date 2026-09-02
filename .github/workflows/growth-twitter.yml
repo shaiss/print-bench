@@ -42,14 +42,20 @@ name: Growth agent — Twitter/X (scheduled queue drain)
 # before it can ever go live.
 #
 # This is the SIBLING of adoption-assessor.yml and product-scout.yml. It
-# shares their two-key safety model and their trusted-Select bounding; unlike
+# shares their two-key safety model, their trusted-Select bounding and —
+# since issue #544 Part B — the scout's cross-provider chain walk (one run
+# step per registry link, the GLM head then the Anthropic tail; every link
+# carries the SAME backstop, tool surface, channel-credential env and prompt
+# — only the model, secret and endpoint differ, so the link that happens to
+# serve can climb no rung of the arming ladder another could not). Unlike
 # them its write surface can eventually reach OUTSIDE the repo, which is why
 # it alone carries the third (live) key and the per-item approval gate.
 #
 # WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
 #   * Policy → committed, git-tracked: .github/growth-twitter.conf holds
-#     `enabled`, `provider`, `cadence`, `max_posts_per_run`,
-#     `require_approval` — read by tools/growth's own strict parser.
+#     `enabled`, the `provider` (the walk's HEAD), `cadence`,
+#     `max_posts_per_run`, `max_posts_per_day`, `require_approval` — read by
+#     tools/growth's own strict parser.
 #   * Live arming / kill switch → the GROWTH_TWITTER_ENABLED repo variable.
 #     SHIPPED DISARMED — unset by default.
 #   * Going live on the channel → the GROWTH_TWITTER_LIVE repo variable plus
@@ -117,12 +123,28 @@ jobs:
       vars.GROWTH_TWITTER_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # A hung agent must not hold a runner for the 6-hour default while
-    # holding channel credentials, unwatched.
-    timeout-minutes: 30
+    # Job budget 45 = 2 × run-step timeout (20) + 5 min headroom. A drain is
+    # one queue item composed into one tweet, but the walk below is three run
+    # steps in a row (the GLM head, then the Anthropic tail — issue #544 Part
+    # B), each with its own 20-minute timeout, and the budget must let at
+    # least ONE full fallback link complete after a head link STALLS to its
+    # step timeout (a model stall, not the seconds a quota/billing rejection
+    # takes): head 20 + one fallback 20 + the pre-run steps. The per-step
+    # timeout is what keeps a hung agent from holding a runner AND the
+    # channel credentials for the whole job budget, unwatched — before #544
+    # the single step could hold them for the full 30. Two consecutive
+    # stalls are not budgeted — a second stalled link dies with the job —
+    # because a stall is a provider-wide symptom, and the fast failures the
+    # tail exists for reject in seconds. Well inside GitHub's 360-minute
+    # hosted-job cap (the drift guard pins <= 360).
+    timeout-minutes: 45
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
-      # provider's key presence as a plain string and gate on it below.
+      # provider's key presence as a plain string and gate on it below. The
+      # "Read policy" step turns these into per-provider `zai_key_present` /
+      # `anthropic_key_present` outputs (each provider's run steps gate on
+      # their own) plus `key_present` = either one (the any-key gate the
+      # context, triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
     steps:
@@ -144,8 +166,14 @@ jobs:
         # Key 2 of 2: the committed, git-tracked source of truth. A malformed
         # or typo'd config fails this step loudly rather than running on a
         # policy nobody wrote. tools/growth's parser is stdlib-only and reads
-        # straight from the checkout — no pip step in front of it. The model
-        # is NOT decided here — it comes from the registry chain below.
+        # straight from the checkout — no pip step in front of it. The conf's
+        # `provider:` is the walk's HEAD provider (issue #544) — validated
+        # here, emitted for the resolve step's shape check and the summary.
+        # Key presence is emitted PER PROVIDER (each provider's run steps
+        # gate on their own, so the tail can run when the head's key is
+        # absent) plus the any-key `key_present` the context / triage / red
+        # / skip-notice gates read. The model itself is NOT decided here — it
+        # comes from the registry chain below.
         env:
           PYTHONPATH: tools/growth/src
         run: |
@@ -157,29 +185,48 @@ jobs:
           max_per_day="$(python3 -m growth config --get max_posts_per_day --path "$conf")"
           require_approval="$(python3 -m growth config --get require_approval --path "$conf")"
           case "$provider" in
-            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
-            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            anthropic|zai) ;;
             *) echo "::error::unknown provider '$provider'"; exit 1 ;;
           esac
+          [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
+          [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "provider=$provider"
             echo "max_posts=$max_posts"
             echo "max_per_day=$max_per_day"
             echo "require_approval=$require_approval"
+            echo "zai_key_present=$zai_key"
+            echo "anthropic_key_present=$anthropic_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
-      # Resolve Lark's model from the committed provider/model registry
-      # (issue #206) — the same step the assessor runs. Stdlib-only, no
-      # install in front. A malformed registry, or one whose `growth-twitter`
-      # chain went missing, fails loudly BEFORE any key is spent. The
-      # cross-check guards the conf/chain split: the conf's `provider:` label
-      # picks the ship step (endpoint + literal secret), the registry picks
-      # the model — a model hosted elsewhere would fail at request time with
-      # a key spent. Single-link chain on purpose (the assessor's reasoning):
-      # low-volume, shipped disarmed, dry-run-by-default — a rare unservable
-      # model fails one daily sweep that retries next morning.
+      # Resolve Lark's model chain from the committed provider/model registry
+      # (issue #206) — the same step the scout runs. Stdlib-only, no install
+      # in front. A malformed registry, or one whose `growth-twitter` chain
+      # went missing, fails loudly BEFORE any key is spent — and is caught
+      # pre-merge by the model-registry drift-guard tests, which fire on this
+      # workflow and on registry.conf. `link<N>_model` is what the run steps
+      # below read; the secret stays literal per step (the Actions
+      # constraint), so the registry decides the model, never the auth.
+      #
+      # The shape check guards the one way the conf/chain split can mis-run
+      # (issue #544): the walk below is a FIXED sequence of literal run steps
+      # — its layout, one provider per step in file order (one Z.AI GLM step,
+      # then two Anthropic steps), because Actions can only reference a secret
+      # by its literal name — while the registry picks the MODEL each step
+      # runs. A link on the wrong slot's provider (claude-* on the Z.AI step,
+      # glm-* on an Anthropic step) would fail at request time with a key
+      # already spent, and a chain longer or shorter than the walk leaves a
+      # step without a link or a link without a step. So the conf's
+      # `provider:` must be link 1's (it names the HEAD of the walk), and link
+      # N's provider must be step N's — `model-registry shape` applies the
+      # same pure rule the drift guard pins pre-merge, so the two cannot
+      # drift, and the `--layout` literal below is what the drift guard
+      # compares against the steps' actual wiring. Low-volume, shipped
+      # disarmed, dry-run-by-default as before — but a dead head model no
+      # longer costs the day's drain: the tail picks it up.
       - name: Resolve the growth-twitter model chain (issue #206)
         id: chain
         env:
@@ -187,12 +234,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m model_registry resolve growth-twitter --gh-output "$GITHUB_OUTPUT"
-          link_provider="$(sed -n 's/^link1_provider=//p' "$GITHUB_OUTPUT" | head -1)"
           conf_provider="$(PYTHONPATH=tools/growth/src python3 -m growth config --get provider --path .github/growth-twitter.conf)"
-          if [ "$link_provider" != "$conf_provider" ]; then
-            echo "::error::the registry's 'growth-twitter' chain resolves to provider '$link_provider' but .github/growth-twitter.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/growth-twitter.conf."
-            exit 1
-          fi
+          # One layout entry per run step below, in file order.
+          python3 -m model_registry shape growth-twitter --head "$conf_provider" \
+            --conf .github/growth-twitter.conf --layout zai,anthropic,anthropic
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -356,11 +401,44 @@ jobs:
           done
           echo "assembled queue context under .growth-context/ for: ${ISSUES}"
 
-      # One explicit run step per provider — a provider is a reviewed,
-      # git-tracked step because Actions can only reference a secret by its
-      # literal name. The committed `provider:` label picks which one runs;
-      # the MODEL comes from the registry's `growth-twitter` chain. The
-      # default GITHUB_TOKEN is right: issue comments trigger no workflow.
+      # One explicit run step per CHAIN LINK, walked in file order ACROSS
+      # providers (issue #544 Part B): link 1 is the Z.AI GLM step, links 2-3
+      # the Anthropic tail. A provider is a reviewed, git-tracked step because
+      # GitHub Actions can only reference a secret by its literal name
+      # (secrets can't be selected by a runtime variable), so the walk's
+      # provider LAYOUT is fixed here and the registry's `growth-twitter`
+      # chain (steps.chain.outputs) picks which MODEL each link runs —
+      # swapping Lark to another model is a registry edit, not a workflow
+      # edit; the resolve step above refuses a chain that does not fit this
+      # layout. The committed `provider:` label names the HEAD provider (link
+      # 1 must sit on it); it no longer selects a whole block. Each link is
+      # gated on EVERY earlier link NOT having succeeded — a skipped step's
+      # outcome is 'skipped', not 'success', so the Anthropic tail runs
+      # whether the GLM link failed or was skipped for want of ZAI_KEY — so
+      # the first success short-circuits the rest and a dead model, or a
+      # whole dead provider, falls through instead of killing the drain. Each
+      # provider's steps gate on THEIR OWN key (zai_key_present /
+      # anthropic_key_present), never the other's. Deepening the chain is a
+      # same-PR pair: add the model to the registry AND the matching run step
+      # here (and its slot in the resolve step's --layout) — the drift guard
+      # fails either half shipped alone.
+      #
+      # Failure model: Lark carries no SHIP-LOCK lifecycle, so the
+      # non-terminal links (1-2) are continue-on-error so a dead id falls
+      # through, and the TERMINAL link (3) keeps none — a total-walk failure
+      # then fails the step, and the job, exactly as the single step did
+      # before the tail existed. The "Turn an exhausted walk red" step at the
+      # end covers the one case that rule misses: a walk exhausted with the
+      # tail SKIPPED (only ZAI_KEY set, the GLM link dead) has no failed
+      # non-coe step to fail the job.
+      #
+      # THE ARMING LADDER SURVIVES ON EVERY LINK (docs/growth.md): all three
+      # steps carry the same trusted-Select candidate binding, the same
+      # committed cap + approval switch, the same live key and the same
+      # channel credentials — the posting tool enforces the three rungs at
+      # write time from THAT env, so the link that happens to serve changes
+      # nothing about what may be published. The default GITHUB_TOKEN is
+      # right: issue comments trigger no workflow.
       #
       # Tool surface: WRITING is the one MCP tool (mcp__growth_twitter__
       # post_tweet, served by growth_mcp.py via --mcp-config) — Lark is
@@ -369,18 +447,31 @@ jobs:
       # closes the additive allow leak from settings.json with the growth
       # agent's OWN deny backstop (.claude/growth-twitter-settings.json —
       # deny beats allow from every source), kept honest by
-      # scripts/growth-perms-check.sh. show_full_output stays "false": this
-      # step can hold channel credentials, and a public repo's Actions log is
-      # world-readable.
+      # scripts/growth-perms-check.sh. show_full_output stays "false" on
+      # every link: each step can hold channel credentials, and a public
+      # repo's Actions log is world-readable.
 
-      - name: Run via Z.AI (GLM)
-        id: run_zai
+      - name: Run via Z.AI (GLM, chain link 1)
+        id: run_zai_1
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+        # continue-on-error so the walk reaches the tail when this id or
+        # provider is dead; the step timeout keeps a stalled model from eating
+        # the job budget the fallback links need — or from holding the channel
+        # credentials for longer than one link's worth.
+        timeout-minutes: 20
+        continue-on-error: true
+        # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
+        # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
+        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the
+        # same ZAI_KEY is also passed as anthropic_api_key to satisfy the
+        # action's credential check. Public copy under the bench's name is
+        # expensive-to-be-wrong, so the frontier GLM tier leads — which model
+        # exactly is the registry's `growth-twitter` chain's call, not this
+        # step's.
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -391,7 +482,8 @@ jobs:
           # the trusted Select step's candidate binding, the committed
           # policy's cap + approval switch, the live key, and the channel
           # credentials (all empty until a human configures them — empty
-          # means every drain is a dry run, by design).
+          # means every drain is a dry run, by design). Every link of the
+          # walk carries this block verbatim.
           GITHUB_TOKEN: ${{ github.token }}
           GROWTH_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
           GROWTH_MAX_POSTS: ${{ steps.policy.outputs.max_posts }}
@@ -412,17 +504,59 @@ jobs:
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/growth-twitter-settings.json --mcp-config .claude/skills/growth-twitter/growth-mcp.json --allowedTools "mcp__growth_twitter__post_tweet,Read,Grep,Glob"
           prompt: "/growth-twitter ${{ steps.select.outputs.issues }}"
 
-      - name: Run via Anthropic (Claude)
-        id: run_anthropic
+      # The cross-provider tail (issue #544 Part B): links 2 and 3 of the
+      # registry's `growth-twitter` chain on Anthropic's native endpoint,
+      # reached only when the GLM link did not succeed (failed, or skipped
+      # for want of ZAI_KEY) and gated on the Anthropic key's own presence.
+      # Claude via api.anthropic.com: a plain API key (pay-per-token) is the
+      # right fit for an unattended bot — no OAuth token / subscription seat.
+      # The same pin, permission, github_token, effort, MCP posting tool,
+      # backstop, transcript posture, env contract (candidate binding, cap,
+      # approval switch, live key, channel credentials) and prompt as the GLM
+      # link — only the model, secret and endpoint differ. Which model runs
+      # is the registry's call.
+      - name: Run via Anthropic (Claude, chain link 2)
+        id: run_anthropic_2
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issues != ''
-          && steps.policy.outputs.provider == 'anthropic'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
-        # Claude via api.anthropic.com — the latent alternative provider,
-        # kept git-tracked for when the account is funded; same tool surface,
-        # same backstop, same env contract as the Z.AI step.
+          && steps.run_zai_1.outcome != 'success'
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          # Same reason as the Z.AI step: the posting MCP server inherits
+          # this env, and it is the server's whole configuration surface.
+          GITHUB_TOKEN: ${{ github.token }}
+          GROWTH_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          GROWTH_MAX_POSTS: ${{ steps.policy.outputs.max_posts }}
+          GROWTH_REQUIRE_APPROVAL: ${{ steps.policy.outputs.require_approval }}
+          GROWTH_TWITTER_LIVE: ${{ vars.GROWTH_TWITTER_LIVE }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.chain.outputs.link2_model }} --effort high --permission-mode dontAsk --settings .claude/growth-twitter-settings.json --mcp-config .claude/skills/growth-twitter/growth-mcp.json --allowedTools "mcp__growth_twitter__post_tweet,Read,Grep,Glob"
+          prompt: "/growth-twitter ${{ steps.select.outputs.issues }}"
+
+      - name: Run via Anthropic (Claude, chain link 3)
+        id: run_anthropic_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_anthropic_2.outcome != 'success'
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over.
+        timeout-minutes: 20
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GROWTH_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
@@ -438,7 +572,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           show_full_output: "false"
-          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort high --permission-mode dontAsk --settings .claude/growth-twitter-settings.json --mcp-config .claude/skills/growth-twitter/growth-mcp.json --allowedTools "mcp__growth_twitter__post_tweet,Read,Grep,Glob"
+          claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort high --permission-mode dontAsk --settings .claude/growth-twitter-settings.json --mcp-config .claude/skills/growth-twitter/growth-mcp.json --allowedTools "mcp__growth_twitter__post_tweet,Read,Grep,Glob"
           prompt: "/growth-twitter ${{ steps.select.outputs.issues }}"
 
       - name: Explain a skipped agentic run
@@ -455,12 +589,41 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "::notice::dry run — selected queued items (${ISSUES}) but did not invoke the agent"
           else
-            echo "::notice::the configured provider '${PROVIDER}' has no key set (ANTHROPIC_API_KEY for anthropic, ZAI_KEY for zai) — selected (${ISSUES}) but skipping the unattended run"
+            echo "::notice::no key is set for ANY provider in the growth-twitter chain (ZAI_KEY for the zai link, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — selected (${ISSUES}) but skipping the unattended run"
           fi
 
       - name: Explain nothing to drain
         if: steps.policy.outputs.enabled == 'true' && steps.select.outputs.issues == ''
         run: echo "::notice::nothing to drain this run — either the day's live-post cap is already met (the per-day guard) or the queue is empty (PMs queue messages with /growth-queue or the 'Growth post (Twitter/X)' issue form); the Select step summary says which"
+
+      # No SHIP-LOCK lifecycle here, so the terminal link failing IS the job
+      # failure — but before that stands, recover WHY the chain exhausted (the
+      # agent steps hide their provider error) and route the human-fixable
+      # causes — out of credit / out of tokens / bad key — to ONE deduped
+      # needs-decision issue, so a scheduled red nobody watches becomes an
+      # actionable ask. A bad model id or a transient blip is only diagnosed
+      # in the log. Advisory: it never fails the job. Fires (always()) only
+      # when something was selected, a key was present and the walk did not
+      # succeed — the same three-link walk-outcome expression the record step
+      # reports as RUN. Both keys go in so classify probes both halves of the
+      # chain.
+      - name: Diagnose the exhausted chain (billing / tokens / technical)
+        id: triage
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: growth-twitter
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the Twitter/X growth agent routine
+          escalate: "true"
 
       - name: Record the run outcome
         if: always()
@@ -470,9 +633,42 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+          # The walk's outcome (#544): 'success' if ANY of the three links
+          # across both providers succeeded; otherwise the outcome of the
+          # LAST LINK THAT ACTUALLY RAN — the nested tail walks backwards
+          # over 'skipped' links, so 'skipped' means every link was skipped
+          # (no key for any provider, or nothing selected), never "the tail
+          # had no key" after the head failed. The terminal link failing
+          # fails the job; the "Turn an exhausted walk red" step below
+          # covers a walk exhausted with the tail skipped.
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
+          # Per-link outcomes + the chain the resolve step emitted, so the
+          # summary can name WHICH link served and warn when the head
+          # provider fell through (a GLM outage must stay visible even though
+          # the run is green — #544).
+          L1: ${{ steps.run_zai_1.outcome }}
+          L2: ${{ steps.run_anthropic_2.outcome }}
+          L3: ${{ steps.run_anthropic_3.outcome }}
+          M1: ${{ steps.chain.outputs.link1_model }}
+          M2: ${{ steps.chain.outputs.link2_model }}
+          M3: ${{ steps.chain.outputs.link3_model }}
+          P1: ${{ steps.chain.outputs.link1_provider }}
+          P2: ${{ steps.chain.outputs.link2_provider }}
+          P3: ${{ steps.chain.outputs.link3_provider }}
           LIVE: ${{ vars.GROWTH_TWITTER_LIVE }}
         run: |
+          # Which link served: the first (only) link whose outcome is success.
+          served=""
+          for i in 1 2 3; do
+            o="L$i"; m="M$i"; p="P$i"
+            if [ "${!o}" = "success" ]; then
+              served="link $i ${!m} (${!p})"
+              if [ "${!p}" != "${PROVIDER}" ]; then
+                echo "::warning::the Twitter/X growth agent fell through to ${!p}: every '${PROVIDER}' (head provider) link failed or was skipped and link $i ${!m} served — the run is green, but the head provider is down or keyless; check its quota/key"
+              fi
+              break
+            fi
+          done
           {
             echo "## Growth agent (Twitter/X) — run outcome"
             if [ "${POLICY_OUTCOME}" != "success" ]; then
@@ -485,11 +681,36 @@ jobs:
               echo "- selected: none (the queue is empty)"
             else
               echo "- queued items, in drain order: #${ISSUES// / #}"
-              echo "- provider: ${PROVIDER}"
+              echo "- provider: ${PROVIDER} (head)"
               echo "- channel mode: $([ "${LIVE}" = "true" ] && echo 'LIVE-armed (posts still need X credentials + per-item approval)' || echo 'dry-run (GROWTH_TWITTER_LIVE unset)')"
               echo "- run step: ${RUN:-skipped} (each drained item's outcome is a comment on its queue issue)"
+              if [ -n "${served}" ]; then
+                echo "- served by: ${served}"
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Turn an exhausted walk red
+        # The terminal link (3) carries no continue-on-error, so its failure
+        # fails the job — but a walk that exhausted with the tail SKIPPED
+        # (only ZAI_KEY set and the GLM link dead) has no failed non-coe
+        # step, and would leave the run green: exactly the silent-success
+        # disguise the burn's red-on-death step exists for. Restore the
+        # failure last, after the triage and the record have run. Same
+        # walk-outcome expression as the triage gate and RUN above.
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
+        env:
+          ISSUES: ${{ steps.select.outputs.issues }}
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
+        run: |
+          echo "::error::the /growth-twitter agent step did not succeed on any link of the growth-twitter chain for the selected queue items (${ISSUES}) (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
+          exit 1
 
   disarmed-notice:
     name: Explain a disarmed run
