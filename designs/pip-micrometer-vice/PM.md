@@ -36,7 +36,9 @@ orientations or variants that need supports (N1).
 - [x] `gate.sh --slice` exit 0 for vice + coupon, fusecheck ok with control firing
 - [x] `readme-gate.sh` passes (hero shot is CI's `regen` to render)
 - [x] Every Must-fit row measured on the exported mesh, not the parameter
-- [ ] `/preflight` green
+- [x] `/preflight` green (gate rc 0, check.sh, style-check, lineage
+      selftest; the only local reds are the two hero-image lines
+      readme-gate reports, which CI's `regen` renders)
 - [ ] Human reacts to the previews and merges (taste — theirs, not ours)
 - [ ] Post-merge: a FIELD-TEST entry with the clamped-force measurement
       (~50 N target, kitchen scale — the `czs-slider` acceptance pattern)

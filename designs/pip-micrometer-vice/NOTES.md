@@ -177,6 +177,23 @@ Per the brief (issue #516), all rows given unless marked:
     135 px headroom — so the freeze holds. Vision claimed bottom/right
     clipping the trim box contradicts (misread 10).
 
+15. **Brief audit measured off the export, not the parameter.** Welded-
+    vertex connected components over the STL separate the three bodies
+    (body/screw/jaw by bbox), and each Must-fit row was then measured on
+    the mesh: travel = the jaw component's x-shift between poses rendered
+    at `demo_opening=0.5` and `30` (29.50 mm, exactly 30 minus the 0.5
+    render standoff); face 40.00 × 20.00 (z 6.60..26.60); lead — crest
+    vertices phase-fold `mod 2` land on exactly two phases {0.25, 0.75},
+    the two edges of the 0.5-wide crest band, one band per turn (2.00
+    single-start; a naive gap-sort reads 1.5 because it drops the 0.5
+    intra-pair gaps); crest dia 12.00 (max radius 6.000 from the axis);
+    key clearance 0.300/side (rail faces ±20.300 vs jaw ±20.000 — note a
+    flat wall's *interior* has no facet corners, so the probe must take
+    `min |y|` over the wall, not an x-window); M5 rims centered
+    (±20.000, 0.000), Ø5.50; footprint 80.0 × 58.0. Same lesson as
+    decisions 9/10/13: the ECHO line agrees with all of it, but the ECHO
+    was never the evidence.
+
 ## Print settings
 
 - Orientation: as rendered — base down, screw and jaw axes along x. No
