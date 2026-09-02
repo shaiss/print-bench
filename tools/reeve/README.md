@@ -46,8 +46,12 @@ pattern; issue #313) — only when `--repo` is passed:
 
 The same `github.py` serves the greenlight loop's trusted Select step (issue
 #443): `gather_greenlight_queue` lists the open `needs-decision` issues and
-reads each thread to see which already carry a greenlight marker — still all
-GET, still the only network-capable module in the package.
+reads each thread to see which already carry a greenlight marker — and the
+loop's **learning half** (issue #445): `gather_greenlight_rounds` finds every
+greenlighted thread (a search probe over the marker phrase, per-candidate
+verified against a real marker first line, so a body that merely quotes the
+marker never counts) with its resolution state — still all GET, still the only
+network-capable module in the package.
 
 ## The detectors
 
@@ -110,6 +114,46 @@ repo-root `PM.md` charter line) or a ROUTE note handing design taste to its
 design PM — never a label, never a resolved gate, advisory until a human 👍.
 The reaction poll and push-through are piece #444, deliberately not this.
 
+## The learning half (issue #445)
+
+The loop converges on the bar the owner actually applies, instead of re-deriving
+it from the charter every run, through a committed **precedent log**:
+`telemetry/reeve-greenlights.ndjson`, one ndjson record per greenlight round
+whose gate resolved (closed, or verdict-labeled by `decide.yml`):
+
+```json
+{"issue": 267, "verdict": "yes", "reasoning": "…digest…",
+ "owner_reaction": "…", "outcome": "merged #299", "recorded_at": "…"}
+```
+
+`src/reeve/greenlights.py` is its pure core — a strict, loud-failing parser
+(a malformed record names its line, never silently drops), the observer's
+derive rule (one record per resolved-and-unrecorded round, idempotent, owner
+reaction from the decide.yml ledger row → the verdict label → inline owner
+replies → the honest "none observed"), and the capped context digest the
+drafter reads. Two CLI verbs compose it over the GET seam:
+
+- **`reeve greenlight-context`** — the *load* half. Renders the most recent
+  `greenlight_precedent_cap` records plus the inline owner replies on their
+  threads to `.reeve-context/precedent.md`, assembled by trusted workflow
+  code (the `.oracle-context/` pattern) so the agent cannot widen its own
+  context, with replies framed as evidence, never instructions. The seed
+  committed on the default branch records the stage-1 round (#296): six
+  verdicts, 6/6 ratified, zero overruled.
+- **`reeve greenlight-append`** — the *observe* half. Gathers every
+  greenlighted thread's resolution state, derives records for the newly
+  resolved, and writes the updated log in place. The push to the `telemetry`
+  data branch is trusted workflow bash: a third `observe` job in
+  `reeve.yml` (after the drafter, keyless, `contents: write` only) rebuilds
+  the branch with git plumbing — GITHUB_TOKEN, so the push triggers no
+  workflow — and `ci.yml`'s roll-up carries the file in the same tree, so
+  neither builder can silently delete the other's records
+  (`tests/test_learning_wiring.py` pins that parity, tamper negative
+  included).
+
+Both halves share the loop's gates (`greenlight: true` + arming); a dry run
+builds the context but derives and pushes nothing.
+
 ## Arming (two keys, shipped disarmed)
 
 The routine runs only when **both** agree: `.github/reeve.conf`'s `enabled: true`
@@ -131,6 +175,8 @@ reeve run --root . --repo owner/name         # + the GET-only run-health read
 reeve config --get enabled                   # read the committed policy
 reeve armed --variable "$REEVE_ENABLED" --conf-enabled "$enabled"
 reeve greenlight-select --repo owner/name    # the draftable parked-decision queue
+reeve greenlight-context --repo owner/name   # the drafter's precedent digest (#445)
+reeve greenlight-append --repo owner/name    # records for newly-resolved rounds (#445)
 ```
 
 `--repo` (on `gather` and `run`) attaches the run-health block; the token comes
@@ -147,5 +193,9 @@ python -m pytest tools/reeve/tests -q
 ```
 
 The golden-file test (`tests/fixtures/report.golden.md`) pins the report bytes;
-each detector has a positive case and a negative control. CI runs the suite when
-`tools/reeve/**` or `.github/reeve.conf` changes (`scripts/ci-classify.sh`).
+each detector has a positive case and a negative control, the precedent log has
+a golden round-trip against the committed seed, and `tests/test_learning_wiring.py`
+pins the workflow wiring (context channel, three-file branch parity, keyless
+observer). CI runs the suite when `tools/reeve/**`, `.github/reeve.conf`,
+`.github/workflows/reeve.yml` or the precedent-log seed changes
+(`scripts/ci-classify.sh`).

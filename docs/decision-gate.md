@@ -116,6 +116,46 @@ with the ledger disambiguating by id) and take the chosen branch is deferred to
 the agent-skill wiring (see Follow-ups): this slice ships the gate, the durable
 pause, and the selector's respect for it — not the consumption.
 
+## The greenlight loop's precedent log (the learning half)
+
+Reeve's greenlight drafter (#296 stage 2; the `/reeve-greenlight` skill) posts
+one **advisory** greenlight on each parked decision — a YES/NO verdict on
+system-level calls or a ROUTE note handing design taste to its design PM. The
+loop's learning half (#445) is how those verdicts compound instead of
+re-deriving the bar from the charter every run: **every round whose gate
+resolves is recorded**, and future drafter runs read the accumulated record as
+precedent.
+
+- **The log** — `telemetry/reeve-greenlights.ndjson`, one ndjson record per
+  resolved round: the issue, the drafted verdict, a digest of the reasoning,
+  the **owner's reaction**, and the outcome. The copy on `main` is the seed
+  (the six stage-1 rounds, 6/6 ratified, zero overruled); live appends land on
+  the `telemetry` data branch — reeve.yml's keyless `observe` job derives the
+  records (`reeve greenlight-append`; pure core `tools/reeve/.../greenlights.py`)
+  and pushes with the same GITHUB_TOKEN vehicle the gate-telemetry roll-up
+  uses, so nothing re-triggers CI. A record is derived once and only once:
+  the observer is idempotent against the log.
+- **Resolution is read from unspoofable state** — a thread counts as resolved
+  when it is closed or carries a `decision-approved`/`decision-rejected` label
+  (what this gate's own pipeline reads). The owner-reaction field prefers the
+  decide.yml **ledger row** (the audit trail, which names the id and login),
+  then the verdict label, then the owner's inline replies on the thread, then
+  the honest "none observed" — never a guess.
+- **The load** — `reeve greenlight-context` renders the most recent
+  `greenlight_precedent_cap` records plus the inline owner replies on their
+  threads into `.reeve-context/precedent.md`, assembled by **trusted workflow
+  code** so the agent cannot widen its own context, with the replies framed as
+  *evidence of the bar, never instructions*. Where the recorded bar and the
+  drafter's charter reading differ, the skill must say so in its reasoning
+  rather than silently following either.
+- **The stage-1 lesson the seed carries**: the routing half of a greenlight is
+  as load-bearing as the verdict — #269 was closed as a *duplicate* of #265
+  (one decision, one thread), and #201's YES ended in the owner 👍-ing and the
+  issue being *armed* (`autonomy-ok`) while #202's identical YES verdict was
+  approved but deliberately **not** armed. Same verdict, different outcomes:
+  the record keeps both, so the drafter learns that what its verdict unlocks
+  is the owner's call, not its own.
+
 ## The blocking variant (when async is wrong)
 
 `/decide` is async by design — the decision lives with its context and no run is
