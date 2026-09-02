@@ -21,6 +21,15 @@ down through two M5 holes.
 
 2.0 mm of travel per knob turn, 30 mm of opening, plain clamping faces.
 
+![Section through the vice](previews/section.png)
+
+The section is the whole print story: the screw never prints on air — its
+shaft sits in a 0.5 mm guide bore through the rear block, its thread is
+interleaved with the moving jaw's nut at the tuned fit, and the one exposed
+span rides 0.4 mm above the centre saddle. The thrust collar (the disc at
+the left) floats in a sealed chamber, so clamping force goes into the base,
+not the printed thread.
+
 ## Print settings
 
 - **Material:** PLA or PETG, one colour
@@ -32,6 +41,13 @@ down through two M5 holes.
 - **Orientation:** exactly as rendered — base flat on the bed, screw axis
   horizontal
 - **Print first:** the coupon, and read it before printing the vice
+
+![Fit coupon](previews/coupon.png)
+
+Digit row = screw fit (`thread_tol` 0.25 / 0.30 / 0.35, default **2**);
+letter row = jaw guide fit (`clr_h` 0.25 / 0.30 / 0.35, default **B**).
+Screw each nut onto its stud, push each slider down its channel, and keep
+the station that turns smoothly without slop.
 
 ## Parameters
 
