@@ -169,7 +169,7 @@ def test_no_hardcoded_model_literal_survives():
 # The scout was the registry's second consumer (#243), pinned here as a
 # single-link chain with one ship step per provider, the conf's `provider:`
 # picking which one ran. Since #544 Part B it walks the cross-provider chain
-# like the four scheduled routines — the GLM head, then the Anthropic tail —
+# like the four Part A routines — the GLM head, then the Anthropic tail —
 # and is the "scout" row of the ROUTINES table below, covered by every generic
 # pin: the chain fits the walk (head on the conf provider, one step per link
 # wired to its link's provider, the row's layout), the walk order, the
@@ -220,69 +220,54 @@ def test_scout_degraded_path_skips_with_a_notice_only_when_no_key_is_present():
         "through, not a skip")
 
 
-# ── The spike converter (#245 child C, issue #440) ────────────────────────────
+# ── The spike converter (#245 child C, issue #440; #544 Part B) ───────────────
 #
-# PHASE 3 (#544 Part B): spike-converter.yml joins the ROUTINES table as
-#   "spike-converter": Routine(workflow="spike-converter.yml",
-#       chain="spike-converter", conf=".github/spike-converter.conf",
-#       job="convert", resolve_id="chain", prefix="run",
-#       layout=("zai", "anthropic", "anthropic"),
-#       gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False)
-# once its workflow carries the product-scout.yml walk. Then: retire
-# `_spike_ship_steps` + `test_spike_converter_ship_steps_are_pinned_to_its_
-# registry_link` (one-step-per-provider reading link1 — the generic ship-step
-# pin covers it), `test_spike_converter_workflow_cross_checks_chain_and_conf_
-# providers` (the `link1_provider` read becomes the `model_registry shape`
-# call the generic layout pin reads) and `test_spike_converter_degraded_path_
-# skips_with_a_notice` (the "::notice::the configured provider" wording
-# becomes the any-provider notice the generic skip-notice pin covers); KEEP
-# `test_spike_converter_ship_steps_wire_the_reused_surface` (re-read the
-# chunks off `_routine_ship_steps` — every walk step must still carry the
-# reused scout surface), `test_spike_converter_conf_declares_the_chains_
-# provider` (already a head-link rule) and the two-key arming pin.
-#
-# The scheduled spike-to-brief converter is the scout's shape exactly: a
-# SINGLE-link chain (`spike-converter`, the scout tier — extraction and
-# reformatting of human-vetted text is cheap-to-be-wrong), one ship step per
-# provider, each sourcing `--model` from `steps.chain.outputs.link1_model`.
-# The guard below is the scout's, adapted only where the converter differs:
-# its ONE write is not its own MCP server but the scout's REUSED filing tool,
-# so the wiring test additionally pins the reuse — every ship step must pass
-# the converter's own deny backstop, the scout's mcp-config, and an allow-list
-# that names mcp__scout__file_design_brief. The file-side half of that
-# coupling (the backstop never denying the tool; the scout files still
-# existing) is scripts/spike-converter-perms-check.sh's.
+# The scheduled spike-to-brief converter is the scout's shape exactly, and
+# since #544 Part B it walks the scout's chain shape too — the GLM head, then
+# the Anthropic tail — as the "spike-converter" row of the ROUTINES table
+# below, covered by every generic pin: the chain fits the walk (head on the
+# conf provider, one step per link wired to its link's provider, the row's
+# layout), the walk order, the per-provider key gates, the any-provider skip
+# notice, the outcome simulation, the exhaustion gates, the job budget, the
+# no-literal rule and the triage wiring. What stays explicit here is what
+# the generic pins do NOT say: the converter's ONE write is not its own MCP
+# server but the scout's REUSED filing tool (#439), so EVERY walk step —
+# the tail included, which runs only on the fall-through path where nobody
+# is watching — must carry the converter's own deny backstop, the scout's
+# mcp-config and an allow-list naming exactly mcp__scout__file_design_brief
+# (the workflow half of the coupling scripts/spike-converter-perms-check.sh
+# holds over the files); issue #440's two frozen acceptance criteria — the
+# conf declares the chain's head provider, and the two-key arming gates the
+# job on every link; and the #440 degraded path, a ::notice:: skip that now
+# fires only when NO provider in the chain has a key.
 
-SPIKE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "spike-converter.yml"
-SPIKE_CONF = REPO_ROOT / ".github" / "spike-converter.conf"
-SPIKE_CHAIN = "spike-converter"
+# The converter's own deny backstop, the scout's filing server it reuses, and
+# the exact allow-list — the tool, its own read wrapper (both spellings) and
+# the read-only file tools.
+_SPIKE_BACKSTOP = ".claude/spike-converter-settings.json"
+_SPIKE_MCP_CONFIG = ".claude/skills/product-scout/scout-mcp.json"
+_SPIKE_ALLOWED = (
+    "mcp__scout__file_design_brief,"
+    "Bash(.claude/skills/spike-converter/converter-helper.sh:*),"
+    "Bash(./.claude/skills/spike-converter/converter-helper.sh:*),"
+    "Read,Grep,Glob")
 
 
-def _spike_text() -> str:
-    return SPIKE_WORKFLOW.read_text(encoding="utf-8")
-
-
-def _spike_ship_steps(text: str) -> list[dict]:
-    """The converter job's claude-code-action ship steps, parsed for wiring."""
-    steps: list[dict] = []
-    for chunk in re.split(r"\n      - ", text):
-        if "uses: anthropics/claude-code-action" not in chunk:
-            continue
-        model = re.search(
-            r"--model \$\{\{ steps\.chain\.outputs\.link(\d+)_model \}\}", chunk)
-        secret = re.search(r"anthropic_api_key: \$\{\{ secrets\.(\w+) \}\}", chunk)
-        base = re.search(r"ANTHROPIC_BASE_URL: (\S+)", chunk)
+def _spike_walk_steps(text: str) -> list[dict]:
+    """The converter walk's ship steps (every link, via the generic parser),
+    each with the surface fields the reuse pin reads parsed off its chunk."""
+    row = ROUTINES["spike-converter"]
+    steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
+    assert steps, (
+        f"no claude-code-action ship step found in {row.workflow}'s `{row.job}` job")
+    for step in steps:
+        chunk = step["chunk"]
         settings = re.search(r"--settings (\S+)", chunk)
         mcp = re.search(r"--mcp-config (\S+)", chunk)
         allowed = re.search(r'--allowedTools "([^"]*)"', chunk)
-        steps.append({
-            "model_slot": int(model.group(1)) if model else None,
-            "secret": secret.group(1) if secret else None,
-            "base_url": base.group(1) if base else "",
-            "settings": settings.group(1) if settings else None,
-            "mcp_config": mcp.group(1) if mcp else None,
-            "allowed_tools": allowed.group(1) if allowed else "",
-        })
+        step["settings"] = settings.group(1) if settings else None
+        step["mcp_config"] = mcp.group(1) if mcp else None
+        step["allowed_tools"] = allowed.group(1) if allowed else ""
     return steps
 
 
@@ -290,176 +275,148 @@ def test_spike_converter_chain_exists_and_resolves():
     # The chain issue #440 names. A registry edit that dropped it would fail
     # the workflow's resolve step at run time — on the converter's weekly
     # cadence, where nobody is watching. Catch it here instead.
-    links = Registry.load(str(REGISTRY)).resolve(SPIKE_CHAIN)
-    assert links, f"the `{SPIKE_CHAIN}` chain resolved to zero links"
+    row = ROUTINES["spike-converter"]
+    links = Registry.load(str(REGISTRY)).resolve(row.chain)
+    assert links, f"the `{row.chain}` chain resolved to zero links"
 
 
-def test_spike_converter_ship_steps_are_pinned_to_its_registry_link():
-    """Every converter ship step reads its model from the resolved chain,
-    sources it from the resolve step's output, and carries exactly one
-    endpoint/secret pair per provider — the model id appears nowhere in the
-    YAML (the scout guard's split: the conf's `provider:` label picks which
-    step runs, so the non-current provider's step is checked structurally).
+def _assert_spike_walk_carries_the_reused_surface(text: str) -> None:
+    """Every walk step — head and tail alike — carries the #439/#440 reuse:
+    the converter's own backstop, the SCOUT's mcp-config, the exact
+    allow-list and dontAsk. A step that drops any of these either widens the
+    unattended run's surface or — for the mcp-config / allow-list — silently
+    revokes its only write, so the armed routine files nothing and fails
+    without an error. Factored out so the negative control can run it
+    against tampered text."""
+    for step in _spike_walk_steps(text):
+        where = f"spike-converter link-{step['link']} ship step"
+        assert step["settings"] == _SPIKE_BACKSTOP, (
+            f"{where}: --settings is {step['settings']!r}, not the converter's "
+            f"own deny backstop {_SPIKE_BACKSTOP}")
+        assert step["mcp_config"] == _SPIKE_MCP_CONFIG, (
+            f"{where}: --mcp-config is {step['mcp_config']!r}, not the reused "
+            f"scout filing server {_SPIKE_MCP_CONFIG} — filing a brief any "
+            "other way breaks #439's one-filing-surface rule")
+        assert step["allowed_tools"] == _SPIKE_ALLOWED, (
+            f"{where}: allow-list is {step['allowed_tools']!r}, expected "
+            f"exactly {_SPIKE_ALLOWED!r}")
+        assert "--permission-mode dontAsk" in step["chunk"], (
+            f"{where}: the dontAsk mode is gone — without it the allow-list "
+            "stops being exclusive and a prompt-injected run gets "
+            "prompted-for tools")
+
+
+def test_spike_converter_walk_steps_wire_the_reused_surface():
+    row = ROUTINES["spike-converter"]
+    _assert_spike_walk_carries_the_reused_surface(_routine_text(row.workflow))
+
+
+def test_spike_reuse_guard_rejects_a_tail_step_that_sheds_the_mcp_config():
+    # NEGATIVE CONTROL: the terminal tail step without the reused scout
+    # mcp-config — its only write silently revoked, on the one path that
+    # runs unwatched — must fail. The tamper is anchored inside the live
+    # step, not the file's first occurrence, so it stays valid whichever
+    # link's step the file lists first.
+    row = ROUTINES["spike-converter"]
+    text = _routine_text(row.workflow)
+    chunk = max(_spike_walk_steps(text), key=lambda s: s["link"])["chunk"]
+    needle = f"--mcp-config {_SPIKE_MCP_CONFIG} "
+    assert needle in chunk, "tamper target not found — the fixture is stale"
+    tampered = text.replace(chunk, chunk.replace(needle, "", 1), 1)
+    with pytest.raises(AssertionError, match="mcp-config"):
+        _assert_spike_walk_carries_the_reused_surface(tampered)
+
+
+def test_spike_converter_conf_declares_the_chains_head_provider():
+    # Issue #440's pinned acceptance criterion, held by name: .github/
+    # spike-converter.conf must keep declaring the provider the chain's HEAD
+    # link resolves to, or every armed run dies at the resolve step's shape
+    # check before a key is spent. The generic chain-fits-walk pin applies
+    # this same head rule to every ROUTINES row (with its negative control,
+    # test_routine_shape_guard_rejects_a_head_off_the_conf_provider); this
+    # keeps the issue's criterion legible where the issue put it.
+    row = ROUTINES["spike-converter"]
+    head = Registry.load(str(REGISTRY)).resolve(row.chain)[0]
+    conf_provider = _routine_provider(row.conf)
+    assert conf_provider == head.provider, (
+        f"{row.conf} declares provider {conf_provider!r} but the "
+        f"`{row.chain}` chain's head link ({head.model}) is on "
+        f"{head.provider!r} — the resolve step's shape check will fail every "
+        "armed run")
+
+
+def test_spike_converter_degraded_path_skips_with_a_notice_only_when_no_key_is_present():
+    """The secret-absent path stays a `::notice::` skip, not a hard fail —
+    the #440 property — reworded by #544 Part B: it fires only when NO
+    provider in the chain has a key (the pre-#544 "the configured provider
+    has no key" notice would announce a skip while the Anthropic tail ran,
+    or skip the whole run on a keyless head). The generic rule proves the
+    gate; this pins that the old single-provider wording is gone with it.
     """
-    reg = Registry.load(str(REGISTRY))
-    link = reg.resolve(SPIKE_CHAIN)[0]
-    text = _spike_text()
-    steps = _spike_ship_steps(text)
-    assert steps, "no claude-code-action ship step found in spike-converter.yml"
-    secrets_by_provider = {p.id: p.secret for p in reg.providers.values()}
-    bases_by_provider = {p.id: p.base_url for p in reg.providers.values()}
-    matched_current = False
-    for step in steps:
-        assert step["model_slot"] == link.position, (
-            f"converter ship step: references link{step['model_slot']}_model "
-            f"but the `{SPIKE_CHAIN}` chain has its only model at position "
-            f"{link.position}.")
-        providers_with_secret = [pid for pid, s in secrets_by_provider.items()
-                                 if s == step["secret"]]
-        assert len(providers_with_secret) == 1, (
-            f"converter ship step: wires secrets.{step['secret']}, which "
-            f"matches no single registry provider "
-            f"(matches: {providers_with_secret}).")
-        step_provider = providers_with_secret[0]
-        assert step["base_url"] == bases_by_provider[step_provider], (
-            f"converter ship step: wires secrets.{step['secret']} with "
-            f"ANTHROPIC_BASE_URL {step['base_url']!r} but registry provider "
-            f"{step_provider!r} uses {bases_by_provider[step_provider]!r}.")
-        if step_provider == link.provider:
-            matched_current = True
-    assert matched_current, (
-        f"no converter ship step carries the `{SPIKE_CHAIN}` chain's provider "
-        f"{link.provider!r} (secret {link.secret}) — the configured provider "
-        f"would have no step to run, or would run one wired for another "
-        f"provider's endpoint.")
+    row = ROUTINES["spike-converter"]
+    text = _routine_text(row.workflow)
+    _assert_routine_skip_notice_fires_only_without_any_key(row, text)
+    assert "::notice::the configured provider" not in text, (
+        "spike-converter.yml still carries the single-provider secret-absent "
+        "notice — under the cross-provider walk a keyless head is a fall-"
+        "through, not a skip")
 
 
-def test_spike_converter_ship_steps_wire_the_reused_surface():
-    """The converter's tool surface is the #439/#440 reuse: its own backstop,
-    the SCOUT's mcp-config, and an allow-list of exactly the filing tool, its
-    own read wrapper (both spellings) and the read-only file tools. A step
-    that drops any of these either widens the unattended run's surface or —
-    for the mcp-config/allow-list — silently revokes its only write, so the
-    armed routine files nothing and fails without an error. This is the
-    workflow half of the coupling scripts/spike-converter-perms-check.sh
-    holds over the files.
-    """
-    text = _spike_text()
-    steps = _spike_ship_steps(text)
-    assert steps, "no claude-code-action ship step found in spike-converter.yml"
-    expected_allowed = (
-        "mcp__scout__file_design_brief,"
-        "Bash(.claude/skills/spike-converter/converter-helper.sh:*),"
-        "Bash(./.claude/skills/spike-converter/converter-helper.sh:*),"
-        "Read,Grep,Glob")
-    for step in steps:
-        assert step["settings"] == ".claude/spike-converter-settings.json", (
-            f"converter ship step: --settings is {step['settings']!r}, not the "
-            f"converter's own deny backstop")
-        assert step["mcp_config"] == ".claude/skills/product-scout/scout-mcp.json", (
-            f"converter ship step: --mcp-config is {step['mcp_config']!r}, not "
-            f"the reused scout filing server — filing a brief any other way "
-            f"breaks #439's one-filing-surface rule")
-        assert step["allowed_tools"] == expected_allowed, (
-            f"converter ship step: allow-list is {step['allowed_tools']!r}, "
-            f"expected exactly {expected_allowed!r}")
-        assert "--permission-mode dontAsk" in text, (
-            "the dontAsk mode is gone — without it the allow-list stops being "
-            "exclusive and a prompt-injected run gets prompted-for tools")
-
-
-def test_spike_converter_workflow_cross_checks_chain_and_conf_providers():
-    # The workflow itself must refuse a conf/chain provider mismatch at
-    # resolve time (before any key is spent), or the model would run against
-    # the wrong provider's endpoint and fail mid-run — issue #440's pinned
-    # acceptance criterion, so its presence is pinned too.
-    text = _spike_text()
-    assert re.search(r"link1_provider", text), (
-        "spike-converter.yml no longer reads link1_provider — the conf/chain "
-        "provider cross-check is gone")
-    assert "model_registry resolve spike-converter" in text, (
-        "spike-converter.yml no longer resolves the `spike-converter` chain")
-
-
-def test_spike_converter_conf_declares_the_chains_provider():
-    # The cross-check's subject, held still: .github/spike-converter.conf
-    # must keep declaring the provider its chain's link resolves to, or every
-    # armed run dies at the resolve step. (The runtime check reports this
-    # loudly; this pins it pre-merge, before a key is spent discovering it.)
-    reg = Registry.load(str(REGISTRY))
-    link = reg.resolve(SPIKE_CHAIN)[0]
-    conf = SPIKE_CONF.read_text(encoding="utf-8")
-    m = re.search(r"^provider:\s*(\S+)\s*$", conf, re.MULTILINE)
-    assert m, f"{SPIKE_CONF} carries no `provider:` key"
-    assert m.group(1) == link.provider, (
-        f"{SPIKE_CONF} declares provider {m.group(1)!r} but the "
-        f"`{SPIKE_CHAIN}` chain's link is on {link.provider!r} — the resolve "
-        f"cross-check will fail every armed run")
-
-
-def test_spike_converter_degraded_path_skips_with_a_notice():
-    """The secret-absent path stays a `::notice::` skip, not a hard fail.
-
-    The run steps' `if:` must gate on `key_present` (so an absent key skips
-    them), and the step that explains the skip must still emit a `::notice::`
-    naming the provider and its key — the scout's preserved degraded path,
-    verbatim.
-    """
-    text = _spike_text()
-    assert re.search(
-        r"steps\.policy\.outputs\.key_present\s*==\s*'1'", text), (
-        "the converter run steps no longer gate on key_present — an absent "
-        "key would not skip them")
-    assert "::notice::the configured provider" in text, (
-        "the secret-absent notice is gone — the degraded path must stay a "
-        "::notice:: skip")
-
-
-def test_spike_converter_no_hardcoded_model_literal_survives():
-    # No `--model` literal of ANY provider may appear in spike-converter.yml —
-    # every one must be a `${{ … }}` expression sourced from the resolve
-    # step's outputs.
-    text = _spike_text()
-    literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
-                if not tok.startswith("${{")]
-    assert not literals, f"hardcoded --model literal(s) in spike-converter.yml: {literals}"
-
-
-def test_spike_converter_two_key_arming_gates_the_job():
+def _assert_spike_two_key_arming_gates_the_job(text: str) -> None:
     """Issue #440's disarm acceptance, pinned structurally: the job-level
     `if:` must read the LIVE repo variable (key 1 — unset by default, so a
-    clone/fork cannot silently arm an issue-filing cron) AND the ship steps
-    must gate on the committed conf's `enabled` (key 2 — `steps.policy.outputs
-    .enabled`, read from .github/spike-converter.conf by the policy step).
-    Dropping either key from its condition re-arms the routine one-sidedly —
-    exactly the drift this pins, complementing the disarmed-notice job that
-    makes the unset-variable leg visible in the run log.
-    """
-    text = _spike_text()
-    convert_block = _job_blocks(text)["convert"]
+    clone/fork cannot silently arm an issue-filing cron) AND every walk step
+    must gate on the committed conf's `enabled` (key 2 — `steps.policy
+    .outputs.enabled`, read from .github/spike-converter.conf by the policy
+    step). Dropping either key from its condition re-arms the routine
+    one-sidedly — and a TAIL step that dropped key 2 would file with the
+    conf paused in git, on the fall-through path alone. Factored out so the
+    negative control can run it against tampered text."""
+    row = ROUTINES["spike-converter"]
+    convert_block = _routine_job_text(text, row)
     job_if = re.search(
         r"if: >-\n\s+vars\.SPIKE_CONVERTER_ENABLED == 'true'", convert_block)
     assert job_if, (
         "the convert job's `if:` no longer reads "
         "vars.SPIKE_CONVERTER_ENABLED == 'true' — key 1 of the two-key arming "
         "is gone, and a clone that sets only the conf would run")
-    assert re.search(
-        r"steps\.policy\.outputs\.enabled == 'true'", convert_block), (
-        "the converter run steps no longer gate on the committed conf's "
-        "`enabled` (steps.policy.outputs.enabled) — key 2 of the two-key "
-        "arming is gone, and a one-line conf edit would disarm nothing")
     assert "enabled=\"$(backlog-burn config --get enabled --path \"$conf\")\"" \
         in convert_block, (
         "the policy step no longer reads `enabled` out of the conf — the "
-        "key-2 output the run steps gate on would be unfilled")
+        "key-2 output the walk steps gate on would be unfilled")
+    for step in _spike_walk_steps(text):
+        assert re.search(
+            r"steps\.policy\.outputs\.enabled == 'true'", step["chunk"]), (
+            f"spike-converter link-{step['link']} ship step no longer gates on "
+            "the committed conf's `enabled` (steps.policy.outputs.enabled) — "
+            "key 2 of the two-key arming is gone for that link, and a one-line "
+            "conf edit would disarm nothing on its path")
+
+
+def test_spike_converter_two_key_arming_gates_the_job():
+    row = ROUTINES["spike-converter"]
+    _assert_spike_two_key_arming_gates_the_job(_routine_text(row.workflow))
+
+
+def test_spike_two_key_guard_rejects_a_tail_step_without_the_conf_key():
+    # NEGATIVE CONTROL: strip the `enabled` leg from the terminal tail step's
+    # `if:` (the leg is read off the live step, never hand-copied) — the job
+    # still reads the live variable and the head still gates on the conf, so
+    # only a per-link rule can see the tail re-armed one-sidedly.
+    row = ROUTINES["spike-converter"]
+    text = _routine_text(row.workflow)
+    chunk = max(_spike_walk_steps(text), key=lambda s: s["link"])["chunk"]
+    m = re.search(
+        r"^([ \t]*)steps\.policy\.outputs\.enabled == 'true'\n[ \t]*&& ",
+        chunk, re.MULTILINE)
+    assert m, "tamper target not found — the tail step's `enabled` leg moved shape"
+    tampered = text.replace(chunk, chunk.replace(m.group(0), m.group(1), 1), 1)
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="key 2 of the two-key arming"):
+        _assert_spike_two_key_arming_gates_the_job(tampered)
 
 
 # ── The Oracle reviewer (issue #333) ──────────────────────────────────────────
-#
-# PHASE 3 (#544 Part B): NO change here. The Oracle's two role chains stay
-# single-vendor by design (the independence property below); Part B leaves
-# oracle-anthropic / oracle-glm untouched and the Oracle never joins the
-# ROUTINES table.
 #
 # The Oracle is the registry's third consumer: the cross-vendor, reasoning-blind
 # advisory reviewer on autonomy PRs. Its shape combines the other two — like the
@@ -2220,258 +2177,116 @@ def test_triage_wiring_guard_discriminates_a_wrong_chain():
 
 # ── The agent forge (Wright + Reeve's sign-off, docs/agent-forge.md) ─────────
 #
-# PHASE 3 (#544 Part B): wright.yml joins the ROUTINES table as TWO rows —
-#   "wright-propose": Routine(workflow="wright.yml", chain="wright",
-#       conf=".github/wright.conf", job="propose", resolve_id="propose_chain",
-#       prefix="propose", layout=("zai", "anthropic", "anthropic"),
-#       gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False)
-#   "wright-signoff": Routine(workflow="wright.yml", chain="wright-signoff",
-#       conf=".github/wright.conf", job="signoff", resolve_id="signoff_chain",
-#       prefix="signoff", layout=("zai", "zai", "zai", "anthropic", "anthropic"),
-#       gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False)
-# once the registry's `wright` / `wright-signoff` chains gain their tail (the
-# PHASE 3 markers in registry.conf) and both jobs carry the walk. Then
-# rewrite: `test_wright_chains_exist_and_match_conf` (every link on the conf
-# provider → the head rule, which the generic chain-fits-walk pin already
-# applies), `test_wright_ship_steps_are_pinned_to_their_registry_links` (the
-# conf-provider block covering every link → the generic one-step-per-link
-# pin; KEEP its per-half backstop + dontAsk assertions over the walk's
-# chunks), `test_wright_signoff_walk_gates_on_earlier_links` (the generic
-# walks-in-order pin), `test_wright_run_steps_gate_on_key_presence` (the
-# "::notice::the configured provider" wording → the any-provider notice; the
-# generic per-provider key gate), and the `WRIGHT_SIGNOFF_BLOCK` outcome
-# simulation + its stale-link1 control (the generic walk-outcome simulation
-# over `_walk_step_ids`, with `_stale_link1_copy`). Note the propose job's
-# select leg is `steps.select.outputs.propose == 'yes'`, already in
-# `_FIXED_GREEN_LEGS`.
-#
-# The forge is the registry's next consumer: ONE workflow (wright.yml), TWO
-# chains — `wright` (the propose half, single-link, the scout's shape) and
-# `wright-signoff` (the judging half, a walking tail, the labeler's shape) —
-# each resolved by its own step id in its own job, the Oracle's two-chain
-# pattern. The guard pins each chain's ship steps to its registry links, the
-# conf/chain provider agreement, the per-half deny backstop + dontAsk on
-# every ship step (the sign-off can apply `autonomy-ok`, so a quietly-shed
-# backstop there is the worst drift in the family), the sign-off walk's
-# gating, and — by simulation — that the sign-off RUN expression reads every
-# link, with a negative control proving the simulation can fail.
+# The forge is ONE workflow (wright.yml) carrying TWO walks — `wright` (the
+# propose half) in the `propose` job and `wright-signoff` (the judging half)
+# in the `signoff` job — each resolved by its own step id in its own job,
+# the Oracle's two-chain pattern. Since #544 Part B each walk crosses
+# providers (the propose half in the scout's three-link shape, the sign-off
+# in the labeler's five-link one) and is its own row of the ROUTINES table
+# above — "wright-propose" and "wright-signoff" — so every generic pin reads
+# each job separately: the chain fits its walk (head on the conf provider,
+# one step per link wired to its link's provider, the row's layout), the walk
+# order, the per-provider key gates, the outcome simulation and the
+# exhaustion gates per job, the job budget, the no-literal rule and the
+# triage wiring on each job's OWN chain. What stays explicit here is the
+# forge's own invariant, which no generic pin states: EVERY walk step of
+# each half — the tail included, which runs only on the fall-through path —
+# carries ITS OWN deny backstop and dontAsk, never the other half's. The
+# sign-off can apply `autonomy-ok`, so a quietly-shed backstop there is the
+# worst drift in the family, and a step carrying the other half's backstop
+# would collapse the proposer/judge separation the forge is built on
+# (scripts/wright-perms-check.sh holds the file side of that split). Plus
+# the degraded path in its any-provider form.
 
-WRIGHT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "wright.yml"
-WRIGHT_CONF = ".github/wright.conf"
-# chain id → (the resolve step id whose outputs that chain's ship steps read,
-#             the half's OWN deny backstop the ship steps must carry)
-WRIGHT_CHAINS = {
-    "wright": ("propose_chain", ".claude/wright-settings.json"),
-    "wright-signoff": ("signoff_chain", ".claude/reeve-signoff-settings.json"),
+# ROUTINES row → the half's OWN deny backstop every walk step must carry.
+WRIGHT_BACKSTOPS = {
+    "wright-propose": ".claude/wright-settings.json",
+    "wright-signoff": ".claude/reeve-signoff-settings.json",
 }
-# The sign-off walk's step ids in the conf provider's block, link order.
-WRIGHT_SIGNOFF_BLOCK = ("signoff_zai_1", "signoff_zai_2", "signoff_zai_3")
 
 
-def _wright_text() -> str:
-    return WRIGHT_WORKFLOW.read_text(encoding="utf-8")
-
-
-def test_wright_chains_exist_and_match_conf():
-    # Both chains must exist AND every link must sit on the provider
-    # .github/wright.conf declares — the workflow resolve steps' run-time
-    # cross-check, caught pre-merge (a mismatched link would spend a key
-    # against the wrong endpoint mid-walk).
-    reg = Registry.load(str(REGISTRY))
-    conf_provider = _routine_provider(WRIGHT_CONF)
-    for chain in WRIGHT_CHAINS:
-        links = reg.resolve(chain)
-        assert links, f"the `{chain}` chain resolved to zero links"
-        for link in links:
-            assert link.provider == conf_provider, (
-                f"wright: link {link.position} of `{chain}` is on provider "
-                f"{link.provider!r} but {WRIGHT_CONF} declares "
-                f"{conf_provider!r} — the walk would spend that link's key "
-                "against the wrong endpoint")
-
-
-def test_wright_ship_steps_are_pinned_to_their_registry_links():
-    """Every forge ship step sources --model from a real link of its half's
-    chain and carries that half's deny backstop + dontAsk; the steps on the
-    conf's provider match the chain exactly (count, order, secret, endpoint),
-    the latent other-provider block is checked structurally — the scout/
-    routine guards' two-tier split."""
-    reg = Registry.load(str(REGISTRY))
-    conf_provider = _routine_provider(WRIGHT_CONF)
-    secrets_by_provider = {p.id: p.secret for p in reg.providers.values()}
-    bases_by_provider = {p.id: p.base_url for p in reg.providers.values()}
-    text = _wright_text()
-    for chain, (step_id, backstop) in WRIGHT_CHAINS.items():
-        links = reg.resolve(chain)
-        link_positions = {link.position for link in links}
-        steps = _oracle_ship_steps(text, step_id)
-        assert steps, f"no ship step reads steps.{step_id}.outputs in wright.yml"
-        current = []
-        for step in steps:
-            assert step["model_slot"] in link_positions, (
-                f"wright {chain}: a ship step references "
-                f"link{step['model_slot']}_model but the chain has links "
-                f"{sorted(link_positions)}")
-            providers_with_secret = [pid for pid, s in secrets_by_provider.items()
-                                     if s == step["secret"]]
-            assert len(providers_with_secret) == 1, (
-                f"wright {chain}: a ship step wires secrets.{step['secret']}, "
-                f"which matches no single registry provider "
-                f"({providers_with_secret})")
-            step_provider = providers_with_secret[0]
-            assert step["base_url"] == bases_by_provider[step_provider], (
-                f"wright {chain}: a step for provider {step_provider!r} carries "
-                f"ANTHROPIC_BASE_URL {step['base_url']!r} but the registry "
-                f"endpoint is {bases_by_provider[step_provider]!r}")
-            # Punch-list discipline (the Oracle's): the narrowed surface must
-            # not be quietly shed — and each half must carry ITS OWN backstop,
-            # never the other's (the proposer/judge separation lives there).
-            assert "--permission-mode dontAsk" in step["chunk"], (
-                f"wright {chain}: a ship step no longer runs under "
-                "--permission-mode dontAsk")
-            assert f"--settings {backstop}" in step["chunk"], (
-                f"wright {chain}: a ship step no longer carries its half's "
-                f"deny backstop (--settings {backstop})")
-            if step_provider == conf_provider:
-                current.append(step)
-        assert [s["model_slot"] for s in current] == [l.position for l in links], (
-            f"wright {chain}: the {conf_provider} block's steps reference links "
-            f"{[s['model_slot'] for s in current]} but the chain has "
-            f"{[l.position for l in links]} — one ship step per link, in order")
-
-
-def test_wright_signoff_walk_gates_on_earlier_links():
-    # The sign-off walk must actually WALK: each link-N step (N>1) is gated on
-    # every earlier same-block link NOT having succeeded, so the first success
-    # short-circuits the rest (#327's rule, the labeler's shape).
-    text = _wright_text()
-    steps = _oracle_ship_steps(text, "signoff_chain")
-    by_link = {}
+def _assert_wright_half_carries_its_own_backstop(
+        row: Routine, backstop: str, text: str) -> None:
+    """Every walk step of one half runs under dontAsk with that half's own
+    backstop — and NOT the other half's. Factored out so the negative
+    control can run it against tampered text."""
+    steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
+    assert steps, (
+        f"no claude-code-action ship step found in {row.workflow}'s `{row.job}` job")
+    others = [b for b in WRIGHT_BACKSTOPS.values() if b != backstop]
     for step in steps:
-        m = re.search(r"^\s*id:\s*(\S+)", step["chunk"], re.MULTILINE)
-        if m and m.group(1).startswith("signoff_zai_"):
-            by_link[step["model_slot"]] = step
-    assert set(by_link) == {1, 2, 3}, (
-        f"wright signoff: expected zai walk steps for links 1-3, found "
-        f"{sorted(by_link)}")
-    for n in (2, 3):
-        for earlier in range(1, n):
-            needle = f"steps.signoff_zai_{earlier}.outcome != 'success'"
-            assert needle in by_link[n]["chunk"], (
-                f"wright signoff: the link-{n} step is not gated on {needle} — "
-                "the walk would run every link unconditionally")
+        where = f"wright {row.job} link-{step['link']} ship step"
+        assert "--permission-mode dontAsk" in step["chunk"], (
+            f"{where}: no longer runs under --permission-mode dontAsk")
+        assert f"--settings {backstop}" in step["chunk"], (
+            f"{where}: no longer carries its half's deny backstop "
+            f"(--settings {backstop})")
+        for other in others:
+            assert f"--settings {other}" not in step["chunk"], (
+                f"{where}: carries the OTHER half's deny backstop "
+                f"(--settings {other}) — the proposer/judge separation is gone")
 
 
-def test_wright_run_steps_gate_on_key_presence():
-    # The degraded path stays a ::notice:: skip (the #326 constraint): every
-    # ship step gates on key_present, and the skip notice survives.
-    text = _wright_text()
-    for chain, (step_id, _backstop) in WRIGHT_CHAINS.items():
-        for step in _oracle_ship_steps(text, step_id):
-            assert "key_present == '1'" in step["chunk"], (
-                f"wright {chain}: a ship step does not gate on "
-                "key_present == '1' — an absent provider key would not skip it")
-    assert "::notice::the configured provider" in text, (
-        "wright.yml's secret-absent notice is gone — the degraded path must "
-        "stay a ::notice:: skip")
+def test_wright_walk_steps_carry_their_halfs_backstop():
+    for name, backstop in WRIGHT_BACKSTOPS.items():
+        row = ROUTINES[name]
+        _assert_wright_half_carries_its_own_backstop(
+            row, backstop, _routine_text(row.workflow))
 
 
-def test_wright_no_hardcoded_model_literal_survives():
-    text = _wright_text()
-    literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
-                if not tok.startswith("${{")]
-    assert not literals, f"hardcoded --model literal(s) in wright.yml: {literals}"
+def test_wright_backstop_guard_rejects_a_tail_step_on_the_other_halfs_backstop():
+    # NEGATIVE CONTROL: the sign-off's terminal tail step rewired to the
+    # PROPOSER's backstop — the cross-half drift, on the fall-through path —
+    # must fail. Derived from the live step, not a hand-copied literal.
+    row = ROUTINES["wright-signoff"]
+    text = _routine_text(row.workflow)
+    steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
+    chunk = max(steps, key=lambda s: s["link"])["chunk"]
+    own = WRIGHT_BACKSTOPS["wright-signoff"]
+    other = WRIGHT_BACKSTOPS["wright-propose"]
+    assert f"--settings {own}" in chunk, "tamper target not found — the fixture is stale"
+    tampered = text.replace(
+        chunk, chunk.replace(f"--settings {own}", f"--settings {other}", 1), 1)
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="deny backstop"):
+        _assert_wright_half_carries_its_own_backstop(row, own, tampered)
 
 
-def _assert_wright_signoff_outcome_covers_every_link(text: str) -> None:
-    """The sign-off job's RUN expression must treat ANY walk link's success as
-    the walk's success, and no-success as not-success — simulated over the
-    full outcome cartesian, the #327 walk-outcome discipline. Factored out so
-    the negative control can run it against tampered text."""
-    global _PROVIDER_UNDER_TEST
-    blocks = _job_blocks(text)
-    assert "signoff" in blocks, "wright.yml has no `signoff` job"
-    exprs = _outcome_expressions(blocks["signoff"])
-    assert exprs.get("RUN"), (
-        "wright.yml's signoff job has no RUN outcome expression to pin")
-    _PROVIDER_UNDER_TEST = _routine_provider(WRIGHT_CONF)
-    links = Registry.load(str(REGISTRY)).resolve("wright-signoff")
-    assert len(WRIGHT_SIGNOFF_BLOCK) == len(links), (
-        f"the `wright-signoff` chain has {len(links)} links but the pinned "
-        f"walk block has {len(WRIGHT_SIGNOFF_BLOCK)} step ids — update "
-        "WRIGHT_SIGNOFF_BLOCK with the chain")
-    for expr in exprs["RUN"]:
-        for state in _walk_states(len(links)):
-            outcomes = dict(zip(WRIGHT_SIGNOFF_BLOCK, state))
-            got = _eval_github_expression(expr, outcomes)
-            any_success = "success" in state
-            if any_success:
-                assert got == "success", (
-                    f"wright signoff RUN evaluated to {got!r} under "
-                    f"{outcomes} — a link succeeded but the walk's outcome "
-                    "is not success")
-            else:
-                assert got != "success", (
-                    f"wright signoff RUN read {got!r} with no link having "
-                    f"succeeded ({state})")
+def test_wright_degraded_path_skips_with_a_notice_only_when_no_key_is_present():
+    # The #326 constraint on both halves, reworded for #544: each job's
+    # secret-absent path is a ::notice:: skip that fires only when NO
+    # provider in its chain has a key (the generic rule proves the gate per
+    # row), and the pre-#544 single-provider wording is gone from the file.
+    text = _routine_text("wright.yml")
+    for name in WRIGHT_BACKSTOPS:
+        _assert_routine_skip_notice_fires_only_without_any_key(ROUTINES[name], text)
+    assert "::notice::the configured provider" not in text, (
+        "wright.yml still carries the single-provider secret-absent notice — "
+        "under the cross-provider walk a keyless head is a fall-through, not "
+        "a skip")
 
 
-def test_wright_signoff_walk_outcome_covers_every_link():
-    _assert_wright_signoff_outcome_covers_every_link(_wright_text())
-
-
-def test_wright_walk_outcome_guard_fires_on_a_stale_link1_expression():
-    # NEGATIVE CONTROL: revert the sign-off RUN expression to a link-1-only
-    # read and require the simulation to FAIL — otherwise the guard is a
-    # restatement (the repo's standing rule).
-    text = _wright_text()
-    stale = ("(steps.signoff_zai_1.outcome == 'success' && 'success' || "
-             "steps.signoff_zai_2.outcome == 'success' && 'success' || "
-             "steps.signoff_zai_3.outcome)")
-    assert stale in text, (
-        "the live signoff RUN expression changed shape — update the mutation")
-    tampered = text.replace(stale, "(steps.signoff_zai_1.outcome)")
-    with pytest.raises(AssertionError):
-        _assert_wright_signoff_outcome_covers_every_link(tampered)
-
-
-# ── Reeve's greenlight drafter (issue #443, #296 stage 2) ────────────────────
+# ── Reeve's greenlight drafter (issue #443, #296 stage 2; #544 Part B) ───────
 #
-# PHASE 3 (#544 Part B): reeve.yml's greenlight job joins the ROUTINES table
-# as
-#   "reeve-greenlight": Routine(workflow="reeve.yml", chain="reeve-greenlight",
-#       conf=".github/reeve.conf", job="greenlight", resolve_id="chain",
-#       prefix="run", layout=("zai", "anthropic", "anthropic"),
-#       gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False)
-# once the registry's `reeve-greenlight` chain gains its tail (the PHASE 3
-# marker in registry.conf) and the job carries the walk (the Anthropic
-# steps AFTER the Z.AI one — today the file lists the Anthropic step first).
-# Then rewrite: `test_reeve_greenlight_chain_exists_and_matches_conf` (every
-# link on the conf provider → the head rule), `test_reeve_greenlight_ship_
-# steps_are_pinned_to_the_chain` (the conf-provider block covering every link
-# → the generic one-step-per-link pin; KEEP the #442 containment-surface
-# assertions over every walk step's chunk), `test_reeve_greenlight_run_steps_
-# gate_on_key_presence` + its negative control (the "::notice::the configured
-# provider" wording → the any-provider notice; the per-provider key gate;
-# note the job's own legs `armed == 'true'`, `greenlight == 'true'` and
-# `inputs.dry_run != true` are already in `_FIXED_GREEN_LEGS`). The report
-# job's keylessness pins are untouched by Part B.
-#
-# reeve.yml is the registry's next consumer, and an unusual one: ONE workflow,
-# TWO jobs with opposite security postures. The `report` job is the
-# deterministic, keyless reporter — every finding a recomputable fact, no
-# provider secret, no agent — and issue #443's contract is that it STAYS that
-# way: the LLM greenlight drafter is a SEPARATE job that runs after it, so the
-# secret enters only where the agent runs. The guard therefore pins both
-# directions: the greenlight job's wiring to the `reeve-greenlight` chain (the
-# routine guards' two-tier split — provider agreement, literal secret,
-# endpoint, link-per-step, the #442 containment surface), and the report job's
-# keylessness (no `secrets.` reference, no agent step), each with a negative
-# control proving the check can fail.
+# reeve.yml is an unusual consumer: ONE workflow whose jobs carry opposite
+# security postures. The `report` job is the deterministic, keyless reporter
+# — every finding a recomputable fact, no provider secret, no agent — and
+# issue #443's contract is that it STAYS that way: the LLM greenlight
+# drafter is a SEPARATE job that runs after it, so the secret enters only
+# where the agent runs. Since #544 Part B the greenlight job walks its
+# chain across providers (the scout's three-link shape) as the
+# "reeve-greenlight" row of the ROUTINES table above, so every generic pin
+# reads THAT job alone — the chain fits its walk, one step per link wired
+# to its link's provider, the walk order, the per-provider key gates, the
+# outcome simulation, the exhaustion gates, the job budget, the no-literal
+# rule, the triage wiring — and never the report or observe jobs. What
+# stays explicit here, each with a negative control: the job split itself;
+# the #442 containment surface on EVERY walk step (the tail included — a
+# step that shed it would do so only on the fall-through path); the #443
+# keyed-and-skippable degraded path in its any-provider form; and the
+# report job's keylessness.
 
 REEVE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "reeve.yml"
-REEVE_CONF = ".github/reeve.conf"
-REEVE_CHAIN = "reeve-greenlight"
 # The drafter's own deny backstop (#442) and its single shell surface.
 REEVE_BACKSTOP = ".claude/reeve-settings.json"
 REEVE_WRAPPER = ".claude/skills/reeve-greenlight/greenlight-helper.sh"
@@ -2481,137 +2296,112 @@ def _reeve_text() -> str:
     return REEVE_WORKFLOW.read_text(encoding="utf-8")
 
 
-def test_reeve_greenlight_chain_exists_and_matches_conf():
-    # The chain must exist AND sit on the provider .github/reeve.conf declares —
-    # the greenlight resolve step's run-time cross-check, caught pre-merge (a
-    # mismatched link would spend its key against the wrong endpoint).
-    reg = Registry.load(str(REGISTRY))
-    assert REEVE_CHAIN in reg.chains, (
-        f"the `{REEVE_CHAIN}` chain is missing from the registry — reeve.yml's "
-        "greenlight resolve step would fail at run time, before any key is spent")
-    conf_provider = _routine_provider(REEVE_CONF)
-    for link in reg.resolve(REEVE_CHAIN):
-        assert link.provider == conf_provider, (
-            f"reeve: link {link.position} of `{REEVE_CHAIN}` is on provider "
-            f"{link.provider!r} but {REEVE_CONF} declares {conf_provider!r} — "
-            "the drafter would run its model against the wrong endpoint")
+def _reeve_walk_steps(text: str) -> list[dict]:
+    """The greenlight walk's ship steps, every link, via the generic parser."""
+    row = ROUTINES["reeve-greenlight"]
+    steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
+    assert steps, "reeve.yml's greenlight job has no claude-code-action ship step"
+    return steps
 
 
 def test_reeve_greenlight_is_a_separate_job_after_the_report():
     # The drafter must run in its OWN job that `needs:` the report — the report
     # job's keylessness is structural, not incidental, so an agent step cannot
     # creep into the reporter.
+    row = ROUTINES["reeve-greenlight"]
     blocks = _job_blocks(_reeve_text())
-    assert "greenlight" in blocks, "reeve.yml has no `greenlight` job"
-    assert re.search(r"^    needs: report\b", blocks["greenlight"], re.MULTILINE), (
+    assert row.job in blocks, f"reeve.yml has no `{row.job}` job"
+    assert re.search(r"^    needs: report\b", blocks[row.job], re.MULTILINE), (
         "reeve.yml's greenlight job does not `needs: report` — the drafter must "
         "run after (and only after a successful) deterministic report")
     # And it must be the workflow's resolve step that picks the model.
-    assert "model_registry resolve reeve-greenlight" in blocks["greenlight"], (
-        "the greenlight job no longer resolves the `reeve-greenlight` chain — "
+    assert f"model_registry resolve {row.chain}" in blocks[row.job], (
+        f"the greenlight job no longer resolves the `{row.chain}` chain — "
         "its model would have to come from somewhere the registry does not own")
 
 
-def test_reeve_greenlight_ship_steps_are_pinned_to_the_chain():
-    """Every greenlight ship step sources --model from a real chain link, wires
-    the link's provider's literal secret + endpoint, keeps the #442 containment
-    surface (dontAsk, its OWN backstop, the wrapper as the only Bash allow, no
-    MCP server, the committed skill as the prompt), and the steps on the conf's
-    provider match the chain exactly — one ship step per link, in order, so the
-    single-link chain cannot quietly grow a fallback the workflow never walks."""
-    reg = Registry.load(str(REGISTRY))
-    conf_provider = _routine_provider(REEVE_CONF)
-    secrets_by_provider = {p.id: p.secret for p in reg.providers.values()}
-    bases_by_provider = {p.id: p.base_url for p in reg.providers.values()}
-    links = reg.resolve(REEVE_CHAIN)
-    link_positions = {link.position for link in links}
-    steps = _routine_ship_steps(_job_blocks(_reeve_text())["greenlight"])
-    assert steps, "reeve.yml's greenlight job has no claude-code-action ship step"
-    current = []
-    for step in steps:
-        assert step["link"] in link_positions, (
-            f"reeve: a greenlight ship step references link{step['link']}_model "
-            f"but the `{REEVE_CHAIN}` chain has links {sorted(link_positions)}")
-        assert step["secret"] is not None, (
-            "reeve: a greenlight ship step wires no literal anthropic_api_key secret")
-        providers_with_secret = [pid for pid, s in secrets_by_provider.items()
-                                 if s == step["secret"]]
-        assert len(providers_with_secret) == 1, (
-            f"reeve: a ship step wires secrets.{step['secret']}, which matches "
-            f"no single registry provider ({providers_with_secret})")
-        step_provider = providers_with_secret[0]
-        assert step["base_url"] == bases_by_provider[step_provider], (
-            f"reeve: the {step_provider!r} step carries ANTHROPIC_BASE_URL "
-            f"{step['base_url']!r} but the registry endpoint is "
-            f"{bases_by_provider[step_provider]!r}")
-        # The #442 containment surface, which must not be quietly shed: dontAsk,
-        # the loop's OWN deny backstop (never a sibling's), the wrapper as the
-        # ONLY Bash allow plus the read-only file tools, no MCP server (the
-        # wrapper is both the read and the write surface), and the committed
-        # skill as the prompt — never an inline one that bypasses it.
-        assert "--permission-mode dontAsk" in step["chunk"], (
-            "reeve: a greenlight ship step no longer runs under "
-            "--permission-mode dontAsk")
-        assert f"--settings {REEVE_BACKSTOP}" in step["chunk"], (
-            f"reeve: a greenlight ship step no longer carries the deny backstop "
+def _assert_reeve_greenlight_walk_keeps_the_containment_surface(text: str) -> None:
+    """The #442 containment surface on every walk step, which must not be
+    quietly shed: dontAsk, the loop's OWN deny backstop (never a sibling's),
+    the wrapper as the ONLY Bash allow plus the read-only file tools, no MCP
+    server (the wrapper is both the read and the write surface), and the
+    committed skill as the prompt — never an inline one that bypasses it.
+    Factored out so the negative control can run it against tampered text."""
+    for step in _reeve_walk_steps(text):
+        where = f"reeve greenlight link-{step['link']} ship step"
+        chunk = step["chunk"]
+        assert "--permission-mode dontAsk" in chunk, (
+            f"{where}: no longer runs under --permission-mode dontAsk")
+        assert f"--settings {REEVE_BACKSTOP}" in chunk, (
+            f"{where}: no longer carries the deny backstop "
             f"(--settings {REEVE_BACKSTOP})")
-        assert f"Bash({REEVE_WRAPPER}:*)" in step["chunk"], (
-            "reeve: a greenlight ship step no longer allows the greenlight "
-            "wrapper — the agent's only shell surface")
-        assert "Read,Grep,Glob" in step["chunk"], (
-            "reeve: a greenlight ship step dropped the read-only file tools the "
-            "charter grounding (repo-root PM.md) depends on")
-        assert "mcp__" not in step["chunk"] and "--mcp-config" not in step["chunk"], (
-            "reeve: a greenlight ship step allows an MCP server — the loop's "
-            "write surface is the wrapper, and no server exists to allow")
-        assert "prompt: /reeve-greenlight" in step["chunk"], (
-            "reeve: a greenlight ship step no longer invokes the committed "
-            "/reeve-greenlight skill — an inline prompt would bypass it")
-        if step_provider == conf_provider:
-            current.append(step)
-    assert [s["link"] for s in current] == [l.position for l in links], (
-        f"reeve: the {conf_provider} block's steps reference links "
-        f"{[s['link'] for s in current]} but the chain has "
-        f"{[l.position for l in links]} — one ship step per link in order, so "
-        "deepening the chain means wiring (and gating) its walk, not just "
-        "editing the registry")
+        assert f"Bash({REEVE_WRAPPER}:*)" in chunk, (
+            f"{where}: no longer allows the greenlight wrapper — the agent's "
+            "only shell surface")
+        assert "Read,Grep,Glob" in chunk, (
+            f"{where}: dropped the read-only file tools the charter grounding "
+            "(repo-root PM.md) depends on")
+        assert "mcp__" not in chunk and "--mcp-config" not in chunk, (
+            f"{where}: allows an MCP server — the loop's write surface is the "
+            "wrapper, and no server exists to allow")
+        assert "prompt: /reeve-greenlight" in chunk, (
+            f"{where}: no longer invokes the committed /reeve-greenlight skill "
+            "— an inline prompt would bypass it")
 
 
-def test_reeve_greenlight_run_steps_gate_on_key_presence():
-    # The keyed-and-skippable requirement (#443's Done-when): every ship step
-    # gates on key_present, so an absent provider secret is a ::notice:: skip,
-    # never a red run — and the notice survives.
+def test_reeve_greenlight_walk_steps_keep_the_containment_surface():
+    _assert_reeve_greenlight_walk_keeps_the_containment_surface(_reeve_text())
+
+
+def test_reeve_containment_guard_rejects_a_tail_step_that_sheds_the_backstop():
+    # NEGATIVE CONTROL: strip the deny backstop from the terminal tail step
+    # — the one that runs only after every earlier link failed, unwatched —
+    # and require the containment pin to FAIL. Anchored inside the live step
+    # (the Oracle control's pattern), never the file's first occurrence.
     text = _reeve_text()
-    for step in _routine_ship_steps(_job_blocks(text)["greenlight"]):
-        assert step["gates_on_key"], (
-            "reeve: a greenlight ship step does not gate on key_present == '1' "
-            "— an absent provider key would fail the run red instead of skipping")
-    assert "::notice::the configured provider" in text, (
-        "reeve.yml's secret-absent notice is gone — the degraded path must stay "
-        "a ::notice:: skip")
+    chunk = max(_reeve_walk_steps(text), key=lambda s: s["link"])["chunk"]
+    needle = f"--settings {REEVE_BACKSTOP} "
+    assert needle in chunk, "tamper target not found — the fixture is stale"
+    tampered = text.replace(chunk, chunk.replace(needle, "", 1), 1)
+    with pytest.raises(AssertionError, match="deny backstop"):
+        _assert_reeve_greenlight_walk_keeps_the_containment_surface(tampered)
 
 
-def test_reeve_key_gate_guard_fires_without_the_gate():
-    # NEGATIVE CONTROL: strip the key gate from a ship step and require the
-    # guard to FAIL — otherwise it proves nothing (a check that cannot fail is
-    # worthless, the repo's standing rule).
+def test_reeve_greenlight_degraded_path_skips_with_a_notice_only_when_no_key_is_present():
+    # The keyed-and-skippable requirement (#443's Done-when), reworded for
+    # #544: every walk step gates on ITS provider's key (the generic
+    # per-provider rule), the secret-absent path is a ::notice:: skip that
+    # fires only when NO provider in the chain has a key — never a red run —
+    # and the pre-#544 single-provider wording is gone with it.
+    row = ROUTINES["reeve-greenlight"]
     text = _reeve_text()
-    tampered = text.replace("          && steps.policy.outputs.key_present == '1'\n", "", 1)
-    assert tampered != text, (
-        "tamper target not found — the greenlight ship-step key gate moved "
-        "shape; update the mutation")
-    stripped = [s for s in _routine_ship_steps(_job_blocks(tampered)["greenlight"])
-                if not s["gates_on_key"]]
-    assert stripped, (
-        "the key-presence check did not react to a stripped gate — it has been "
-        "weakened into a restatement")
+    _assert_routine_skip_notice_fires_only_without_any_key(row, text)
+    assert "::notice::the configured provider" not in text, (
+        "reeve.yml still carries the single-provider secret-absent notice — "
+        "under the cross-provider walk a keyless head is a fall-through, not "
+        "a skip")
 
 
-def test_reeve_no_hardcoded_model_literal_survives():
+def test_reeve_key_gate_guard_fires_on_a_head_step_without_its_gate():
+    # NEGATIVE CONTROL for #443's keyed-and-skippable Done-when, re-derived
+    # for the walk: strip the HEAD step's own-provider key gate (the generic
+    # control, test_key_gate_guard_rejects_a_tail_step_without_its_key_gate,
+    # strips a TAIL step's on the labeler — this is the other end of the
+    # walk) and require the per-provider key-gate rule to fail. The leg is
+    # read off the live step, never hand-copied.
+    reg = Registry.load(str(REGISTRY))
+    row = ROUTINES["reeve-greenlight"]
     text = _reeve_text()
-    literals = [tok for tok in re.findall(r"--model\s+(\S+)", text)
-                if not tok.startswith("${{")]
-    assert not literals, f"hardcoded --model literal(s) in reeve.yml: {literals}"
+    head = min(_reeve_walk_steps(text), key=lambda s: s["link"])
+    m = re.search(
+        r"^[ \t]*&& steps\.policy\.outputs\.[a-z0-9]+_key_present == '1'\n",
+        head["chunk"], re.MULTILINE)
+    assert m, "tamper target not found — the head step's key gate moved shape"
+    tampered = text.replace(
+        head["chunk"], head["chunk"].replace(m.group(0), "", 1), 1)
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="link-1 ship step"):
+        _assert_routine_steps_gate_on_their_providers_key(reg, row, tampered)
 
 
 def _assert_reeve_report_job_is_keyless(text: str) -> None:
