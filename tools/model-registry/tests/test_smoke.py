@@ -282,9 +282,17 @@ def test_routine_chains_are_smokeable_from_their_head_provider():
         "backlog-burn": "zai",
         "chunker": "zai",
         "labeler": "zai",
-        # #544 Part B: the formerly single-link routines join as their
-        # workflows convert (the scout first; the rest with their walks).
+        # #544 Part B: the eight formerly single-link routines, each walking
+        # a GLM head then the Anthropic tail (the drift guard's ROUTINES
+        # table holds the same set, one row per walk).
         "scout": "zai",
+        "spike-converter": "zai",
+        "adoption-assessor": "zai",
+        "growth-twitter": "zai",
+        "reeve-growth": "zai",
+        "wright": "zai",
+        "wright-signoff": "zai",
+        "reeve-greenlight": "zai",
     }
     for chain_id, head in routines.items():
         links = reg.resolve(chain_id)

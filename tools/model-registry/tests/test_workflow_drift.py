@@ -758,12 +758,58 @@ ROUTINES = {
         resolve_id="chain", prefix="run",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
-    # #544 Part B: the formerly single-link routines, one row each as their
-    # workflows convert. The scout is the template — the GLM head, then the
-    # two-link Anthropic tail.
+    # #544 Part B: the eight formerly single-link routines, one row each —
+    # the GLM head (one link, or the sign-off's three), then the two-link
+    # Anthropic tail. The scout was the template.
     "scout": Routine(
         workflow="product-scout.yml", chain="scout",
         conf=".github/product-scout.conf", job="scout",
+        resolve_id="chain", prefix="run",
+        layout=("zai", "anthropic", "anthropic"),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+    "spike-converter": Routine(
+        workflow="spike-converter.yml", chain="spike-converter",
+        conf=".github/spike-converter.conf", job="convert",
+        resolve_id="chain", prefix="run",
+        layout=("zai", "anthropic", "anthropic"),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+    "adoption-assessor": Routine(
+        workflow="adoption-assessor.yml", chain="adoption-assessor",
+        conf=".github/adoption-assessor.conf", job="assess",
+        resolve_id="chain", prefix="run",
+        layout=("zai", "anthropic", "anthropic"),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+    "growth-twitter": Routine(
+        workflow="growth-twitter.yml", chain="growth-twitter",
+        conf=".github/growth-twitter.conf", job="drain",
+        resolve_id="chain", prefix="run",
+        layout=("zai", "anthropic", "anthropic"),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+    "reeve-growth": Routine(
+        workflow="reeve-growth.yml", chain="reeve-growth",
+        conf=".github/reeve-growth.conf", job="reeve-growth",
+        resolve_id="chain", prefix="run",
+        layout=("zai", "anthropic", "anthropic"),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+    # wright.yml carries two walks, one per job, each on its own chain and
+    # its own resolve step (the Oracle's two-chain pattern) — two rows.
+    "wright-propose": Routine(
+        workflow="wright.yml", chain="wright",
+        conf=".github/wright.conf", job="propose",
+        resolve_id="propose_chain", prefix="propose",
+        layout=("zai", "anthropic", "anthropic"),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+    "wright-signoff": Routine(
+        workflow="wright.yml", chain="wright-signoff",
+        conf=".github/wright.conf", job="signoff",
+        resolve_id="signoff_chain", prefix="signoff",
+        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+    # reeve.yml's one agentic job; the report and observe jobs stay keyless
+    # (pinned separately below) and are never walked.
+    "reeve-greenlight": Routine(
+        workflow="reeve.yml", chain="reeve-greenlight",
+        conf=".github/reeve.conf", job="greenlight",
         resolve_id="chain", prefix="run",
         layout=("zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
