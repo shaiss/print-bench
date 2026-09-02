@@ -105,11 +105,13 @@ unfolding parts the halves and the ring lifts free of the scoop as they open, so
 open it over a hand or the table, not in mid-air. The closed hamster carries a
 small tab along the top of the spine between the ears — that's the living hinge,
 printed flat and folded up, and it stays on the finished piece. A light tack
-across the seam at the very first layer is normal elephant foot — flex the halves
-gently to break it before first use (a non-event in PETG; in PLA expect a faint
-whitened crack along the seam). If the halves fit tight and won't part after
-flexing, that's almost always first-layer flare, not the gap — turn on 0.2 mm
-elephant-foot compensation and reprint — coupon first; only a seam that still binds after that
+across the seam at the very first layer is normal elephant foot — hinge one half
+up off the bed, the way it folds, to break it before first use; don't pry the
+halves sideways across the seam, which loads the hinge web in peel (a non-event
+in PETG; in PLA expect a faint whitened crack along the seam). If the halves
+fit tight and won't part after flexing, that's almost always first-layer flare,
+not the gap — turn on 0.2 mm elephant-foot compensation and reprint — coupon
+first; only a seam that still binds after that
 wants `part_gap` raised, +0.1 mm on the coupon first. And when you give it, hand
 it over with **"it folds like a locket — the spine's the hinge"** (or fold it
 open once in front of them): a first-timer's instinct is to pull the halves apart

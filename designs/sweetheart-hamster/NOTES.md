@@ -113,9 +113,11 @@ print:
 
 - **~3 % of the surface is unbridgeable overhang** (printcheck WARNING, not a
   fail): the ring-nest ceiling and a few underside curves (cheeks/feet). It
-  slices and prints; use the slicer's supports for that 3 % or accept minor
-  sag inside the nest (it's hidden). Not chased to zero — inherent to an organic
-  body plus a hollow nest.
+  slices and prints; keep supports off — see the README's Supports section; only
+  the nest crown ever needs an enforcer (paint one on — global supports drop
+  pillars into the 0.5 mm parting gap and re-weld the seam). Accept minor sag
+  inside the nest instead (it's hidden). Not chased to zero — inherent to an
+  organic body plus a hollow nest.
 - The body is mostly solid apart from the nest; at default infill the full print
   is ~36 g / ~2.5 h. Drop infill to 10–15 % to cut both — it's a decorative box,
   not a structural part.
