@@ -62,6 +62,17 @@ python3 -m model_registry show
 # new routine at a chain.
 ZAI_KEY=... ANTHROPIC_API_KEY=... python3 -m model_registry smoke review
 
+# Does a chain FIT a workflow's literal ship-step walk (issue #544)? A routine's
+# walk is a fixed sequence of literal steps — its layout, one provider per step
+# in file order — and the conf's `provider:` names the head. This applies the
+# same pure rule the drift guard pins (`walk_shape_errors`): link 1 on the head
+# provider, exactly one link per step, link N on step N's provider. One
+# `::error::` per violation naming the registry file, the conf and the link;
+# exit 1 on any. Every chain-walking routine's resolve step runs it before a
+# key is spent.
+python3 -m model_registry shape backlog-burn --head zai \
+  --conf .github/backlog-burn.conf --layout zai,zai,zai,anthropic,anthropic
+
 # Diagnose a chain that just failed on EVERY link (issue #347). Where `smoke`
 # asks "is any id a registry defect?", `classify` asks "what should be done about
 # a chain that exhausted?" — a live 1-token probe per link recovers the HTTP cause
@@ -85,7 +96,7 @@ front of the review pipeline.
 
 `.github/models/registry.conf` is the committed, git-tracked source of truth,
 read identically every run (the same pattern as `.github/ci-gates/registry.conf`
-and `.github/backlog-burn.conf`). Adding or reordering a model *within an existing
+and `.github/backlog-burn.conf`). Adding or reordering a model *within a slot's
 provider* is a one-line edit there. Adding a **new provider** still needs a
 reviewed workflow ship step too (its secret is literal), so the registry entry and
 the ship step land together.
@@ -95,18 +106,39 @@ the ship step land together.
 read those instead of hardcoding `--model`. `product-scout.yml` and the four
 scheduled routines — `design-run.yml`, `backlog-burn.yml`, `chunker.yml`,
 `labeler.yml` (issue #326) — resolve their own chains in the job that consumes
-them and walk the links, one ship step per link per provider, so a dead model
-falls through to the next instead of killing the run. Since #327 each routine
-chain carries a multi-model tail *within its routine's provider* (the GLM
-routines walk glm-5.2 → 5.1 → 4.6 — the chunker among them since #347/#358
-rerouted it off the unfunded Anthropic account), so no routine bottoms out on a
-single id. Each routine's chain must
-sit on the provider its `.github/<routine>.conf` declares; the workflow's
-resolve step cross-checks that before any key is spent.
+them and walk the links, one ship step per link, so a dead model falls through
+to the next instead of killing the run. Since #327 each routine chain carries a
+multi-model tail (the GLM links walk glm-5.2 → 5.1 → 4.6), and since #544 the
+four chain-walking routines' tails **cross providers**: after the GLM links
+each walks an Anthropic tail (claude-sonnet-5 → claude-haiku-4-5), the
+workflow's steps in file order — GLM link steps first, then the Anthropic link
+steps, each gated on every earlier link not having succeeded and on its own
+provider's key — so a whole-provider outage falls through instead of killing
+every scheduled run. Under that contract a routine's `.github/<routine>.conf`
+`provider:` names the **head** provider: link 1 must sit on it, and the tail
+may cross to any other declared provider the workflow carries literal ship
+steps for, in the workflow's step order. That shape is one pure rule,
+`walk_shape_errors(links, head_provider, layout)` in `registry.py`, which the
+resolve step runs as `model-registry shape <chain> --head <conf provider>
+--layout zai,zai,zai,anthropic,anthropic` (the `--layout` literal is the
+file's ship-step order) before any key is spent, and which the drift guard
+runs pre-merge against the layout it derives from the ship steps' actual
+wiring — so the runtime check and the test cannot drift. The eight
+single-link scheduled routines keep the single-provider rule (every link on
+the conf's provider) until #544's Part B extends the walk to them. Spend
+note: the four are the bench's high-volume consumers, so with the Anthropic
+account funded a GLM outage shifts their spend to Anthropic while it lasts —
+the tail is the cheap tier for that reason, and each run summary names the
+link that served and warns when the head provider fell through.
 `tests/test_workflow_drift.py` pins the registry and every consumer workflow
 together so they cannot silently diverge — including, since #327, that the
 expressions reading the walk's *outcome* cover every link (an expression still
-on link 1 after a chain deepened would send a healthy link-2 run red).
+on link 1 after a chain deepened would send a healthy link-2 run red), and
+since #544 that each link's ship step wires that link's provider (secret and
+endpoint, position-derived), that exactly one ship step exists per link, that
+every step gates on every earlier link and on its own provider's key, and that
+the provider-triage gate simulates correctly over all five links — each with a
+negative control.
 
 When a chain *does* exhaust every link, each consumer invokes the shared
 `.github/actions/provider-triage` composite action, which runs `classify` to
@@ -125,11 +157,14 @@ serve it is exactly what the live smoke confirms, rather than a static claim.)
 
 ## Layout
 
-- `src/model_registry/registry.py` — the parser (fail-loud, stdlib `configparser`)
-  and the `resolve(chain)` → ordered `ResolvedLink`s.
+- `src/model_registry/registry.py` — the parser (fail-loud, stdlib `configparser`),
+  the `resolve(chain)` → ordered `ResolvedLink`s, and `walk_shape_errors` (the
+  pure cross-provider walk-shape rule, issue #544, shared by `shape` and the
+  drift guard).
 - `src/model_registry/cli.py` — `check` / `resolve` / `chain` / `show` / `smoke` /
-  `classify`; `resolve` emits the `$GITHUB_OUTPUT` links a workflow consumes,
-  `classify` emits `class` + `reason` for a workflow's exhaustion branch.
+  `classify` / `shape`; `resolve` emits the `$GITHUB_OUTPUT` links a workflow
+  consumes, `classify` emits `class` + `reason` for a workflow's exhaustion
+  branch, `shape` fails a resolve step whose chain does not fit the walk.
 - `src/model_registry/smoke.py` — the live-callability proof (issue #298) and the
   package's single network seam (`_post`); everything else stays statically
   network-free, and a test enforces that confinement. `diagnose_chain` reduces an
@@ -155,7 +190,9 @@ A positive case and a negative control for every parser rule, the CLI's
 skipped, and never green with nothing attempted) through its injected seam,
 `classify`'s class **and** reason for every cause (billing vs quota vs auth vs
 rate-limit vs outage vs a dead id, with the reason↔class consistency pinned so
-the split can't misroute), and the drift guard that holds
-`.github/models/registry.conf` and its consumer workflows in correspondence —
-including that every chain-walking workflow stays wired to the shared
-`.github/actions/provider-triage` action on its own chain.
+the split can't misroute), the walk-shape rule (a fitting chain, a head off the
+conf provider, a link on the wrong slot's provider, a chain the walk cannot
+carry), and the drift guard that holds `.github/models/registry.conf` and its
+consumer workflows in correspondence — including that every chain-walking
+workflow stays wired to the shared `.github/actions/provider-triage` action on
+its own chain.
