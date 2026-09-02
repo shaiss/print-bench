@@ -240,14 +240,21 @@ def push_approval(
     # Step 3 — best-effort removals: an absent label 404s (tolerated), and a
     # failed removal only leaves the pause on — the recoverable direction,
     # reported as a note on the reply rather than fatal.
+    # Each outcome below is TRACKED, not assumed: the reply is the human-
+    # visible record of what actually landed, so a removal or an arming that
+    # failed must read as failed there — never as "lifted"/"not recommended".
+    lifted = True
     for name in (other, github.NEEDS_DECISION_LABEL):
         try:
             remove_label(repo, token, issue_number, name)
         except (urllib.error.HTTPError, OSError) as exc:
+            if name == github.NEEDS_DECISION_LABEL:
+                lifted = False
             notes.append(f"could not remove `{name}` ({exc}) — the `{want}` label carries the verdict; lift `{name}` by hand")
 
+    arm_requested = bool(greenlight_info.get("arm")) and verdict == "yes"
     armed = False
-    if greenlight_info.get("arm") and verdict == "yes":
+    if arm_requested:
         try:
             ensure_label(repo, token, _AUTONOMY_LABEL, *_AUTONOMY_SPEC)
             add_labels(repo, token, issue_number, [_AUTONOMY_LABEL])
@@ -271,11 +278,20 @@ def push_approval(
         ledger = False
         notes.append("REGEN_TOKEN is not set — ledger append skipped; the label carries the verdict")
 
-    arming_text = (
-        " and `autonomy-ok` applied — the backlog burn picks this up on its next firing"
-        if armed else
-        " (not armed: the greenlight did not recommend arming)"
+    lifted_text = (
+        "`needs-decision` lifted"
+        if lifted else
+        "`needs-decision` could NOT be lifted (the issue stays parked — lift it by hand)"
     )
+    if armed:
+        arming_text = " and `autonomy-ok` applied — the backlog burn picks this up on its next firing"
+    elif arm_requested:
+        arming_text = (
+            " — arming was requested but did not complete: `autonomy-ok` is NOT applied"
+            " (apply it by hand to route the work to the backlog burn)"
+        )
+    else:
+        arming_text = " (not armed: the greenlight did not recommend arming)"
     ledger_text = (
         f", ledger row appended under `{decision_id}`."
         if ledger else
@@ -287,7 +303,7 @@ def push_approval(
         f"✅ **Approved by 👍 ({approvers[0]}) — recorded {want}**",
         "",
         "Applied the `/decide` sequence via the API (never a posted command): "
-        f"`{want}` added first, `needs-decision` lifted{arming_text}{ledger_text}",
+        f"`{want}` added first, {lifted_text}{arming_text}{ledger_text}",
     ]
     for note in notes:
         reply.append(f"- {note}")
@@ -344,7 +360,12 @@ def run_poll(
     """Poll every open parked decision's greenlight; push what is approved.
 
     Per issue: classify the thread's greenlight (live / none / consumed /
-    ambiguous — ``greenlight.find_current_greenlight``), read the live one's
+    ambiguous — ``greenlight.find_current_greenlight``, counting only
+    markers whose AUTHOR is the workflow's own bot login or a login whose
+    real permission is one of ``greenlight.AUTHORIZED_PERMISSIONS`` — the
+    same memoized permission read the reactions go through, so an
+    untrusted commenter's pasted marker can neither force ``ambiguous``
+    nor spend the greenlight as ``consumed``), read the live one's
     reactions through the GET seam, keep only reactions whose author's real
     permission is one of ``greenlight.AUTHORIZED_PERMISSIONS``, let an
     explicit authorized ``/decide`` comment outrank everything, then apply
@@ -363,10 +384,20 @@ def run_poll(
             permissions[login] = github.permission_of(repo, token, login)
         return permissions[login] in greenlight.AUTHORIZED_PERMISSIONS
 
+    def _trusted_author(login: str) -> bool:
+        # The workflow's own bot login short-circuits (no lookup); anyone
+        # else must hold a real write-level permission, exactly like a
+        # reactor. A lookup that raises propagates to the per-issue guard
+        # below, so a bad permission read leaves the issue waiting — the
+        # fail-closed direction — rather than trusting the marker.
+        return greenlight.marker_author_trusted(login, _authorized)
+
     for thread in github.gather_greenlight_poll(repo, token):
         number = thread["number"]
         try:
-            info = greenlight.find_current_greenlight(number, thread["comments"])
+            info = greenlight.find_current_greenlight(
+                number, thread["comments"], _trusted_author
+            )
             if info["state"] != "live":
                 results.append({"number": number, "outcome": "wait",
                                 "reason": f"greenlight state: {info['state']}"})

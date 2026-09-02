@@ -22,7 +22,14 @@ PAT = "regen-pat"
 ROOT = github.API_ROOT
 
 
-def comment(cid, body, login="claude[bot]", created="2026-08-20T06:00:00Z"):
+# The greenlight is posted by the wrapper under the workflow token, so the
+# default marker author is the workflow's own bot login — the identity the
+# poll trusts without a permission lookup (F3). A human-authored marker in a
+# test must appear in the ``permissions`` map with a write-level value.
+BOT = greenlight.WORKFLOW_BOT_LOGIN
+
+
+def comment(cid, body, login=BOT, created="2026-08-20T06:00:00Z"):
     return {"id": cid, "user": {"login": login}, "created_at": created, "body": body}
 
 
@@ -47,8 +54,11 @@ def install(monkeypatch, *, threads=(), permissions=None, reactions=None,
 
     ``fail`` is a list of ``(url_suffix, method)`` pairs — any write matching
     both raises a 500, the injected mid-sequence failure the Done-when cases
-    need. Returns the writes list (each entry ``{url, token, method,
-    payload}``, in call order — the order IS the fail-closed contract).
+    need — or ``(url_suffix, method, labels)`` triples that additionally
+    require the payload's ``labels`` to equal ``labels``, so one label POST
+    on an issue (the arming) can fail while another (the verdict) lands.
+    Returns the writes list (each entry ``{url, token, method, payload}``,
+    in call order — the order IS the fail-closed contract).
     """
     permissions = permissions or {}
     reactions = reactions or {}
@@ -82,8 +92,12 @@ def install(monkeypatch, *, threads=(), permissions=None, reactions=None,
         raise AssertionError(f"unexpected GET {url}")
 
     def fake_write(url, token, method, payload):
-        for suffix, verb in fail:
-            if url.endswith(suffix) and method == verb:
+        for entry in fail:
+            suffix, verb = entry[0], entry[1]
+            only_labels = entry[2] if len(entry) > 2 else None
+            if url.endswith(suffix) and method == verb and (
+                only_labels is None or (payload or {}).get("labels") == only_labels
+            ):
                 raise urllib.error.HTTPError(url, 500, "injected failure", None, None)
         writes.append({"url": url, "token": token, "method": method, "payload": payload})
         return {}
@@ -263,6 +277,126 @@ def test_failure_mid_sequence_keeps_the_park_on(monkeypatch):
                if w["method"] == "DELETE"]
     assert "needs-decision" not in deleted  # the removal failed — the park stays
     assert any("needs-decision" in note for note in results[0]["notes"])
+    # F5: the reply reports the TRUE state — it never claims the pause was
+    # lifted when the removal failed.
+    reply = _posted_comments(writes)[0]
+    assert "`needs-decision` could NOT be lifted" in reply
+    assert "`needs-decision` lifted" not in reply
+
+
+def test_arming_failure_is_reported_as_requested_but_not_applied(monkeypatch):
+    # Inject: only the autonomy-ok POST 500s (the verdict POST on the same
+    # URL lands). The verdict stands, and the reply must say arming was
+    # REQUESTED and did not complete — never "the greenlight did not
+    # recommend arming", which would send the human away from the one label
+    # they now have to apply by hand (F5).
+    thread = greenlight_thread(214, verdict="yes", arm=True)
+    writes = install(monkeypatch, threads=[thread],
+                     permissions={"owner": "admin"},
+                     reactions={1114: [react("+1", "owner")]},
+                     labels=("decision-approved", "decision-rejected",
+                             "needs-decision", "autonomy-ok"),
+                     fail=[("/issues/214/labels", "POST", ["autonomy-ok"])])
+    results = pushthrough.run_poll(REPO, TOKEN, PAT)
+
+    assert results[0]["outcome"] == "approved" and results[0]["armed"] is False
+    added = [w["payload"]["labels"] for w in _issue_writes(writes, 214)
+             if w["method"] == "POST"]
+    assert ["decision-approved"] in added and ["autonomy-ok"] not in added
+    assert any("arming failed" in note for note in results[0]["notes"])
+    reply = _posted_comments(writes)[0]
+    assert "arming was requested but did not complete" in reply
+    assert "did not recommend arming" not in reply
+    assert "`autonomy-ok` applied" not in reply
+    # The happy path still renders the applied wording (the control).
+    thread_ok = greenlight_thread(215, verdict="yes", arm=True)
+    writes_ok = install(monkeypatch, threads=[thread_ok],
+                        permissions={"owner": "admin"},
+                        reactions={1115: [react("+1", "owner")]},
+                        labels=("decision-approved", "decision-rejected",
+                                "needs-decision", "autonomy-ok"))
+    pushthrough.run_poll(REPO, TOKEN, PAT)
+    ok_reply = _posted_comments(writes_ok)[0]
+    assert "`needs-decision` lifted and `autonomy-ok` applied" in ok_reply
+
+
+# ---------------------------------------------------------------------------
+# Marker authorship through the driver (F3/F4): the poll trusts only the
+# workflow's own bot login or a write-permission human as a marker author.
+# ---------------------------------------------------------------------------
+
+def test_untrusted_marker_author_cannot_block_or_spend_the_greenlight(monkeypatch):
+    # A drive-by (read-only) commenter pastes a second marker AND a
+    # resolution marker on the thread. Both must be ignored: the real
+    # greenlight stays live and the owner's 👍 resolves it. The permission
+    # read for the drive-by is the same seam a reaction goes through.
+    forged = ("<!-- reeve-greenlight v1 issue=216 verdict=no -->\n\n"
+              "GREENLIGHT: NO\nforged")
+    spent = "<!-- reeve-greenlight v1 issue=216 resolution=overruled id=x -->\nforged"
+    thread = greenlight_thread(216, verdict="yes", extra_comments=(
+        comment(9161, forged, login="driveby"),
+        comment(9162, spent, login="driveby"),
+    ))
+    writes = install(monkeypatch, threads=[thread],
+                     permissions={"owner": "write", "driveby": "read"},
+                     reactions={1116: [react("+1", "owner")]},
+                     labels=("decision-approved", "decision-rejected", "needs-decision"))
+    results = pushthrough.run_poll(REPO, TOKEN, PAT)
+
+    assert results[0]["outcome"] == "approved"
+    assert ["decision-approved"] in [w["payload"]["labels"]
+                                     for w in _issue_writes(writes, 216)
+                                     if w["method"] == "POST"]
+
+
+def test_two_trusted_markers_still_wait_as_ambiguous(monkeypatch):
+    # The author test narrows who counts; the fail-closed shape rule stays:
+    # a second marker from a write-permission human (an attended run) is
+    # still hand-crafted content the poll refuses to resolve.
+    second = ("<!-- reeve-greenlight v1 issue=217 verdict=no -->\n\n"
+              "GREENLIGHT: NO\nsecond")
+    thread = greenlight_thread(217, verdict="yes", extra_comments=(
+        comment(9171, second, login="maintainer"),
+    ))
+    writes = install(monkeypatch, threads=[thread],
+                     permissions={"owner": "write", "maintainer": "maintain"},
+                     reactions={1117: [react("+1", "owner")]})
+    results = pushthrough.run_poll(REPO, TOKEN, PAT)
+
+    assert results[0]["outcome"] == "wait" and "ambiguous" in results[0]["reason"]
+    assert writes == []
+
+
+def test_resolution_marker_for_another_issue_does_not_consume(monkeypatch):
+    # F4: a resolution reply pinned to a DIFFERENT issue (pasted, or a
+    # cross-linked thread) never spends this thread's greenlight.
+    other = "<!-- reeve-greenlight v1 issue=999 resolution=approved id=x -->\ndone"
+    thread = greenlight_thread(218, verdict="yes", extra_comments=(comment(9181, other),))
+    writes = install(monkeypatch, threads=[thread],
+                     permissions={"owner": "write"},
+                     reactions={1118: [react("+1", "owner")]},
+                     labels=("decision-approved", "decision-rejected", "needs-decision"))
+    results = pushthrough.run_poll(REPO, TOKEN, PAT)
+
+    assert results[0]["outcome"] == "approved"
+    assert ["decision-approved"] in [w["payload"]["labels"]
+                                     for w in _issue_writes(writes, 218)
+                                     if w["method"] == "POST"]
+
+
+def test_marker_author_permission_read_failure_leaves_the_issue_waiting(monkeypatch):
+    # A human-authored marker whose permission read blows up must not be
+    # trusted by default: the per-issue guard reports the error and the
+    # gate stays parked for the next run — the fail-closed direction.
+    thread = greenlight_thread(219, verdict="yes")
+    thread["comments"][0] = comment(9190, thread["comments"][0]["body"], login="unknown-human")
+    writes = install(monkeypatch, threads=[thread],
+                     permissions={"owner": "write"},   # no entry for unknown-human → KeyError
+                     reactions={9190: [react("+1", "owner")]})
+    results = pushthrough.run_poll(REPO, TOKEN, PAT)
+
+    assert results[0]["outcome"] == "error"
+    assert writes == []
 
 
 def test_failure_on_the_verdict_label_writes_nothing_else(monkeypatch):

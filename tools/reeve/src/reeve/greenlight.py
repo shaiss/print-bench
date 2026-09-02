@@ -19,8 +19,10 @@ Three shapes this module owns:
 * **The resolution marker** — the push-through's reply,
   ``<!-- reeve-greenlight v1 issue=<N> resolution=approved|overruled id=<id> -->``
   (the exact shape the stage-1 session-drafted resolution comments used).
-  Its presence means the greenlight was already consumed: the poll never
-  re-reads a resolved or overruled greenlight's (stale) reactions.
+  Its presence — pinned to this thread's ``issue=`` and posted by a trusted
+  author, the same two tests a greenlight marker passes — means the
+  greenlight was already consumed: the poll never re-reads a resolved or
+  overruled greenlight's (stale) reactions.
 * **The decision id** — from the thread's ``🚦 DECISION NEEDED — `<id>```
   comment/body (the gate's own capture format, the same string in
   ``decide.yml``, the ship/design skills and the provider-triage raiser),
@@ -31,7 +33,7 @@ Three shapes this module owns:
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 # The wrapper's greenlight first line. Attributes after `issue=` are
 # order-tolerant so a future optional attribute needs no parser change:
@@ -76,6 +78,18 @@ OVERRULE_REACTION = "-1"
 # aggregating, because permission is a live per-user fact only the seam can
 # read.
 AUTHORIZED_PERMISSIONS = ("admin", "maintain", "write")
+
+# The login the workflow's OWN token posts as. Both marker kinds the poll
+# acts on are written through ``GITHUB_TOKEN`` — the drafter's wrapper (``gh
+# issue comment`` under the step's ``GH_TOKEN``) and the push-through's
+# resolution reply (``pushthrough.post_comment`` with the workflow token) —
+# so a marker under this login is the loop's own, and nobody else can post
+# as it. It is trusted by identity rather than by ``permission_of``: the
+# collaborator-permission endpoint is defined for users, and an answer of
+# ``none``/404 for the Actions bot would dead-letter every legitimate
+# greenlight (fail-closed turned into fail-dead). An attended run posts as
+# the human who ran it, whose real permission is what vouches for it.
+WORKFLOW_BOT_LOGIN = "github-actions[bot]"
 
 # Poll outcomes. `approve` pushes the verdict through; `overrule` parks with
 # a reply; `wait` does nothing this run; `yield` steps aside for decide.yml.
@@ -131,37 +145,75 @@ def parse_resolution_marker(line: str) -> Optional[dict[str, Any]]:
     }
 
 
+def marker_author_trusted(login: str, authorized: Callable[[str], bool]) -> bool:
+    """Whether a marker posted under ``login`` is the loop's own.
+
+    True for the workflow's own bot identity (:data:`WORKFLOW_BOT_LOGIN`,
+    tested first so no permission lookup is ever spent on it) or for a
+    login ``authorized`` vouches for — the driver's memoized
+    :func:`github.permission_of` against :data:`AUTHORIZED_PERMISSIONS`,
+    the same test a reaction passes, so an attended run's human-posted
+    greenlight counts exactly when that human's 👍 would. An empty login
+    is never trusted.
+    """
+    if not login:
+        return False
+    if login == WORKFLOW_BOT_LOGIN:
+        return True
+    return bool(authorized(login))
+
+
 def find_current_greenlight(
-    issue_number: int, comments: list[dict[str, Any]]
+    issue_number: int,
+    comments: list[dict[str, Any]],
+    trusted: Callable[[str], bool],
 ) -> dict[str, Any]:
     """The one live greenlight comment on a thread, with its parsed marker.
 
     A comment *is* a greenlight when its first non-blank line parses as a
     greenlight marker whose ``issue=`` matches the thread — the wrapper
     writes that self-referencing anchor, so a marker copied from another
-    thread never reads as this thread's greenlight. Author login is not part
-    of the test (the wrapper supports attended runs that post as a human);
-    the marker shape plus the thread pin is the ownership proof, and acting
-    on it still requires a write-permission reaction.
+    thread never reads as this thread's greenlight — **and** its author is
+    one ``trusted`` vouches for (:func:`marker_author_trusted`: the
+    workflow's own bot login, or a login with a real write-level
+    permission). Anyone can comment on a public issue, so without the
+    author test an untrusted commenter could paste a second marker and
+    force ``ambiguous`` (suppressing the real greenlight for good), or
+    paste a resolution marker and spend it as ``consumed``; a marker from
+    an untrusted author is simply not a marker here. The trust test is
+    injected, never performed, so this stays a pure function over the
+    thread — the driver supplies the live permission read.
+
+    Resolution markers are held to the same two tests — a trusted author
+    and ``issue=`` pinned to this thread — so a resolution reply copied
+    from another thread never spends this one's greenlight.
 
     Fail-closed on shape anomalies, because the loop's own wrapper
     guarantees at most one marker per thread, ever: zero greenlights →
     ``{"state": "none"}``; more than one → ``{"state": "ambiguous"}``
-    (hand-crafted or spoofed content — never resolved by this poll); any
-    resolution marker → ``{"state": "consumed"}`` (already approved or
-    overruled; re-polling its stale reactions must not re-resolve a
-    re-parked decision). Only the clean single-live-marker case carries a
-    verdict.
+    (hand-crafted content from a trusted account — never resolved by this
+    poll); any resolution marker → ``{"state": "consumed"}`` (already
+    approved or overruled; re-polling its stale reactions must not
+    re-resolve a re-parked decision). Only the clean single-live-marker
+    case carries a verdict.
     """
     greenlights = []
+    resolved = False
     for comment in comments:
-        marker = parse_greenlight_marker(first_line(comment.get("body", "")))
-        if marker and marker["issue"] == issue_number:
+        line = first_line(comment.get("body", ""))
+        marker = parse_greenlight_marker(line)
+        resolution = None if marker else parse_resolution_marker(line)
+        if marker is None and resolution is None:
+            continue  # not a marker at all — no lookup spent on its author
+        if (marker or resolution)["issue"] != issue_number:
+            continue  # pinned to another thread — never this one's
+        if not trusted((comment.get("user") or {}).get("login", "")):
+            continue  # an untrusted author's marker is not a marker
+        if resolution is not None:
+            resolved = True
+        else:
             greenlights.append((comment, marker))
-    if any(
-        parse_resolution_marker(first_line(c.get("body", "")))
-        for c in comments
-    ):
+    if resolved:
         return {"state": "consumed"}
     if not greenlights:
         return {"state": "none"}

@@ -65,32 +65,47 @@ def test_resolution_marker_parses_and_is_not_a_greenlight():
 # find_current_greenlight — live / none / ambiguous / consumed
 # ---------------------------------------------------------------------------
 
-def _comment(cid, body, login="claude[bot]", created="2026-08-20T05:53:00Z"):
+BOT = greenlight.WORKFLOW_BOT_LOGIN
+
+# The trust test the driver injects, modelled offline: the workflow's bot
+# login, plus a fixed set of write-permission humans. Everyone else — a
+# drive-by commenter — is untrusted, which is what every F3 case turns on.
+TRUSTED_HUMANS = {"owner", "maintainer"}
+
+
+def _trusted(login):
+    return greenlight.marker_author_trusted(login, lambda l: l in TRUSTED_HUMANS)
+
+
+def _comment(cid, body, login=BOT, created="2026-08-20T05:53:00Z"):
     return {"id": cid, "user": {"login": login}, "created_at": created, "body": body}
+
+
+def _find(issue, comments):
+    return greenlight.find_current_greenlight(issue, comments, _trusted)
 
 
 def test_find_current_greenlight_live():
     _, body = marker_body()
-    info = greenlight.find_current_greenlight(201, [_comment(11, body)])
+    info = _find(201, [_comment(11, body)])
     assert info["state"] == "live"
     assert info["comment_id"] == 11
     assert info["verdict"] == "yes"
     assert info["arm"] is False
+    assert info["author"] == BOT
 
 
 def test_find_current_greenlight_pins_the_thread():
     # A marker copied from another thread never reads as this thread's.
     _, body = marker_body(issue=999)
-    assert greenlight.find_current_greenlight(201, [_comment(11, body)])["state"] == "none"
+    assert _find(201, [_comment(11, body)])["state"] == "none"
 
 
 def test_find_current_greenlight_ambiguous_and_none():
     _, a = marker_body(issue=201)
     _, b = marker_body(issue=201, verdict="no")
-    assert greenlight.find_current_greenlight(201, [])["state"] == "none"
-    assert greenlight.find_current_greenlight(
-        201, [_comment(11, a), _comment(12, b)]
-    )["state"] == "ambiguous"
+    assert _find(201, [])["state"] == "none"
+    assert _find(201, [_comment(11, a), _comment(12, b)])["state"] == "ambiguous"
 
 
 def test_find_current_greenlight_consumed_by_any_resolution():
@@ -98,9 +113,73 @@ def test_find_current_greenlight_consumed_by_any_resolution():
     # never re-resolve a re-parked decision.
     _, body = marker_body()
     resolution = "<!-- reeve-greenlight v1 issue=201 resolution=overruled id=x -->\nno"
-    assert greenlight.find_current_greenlight(
-        201, [_comment(11, body), _comment(12, resolution)]
-    ) == {"state": "consumed"}
+    assert _find(201, [_comment(11, body), _comment(12, resolution)]) == {"state": "consumed"}
+
+
+# --- Marker authorship (F3): an untrusted commenter's marker is not a marker.
+
+def test_marker_author_trusted_is_the_bot_or_a_write_permission_login():
+    assert greenlight.marker_author_trusted(BOT, lambda l: False) is True
+    assert greenlight.marker_author_trusted("owner", lambda l: l == "owner") is True
+    assert greenlight.marker_author_trusted("driveby", lambda l: l == "owner") is False
+    assert greenlight.marker_author_trusted("", lambda l: True) is False
+    # The bot short-circuits: the permission read is never spent on it.
+    def boom(_login):
+        raise AssertionError("permission lookup must not run for the bot login")
+    assert greenlight.marker_author_trusted(BOT, boom) is True
+
+
+def test_untrusted_author_marker_is_ignored_and_the_real_one_stays_live():
+    # A drive-by commenter pastes a same-issue marker next to the real one:
+    # without the author test this would read `ambiguous` and the real
+    # greenlight would never resolve. The forgery is simply not a marker.
+    _, real = marker_body(issue=201)
+    _, forged = marker_body(issue=201, verdict="no")
+    info = _find(201, [_comment(11, real), _comment(12, forged, login="driveby")])
+    assert info["state"] == "live" and info["comment_id"] == 11 and info["verdict"] == "yes"
+    # And a forgery with no real greenlight beside it is `none`, not `live`.
+    assert _find(201, [_comment(12, forged, login="driveby")])["state"] == "none"
+
+
+def test_two_trusted_markers_still_read_ambiguous():
+    # The author test narrows WHO counts, never the fail-closed shape rule:
+    # two markers from trusted accounts (the bot and a write-permission
+    # human on an attended run) are still hand-crafted content this poll
+    # refuses to resolve.
+    _, a = marker_body(issue=201)
+    _, b = marker_body(issue=201, verdict="no")
+    assert _find(201, [_comment(11, a), _comment(12, b, login="owner")])["state"] == "ambiguous"
+    assert _find(201, [_comment(11, a, login="owner"), _comment(12, b, login="maintainer")])["state"] == "ambiguous"
+
+
+def test_attended_run_human_posted_marker_is_live():
+    # The wrapper supports attended runs that post as a human; a
+    # write-permission human's marker counts exactly as their 👍 would.
+    _, body = marker_body(issue=201)
+    info = _find(201, [_comment(11, body, login="owner")])
+    assert info["state"] == "live" and info["author"] == "owner"
+
+
+def test_untrusted_resolution_marker_does_not_consume():
+    # The same spoof against the resolution shape: a drive-by "resolution"
+    # must not spend a live greenlight.
+    _, body = marker_body(issue=201)
+    resolution = "<!-- reeve-greenlight v1 issue=201 resolution=approved id=x -->\ndone"
+    info = _find(201, [_comment(11, body), _comment(12, resolution, login="driveby")])
+    assert info["state"] == "live"
+
+
+# --- Resolution pinning (F4): a resolution marker for ANOTHER issue never
+# consumes this thread.
+
+def test_resolution_marker_for_a_different_issue_does_not_consume():
+    _, body = marker_body(issue=201)
+    other = "<!-- reeve-greenlight v1 issue=999 resolution=approved id=x -->\ndone"
+    info = _find(201, [_comment(11, body), _comment(12, other)])
+    assert info["state"] == "live" and info["comment_id"] == 11
+    # The pin is exact: this thread's own resolution still consumes.
+    own = "<!-- reeve-greenlight v1 issue=201 resolution=approved id=x -->\ndone"
+    assert _find(201, [_comment(11, body), _comment(13, own)]) == {"state": "consumed"}
 
 
 # ---------------------------------------------------------------------------
