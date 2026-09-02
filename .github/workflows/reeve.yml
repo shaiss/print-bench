@@ -409,15 +409,15 @@ jobs:
           {
             echo "## Reeve greenlight — approval poll"
             if [ -n "$(sed -n 's/^resolved=//p' "$GITHUB_OUTPUT" | head -1)" ]; then
-              echo "- resolved by 👍: #$(sed -n 's/^resolved=//p' "$GITHUB_OUTPUT" | head -1 | tr ' ' ' #')"
+              echo "- resolved by 👍: #$(sed -n 's/^resolved=//p' "$GITHUB_OUTPUT" | head -1 | sed 's/ / #/g')"
             else
               echo "- no greenlights approved by a qualifying reaction this run"
             fi
             if [ -n "$(sed -n 's/^overruled=//p' "$GITHUB_OUTPUT" | head -1)" ]; then
-              echo "- overruled by 👎 (gate stays parked): #$(sed -n 's/^overruled=//p' "$GITHUB_OUTPUT" | head -1 | tr ' ' ' #')"
+              echo "- overruled by 👎 (gate stays parked): #$(sed -n 's/^overruled=//p' "$GITHUB_OUTPUT" | head -1 | sed 's/ / #/g')"
             fi
             if [ -n "$(sed -n 's/^failed=//p' "$GITHUB_OUTPUT" | head -1)" ]; then
-              echo "- ⚠️ push-through FAILED (left parked for the next run to retry): #$(sed -n 's/^failed=//p' "$GITHUB_OUTPUT" | head -1 | tr ' ' ' #') — see the step log"
+              echo "- ⚠️ push-through FAILED (left parked for the next run to retry): #$(sed -n 's/^failed=//p' "$GITHUB_OUTPUT" | head -1 | sed 's/ / #/g') — see the step log"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
