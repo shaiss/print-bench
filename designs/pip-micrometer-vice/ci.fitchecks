@@ -1,0 +1,14 @@
+# Boolean fit gates (scripts/gate.sh): "<part> empty" must render zero
+# facets, "<part> interferes" is the mandatory negative control.
+#
+# fitcheck      — every pairwise intersection across the three printed
+#                 bodies (body / screw / moving jaw) at the pose extremes
+#                 0.5 mm off closed and full open. The motion is a monotone
+#                 translation and every clearance in play (rails 0.3, floor
+#                 0.6, saddle straddle 0.3, thread fit by construction) is
+#                 pose-independent, so the extremes bound the whole travel.
+#                 Must be empty.
+# fitcheck_neg  — the same jaw grown 0.4 mm every way it slides; must
+#                 interfere, proving the empty check can fail.
+fitcheck      empty
+fitcheck_neg  interferes
