@@ -229,46 +229,41 @@ def test_scout_degraded_path_skips_with_a_notice_only_when_no_key_is_present():
 # conf provider, one step per link wired to its link's provider, the row's
 # layout), the walk order, the per-provider key gates, the any-provider skip
 # notice, the outcome simulation, the exhaustion gates, the job budget, the
-# no-literal rule and the triage wiring. What stays explicit here is what
-# the generic pins do NOT say: the converter's ONE write is not its own MCP
-# server but the scout's REUSED filing tool (#439), so EVERY walk step —
-# the tail included, which runs only on the fall-through path where nobody
-# is watching — must carry the converter's own deny backstop, the scout's
-# mcp-config and an allow-list naming exactly mcp__scout__file_design_brief
-# (the workflow half of the coupling scripts/spike-converter-perms-check.sh
-# holds over the files); issue #440's two frozen acceptance criteria — the
-# conf declares the chain's head provider, and the two-key arming gates the
-# job on every link; and the #440 degraded path, a ::notice:: skip that now
-# fires only when NO provider in the chain has a key.
-
-# The converter's own deny backstop, the scout's filing server it reuses, and
-# the exact allow-list — the tool, its own read wrapper (both spellings) and
-# the read-only file tools.
-_SPIKE_BACKSTOP = ".claude/spike-converter-settings.json"
-_SPIKE_MCP_CONFIG = ".claude/skills/product-scout/scout-mcp.json"
-_SPIKE_ALLOWED = (
-    "mcp__scout__file_design_brief,"
-    "Bash(.claude/skills/spike-converter/converter-helper.sh:*),"
-    "Bash(./.claude/skills/spike-converter/converter-helper.sh:*),"
-    "Read,Grep,Glob")
+# no-literal rule, the triage wiring — and, since the review round, the
+# agent SURFACE on every walk step: the converter's ONE write is not its own
+# MCP server but the scout's REUSED filing tool (#439), so its row declares
+# the converter's own deny backstop, the SCOUT's mcp-config and an allow-list
+# naming exactly mcp__scout__file_design_brief, and the generic surface pin
+# holds every step — the tail included, which runs only on the fall-through
+# path where nobody is watching — to them (the workflow half of the coupling
+# scripts/spike-converter-perms-check.sh holds over the files). What stays
+# explicit here: issue #440's two frozen acceptance criteria — the conf
+# declares the chain's head provider, and the two-key arming gates the job
+# on every link; and the #440 degraded path, a ::notice:: skip that now fires
+# only when NO provider in the chain has a key.
 
 
 def _spike_walk_steps(text: str) -> list[dict]:
-    """The converter walk's ship steps (every link, via the generic parser),
-    each with the surface fields the reuse pin reads parsed off its chunk."""
+    """The converter walk's ship steps (every link, via the generic parser)."""
     row = ROUTINES["spike-converter"]
     steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
     assert steps, (
         f"no claude-code-action ship step found in {row.workflow}'s `{row.job}` job")
-    for step in steps:
-        chunk = step["chunk"]
-        settings = re.search(r"--settings (\S+)", chunk)
-        mcp = re.search(r"--mcp-config (\S+)", chunk)
-        allowed = re.search(r'--allowedTools "([^"]*)"', chunk)
-        step["settings"] = settings.group(1) if settings else None
-        step["mcp_config"] = mcp.group(1) if mcp else None
-        step["allowed_tools"] = allowed.group(1) if allowed else ""
     return steps
+
+
+def test_spike_converter_row_reuses_the_scouts_filing_server():
+    # #439's one-filing-surface rule as a table fact: the converter's row
+    # names the SCOUT's mcp-config and the scout's filing tool, with its OWN
+    # backstop — the generic surface pin then holds every walk step to it.
+    spike, scout = ROUTINES["spike-converter"], ROUTINES["scout"]
+    assert spike.mcp_config == scout.mcp_config, (
+        "the converter row no longer reuses the scout's filing server — "
+        "filing a brief any other way breaks #439's one-filing-surface rule")
+    assert spike.allowed.startswith("mcp__scout__file_design_brief,"), (
+        "the converter row's allow-list no longer leads with the scout's filing tool")
+    assert spike.backstop != scout.backstop, (
+        "the converter row wears the scout's backstop — it must carry its own")
 
 
 def test_spike_converter_chain_exists_and_resolves():
@@ -278,53 +273,6 @@ def test_spike_converter_chain_exists_and_resolves():
     row = ROUTINES["spike-converter"]
     links = Registry.load(str(REGISTRY)).resolve(row.chain)
     assert links, f"the `{row.chain}` chain resolved to zero links"
-
-
-def _assert_spike_walk_carries_the_reused_surface(text: str) -> None:
-    """Every walk step — head and tail alike — carries the #439/#440 reuse:
-    the converter's own backstop, the SCOUT's mcp-config, the exact
-    allow-list and dontAsk. A step that drops any of these either widens the
-    unattended run's surface or — for the mcp-config / allow-list — silently
-    revokes its only write, so the armed routine files nothing and fails
-    without an error. Factored out so the negative control can run it
-    against tampered text."""
-    for step in _spike_walk_steps(text):
-        where = f"spike-converter link-{step['link']} ship step"
-        assert step["settings"] == _SPIKE_BACKSTOP, (
-            f"{where}: --settings is {step['settings']!r}, not the converter's "
-            f"own deny backstop {_SPIKE_BACKSTOP}")
-        assert step["mcp_config"] == _SPIKE_MCP_CONFIG, (
-            f"{where}: --mcp-config is {step['mcp_config']!r}, not the reused "
-            f"scout filing server {_SPIKE_MCP_CONFIG} — filing a brief any "
-            "other way breaks #439's one-filing-surface rule")
-        assert step["allowed_tools"] == _SPIKE_ALLOWED, (
-            f"{where}: allow-list is {step['allowed_tools']!r}, expected "
-            f"exactly {_SPIKE_ALLOWED!r}")
-        assert "--permission-mode dontAsk" in step["chunk"], (
-            f"{where}: the dontAsk mode is gone — without it the allow-list "
-            "stops being exclusive and a prompt-injected run gets "
-            "prompted-for tools")
-
-
-def test_spike_converter_walk_steps_wire_the_reused_surface():
-    row = ROUTINES["spike-converter"]
-    _assert_spike_walk_carries_the_reused_surface(_routine_text(row.workflow))
-
-
-def test_spike_reuse_guard_rejects_a_tail_step_that_sheds_the_mcp_config():
-    # NEGATIVE CONTROL: the terminal tail step without the reused scout
-    # mcp-config — its only write silently revoked, on the one path that
-    # runs unwatched — must fail. The tamper is anchored inside the live
-    # step, not the file's first occurrence, so it stays valid whichever
-    # link's step the file lists first.
-    row = ROUTINES["spike-converter"]
-    text = _routine_text(row.workflow)
-    chunk = max(_spike_walk_steps(text), key=lambda s: s["link"])["chunk"]
-    needle = f"--mcp-config {_SPIKE_MCP_CONFIG} "
-    assert needle in chunk, "tamper target not found — the fixture is stale"
-    tampered = text.replace(chunk, chunk.replace(needle, "", 1), 1)
-    with pytest.raises(AssertionError, match="mcp-config"):
-        _assert_spike_walk_carries_the_reused_surface(tampered)
 
 
 def test_spike_converter_conf_declares_the_chains_head_provider():
@@ -668,6 +616,20 @@ class Routine(NamedTuple):
     ship_lock   True for the SHIP-LOCK routines (the burn, the design run):
                 AGENT_OUTCOME is then assigned twice — the lock cleanup and
                 the red-on-death gate — and both copies must agree
+    permission_mode, backstop, mcp_config, allowed
+                the agent SURFACE every ship step must carry verbatim on its
+                `claude_args:` line — read off the routine's head link when
+                the row was enrolled: the `--permission-mode` (None where the
+                step sets none), the `--settings` deny backstop, the
+                `--mcp-config` server (None for a routine whose write is a
+                shell wrapper, or none) and the exact `--allowedTools` list
+                (None for the SHIP-LOCK routines, which run the whole skill
+                under bypassPermissions). The tail runs only on the
+                fall-through path where nobody is watching, so a tail step
+                that shed its backstop or widened its allow-list is exactly
+                the drift these fields pin — the same surface every
+                `scripts/*-perms-check.sh` holds over the FILES, none of
+                which reads a workflow.
     """
     workflow: str
     chain: str
@@ -678,6 +640,10 @@ class Routine(NamedTuple):
     layout: tuple[str, ...]
     gates: tuple[str, ...]
     ship_lock: bool
+    permission_mode: str | None
+    backstop: str | None
+    mcp_config: str | None
+    allowed: str | None
 
 
 # The provider-triage step every routine carries (#347): its `if:` is an
@@ -696,25 +662,39 @@ ROUTINES = {
         conf=".github/design-run.conf", job="run",
         resolve_id="chain", prefix="run",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
-        gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True),
+        gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
+        # The SHIP-LOCK routines run the whole skill: no backstop, no
+        # allow-list, bypassPermissions on every link.
+        permission_mode="bypassPermissions", backstop=None, mcp_config=None,
+        allowed=None),
     "backlog-burn": Routine(
         workflow="backlog-burn.yml", chain="backlog-burn",
         conf=".github/backlog-burn.conf", job="burn",
         resolve_id="chain", prefix="ship",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
-        gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True),
+        gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
+        permission_mode="bypassPermissions", backstop=None, mcp_config=None,
+        allowed=None),
     "chunker": Routine(
         workflow="chunker.yml", chain="chunker",
         conf=".github/chunker.conf", job="chunk",
         resolve_id="chain", prefix="run",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        # The chunker's steps set no --permission-mode (the live value when
+        # the row was enrolled — adding dontAsk is a deliberate row edit).
+        permission_mode=None, backstop=".claude/chunker-settings.json",
+        mcp_config=None,
+        allowed="Bash(.claude/skills/chunk-issue/chunk-helper.sh:*),Read,Grep,Glob"),
     "labeler": Routine(
         workflow="labeler.yml", chain="labeler",
         conf=".github/labeler.conf", job="label",
         resolve_id="chain", prefix="run",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        permission_mode="dontAsk", backstop=".claude/labeler-settings.json",
+        mcp_config=None,
+        allowed="Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"),
     # #544 Part B: the eight formerly single-link routines, one row each —
     # the GLM head (one link, or the sign-off's three), then the two-link
     # Anthropic tail. The scout was the template.
@@ -723,54 +703,177 @@ ROUTINES = {
         conf=".github/product-scout.conf", job="scout",
         resolve_id="chain", prefix="run",
         layout=("zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        permission_mode="dontAsk", backstop=".claude/scout-settings.json",
+        mcp_config=".claude/skills/product-scout/scout-mcp.json",
+        allowed=("mcp__scout__file_design_brief,"
+                 "Bash(.claude/skills/product-scout/scout-helper.sh:*),"
+                 "Bash(./.claude/skills/product-scout/scout-helper.sh:*),"
+                 "Read,Grep,Glob")),
     "spike-converter": Routine(
         workflow="spike-converter.yml", chain="spike-converter",
         conf=".github/spike-converter.conf", job="convert",
         resolve_id="chain", prefix="run",
         layout=("zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        # Its own backstop, the SCOUT's reused filing server (#439: one
+        # filing surface), its own read wrapper.
+        permission_mode="dontAsk", backstop=".claude/spike-converter-settings.json",
+        mcp_config=".claude/skills/product-scout/scout-mcp.json",
+        allowed=("mcp__scout__file_design_brief,"
+                 "Bash(.claude/skills/spike-converter/converter-helper.sh:*),"
+                 "Bash(./.claude/skills/spike-converter/converter-helper.sh:*),"
+                 "Read,Grep,Glob")),
     "adoption-assessor": Routine(
         workflow="adoption-assessor.yml", chain="adoption-assessor",
         conf=".github/adoption-assessor.conf", job="assess",
         resolve_id="chain", prefix="run",
         layout=("zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        permission_mode="dontAsk", backstop=".claude/adoption-assessor-settings.json",
+        mcp_config=".claude/skills/adoption-assessor/assessor-mcp.json",
+        allowed=("mcp__assessor__post_adoption_disposition,"
+                 "Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*),"
+                 "Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*),"
+                 "Read,Grep,Glob")),
     "growth-twitter": Routine(
         workflow="growth-twitter.yml", chain="growth-twitter",
         conf=".github/growth-twitter.conf", job="drain",
         resolve_id="chain", prefix="run",
         layout=("zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        # Oracle-shaped: no wrapper, the posting tool plus the read-only
+        # file tools and nothing else.
+        permission_mode="dontAsk", backstop=".claude/growth-twitter-settings.json",
+        mcp_config=".claude/skills/growth-twitter/growth-mcp.json",
+        allowed="mcp__growth_twitter__post_tweet,Read,Grep,Glob"),
     "reeve-growth": Routine(
         workflow="reeve-growth.yml", chain="reeve-growth",
         conf=".github/reeve-growth.conf", job="reeve-growth",
         resolve_id="chain", prefix="run",
         layout=("zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        permission_mode="dontAsk", backstop=".claude/reeve-growth-settings.json",
+        mcp_config=".claude/skills/growth-queue/queue-mcp.json",
+        allowed="mcp__growth_queue__queue_growth_post,Read,Grep,Glob"),
     # wright.yml carries two walks, one per job, each on its own chain and
-    # its own resolve step (the Oracle's two-chain pattern) — two rows.
+    # its own resolve step (the Oracle's two-chain pattern) — two rows. Each
+    # half carries ITS OWN backstop and filing server, never the other's:
+    # the proposer/judge separation the forge is built on.
     "wright-propose": Routine(
         workflow="wright.yml", chain="wright",
         conf=".github/wright.conf", job="propose",
         resolve_id="propose_chain", prefix="propose",
         layout=("zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        permission_mode="dontAsk", backstop=".claude/wright-settings.json",
+        mcp_config=".claude/skills/wright/wright-mcp.json",
+        allowed=("mcp__wright__file_agent_brief,"
+                 "Bash(.claude/skills/wright/wright-helper.sh:*),"
+                 "Bash(./.claude/skills/wright/wright-helper.sh:*),"
+                 "Read,Grep,Glob")),
     "wright-signoff": Routine(
         workflow="wright.yml", chain="wright-signoff",
         conf=".github/wright.conf", job="signoff",
         resolve_id="signoff_chain", prefix="signoff",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        permission_mode="dontAsk", backstop=".claude/reeve-signoff-settings.json",
+        mcp_config=".claude/skills/reeve-signoff/signoff-mcp.json",
+        allowed=("mcp__reeve_signoff__post_reeve_signoff,"
+                 "Bash(.claude/skills/wright/wright-helper.sh:*),"
+                 "Bash(./.claude/skills/wright/wright-helper.sh:*),"
+                 "Read,Grep,Glob")),
     # reeve.yml's one agentic job; the report and observe jobs stay keyless
-    # (pinned separately below) and are never walked.
+    # (pinned separately below) and are never walked. The loop's write is
+    # its wrapper (#442) — no MCP server exists to allow.
     "reeve-greenlight": Routine(
         workflow="reeve.yml", chain="reeve-greenlight",
         conf=".github/reeve.conf", job="greenlight",
         resolve_id="chain", prefix="run",
         layout=("zai", "anthropic", "anthropic"),
-        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False),
+        gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
+        permission_mode="dontAsk", backstop=".claude/reeve-settings.json",
+        mcp_config=None,
+        allowed=("Bash(.claude/skills/reeve-greenlight/greenlight-helper.sh:*),"
+                 "Bash(./.claude/skills/reeve-greenlight/greenlight-helper.sh:*),"
+                 "Read,Grep,Glob")),
 }
+
+# The registry's consumers that are NOT scheduled-routine walks and so carry
+# no ROUTINES row: the design-review chain (its ship steps live in the
+# reviewer jobs, pinned by the review guard above) and the Oracle's two
+# role chains (pinned by the Oracle guard). Every OTHER `model_registry
+# resolve <chain>` in .github/workflows/ must be a row — the coverage pin
+# below — so a walk cannot exist ungoverned by the generic pins.
+NON_ROUTINE_CONSUMERS = {
+    ("auto-review.yml", "review"),
+    ("oracle.yml", "oracle-anthropic"),
+    ("oracle.yml", "oracle-glm"),
+}
+
+
+def _all_workflow_texts() -> dict[str, str]:
+    """Every workflow file, by name — the coverage pin's whole search space."""
+    return {p.name: p.read_text(encoding="utf-8")
+            for p in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))}
+
+
+def _registry_consumers(texts: dict[str, str]) -> set[tuple[str, str]]:
+    """Every (workflow, chain) a `model_registry resolve <chain>` line names."""
+    found: set[tuple[str, str]] = set()
+    for workflow, text in texts.items():
+        for chain in re.findall(r"model_registry resolve (\S+)", text):
+            found.add((workflow, chain))
+    return found
+
+
+def _assert_every_consumer_has_a_row(consumers: set[tuple[str, str]],
+                                     rows: dict[str, "Routine"]) -> None:
+    """The resolved set and the table (plus the named non-routine consumers)
+    are the same set, both ways. Factored out so the negative controls can
+    run it against a thinned table / a thinned consumer set."""
+    expected = {(row.workflow, row.chain) for row in rows.values()} | NON_ROUTINE_CONSUMERS
+    missing = consumers - expected
+    assert not missing, (
+        f"chain-walking workflow(s) with no ROUTINES row: {sorted(missing)} — "
+        "every `model_registry resolve <chain>` consumer must be a row of the "
+        "table (or a named NON_ROUTINE_CONSUMERS entry), or its walk runs "
+        "ungoverned by every generic pin")
+    stale = expected - consumers
+    assert not stale, (
+        f"ROUTINES row(s) / named consumer(s) no workflow resolves: "
+        f"{sorted(stale)} — a row outlived its walk; drop it, or restore the "
+        "resolve step")
+
+
+def test_every_chain_walking_workflow_has_a_routines_row():
+    # A row is what enrols a walk in every generic pin — so deleting a row
+    # must not be a silent way out of them (deleting `growth-twitter`'s row
+    # once passed the whole suite). Scan the workflows, not the table.
+    _assert_every_consumer_has_a_row(_registry_consumers(_all_workflow_texts()), ROUTINES)
+
+
+def test_row_coverage_guard_rejects_a_table_missing_a_row():
+    # NEGATIVE CONTROL: the table without one live row must fail on that row.
+    thinned = {name: row for name, row in ROUTINES.items() if name != "growth-twitter"}
+    assert len(thinned) == len(ROUTINES) - 1
+    with pytest.raises(AssertionError, match="no ROUTINES row.*growth-twitter"):
+        _assert_every_consumer_has_a_row(_registry_consumers(_all_workflow_texts()), thinned)
+
+
+def test_row_coverage_guard_rejects_a_row_no_workflow_resolves():
+    # NEGATIVE CONTROL, the other direction: a workflow that stopped
+    # resolving its chain leaves a row describing a walk that no longer
+    # exists — derived by deleting the live resolve line, never a literal.
+    texts = _all_workflow_texts()
+    victim = ROUTINES["growth-twitter"]
+    line = f"model_registry resolve {victim.chain}"
+    assert line in texts[victim.workflow], "tamper target not found — the fixture is stale"
+    texts[victim.workflow] = texts[victim.workflow].replace(line, "model_registry resolve-nothing", 1)
+    with pytest.raises(AssertionError, match="outlived its walk"):
+        _assert_every_consumer_has_a_row(_registry_consumers(texts), ROUTINES)
+
 
 # An explicit in-workflow marker naming a step's secret as an alias for a
 # registry provider's declared secret: `registry-secret-alias:
@@ -810,6 +913,12 @@ def _routine_job_text(text: str, row: Routine) -> str:
     return blocks[row.job]
 
 
+def _arg_value(argline: str, flag: str) -> str | None:
+    """The value after `<flag> ` on a claude_args line, or None if unset."""
+    m = re.search(re.escape(flag) + r"[ \t]+(\S+)", argline)
+    return m.group(1) if m else None
+
+
 def _routine_ship_steps(job_text: str, resolve_id: str = "chain") -> list[dict]:
     """The routine job's claude-code-action steps, in order, as parsed wiring.
 
@@ -828,9 +937,19 @@ def _routine_ship_steps(job_text: str, resolve_id: str = "chain") -> list[dict]:
         secret = re.search(r"anthropic_api_key: \$\{\{ secrets\.(\w+) \}\}", chunk)
         base = re.search(r"ANTHROPIC_BASE_URL: (\S+)", chunk)
         step_id = re.search(r"^\s*id:\s*(\S+)", chunk, re.MULTILINE)
+        # The agent surface, read off the `claude_args:` LINE only — a step's
+        # comments may quote a flag (chunker's link 1 says "--settings
+        # closes"), and a comment is not a surface.
+        args = re.search(r"^[ \t]*claude_args:[ \t]*(.+)$", chunk, re.MULTILINE)
+        argline = args.group(1) if args else ""
+        allowed = re.search(r'--allowedTools "([^"]*)"', argline)
         steps.append({
             "id": step_id.group(1) if step_id else "",
             "link": int(model.group(1)) if model else None,
+            "permission_mode": _arg_value(argline, "--permission-mode"),
+            "backstop": _arg_value(argline, "--settings"),
+            "mcp_config": _arg_value(argline, "--mcp-config"),
+            "allowed": allowed.group(1) if allowed else None,
             "secret": secret.group(1) if secret else None,
             "base_url": base.group(1) if base else "",
             "alias": _ALIAS_MARKER in chunk,
@@ -936,36 +1055,37 @@ def _assert_routine_chain_fits_its_walk(reg: Registry, row: Routine,
     ROUTINES row declares. Factored out so the negative controls can run it
     against a tampered registry / workflow."""
     workflow, chain_id = row.workflow, row.chain
+    where = f"{row.workflow} [{row.job}]"
     assert chain_id in reg.chains, (
-        f"the `{chain_id}` chain (consumed by {workflow}) is missing from "
+        f"the `{chain_id}` chain (consumed by {where}) is missing from "
         "the registry — the workflow's resolve step would fail at run time")
     links = reg.resolve(chain_id)
     conf_provider = _routine_provider(row.conf)
     assert links[0].provider == conf_provider, (
-        f"{workflow}: link 1 of `{chain_id}` is on provider "
+        f"{where}: link 1 of `{chain_id}` is on provider "
         f"{links[0].provider!r} but {row.conf} declares provider {conf_provider!r} "
         "as the walk's HEAD — the routine would start on the wrong endpoint")
     # Every link on a declared provider (a chain can only cross to providers
     # the registry knows).
     for link in links:
         assert link.provider in reg.providers, (
-            f"{workflow}: link {link.position} of `{chain_id}` names provider "
+            f"{where}: link {link.position} of `{chain_id}` names provider "
             f"{link.provider!r}, which the registry does not declare")
     from model_registry.registry import walk_shape_errors
     job = _routine_job_text(text, row)
     steps = _routine_ship_steps(job, row.resolve_id)
-    assert steps, f"no claude-code-action ship step found in {workflow}'s `{row.job}` job"
-    layout = _walk_layout(reg, steps, workflow)
+    assert steps, f"no claude-code-action ship step found in {where}'s `{row.job}` job"
+    layout = _walk_layout(reg, steps, where)
     errors = walk_shape_errors(links, conf_provider, layout)
     assert not errors, (
-        f"{workflow}: the `{chain_id}` chain does not fit the walk the ship "
+        f"{where}: the `{chain_id}` chain does not fit the walk the ship "
         f"steps carry ({','.join(layout)}): " + "; ".join(errors))
     # The runtime half must check the SAME layout the steps really carry —
     # a resolve step handing `shape` a stale literal would pass a chain the
     # steps cannot walk.
-    literal = _resolve_layout_literal(job, chain_id, workflow)
+    literal = _resolve_layout_literal(job, chain_id, where)
     assert literal == layout, (
-        f"{workflow}: the resolve step's --layout literal {','.join(literal)} "
+        f"{where}: the resolve step's --layout literal {','.join(literal)} "
         f"differs from the layout the ship steps actually carry "
         f"{','.join(layout)} — the runtime shape check and the workflow drifted")
     # And the table's expectation: the row says what walk this routine
@@ -973,7 +1093,7 @@ def _assert_routine_chain_fits_its_walk(reg: Registry, row: Routine,
     # fourth GLM link) fails against the declared layout even when chain,
     # steps and literal all moved together.
     assert layout == list(row.layout), (
-        f"{workflow}: the ROUTINES row declares layout {','.join(row.layout)} "
+        f"{where}: the ROUTINES row declares layout {','.join(row.layout)} "
         f"but the ship steps carry {','.join(layout)} — update the row with "
         "the walk, deliberately")
 
@@ -998,9 +1118,10 @@ def test_routine_chains_are_mixed_provider_walks():
     # single-provider walk).
     reg = Registry.load(str(REGISTRY))
     for row in ROUTINES.values():
+        where = f"{row.workflow} [{row.job}]"
         providers = [link.provider for link in reg.resolve(row.chain)]
         assert len(set(providers)) > 1, (
-            f"{row.workflow}: the `{row.chain}` chain sits entirely on "
+            f"{where}: the `{row.chain}` chain sits entirely on "
             f"{providers[0]!r} — the #544 cross-provider tail is gone")
         assert providers[0] == _routine_provider(row.conf)
 
@@ -1072,26 +1193,37 @@ def _assert_routine_ship_steps_pinned(reg: Registry, row: Routine,
     guard's position-derived rule — not merely *some* provider's). Factored
     out so the negative controls can run it against tampered text."""
     workflow, chain_id = row.workflow, row.chain
+    where = f"{row.workflow} [{row.job}]"
     links = reg.resolve(chain_id)
     steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
-    assert steps, f"no claude-code-action ship step found in {workflow}'s `{row.job}` job"
+    assert steps, f"no claude-code-action ship step found in {where}'s `{row.job}` job"
     link_positions = {link.position for link in links}
     for step in steps:
         assert step["link"] in link_positions, (
-            f"{workflow}: a ship step references link{step['link']}_model, "
+            f"{where}: a ship step references link{step['link']}_model, "
             f"but the `{chain_id}` chain has links {sorted(link_positions)} "
             "— add the registry link or fix the reference")
+    # File order IS walk order: Actions runs steps top to bottom, so a
+    # link-3 step listed above link 2's runs first — and, gated only on the
+    # links before it, link 2 then runs as well: two tail spends for one
+    # walk. Every other pin keys by link<N>, blind to the listing order.
+    file_order = [step["link"] for step in steps]
+    assert file_order == list(range(1, len(steps) + 1)), (
+        f"{where}: the ship steps are listed in link order {file_order}, not "
+        "1..N — file order is the order Actions runs them, so a tail step "
+        "listed early runs before the link it should follow (and that link "
+        "still runs after it)")
     # One ship step per link, in order — derived from the steps, compared to
     # the chain. A workflow still carrying only one provider's steps against
     # a mixed chain fails HERE (a link with no step), as does a latent block
     # reading a link another step already walks.
-    layout = _walk_layout(reg, steps, workflow)
+    layout = _walk_layout(reg, steps, where)
     assert len(layout) == len(links), (
-        f"{workflow}: the ship steps walk {len(layout)} links but the "
+        f"{where}: the ship steps walk {len(layout)} links but the "
         f"`{chain_id}` chain has {len(links)} — one ship step per link")
     for link, provider in zip(links, layout):
         assert provider == link.provider, (
-            f"{workflow}: the link-{link.position} ship step is wired for "
+            f"{where}: the link-{link.position} ship step is wired for "
             f"provider {provider!r} (its secret/endpoint) but the registry "
             f"routes link {link.position} ({link.model}) to "
             f"{link.provider!r} — the step would spend the wrong key against "
@@ -1104,6 +1236,21 @@ def test_every_routine_ship_step_is_pinned_to_its_chain():
         _assert_routine_ship_steps_pinned(reg, row, _routine_text(row.workflow))
 
 
+def test_ship_step_pin_rejects_tail_steps_listed_out_of_link_order():
+    # NEGATIVE CONTROL: the scout's two tail blocks swapped in the file —
+    # every link still has exactly one correctly-wired step, so only the
+    # file-order rule can see that link 3 would run before (and then with)
+    # link 2. Derived by swapping the live chunks, never a literal.
+    reg = Registry.load(str(REGISTRY))
+    row = ROUTINES["scout"]
+    text = _routine_text(row.workflow)
+    two, three = _tail_step_chunk(text, row, 2), _tail_step_chunk(text, row, 3)
+    tampered = text.replace(two, "\x00", 1).replace(three, two, 1).replace("\x00", three, 1)
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="listed in link order"):
+        _assert_routine_ship_steps_pinned(reg, row, tampered)
+
+
 def _assert_routine_step_ids_follow_the_convention(
         reg: Registry, row: Routine, text: str) -> None:
     """Every ship step's id is `<prefix>_<provider>_<N>` — the row's prefix,
@@ -1112,16 +1259,17 @@ def _assert_routine_step_ids_follow_the_convention(
     same in any workflow and a step id says which link it is. Factored out
     so the negative control can run it against tampered text."""
     workflow = row.workflow
+    where = f"{row.workflow} [{row.job}]"
     links = {link.position: link for link in reg.resolve(row.chain)}
     steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
-    assert steps, f"no claude-code-action ship step found in {workflow}'s `{row.job}` job"
+    assert steps, f"no claude-code-action ship step found in {where}'s `{row.job}` job"
     for step in steps:
         assert step["link"] in links, (
-            f"{workflow}: a ship step references link{step['link']}_model, "
+            f"{where}: a ship step references link{step['link']}_model, "
             f"which the `{row.chain}` chain does not have")
         want = f"{row.prefix}_{links[step['link']].provider}_{step['link']}"
         assert step["id"] == want, (
-            f"{workflow}: the link-{step['link']} ship step is id "
+            f"{where}: the link-{step['link']} ship step is id "
             f"{step['id']!r}, expected {want!r} (`<prefix>_<provider>_<N>`, "
             f"the ROUTINES row's prefix {row.prefix!r})")
 
@@ -1210,19 +1358,20 @@ def _assert_routine_walks_in_order(reg: Registry, row: Routine,
     the Anthropic tail runs only after the GLM links failed or were skipped.
     Factored out so the negative control can run it against tampered text."""
     workflow, chain_id = row.workflow, row.chain
+    where = f"{row.workflow} [{row.job}]"
     links = reg.resolve(chain_id)
     steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
     by_link = {step["link"]: step for step in steps}
     for n in range(1, len(links) + 1):
         assert n in by_link, (
-            f"{workflow}: the `{chain_id}` chain has a link {n} but no ship "
+            f"{where}: the `{chain_id}` chain has a link {n} but no ship "
             "step references it — a registry edit landed without its "
             "workflow half (the walk stops early)")
     for n in range(2, len(links) + 1):
         for earlier in range(1, n):
             needle = f"steps.{by_link[earlier]['id']}.outcome != 'success'"
             assert needle in by_link[n]["chunk"], (
-                f"{workflow}: the link-{n} step is not gated on {needle} — "
+                f"{where}: the link-{n} step is not gated on {needle} — "
                 "the walk would run that link even after an earlier one "
                 "succeeded, instead of stopping at the first success")
 
@@ -1255,16 +1404,17 @@ def _assert_routine_steps_gate_on_their_providers_key(
     credential, and the tail must not inherit the head's key gate. Factored
     out so the negative control can run it against tampered text."""
     workflow = row.workflow
+    where = f"{row.workflow} [{row.job}]"
     links = reg.resolve(row.chain)
     steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
     by_link = {step["link"]: step for step in steps}
     for link in links:
         step = by_link[link.position]
         assert step["gates_on_key"], (
-            f"{workflow}: the link-{link.position} ship step does not gate on "
+            f"{where}: the link-{link.position} ship step does not gate on "
             "key_present == '1' — an absent provider key would not skip it")
         assert step["key_gate_providers"] == {link.provider}, (
-            f"{workflow}: the link-{link.position} ship step gates on the key "
+            f"{where}: the link-{link.position} ship step gates on the key "
             f"of {sorted(step['key_gate_providers'])} but the registry routes "
             f"that link to {link.provider!r} — it must gate on "
             f"steps.policy.outputs.{link.provider}_key_present == '1' and "
@@ -1274,12 +1424,13 @@ def _assert_routine_steps_gate_on_their_providers_key(
 def test_routine_run_steps_gate_on_their_providers_key_presence():
     reg = Registry.load(str(REGISTRY))
     for row in ROUTINES.values():
+        where = f"{row.workflow} [{row.job}]"
         text = _routine_text(row.workflow)
         _assert_routine_steps_gate_on_their_providers_key(reg, row, text)
         # The secret-absent notice survives (the #326 skip, reworded for
         # #544: it fires only when NO provider in the chain has a key).
         assert _NO_KEY_NOTICE in _routine_job_text(text, row), (
-            f"{row.workflow}: the no-key-for-any-provider ::notice:: is gone — "
+            f"{where}: the no-key-for-any-provider ::notice:: is gone — "
             "the degraded path must stay a notice skip, never a hard fail")
 
 
@@ -1295,6 +1446,118 @@ def test_key_gate_guard_rejects_a_tail_step_without_its_key_gate():
     with pytest.raises(AssertionError, match="link-4 ship step"):
         _assert_routine_steps_gate_on_their_providers_key(
             Registry.load(str(REGISTRY)), row, tampered)
+
+
+# ── The agent surface on EVERY walk step (#544 Part B, review round) ─────────
+#
+# The deny backstop, the permission mode, the MCP server and the allow-list
+# are the unattended run's containment — and the tail steps carry them only
+# on the fall-through path, where a shed `--settings` or a widened allow-list
+# is never seen in a green run. Every `scripts/*-perms-check.sh` holds the
+# FILE half of that surface (the backstop denies what it must); none reads a
+# workflow, so this is the only pin on the WORKFLOW half. The row declares
+# the surface (read off the head link when the row was enrolled) and every
+# ship step must carry it verbatim: exact allow-list equality, the mcp-config
+# exact or absent per row, the backstop exact, the permission mode exact.
+
+
+def _assert_routine_walk_steps_keep_their_surface(row: Routine, text: str) -> None:
+    """Every ship step's claude_args surface equals the row's, field for
+    field. Factored out so the negative controls can run it against
+    tampered text."""
+    where = f"{row.workflow} [{row.job}]"
+    steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
+    assert steps, f"no claude-code-action ship step found in {where}"
+    for step in steps:
+        at = f"{where}: the link-{step['link']} ship step"
+        assert step["permission_mode"] == row.permission_mode, (
+            f"{at} runs under permission mode {step['permission_mode']!r}, "
+            f"not the row's {row.permission_mode!r} — without dontAsk the "
+            "allow-list stops being exclusive and a prompt-injected run gets "
+            "prompted-for tools")
+        assert step["backstop"] == row.backstop, (
+            f"{at} carries deny backstop {step['backstop']!r}, not the row's "
+            f"{row.backstop!r} — the settings.json allows it inherits are "
+            "no longer neutralised (or it wears a sibling's backstop)")
+        assert step["mcp_config"] == row.mcp_config, (
+            f"{at} wires mcp-config {step['mcp_config']!r}, not the row's "
+            f"{row.mcp_config!r} — its only write is silently revoked, or a "
+            "server it must not hold is mounted")
+        assert step["allowed"] == row.allowed, (
+            f"{at} allow-list is {step['allowed']!r}, expected exactly "
+            f"{row.allowed!r} — a widened list is a wider unattended surface, "
+            "a narrowed one a silently revoked write")
+
+
+def test_every_routine_walk_step_keeps_its_surface():
+    for row in ROUTINES.values():
+        _assert_routine_walk_steps_keep_their_surface(row, _routine_text(row.workflow))
+
+
+def _terminal_step_chunk(row: Routine, text: str) -> str:
+    """The raw chunk of the walk's TERMINAL ship step — the one that runs
+    only after every earlier link failed, unwatched."""
+    steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
+    return max(steps, key=lambda s: s["link"])["chunk"]
+
+
+@pytest.mark.parametrize("name", [n for n, r in ROUTINES.items() if r.backstop])
+def test_surface_guard_rejects_a_terminal_step_that_sheds_its_backstop(name):
+    # NEGATIVE CONTROL, every row with a backstop: the terminal tail step
+    # loses `--settings <backstop>` (and its dontAsk, where it has one) —
+    # the exact hazard of a surface pinned on the head alone. Derived from
+    # the live step, never a literal.
+    row = ROUTINES[name]
+    text = _routine_text(row.workflow)
+    chunk = _terminal_step_chunk(row, text)
+    shed = chunk.replace(f" --settings {row.backstop}", "", 1)
+    if row.permission_mode:
+        shed = shed.replace(f" --permission-mode {row.permission_mode}", "", 1)
+    assert shed != chunk, "tamper target not found — the fixture is stale"
+    tampered = text.replace(chunk, shed, 1)
+    with pytest.raises(AssertionError, match="deny backstop|permission mode"):
+        _assert_routine_walk_steps_keep_their_surface(row, tampered)
+
+
+@pytest.mark.parametrize("name", [n for n, r in ROUTINES.items() if r.allowed])
+def test_surface_guard_rejects_a_terminal_step_with_a_widened_allow_list(name):
+    # NEGATIVE CONTROL, every row with an allow-list: the terminal tail
+    # step's list widened to a general Bash and Write — the assessor's
+    # `…,Read,Grep,Glob,Bash,Write` tamper that once passed the suite.
+    row = ROUTINES[name]
+    text = _routine_text(row.workflow)
+    chunk = _terminal_step_chunk(row, text)
+    needle = f'--allowedTools "{row.allowed}"'
+    assert needle in chunk, "tamper target not found — the fixture is stale"
+    tampered = text.replace(
+        chunk, chunk.replace(needle, f'--allowedTools "{row.allowed},Bash,Write"', 1), 1)
+    with pytest.raises(AssertionError, match="allow-list"):
+        _assert_routine_walk_steps_keep_their_surface(row, tampered)
+
+
+@pytest.mark.parametrize("name", [n for n, r in ROUTINES.items() if r.mcp_config])
+def test_surface_guard_rejects_a_terminal_step_that_sheds_its_mcp_config(name):
+    # NEGATIVE CONTROL, every row with an MCP write: the terminal tail step
+    # without its mcp-config — its only write silently revoked on the one
+    # path that runs unwatched (the converter's #439 reuse hazard, now for
+    # every MCP-writing routine).
+    row = ROUTINES[name]
+    text = _routine_text(row.workflow)
+    chunk = _terminal_step_chunk(row, text)
+    needle = f"--mcp-config {row.mcp_config} "
+    assert needle in chunk, "tamper target not found — the fixture is stale"
+    tampered = text.replace(chunk, chunk.replace(needle, "", 1), 1)
+    with pytest.raises(AssertionError, match="mcp-config"):
+        _assert_routine_walk_steps_keep_their_surface(row, tampered)
+
+
+def test_surface_guard_rejects_a_row_whose_surface_the_head_does_not_carry():
+    # NEGATIVE CONTROL from the table's side: a row declaring a surface no
+    # step carries (a stale row after a deliberate workflow change) fails
+    # too — the pin is equality, not a subset.
+    row = ROUTINES["scout"]._replace(backstop=".claude/oracle-settings.json")
+    with pytest.raises(AssertionError, match="deny backstop"):
+        _assert_routine_walk_steps_keep_their_surface(row, _routine_text(row.workflow))
 
 
 def _step_condition(chunk: str) -> str:
@@ -1583,10 +1846,11 @@ def _walk_states(n_links: int):
 def _routine_walk_ids(reg: Registry, row: Routine, job_text: str) -> list[str]:
     """The walk's step ids in link order across providers, checked against
     the chain's link count (the step tests above catch a mismatch first)."""
+    where = f"{row.workflow} [{row.job}]"
     links = reg.resolve(row.chain)
     ids = _walk_step_ids(_routine_ship_steps(job_text, row.resolve_id))
     assert len(ids) == len(links), (
-        f"{row.workflow}: the `{row.chain}` chain has {len(links)} links but "
+        f"{where}: the `{row.chain}` chain has {len(links)} links but "
         f"the walk carries {len(ids)} ship steps ({ids}) — the drift guard's "
         "step tests should have caught this first")
     return ids
@@ -1610,12 +1874,13 @@ def _assert_routine_walk_outcome_covers_every_link(
     """
     global _PROVIDER_UNDER_TEST
     workflow = row.workflow
+    where = f"{row.workflow} [{row.job}]"
     _PROVIDER_UNDER_TEST = _routine_provider(row.conf)
     job = _routine_job_text(text, row)
     walk_ids = _routine_walk_ids(reg, row, job)
     exprs = _outcome_expressions(job)
     assert exprs, (
-        f"{workflow}: no AGENT_OUTCOME/RUN/SHIP expression found in the "
+        f"{where}: no AGENT_OUTCOME/RUN/SHIP expression found in the "
         f"`{row.job}` job — the walk-outcome wiring this test exists to pin "
         "is missing")
     for var, expr_list in exprs.items():
@@ -1626,19 +1891,19 @@ def _assert_routine_walk_outcome_covers_every_link(
                 any_success = "success" in state
                 if any_success:
                     assert got == "success", (
-                        f"{workflow}: {var} evaluated to {got!r} with link "
+                        f"{where}: {var} evaluated to {got!r} with link "
                         f"outcomes {outcomes} — a link succeeded but the "
                         "walk's outcome is not success; the expression does "
                         "not cover every link of the walk")
                 else:
                     assert got != "success", (
-                        f"{workflow}: {var} read {got!r} with no link having "
+                        f"{where}: {var} read {got!r} with no link having "
                         f"succeeded ({state}) — the walk claims a success "
                         "nobody produced")
                     ran = [o for o in state if o != "skipped"]
                     want = ran[-1] if ran else "skipped"
                     assert got == want, (
-                        f"{workflow}: {var} read {got!r} with link outcomes "
+                        f"{where}: {var} read {got!r} with link outcomes "
                         f"{outcomes} — expected {want!r}, the outcome of the "
                         "last link that actually ran ('skipped' only when "
                         "every link was skipped); a 'skipped' with a link that "
@@ -1734,17 +1999,32 @@ def _assert_gate_fires_on_whole_walk_failure(
     """
     global _PROVIDER_UNDER_TEST
     workflow = row.workflow
+    where = f"{row.workflow} [{row.job}]"
     _PROVIDER_UNDER_TEST = _routine_provider(row.conf)
     job = _routine_job_text(text, row)
     walk_ids = _routine_walk_ids(reg, row, job)
-    cond = _gate_condition(job, step_name, workflow)
+    cond = _gate_condition(job, step_name, where)
+    # The legs the simulation fixes green must actually BE there: stripping
+    # tolerates absence, so a gate that DROPPED its key_present leg passed —
+    # and would turn the keyless degraded path (every link skipped, the
+    # pinned ::notice:: skip) into a red run; one that dropped its arming
+    # leg would fire with the routine paused in git. Require presence first.
+    assert re.search(r"steps\.policy\.outputs\.key_present\s*==\s*'1'", cond), (
+        f"{where}: the '{step_name}' gate carries no "
+        "steps.policy.outputs.key_present == '1' leg — with no key set for any "
+        "provider the walk is all-skipped, and this gate would turn the "
+        "pinned ::notice:: skip into a red run (or a live triage probe)")
+    assert re.search(r"steps\.policy\.outputs\.(enabled|armed)\s*==\s*'true'", cond), (
+        f"{where}: the '{step_name}' gate carries no arming leg "
+        "(steps.policy.outputs.enabled == 'true', or reeve's armed) — it "
+        "would fire with the routine paused in git")
     # Drop the legs the simulation fixes green (policy/enabled/select/
     # key/dry_run) and the leading always(), leaving the outcome clause.
     sim_cond = _strip_fixed_green_legs(cond)
     # The surviving clause is `(walk-success test) != 'success'`.
     mm = re.match(r"^\((.+)\)\s*!=\s*'success'\s*$", sim_cond.strip())
     assert mm, (
-        f"{workflow}: the '{step_name}' condition's outcome clause does not "
+        f"{where}: the '{step_name}' condition's outcome clause does not "
         f"match the expected `(walk) != 'success'` shape after stripping "
         f"the fixed-green legs: {sim_cond!r}")
     inner = mm.group(1)
@@ -1759,13 +2039,13 @@ def _assert_gate_fires_on_whole_walk_failure(
         # to numbers (true→1, 'success'→NaN) so it is ALWAYS true: the
         # always-red bug this shape must avoid.
         assert isinstance(walk, str), (
-            f"{workflow}: the '{step_name}' walk clause must reduce to a "
+            f"{where}: the '{step_name}' walk clause must reduce to a "
             f"string outcome, so `!= 'success'` is a string compare rather "
             f"than an always-true bool-vs-string: {inner!r} → {walk!r}")
         fired = walk != "success"
         any_success = "success" in state
         assert fired == (not any_success), (
-            f"{workflow}: the '{step_name}' gate fired={fired} under link "
+            f"{where}: the '{step_name}' gate fired={fired} under link "
             f"outcomes {outcomes} — expected fired={not any_success}; the "
             "gate does not cover the whole chain")
 
@@ -1779,6 +2059,48 @@ def test_routine_exhaustion_gates_fire_on_whole_chain_failure():
         text = _routine_text(row.workflow)
         for step_name in row.gates:
             _assert_gate_fires_on_whole_walk_failure(reg, row, text, step_name)
+
+
+def _gate_chunk(job_text: str, step_name: str) -> str:
+    """The raw step chunk of the named gate (for tampering its `if:`)."""
+    chunks = [c for c in re.split(r"\n      - ", job_text) if f"name: {step_name}" in c]
+    assert len(chunks) == 1, f"expected one '{step_name}' step, found {len(chunks)}"
+    return chunks[0]
+
+
+def _gate_without_leg(row: Routine, step_name: str, leg: str) -> str:
+    """A copy of the workflow with one `&& <leg>` line removed from the named
+    gate's `if:` — the leg is read off the live gate, never hand-copied."""
+    text = _routine_text(row.workflow)
+    chunk = _gate_chunk(_routine_job_text(text, row), step_name)
+    m = re.search(r"^[ \t]*&& " + leg + r"\n", chunk, re.MULTILINE)
+    assert m, f"tamper target not found — the gate's `{leg}` leg moved shape"
+    tampered = text.replace(chunk, chunk.replace(m.group(0), "", 1), 1)
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    return tampered
+
+
+def test_gate_guard_rejects_a_red_step_without_its_key_present_leg():
+    # NEGATIVE CONTROL: the labeler's red step with its key_present leg
+    # dropped — the walk clause still covers every link, so only the
+    # presence rule can see that the keyless degraded path now goes red.
+    reg = Registry.load(str(REGISTRY))
+    row = ROUTINES["labeler"]
+    tampered = _gate_without_leg(
+        row, EXHAUSTED_RED_STEP, r"steps\.policy\.outputs\.key_present == '1'")
+    with pytest.raises(AssertionError, match="no steps.policy.outputs.key_present"):
+        _assert_gate_fires_on_whole_walk_failure(reg, row, tampered, EXHAUSTED_RED_STEP)
+
+
+def test_gate_guard_rejects_a_red_step_without_its_arming_leg():
+    # NEGATIVE CONTROL: the same gate with its `enabled` leg dropped — it
+    # would fire with the routine paused in git.
+    reg = Registry.load(str(REGISTRY))
+    row = ROUTINES["labeler"]
+    tampered = _gate_without_leg(
+        row, EXHAUSTED_RED_STEP, r"steps\.policy\.outputs\.enabled == 'true'")
+    with pytest.raises(AssertionError, match="no arming leg"):
+        _assert_gate_fires_on_whole_walk_failure(reg, row, tampered, EXHAUSTED_RED_STEP)
 
 
 def test_burn_checkless_pr_notice_fires_only_on_a_successful_walk():
@@ -1955,13 +2277,14 @@ def _routine_step_timeouts(reg: Registry, row: Routine,
     """(longest head-provider ship-step timeout, longest tail-provider one).
     The head provider is the chain's link-1 provider; a walk with no tail
     reports 0 for it."""
+    where = f"{row.workflow} [{row.job}]"
     links = {link.position: link for link in reg.resolve(row.chain)}
     head_provider = links[1].provider
     head, tail = 0, 0
     for step in _routine_ship_steps(job_text, row.resolve_id):
         m = re.search(r"^\s*timeout-minutes: (\d+)$", step["chunk"], re.MULTILINE)
         assert m, (
-            f"{row.workflow}: the link-{step['link']} ship step carries no "
+            f"{where}: the link-{step['link']} ship step carries no "
             "timeout-minutes")
         minutes = int(m.group(1))
         if links[step["link"]].provider == head_provider:
@@ -1974,18 +2297,19 @@ def _routine_step_timeouts(reg: Registry, row: Routine,
 def _assert_routine_job_budget_fits_the_platform_cap(
         reg: Registry, row: Routine, text: str) -> None:
     workflow = row.workflow
+    where = f"{row.workflow} [{row.job}]"
     job_text = _routine_job_text(text, row)
-    job = _routine_job_timeout(job_text, workflow)
+    job = _routine_job_timeout(job_text, where)
     head, tail = _routine_step_timeouts(reg, row, job_text)
     assert job <= _PLATFORM_JOB_CAP_MINUTES, (
-        f"{workflow}: job timeout-minutes {job} exceeds GitHub's "
+        f"{where}: job timeout-minutes {job} exceeds GitHub's "
         f"{_PLATFORM_JOB_CAP_MINUTES}-minute hosted-job cap — the platform clamps "
         "it, so the budget the comment claims is fiction and a stalled head "
         "link lets the platform kill the fallback link (and the lock cleanup) "
         "mid-walk")
     need = head + tail + _JOB_BUDGET_HEADROOM_MINUTES
     assert job >= need, (
-        f"{workflow}: job timeout-minutes {job} does not budget one stalled head "
+        f"{where}: job timeout-minutes {job} does not budget one stalled head "
         f"link ({head}) plus one full tail link ({tail}) plus "
         f"{_JOB_BUDGET_HEADROOM_MINUTES} headroom = {need} — shorten a step "
         "timeout or raise the job budget (within the cap)")
@@ -2188,68 +2512,52 @@ def test_triage_wiring_guard_discriminates_a_wrong_chain():
 # one step per link wired to its link's provider, the row's layout), the walk
 # order, the per-provider key gates, the outcome simulation and the
 # exhaustion gates per job, the job budget, the no-literal rule and the
-# triage wiring on each job's OWN chain. What stays explicit here is the
-# forge's own invariant, which no generic pin states: EVERY walk step of
-# each half — the tail included, which runs only on the fall-through path —
-# carries ITS OWN deny backstop and dontAsk, never the other half's. The
-# sign-off can apply `autonomy-ok`, so a quietly-shed backstop there is the
-# worst drift in the family, and a step carrying the other half's backstop
-# would collapse the proposer/judge separation the forge is built on
-# (scripts/wright-perms-check.sh holds the file side of that split). Plus
-# the degraded path in its any-provider form.
+# triage wiring on each job's OWN chain — and, since the review round, the
+# agent surface on EVERY walk step of each half (the tail included, which
+# runs only on the fall-through path): each row declares ITS OWN deny
+# backstop, filing server and allow-list, and the generic surface pin holds
+# every step to them verbatim. What stays explicit here is the forge's own
+# invariant, which equality on one row cannot state alone: the two halves'
+# surfaces DIFFER — a step carrying the other half's backstop would collapse
+# the proposer/judge separation the forge is built on (the sign-off can
+# apply `autonomy-ok`, so a shed or swapped backstop there is the worst
+# drift in the family; scripts/wright-perms-check.sh holds the file side of
+# that split). Plus the degraded path in its any-provider form.
 
-# ROUTINES row → the half's OWN deny backstop every walk step must carry.
-WRIGHT_BACKSTOPS = {
-    "wright-propose": ".claude/wright-settings.json",
-    "wright-signoff": ".claude/reeve-signoff-settings.json",
-}
-
-
-def _assert_wright_half_carries_its_own_backstop(
-        row: Routine, backstop: str, text: str) -> None:
-    """Every walk step of one half runs under dontAsk with that half's own
-    backstop — and NOT the other half's. Factored out so the negative
-    control can run it against tampered text."""
-    steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
-    assert steps, (
-        f"no claude-code-action ship step found in {row.workflow}'s `{row.job}` job")
-    others = [b for b in WRIGHT_BACKSTOPS.values() if b != backstop]
-    for step in steps:
-        where = f"wright {row.job} link-{step['link']} ship step"
-        assert "--permission-mode dontAsk" in step["chunk"], (
-            f"{where}: no longer runs under --permission-mode dontAsk")
-        assert f"--settings {backstop}" in step["chunk"], (
-            f"{where}: no longer carries its half's deny backstop "
-            f"(--settings {backstop})")
-        for other in others:
-            assert f"--settings {other}" not in step["chunk"], (
-                f"{where}: carries the OTHER half's deny backstop "
-                f"(--settings {other}) — the proposer/judge separation is gone")
+# ROUTINES row → the half's OWN deny backstop, read from the table so the
+# two can never disagree.
+WRIGHT_BACKSTOPS = {name: ROUTINES[name].backstop
+                    for name in ("wright-propose", "wright-signoff")}
 
 
-def test_wright_walk_steps_carry_their_halfs_backstop():
-    for name, backstop in WRIGHT_BACKSTOPS.items():
-        row = ROUTINES[name]
-        _assert_wright_half_carries_its_own_backstop(
-            row, backstop, _routine_text(row.workflow))
+def test_wright_halves_carry_different_surfaces():
+    # The separation as a table fact: the two halves share a workflow and a
+    # read wrapper but never a backstop or a filing server.
+    propose, signoff = ROUTINES["wright-propose"], ROUTINES["wright-signoff"]
+    assert propose.backstop != signoff.backstop, (
+        "the forge's two halves declare the same deny backstop — the "
+        "proposer/judge separation is gone from the table")
+    assert propose.mcp_config != signoff.mcp_config, (
+        "the forge's two halves declare the same filing server — the "
+        "proposer could hold the arming tool")
 
 
 def test_wright_backstop_guard_rejects_a_tail_step_on_the_other_halfs_backstop():
     # NEGATIVE CONTROL: the sign-off's terminal tail step rewired to the
     # PROPOSER's backstop — the cross-half drift, on the fall-through path —
-    # must fail. Derived from the live step, not a hand-copied literal.
+    # must fail the generic surface pin (the sibling's backstop is a real
+    # committed file, so only exact equality can see the swap). Derived from
+    # the live step, not a hand-copied literal.
     row = ROUTINES["wright-signoff"]
     text = _routine_text(row.workflow)
-    steps = _routine_ship_steps(_routine_job_text(text, row), row.resolve_id)
-    chunk = max(steps, key=lambda s: s["link"])["chunk"]
-    own = WRIGHT_BACKSTOPS["wright-signoff"]
-    other = WRIGHT_BACKSTOPS["wright-propose"]
+    chunk = _terminal_step_chunk(row, text)
+    own, other = WRIGHT_BACKSTOPS["wright-signoff"], WRIGHT_BACKSTOPS["wright-propose"]
     assert f"--settings {own}" in chunk, "tamper target not found — the fixture is stale"
     tampered = text.replace(
         chunk, chunk.replace(f"--settings {own}", f"--settings {other}", 1), 1)
     assert tampered != text, "tamper did not land — the fixture is stale"
     with pytest.raises(AssertionError, match="deny backstop"):
-        _assert_wright_half_carries_its_own_backstop(row, own, tampered)
+        _assert_routine_walk_steps_keep_their_surface(row, tampered)
 
 
 def test_wright_degraded_path_skips_with_a_notice_only_when_no_key_is_present():
@@ -2279,12 +2587,16 @@ def test_wright_degraded_path_skips_with_a_notice_only_when_no_key_is_present():
 # reads THAT job alone — the chain fits its walk, one step per link wired
 # to its link's provider, the walk order, the per-provider key gates, the
 # outcome simulation, the exhaustion gates, the job budget, the no-literal
-# rule, the triage wiring — and never the report or observe jobs. What
-# stays explicit here, each with a negative control: the job split itself;
-# the #442 containment surface on EVERY walk step (the tail included — a
-# step that shed it would do so only on the fall-through path); the #443
-# keyed-and-skippable degraded path in its any-provider form; and the
-# report job's keylessness.
+# rule, the triage wiring — and, since the review round, the #442
+# containment surface on EVERY walk step (dontAsk, the loop's own backstop,
+# the exact wrapper-only allow-list, no mcp-config — the row's fields, held
+# by the generic surface pin, the tail included) — and never the report or
+# observe jobs. What stays explicit here, each with a negative control: the
+# job split itself; the two containment facts equality on the row cannot
+# say (no MCP server mentioned ANYWHERE on a step — the wrapper is both the
+# read and the write surface — and the committed skill as the prompt, never
+# an inline one that bypasses it); the #443 keyed-and-skippable degraded
+# path in its any-provider form; and the report job's keylessness.
 
 REEVE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "reeve.yml"
 # The drafter's own deny backstop (#442) and its single shell surface.
@@ -2320,27 +2632,28 @@ def test_reeve_greenlight_is_a_separate_job_after_the_report():
         "its model would have to come from somewhere the registry does not own")
 
 
+def test_reeve_greenlight_row_declares_the_wrapper_only_surface():
+    # The #442 containment as a table fact, held on every step by the
+    # generic surface pin: the loop's OWN backstop, the wrapper as the ONLY
+    # Bash allow plus the read-only file tools, and no MCP server.
+    row = ROUTINES["reeve-greenlight"]
+    assert row.backstop == REEVE_BACKSTOP
+    assert row.mcp_config is None, "the greenlight row mounts an MCP server — none exists to allow"
+    assert f"Bash({REEVE_WRAPPER}:*)" in row.allowed and row.allowed.endswith("Read,Grep,Glob")
+    assert not re.search(r"Bash\((?!\.?/?\.claude/skills/reeve-greenlight/)", row.allowed), (
+        "the greenlight row allows a Bash beyond the wrapper")
+
+
 def _assert_reeve_greenlight_walk_keeps_the_containment_surface(text: str) -> None:
-    """The #442 containment surface on every walk step, which must not be
-    quietly shed: dontAsk, the loop's OWN deny backstop (never a sibling's),
-    the wrapper as the ONLY Bash allow plus the read-only file tools, no MCP
-    server (the wrapper is both the read and the write surface), and the
-    committed skill as the prompt — never an inline one that bypasses it.
-    Factored out so the negative control can run it against tampered text."""
+    """The two containment facts the generic (per-flag equality) pin cannot
+    say: no MCP server mentioned ANYWHERE on a step (not only on the
+    claude_args line — the wrapper is both the read and the write surface),
+    and the committed skill as the prompt — never an inline one that
+    bypasses it. Factored out so the negative control can run it against
+    tampered text."""
     for step in _reeve_walk_steps(text):
         where = f"reeve greenlight link-{step['link']} ship step"
         chunk = step["chunk"]
-        assert "--permission-mode dontAsk" in chunk, (
-            f"{where}: no longer runs under --permission-mode dontAsk")
-        assert f"--settings {REEVE_BACKSTOP}" in chunk, (
-            f"{where}: no longer carries the deny backstop "
-            f"(--settings {REEVE_BACKSTOP})")
-        assert f"Bash({REEVE_WRAPPER}:*)" in chunk, (
-            f"{where}: no longer allows the greenlight wrapper — the agent's "
-            "only shell surface")
-        assert "Read,Grep,Glob" in chunk, (
-            f"{where}: dropped the read-only file tools the charter grounding "
-            "(repo-root PM.md) depends on")
         assert "mcp__" not in chunk and "--mcp-config" not in chunk, (
             f"{where}: allows an MCP server — the loop's write surface is the "
             "wrapper, and no server exists to allow")
@@ -2353,17 +2666,17 @@ def test_reeve_greenlight_walk_steps_keep_the_containment_surface():
     _assert_reeve_greenlight_walk_keeps_the_containment_surface(_reeve_text())
 
 
-def test_reeve_containment_guard_rejects_a_tail_step_that_sheds_the_backstop():
-    # NEGATIVE CONTROL: strip the deny backstop from the terminal tail step
-    # — the one that runs only after every earlier link failed, unwatched —
-    # and require the containment pin to FAIL. Anchored inside the live step
-    # (the Oracle control's pattern), never the file's first occurrence.
+def test_reeve_containment_guard_rejects_a_tail_step_with_an_inline_prompt():
+    # NEGATIVE CONTROL: the terminal tail step's prompt swapped for an
+    # inline one — the skill bypassed on the one path that runs unwatched.
+    # Anchored inside the live step, never the file's first occurrence.
     text = _reeve_text()
     chunk = max(_reeve_walk_steps(text), key=lambda s: s["link"])["chunk"]
-    needle = f"--settings {REEVE_BACKSTOP} "
+    needle = "prompt: /reeve-greenlight"
     assert needle in chunk, "tamper target not found — the fixture is stale"
-    tampered = text.replace(chunk, chunk.replace(needle, "", 1), 1)
-    with pytest.raises(AssertionError, match="deny backstop"):
+    tampered = text.replace(
+        chunk, chunk.replace(needle, "prompt: draft a greenlight on every parked issue", 1), 1)
+    with pytest.raises(AssertionError, match="committed /reeve-greenlight skill"):
         _assert_reeve_greenlight_walk_keeps_the_containment_surface(tampered)
 
 

@@ -294,6 +294,15 @@ def test_routine_chains_are_smokeable_from_their_head_provider():
         "wright-signoff": "zai",
         "reeve-greenlight": "zai",
     }
+    # The two lists cannot drift: this hand-maintained dict must equal the
+    # {chain: head provider} the drift guard's ROUTINES table derives (one
+    # row per walk, its conf's `provider:` the head) — a routine enrolled in
+    # one and not the other is either unsmoked or unpinned.
+    from test_workflow_drift import ROUTINES, _routine_provider
+    derived = {row.chain: _routine_provider(row.conf) for row in ROUTINES.values()}
+    assert routines == derived, (
+        f"test_smoke's routine dict {sorted(routines)} != the drift guard's "
+        f"ROUTINES table {sorted(derived)} — enrol the routine in both")
     for chain_id, head in routines.items():
         links = reg.resolve(chain_id)
         assert len(links) > 1, (
