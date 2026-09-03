@@ -264,7 +264,7 @@ def test_auth_401_is_inconclusive_not_a_dead_id(tmp_path):
 
 
 def test_routine_chains_are_smokeable_from_their_head_provider():
-    """#327 / #544 AC: the four routine chains resolve to >1 link, their HEAD
+    """#327 / #544 AC: the routine chains resolve to >1 link, their HEAD
     on the routine's conf provider and their tail crossing to a second
     declared provider whose secret the smoke can also hold — so a model-smoke
     run (the model-smoke.yml workflow smokes EVERY chain on any registry
@@ -282,7 +282,27 @@ def test_routine_chains_are_smokeable_from_their_head_provider():
         "backlog-burn": "zai",
         "chunker": "zai",
         "labeler": "zai",
+        # #544 Part B: the eight formerly single-link routines, each walking
+        # a GLM head then the Anthropic tail (the drift guard's ROUTINES
+        # table holds the same set, one row per walk).
+        "scout": "zai",
+        "spike-converter": "zai",
+        "adoption-assessor": "zai",
+        "growth-twitter": "zai",
+        "reeve-growth": "zai",
+        "wright": "zai",
+        "wright-signoff": "zai",
+        "reeve-greenlight": "zai",
     }
+    # The two lists cannot drift: this hand-maintained dict must equal the
+    # {chain: head provider} the drift guard's ROUTINES table derives (one
+    # row per walk, its conf's `provider:` the head) — a routine enrolled in
+    # one and not the other is either unsmoked or unpinned.
+    from test_workflow_drift import ROUTINES, _routine_provider
+    derived = {row.chain: _routine_provider(row.conf) for row in ROUTINES.values()}
+    assert routines == derived, (
+        f"test_smoke's routine dict {sorted(routines)} != the drift guard's "
+        f"ROUTINES table {sorted(derived)} — enrol the routine in both")
     for chain_id, head in routines.items():
         links = reg.resolve(chain_id)
         assert len(links) > 1, (

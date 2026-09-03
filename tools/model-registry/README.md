@@ -103,14 +103,17 @@ the ship step land together.
 
 `auto-review.yml` is the first consumer: its `design-changes` job resolves the
 `review` chain into `model1..model6` outputs, and the Jane/Drik/PM-triage/coach ship steps
-read those instead of hardcoding `--model`. `product-scout.yml` and the four
-scheduled routines — `design-run.yml`, `backlog-burn.yml`, `chunker.yml`,
-`labeler.yml` (issue #326) — resolve their own chains in the job that consumes
-them and walk the links, one ship step per link, so a dead model falls through
-to the next instead of killing the run. Since #327 each routine chain carries a
-multi-model tail (the GLM links walk glm-5.2 → 5.1 → 4.6), and since #544 the
-four chain-walking routines' tails **cross providers**: after the GLM links
-each walks an Anthropic tail (claude-sonnet-5 → claude-haiku-4-5), the
+read those instead of hardcoding `--model`. Every scheduled routine —
+`design-run.yml`, `backlog-burn.yml`, `chunker.yml`, `labeler.yml` (issue
+#326), `product-scout.yml`, `spike-converter.yml`, `adoption-assessor.yml`,
+`growth-twitter.yml`, `reeve-growth.yml`, both jobs of `wright.yml` and the
+`greenlight` job of `reeve.yml` (#544 Part B) — resolves its own chain in the
+job that consumes it and walks the links, one ship step per link, so a dead
+model falls through to the next instead of killing the run. Since #327 each
+routine chain carries a multi-model tail, and since #544 every walk **crosses
+providers**: a GLM head — three GLM links (glm-5.2 → 5.1 → 4.6) for the four
+high-volume routines and for Reeve's sign-off (5.3 → 5.2 → 5.1), one link for
+the rest — then an Anthropic tail (claude-sonnet-5 → claude-haiku-4-5), the
 workflow's steps in file order — GLM link steps first, then the Anthropic link
 steps, each gated on every earlier link not having succeeded and on its own
 provider's key — so a whole-provider outage falls through instead of killing
@@ -120,25 +123,28 @@ may cross to any other declared provider the workflow carries literal ship
 steps for, in the workflow's step order. That shape is one pure rule,
 `walk_shape_errors(links, head_provider, layout)` in `registry.py`, which the
 resolve step runs as `model-registry shape <chain> --head <conf provider>
---layout zai,zai,zai,anthropic,anthropic` (the `--layout` literal is the
-file's ship-step order) before any key is spent, and which the drift guard
-runs pre-merge against the layout it derives from the ship steps' actual
-wiring — so the runtime check and the test cannot drift. The eight
-single-link scheduled routines keep the single-provider rule (every link on
-the conf's provider) until #544's Part B extends the walk to them. Spend
-note: the four are the bench's high-volume consumers, so with the Anthropic
-account funded a GLM outage shifts their spend to Anthropic while it lasts —
-the tail is the cheap tier for that reason, and each run summary names the
-link that served and warns when the head provider fell through.
+--layout <the file's ship-step order>` — `zai,zai,zai,anthropic,anthropic`
+for the five-link walks, `zai,anthropic,anthropic` for the three-link ones —
+before any key is spent, and which the drift guard runs pre-merge against the
+layout it derives from the ship steps' actual wiring — so the runtime check
+and the test cannot drift. Every tail leads with Sonnet, not Opus, the
+review-tier routines included: the Anthropic account carries a monthly usage
+cap, and an unattended fall-through must land on the cheap tier (promoting one
+routine's tail to Opus is a one-line `models` edit). Spend note: the four
+high-volume routines are where a GLM outage shifts the most spend to Anthropic
+while it lasts — the cheap tail is for that reason too, and each run summary
+names the link that served and warns when the head provider fell through.
 `tests/test_workflow_drift.py` pins the registry and every consumer workflow
-together so they cannot silently diverge — including, since #327, that the
-expressions reading the walk's *outcome* cover every link (an expression still
-on link 1 after a chain deepened would send a healthy link-2 run red), and
-since #544 that each link's ship step wires that link's provider (secret and
-endpoint, position-derived), that exactly one ship step exists per link, that
-every step gates on every earlier link and on its own provider's key, and that
-the provider-triage gate simulates correctly over all five links — each with a
-negative control.
+together so they cannot silently diverge — its `ROUTINES` table holds one row
+per walk (twelve, two of them in `wright.yml`), and every routine pin loops
+it — including, since #327, that the expressions reading the walk's *outcome*
+cover every link (an expression still on link 1 after a chain deepened would
+send a healthy link-2 run red), and since #544 that each link's ship step
+wires that link's provider (secret and endpoint, position-derived), that
+exactly one ship step exists per link, that every step gates on every earlier
+link and on its own provider's key, and that the provider-triage gate
+simulates correctly over every link of the walk — each with a negative
+control.
 
 When a chain *does* exhaust every link, each consumer invokes the shared
 `.github/actions/provider-triage` composite action, which runs `classify` to
@@ -151,9 +157,10 @@ The `review` chain's Anthropic backstop is itself a chain — Opus 4.8 → Sonne
 → Haiku 4.5 — rather than a single model (issue #298): a single hardcoded id can
 be unservable by a key (a deprecation, an access tier), so one dead id must never
 be the whole "never lose a review" backstop, and `model-smoke` proves each link
-live. (The tail now leads with `claude-opus-4-8` — the Anthropic model the team's
-design work rates highest and the ship-routine default; whether a given key can
-serve it is exactly what the live smoke confirms, rather than a static claim.)
+live. (The review tail leads with `claude-opus-4-8` — the Anthropic model the
+team's design work rates highest; the scheduled routines' tails start one link
+down, at `claude-sonnet-5`, the cheap tier (#544). Whether a given key can serve
+a link is exactly what the live smoke confirms, rather than a static claim.)
 
 ## Layout
 

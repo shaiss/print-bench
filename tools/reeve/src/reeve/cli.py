@@ -150,7 +150,8 @@ def cmd_greenlight_select(args: argparse.Namespace) -> int:
     """`greenlight-select`: print the draftable parked-decision queue.
 
     One line of space-separated issue numbers — the open ``needs-decision``
-    issues with no greenlight marker yet, oldest first, bounded by the conf's
+    issues with no greenlight marker yet (and not a provider-triage
+    escalation, which the gather skips), oldest first, bounded by the conf's
     ``greenlight_cap`` (so every issue the drafter is handed is postable
     within the same run's cap). The same string is appended to
     ``$GITHUB_OUTPUT`` as ``issues=`` (the ``armed`` precedent), so the

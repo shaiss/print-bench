@@ -12,12 +12,14 @@ name: Reeve growth (scheduled growth-post queueing)
 # workflow just gives it a cadence.
 #
 # This is the SIBLING of product-scout.yml — the same config parser, the same
-# two-key safety model, no selector (it originates rather than picks). Unlike
-# the scout it is oracle-shaped: NO shell wrapper. Its one write is the growth
-# desk's queue-filing MCP tool (mcp__growth_queue__queue_growth_post, the SAME
-# server /growth-queue mounts) — "wiring the queue server into a scheduled
-# sibling", the exact path docs/growth.md's Future work named — and its reads
-# are the file tools over the checkout plus a workflow-assembled dedup context.
+# two-key safety model, no selector (it originates rather than picks), and —
+# since issue #544 Part B — the same cross-provider chain walk (one run step
+# per registry link, the GLM head then the Anthropic tail). Unlike the scout it
+# is oracle-shaped: NO shell wrapper. Its one write is the growth desk's
+# queue-filing MCP tool (mcp__growth_queue__queue_growth_post, the SAME server
+# /growth-queue mounts) — "wiring the queue server into a scheduled sibling",
+# the exact path docs/growth.md's Future work named — and its reads are the
+# file tools over the checkout plus a workflow-assembled dedup context.
 #
 # DRY-RUN-FIRST BY CONSTRUCTION: this routine can never reach a channel. Its
 # backstop (.claude/reeve-growth-settings.json) DENIES the poster
@@ -25,7 +27,8 @@ name: Reeve growth (scheduled growth-post queueing)
 # dry-runs, and that still needs the human `approved-to-post` label to publish.
 #
 # WHERE THE CONFIG LIVES (deliberate split, identical to the siblings):
-#   * Policy → committed: .github/reeve-growth.conf (`enabled`/`provider`/`cadence`).
+#   * Policy → committed: .github/reeve-growth.conf (`enabled`, the `provider`
+#     — the walk's HEAD — and the `cadence`).
 #   * Live arming / kill switch → the REEVE_GROWTH_ENABLED repo variable, a fast
 #     human-only toggle. Not in git: arming an agent that WRITES issues should be
 #     a conscious act a fresh clone/fork can't inherit.
@@ -43,7 +46,8 @@ name: Reeve growth (scheduled growth-post queueing)
 #     bounded number of draft queue items — noise a human closes.
 #   * The deny backstop (.claude/reeve-growth-settings.json, via --settings)
 #     neutralizes the additive settings.json allows AND denies the poster, kept
-#     honest by scripts/reeve-growth-perms-check.sh.
+#     honest by scripts/reeve-growth-perms-check.sh — on EVERY link of the walk,
+#     because a fallback link that shed the backstop would be the worst drift.
 
 on:
   schedule:
@@ -63,9 +67,11 @@ on:
         default: false
 
 # Scoped to what the unattended /reeve-growth run does: read the repo to run the
-# skill (contents:read) and CREATE growth-queue issues (issues:write). It pushes
-# no branch and opens no PR, so it needs neither contents:write nor
-# pull-requests:write — the same tight grant as the product scout.
+# skill (contents:read) and CREATE growth-queue issues (issues:write — which the
+# provider-triage escalation also needs, to file its one deduped needs-decision
+# issue). It pushes no branch and opens no PR, so it needs neither
+# contents:write nor pull-requests:write — the same tight grant as the product
+# scout.
 permissions:
   contents: read
   issues: write
@@ -89,12 +95,33 @@ jobs:
       vars.REEVE_GROWTH_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # A hung /reeve-growth must not hold a runner for the 6-hour default while
-    # holding a secret, unwatched.
-    timeout-minutes: 40
+    # Job budget 65 = head-step timeout (40) + one tail-step timeout (20)
+    # + 5 min headroom. The GLM head keeps main's WHOLE pre-#544 job budget
+    # (40): a per-step cap below it would kill a legitimately long
+    # /reeve-growth run, read the kill as a failed link and re-run the whole
+    # thing on the tail — the common path must not pay for the fallback. The
+    # Anthropic tail links are budgeted shorter (20 each) on purpose (Part
+    # A's "tail shorter than head" shape): they exist for the fast failures a
+    # dead head produces, not for a second full run. So the budget fits
+    # exactly ONE stalled head link (40 — a model stall, not the seconds a
+    # quota/billing rejection takes) plus ONE full tail link (20) plus the
+    # pre-run steps; two consecutive stalls are NOT budgeted — a second
+    # stalled link dies with the job — because a stall is a provider-wide
+    # symptom, and the tail exists for the fast failures. The walk is
+    # three run steps in a row (the GLM head, then the two-link
+    # Anthropic tail — issue #544 Part B), each tail link re-assembling the
+    # dedup context first. The per-step timeouts are what keep a hung /reeve-growth
+    # from holding a runner and a secret past its budget, unwatched.
+    # Well inside GitHub's 360-minute hosted-job cap (the drift guard pins
+    # <= 360 and >= head + tail + 5).
+    timeout-minutes: 65
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
-      # provider's key presence as a plain string and gate on it below.
+      # provider's key presence as a plain string and gate on it below. The
+      # "Read policy" step turns these into per-provider `zai_key_present` /
+      # `anthropic_key_present` outputs (each provider's run steps gate on
+      # their own) plus `key_present` = either one (the any-key gate the
+      # dedup-context, triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
       # The per-run queue cap, enforced by the queue server (queue_mcp.py). With
@@ -123,32 +150,56 @@ jobs:
       - name: Read policy (.github/reeve-growth.conf)
         id: policy
         # Key 2 of 2: the committed source of truth. A malformed or typo'd config
-        # fails this step loudly. It also resolves the configured provider to
-        # whether *that provider's* secret is present, so the run steps below gate
-        # on one `key_present` output.
+        # fails this step loudly. The conf's `provider:` is the walk's HEAD
+        # provider (issue #544) — validated here, emitted for the resolve step's
+        # shape check and the summary. Key presence is emitted PER PROVIDER
+        # (each provider's run steps gate on their own, so the tail can run when
+        # the head's key is absent) plus the any-key `key_present` the
+        # dedup-context / triage / red / skip-notice gates read. The model
+        # itself is NOT decided here — it comes from the registry chain below.
         run: |
           set -euo pipefail
           conf=.github/reeve-growth.conf
           enabled="$(backlog-burn config --get enabled --path "$conf")"
           provider="$(backlog-burn config --get provider --path "$conf")"
           case "$provider" in
-            anthropic) [ "$HAS_ANTHROPIC_KEY" = "true" ] && key=1 || key=0 ;;
-            zai)       [ "$HAS_ZAI_KEY" = "true" ]       && key=1 || key=0 ;;
+            anthropic|zai) ;;
             *) echo "::error::unknown provider '$provider'"; exit 1 ;;
           esac
+          [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
+          [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "provider=$provider"
+            echo "zai_key_present=$zai_key"
+            echo "anthropic_key_present=$anthropic_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
-      # Resolve the routine's model from the committed provider/model registry
-      # (#206) — the same step product-scout.yml runs, stdlib-only. A malformed
-      # registry, or one whose `reeve-growth` chain went missing, fails loudly
-      # BEFORE any key is spent. The cross-check guards the one mis-run this
-      # migration could hit: the conf's `provider:` picks the ship step (endpoint
-      # + secret), the registry picks the model — a model hosted elsewhere would
-      # fail at request time with a key spent.
+      # Resolve the routine's model chain from the committed provider/model
+      # registry (#206) — the same resolve step product-scout.yml runs,
+      # stdlib-only so it needs no install in front of it. A malformed registry,
+      # or one whose `reeve-growth` chain went missing, fails loudly BEFORE any
+      # key is spent — and is caught pre-merge by the model-registry drift-guard
+      # tests, which fire on this workflow and on registry.conf. `link<N>_model`
+      # is what the run steps below read; the secret stays literal per step (the
+      # Actions constraint), so the registry decides the model, never the auth.
+      #
+      # The shape check guards the one way the conf/chain split can mis-run
+      # (issue #544): the walk below is a FIXED sequence of literal run steps
+      # — its layout, one provider per step in file order (one Z.AI GLM step,
+      # then two Anthropic steps), because Actions can only reference a secret
+      # by its literal name — while the registry picks the MODEL each step
+      # runs. A link on the wrong slot's provider (claude-* on the Z.AI step,
+      # glm-* on an Anthropic step) would fail at request time with a key
+      # already spent, and a chain longer or shorter than the walk leaves a
+      # step without a link or a link without a step. So the conf's
+      # `provider:` must be link 1's (it names the HEAD of the walk), and link
+      # N's provider must be step N's — `model-registry shape` applies the
+      # same pure rule the drift guard pins pre-merge, so the two cannot
+      # drift, and the `--layout` literal below is what the drift guard
+      # compares against the steps' actual wiring.
       - name: Resolve the reeve-growth model chain (#206)
         id: chain
         env:
@@ -156,12 +207,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m model_registry resolve reeve-growth --gh-output "$GITHUB_OUTPUT"
-          link_provider="$(sed -n 's/^link1_provider=//p' "$GITHUB_OUTPUT" | head -1)"
           conf_provider="$(backlog-burn config --get provider --path .github/reeve-growth.conf)"
-          if [ "$link_provider" != "$conf_provider" ]; then
-            echo "::error::the registry's 'reeve-growth' chain resolves to provider '$link_provider' but .github/reeve-growth.conf says provider '$conf_provider' — the model would run against the wrong endpoint. Edit them together: the chain in .github/models/registry.conf, the label in .github/reeve-growth.conf."
-            exit 1
-          fi
+          # One layout entry per run step below, in file order.
+          python3 -m model_registry shape reeve-growth --head "$conf_provider" \
+            --conf .github/reeve-growth.conf --layout zai,anthropic,anthropic
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -171,7 +220,11 @@ jobs:
       # agent): the currently-open growth-queue items, so /reeve-growth never
       # re-queues one already open. The agent reads this file with Read/Grep/Glob;
       # it holds no `gh` of its own (the .oracle-context / .growth-context
-      # pattern). Runs only when the routine will actually invoke the agent.
+      # pattern). Runs only when the routine will actually invoke the agent —
+      # gated on the any-key `key_present`. This copy serves the HEAD link;
+      # each tail link re-assembles its own immediately before it runs (the
+      # "Refresh the dedup context" steps below), because a head link that
+      # queued items and THEN failed leaves this list stale.
       - name: Assemble the dedup context
         if: >-
           steps.policy.outputs.enabled == 'true'
@@ -194,13 +247,40 @@ jobs:
           echo "assembled .reeve-growth-context/queued.md:"
           cat .reeve-growth-context/queued.md
 
-      # One explicit run step per provider — a provider is a reviewed, git-tracked
-      # step because Actions can only reference a secret by its literal name. The
-      # committed `provider:` label picks which one runs; the MODEL comes from the
-      # registry's `reeve-growth` chain (steps.chain.outputs), so swapping the
-      # model is a registry edit, not a workflow edit.
+      # One explicit run step per CHAIN LINK, walked in file order ACROSS
+      # providers (issue #544 Part B): link 1 is the Z.AI GLM step, links 2-3
+      # the Anthropic tail. A provider is a reviewed, git-tracked step because
+      # GitHub Actions can only reference a secret by its literal name
+      # (secrets can't be selected by a runtime variable), so the walk's
+      # provider LAYOUT is fixed here and the registry's `reeve-growth` chain
+      # (steps.chain.outputs) picks which MODEL each link runs — swapping the
+      # routine to another model is a registry edit, not a workflow edit; the
+      # resolve step above refuses a chain that does not fit this layout. The
+      # committed `provider:` label names the HEAD provider (link 1 must sit
+      # on it); it no longer selects a whole block. Each link is gated on
+      # EVERY earlier link NOT having succeeded — a skipped step's outcome is
+      # 'skipped', not 'success', so the Anthropic tail runs whether the GLM
+      # link failed or was skipped for want of ZAI_KEY — so the first success
+      # short-circuits the rest and a dead model, or a whole dead provider,
+      # falls through instead of killing the run. Each provider's steps gate
+      # on THEIR OWN key (zai_key_present / anthropic_key_present), never the
+      # other's. Deepening the chain is a same-PR pair: add the model to the
+      # registry AND the matching run step here (and its slot in the resolve
+      # step's --layout) — the drift guard fails either half shipped alone.
       #
-      # Tool surface (why exactly this): FILING is the MCP tool
+      # Failure model: this routine carries no SHIP-LOCK lifecycle, so the
+      # non-terminal links (1-2) are continue-on-error so a dead id falls
+      # through, and the TERMINAL link (3) keeps none — a total-walk failure
+      # then fails the step, and the job, exactly as the single step did
+      # before the tail existed. The "Turn an exhausted walk red" step at the
+      # end covers the one case that rule misses: a walk exhausted with the
+      # tail SKIPPED (only ZAI_KEY set, the GLM link dead) has no failed
+      # non-coe step to fail the job.
+      #
+      # All three steps share the pin, the write permission, the `github_token`,
+      # the queue cap, the same tool surface and the same /reeve-growth prompt.
+      #
+      # Tool surface (why exactly this, on EVERY link): FILING is the MCP tool
       # (mcp__growth_queue__queue_growth_post, the growth desk's shared queue
       # server, wired via --mcp-config) because the queue-item body is rich
       # multi-line markdown, and under --permission-mode dontAsk the Bash matcher
@@ -211,13 +291,25 @@ jobs:
       # (--settings) neutralises any Bash allow that leaks from settings.json AND
       # denies mcp__growth_twitter (this routine queues, it never posts).
 
-      - name: Run via Z.AI (GLM)
-        id: run_zai
+      - name: Run via Z.AI (GLM, chain link 1)
+        id: run_zai_1
         if: >-
           steps.policy.outputs.enabled == 'true'
-          && steps.policy.outputs.provider == 'zai'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+        # continue-on-error so the walk reaches the tail when this id or
+        # provider is dead. The step timeout is main's whole pre-#544 job
+        # budget — the head is never cut short on the common path — and a
+        # stall past it is exactly what the shorter tail links are for.
+        timeout-minutes: 40
+        continue-on-error: true
+        # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
+        # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
+        # path matters), ANTHROPIC_AUTH_TOKEN becomes the Bearer token; the same
+        # ZAI_KEY is also passed as anthropic_api_key to satisfy the action's
+        # credential check. Growth-desk content under the bench's name leads
+        # with the frontier GLM tier (the growth-twitter posture) — which model
+        # exactly is the registry's `reeve-growth` chain's call, not this step's.
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -235,13 +327,111 @@ jobs:
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
           prompt: "/reeve-growth"
 
-      - name: Run via Anthropic (Claude)
-        id: run_anthropic
+      # Refresh the dedup context immediately before EACH tail link (#544 Part
+      # B review fix): a head link can queue items and THEN fail (a filing
+      # landed, the run died after it), so by the time a tail link runs the
+      # list the first assembly wrote is stale — and queue_mcp.py has no
+      # write-time dedup, so a tail trusting that list would re-queue the
+      # head's own items as duplicates. A tail must not trust a list the head
+      # may have changed; it re-reads the live queue itself. Gated EXACTLY
+      # like the link it precedes (the same fixed legs, that link's own key,
+      # every earlier link NOT having succeeded), so it runs when — and only
+      # when — that link will. Not a ship step and not a gate: the drift
+      # guard's walk pins read only the claude-code-action steps.
+      - name: Refresh the dedup context for chain link 2
+        id: dedup_context_2
         if: >-
           steps.policy.outputs.enabled == 'true'
-          && steps.policy.outputs.provider == 'anthropic'
-          && steps.policy.outputs.key_present == '1'
+          && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .reeve-growth-context
+          {
+            echo "# Currently-open growth-queue items (dedup — do not re-propose these)"
+            echo
+            gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --label growth-queue --limit 100 \
+              --json number,title,labels \
+              --jq 'sort_by(.number) | .[] | "- #\(.number) \(.title)  [\(.labels | map(.name) | join(", "))]"' \
+              || echo "(could not list open growth-queue items)"
+          } > .reeve-growth-context/queued.md
+          echo "assembled .reeve-growth-context/queued.md:"
+          cat .reeve-growth-context/queued.md
+
+      # The cross-provider tail (issue #544 Part B): links 2 and 3 of the
+      # registry's `reeve-growth` chain on Anthropic's native endpoint, reached
+      # only when the GLM link did not succeed (failed, or skipped for want of
+      # ZAI_KEY) and gated on the Anthropic key's own presence. Claude via
+      # api.anthropic.com: a plain API key (pay-per-token) is the right fit
+      # for an unattended bot — no OAuth token / subscription seat. The same
+      # pin, permission, github_token, effort, cap, MCP queue tool, backstop,
+      # transcript posture and prompt as the GLM link — only the model, secret
+      # and endpoint differ. Which model runs is the registry's call.
+      - name: Run via Anthropic (Claude, chain link 2)
+        id: run_anthropic_2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          # Same reason as the Z.AI step: the queue MCP tool inherits this env
+          # and authenticates with it.
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          # Same tool surface as the Z.AI step: MCP queue tool + read-only file
+          # tools + the reeve-growth deny backstop + dontAsk + show_full_output
+          # (see the block comment above for why it is exactly this).
+          show_full_output: "true"
+          claude_args: --model ${{ steps.chain.outputs.link2_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
+          prompt: "/reeve-growth"
+
+      # Same refresh for link 3: link 2 may itself have queued and then died.
+      - name: Refresh the dedup context for chain link 3
+        id: dedup_context_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_anthropic_2.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .reeve-growth-context
+          {
+            echo "# Currently-open growth-queue items (dedup — do not re-propose these)"
+            echo
+            gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --label growth-queue --limit 100 \
+              --json number,title,labels \
+              --jq 'sort_by(.number) | .[] | "- #\(.number) \(.title)  [\(.labels | map(.name) | join(", "))]"' \
+              || echo "(could not list open growth-queue items)"
+          } > .reeve-growth-context/queued.md
+          echo "assembled .reeve-growth-context/queued.md:"
+          cat .reeve-growth-context/queued.md
+
+      - name: Run via Anthropic (Claude, chain link 3)
+        id: run_anthropic_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_anthropic_2.outcome != 'success'
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over.
+        timeout-minutes: 20
         env:
           GITHUB_TOKEN: ${{ github.token }}
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
@@ -249,7 +439,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           show_full_output: "true"
-          claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
+          claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
           prompt: "/reeve-growth"
 
       - name: Explain a skipped agentic run
@@ -264,8 +454,35 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "::notice::dry run — did not invoke /reeve-growth"
           else
-            echo "::notice::the configured provider '${PROVIDER}' has no key set (ZAI_KEY for zai, ANTHROPIC_API_KEY for anthropic) — skipping the unattended /reeve-growth run"
+            echo "::notice::no key is set for ANY provider in the reeve-growth chain (ZAI_KEY for the zai link, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — skipping the unattended /reeve-growth run"
           fi
+
+      # No SHIP-LOCK lifecycle here, so the terminal link failing IS the job
+      # failure — but before that stands, recover WHY the chain exhausted (the
+      # agent steps hide their provider error) and route the human-fixable causes
+      # — out of credit / out of tokens / bad key — to ONE deduped needs-decision
+      # issue, so a scheduled red nobody watches becomes an actionable ask. A bad
+      # model id or a transient blip is only diagnosed in the log. Advisory: it
+      # never fails the job. Fires (always()) only when a key was present and the
+      # walk did not succeed — the same three-link walk-outcome expression the
+      # record step reports as RUN. Both keys go in so classify probes both
+      # halves of the chain.
+      - name: Diagnose the exhausted chain (billing / tokens / technical)
+        id: triage
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
+        uses: ./.github/actions/provider-triage
+        with:
+          chain: reeve-growth
+          zai-key: ${{ secrets.ZAI_KEY }}
+          anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ github.token }}
+          context: the reeve-growth routine
+          escalate: "true"
 
       - name: Record the run outcome
         if: always()
@@ -273,8 +490,41 @@ jobs:
           PROVIDER: ${{ steps.policy.outputs.provider }}
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
-          RUN: ${{ steps.policy.outputs.provider == 'anthropic' && steps.run_anthropic.outcome || steps.run_zai.outcome }}
+          # The walk's outcome (#544): 'success' if ANY of the three links
+          # across both providers succeeded; otherwise the outcome of the
+          # LAST LINK THAT ACTUALLY RAN — the nested tail walks backwards
+          # over 'skipped' links, so 'skipped' means every link was skipped
+          # (no key for any provider), never "the tail had no key" after the
+          # head failed. The terminal link failing fails the job; the "Turn
+          # an exhausted walk red" step below covers a walk exhausted with
+          # the tail skipped.
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
+          # Per-link outcomes + the chain the resolve step emitted, so the
+          # summary can name WHICH link served and warn when the head
+          # provider fell through (a GLM outage must stay visible even though
+          # the run is green — #544).
+          L1: ${{ steps.run_zai_1.outcome }}
+          L2: ${{ steps.run_anthropic_2.outcome }}
+          L3: ${{ steps.run_anthropic_3.outcome }}
+          M1: ${{ steps.chain.outputs.link1_model }}
+          M2: ${{ steps.chain.outputs.link2_model }}
+          M3: ${{ steps.chain.outputs.link3_model }}
+          P1: ${{ steps.chain.outputs.link1_provider }}
+          P2: ${{ steps.chain.outputs.link2_provider }}
+          P3: ${{ steps.chain.outputs.link3_provider }}
         run: |
+          # Which link served: the first (only) link whose outcome is success.
+          served=""
+          for i in 1 2 3; do
+            o="L$i"; m="M$i"; p="P$i"
+            if [ "${!o}" = "success" ]; then
+              served="link $i ${!m} (${!p})"
+              if [ "${!p}" != "${PROVIDER}" ]; then
+                echo "::warning::reeve-growth fell through to ${!p}: every '${PROVIDER}' (head provider) link failed or was skipped and link $i ${!m} served — the run is green, but the head provider is down or keyless; check its quota/key"
+              fi
+              break
+            fi
+          done
           {
             echo "## Reeve growth — run outcome"
             if [ "${POLICY_OUTCOME}" != "success" ]; then
@@ -282,10 +532,33 @@ jobs:
             elif [ "${ENABLED}" != "true" ]; then
               echo "- disabled by committed policy (.github/reeve-growth.conf \`enabled\` != true) — nothing ran"
             else
-              echo "- provider: ${PROVIDER}"
+              echo "- provider: ${PROVIDER} (head)"
               echo "- run step: ${RUN:-skipped} (any queued items are on the issue tracker, labelled \`growth-queue\` + \`channel:twitter\`, awaiting a human's review and \`approved-to-post\`)"
+              if [ -n "${served}" ]; then
+                echo "- served by: ${served}"
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Turn an exhausted walk red
+        # The terminal link (3) carries no continue-on-error, so its failure
+        # fails the job — but a walk that exhausted with the tail SKIPPED
+        # (only ZAI_KEY set and the GLM link dead) has no failed non-coe
+        # step, and would leave the run green: exactly the silent-success
+        # disguise the burn's red-on-death step exists for. Restore the
+        # failure last, after the triage and the record have run. Same
+        # walk-outcome expression as the triage gate and RUN above.
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
+        env:
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
+        run: |
+          echo "::error::the /reeve-growth agent step did not succeed on any link of the reeve-growth chain (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
+          exit 1
 
   disarmed-notice:
     name: Explain a disarmed run

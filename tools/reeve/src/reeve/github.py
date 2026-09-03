@@ -74,6 +74,16 @@ NEEDS_DECISION_LABEL = "needs-decision"
 # greenlighted", exactly the wrapper's own live idempotency check.
 GREENLIGHT_MARKER = "<!-- reeve-greenlight v"
 
+# The marker `.github/actions/provider-triage` writes into the body of the
+# needs-decision issue it files when a chain is exhausted (one per registry
+# chain, so every converted walk can raise one — issue #544). That issue is an
+# account/key ask with a fixed remedy — fund the account, raise the cap,
+# rotate the key — not a decision a charter verdict can rule on, so the
+# greenlight Select skips it rather than hand the drafter a yes/no it cannot
+# give. Mirrored, not imported (the action is JavaScript); matched anywhere
+# in the body, where the action writes it as the first line.
+PROVIDER_ESCALATION_MARKER = "<!-- provider-escalation:"
+
 # The scheduled routines whose death Reeve watches (the #312 incident class:
 # a run killed by its own timeout leaves conclusion "cancelled"/"failure" and
 # a ghost lock behind). growth-twitter is here because docs/growth.md names
@@ -262,6 +272,11 @@ def carries_greenlight(comments: list[Any]) -> bool:
     )
 
 
+def is_provider_escalation(body: str | None) -> bool:
+    """Whether an issue body carries provider-triage's escalation marker."""
+    return PROVIDER_ESCALATION_MARKER in (body or "")
+
+
 def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
     """The greenlight loop's work-list, from the live repo (issue #443).
 
@@ -270,6 +285,9 @@ def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
     workflow's Select step reads this and hands the agent only the rest, so
     the drafter never even sees an issue it cannot post on (the wrapper
     re-checks live at write time; this is the selection, not the enforcement).
+    A parked issue that is a provider-triage escalation (its body carries
+    ``PROVIDER_ESCALATION_MARKER``) stays in ``parked`` — it IS at the gate —
+    but never enters ``queue``, and its thread is not even read.
     Still GET-only: two listings per issue and nothing else.
     """
     parked: list[dict[str, Any]] = []
@@ -285,11 +303,14 @@ def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
                 "number": item["number"],
                 "title": item["title"],
                 "url": item.get("html_url", ""),
+                "providerEscalation": is_provider_escalation(item.get("body", "")),
             }
         )
 
     queue: list[dict[str, Any]] = []
     for issue in parked:
+        if issue["providerEscalation"]:
+            continue  # an account/key ask with a fixed remedy, not a charter call
         comments = _paged(
             f"{API_ROOT}/repos/{repo}/issues/{issue['number']}/comments?per_page=100",
             token,

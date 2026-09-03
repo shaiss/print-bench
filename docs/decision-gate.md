@@ -219,8 +219,11 @@ follow-ups.
 
 The same mechanism now covers **every** chain-walking workflow, factored into one
 shared composite action, `.github/actions/provider-triage`. When the design-review
-chain (`auto-review.yml`) or any of the four scheduled routines (`backlog-burn`,
-`design-run`, `chunker`, `labeler`) fails on every link, the action runs
+chain (`auto-review.yml`) or any scheduled routine's walk — the twelve of them
+since #544 Part B: `backlog-burn`, `design-run`, `chunker`, `labeler`,
+`product-scout`, `spike-converter`, both of `wright.yml`'s jobs,
+`adoption-assessor`, `growth-twitter`, `reeve-growth` and `reeve.yml`'s
+greenlight job — fails on every link, the action runs
 `model-registry classify` and, on a `needs-human` verdict, files a single deduped
 `needs-decision` issue keyed by a `<!-- provider-escalation:<chain> -->` marker
 (one per registry chain, so no two routines collide, and distinct from the

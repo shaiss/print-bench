@@ -109,11 +109,16 @@ pieces. A separate `greenlight` job in `.github/workflows/reeve.yml` runs after
 the keyless report and:
 
 - resolves the registry's `[chain:reeve-greenlight]` (`.github/models/
-  registry.conf`), cross-checked up front against the conf's `provider:` label
-  — the #326 pattern, no model id in the workflow;
+  registry.conf`) and walks it across providers (#544): the GLM head on the
+  conf's `provider:`, then the Anthropic tail, one ship step per link — the
+  resolve step's `model-registry shape` check fails up front on a chain that
+  does not fit that walk; no model id in the workflow;
 - selects the work **as trusted workflow code** (`reeve greenlight-select`):
   the open `needs-decision` issues carrying no greenlight marker, oldest first,
-  bounded by the `greenlight_cap` conf key;
+  bounded by the `greenlight_cap` conf key — skipping any that is a
+  `provider-triage` escalation (its body carries the `<!--
+  provider-escalation:<chain> -->` marker; #544): an account/key ask with a
+  fixed remedy is not a decision a charter verdict can rule on;
 - runs the drafter (`/reeve-greenlight`, `.claude/skills/reeve-greenlight/`)
   with `--permission-mode dontAsk` over the #442 wrapper — its only shell
   surface — behind `.claude/reeve-settings.json`, its writes bound to the
@@ -219,9 +224,10 @@ The routine runs only when **both** agree: `.github/reeve.conf`'s `enabled: true
 switch). Shipped with the variable unset, so a clone/fork can't silently arm it.
 The 2×2 decision is code (`reeve armed`), unit-tested. The greenlight job adds a
 third, keyless-until-lit gate of its own: `greenlight: true` in the conf
-(**shipped `false`** — the loop is built but not lit) plus the conf-declared
-provider's secret actually being set; a missing secret is a `::notice::` skip,
-never a red run.
+(**shipped `false`** — the loop is built but not lit) plus at least one of the
+walk's provider secrets actually being set (a keyless head falls through to the
+Anthropic tail, #544); no key on any provider is a `::notice::` skip, never a
+red run.
 
 ## CLI
 
