@@ -80,7 +80,13 @@ def _is_transient(status: int) -> bool:
 # Both are ``needs_human`` to the coarse verdict, so the UNION below preserves
 # ``_classify_fine``'s behaviour exactly; only the human-facing remediation differs
 # (raise the cap / wait for reset, versus fund the account).
-_QUOTA_MARKERS = ("quota", "exhausted")
+# "usage limit" / "regain access" catch the phrasing a provider uses for a spend
+# or usage cap that resets on a date — notably Anthropic's "You have reached your
+# specified API usage limits. You will regain access on <date>" (an HTTP 400 with
+# NO "quota"/"exhausted"/billing word in it). Without these it fell through to
+# `bad-model-id` and reddened as a #298 registry defect, when it is really a
+# needs_human quota condition (raise the cap / wait for the reset).
+_QUOTA_MARKERS = ("quota", "exhausted", "usage limit", "regain access")
 _BILLING_MARKERS = ("credit", "billing", "balance", "payment", "funds", "too low")
 _FUNDING_MARKERS = _BILLING_MARKERS + _QUOTA_MARKERS
 
@@ -149,7 +155,8 @@ def _reason_fine(status: int, body: str) -> str:
     if any(marker in low for marker in _BILLING_MARKERS):
         return "billing"                    # "credit balance too low", payment failed
     if any(marker in low for marker in _QUOTA_MARKERS):
-        return "quota"                      # "quota exceeded", weekly limit exhausted
+        return "quota"                      # "quota exceeded", "weekly limit exhausted",
+                                            # "usage limits ... regain access on <date>"
     # 404 not-found, 403 permission, invalid-model 400, …: the id is the problem.
     return "bad-model-id"
 
