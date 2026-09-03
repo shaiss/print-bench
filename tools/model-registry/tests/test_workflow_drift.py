@@ -1562,9 +1562,15 @@ def test_surface_guard_rejects_a_row_whose_surface_the_head_does_not_carry():
 
 def _step_condition(chunk: str) -> str:
     """A step chunk's `if:` body, one line — the folded `if: >-` form the
-    routines use, or a one-line `if: <expr>`."""
+    routines use, or a one-line `if: <expr>`.
+
+    Each continuation line is matched as indentation, then an optional
+    non-blank remainder: a blank run of tabs has exactly one split, so a
+    non-matching tail cannot make the engine backtrack exponentially (the
+    `[ \t]+.*` shape CodeQL flagged as a ReDoS)."""
     m = re.search(
-        r"^[ \t]*if: >-\n((?:[ \t]+.*\n)+?)(?=[ \t]*[a-z_-]+:)", chunk, re.MULTILINE)
+        r"^[ \t]*if: >-\n((?:[ \t]+(?:[^ \t\n][^\n]*)?\n)+?)(?=[ \t]*[a-z_-]+:)",
+        chunk, re.MULTILINE)
     if m:
         return " ".join(l.strip() for l in m.group(1).splitlines())
     m = re.search(r"^[ \t]*if:[ \t]*(.+)$", chunk, re.MULTILINE)
