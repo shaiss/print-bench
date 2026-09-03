@@ -272,7 +272,7 @@ def carries_greenlight(comments: list[Any]) -> bool:
     )
 
 
-def is_provider_escalation(body: str) -> bool:
+def is_provider_escalation(body: str | None) -> bool:
     """Whether an issue body carries provider-triage's escalation marker."""
     return PROVIDER_ESCALATION_MARKER in (body or "")
 
