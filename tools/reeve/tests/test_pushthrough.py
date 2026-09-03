@@ -117,9 +117,11 @@ def _posted_comments(writes):
 
 
 def _no_decide_command_anywhere(writes):
-    # Done-when (e): the routine never posts a /decide — decide.yml's anchor
-    # would not match a footered bot command anyway (the stage-1 lesson), so
-    # posting one would be a silently-neutral no-op dressed as success.
+    # Done-when (e): the routine never posts a /decide. Since #540 decide.yml
+    # honours a bot command carrying the tooling's footer, so a posted one
+    # would now be a SECOND write path racing the API push-through — the
+    # opposite failure from the stage-1 silently-neutral no-op, and still
+    # forbidden.
     for body in _posted_comments(writes):
         for line in body.splitlines():
             assert greenlight.DECIDE_COMMAND_RE.match(line.strip()) is None, (
