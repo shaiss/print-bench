@@ -95,21 +95,26 @@ jobs:
       vars.REEVE_GROWTH_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # Job budget 45 = 2 × run-step timeout (20) + 5 min headroom. A reeve-growth
-    # run is a read of committed signals plus at most GROWTHQ_MAX_POSTS queue
-    # filings, but the walk below is three run steps in a row (the GLM head,
-    # then the Anthropic tail — issue #544 Part B), each with its own 20-minute
-    # timeout, and the budget must let at least ONE full fallback link complete
-    # after a head link STALLS to its step timeout (a model stall, not the
-    # seconds a quota/billing rejection takes): head 20 + one fallback 20 + the
-    # pre-run steps. The per-step timeout is what keeps a hung /reeve-growth
-    # from holding a runner and a secret for the whole job budget, unwatched —
-    # before #544 the single step could hold it for 40. Two consecutive stalls
-    # are not budgeted — a second stalled link dies with the job — because a
-    # stall is a provider-wide symptom, and the fast failures the tail exists
-    # for reject in seconds. Well inside GitHub's 360-minute hosted-job cap
-    # (the drift guard pins <= 360).
-    timeout-minutes: 45
+    # Job budget 65 = head-step timeout (40) + one tail-step timeout (20)
+    # + 5 min headroom. The GLM head keeps main's WHOLE pre-#544 job budget
+    # (40): a per-step cap below it would kill a legitimately long
+    # /reeve-growth run, read the kill as a failed link and re-run the whole
+    # thing on the tail — the common path must not pay for the fallback. The
+    # Anthropic tail links are budgeted shorter (20 each) on purpose (Part
+    # A's "tail shorter than head" shape): they exist for the fast failures a
+    # dead head produces, not for a second full run. So the budget fits
+    # exactly ONE stalled head link (40 — a model stall, not the seconds a
+    # quota/billing rejection takes) plus ONE full tail link (20) plus the
+    # pre-run steps; two consecutive stalls are NOT budgeted — a second
+    # stalled link dies with the job — because a stall is a provider-wide
+    # symptom, and the tail exists for the fast failures. The walk is
+    # three run steps in a row (the GLM head, then the two-link
+    # Anthropic tail — issue #544 Part B), each tail link re-assembling the
+    # dedup context first. The per-step timeouts are what keep a hung /reeve-growth
+    # from holding a runner and a secret past its budget, unwatched.
+    # Well inside GitHub's 360-minute hosted-job cap (the drift guard pins
+    # <= 360 and >= head + tail + 5).
+    timeout-minutes: 65
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
@@ -216,8 +221,10 @@ jobs:
       # re-queues one already open. The agent reads this file with Read/Grep/Glob;
       # it holds no `gh` of its own (the .oracle-context / .growth-context
       # pattern). Runs only when the routine will actually invoke the agent —
-      # gated on the any-key `key_present`, since whichever link serves reads
-      # the same context.
+      # gated on the any-key `key_present`. This copy serves the HEAD link;
+      # each tail link re-assembles its own immediately before it runs (the
+      # "Refresh the dedup context" steps below), because a head link that
+      # queued items and THEN failed leaves this list stale.
       - name: Assemble the dedup context
         if: >-
           steps.policy.outputs.enabled == 'true'
@@ -291,9 +298,10 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
         # continue-on-error so the walk reaches the tail when this id or
-        # provider is dead; the step timeout keeps a stalled model from eating
-        # the job budget the fallback links need.
-        timeout-minutes: 20
+        # provider is dead. The step timeout is main's whole pre-#544 job
+        # budget — the head is never cut short on the common path — and a
+        # stall past it is exactly what the shorter tail links are for.
+        timeout-minutes: 40
         continue-on-error: true
         # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
         # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
@@ -318,6 +326,41 @@ jobs:
           show_full_output: "true"
           claude_args: --model ${{ steps.chain.outputs.link1_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
           prompt: "/reeve-growth"
+
+      # Refresh the dedup context immediately before EACH tail link (#544 Part
+      # B review fix): a head link can queue items and THEN fail (a filing
+      # landed, the run died after it), so by the time a tail link runs the
+      # list the first assembly wrote is stale — and queue_mcp.py has no
+      # write-time dedup, so a tail trusting that list would re-queue the
+      # head's own items as duplicates. A tail must not trust a list the head
+      # may have changed; it re-reads the live queue itself. Gated EXACTLY
+      # like the link it precedes (the same fixed legs, that link's own key,
+      # every earlier link NOT having succeeded), so it runs when — and only
+      # when — that link will. Not a ship step and not a gate: the drift
+      # guard's walk pins read only the claude-code-action steps.
+      - name: Refresh the dedup context for chain link 2
+        id: dedup_context_2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .reeve-growth-context
+          {
+            echo "# Currently-open growth-queue items (dedup — do not re-propose these)"
+            echo
+            gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --label growth-queue --limit 100 \
+              --json number,title,labels \
+              --jq 'sort_by(.number) | .[] | "- #\(.number) \(.title)  [\(.labels | map(.name) | join(", "))]"' \
+              || echo "(could not list open growth-queue items)"
+          } > .reeve-growth-context/queued.md
+          echo "assembled .reeve-growth-context/queued.md:"
+          cat .reeve-growth-context/queued.md
 
       # The cross-provider tail (issue #544 Part B): links 2 and 3 of the
       # registry's `reeve-growth` chain on Anthropic's native endpoint, reached
@@ -351,6 +394,32 @@ jobs:
           show_full_output: "true"
           claude_args: --model ${{ steps.chain.outputs.link2_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
           prompt: "/reeve-growth"
+
+      # Same refresh for link 3: link 2 may itself have queued and then died.
+      - name: Refresh the dedup context for chain link 3
+        id: dedup_context_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_anthropic_2.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .reeve-growth-context
+          {
+            echo "# Currently-open growth-queue items (dedup — do not re-propose these)"
+            echo
+            gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --label growth-queue --limit 100 \
+              --json number,title,labels \
+              --jq 'sort_by(.number) | .[] | "- #\(.number) \(.title)  [\(.labels | map(.name) | join(", "))]"' \
+              || echo "(could not list open growth-queue items)"
+          } > .reeve-growth-context/queued.md
+          echo "assembled .reeve-growth-context/queued.md:"
+          cat .reeve-growth-context/queued.md
 
       - name: Run via Anthropic (Claude, chain link 3)
         id: run_anthropic_3

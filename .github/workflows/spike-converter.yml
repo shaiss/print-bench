@@ -119,22 +119,25 @@ jobs:
       vars.SPIKE_CONVERTER_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # Job budget 45 = 2 × run-step timeout (20) + 5 min headroom. A converter
-    # run is one extractor selection, a read of one committed doc section and
-    # at most SCOUT_MAX_BRIEFS (1) filing, but the walk below is three run
-    # steps in a row (the GLM head, then the Anthropic tail — issue #544 Part
-    # B), each with its own 20-minute timeout, and the budget must let at
-    # least ONE full fallback link complete after a head link STALLS to its
-    # step timeout (a model stall, not the seconds a quota/billing rejection
-    # takes): head 20 + one fallback 20 + the pre-run steps. The per-step
-    # timeout is what keeps a hung /spike-converter from holding a runner and
-    # a secret for the whole job budget, unwatched — before #544 the single
-    # step could hold it for 40. Two consecutive stalls are not budgeted — a
-    # second stalled link dies with the job — because a stall is a
-    # provider-wide symptom, and the fast failures the tail exists for reject
-    # in seconds. Well inside GitHub's 360-minute hosted-job cap (the drift
-    # guard pins <= 360).
-    timeout-minutes: 45
+    # Job budget 65 = head-step timeout (40) + one tail-step timeout (20)
+    # + 5 min headroom. The GLM head keeps main's WHOLE pre-#544 job budget
+    # (40): a per-step cap below it would kill a legitimately long
+    # /spike-converter run, read the kill as a failed link and re-run the whole
+    # thing on the tail — the common path must not pay for the fallback. The
+    # Anthropic tail links are budgeted shorter (20 each) on purpose (Part
+    # A's "tail shorter than head" shape): they exist for the fast failures a
+    # dead head produces, not for a second full run. So the budget fits
+    # exactly ONE stalled head link (40 — a model stall, not the seconds a
+    # quota/billing rejection takes) plus ONE full tail link (20) plus the
+    # pre-run steps; two consecutive stalls are NOT budgeted — a second
+    # stalled link dies with the job — because a stall is a provider-wide
+    # symptom, and the tail exists for the fast failures. The walk is
+    # three run steps in a row (the GLM head, then the two-link
+    # Anthropic tail — issue #544 Part B). The per-step timeouts are what keep a hung /spike-converter
+    # from holding a runner and a secret past its budget, unwatched.
+    # Well inside GitHub's 360-minute hosted-job cap (the drift guard pins
+    # <= 360 and >= head + tail + 5).
+    timeout-minutes: 65
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
@@ -302,9 +305,10 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
         # continue-on-error so the walk reaches the tail when this id or
-        # provider is dead; the step timeout keeps a stalled model from eating
-        # the job budget the fallback links need.
-        timeout-minutes: 20
+        # provider is dead. The step timeout is main's whole pre-#544 job
+        # budget — the head is never cut short on the common path — and a
+        # stall past it is exactly what the shorter tail links are for.
+        timeout-minutes: 40
         continue-on-error: true
         # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
         # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic

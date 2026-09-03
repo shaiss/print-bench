@@ -142,21 +142,26 @@ jobs:
       vars.WRIGHT_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # Job budget 45 = head-step timeout (20) + one tail-step timeout (20) + 5
-    # min headroom. A sign-off run judges at most SIGNOFF_MAX_VERDICTS briefs,
-    # but the walk below is five ship steps in a row (three GLM links, then
-    # the Anthropic tail — issue #544 Part B), each with its own 20-minute
-    # timeout, and the budget must let at least ONE full fallback link
-    # complete after a head link STALLS to its step timeout (a model stall,
-    # not the seconds a quota/billing rejection takes): head 20 + one fallback
-    # 20 + the pre-run steps. The per-step timeout is what keeps a hung
-    # /reeve-signoff from holding a runner and a secret for the whole job
-    # budget, unwatched — before #544 the single step could hold it for 40.
-    # Two consecutive stalls are not budgeted — a second stalled link dies
-    # with the job — because a stall is a provider-wide symptom, and the fast
-    # failures the tail exists for reject in seconds. Well inside GitHub's
-    # 360-minute hosted-job cap (the drift guard pins <= 360).
-    timeout-minutes: 45
+    # Job budget 65 = head-step timeout (40) + one tail-step timeout (20)
+    # + 5 min headroom. The GLM head keeps main's WHOLE pre-#544 job budget
+    # (40): a per-step cap below it would kill a legitimately long
+    # /reeve-signoff run, read the kill as a failed link and re-run the whole
+    # thing on the tail — the common path must not pay for the fallback. The
+    # Anthropic tail links are budgeted shorter (20 each) on purpose (Part
+    # A's "tail shorter than head" shape): they exist for the fast failures a
+    # dead head produces, not for a second full run. So the budget fits
+    # exactly ONE stalled head link (40 — a model stall, not the seconds a
+    # quota/billing rejection takes) plus ONE full tail link (20) plus the
+    # pre-run steps; two consecutive stalls are NOT budgeted — a second
+    # stalled link dies with the job — because a stall is a provider-wide
+    # symptom, and the tail exists for the fast failures. The walk is
+    # five ship steps in a row (three GLM head links — each
+    # carrying the head's 40 — then the two-link Anthropic tail — issue #544
+    # Part B). The per-step timeouts are what keep a hung /reeve-signoff
+    # from holding a runner and a secret past its budget, unwatched.
+    # Well inside GitHub's 360-minute hosted-job cap (the drift guard pins
+    # <= 360 and >= head + tail + 5).
+    timeout-minutes: 65
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
@@ -364,9 +369,10 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
         # continue-on-error so the walk reaches link 2 (and the tail) when
-        # this id or provider is dead; the step timeout keeps a stalled model
-        # from eating the job budget the fallback links need.
-        timeout-minutes: 20
+        # this id or provider is dead. The step timeout is main's whole
+        # pre-#544 job budget — a GLM head link is never cut short on the
+        # common path — and a stall past it is what the shorter tail is for.
+        timeout-minutes: 40
         continue-on-error: true
         # Z.AI GLM via its Anthropic-compatible endpoint. Claude Code inherits
         # these env vars: ANTHROPIC_BASE_URL points at Z.AI (the /api/anthropic
@@ -406,7 +412,8 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.signoff_zai_1.outcome != 'success'
-        timeout-minutes: 20
+        # A head-provider link: main's whole budget, like link 1.
+        timeout-minutes: 40
         continue-on-error: true
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
@@ -432,8 +439,9 @@ jobs:
           && steps.signoff_zai_1.outcome != 'success'
           && steps.signoff_zai_2.outcome != 'success'
         # The last GLM link is no longer terminal (#544): continue-on-error so
-        # a dead GLM provider falls through to the Anthropic tail below.
-        timeout-minutes: 20
+        # a dead GLM provider falls through to the Anthropic tail below. Still
+        # a head-provider link, so main's whole budget.
+        timeout-minutes: 40
         continue-on-error: true
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
@@ -664,12 +672,15 @@ jobs:
       vars.WRIGHT_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
-    # Job budget 45 = head-step timeout (20) + one tail-step timeout (20) + 5
+    # Job budget 65 = head-step timeout (40) + one tail-step timeout (20) + 5
     # min headroom — the signoff job's reasoning, for a three-link walk (the
-    # GLM head, then the Anthropic tail — issue #544 Part B): one stalled
-    # head link plus one full fallback link must fit, two consecutive stalls
-    # are not budgeted. Well inside the 360-minute hosted-job cap.
-    timeout-minutes: 45
+    # GLM head, then the two-link Anthropic tail — issue #544 Part B): the
+    # head keeps main's whole pre-#544 budget (40) so a legitimately long
+    # /wright run is never killed and re-run on the tail; the tail links stay
+    # shorter (20); one stalled head plus one full tail link fits, two
+    # consecutive stalls are not budgeted. Well inside the 360-minute
+    # hosted-job cap (the drift guard pins <= 360 and >= head + tail + 5).
+    timeout-minutes: 65
     env:
       # Per-provider key presence, turned into `zai_key_present` /
       # `anthropic_key_present` + the any-key `key_present` by the "Read
@@ -816,9 +827,10 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
         # continue-on-error so the walk reaches the tail when this id or
-        # provider is dead; the step timeout keeps a stalled model from
-        # eating the job budget the fallback links need.
-        timeout-minutes: 20
+        # provider is dead. The step timeout is main's whole pre-#544 job
+        # budget — the head is never cut short on the common path — and a
+        # stall past it is exactly what the shorter tail links are for.
+        timeout-minutes: 40
         continue-on-error: true
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
