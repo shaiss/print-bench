@@ -157,9 +157,10 @@ The `review` chain's Anthropic backstop is itself a chain — Opus 4.8 → Sonne
 → Haiku 4.5 — rather than a single model (issue #298): a single hardcoded id can
 be unservable by a key (a deprecation, an access tier), so one dead id must never
 be the whole "never lose a review" backstop, and `model-smoke` proves each link
-live. (The tail now leads with `claude-opus-4-8` — the Anthropic model the team's
-design work rates highest and the ship-routine default; whether a given key can
-serve it is exactly what the live smoke confirms, rather than a static claim.)
+live. (The review tail leads with `claude-opus-4-8` — the Anthropic model the
+team's design work rates highest; the scheduled routines' tails start one link
+down, at `claude-sonnet-5`, the cheap tier (#544). Whether a given key can serve
+a link is exactly what the live smoke confirms, rather than a static claim.)
 
 ## Layout
 

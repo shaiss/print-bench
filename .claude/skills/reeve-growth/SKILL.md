@@ -198,9 +198,18 @@ the item isn't done — fix it before leaving the issue. One story, one item.
 ## Model tier & the write surface
 
 Runs from the `reeve-growth` chain in `.github/models/registry.conf` (#206),
-resolved by `.github/workflows/reeve-growth.yml` and passed as `--model` — no
-id pinned in this skill. Single link on purpose (the growth-twitter/scout
-reasoning: low-volume, disarmed, everything downstream is a human-gated draft).
+resolved by `.github/workflows/reeve-growth.yml` and walked **across
+providers** (issue #544): one ship step per registry link in file order — the
+GLM head on the provider the conf's `provider:` names, then the Anthropic
+tail `claude-sonnet-5` → `claude-haiku-4-5` — each link gated on its own
+provider's key and on every earlier link not having succeeded, its `--model`
+read from the resolve step, no id pinned in this skill. The tier reasoning is
+the growth-twitter/scout one (low-volume, disarmed, everything downstream is a
+human-gated draft), which is why the tail is the cheap Anthropic pair and not
+a frontier backstop; total exhaustion runs `provider-triage` and escalates a
+human-fixable cause once through the `needs-decision` gate. Each tail link
+re-assembles the dedup context immediately before it runs, so a head that
+queued items and then died cannot hand it a stale list.
 
 Filing is the `queue_growth_post` MCP tool, served by the committed stdio
 server `.claude/skills/growth-queue/queue_mcp.py` (the growth desk's shared

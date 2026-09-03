@@ -184,12 +184,20 @@ none of them the proposer's.
 ## 5. Model tier
 
 Runs on a **cheap/fast model**, resolved from the `wright` chain in
-`.github/models/registry.conf` (#206) — single link, the scout's reasoning:
-proposing is the cheap-to-be-wrong case (a bad brief is one Reeve declines)
-and a failed run retries in at most six hours. The sign-off half runs on the
-**review tier** (`wright-signoff` chain, frontier head + walking tail),
-because arming is expensive-to-be-wrong. Neither model id is pinned in the
-workflow or this skill; swapping either is a registry edit.
+`.github/models/registry.conf` (#206) and walked **across providers** (issue
+#544): one ship step per registry link in file order — the GLM head on the
+provider the conf's `provider:` names, then the Anthropic tail
+`claude-sonnet-5` → `claude-haiku-4-5` — each link gated on its own
+provider's key and on every earlier link not having succeeded. The tier is
+the scout's reasoning: proposing is the cheap-to-be-wrong case (a bad brief
+is one Reeve declines) and a failed run retries in at most six hours, so the
+tail is the cheap Anthropic pair, not a frontier backstop. The sign-off half
+runs on the **review tier** (`wright-signoff` chain: three GLM head links,
+then the same Anthropic tail), because arming is expensive-to-be-wrong.
+Either walk's total exhaustion runs `provider-triage` and escalates a
+human-fixable cause once through the `needs-decision` gate. No model id is
+pinned in the workflow or this skill; swapping a link is a registry edit
+(plus the matching workflow step when a walk deepens).
 
 ## 6. Done means
 

@@ -196,13 +196,21 @@ parking are decisions the scout does not get to make.
 Runs on a **fast/cheap model**, resolved from the `scout` chain in
 `.github/models/registry.conf` (the provider/model registry, #206) —
 `.github/workflows/product-scout.yml` resolves the chain into
-`steps.chain.outputs.link1_model` and passes it as the `--model` to both
-provider ship steps, so no model id is pinned in the workflow or this skill.
-Single link on purpose: generation is the cheap-to-be-wrong case (a bad
-proposal is one a human closes, and a failed run costs nothing), so there is
-no frontier backstop to walk — the same reasoning as the groomer's
-`groomer-narrative` chain. Swapping the scout to another model is a registry
-edit, not a skill or workflow edit.
+`steps.chain.outputs.link<N>_model` and walks it **across providers** (issue
+#544): one ship step per registry link in file order — the GLM head on the
+provider the conf's `provider:` names, then the Anthropic tail
+`claude-sonnet-5` → `claude-haiku-4-5` — each link gated on its own
+provider's key and on every earlier link not having succeeded, so no model id
+is pinned in the workflow or this skill. The tier stays cheap on purpose:
+generation is the cheap-to-be-wrong case (a bad proposal is one a human
+closes, and a failed run costs nothing), so the tail is the cheap Anthropic
+pair rather than a frontier-priced backstop — it exists so a dead GLM head,
+or a whole dead provider, falls through instead of killing the run (the
+groomer's `groomer-narrative` chain, which stays a single link, shares the
+tier reasoning). When every link fails, the workflow runs `provider-triage`
+(`classify`) and escalates a human-fixable cause once through the
+`needs-decision` gate. Swapping a link is a registry edit (plus the matching
+workflow step when the walk deepens), not a skill edit.
 
 ## 6. The write surface — an MCP tool, not a shell command
 
