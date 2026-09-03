@@ -115,7 +115,10 @@ the keyless report and:
   does not fit that walk; no model id in the workflow;
 - selects the work **as trusted workflow code** (`reeve greenlight-select`):
   the open `needs-decision` issues carrying no greenlight marker, oldest first,
-  bounded by the `greenlight_cap` conf key;
+  bounded by the `greenlight_cap` conf key — skipping any that is a
+  `provider-triage` escalation (its body carries the `<!--
+  provider-escalation:<chain> -->` marker; #544): an account/key ask with a
+  fixed remedy is not a decision a charter verdict can rule on;
 - runs the drafter (`/reeve-greenlight`, `.claude/skills/reeve-greenlight/`)
   with `--permission-mode dontAsk` over the #442 wrapper — its only shell
   surface — behind `.claude/reeve-settings.json`, its writes bound to the

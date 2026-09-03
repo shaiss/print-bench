@@ -304,6 +304,74 @@ def test_greenlight_queue_never_reads_a_pr_thread(monkeypatch):
     assert not any("/issues/12/" in url for url in calls)
 
 
+# A provider-triage escalation (issue #544: every converted walk can raise
+# one on exhaustion) wears the gate label but is an account/key ask with a
+# fixed remedy, not a charter call — the queue must skip it. The body shape
+# is the action's own: marker first line, then the tailored remediation.
+_ESCALATION_MARKER_LINE = "<!-- provider-escalation:scout -->\n"
+_ESCALATION_BODY = (
+    _ESCALATION_MARKER_LINE
+    + "## Provider escalation: `scout` chain\n\n"
+    "The provider account is **out of credit** (a billing/balance rejection). "
+    "**Fund the account**, then confirm.\n"
+)
+
+
+def _gl_with_escalation(marker: bool):
+    """The greenlight fixture plus one more parked issue, #271: the
+    provider-triage escalation with its marker (``marker=True``) or the SAME
+    issue with the marker line removed (the negative control)."""
+    responses = _gl_responses()
+    listing = (f"{github.API_ROOT}/repos/{REPO}/issues"
+               f"?state=open&labels={github.NEEDS_DECISION_LABEL}&per_page=100")
+    body = _ESCALATION_BODY if marker else _ESCALATION_BODY.replace(_ESCALATION_MARKER_LINE, "")
+    responses[listing][0].append(
+        {"number": 271, "title": "Provider escalation: scout", "html_url": "u/271", "body": body})
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/271/comments?per_page=100"] = ([], "")
+    return responses
+
+
+def test_greenlight_queue_skips_a_provider_escalation(monkeypatch):
+    calls: list[str] = []
+    responses = _gl_with_escalation(marker=True)
+
+    def _fake(url, token):
+        calls.append(url)
+        return responses[url]
+
+    monkeypatch.setattr(github, "_get", _fake)
+    out = github.gather_greenlight_queue(REPO, "tok")
+    # Not draftable: the queue is exactly what it was without #271 ...
+    assert [i["number"] for i in out["queue"]] == [230, 265, 269]
+    # ... though it IS at the gate, so the inventory keeps it, flagged ...
+    flagged = next(i for i in out["parked"] if i["number"] == 271)
+    assert flagged["providerEscalation"] is True
+    # ... and the skip happens before the comments GET: its thread is never read.
+    assert not any("/issues/271/" in url for url in calls)
+
+
+def test_greenlight_queue_selects_the_same_issue_without_the_marker(monkeypatch):
+    # NEGATIVE CONTROL: strip only the marker line from #271 — same title,
+    # same remediation prose, same label — and it is selected like any other
+    # parked decision, so the skip is the marker, not the wording.
+    _gl_fake(monkeypatch, _gl_with_escalation(marker=False))
+    out = github.gather_greenlight_queue(REPO, "tok")
+    assert [i["number"] for i in out["queue"]] == [230, 265, 269, 271]
+    assert next(i for i in out["parked"] if i["number"] == 271)["providerEscalation"] is False
+
+
+@pytest.mark.parametrize("body,expected", [
+    ("<!-- provider-escalation:scout -->\n## Provider escalation", True),
+    ("\n\nsome preamble\n<!-- provider-escalation:reeve-greenlight -->\nlater", True),
+    # Prose that merely names the mechanism carries no marker.
+    ("please look at the provider-escalation issue the scout filed", False),
+    ("", False),
+    (None, False),
+])
+def test_is_provider_escalation_matches_the_body_marker(body, expected):
+    assert github.is_provider_escalation(body) is expected
+
+
 @pytest.mark.parametrize("body,expected", [
     ("<!-- reeve-greenlight v1 issue=5 verdict=yes -->\nGREENLIGHT: YES", True),
     ("\n\n  <!-- reeve-greenlight v1 issue=5 verdict=no -->\nNO", True),  # first non-blank line
