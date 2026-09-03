@@ -218,6 +218,37 @@ done < <(awk '/awalsh128\/cache-apt-pkgs-action/{f=1}
 grep -qiF "never cross vendors" docs/contributing/autonomy.md \
   && err "docs/contributing/autonomy.md still says chains 'never cross vendors' — the routines walk a cross-provider tail since #544; describe the head-provider + layout rule instead"
 
+# 11. Nor may the wording #544 Part B replaced come back. Every scheduled
+#     routine now walks a cross-provider chain (a GLM head on the conf's
+#     `provider:`, then the Anthropic tail, one ship step per link), so the
+#     "single-link routine" / "keeps the single-provider rule until Part B" /
+#     "the provider key selects a whole ship-step block" descriptions are
+#     false. A mechanical literal check per (file, phrase) — the phrase is
+#     absent from THAT file — naming only the files that carried the wording,
+#     so the registry's genuinely single-link `groomer-narrative` note and any
+#     "it used to be single-link" history elsewhere stay out of its reach.
+while IFS='|' read -r file phrase; do
+  [[ -z "$file" ]] && continue
+  grep -qiF -- "$phrase" "$file" \
+    && err "${file} still says '${phrase}' — every scheduled routine walks a cross-provider chain since #544 Part B (GLM head on the conf's provider, then the Anthropic tail, one ship step per link); describe the walk instead"
+done <<'STALE'
+CLAUDE.md|keep the single-provider rule
+CLAUDE.md|until #544
+CLAUDE.md|selected by the conf's `provider:` key
+tools/model-registry/README.md|keep the single-provider rule
+tools/model-registry/README.md|single-provider rule until
+docs/growth.md|Single-link by design
+.claude/skills/product-scout/SKILL.md|Single link on purpose
+.claude/skills/product-scout/SKILL.md|both provider ship steps
+.claude/skills/product-scout/SKILL.md|no frontier backstop
+.claude/skills/reeve-growth/SKILL.md|Single link on purpose
+.claude/skills/reeve-growth/SKILL.md|both provider ship steps
+.claude/skills/reeve-growth/SKILL.md|no frontier backstop
+.claude/skills/wright/SKILL.md|Single link on purpose
+.claude/skills/wright/SKILL.md|both provider ship steps
+.claude/skills/wright/SKILL.md|no frontier backstop
+STALE
+
 if [[ "$fail" == 0 ]]; then
   echo "ok    docs match the tree"
 fi

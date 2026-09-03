@@ -195,21 +195,35 @@ classify() {
         .github/workflows/ci.yml) bgtests=true ;;
       esac
       case "$f" in
-        # The model registry (issue #206). auto-review.yml, product-scout.yml
-        # oracle.yml (issue #333), the four scheduled routines (design-run,
-        # backlog-burn, chunker, labeler — issue #326) and the agent forge's
-        # wright.yml (docs/agent-forge.md) are here because the
-        # drift-guard test reads them — a change to any of those workflows' chain
-        # wiring must re-run the guard that pins it to
-        # .github/models/registry.conf, or a reintroduced hardcoded model literal
-        # could ship unguarded. (As workflows they are already soft-infra via the
-        # .github/workflows/* case above — this adds only the drift-guard selection.)
+        # The model registry (issue #206). auto-review.yml, oracle.yml (issue
+        # #333) and EVERY chain-walking scheduled routine — the four #326
+        # routines (design-run, backlog-burn, chunker, labeler), the agent
+        # forge's wright.yml (docs/agent-forge.md, two walks), product-scout,
+        # spike-converter, adoption-assessor, growth-twitter, reeve-growth and
+        # reeve.yml's greenlight job (enrolled as ROUTINES rows by #544 Part B)
+        # — are here because the drift-guard test reads them: a change to any
+        # of those workflows' chain wiring must re-run the guard that pins it
+        # to .github/models/registry.conf, or a reintroduced hardcoded model
+        # literal, a tail step gated off its provider's key, or a walk that
+        # stopped short could ship unguarded. Each routine's .github/<routine>
+        # .conf joins for the guard's head rule: it reads the conf's
+        # `provider:` and refuses a chain whose link 1 is not on it, so a conf
+        # edit that moved a head off its provider must re-run the guard too.
+        # (As workflows they are already soft-infra via the .github/workflows/*
+        # case above — this adds only the drift-guard selection.)
         tools/model-registry/*|.github/models/registry.conf|\
         .github/workflows/auto-review.yml|.github/workflows/product-scout.yml|\
         .github/workflows/oracle.yml|\
         .github/workflows/design-run.yml|.github/workflows/backlog-burn.yml|\
         .github/workflows/chunker.yml|.github/workflows/labeler.yml|\
         .github/workflows/wright.yml|\
+        .github/workflows/spike-converter.yml|.github/workflows/adoption-assessor.yml|\
+        .github/workflows/growth-twitter.yml|.github/workflows/reeve-growth.yml|\
+        .github/workflows/reeve.yml|\
+        .github/design-run.conf|.github/backlog-burn.conf|.github/chunker.conf|\
+        .github/labeler.conf|.github/product-scout.conf|.github/spike-converter.conf|\
+        .github/adoption-assessor.conf|.github/growth-twitter.conf|\
+        .github/reeve-growth.conf|.github/wright.conf|.github/reeve.conf|\
         .github/workflows/ci.yml) mrtests=true ;;
       esac
       case "$f" in
@@ -528,6 +542,52 @@ selftest() {
   check "chunker-runs-drift-guard" "$out" "model_registry_tests=true"
   out="$(run ".github/workflows/labeler.yml")"
   check "labeler-runs-drift-guard" "$out" "model_registry_tests=true"
+  # #544 Part B enrolled the remaining seven chain-walking workflows (twelve
+  # walks in all, two of them in wright.yml) as ROUTINES rows of the same
+  # drift guard — so each of those paths must route into the model-registry
+  # test job too, or a workflow edit that broke a walk (a tail step gated off
+  # its key, a step reading the wrong link) could ship with the guard never
+  # running. The outputs those paths already set stay set (reeve.yml still
+  # re-runs reeve's own tests, growth-twitter.conf growth's).
+  out="$(run ".github/workflows/spike-converter.yml")"
+  check "spike-converter-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/workflows/adoption-assessor.yml")"
+  check "adoption-assessor-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/workflows/growth-twitter.yml")"
+  check "growth-twitter-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/workflows/reeve-growth.yml")"
+  check "reeve-growth-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/workflows/reeve.yml")"
+  check "reeve-workflow-runs-drift-guard" "$out" \
+    "model_registry_tests=true" "reeve_tests=true"
+  # And every routine conf the guard's head rule reads: it refuses a chain
+  # whose link 1 is not on the conf's `provider:`, so a conf edit that moved a
+  # head off its provider must re-run the guard — a conf-only PR that skipped
+  # it would land a walk the resolve step then fails at run time, unwatched.
+  out="$(run ".github/design-run.conf")"
+  check "design-run-conf-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/backlog-burn.conf")"
+  check "backlog-burn-conf-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/chunker.conf")"
+  check "chunker-conf-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/labeler.conf")"
+  check "labeler-conf-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/product-scout.conf")"
+  check "product-scout-conf-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/spike-converter.conf")"
+  check "spike-converter-conf-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/adoption-assessor.conf")"
+  check "adoption-assessor-conf-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/growth-twitter.conf")"
+  check "growth-twitter-conf-runs-drift-guard" "$out" \
+    "model_registry_tests=true" "growth_tests=true"
+  out="$(run ".github/reeve-growth.conf")"
+  check "reeve-growth-conf-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/wright.conf")"
+  check "wright-conf-runs-drift-guard" "$out" "model_registry_tests=true"
+  out="$(run ".github/reeve.conf")"
+  check "reeve-conf-runs-drift-guard" "$out" \
+    "model_registry_tests=true" "reeve_tests=true"
 
   # 4f. Reeve (issue #272) is soft-infra like its groomer sibling: its own tests
   #     run and the required contexts RUN with an empty design list — it reads
