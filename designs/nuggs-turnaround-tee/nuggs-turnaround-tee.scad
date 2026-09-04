@@ -72,13 +72,9 @@ include <../nuggs-turnaround/nuggs-turnaround.scad>
 
 // NUGGS-ecosystem declaration. This derivative incorporates the NUGGS coupling
 // standard through its parent (nuggs-turnaround `use`s it), so the modules are
-// already in scope. Declaring the `use` directly here makes that incorporation
-// explicit AND lets the design catalog recognise the tee as the NUGGS module it
-// is: scripts/catalog.sh's includes_coupling() scans only this entry .scad, and
-// a nuggs-*-named design it can't see the coupling in is flagged as a name
-// collision. `use` imports modules only (no top-level geometry), so the exported
-// mesh is unchanged — verified: gate.sh --slice is byte-identical.
-use <nuggs-coupling.scad>
+// already in scope — and the design catalog resolves that inheritance through
+// the include closure (issue #517), so the tee is grouped under NUGGS as the
+// module it is without redeclaring the `use` here.
 
 /* [The tee] */
 // Chamber ellipsoid inner z semi-axis (mm) — the use-travel/print-vertical
