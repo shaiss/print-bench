@@ -411,6 +411,80 @@ test("includesCoupling is comment-aware like catalog.sh — a commented-out dire
   }
 });
 
+test("a derivative reaches the coupling through its parent — closure, not one file (#517)", () => {
+  // The nuggs-turnaround-tee shape: the parent `use`s the coupling, the
+  // derivative's own entry never names it — only the include closure sees the
+  // inheritance. Both surfaces must seat the derivative in NUGGS without a
+  // catalog.conf, or the derivative would need a redundant direct `use` purely
+  // for the catalog to see it (the #532 stopgap this replaces).
+  const root = fixture({
+    "nuggs-parent": {}, // the coupling via the fixture default
+  });
+  try {
+    const dir = join(root, "designs", "nuggs-tee");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "nuggs-tee.scad"),
+      "// fixture: coupling inherited, never named here\ninclude <../nuggs-parent/nuggs-parent.scad>\n"
+    );
+    writeFileSync(join(dir, "README.md"), "# nuggs-tee\n\nThe nuggs-tee design.\n");
+    writeFileSync(join(dir, "derives.conf"), "variant-of: nuggs-parent\n");
+
+    assert.equal(categoryOf(dir, "nuggs-tee"), "nuggs");
+    // And the port agrees with the bash authority — membership and order.
+    assert.deepEqual(jsPairs(root), catalogPairs(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the closure recurses and terminates on cycles — two hops up, mutual includes (#517)", () => {
+  // Two controls in one tree: a two-hop chain (grandparent holds the coupling,
+  // middle and leaf only include their own parent) proves the walk is
+  // transitive, and a mutual-include pair proves the visited set terminates it.
+  // Every nuggs-* name here reaches the coupling except the cycle pair, which
+  // declare categories — the nuggs-yard resolution — so bash and the port have
+  // a well-defined grouping to agree on.
+  const root = fixture({
+    "nuggs-gp": {}, // the coupling via the fixture default
+  });
+  try {
+    const mk = (name, scad, extra = {}) => {
+      const dir = join(root, "designs", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${name}.scad`), scad);
+      writeFileSync(join(dir, "README.md"), `# ${name}\n\nThe ${name} design.\n`);
+      if (extra.category) writeFileSync(join(dir, "catalog.conf"), `category: ${extra.category}\n`);
+      if (extra.derives) writeFileSync(join(dir, "derives.conf"), extra.derives);
+    };
+    mk("nuggs-mid", "// fixture\ninclude <../nuggs-gp/nuggs-gp.scad>\n", {
+      derives: "variant-of: nuggs-gp\n",
+    });
+    mk("nuggs-leaf", "// fixture\ninclude <../nuggs-mid/nuggs-mid.scad>\n", {
+      derives: "variant-of: nuggs-mid\n",
+    });
+    mk("nuggs-mutA", "// fixture\ninclude <../nuggs-mutB/nuggs-mutB.scad>\n", {
+      category: "everyday-functional",
+    });
+    mk("nuggs-mutB", "// fixture — includes A right back\ninclude <../nuggs-mutA/nuggs-mutA.scad>\n", {
+      category: "everyday-functional",
+    });
+
+    const groups = groupDesigns(readDesigns(root), readCategories(root));
+    const bySlug = new Map(groups.map((g) => [g.slug, g.designs.map((d) => d.name)]));
+    assert.deepEqual(bySlug.get("nuggs"), ["nuggs-gp", "nuggs-mid", "nuggs-leaf"]);
+    assert.ok(
+      bySlug.get("everyday-functional").includes("nuggs-mutA") &&
+        bySlug.get("everyday-functional").includes("nuggs-mutB"),
+      "the cyclic pair terminates and groups by its declared category"
+    );
+    // And the port agrees with the bash authority on all of it.
+    assert.deepEqual(jsPairs(root), catalogPairs(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the real repo's site grouping agrees with scripts/catalog.sh", () => {
   // The regression that pins the port to the authority on the live catalog:
   // same designs, same groups, same order — membership, group order and
