@@ -533,6 +533,13 @@ def test_reason_fine_reproduces_the_coarse_verdict_exactly():
         (400, "credit balance exhausted", "billing", "needs_human"),
         (400, "monthly quota exceeded", "quota", "needs_human"),
         (400, "weekly limit exhausted", "quota", "needs_human"),
+        # The real Anthropic message that USED to fall through to bad-model-id (a
+        # #298 registry defect) and red the routine: it carries none of the
+        # billing/quota words, only "usage limits" + "regain access on <date>" —
+        # a period cap that resets, i.e. quota (needs_human), never a dead id.
+        (400, "You have reached your specified API usage limits. You will "
+              "regain access on 2026-10-01 at 00:00 UTC.", "quota", "needs_human"),
+        (400, "usage limit reached", "quota", "needs_human"),
         (400, "rate limit exceeded", "rate-limit", "transient"),
         (404, "model not found", "bad-model-id", "dead"),
         (403, "insufficient permissions to access this model", "bad-model-id", "dead"),
