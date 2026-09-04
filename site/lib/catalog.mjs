@@ -11,14 +11,16 @@
 // same trees and fails on any disagreement about a design's group or the order.
 //
 // The grouping signal is minimal committed source, never a hand-grouped table
-// (charter N1): a NUGGS module is derived from the nuggs-* name AND the
-// lib/nuggs-coupling.scad include (a coupling-less nuggs-* name is a collision,
-// grouped by its declared category); every other design declares
+// (charter N1): a NUGGS module is derived from the nuggs-* name AND reaching
+// the lib/nuggs-coupling.scad standard through its include closure (issue #517
+// — a derivative inherits the coupling through its parent, and that inheritance
+// counts; a nuggs-* name reaching the coupling nowhere is a collision, grouped
+// by its declared category); every other design declares
 // `category: <slug>` in designs/<name>/catalog.conf; the closed vocabulary and
 // display order live in designs/categories.conf.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, sep } from "node:path";
 
 function read(path) {
   try {
@@ -33,21 +35,23 @@ export function isNuggs(name) {
   return name === "nuggs" || name.startsWith("nuggs-");
 }
 
-/** Does the design's entry .scad pull in the NUGGS coupling standard? (Mirrors catalog.sh includes_coupling.) */
-function includesCoupling(designDir, name) {
-  const scad = read(join(designDir, `${name}.scad`));
-  if (scad === null) return false;
+/**
+ * The live include/use directive targets of a .scad file's text, one per line:
+ * comment-stripped first (issue #509 / CodeRabbit), line-oriented always — a
+ * directive and its <...> target must sit on one line to count. Mirrors
+ * catalog.sh scad_directives (which also documents the comment state machine).
+ */
+function scadDirectives(scad) {
   // Strip // line comments and /* ... */ block comments before matching, so a
-  // commented-out directive is not read as the coupling (issue #509 / CodeRabbit).
-  // The strip is line-oriented and newline-preserving — block-comment state is
-  // carried across lines but each line stays a line — so the match below stays
-  // line-based (a directive and its <...> target must sit on one line), the exact
-  // state machine catalog.sh strip_scad_comments runs. So the port and the bash
-  // authority can never disagree on a design's group over a wrapped or
-  // commented-out directive; catalog.test.mjs pins that parity.
+  // commented-out directive is not read as live. The strip is line-oriented and
+  // newline-preserving — block-comment state is carried across lines but each
+  // line stays a line — the exact state machine catalog.sh strip_scad_comments
+  // runs, so the port and the bash authority can never disagree over a wrapped
+  // or commented-out directive; catalog.test.mjs pins that parity.
   let inBlock = false;
+  const out = [];
   for (const raw of scad.split("\n")) {
-    let out = "";
+    let line = "";
     for (let i = 0; i < raw.length; ) {
       const two = raw.slice(i, i + 2);
       if (inBlock) {
@@ -56,22 +60,95 @@ function includesCoupling(designDir, name) {
       }
       if (two === "//") break; // line comment: drop the rest of the line
       if (two === "/*") { inBlock = true; i += 2; continue; }
-      out += raw[i]; i += 1;
+      line += raw[i]; i += 1;
     }
-    if (/(?:include|use)\s*<[^>]*nuggs-coupling\.scad>/.test(out)) return true;
+    for (const m of line.matchAll(/(?:include|use)\s*<([^>]+)>/g)) out.push(m[1]);
+  }
+  return out;
+}
+
+/**
+ * Resolve one directive target against the file carrying it, the way the
+ * scripts set OPENSCADPATH for OpenSCAD itself: the including file's directory
+ * (the `../<parent>/<parent>.scad` derivative form, a coupon's bare
+ * `include <entry.scad>`), then lib/, then the repo root
+ * (`styles/<name>/style.scad`). Null when no candidate holds the file — an
+ * unresolvable directive is a leaf of the walk, never an error. Mirrors
+ * catalog.sh resolve_directive.
+ */
+function resolveDirective(target, from, repoRoot) {
+  const candidates = [
+    join(dirname(from), target),
+    join(repoRoot, "lib", target),
+    join(repoRoot, target),
+  ];
+  for (const c of candidates) {
+    if (existsSync(c) && statSync(c).isFile()) return c;
+  }
+  return null;
+}
+
+/**
+ * Does the design REACH the NUGGS coupling standard through its include
+ * closure (issue #517)? The entry's own directives are level one; every
+ * directive resolving to another FIRST-PARTY file (designs/, top-level
+ * lib/*.scad, styles/) extends the closure transitively, so a derivative
+ * inheriting the coupling through its parent is a NUGGS module. The coupling
+ * itself is matched by name wherever the directive sits (the selftest trees
+ * carry no lib/), vendored subtrees of lib/ and unresolvable targets are
+ * leaves, and a visited set terminates cyclic includes. Mirrors
+ * catalog.sh includes_coupling.
+ */
+function includesCoupling(designDir, name) {
+  const entry = join(designDir, `${name}.scad`);
+  const scad = read(entry);
+  if (scad === null) return false;
+  const repoRoot = join(designDir, "..", "..");
+  // First-party is the CLAUDE.md set: anything under designs/ or styles/, and
+  // a .scad DIRECTLY in lib/ (first-party libs occupy that single level;
+  // vendored libraries live in subdirectories of lib/, so anything deeper is a
+  // vendored leaf).
+  const firstParty = (p) => {
+    for (const d of ["designs", "styles"]) {
+      if (p.startsWith(join(repoRoot, d) + sep)) return true;
+    }
+    const lib = join(repoRoot, "lib") + sep;
+    if (p.startsWith(lib)) {
+      const rel = p.slice(lib.length);
+      return rel.endsWith(".scad") && !rel.includes(sep);
+    }
+    return false;
+  };
+  const queue = [entry];
+  const seen = new Set();
+  while (queue.length > 0) {
+    const f = queue.shift();
+    if (seen.has(f)) continue;
+    seen.add(f);
+    const text = read(f);
+    if (text === null) continue;
+    for (const target of scadDirectives(text)) {
+      // The directive names the coupling: reached, at whatever depth.
+      if (target.endsWith("nuggs-coupling.scad")) return true;
+      const resolved = resolveDirective(target, f, repoRoot);
+      if (resolved !== null && firstParty(resolved) && !seen.has(resolved)) {
+        queue.push(resolved);
+      }
+    }
   }
   return false;
 }
 
 /**
  * A design's category slug: "nuggs" for a real NUGGS module (a `nuggs`/`nuggs-*`
- * name that ALSO includes lib/nuggs-coupling.scad), else the `category:` key of
- * designs/<name>/catalog.conf. A nuggs-*-named design without the coupling is a
- * name collision (e.g. nuggs-yard), not a NUGGS module — it falls through to its
- * declared category, matching catalog.sh resolve_groups (both directions of the
- * #374 cross-check). Null when a non-NUGGS design declares none — the build keeps
- * it visible (groupDesigns' Other bucket) rather than dropping it, and the
- * cross-check test flags the divergence.
+ * name that ALSO reaches lib/nuggs-coupling.scad through its include closure),
+ * else the `category:` key of designs/<name>/catalog.conf. A nuggs-*-named
+ * design reaching the coupling nowhere in its closure is a name collision (e.g.
+ * nuggs-yard), not a NUGGS module — it falls through to its declared category,
+ * matching catalog.sh resolve_groups (both directions of the #374 cross-check).
+ * Null when a non-NUGGS design declares none — the build keeps it visible
+ * (groupDesigns' Other bucket) rather than dropping it, and the cross-check
+ * test flags the divergence.
  *
  * `key: value` parsed the way site/lib/team.mjs parses it: trailing `#`
  * comments stripped, split on the first colon.
