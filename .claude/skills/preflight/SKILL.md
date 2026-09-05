@@ -126,7 +126,7 @@ verdict. And the exception to both bullets: a PR from a **fork** cannot be
 pushed to, so CI fails those instead of fixing them. On a fork branch,
 treat both as real.
 
-## 3. Verdict
+## 4. Verdict
 
 Report a one-line verdict first: **"CI would pass"** or **"CI would fail:
 <step>"**, then per-part printcheck scores (capture the gate output with
