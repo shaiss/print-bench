@@ -239,8 +239,9 @@ def _decline_cooldown(
     if age > timedelta(hours=cooldown_hours):
         return None  # expired: a decline must never bury the brief
     hours = age.total_seconds() / 3600
+    age_h = "<1 h" if hours < 1 else f"{hours:.0f} h"
     return (
-        f"recently declined ({hours:.0f} h ago, within the "
+        f"recently declined ({age_h} ago, within the "
         f"{cooldown_hours:g} h cooldown — an owner reply re-arms)"
     )
 
