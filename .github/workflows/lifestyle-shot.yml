@@ -386,7 +386,10 @@ jobs:
     # The visible no-op: a skipped gated job is mute, so a sibling with no
     # permissions and no secrets says why nothing ran (the disarmed-notice
     # pattern every scheduled routine uses).
-    if: vars.AI_ANDON_CORD == 'pulled'
+    # Only when detect resolved something to generate: with '[]' (the conf off,
+    # or no manifest moved) nothing was bypassed, so there is nothing to explain.
+    needs: detect
+    if: needs.detect.outputs.designs != '[]' && vars.AI_ANDON_CORD == 'pulled'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

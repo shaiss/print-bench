@@ -99,15 +99,19 @@ def _gather(args: argparse.Namespace) -> dict[str, Any]:
 def _andon_pulled(args: argparse.Namespace) -> bool:
     """Is the AI andon cord pulled? ``--andon`` wins, else ``$AI_ANDON_CORD``.
 
-    Only the word ``pulled`` pulls it, compared case-insensitively — exactly
-    the normalization ``config.armed`` applies to REEVE_ENABLED, and the same
-    comparison GitHub's ``vars.AI_ANDON_CORD == 'pulled'`` expression makes,
-    so a variable set to 'Pulled' bypasses the AI jobs AND banners the report.
-    The cord is live repo state, never a conf key and never in the snapshot.
+    Only the exact word ``pulled`` pulls it: case-insensitive, NO whitespace
+    trimming — exactly GitHub's ``vars.AI_ANDON_CORD == 'pulled'`` expression
+    compare, which every workflow gate uses (it casefolds but never strips).
+    Deliberately NOT ``config.armed``'s normalization (that one strips): a
+    value of 'pulled ' reads as released by every gate, so the AI jobs keep
+    running, and this tool must read it the same way — a banner here for a
+    cord the gates ignore would be a split brain. So 'Pulled'/'PULLED'
+    banner, 'pulled ' does not. The cord is live repo state, never a conf
+    key and never in the snapshot.
     """
     raw = (args.andon if args.andon is not None
            else os.environ.get("AI_ANDON_CORD", ""))
-    return raw.strip().lower() == "pulled"
+    return raw.casefold() == "pulled"
 
 
 def _emit_report(snapshot: dict[str, Any], args: argparse.Namespace) -> int:
@@ -336,8 +340,9 @@ def build_parser() -> argparse.ArgumentParser:
     # around main()'s error handler, so a 'Pulled' value would red the job.
     p_report.add_argument("--andon", default=None,
                           help="the AI_ANDON_CORD repo variable's value (default: "
-                               "$AI_ANDON_CORD); the word 'pulled', any case, adds "
-                               "the cord banner line")
+                               "$AI_ANDON_CORD); exactly the word 'pulled' — "
+                               "case-insensitive, no whitespace trimming, GitHub's "
+                               "expression compare — adds the cord banner line")
     p_report.set_defaults(func=cmd_report)
 
     p_gather = sub.add_parser("gather", help="read the snapshot from committed files")
@@ -354,8 +359,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--out", help="also write the report to this file")
     p_run.add_argument("--andon", default=None,
                        help="the AI_ANDON_CORD repo variable's value (default: "
-                            "$AI_ANDON_CORD); the word 'pulled', any case, adds "
-                            "the cord banner line")
+                            "$AI_ANDON_CORD); exactly the word 'pulled' — "
+                            "case-insensitive, no whitespace trimming, GitHub's "
+                            "expression compare — adds the cord banner line")
     p_run.set_defaults(func=cmd_run)
 
     p_config = sub.add_parser("config", help="read the committed policy file")

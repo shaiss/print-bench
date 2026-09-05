@@ -13,12 +13,18 @@ episode history.
 Modules:
 
 * :mod:`andon.policy` — PURE: the constants (marker, labels, title, the
-  variable name), ``is_pulled`` (GitHub's case-insensitive ``==``, mirrored),
-  ``decide`` (the four-branch open/close/none decision) and every rendered
-  byte (the issue body, the closing comment, the humanised duration).
+  variable name), ``is_pulled`` (GitHub's case-insensitive ``==`` mirrored
+  EXACTLY — the exact word, case folded, NO whitespace trimming, because
+  GitHub trims none and a more forgiving tool would split the brain: the
+  AI jobs running while the status issue claims a bypass), ``decide`` (the
+  four-branch open/close/none decision) and every rendered byte (the issue
+  body, the closing comment, the humanised duration).
 * :mod:`andon.github` — the ONLY module allowed to import ``urllib``: one
-  GET-only seam (``_get``) and the paged listing that finds the open status
-  issue. It never writes to GitHub.
+  GET-only seam (``_get``), a retry wrapper that absorbs transient API
+  blips (a 403/429/5xx or a socket timeout — up to three attempts with a
+  short backoff, never on a 401/404/422) so the hourly keyless reconciler
+  does not go red on a hiccup, and the paged listing that finds the open
+  status issue. It never writes to GitHub.
 * :mod:`andon.cli` — ``andon decide`` (the workflow's step), plus
   ``render-open`` / ``render-close`` for docs and tests.
 

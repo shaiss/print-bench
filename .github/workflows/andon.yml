@@ -32,7 +32,8 @@ name: Andon cord status (AI bypass)
 # issue, never a comment elsewhere, never `needs-decision` (that label parks
 # the autonomy selector and would make a pulled cord look like a decision
 # request). `issues: write` is granted to the reconcile job alone; the
-# workflow-level default is contents: read.
+# workflow-level default is contents: read, and the off-branch notice job
+# below holds `permissions: {}` — it exists only to say why nothing ran.
 #
 # After pulling (or releasing) the cord, dispatch this workflow to stamp
 # the issue immediately instead of waiting for the next hourly firing;
@@ -103,13 +104,17 @@ jobs:
           PYTHONPATH: tools/andon/src
           GH_TOKEN: ${{ github.token }}
           # The variable's RAW value, env-indirected (never interpolated
-          # into the script); the tool normalises it the way GitHub's
-          # case-insensitive `==` does, so 'Pulled' pulls it too and an
-          # unset variable reads as released.
+          # into the script); the tool compares it EXACTLY the way GitHub's
+          # case-insensitive `==` does — no whitespace trimming — so it is
+          # the exact word: 'Pulled' pulls it too, while 'pulled ' (trailing
+          # space) reads as released here just as it does at every workflow
+          # gate, and an unset variable reads as released. Passed in the
+          # --opt=value form so a value starting with a dash can never be
+          # taken for an option.
           CORD: ${{ vars.AI_ANDON_CORD }}
         run: |
           set -euo pipefail
-          python3 -m andon decide --repo "$GITHUB_REPOSITORY" --cord "$CORD" \
+          python3 -m andon decide --repo "$GITHUB_REPOSITORY" --cord="$CORD" \
             --gh-output "$GITHUB_OUTPUT" --out-dir .andon
 
       - name: Open or close the status issue (the one write)
@@ -211,3 +216,20 @@ jobs:
           else
             echo "::notice::AI andon cord is released and no status issue is open — nothing to reconcile."
           fi
+
+  offbranch-notice:
+    # The visible no-op: the reconcile job pins itself to the default branch,
+    # so a dispatch from any other ref would be a mute, fully-skipped run.
+    # Keyless and permission-less (no issues grant of any kind — this job
+    # writes nothing anywhere), inverse-gated on the same pin: the
+    # disarmed-notice pattern the routine workflows use.
+    if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain why nothing ran
+        env:
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: echo "::notice::the andon reconciler only runs from the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."

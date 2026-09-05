@@ -15,11 +15,12 @@ OPEN = OpenIssue(number=77, created_at=T0)
 
 
 # ---------------------------------------------------------------------------
-# is_pulled — mirrors GitHub's case-insensitive expression ==
+# is_pulled — mirrors GitHub's case-insensitive expression == EXACTLY:
+# case-folded, never whitespace-trimmed
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("raw", ["pulled", "Pulled", "PULLED", " pulled ", "\tPulled\n"])
-def test_is_pulled_accepts_case_and_whitespace_variants(raw):
+@pytest.mark.parametrize("raw", ["pulled", "Pulled", "PULLED", "pULLED"])
+def test_is_pulled_accepts_case_variants(raw):
     assert policy.is_pulled(raw) is True
 
 
@@ -28,6 +29,24 @@ def test_is_pulled_rejects_everything_else(raw):
     # 'true' is NOT pulled: the cord is the WORD, not a boolean, so a habit
     # from the *_ENABLED arming variables cannot pull it by accident.
     assert policy.is_pulled(raw) is False
+
+
+@pytest.mark.parametrize("raw", ["pulled ", " pulled", " pulled ", "\tPulled\n", "pulled\n", "PULLED "])
+def test_is_pulled_rejects_whitespace_padding_exactly_like_github(raw):
+    # The split-brain guard. GitHub's `vars.AI_ANDON_CORD == 'pulled'` is
+    # case-insensitive but does NOT trim, so a padded value is RELEASED to
+    # every workflow gate (the AI jobs keep running). If the tool forgave
+    # the padding it would open the status issue and Reeve would banner a
+    # bypass that is not happening — so the tool must read it as released.
+    assert policy.is_pulled(raw) is False
+
+
+def test_is_pulled_is_exactly_githubs_rule_side_by_side():
+    # The three cases the doc names, pinned together: case is folded,
+    # whitespace is not.
+    assert policy.is_pulled("PULLED") is True
+    assert policy.is_pulled("pulled ") is False
+    assert policy.is_pulled(" pulled") is False
 
 
 # ---------------------------------------------------------------------------

@@ -63,6 +63,52 @@ def test_report_andon_flag_is_case_insensitive_like_github(monkeypatch, capsys):
     assert out == (FIXTURES / "report.andon-pulled.golden.md").read_text(encoding="utf-8")
 
 
+def test_report_andon_trailing_whitespace_is_released_like_github(monkeypatch, capsys):
+    # GitHub's `vars.AI_ANDON_CORD == 'pulled'` casefolds but does NOT trim, so
+    # a variable set to 'pulled ' (trailing space) is RELEASED by every workflow
+    # gate — the AI jobs keep running. The tool must read it the same way: a
+    # banner here would claim a bypass the gates never made (a split brain).
+    # Released renders today's golden byte-for-byte.
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    for value in ("pulled ", " pulled", "pulled\n", "\tpulled\t"):
+        assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", value]) == 0
+        out = capsys.readouterr().out
+        assert ANDON_BANNER not in out, repr(value)
+        assert out == golden, repr(value)
+
+
+def test_report_andon_upper_case_banners_like_github(monkeypatch, capsys):
+    # The other half of GitHub's rule: case IS folded, so 'PULLED' pulls the
+    # cord in every gate and must banner here too — the pulled golden exactly.
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    rc = main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", "PULLED"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert out.count(ANDON_BANNER) == 1
+    assert out == (FIXTURES / "report.andon-pulled.golden.md").read_text(encoding="utf-8")
+
+
+def test_report_andon_env_trailing_whitespace_is_released(monkeypatch, capsys):
+    # The same no-trim rule on the env path (the workflow's default source).
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    monkeypatch.setenv("AI_ANDON_CORD", "pulled ")
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json")]) == 0
+    assert capsys.readouterr().out == golden
+
+
+def test_report_andon_dash_leading_value_is_a_value_not_an_option(monkeypatch, capsys):
+    # reeve.yml passes `--andon="$AI_ANDON_CORD"` (the = form) so a value that
+    # happens to start with a dash is still read as the value, never as an
+    # option — which would exit 2 and red the keyless daily report.
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon=-pulled"]) == 0
+    assert capsys.readouterr().out == golden
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon=PULLED"]) == 0
+    assert capsys.readouterr().out.count(ANDON_BANNER) == 1
+
+
 def test_report_andon_env_is_the_default_source(monkeypatch, capsys):
     # No flag: the cord is read from $AI_ANDON_CORD (the workflow's env path).
     monkeypatch.setenv("AI_ANDON_CORD", "pulled")

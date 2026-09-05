@@ -32,6 +32,7 @@ at the YAML that must change with the registry.
 
 from __future__ import annotations
 
+import functools
 import pathlib
 import re
 from typing import NamedTuple
@@ -813,10 +814,20 @@ NON_ROUTINE_CONSUMERS = {
 }
 
 
+_WORKFLOW_GLOBS = ("*.yml", "*.yaml")
+
+
+def _workflow_paths(workflows_dir: pathlib.Path) -> list[pathlib.Path]:
+    """Every workflow file GitHub would run: it accepts BOTH extensions, so
+    the search space globs both — a `.yaml` file must never be invisible to
+    the pins (the hygiene test below still refuses one in the live tree)."""
+    return sorted(p for pattern in _WORKFLOW_GLOBS for p in workflows_dir.glob(pattern))
+
+
 def _all_workflow_texts() -> dict[str, str]:
     """Every workflow file, by name — the coverage pin's whole search space."""
     return {p.name: p.read_text(encoding="utf-8")
-            for p in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))}
+            for p in _workflow_paths(REPO_ROOT / ".github" / "workflows")}
 
 
 def _registry_consumers(texts: dict[str, str]) -> set[tuple[str, str]]:
@@ -887,20 +898,71 @@ def test_row_coverage_guard_rejects_a_row_no_workflow_resolves():
 # cannot land uncorded (the same enumerate-the-tree discipline as the
 # ROUTINES row-coverage pin above — a list would let a new job slip past).
 
-# The job-level gate leg every AI-consuming job's `if:` must carry (as its
-# LAST folded line — the arming variable stays the first line, a shape the
-# spike-converter pin depends on), and the explain leg the visible-no-op
-# sibling / step keys on.
+# The job-level gate leg every AI-consuming job's `if:` must carry as a
+# TOP-LEVEL CONJUNCT — the whole condition, or joined to the rest by a
+# top-level `&&`, with no top-level `||` anywhere in the condition (`&&`
+# binds tighter than `||` in GitHub expressions, so `leg && A || B` runs the
+# job on B with the cord pulled). Position is NOT enforced: the arming
+# variable stays the first line by convention, the leg usually last, but the
+# pin reads the folded expression, not the line order. The explain leg is
+# what the visible-no-op sibling / step keys on. The comparison is GitHub's:
+# case-insensitive on the exact word `pulled`, never trimmed — a value of
+# `pulled ` (trailing space) is the RELEASED state to every gate here, and
+# the tools (tools/andon, tools/reeve) must read it identically.
 ANDON_JOB_LEG = "vars.AI_ANDON_CORD != 'pulled'"
 ANDON_EXPLAIN_LEG = "vars.AI_ANDON_CORD == 'pulled'"
 
 # A provider-key SPEND: `anthropic_api_key: ${{ secrets.X }}`, `zai-key:
 # ${{ secrets.X }}`, `ZAI_KEY: ${{ secrets.X }}`. The negative lookahead
 # excludes the presence probes deterministic jobs carry (`HAS_ZAI: ${{
-# secrets.ZAI_KEY != '' }}`) so they are not flagged; CLAUDE_KEY is in the
-# alternation because design-run's Anthropic tail wires that alias (see
-# _ALIAS_MARKER below) — without it that tail would be invisible.
-_AI_SPEND = re.compile(r"secrets\.(ANTHROPIC_API_KEY|ZAI_KEY|CLAUDE_KEY)\b(?!\s*!=\s*'')")
+# secrets.ZAI_KEY != '' }}`) so they are not flagged. The alternation is
+# DERIVED, not hand-kept: every `secret` a `[provider:…]` stanza of the
+# committed registry declares, UNION the literal floor below, UNION every
+# `registry-secret-alias: X=Y` marker a workflow carries (design-run's
+# Anthropic tail wires CLAUDE_KEY, a historical alias — without it that tail
+# would be invisible). So a NEW registry provider's secret enrols its
+# spenders the moment the stanza lands, with no edit here.
+_LITERAL_PROVIDER_SECRETS = frozenset({"ANTHROPIC_API_KEY", "ZAI_KEY", "CLAUDE_KEY"})
+_ALIAS_MARKER_RE = re.compile(r"registry-secret-alias:\s*(\w+)=(\w+)")
+
+
+def _registry_provider_secrets() -> set[str]:
+    """Every provider secret name the committed registry declares."""
+    return {p.secret for p in Registry.load(str(REGISTRY)).providers.values()}
+
+
+def _alias_secret_names(texts: dict[str, str]) -> set[str]:
+    """Both sides of every `registry-secret-alias: X=Y` marker in the
+    workflows (the marker lives in a comment, so this reads the RAW text)."""
+    names: set[str] = set()
+    for text in texts.values():
+        for alias, canonical in _ALIAS_MARKER_RE.findall(text):
+            names.add(alias)
+            names.add(canonical)
+    return names
+
+
+def _provider_secret_names(texts: dict[str, str] | None = None) -> frozenset[str]:
+    """The full spend alternation: literal floor ∪ registry ∪ aliases."""
+    if texts is None:
+        texts = _all_workflow_texts()
+    return frozenset(_LITERAL_PROVIDER_SECRETS | _registry_provider_secrets()
+                     | _alias_secret_names(texts))
+
+
+def _ai_spend_regex(names: frozenset[str] | set[str]) -> re.Pattern[str]:
+    """The spend regex over a given secret-name set (the presence-probe
+    lookahead kept), so the negative controls can build one for a provider
+    the registry does not declare yet — exactly what a new stanza would do."""
+    assert names, "an empty alternation would match nothing — no spend could ever be seen"
+    alternation = "|".join(re.escape(n) for n in sorted(names))
+    return re.compile(r"secrets\.(" + alternation + r")\b(?!\s*!=\s*'')")
+
+
+@functools.lru_cache(maxsize=None)
+def _ai_spend() -> re.Pattern[str]:
+    """The live spend regex, derived once per session."""
+    return _ai_spend_regex(_provider_secret_names())
 # The agent action and the exhaustion-triage action: a job carrying either
 # reaches a provider even when the key is wired through a composite input.
 _AI_ACTIONS = ("anthropics/claude-code-action", "./.github/actions/provider-triage")
@@ -978,75 +1040,145 @@ def _job_steps(block: str) -> list[str]:
     return re.split(r"\n      - ", block)[1:]
 
 
-def _is_ai_consuming(block: str) -> tuple[bool, str]:
+def _workflow_header(text: str) -> str:
+    """The workflow text ABOVE `jobs:` — `name:`, `on:`, `permissions:`,
+    `concurrency:` and a top-level `env:` — where a hoisted secret would
+    live out of every job block's sight."""
+    jobs_at = re.search(r"^jobs:[ \t]*$", text, re.MULTILINE)
+    assert jobs_at, "workflow has no `jobs:` section"
+    return text[:jobs_at.start()]
+
+
+def _is_ai_consuming(block: str, spend: re.Pattern[str] | None = None) -> tuple[bool, str]:
     """Whether a job block reaches a provider, and the first reference that
-    says so (for the failure message)."""
+    says so (for the failure message). `spend` defaults to the live derived
+    regex; the negative controls pass one built for a not-yet-declared
+    provider."""
     body = _without_comments(block)
     for action in _AI_ACTIONS:
         if action in body:
             return True, action
-    m = _AI_SPEND.search(body)
+    m = (spend or _ai_spend()).search(body)
     if m:
         return True, m.group(0)
     return False, ""
 
 
-def _ai_consuming_jobs(texts: dict[str, str]) -> dict[tuple[str, str], str]:
-    """Every (workflow, job) that reaches a provider, with its block."""
+def _ai_consuming_jobs(texts: dict[str, str],
+                       spend: re.Pattern[str] | None = None) -> dict[tuple[str, str], str]:
+    """Every (workflow, job) that reaches a provider, with its block. The
+    block includes the job header, so a spend wired as a job-level `env:`
+    key (no step ever names the secret) enrols the job too."""
     found: dict[tuple[str, str], str] = {}
     for workflow, text in texts.items():
         for job, block in _job_blocks(text).items():
-            consuming, _why = _is_ai_consuming(block)
+            consuming, _why = _is_ai_consuming(block, spend)
             if consuming:
                 found[(workflow, job)] = block
     return found
 
 
+def _strip_paren_groups(cond: str) -> str:
+    """The condition with every balanced parenthesised group removed,
+    innermost first — what is left is the expression's TOP LEVEL."""
+    prev = None
+    while prev != cond:
+        prev = cond
+        cond = re.sub(r"\([^()]*\)", " ", cond)
+    return cond
+
+
+def _cord_is_top_level_conjunct(cond: str) -> bool:
+    """True iff the gate leg governs the whole condition: after the balanced
+    parenthesised groups are removed there is NO top-level `||`, and the leg
+    is one bare `&&`-conjunct (or the whole condition). `&&` binds tighter
+    than `||` in GitHub expressions, so `leg && A || B` still runs on B with
+    the cord pulled — a substring test would bless it; this refuses it. A
+    leg that only appears INSIDE a group (`(leg && A) || B`) is not the
+    gate either."""
+    top = _strip_paren_groups(cond)
+    if "||" in top:
+        return False
+    conjuncts = [re.sub(r"\s+", " ", c).strip() for c in top.split("&&")]
+    return ANDON_JOB_LEG in conjuncts
+
+
 def _job_level_cord_gated(block: str) -> bool:
-    """True when the job's own `if:` carries the gate leg."""
+    """True when the job's own `if:` carries the gate leg as a top-level
+    conjunct (the shape that actually skips the job)."""
     header = _without_comments(_job_header(block))
     if not _ANDON_JOB_IF.search(header):
         return False
-    return ANDON_JOB_LEG in _step_condition(header)
+    return _cord_is_top_level_conjunct(_step_condition(header))
 
 
-def _assert_every_ai_job_gates_on_the_cord(texts: dict[str, str]) -> None:
+_HOISTED_KEY_MSG = ("provider keys must be wired at job/step level so the cord "
+                    "pin can see them")
+
+
+def _assert_no_workflow_level_provider_env(texts: dict[str, str],
+                                           spend: re.Pattern[str] | None = None) -> None:
+    """A provider secret hoisted into a workflow's top-level `env:` reaches
+    every job through inheritance while living in NO job block — the
+    enumerator would see nothing to cord. Refused outright: wire keys at
+    job/step level (the simplest rule, and the one the pin can check)."""
+    for workflow, text in sorted(texts.items()):
+        m = (spend or _ai_spend()).search(_without_comments(_workflow_header(text)))
+        assert not m, (
+            f"{workflow}: {m.group(0) if m else ''} is referenced in the workflow "
+            f"header (above `jobs:`) — {_HOISTED_KEY_MSG}; every job would inherit "
+            "the key and none of them would enumerate as AI-consuming")
+
+
+def _assert_every_ai_job_gates_on_the_cord(texts: dict[str, str],
+                                           spend: re.Pattern[str] | None = None) -> None:
     """Every AI-consuming job is gated on the cord — at the job level, or for
-    the allow-listed deterministic jobs, on every key-spending step."""
-    jobs = _ai_consuming_jobs(texts)
+    the allow-listed deterministic jobs, on every key-spending step — and in
+    both places the leg must be a TOP-LEVEL CONJUNCT of the `if:`."""
+    _assert_no_workflow_level_provider_env(texts, spend)
+    jobs = _ai_consuming_jobs(texts, spend)
     floor = {(row.workflow, row.job) for row in ROUTINES.values()} | _ANDON_NON_ROUTINE_AI_JOBS
     lost = floor - set(jobs)
     assert not lost, (
         f"known AI-consuming job(s) the enumerator no longer sees: {sorted(lost)} "
-        "— the key/action reference moved into a shape _AI_SPEND / _AI_ACTIONS "
-        "do not match, so the cord pin would silently stop covering them")
+        "— the key/action reference moved into a shape the spend regex / "
+        "_AI_ACTIONS do not match, so the cord pin would silently stop covering them")
     for (workflow, job), block in sorted(jobs.items()):
-        _consuming, why = _is_ai_consuming(block)
+        _consuming, why = _is_ai_consuming(block, spend)
         if (workflow, job) in ANDON_STEP_GATED:
+            header_spend, header_why = _is_ai_consuming(_job_header(block), spend)
+            assert not header_spend, (
+                f"{workflow} [{job}]: allow-listed as step-gated but its job "
+                f"header references {header_why} (a job-level env key reaches "
+                "every step, gated or not) — move the key onto the AI step")
             spending = [chunk for chunk in _job_steps(block)
-                        if _is_ai_consuming(chunk)[0]]
+                        if _is_ai_consuming(chunk, spend)[0]]
             assert spending, (
                 f"{workflow} [{job}]: allow-listed as step-gated but no step "
                 "references a provider — drop it from ANDON_STEP_GATED")
             for chunk in spending:
                 name = re.search(r"^\s*name:\s*(.+)$", chunk, re.MULTILINE)
                 step = name.group(1).strip() if name else chunk.splitlines()[0].strip()
-                _consuming, why = _is_ai_consuming(chunk)
+                _consuming, why = _is_ai_consuming(chunk, spend)
                 body = _without_comments(chunk)
                 has_if = re.search(r"^\s*if:", body, re.MULTILINE)
                 cond = _step_condition(body) if has_if else ""
-                assert has_if and ANDON_JOB_LEG in cond, (
+                assert has_if and _cord_is_top_level_conjunct(cond), (
                     f"{workflow} [{job}]: step '{step}' references {why} but "
-                    f"is not gated on {ANDON_JOB_LEG} — pulling the cord would "
-                    "not stop it (the job is deterministic and stays running, "
-                    "so its AI step must carry the leg itself)")
+                    f"{ANDON_JOB_LEG} is not a top-level conjunct of its `if:` "
+                    f"({cond!r}) — pulling the cord would not stop it (the job "
+                    "is deterministic and stays running, so its AI step must "
+                    "carry the leg itself, joined by top-level && only)")
             continue
         header = _without_comments(_job_header(block))
         has_if = _ANDON_JOB_IF.search(header)
         cond = _step_condition(header) if has_if else ""
-        assert has_if and ANDON_JOB_LEG in cond, (
-            f"{workflow} [{job}]: AI-consuming job (references {why}) is not "
-            f"gated on {ANDON_JOB_LEG} — pulling the cord would not stop it")
+        assert has_if and _cord_is_top_level_conjunct(cond), (
+            f"{workflow} [{job}]: AI-consuming job (references {why}) — "
+            f"{ANDON_JOB_LEG} is not a top-level conjunct of its `if:` "
+            f"({cond!r}); pulling the cord would not stop it (a top-level || "
+            "lets the other branch run, and a leg inside parentheses is not "
+            "the gate)")
 
 
 def _assert_every_corded_workflow_explains_the_pull(texts: dict[str, str]) -> None:
@@ -1102,9 +1234,13 @@ def test_andon_reconciler_itself_is_not_corded():
         "andon.yml enumerated as AI-consuming — it must spend no provider key")
     blocks = _job_blocks(texts["andon.yml"])
     assert "reconcile" in blocks, "andon.yml has no `reconcile` job"
-    assert not _job_level_cord_gated(blocks["reconcile"]), (
-        "andon.yml [reconcile] gates on the cord — it could never open or "
+    # Absence of the LEG ANYWHERE in the job header, stricter than "not
+    # gated as a top-level conjunct": a leg buried in a || branch would
+    # still be a mistake here.
+    assert ANDON_JOB_LEG not in _without_comments(_job_header(blocks["reconcile"])), (
+        "andon.yml [reconcile] carries the gate leg — it could never open or "
         "close the status issue")
+    assert not _job_level_cord_gated(blocks["reconcile"])
 
 
 def test_andon_guard_rejects_a_job_that_shed_its_leg():
@@ -1136,18 +1272,233 @@ def test_andon_guard_rejects_a_future_uncorded_ai_job(tmp_path):
     import shutil
     workflows_dir = tmp_path / "workflows"
     workflows_dir.mkdir()
-    for path in (REPO_ROOT / ".github" / "workflows").glob("*.yml"):
+    for path in _workflow_paths(REPO_ROOT / ".github" / "workflows"):
         shutil.copy(path, workflows_dir)
     victim = workflows_dir / "labeler.yml"
     text = victim.read_text(encoding="utf-8")
     assert "  rogue:" not in text, "tamper target collides — the fixture is stale"
     victim.write_text(text.rstrip("\n") + "\n\n" + _ROGUE_JOB, encoding="utf-8")
     texts = {p.name: p.read_text(encoding="utf-8")
-             for p in sorted(workflows_dir.glob("*.yml"))}
+             for p in _workflow_paths(workflows_dir)}
     assert ("labeler.yml", "rogue") in _ai_consuming_jobs(texts), (
         "the rogue job was not enumerated — the enumerator, not the gate, is broken")
     with pytest.raises(AssertionError, match=r"labeler\.yml \[rogue\]"):
         _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+# ── Hardening pins: conjunct shape, hoisted keys, derived secrets, globs ─────
+
+_DESIGN_COACH_SHAPE = (
+    "always() && needs.design-changes.outputs.designs_changed == 'true' "
+    "&& needs.jane-review.result == 'success' "
+    f"&& {ANDON_JOB_LEG} "
+    "&& (github.event.action == 'opened' || github.event.action == 'reopened')")
+_MODEL_SMOKE_SHAPE = (
+    f"{ANDON_JOB_LEG} && (github.event_name == 'workflow_dispatch' || "
+    "github.event.pull_request.head.repo.full_name == github.repository)")
+
+
+@pytest.mark.parametrize("cond", [
+    ANDON_JOB_LEG,                                   # the whole condition
+    f"vars.X_ENABLED == 'true' && {ANDON_JOB_LEG}",  # last conjunct (the routines)
+    f"{ANDON_JOB_LEG} && vars.X_ENABLED == 'true'",  # first conjunct — position is free
+    f"always()   &&   {ANDON_JOB_LEG}",              # whitespace-insensitive join
+    _DESIGN_COACH_SHAPE,                             # leg mid-way, || group AFTER it
+    _MODEL_SMOKE_SHAPE,                              # leg && (A || B)
+    "!contains(github.event.pull_request.labels.*.name, 'no-oracle-review') "
+    f"&& {ANDON_JOB_LEG}",                           # a call's parens are not a group of ||
+])
+def test_cord_conjunct_helper_accepts_a_governing_leg(cond):
+    assert _cord_is_top_level_conjunct(cond), cond
+
+
+@pytest.mark.parametrize("cond", [
+    "",                                              # no condition at all
+    "vars.X_ENABLED == 'true'",                      # no leg
+    ANDON_EXPLAIN_LEG,                               # the OTHER leg (== 'pulled')
+    f"{ANDON_JOB_LEG} && github.event_name == 'workflow_dispatch' "
+    "|| github.event.pull_request.head.repo.full_name == github.repository",  # leg && A || B
+    f"vars.X_ENABLED == 'true' || {ANDON_JOB_LEG}",  # A || leg
+    f"({ANDON_JOB_LEG} && vars.X_ENABLED == 'true') || always()",  # leg only inside a group
+    f"!({ANDON_JOB_LEG})",                           # negated group
+    "vars.AI_ANDON_CORD != \"pulled\"",              # not the exact leg text
+    f"{ANDON_JOB_LEG}x",                             # the leg as a prefix of something else
+])
+def test_cord_conjunct_helper_rejects_a_non_governing_leg(cond):
+    assert not _cord_is_top_level_conjunct(cond), cond
+
+
+def test_andon_guard_rejects_a_leg_that_is_not_a_top_level_conjunct():
+    # NEGATIVE CONTROL E (in-memory): model-smoke's `leg && (A || B)` with its
+    # parentheses dropped reads `leg && A || B` — GitHub runs the job on B
+    # with the cord pulled. A substring pin would bless it; the guard must
+    # fail naming the job and the shape.
+    texts = _all_workflow_texts()
+    victim = "model-smoke.yml"
+    folded = (
+        f"      {ANDON_JOB_LEG} &&\n"
+        "      (github.event_name == 'workflow_dispatch' ||\n"
+        "       github.event.pull_request.head.repo.full_name == github.repository)\n")
+    flat = (
+        f"      {ANDON_JOB_LEG} &&\n"
+        "      github.event_name == 'workflow_dispatch' ||\n"
+        "      github.event.pull_request.head.repo.full_name == github.repository\n")
+    assert texts[victim].count(folded) == 1, "tamper target not found — the fixture is stale"
+    texts[victim] = texts[victim].replace(folded, flat, 1)
+    with pytest.raises(AssertionError,
+                       match=r"model-smoke\.yml \[smoke\].*not a top-level conjunct"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+def test_andon_guard_rejects_a_provider_key_hoisted_into_workflow_env():
+    # NEGATIVE CONTROL F (in-memory): a provider secret in a workflow's
+    # top-level `env:` reaches every job by inheritance while living in no
+    # job block — the enumerator would see nothing to cord. The guard must
+    # refuse the hoist outright, naming the workflow.
+    texts = _all_workflow_texts()
+    victim = "labeler.yml"
+    hoist = "env:\n  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}\n\njobs:\n"
+    assert texts[victim].count("\njobs:\n") == 1, "tamper target not found — the fixture is stale"
+    texts[victim] = texts[victim].replace("\njobs:\n", "\n" + hoist, 1)
+    assert _ai_spend().search(_workflow_header(texts[victim])), "the hoist did not land"
+    with pytest.raises(AssertionError, match=r"labeler\.yml.*" + re.escape(_HOISTED_KEY_MSG)):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+    # Positive control: the presence probe shape is NOT a hoisted spend.
+    probe = texts[victim].replace("${{ secrets.ANTHROPIC_API_KEY }}",
+                                  "${{ secrets.ANTHROPIC_API_KEY != '' }}", 1)
+    _assert_no_workflow_level_provider_env({victim: probe})
+
+
+def test_live_workflows_hoist_no_provider_key_into_workflow_env():
+    _assert_no_workflow_level_provider_env(_all_workflow_texts())
+
+
+_ENV_ONLY_ROGUE_JOB = """\
+  rogue:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - run: python3 -m some_agent --spend
+"""
+
+
+def test_andon_guard_rejects_a_job_whose_only_spend_is_a_job_level_env_key():
+    # NEGATIVE CONTROL G (in-memory): a job that names the secret ONLY in its
+    # job-level `env:` (no action, no step references it) must still be
+    # enumerated — the block includes the header — and fail the gate.
+    texts = _all_workflow_texts()
+    victim = "labeler.yml"
+    assert "  rogue:" not in texts[victim], "tamper target collides — the fixture is stale"
+    texts[victim] = texts[victim].rstrip("\n") + "\n\n" + _ENV_ONLY_ROGUE_JOB
+    jobs = _ai_consuming_jobs(texts)
+    assert ("labeler.yml", "rogue") in jobs, (
+        "a job-level env spend was not enumerated — the job header is out of the enumerator's sight")
+    assert not any(_is_ai_consuming(c)[0] for c in _job_steps(jobs[("labeler.yml", "rogue")])), (
+        "the control is wrong: a STEP references the key, so it is not env-only")
+    with pytest.raises(AssertionError, match=r"labeler\.yml \[rogue\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+def test_andon_guard_rejects_a_step_gated_job_with_a_job_level_env_key():
+    # NEGATIVE CONTROL H (in-memory): ci.yml's regen is step-gated, so a key
+    # wired in its JOB header would reach every step, gated or not — the
+    # per-step scan cannot see it. The guard must refuse the header spend.
+    texts = _all_workflow_texts()
+    victim = "ci.yml"
+    block = _job_blocks(texts[victim])["regen"]
+    header = _job_header(block)
+    assert not _is_ai_consuming(header)[0], "the fixture is stale: regen's header already spends"
+    runs_on = re.search(r"^    runs-on:.*$", header, re.MULTILINE)
+    assert runs_on, "regen has no runs-on line to anchor the tamper on"
+    tampered = header.replace(
+        runs_on.group(0),
+        runs_on.group(0) + "\n    env:\n      ZAI_KEY: ${{ secrets.ZAI_KEY }}", 1)
+    texts[victim] = texts[victim].replace(block, block.replace(header, tampered, 1), 1)
+    with pytest.raises(AssertionError, match=r"ci\.yml \[regen\].*job header references"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+def test_spend_alternation_covers_every_registry_provider_secret():
+    # Positive pin for the derivation: every `secret` a registry provider
+    # declares is matched as a spend (and its presence probe is not), plus
+    # the literal floor and both sides of every alias marker.
+    registry_secrets = _registry_provider_secrets()
+    assert registry_secrets, "the registry declares no providers"
+    aliases = _alias_secret_names(_all_workflow_texts())
+    assert ("CLAUDE_KEY", "ANTHROPIC_API_KEY") in [
+        tuple(m) for text in _all_workflow_texts().values()
+        for m in _ALIAS_MARKER_RE.findall(text)], (
+        "design-run's registry-secret-alias marker is gone — the fixture is stale")
+    spend = _ai_spend()
+    for name in sorted(registry_secrets | _LITERAL_PROVIDER_SECRETS | aliases):
+        assert spend.search(f"key: ${{{{ secrets.{name} }}}}"), f"{name} is not a spend"
+        assert not spend.search(f"HAS: ${{{{ secrets.{name} != '' }}}}"), (
+            f"{name}'s presence probe is flagged as a spend")
+    assert not spend.search("key: ${{ secrets.REGEN_TOKEN }}"), (
+        "a non-provider secret is in the alternation")
+
+
+_OPENAI_ROGUE_JOB = """\
+  rogue:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python3 -m some_agent
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+"""
+
+
+def test_andon_guard_enrols_a_new_registry_providers_spender():
+    # NEGATIVE CONTROL I (in-memory): the alternation built the way a NEW
+    # `[provider:openai]` stanza would build it (its secret added to the
+    # set) must enumerate a rogue job spending that key and fail the gate —
+    # while today's alternation, without the stanza, does not see it (which
+    # is exactly why the set is derived from the registry, not hand-kept).
+    texts = _all_workflow_texts()
+    victim = "labeler.yml"
+    assert "  rogue:" not in texts[victim], "tamper target collides — the fixture is stale"
+    texts[victim] = texts[victim].rstrip("\n") + "\n\n" + _OPENAI_ROGUE_JOB
+    assert ("labeler.yml", "rogue") not in _ai_consuming_jobs(texts), (
+        "OPENAI_API_KEY is already in the live alternation — pick another name for the control")
+    widened = _ai_spend_regex(_provider_secret_names(texts) | {"OPENAI_API_KEY"})
+    assert ("labeler.yml", "rogue") in _ai_consuming_jobs(texts, widened), (
+        "the widened alternation did not enumerate the rogue spender")
+    with pytest.raises(AssertionError, match=r"labeler\.yml \[rogue\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts, widened)
+    # The widening changes nothing about the live tree: every real job still
+    # passes under it (a new provider must not fail existing workflows).
+    _assert_every_ai_job_gates_on_the_cord(_all_workflow_texts(), widened)
+
+
+def _assert_no_yaml_extension(workflows_dir: pathlib.Path) -> None:
+    """GitHub runs `.yaml` workflows as readily as `.yml`; the enumerator
+    globs both, but the house convention is one extension so every grep,
+    roster and script in the repo sees the same set."""
+    stray = sorted(p.name for p in workflows_dir.glob("*.yaml"))
+    assert not stray, (
+        f"workflow file(s) with a .yaml extension: {stray} — rename to .yml "
+        "(GitHub runs both, and every other tool here globs *.yml)")
+
+
+def test_workflows_dir_has_no_yaml_extension():
+    _assert_no_yaml_extension(REPO_ROOT / ".github" / "workflows")
+
+
+def test_yaml_extension_guard_fires_and_the_enumerator_still_globs_it(tmp_path):
+    # NEGATIVE CONTROL J: a `.yaml` copy of an AI workflow must (1) trip the
+    # hygiene pin with the rename message and (2) still be enumerated by the
+    # glob, so a stray extension can never hide an AI job from the cord pin.
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    (workflows_dir / "stray.yaml").write_text(
+        (REPO_ROOT / ".github" / "workflows" / "labeler.yml").read_text(encoding="utf-8"),
+        encoding="utf-8")
+    with pytest.raises(AssertionError, match=r"stray\.yaml.*rename to \.yml"):
+        _assert_no_yaml_extension(workflows_dir)
+    texts = {p.name: p.read_text(encoding="utf-8") for p in _workflow_paths(workflows_dir)}
+    assert ("stray.yaml", "label") in _ai_consuming_jobs(texts), (
+        "a .yaml workflow is invisible to the enumerator")
 
 
 def test_andon_guard_rejects_a_workflow_that_stopped_explaining():

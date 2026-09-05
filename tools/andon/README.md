@@ -34,21 +34,28 @@ export PYTHONPATH=tools/andon/src          # or: pip install -e 'tools/andon[tes
 # The workflow's step. Reads GH_TOKEN/GITHUB_TOKEN (empty = unauthenticated
 # GET), appends action=/issue_number=/pulled=/opened_at= to --gh-output,
 # writes <out-dir>/body.md on open or <out-dir>/comment.md on close.
-python3 -m andon decide --repo owner/name --cord "$AI_ANDON_CORD" \
+python3 -m andon decide --repo owner/name --cord="$AI_ANDON_CORD" \
     --gh-output "$GITHUB_OUTPUT" --out-dir .andon
 
 # Offline (no GET; the status issue is treated as absent) — for demos/tests.
-python3 -m andon decide --offline --repo owner/name --cord Pulled --out-dir /tmp/andon
+python3 -m andon decide --offline --repo owner/name --cord=Pulled --out-dir /tmp/andon
 
 # The rendered text on its own.
 python3 -m andon render-open  [--now 2026-09-01T10:00:00Z]
 python3 -m andon render-close --since 2026-09-01T10:00:00Z [--now ...]
 ```
 
-`--cord` takes the variable's **raw** value and normalises it the way
-GitHub's expression `==` does — case-insensitive, whitespace-tolerant — so
-`Pulled` pulls it and an unset variable, `released`, `false` or `true` all
-read as released (the cord is the *word*, not a boolean). Exit 0 on any
+`--cord` takes the variable's **raw** value and compares it exactly the way
+GitHub's expression `vars.AI_ANDON_CORD == 'pulled'` does — case-insensitive,
+**no whitespace trimming**: the exact word — so `Pulled` and `PULLED` pull it,
+while `pulled ` (trailing space), ` pulled`, an unset variable, `released`,
+`false` or `true` all read as released (the cord is the *word*, not a
+boolean). The no-trim rule is deliberate, not an omission: GitHub's own
+comparison does not trim, so a padded value leaves every workflow gate
+released and the AI jobs running; a tool that forgave the padding would open
+the status issue and banner a bypass that is not happening — a split brain.
+Pass it as `--cord="$CORD"` (the `--opt=value` form) so a value that happens
+to start with a dash cannot be mistaken for an option. Exit 0 on any
 decision (a `none` is not an error), 1 on a configuration error (a bad ISO
 timestamp; `--repo` missing without `--offline`), 2 on an argparse error.
 
@@ -62,6 +69,14 @@ timestamp; `--repo` missing without `--offline`), 2 on an argparse error.
   groomer's `_get`/`_paged` seam (fail-loud page cap, non-list guard) and
   `find_open_status_issue` (open issues with the label, PRs dropped,
   marker-less bodies dropped, oldest wins, more-than-one logged to stderr).
+  `_get` stays the single one-request seam the tests monkeypatch;
+  `_get_with_retry` wraps it with up to three attempts and a short backoff
+  (`_RETRY_DELAYS`, slept through `time.sleep` so tests can stub it) **only**
+  on a transient blip — an HTTP 403/429/500/502/503/504 (GitHub's
+  secondary-rate-limit 403 included) or a `URLError`/socket timeout — so the
+  hourly keyless reconciler does not go red on every API hiccup. Any other
+  HTTP status (401, 404, 422 …) is a real error and is re-raised on the
+  first attempt; after the last attempt the transient error is re-raised.
 * `cli.py` — argparse over the two.
 
 The package **never writes to GitHub** — its only writes are local scratch
@@ -81,8 +96,13 @@ literals equal `policy`'s constants, the reconcile job carries the
 default-branch pin and **no** cord leg, `issues: write` sits on the job with
 a `contents: read` workflow default, exactly one `- cron: '43 * * * *'`, no
 `secrets.` anywhere, and the decide step is invoked with
-`--gh-output "$GITHUB_OUTPUT"` and `--cord "$CORD"` (env-indirected, never
-interpolated into a `run:` block).
+`--gh-output "$GITHUB_OUTPUT"` and `--cord="$CORD"` (env-indirected, never
+interpolated into a `run:` block; the `--opt=value` form so a dash-leading
+value is never read as an option). The workflow also carries a keyless
+`offbranch-notice` sibling — `permissions: {}`, no `issues:` grant — that
+runs only when a dispatch targets a ref other than the default branch, so
+the reconcile job's default-branch pin is a visible no-op rather than a
+mute, fully-skipped run; the pins hold that sibling to zero permissions.
 
 ## Labels
 
@@ -100,9 +120,12 @@ make a pulled cord look like a decision request.
 PYTHONPATH=tools/andon/src python3 -m pytest tools/andon/tests -q
 ```
 
-A positive and a negative control per rule: `is_pulled` variants, all four
-`decide` branches, marker-first bodies, duration formatting (clamped, never
-negative), the seam's pagination cap and non-list guard, the CLI's outputs
+A positive and a negative control per rule: `is_pulled` variants (case
+folded, whitespace-padded values rejected exactly as GitHub rejects them),
+all four `decide` branches, marker-first bodies, duration formatting
+(clamped, never negative), the seam's pagination cap and non-list guard, the
+retry wrapper (a 503 twice then success returns; a 401 raises on the first
+call; three 503s raise after three calls), the CLI's outputs
 and exit codes, the purity scans, and the workflow pins — each pin with a
 tamper negative where the regex is cheap to invert. Stdlib-only, like
 `tools/lineage` and `tools/reeve`: the workflow runs it straight from the

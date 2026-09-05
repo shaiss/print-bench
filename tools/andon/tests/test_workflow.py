@@ -141,12 +141,64 @@ def test_decide_step_invocation(text):
     block = _job_block(text, "reconcile")
     assert "python3 -m andon decide" in block
     assert '--gh-output "$GITHUB_OUTPUT"' in block
-    assert '--cord "$CORD"' in block
+    # The --opt=value form: a raw variable value that starts with a dash can
+    # never be read as an option by argparse.
+    assert '--cord="$CORD"' in block
+    assert '--cord "$CORD"' not in block
     assert '--repo "$GITHUB_REPOSITORY"' in block
     # The variable is env-indirected, never interpolated into a run: block.
     assert re.search(r"CORD: \$\{\{ vars\.AI_ANDON_CORD \}\}", block)
     run_blocks = re.findall(r"run: \|\n((?:          .*\n)+)", block)
     assert run_blocks and all("${{" not in rb for rb in run_blocks)
+
+
+def test_decide_step_comment_states_the_exact_word_no_trim_rule(text):
+    # The split-brain guard, in prose: the comment beside the raw value
+    # must say the tool trims no whitespace, so nobody "fixes" the tool
+    # back into forgiving what GitHub's == does not.
+    block = _job_block(text, "reconcile")
+    assert "no whitespace trimming" in block
+    assert "the exact word" in block
+
+
+# (vii) the off-branch notice sibling: keyless, permission-less, inverse-gated
+
+OFFBRANCH_PIN = "github.ref != format('refs/heads/{0}', github.event.repository.default_branch)"
+
+
+def test_offbranch_notice_job_is_the_inverse_of_the_default_branch_pin(text):
+    assert _job_if(_job_block(text, "offbranch-notice")) == OFFBRANCH_PIN
+    assert _job_if(_job_block(text, "reconcile")) == DEFAULT_BRANCH_PIN
+
+
+def test_offbranch_notice_job_holds_zero_permissions(text):
+    block = _job_block(text, "offbranch-notice")
+    assert re.search(r"^    permissions: \{\}\s*$", block, re.MULTILINE)
+    assert "issues:" not in block
+    assert "contents:" not in block
+
+
+def test_offbranch_notice_job_emits_one_notice_and_no_secret_or_write(text):
+    block = _job_block(text, "offbranch-notice")
+    assert block.count("::notice::") == 1
+    assert "github-script" not in block
+    assert "andon decide" not in block
+    assert "${{" not in "".join(re.findall(r"run: .*", block))
+
+
+def test_offbranch_notice_still_leaves_the_reconcile_job_uncorded(text):
+    # Adding a sibling must not have put a cord leg on either job.
+    for job in ("reconcile", "offbranch-notice"):
+        assert CORD_GATE_LEG not in _job_block(text, job)
+        assert "vars.AI_ANDON_CORD" not in _job_if(_job_block(text, job))
+
+
+def test_only_the_reconcile_job_declares_issues_write(text):
+    # One `issues:` grant in the whole file, and it sits on reconcile.
+    grants = [m.start() for m in re.finditer(r"^\s+issues: write", text, re.MULTILINE)]
+    assert len(grants) == 1
+    reconcile = _job_block(text, "reconcile")
+    assert "issues: write" in reconcile
 
 
 def test_write_step_is_skipped_on_none_and_on_dry_run(text):

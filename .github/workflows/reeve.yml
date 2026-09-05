@@ -182,13 +182,17 @@ jobs:
           # The AI andon cord's live value (a repo variable, not a secret —
           # the reporter stays keyless); env-indirected, never inline in run:.
           # 'pulled' adds the one 🛑 banner line to the report; the tool
-          # normalizes case exactly as GitHub's expression comparison does.
+          # compares exactly as GitHub's expression does — case-insensitive,
+          # no whitespace trimming — so it can never banner a bypass the
+          # job-level gates did not make. Passed as `--andon=` (the = form)
+          # below so a dash-leading value is read as the value, never as an
+          # option that would exit 2 and red the keyless daily report.
           AI_ANDON_CORD: ${{ vars.AI_ANDON_CORD }}
         run: |
           # GET-only run-health reads via src/reeve/github.py (the groomer's
           # pattern); the sticky upsert remains the sole write.
           reeve run --root . --repo "$GITHUB_REPOSITORY" \
-            --conf .github/reeve.conf --andon "$AI_ANDON_CORD" \
+            --conf .github/reeve.conf --andon="$AI_ANDON_CORD" \
             --out report.md > /dev/null
           {
             echo "## Reeve — bench health"

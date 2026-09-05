@@ -31,15 +31,17 @@ _ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
 def is_pulled(raw: Optional[str]) -> bool:
     """Is the cord pulled, given the variable's raw value?
 
-    Mirrors GitHub's expression ``vars.AI_ANDON_CORD == 'pulled'``: the
-    comparison is case-insensitive, so ``Pulled`` pulls it too; surrounding
-    whitespace is forgiven the way a human typing into the variables UI
-    expects. An unset variable (``None`` / empty), ``released``, ``false`` or
-    any other word means released — the cord's off state is the default.
+    Mirrors GitHub's expression ``vars.AI_ANDON_CORD == 'pulled'`` EXACTLY:
+    the comparison is case-insensitive, so ``Pulled`` and ``PULLED`` pull it
+    too — and nothing else is forgiven. GitHub does **not** trim whitespace,
+    so neither does this: ``' pulled '`` and ``'pulled '`` read as released
+    here precisely because every workflow gate reads them as released. A
+    tolerant reading would split the brain — the AI jobs keep running while
+    the status issue opens and Reeve banners a bypass that isn't happening.
+    An unset variable (``None`` / empty), ``released``, ``false`` or any
+    other word means released — the cord's off state is the default.
     """
-    if raw is None:
-        return False
-    return raw.strip().casefold() == "pulled"
+    return raw is not None and raw.casefold() == "pulled"
 
 
 @dataclass(frozen=True)

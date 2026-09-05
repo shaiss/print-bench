@@ -25,8 +25,9 @@ the image generators or the model smoke. The cord sits above all of it.
 **Pull:** Settings → Secrets and variables → Actions → Variables → new variable
 `AI_ANDON_CORD` with the value `pulled`. The comparison is GitHub's own
 case-insensitive string compare, so `Pulled` and `PULLED` pull it too; it is
-the exact word, so a trailing space or a different word (`true`, `yes`, `on`)
-does **not** — the cord is the word, not a boolean.
+the exact word with no surrounding whitespace, so a trailing space (`pulled `)
+or a different word (`true`, `yes`, `on`) does **not** — the cord is the word,
+not a boolean, and nothing trims it.
 
 **Release:** delete the variable, or set it to anything but `pulled`. An unset
 variable is the released state, so a fresh clone, a fork, or a repo that has
@@ -73,7 +74,7 @@ emits the one notice.
 | `auto-review.yml` | Jane, Drik, PM triage and the design coach; `design-changes`, `review-stamp` and `signoff-status` keep running | `review-stamp` posts a `⏸️ Auto-review bypassed` comment (no `sha=` marker) and the workflow's one notice |
 | `oracle.yml` | the `oracle` job — no probe, no classify, no #347 escalation | the keyless `oracle-andon` sibling; neither runs on a PR labeled `no-oracle-review` |
 | `ci.yml` | the `Draft product pages that do not pass their gate (Claude API)` **step** of `regen` — previews, animations, product shots, the gallery and the commit-back all still run | the `AI andon cord — product-page drafting bypassed` step (only when the PR touched designs; a docs-only PR shows no cord notice in CI at all) |
-| `lifestyle-shot.yml`, `product-still.yml`, `lifestyle-clip.yml` | the `generate` job (the only `ZAI_KEY` spend), manual dispatch included; `detect` still runs its deterministic input validation | the `andon-notice` sibling |
+| `lifestyle-shot.yml`, `product-still.yml`, `lifestyle-clip.yml` | the `generate` job (the only `ZAI_KEY` spend), manual dispatch included; `detect` still runs its deterministic input validation | the `andon-notice` sibling — only when `detect` resolved a design to generate; when it emitted `[]` (the conf off, or no manifest moved) nothing was bypassed and no cord notice prints |
 | `model-smoke.yml` | the `smoke` job on both its paths (a registry-touching PR and a dispatch) | the `andon-notice` sibling |
 
 ## What keeps running
@@ -94,12 +95,19 @@ is pulled to open the status issue and while it is released to close it.
 - **Grey, never red.** A bypassed job is *skipped*; no job goes to failure
   because the cord is pulled, and `ci-ok` treats a classifier-skipped test job
   as green exactly as before.
-- **One `::notice::` per bypassed run**, no `::warning::`, no `::error::`. Two
-  known exceptions, both pre-existing and deterministic: the three image
-  workflows also print their #302 `ai-lifestyle.conf enabled != 'true'`
-  notice from `detect` while that conf is off (it is today), so a cord-pulled
-  run there shows two notices; and `design-changes` in `auto-review.yml` keeps
-  its own diagnostic notices.
+- **One `::notice::` per bypassed run**, no `::warning::`, no `::error::`. Three
+  known exceptions, all pre-existing and deterministic: the three image
+  workflows print their #302 `ai-lifestyle.conf enabled != 'true'` notice from
+  `detect` while that conf is off (it is today) — and since `detect` then
+  resolves `[]`, nothing would have generated, so the `andon-notice` sibling
+  stays quiet and that #302 line is the run's only notice (the cord notice
+  prints only when `detect` resolved a design); `design-changes` in
+  `auto-review.yml` keeps its own diagnostic notices; and `reeve.yml`'s
+  ungated jobs keep theirs — with today's conf (`greenlight: false`) the
+  `observe` job still prints its pre-existing `greenlight loop disabled in
+  git` conf notice and the `report` job its no-data-branch notice when the
+  `telemetry` branch is absent, so a cord-pulled Reeve run shows the cord
+  notice plus those.
 - **No escalation.** The provider-triage composite (the step that files
   `needs-decision` escalations) lives inside the gated jobs, so a pulled cord
   can never open a new `🚦 Provider unusable` issue.
@@ -148,7 +156,7 @@ workflow's `github-script` step is the single write.
 Reeve's deterministic bench-health report keeps running under the cord, and
 that is where a reader of the sticky `reeve-report` issue learns the many
 skipped AI runs are intentional rather than a dead routine: `reeve.yml` hands
-the report job the variable's raw value (`reeve run --andon "$AI_ANDON_CORD"`,
+the report job the variable's raw value (`reeve run --andon="$AI_ANDON_CORD"`,
 env-indirected, never inline), and the report carries one `🛑` banner line
 directly under its H1 while the cord is pulled — released renders today's
 bytes exactly, pinned by the golden pair in `tools/reeve/tests/fixtures/`.
@@ -223,6 +231,11 @@ pulled:
 - **`observe` un-couples from the report.** While pulled, Reeve's `observe`
   no longer inherits a `report` failure through `greenlight`'s skip, so it
   runs even when the report failed — harmless, it never reads `report.md`.
+- **The status issue goes "stale" in the groomer.** The backlog groomer's
+  `stale` detector has no bot-issue exclusion, so a pull longer than its
+  `staleness_days` (14 today, `.github/backlog-groomer.conf`) lists the open
+  andon-cord status issue as stale in the groomer report until release —
+  cosmetic; the issue is doing exactly what it should.
 - **A registry edit ships unproven.** `model-smoke` is skipped, so a chain
   edit merged under the cord has not been live-proven; dispatch `Model chain
   smoke` after release.
@@ -254,7 +267,7 @@ pulled:
 - `tools/andon`'s own suite (`andon_tests`, wired into `ci-ok`) pins the
   reconciler's shape: marker/label/title parity between the workflow's script
   literals and `andon.policy`, the default-branch pin, `issues: write` on the
-  job, the single cron literal, no `secrets.` anywhere, the `--cord "$CORD"`
+  job, the single cron literal, no `secrets.` anywhere, the `--cord="$CORD"`
   env-indirection, and the *absence* of the gate leg on the reconcile job. A
   purity scan holds the package free of GitHub/network writes with zero
   exemptions (its only writes are local scratch files the workflow consumes).
@@ -265,11 +278,18 @@ pulled:
 - Reeve's golden pair pins the banner: `report.andon-pulled.golden.md` is the
   pulled rendering, and `report.golden.md` is asserted equal to the released
   one.
-- The case rule is structural: every workflow compares
+- The comparison rule is structural, and it is exactly GitHub's: the word
+  `pulled`, compared case-insensitively, with no surrounding whitespace
+  (`pulled ` is released). Every **workflow gate** compares
   `vars.AI_ANDON_CORD == 'pulled'` in the expression layer and hands bash only
-  a `true`/`false` string (`ANDON`, `ANDON_PULLED`, `--andon`), so GitHub's
-  comparison is authoritative everywhere and the variable's value is never
-  interpolated into a `run:` block.
+  a `true`/`false` string (`ANDON`, `ANDON_PULLED`, `--andon true|false` to
+  `reviewer-signoff.sh`), so GitHub's comparison is authoritative there and the
+  variable's value is never interpolated into a `run:` block. The two
+  **raw-value consumers** — `andon.yml`'s `--cord=` and `reeve.yml`'s
+  `--andon=` — hand the tools the variable's raw value env-indirected, and the
+  tools apply the identical rule (casefold equality with `pulled`, no
+  whitespace trimming), pinned by their tests — so the tools can never see a
+  pull the workflow gates did not make, or miss one they did.
 
 ## Why a repo variable, not a committed file
 
@@ -292,7 +312,7 @@ machine.
 | Set on a fork | Bypasses that fork's own AI jobs only (it has no secrets to spend anyway); nothing reaches upstream | — |
 | A run already in flight | Finishes as it would have; only the next firing is bypassed | Wait one firing, or cancel the run by hand |
 | The hourly lag | A pull is recorded within about an hour; after release the issue closes within about an hour. Meanwhile the AI jobs are already bypassed/resumed — the issue lags, it never lies | Dispatch `Andon cord status (AI bypass)` to stamp or close now |
-| Two notices in the image workflows | The #302 conf-off notice from `detect` plus the cord's | Expected while `ai-lifestyle.conf` is off |
+| No cord notice in the image workflows | `detect` resolved `[]` (the #302 conf is off, or no manifest moved), so nothing would have generated and `andon-notice` stays quiet; the #302 conf-off notice from `detect` is the run's only line | Expected while `ai-lifestyle.conf` is off |
 | The reconciler itself dies | No issue opens or closes; the bypass is unaffected because every gate reads the variable, not the issue | Read the variable; re-dispatch the reconciler |
 | Someone closes the status issue while pulled | The next hourly run opens a fresh one | Release the cord instead |
 | More than one open issue carries the marker | The tool uses the oldest and logs a stderr warning naming the others (never the reconciler's doing) | Close the extras by hand |
