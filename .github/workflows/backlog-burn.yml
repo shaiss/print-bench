@@ -429,23 +429,27 @@ jobs:
           ISSUE: ${{ steps.select.outputs.issue }}
           # .outcome, never .conclusion — continue-on-error rewrites a failed
           # step's conclusion to success; outcome keeps the real result.
-          # The walk's outcome (#327, #544): 'success' if ANY of the five
-          # links across both providers succeeded; otherwise the outcome of
-          # the LAST LINK THAT ACTUALLY RAN. The nested tail walks backwards
-          # over 'skipped' links (a provider's links are skipped when its key
-          # is absent), so the walk reads 'skipped' only when EVERY link was
-          # skipped — no key for any provider, the agent never ran. That
-          # distinction is load-bearing: routine-lock-cleanup.sh treats
-          # 'skipped' as "nothing ran, nothing to release" and no-ops. A bare
-          # last-link read (`|| steps.<link5>.outcome`) reported 'skipped'
-          # whenever only ZAI_KEY was set and the three GLM links FAILED
-          # while the keyless Anthropic tail was skipped — so a dead run's
-          # SHIP-LOCK was left standing and the issue starved, the #312
-          # orphan-claim livelock through a different door. The drift guard
+          # The walk's three-valued outcome (#327, #544, #538): 'success' if
+          # ANY of the five links across both providers succeeded;
+          # 'not-run' only when EVERY link was skipped (no key for any
+          # provider — the agent never ran); 'failure' for everything else,
+          # INCLUDING an exit-0 link that delivered nothing. That last fold
+          # is the #538 point: claude-code-action exits 0 whenever the agent
+          # ended its turn without an API error, so a ship link's 'success'
+          # outcome is indistinguishable here from its real thing — the
+          # DISPOSITION is derived downstream in routine-lock-cleanup.sh
+          # from what exists on GitHub (branch / closing PR / stop comment),
+          # and this value is diagnostic only. The not-run conjunction
+          # reads every link (not just the last), so a walk where the head
+          # links FAILED and only the keyless tail was skipped can never
+          # read 'not-run' — the cleanup would no-op on a dead run and
+          # leave its SHIP-LOCK standing, the #312 orphan-claim livelock
+          # through a different door. The drift guard
           # (test_routine_walk_outcome_covers_every_link) simulates every
-          # outcome combination against the chain's link count and pins the
-          # last-ran rule, with the bare-tail form as its negative control.
-          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome) }}
+          # outcome combination against the chain's link count and pins all
+          # three values, with a last-link-only not-run read as its
+          # negative control.
+          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
@@ -454,16 +458,19 @@ jobs:
       - name: Note a checkless draft PR (no CI-triggering PAT)
         # A /ship-issue draft PR opened with the default GITHUB_TOKEN does not
         # auto-run CI, so a reviewer can't see whether the work passes. Fires
-        # only when we actually shipped and GH_TOKEN was not set — the ship
-        # outcome guard matters now that continue-on-error keeps the job alive
-        # past a dead ship step, which opened no PR to note.
+        # only when the run actually DELIVERED (a corroborating branch or an
+        # open closing PR — the lock cleanup's artifact-derived disposition,
+        # #538) and GH_TOKEN was not set. Reading the walk's 'success' here
+        # was the same exit-code lie: an agent that ended its turn cleanly
+        # without pushing anything would have triggered a notice about a
+        # draft PR that does not exist.
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && env.HAS_GH_TOKEN != 'true'
-          && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome)) == 'success'
+          && steps.lock_cleanup.outputs.delivered == 'true'
         run: |
           echo "::notice::the draft PR for #${{ steps.select.outputs.issue }} was opened with GITHUB_TOKEN, so CI will not auto-run on it — push any commit, or set the GH_TOKEN repo secret (a PAT with contents + pull-requests + issues write) so future ships trigger checks automatically."
 
@@ -506,10 +513,11 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          # The walk's outcome (#327, #544) — the same five-link walk
-          # expression as AGENT_OUTCOME (any link's success is the run's;
-          # otherwise the last link that actually ran).
-          SHIP: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome) }}
+          # The walk's outcome (#327, #544, #538) — the same five-link
+          # walk expression as AGENT_OUTCOME (byte-identical, diagnostic
+          # only): success / not-run / failure. What the run actually DID
+          # is the lock cleanup's artifact-derived disposition below.
+          SHIP: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
           # Per-link outcomes + the chain the resolve step emitted, so the
           # summary can name WHICH link served and warn when the head
           # provider fell through (a GLM outage must stay visible even though
@@ -530,6 +538,10 @@ jobs:
           P4: ${{ steps.chain.outputs.link4_provider }}
           P5: ${{ steps.chain.outputs.link5_provider }}
           LOCK_WITHDRAWN: ${{ steps.lock_cleanup.outputs.withdrawn }}
+          # The artifact-derived disposition (#538) — what the run actually
+          # did, as distinct from what the ship links' exit codes said.
+          DELIVERED: ${{ steps.lock_cleanup.outputs.delivered }}
+          DECLINED: ${{ steps.lock_cleanup.outputs.declined }}
           # $GITHUB_STEP_SUMMARY does not auto-link a bare #N, so build a real
           # link to the issue holding the authoritative verdict.
           SERVER: ${{ github.server_url }}
@@ -560,7 +572,14 @@ jobs:
             else
               echo "- selected: [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE})"
               echo "- provider: ${PROVIDER} (head)"
-              echo "- ship step: ${SHIP:-skipped} (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /ship-issue verdict and any draft PR)"
+              echo "- ship walk: ${SHIP:-skipped} (diagnostic only)"
+              if [ "${DELIVERED}" = "true" ]; then
+                echo "- disposition: delivered — a corroborating branch or an open closing PR exists (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /ship-issue verdict and the draft PR)"
+              elif [ "${DECLINED}" = "true" ]; then
+                echo "- disposition: declined — the run stopped deliberately (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}))"
+              else
+                echo "- disposition: dead — nothing delivered, nothing declined; the red gate below fails this run"
+              fi
               if [ -n "${served}" ]; then
                 echo "- served by: ${served}"
               fi
@@ -578,7 +597,7 @@ jobs:
       # nobody is watching becomes a human-actionable ask), a bad model id or a
       # transient blip is just diagnosed in the log. Advisory — it never fails the
       # job; the red gate below still fails it, and the lock cleanup above already
-      # released the SHIP-LOCK. Same walk-exhaustion condition as that gate.
+      # released the SHIP-LOCK. Same disposition condition as that gate.
       - name: Diagnose the exhausted chain (billing / tokens / technical)
         id: triage
         if: >-
@@ -587,7 +606,8 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome)) != 'success'
+          && steps.lock_cleanup.outputs.delivered != 'true'
+          && steps.lock_cleanup.outputs.declined != 'true'
         uses: ./.github/actions/provider-triage
         with:
           chain: backlog-burn
@@ -601,23 +621,29 @@ jobs:
         # continue-on-error on the ship steps keeps the cleanup above
         # reachable, but alone it would leave a dead run green — and
         # green/cancelled starvation looking like health is exactly the
-        # livelock's disguise (issue #312). Restore the failure last, after
-        # the cleanup and the record have run.
+        # livelock's disguise (issue #312). #538: the gate reads the lock
+        # cleanup's artifact-derived disposition (delivered / declined),
+        # NEVER the walk's outcome string — claude-code-action exits 0
+        # whenever the agent ends its turn without an API error, so gating
+        # on `(walk) != 'success'` scored an exit-0 run that claimed but
+        # pushed nothing as a success. Fires unless the run is provably
+        # delivered or provably declined, whatever the exit codes said.
         if: >-
           always()
           && steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome)) != 'success'
+          && steps.lock_cleanup.outputs.delivered != 'true'
+          && steps.lock_cleanup.outputs.declined != 'true'
         env:
           ISSUE: ${{ steps.select.outputs.issue }}
-          # The walk's outcome (#327, #544) — byte-identical to AGENT_OUTCOME
-          # in the lock cleanup above (the drift guard pins that): any link's
-          # success is the run's; otherwise the last link that actually ran.
-          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_anthropic_5.outcome == 'skipped' && (steps.ship_anthropic_4.outcome == 'skipped' && (steps.ship_zai_3.outcome == 'skipped' && (steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_1.outcome || steps.ship_zai_2.outcome) || steps.ship_zai_3.outcome) || steps.ship_anthropic_4.outcome) || steps.ship_anthropic_5.outcome) }}
+          # The walk's outcome (#327, #544, #538) — byte-identical to
+          # AGENT_OUTCOME in the lock cleanup above (the drift guard pins
+          # that). Diagnostic only: the disposition above decides.
+          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
         run: |
-          echo "::error::the /ship-issue agent step for #${ISSUE} did not succeed (outcome: ${AGENT_OUTCOME}) — its SHIP-LOCK cleanup ran above; failing the job so the death is visible"
+          echo "::error::the /ship-issue run for #${ISSUE} neither delivered nor declined (ship walk: ${AGENT_OUTCOME} — diagnostic only) — its SHIP-LOCK cleanup ran above; failing the job so the death is visible"
           exit 1
 
   disarmed-notice:
