@@ -43,6 +43,7 @@ drifts. Read the outputs and run §2 accordingly:
 | `model_registry_tests` | `pytest tools/model-registry/tests` |
 | `reeve_tests` | `pytest tools/reeve/tests` |
 | `brief_sources_tests` | `pytest tools/brief-sources/tests` |
+| `growth_tests` | `pytest tools/growth/tests` |
 | `telemetry_tests` | `pytest tools/telemetry/tests` |
 | `ci_gates_tests` | `pytest tools/ci-gates/tests` |
 
@@ -81,6 +82,7 @@ python -m pytest tools/backlog-groomer/tests -q      # if backlog_groomer_tests=
 python -m pytest tools/model-registry/tests -q       # if model_registry_tests=true
 python -m pytest tools/reeve/tests -q                # if reeve_tests=true
 python -m pytest tools/brief-sources/tests -q        # if brief_sources_tests=true
+python -m pytest tools/growth/tests -q               # if growth_tests=true
 python -m pytest tools/telemetry/tests -q            # if telemetry_tests=true
 python -m pytest tools/ci-gates/tests -q             # if ci_gates_tests=true
 ```
@@ -93,9 +95,9 @@ one before running it; locally the SessionStart hook installs only `printcheck`
 and `stylelift`. Of the rest, the suites whose tests bootstrap `src/` into
 `sys.path` themselves (`lineage`, `stylelift`, `model-registry`, `ci-gates`,
 `backlog-burn`) collect with no install, while `reeve`, `backlog-groomer`,
-`telemetry` and `brief-sources` die at collection with `ModuleNotFoundError` in
-a fresh session — run `pip install -e 'tools/<t>[test]'` on those first (the
-same command CI's job uses).
+`telemetry`, `brief-sources` and `growth` die at collection with
+`ModuleNotFoundError` in a fresh session — run `pip install -e 'tools/<t>[test]'`
+on those first (the same command CI's job uses).
 
 Missing tools (openscad, prusa-slicer, printcheck, stylelift) mean the SessionStart
 hook hasn't run — run `.claude/hooks/session-start.sh` first, don't skip
