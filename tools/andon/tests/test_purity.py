@@ -1,5 +1,7 @@
-"""The purity rule, checkable: the package never writes, and only the one
-I/O module may import anything network-capable (the backlog-groomer's shape,
+"""The purity rule, checkable: the package never performs a GitHub or network
+write (its only writes are local scratch files and $GITHUB_OUTPUT lines the
+workflow consumes), and only the one I/O module may import anything
+network-capable (the backlog-groomer's shape,
 with ZERO exemptions — the andon package has no model call to carve out)."""
 
 from __future__ import annotations

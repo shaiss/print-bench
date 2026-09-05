@@ -550,8 +550,9 @@ surfaces studies awaiting a read live in
   and one GET of the open issues it decides whether the hourly `andon.yml`
   workflow opens the sticky `andon-cord` status issue (once, on the first
   observed pull), closes it with the observed timespan (once, on release),
-  or does nothing — pure, GET-only, write-free by a zero-exemption scan; the
-  workflow's one `github-script` step is the write — see its
+  or does nothing — pure, GET-only, free of GitHub writes by a zero-exemption
+  scan (it writes only local scratch the workflow consumes); the workflow's
+  one `github-script` step is the GitHub write — see its
   [README](tools/andon/README.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log

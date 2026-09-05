@@ -256,7 +256,8 @@ pulled:
   literals and `andon.policy`, the default-branch pin, `issues: write` on the
   job, the single cron literal, no `secrets.` anywhere, the `--cord "$CORD"`
   env-indirection, and the *absence* of the gate leg on the reconcile job. A
-  purity scan holds the package write-free with zero exemptions.
+  purity scan holds the package free of GitHub/network writes with zero
+  exemptions (its only writes are local scratch files the workflow consumes).
 - `scripts/reviewer-signoff.sh --selftest` (run by `check.sh`) pins the BLOCK
   description byte-for-byte, plus a negative control that the released path
   never blames the cord and rows proving clean sign-offs and the label hatches

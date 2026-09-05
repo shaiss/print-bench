@@ -18,14 +18,16 @@ Modules:
   byte (the issue body, the closing comment, the humanised duration).
 * :mod:`andon.github` — the ONLY module allowed to import ``urllib``: one
   GET-only seam (``_get``) and the paged listing that finds the open status
-  issue. It never writes.
+  issue. It never writes to GitHub.
 * :mod:`andon.cli` — ``andon decide`` (the workflow's step), plus
   ``render-open`` / ``render-close`` for docs and tests.
 
 The purity rule (tests/test_purity.py, the backlog-groomer's shape): the
-package performs no write — no HTTP write verb appears anywhere in it, not
-even in a comment — and only ``github.py`` may import anything
-network-capable. The single GitHub write (create / comment+close the issue)
+package performs no GitHub or network write — no HTTP write verb appears
+anywhere in it, not even in a comment — and only ``github.py`` may import
+anything network-capable. (Its only writes are local scratch: the rendered
+``body.md`` / ``comment.md`` under ``--out-dir`` and the ``KEY=VALUE`` lines
+appended to ``--gh-output``, both consumed by the workflow's write step.) The single GitHub write (create / comment+close the issue)
 lives in a ``github-script`` step of ``.github/workflows/andon.yml``, driven
 by this package's decision and rendered text, so the tool scans clean and
 the write surface is one reviewed workflow step.

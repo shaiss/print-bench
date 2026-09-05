@@ -64,7 +64,10 @@ timestamp; `--repo` missing without `--offline`), 2 on an argparse error.
   marker-less bodies dropped, oldest wins, more-than-one logged to stderr).
 * `cli.py` — argparse over the two.
 
-The package **never writes**. `tests/test_purity.py` holds it checkable: an
+The package **never writes to GitHub** — its only writes are local scratch
+(`<out-dir>/body.md` / `comment.md` and the `KEY=VALUE` lines appended to
+`--gh-output`, both consumed by the workflow's write step). `tests/test_purity.py`
+holds the network half checkable: an
 AST import scan (only `github.py` may import anything network-capable) and a
 word-bounded scan for HTTP write verbs over every `*.py` in the package —
 comments and docstrings included, **zero exemptions** (the backlog-groomer's
