@@ -56,6 +56,11 @@ name: Wright (scheduled agent forge — propose + Reeve sign-off)
 # Safety properties (same as the siblings, plus the forge's own bounds):
 #   * TWO keys must agree to run: committed `enabled: true` AND
 #     WRIGHT_ENABLED == 'true'. Either off → inert.
+#   * AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set
+#     to 'pulled' bypasses BOTH agent jobs (propose + sign-off) with a single
+#     ::notice:: — grey, never red, no provider call, no escalation.
+#     Orthogonal to the arming variable: it overrides an armed routine
+#     without touching it.
 #   * Bounded on both halves: propose is capped per run (WRIGHT_MAX_BRIEFS)
 #     and skipped entirely while enough briefs are already pending
 #     (WRIGHT_MAX_PENDING, computed in the trusted Select step); sign-off is
@@ -138,9 +143,12 @@ jobs:
     # and a secret, and workflow_dispatch can target any in-repo branch — so a
     # dispatch against a PR branch must not run that branch's skill code with
     # the secret. On schedule github.ref_name is already the default branch.
+    # Plus the AI andon cord (docs/andon-cord.md): AI_ANDON_CORD == 'pulled'
+    # skips this job grey — the disarmed-notice sibling explains the pull.
     if: >-
       vars.WRIGHT_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # Job budget 65 = head-step timeout (40) + one tail-step timeout (20)
     # + 5 min headroom. The GLM head keeps main's WHOLE pre-#544 job budget
@@ -668,9 +676,12 @@ jobs:
   propose:
     name: Propose agent briefs with /wright
     # Same two-key + default-branch pinning as the signoff job above.
+    # Plus the AI andon cord (docs/andon-cord.md): AI_ANDON_CORD == 'pulled'
+    # skips this job grey — the disarmed-notice sibling explains the pull.
     if: >-
       vars.WRIGHT_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # Job budget 65 = head-step timeout (40) + one tail-step timeout (20) + 5
     # min headroom — the signoff job's reasoning, for a three-link walk (the
@@ -1038,9 +1049,13 @@ jobs:
     # default clone/fork state) or a dispatch against a non-default ref skips
     # them silently. This sibling makes that legible. No secrets, no write
     # perms.
+    # A pulled AI andon cord (docs/andon-cord.md) skips the gated job the same
+    # way, so this sibling explains that too — checked first, since the cord
+    # overrides an armed routine.
     if: >-
       vars.WRIGHT_ENABLED != 'true'
       || github.ref_name != github.event.repository.default_branch
+      || vars.AI_ANDON_CORD == 'pulled'
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -1049,8 +1064,11 @@ jobs:
           ARMED: ${{ vars.WRIGHT_ENABLED }}
           REF: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ANDON: ${{ vars.AI_ANDON_CORD == 'pulled' }}
         run: |
-          if [ "${ARMED:-}" != "true" ]; then
+          if [ "${ANDON:-}" = "true" ]; then
+            echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — Wright did not run (neither the propose nor the sign-off half); no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume — see docs/andon-cord.md."
+          elif [ "${ARMED:-}" != "true" ]; then
             echo "::notice::Wright is disarmed — set the WRIGHT_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/wright.conf; both must agree before it runs."
           else
             echo "::notice::Wright only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."

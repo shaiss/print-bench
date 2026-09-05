@@ -12,6 +12,7 @@
 #       --no-auto-review true|false    is the no-auto-review label present?
 #       --override true|false          is the signoff-override label present?
 #       --fuse-warn true|false         is a fusecheck STRONG WARN live this round?
+#       --andon true|false             is the AI andon cord pulled (reviews bypassed)?
 #       --jane "<marker or empty>"     the last JANE_SIGNOFF marker line
 #       --drik "<marker or empty>"     the last DRIK_SIGNOFF marker line
 #       --tree-current <treesha>       git rev-parse HEAD:designs (current design tree)
@@ -28,6 +29,11 @@
 # (design changed since it was signed), blocking, or fuse-unacknowledged marker
 # BLOCKS. The only passes on a design PR are two clean current sign-offs, or a
 # deliberate human escape hatch (the no-auto-review / signoff-override labels).
+# With the AI andon cord pulled (--andon true, docs/andon-cord.md) no reviewer
+# runs, so a design PR lacking two clean current sign-offs BLOCKS with the cord
+# named as the reason — while sign-offs that already happened still PASS (a
+# review that ran is a fact about the design tree, and the cord stops AI
+# consumption, not merging) and the label hatches still PASS.
 #
 # The marker each reviewer emits as the last line of its PR comment (see
 # .claude/skills/{jane,drik}-review/SKILL.md):
@@ -84,7 +90,7 @@ _review_problem() {
 }
 
 decide() {
-  local head="" designs_changed="" no_auto_review="" override="" fuse_warn=""
+  local head="" designs_changed="" no_auto_review="" override="" fuse_warn="" andon=""
   local jane="" drik="" tree_current="" jane_tree="" drik_tree=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -93,6 +99,7 @@ decide() {
       --no-auto-review) no_auto_review="$2"; shift 2 ;;
       --override) override="$2"; shift 2 ;;
       --fuse-warn) fuse_warn="$2"; shift 2 ;;
+      --andon) andon="$2"; shift 2 ;;
       --jane) jane="$2"; shift 2 ;;
       --drik) drik="$2"; shift 2 ;;
       --tree-current) tree_current="$2"; shift 2 ;;
@@ -119,6 +126,12 @@ decide() {
   jp="$(_review_problem Jane "$jane" "$head" "$tree_current" "$jane_tree" "$fuse_warn")"
   dp="$(_review_problem Drik "$drik" "$head" "$tree_current" "$drik_tree" "$fuse_warn")"
   if [[ -n "$jp" || -n "$dp" ]]; then
+    # The cord explains the gap: no reviewer could have run, so name the cord
+    # (and the way out) instead of "has not signed off". Clean current
+    # sign-offs never reach here, so they still PASS under the cord.
+    if [[ "$andon" == "true" ]]; then
+      echo "BLOCK andon cord pulled — reviews bypassed; release the cord or add signoff-override"; return 1
+    fi
     local msg="${jp}"
     [[ -n "$jp" && -n "$dp" ]] && msg="${jp}; ${dp}"
     [[ -z "$jp" ]] && msg="$dp"
@@ -219,6 +232,52 @@ selftest() {
   # no-auto-review label passes a design PR with no sign-offs (human escape hatch)
   _expect no-auto-review-label PASS -- --head "$H" --designs-changed true \
     --no-auto-review true --override false --fuse-warn false \
+    --jane "" --drik "" --tree-current "$T" --jane-tree "" --drik-tree ""
+
+  # AI ANDON CORD (docs/andon-cord.md) — with the cord pulled no reviewer ran:
+
+  # design PR, no sign-offs, cord pulled -> BLOCK, naming the cord
+  _expect andon-no-signoff BLOCK -- --head "$H" --designs-changed true \
+    --no-auto-review false --override false --fuse-warn false --andon true \
+    --jane "" --drik "" --tree-current "$T" --jane-tree "" --drik-tree ""
+
+  # the description is the status text a human reads on the PR — pin it exactly
+  local out want
+  want="BLOCK andon cord pulled — reviews bypassed; release the cord or add signoff-override"
+  out="$(decide --head "$H" --designs-changed true \
+    --no-auto-review false --override false --fuse-warn false --andon true \
+    --jane "" --drik "" --tree-current "$T" --jane-tree "" --drik-tree "")" || true
+  if [[ "$out" == "$want" ]]; then
+    echo "selftest ok    andon-description"
+  else
+    echo "SELFTEST FAIL  andon-description: wanted '${want}', got '${out}'"; pass=0
+  fi
+
+  # NEGATIVE CONTROL: with the cord released the same PR must NOT blame the cord
+  out="$(decide --head "$H" --designs-changed true \
+    --no-auto-review false --override false --fuse-warn false --andon false \
+    --jane "" --drik "" --tree-current "$T" --jane-tree "" --drik-tree "")" || true
+  if [[ "$out" != *"andon cord"* ]]; then
+    echo "selftest ok    andon-off-no-leak (${out#* })"
+  else
+    echo "SELFTEST FAIL  andon-off-no-leak: cord released but the text blames it — ${out}"; pass=0
+  fi
+
+  # two clean current sign-offs still PASS under the cord (a review that ran is
+  # a fact about the design tree; the cord stops AI consumption, not merging)
+  _expect andon-both-signed PASS -- --head "$H" --designs-changed true \
+    --no-auto-review false --override false --fuse-warn false --andon true \
+    --jane "$JOK" --drik "$DOK" --tree-current "$T" --jane-tree "" --drik-tree ""
+
+  # the short-circuits outrank the cord: non-design PR, override, no-auto-review
+  _expect andon-non-design PASS -- --head "$H" --designs-changed false \
+    --no-auto-review false --override false --fuse-warn false --andon true \
+    --jane "" --drik "" --tree-current "$T" --jane-tree "" --drik-tree ""
+  _expect andon-override PASS -- --head "$H" --designs-changed true \
+    --no-auto-review false --override true --fuse-warn false --andon true \
+    --jane "" --drik "" --tree-current "$T" --jane-tree "" --drik-tree ""
+  _expect andon-no-auto-review PASS -- --head "$H" --designs-changed true \
+    --no-auto-review true --override false --fuse-warn false --andon true \
     --jane "" --drik "" --tree-current "$T" --jane-tree "" --drik-tree ""
 
   if [[ "$pass" == 1 ]]; then

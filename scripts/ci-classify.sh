@@ -9,12 +9,13 @@
 # time the classifier moved. Now the workflow and the local mirror share this
 # implementation — they cannot disagree.
 #
-#   Emits, one `key=value` per line on STDOUT (the 17 outputs ci.yml's
+#   Emits, one `key=value` per line on STDOUT (the 19 outputs ci.yml's
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
-#     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests, growth_tests,
-#     styles, gate, gate_designs, regen, regen_designs, docs_standards
+#     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests,
+#     growth_tests, andon_tests, styles, gate, gate_designs, regen,
+#     regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
 # Usage:
@@ -44,12 +45,12 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 
 # --- classify: the shared decision -------------------------------------------
 # Reads the changed-file list from stdin (one path per line), reads the working
-# tree for existence/ARCHIVED/style.conf facts, and prints the 17 outputs.
+# tree for existence/ARCHIVED/style.conf facts, and prints the 19 outputs.
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
   local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false gwtests=false docs_standards=false
-  local bstests=false
+  local bstests=false adtests=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -58,7 +59,7 @@ classify() {
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
     bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; gwtests=true; docs_standards=true
-    bstests=true
+    bstests=true; adtests=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -129,6 +130,7 @@ classify() {
         tools/reeve/*|.github/reeve.conf|\
         tools/brief-sources/*|\
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
+        tools/andon/*|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
           soft_infra=true ;;
@@ -210,21 +212,20 @@ classify() {
         # `provider:` and refuses a chain whose link 1 is not on it, so a conf
         # edit that moved a head off its provider must re-run the guard too.
         # (As workflows they are already soft-infra via the .github/workflows/*
-        # case above — this adds only the drift-guard selection.)
+        # case above — this adds only the drift-guard selection.) Since the AI
+        # andon cord (docs/andon-cord.md) the guard also pins the cord gate on
+        # EVERY AI-consuming job across every workflow, so any workflow edit —
+        # not only the named routines above (auto-review, oracle, the four
+        # #326 routines, wright, product-scout, spike-converter,
+        # adoption-assessor, growth-twitter, reeve-growth, reeve, ci.yml) —
+        # must re-run it: the .github/workflows/* glob below subsumes them
+        # (a named list beside the glob is dead code shellcheck refuses).
         tools/model-registry/*|.github/models/registry.conf|\
-        .github/workflows/auto-review.yml|.github/workflows/product-scout.yml|\
-        .github/workflows/oracle.yml|\
-        .github/workflows/design-run.yml|.github/workflows/backlog-burn.yml|\
-        .github/workflows/chunker.yml|.github/workflows/labeler.yml|\
-        .github/workflows/wright.yml|\
-        .github/workflows/spike-converter.yml|.github/workflows/adoption-assessor.yml|\
-        .github/workflows/growth-twitter.yml|.github/workflows/reeve-growth.yml|\
-        .github/workflows/reeve.yml|\
+        .github/workflows/*|\
         .github/design-run.conf|.github/backlog-burn.conf|.github/chunker.conf|\
         .github/labeler.conf|.github/product-scout.conf|.github/spike-converter.conf|\
         .github/adoption-assessor.conf|.github/growth-twitter.conf|\
-        .github/reeve-growth.conf|.github/wright.conf|.github/reeve.conf|\
-        .github/workflows/ci.yml) mrtests=true ;;
+        .github/reeve-growth.conf|.github/wright.conf|.github/reeve.conf) mrtests=true ;;
       esac
       case "$f" in
         tools/telemetry/*|.github/workflows/ci.yml) tmtests=true ;;
@@ -264,6 +265,12 @@ classify() {
         .github/workflows/ci.yml) gwtests=true ;;
       esac
       case "$f" in
+        # The AI andon cord (docs/andon-cord.md): tools/andon's own tests, plus
+        # the reconciler workflow they pin (job shape, cron literal, marker/label
+        # parity with the tool) — an edit to either must re-run them.
+        tools/andon/*|.github/workflows/andon.yml|.github/workflows/ci.yml) adtests=true ;;
+      esac
+      case "$f" in
         # The smart-ci selector's own unit tests. The registry is data the
         # selector reads, so a registry edit re-runs them too.
         tools/ci-gates/*|.github/ci-gates/*|\
@@ -295,6 +302,7 @@ classify() {
         tools/reeve/*|.github/reeve.conf|\
         tools/brief-sources/*|\
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
+        tools/andon/*|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
           scad=true ;;
@@ -393,6 +401,7 @@ classify() {
   echo "reeve_tests=$rvtests"
   echo "brief_sources_tests=$bstests"
   echo "growth_tests=$gwtests"
+  echo "andon_tests=$adtests"
   echo "styles=$styles"
   echo "gate=$gate"
   echo "gate_designs=$designs"
@@ -642,6 +651,19 @@ selftest() {
   # tests, so a server-only edit must re-run them.
   out="$(run ".claude/skills/growth-twitter/growth_mcp.py")"
   check "growth-server-parity-drift" "$out" "growth_tests=true"
+  # 4h. The AI andon cord (docs/andon-cord.md) is soft-infra the same way: the
+  #     reconciler tool moves no mesh, but a tools/andon-only PR must still RUN
+  #     the required contexts. Its tests pin the reconciler workflow, so an
+  #     andon.yml edit re-runs them; and since the drift guard now pins the
+  #     cord gate across every workflow, ANY workflow edit re-runs the guard.
+  out="$(run "tools/andon/src/andon/cli.py")"
+  check "andon-only" "$out" \
+    "andon_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "growth_tests=false"
+  out="$(run ".github/workflows/andon.yml")"
+  check "andon-workflow-drift" "$out" "andon_tests=true" "model_registry_tests=true"
+  out="$(run ".github/workflows/lifestyle-shot.yml")"
+  check "any-workflow-reruns-the-drift-guard" "$out" "model_registry_tests=true"
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must

@@ -12,6 +12,12 @@
 # deterministic report. That step alone holds a provider secret; everything
 # else sees only the ambient GITHUB_TOKEN.
 #
+# AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set to
+# 'pulled' bypasses only that narrative step, with a single ::notice:: —
+# grey, never red, no provider call — while the deterministic report keeps
+# running and posting. Orthogonal to the arming variable: it overrides an
+# armed routine's model call without touching the routine.
+#
 # TWO keys must agree to run: committed `enabled: true` in
 # .github/backlog-groomer.conf AND the repo variable
 # BACKLOG_GROOMER_ENABLED == "true". Either off → inert. The decision is
@@ -121,7 +127,10 @@ jobs:
       # Three keys must agree before any provider key is touched: armed
       # (both halves), `narrative: true` in the committed conf, and the
       # provider's secret present. Every other combination notices and
-      # skips — the deterministic report below is unaffected.
+      # skips — the deterministic report below is unaffected. The AI andon
+      # cord (docs/andon-cord.md) overrides all three: with AI_ANDON_CORD
+      # set to 'pulled' both write steps skip and a notice says so, while
+      # the deterministic report still posts.
       #
       # One explicit step per provider (the house pattern — a secret can
       # only be referenced by its literal name, so each provider owns a
@@ -156,6 +165,7 @@ jobs:
           && steps.narrative_policy.outputs.provider == 'zai'
           && steps.narrative_policy.outputs.key_present == 'true'
           && steps.report.outcome == 'success'
+          && vars.AI_ANDON_CORD != 'pulled'
         env:
           # The tool resolves the model + base_url from the #206 registry
           # and reads the key from the provider's literal secret name.
@@ -169,6 +179,7 @@ jobs:
           && steps.narrative_policy.outputs.provider == 'anthropic'
           && steps.narrative_policy.outputs.key_present == 'true'
           && steps.report.outcome == 'success'
+          && vars.AI_ANDON_CORD != 'pulled'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: backlog-groomer narrative --report report.md --conf .github/backlog-groomer.conf
@@ -193,6 +204,18 @@ jobs:
           echo "::notice::narrative: true but the configured provider
           '${PROVIDER}' has no key set — posting the deterministic report
           unchanged"
+
+      - name: Note an andon-paused narrative
+        if: >-
+          steps.narrative_policy.outcome == 'success'
+          && steps.narrative_policy.outputs.narrative == 'true'
+          && steps.narrative_policy.outputs.key_present == 'true'
+          && vars.AI_ANDON_CORD == 'pulled'
+        run: >
+          echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) —
+          the groomer's narrative layer (the one model call in this job) was skipped and
+          the deterministic report posted unchanged; no provider API call was made.
+          Release the cord to resume — see docs/andon-cord.md."
 
       - name: Publish the report to the job summary
         if: steps.policy.outputs.armed == 'true' && steps.report.outcome == 'success'

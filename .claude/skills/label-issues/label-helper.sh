@@ -85,8 +85,11 @@ ROUTING_LABELS=(autonomy-ok declined-too-big design-brief needs-decision)
 # labeler-applied `needs-decision` would silently park a queued message
 # forever (the growth Select step and the posting tool both exclude parked
 # items), and a labeler-applied `autonomy-ok` would point the backlog burn's
-# /ship-issue at a message that is not code work.
-NON_TRIAGE_LABELS=(agent-brief growth-queue)
+# /ship-issue at a message that is not code work. And `andon-cord` — the AI
+# andon reconciler's sticky status issue (docs/andon-cord.md), which is bot
+# state (opened on a pull, closed on release), never work to route: a
+# labeler-applied routing label would hand a status record to a routine.
+NON_TRIAGE_LABELS=(agent-brief growth-queue andon-cord)
 
 # A mutating verb may only touch a label from ROUTING_LABELS — the labeler's
 # entire remit. Refuses anything else so a prompt-injected agent cannot stamp an

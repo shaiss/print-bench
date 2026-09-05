@@ -212,12 +212,26 @@ authorised by your real repository permission (write access needed).
     [docs/agent-forge.md](docs/agent-forge.md)); same two-key rule, and its
     `WRIGHT_AUTO_ARM` env in `wright.yml` demotes approves to advisory.
   - `PRINT_FEEDBACK_ENABLED` — the *Log a print result* form (single switch).
+- **The AI andon cord** — one repo variable, `AI_ANDON_CORD`, set to the word
+  `pulled` (case-insensitive; unset means released) bypasses *every*
+  AI-consuming workflow job at once — the scheduled agents, the reviewers and
+  the Oracle, CI's product-page drafting, the AI image generators, the model
+  smoke — grey/skipped, never red, no provider call, no escalation, one
+  `::notice::` per run. Every deterministic job (the CI gates, previews and
+  gallery, Reeve's and the groomer's reports, telemetry) keeps running. It
+  sits above the arming variables and touches none of them. The hourly
+  *Andon cord status (AI bypass)* workflow opens one `andon-cord` status
+  issue while pulled and closes it with the timespan on release. Design PRs
+  lacking two current reviewer sign-offs block until release (or
+  `signoff-override`). See [docs/andon-cord.md](docs/andon-cord.md).
 - **Manual workflows** — several workflows are `workflow_dispatch` forms in the
   repository's **Actions** tab: *Log a print result*, *Regenerate avatar*,
   *Lifestyle shot (tier-2, AI)*, *Lifestyle clip (tier-2, AI motion)*, *Release
-  bundles* and *Backlog-burn config update*. The three scheduled agents can also
-  be dispatched there, each with a `dry_run` option that selects an issue but
-  takes no action.
+  bundles*, *Backlog-burn config update* and *Andon cord status (AI bypass)*
+  (dispatch it right after pulling or releasing the cord to stamp or close the
+  status issue immediately; `dry_run` prints the decision and writes nothing).
+  The three scheduled agents can also be dispatched there, each with a
+  `dry_run` option that selects an issue but takes no action.
 
 The design of these controls (the two-key arming, the committed-vs-live config
 split, the comment-command authorisation) is documented in full in
@@ -531,6 +545,15 @@ surfaces studies awaiting a read live in
   seam, and the approval-board Stage policy (`growth.board`, the lens
   `growth-board-sync.yml` reflects onto the Projects board) — see its
   [README](tools/growth/README.md)
+- `tools/andon/` — the AI andon cord's status-issue reconciler
+  (`docs/andon-cord.md`): from the `AI_ANDON_CORD` repo variable's raw value
+  and one GET of the open issues it decides whether the hourly `andon.yml`
+  workflow opens the sticky `andon-cord` status issue (once, on the first
+  observed pull), closes it with the observed timespan (once, on release),
+  or does nothing — pure, GET-only, free of GitHub writes by a zero-exemption
+  scan (it writes only local scratch the workflow consumes); the workflow's
+  one `github-script` step is the GitHub write — see its
+  [README](tools/andon/README.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log
   into the report — see its [README](tools/telemetry/README.md)

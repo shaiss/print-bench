@@ -40,7 +40,13 @@ name: Oracle review (cross-vendor, reasoning-blind)
 # PR lifecycle event (opened / reopened / ready_for_review, never on every
 # push). Re-roll a review by closing and reopening the PR. A human-PR mode is
 # a possible extension, not this. The `no-oracle-review` label is the human
-# escape hatch for a PR that should not be reviewed.
+# escape hatch for a PR that should not be reviewed; the repo-wide hatch is
+# the AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set
+# to 'pulled' bypasses the oracle job with a single ::notice:: from the
+# keyless `oracle-andon` sibling — grey, never red, no provider call, no
+# needs-decision escalation. Orthogonal to the label: it overrides an
+# unlabeled PR without touching it. Release the cord and close-and-reopen
+# the PR to re-roll the review.
 #
 # Registry-driven (issue #206): NO model id is hardcoded here. Both role
 # chains — oracle-anthropic (Anthropic-first) and oracle-glm (GLM-first) —
@@ -88,6 +94,7 @@ jobs:
       startsWith(github.event.pull_request.head.ref, 'claude/')
       && github.event.pull_request.head.repo.full_name == github.repository
       && !contains(github.event.pull_request.labels.*.name, 'no-oracle-review')
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # A hung review must not hold a runner (and a key) for the 6-hour default.
     # Sized against the per-request API_TIMEOUT_MS (600000 ms = 10 min) so the
@@ -602,3 +609,20 @@ jobs:
               || steps.classify.outputs.class == 'servable')
         run: |
           echo "::warning::the Oracle review failed but the ${{ steps.vendor.outputs.oracle_chain }} chain is not the proven cause (classifier: ${{ steps.classify.outputs.class }}) — advisory only, retries on the next PR. See the ship-step logs above."
+
+  oracle-andon:
+    name: Oracle review bypassed (AI andon cord pulled)
+    # The visible no-op (the routines' disarmed-notice pattern): a skipped
+    # gated job is mute, so a sibling with no permissions and no secrets says
+    # why nothing ran. Same PR scoping as the oracle job, plus the cord.
+    if: >-
+      startsWith(github.event.pull_request.head.ref, 'claude/')
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && !contains(github.event.pull_request.labels.*.name, 'no-oracle-review')
+      && vars.AI_ANDON_CORD == 'pulled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain why nothing ran
+        run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — the Oracle review was bypassed; no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') and close-and-reopen the PR to re-roll the review — see docs/andon-cord.md."

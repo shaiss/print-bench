@@ -16,3 +16,8 @@ __pycache__/
 # Baked design-review previews (site/preview/bake.mjs output) — bake on demand
 site/preview/media-rework.html
 site/preview/media-rework-embedded.html
+
+# The AI andon cord reconciler's per-run scratch (tools/andon, andon.yml):
+# `python3 -m andon decide` writes the rendered issue body / closing comment
+# here for the workflow's one write step to carry — never committed.
+.andon/

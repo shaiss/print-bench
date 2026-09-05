@@ -56,6 +56,14 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     exit 0 so the PR is not blocked.
 #   * The `no-auto-review` label is the human escape hatch; add it to any PR
 #     that should not be auto-reviewed.
+#   * AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set
+#     to 'pulled' bypasses every reviewer job (Jane / Drik / PM / coach) with
+#     one ::notice:: from the stamp job — grey, never red, no provider call,
+#     no escalation. The required `reviewer-signoff` status then BLOCKS a
+#     design PR that lacks two clean, current sign-offs until the cord is
+#     released (push, or close-and-reopen) or `signoff-override` is applied;
+#     sign-offs that already happened still pass. Orthogonal to the keys and
+#     the label: it overrides a keyed, unlabeled round without touching them.
 #
 # Provider fallback chain (per reviewer job):
 #   Z.AI GLM 5.3 → GLM 5.2 → GLM 5.1 → Anthropic Opus 4.8 → Sonnet 5 → Haiku 4.5.
@@ -230,6 +238,7 @@ jobs:
     if: >-
       needs.design-changes.outputs.designs_changed == 'true'
       && needs.design-changes.outputs.is_new_round == 'true'
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # Provider fallback chain, sourced from .github/models/registry.conf's
     # `review` chain (issue #206). The order + model ids arrive as the
@@ -421,6 +430,7 @@ jobs:
     if: >-
       needs.design-changes.outputs.designs_changed == 'true'
       && needs.design-changes.outputs.is_new_round == 'true'
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # Provider fallback chain — see the jane-review job for the rationale and
     # ordering (Z.AI glm-5.3 → glm-5.2 → glm-5.1 → Anthropic claude-opus-4-8 →
@@ -608,6 +618,7 @@ jobs:
       && needs.design-changes.outputs.designs_changed == 'true'
       && needs.design-changes.outputs.is_new_round == 'true'
       && (needs.jane-review.result == 'success' || needs.drik-review.result == 'success')
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # Provider fallback chain — see the jane-review job for the rationale and
     # ordering (Z.AI glm-5.3 → glm-5.2 → glm-5.1 → Anthropic claude-opus-4-8 →
@@ -852,6 +863,7 @@ jobs:
       && needs.jane-review.result == 'success'
       && needs.drik-review.result == 'success'
       && needs.pm-triage.result != 'cancelled'
+      && vars.AI_ANDON_CORD != 'pulled'
       && (github.event.action == 'opened'
           || github.event.action == 'ready_for_review'
           || github.event.action == 'reopened')
@@ -1042,13 +1054,20 @@ jobs:
         # advancing the SHA in either case silently strands the PR from
         # re-review. The non-reviewed cases post an honest comment WITHOUT a
         # `sha=` marker, so the round logic (which greps for a 40-hex sha) treats
-        # the next push as a fresh round.
+        # the next push as a fresh round. The AI andon cord (docs/andon-cord.md)
+        # is the same shape as the keyless case, checked first: with the cord
+        # pulled every reviewer job was skipped at job level, so the stamp says
+        # so honestly (not "incomplete"), emits the workflow's one ::notice::
+        # for the cord, and leaves the sha off so the round retries once the
+        # cord is released. ANDON_PULLED is computed in the expression layer so
+        # GitHub's case-insensitive string compare stays authoritative.
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
           HAS_SECRET: ${{ (secrets.ZAI_KEY != '' || secrets.ANTHROPIC_API_KEY != '') && 'true' || 'false' }}
+          ANDON_PULLED: ${{ vars.AI_ANDON_CORD == 'pulled' }}
           JANE: ${{ needs.jane-review.result }}
           DRIK: ${{ needs.drik-review.result }}
           PM: ${{ needs.pm-triage.result }}
@@ -1071,7 +1090,17 @@ jobs:
           if [ "$COACH" = "success" ] || [ "$COACH" = "skipped" ]; then coach_ok=true; fi
           pm_ok=false
           if [ "$PM" = "success" ] || [ "$PM" = "skipped" ]; then pm_ok=true; fi
-          if [ "$HAS_SECRET" != "true" ]; then
+          if [ "${ANDON_PULLED:-}" = "true" ]; then
+            # The AI andon cord is pulled — every reviewer job was bypassed at
+            # job level. Nothing ran, so do NOT advance the reviewed-SHA.
+            body="$(printf '%s\n' \
+              "<!-- AUTO_REVIEW_STAMP -->" \
+              "⏸️ **Auto-review bypassed** — the AI andon cord is pulled (repo variable \`AI_ANDON_CORD=pulled\`), so no reviewer ran for \`${short}\` (designs: \`${DESIGNS}\`)." \
+              "This round is **not** marked reviewed; once the cord is released it retries on the next push, or close-and-reopen the PR (the one gesture that also re-fires the design coach and the Oracle)." \
+              "Add the \`no-auto-review\` label to suppress future rounds." \
+              "" "---" "$gen")"
+            echo "::notice::auto-review bypassed — AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled); no reviewer ran, no provider API call was made; reviewed-SHA not advanced so the round retries once the cord is released — see docs/andon-cord.md"
+          elif [ "$HAS_SECRET" != "true" ]; then
             # Nothing actually ran — do NOT advance the reviewed-SHA.
             body="$(printf '%s\n' \
               "<!-- AUTO_REVIEW_STAMP -->" \
@@ -1159,6 +1188,7 @@ jobs:
           DESIGNS_CHANGED: ${{ needs.design-changes.outputs.designs_changed }}
           NO_AUTO_REVIEW: ${{ contains(github.event.pull_request.labels.*.name, 'no-auto-review') }}
           OVERRIDE: ${{ contains(github.event.pull_request.labels.*.name, 'signoff-override') }}
+          ANDON: ${{ vars.AI_ANDON_CORD == 'pulled' }}
         run: |
           set -euo pipefail
 
@@ -1214,6 +1244,7 @@ jobs:
             --no-auto-review "$NO_AUTO_REVIEW" \
             --override "$OVERRIDE" \
             --fuse-warn "$fuse_warn" \
+            --andon "$ANDON" \
             --jane "$jane" --drik "$drik" \
             --tree-current "$tree_current" \
             --jane-tree "$jane_tree" --drik-tree "$drik_tree")"

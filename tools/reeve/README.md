@@ -236,6 +236,7 @@ reeve report --input snapshot.json          # snapshot JSON -> markdown report
 reeve gather --root .                        # committed files -> snapshot JSON
 reeve run --root . --conf .github/reeve.conf # gather then report (the workflow)
 reeve run --root . --repo owner/name         # + the GET-only run-health read
+reeve run --root . --andon="$AI_ANDON_CORD"  # 'pulled' adds the 🛑 andon banner line
 reeve config --get enabled                   # read the committed policy
 reeve armed --variable "$REEVE_ENABLED" --conf-enabled "$enabled"
 reeve greenlight-select --repo owner/name    # the draftable parked-decision queue
@@ -249,6 +250,19 @@ reeve greenlight-append --repo owner/name    # records for newly-resolved rounds
 from `GH_TOKEN`/`GITHUB_TOKEN`. Without it the run is fully offline and the
 run-health detectors read "not evaluated".
 
+`--andon` (on `report` and `run`, default `$AI_ANDON_CORD`) is the value of the
+AI andon cord repo variable (docs/andon-cord.md): only the exact word `pulled`
+— case-insensitive, **no** surrounding-whitespace trimming, exactly the comparison
+GitHub's `vars.AI_ANDON_CORD == 'pulled'` expression makes (and deliberately not
+`armed`'s normalization, which strips: a value of `pulled ` is released by every
+workflow gate, so it must be released here too, or the report would banner a
+bypass the gates never made) — inserts the one `🛑` banner line under the H1,
+so a reader of the sticky report learns the skipped AI runs are intentional
+rather than a dead routine; anything else renders today's bytes. The workflow
+passes it as `--andon="$AI_ANDON_CORD"` (the `=` form) so a dash-leading value
+is a value, never an option. The cord is live repo state: never a conf key,
+never in the snapshot.
+
 ## Tests
 
 Stdlib-only; the `[test]` extra is just pytest.
@@ -258,7 +272,10 @@ pip install -e 'tools/reeve[test]'
 python -m pytest tools/reeve/tests -q
 ```
 
-The golden-file test (`tests/fixtures/report.golden.md`) pins the report bytes;
+The golden-file test (`tests/fixtures/report.golden.md`) pins the report bytes,
+and its pair `report.andon-pulled.golden.md` pins the pulled rendering — the same
+bytes with exactly the banner line and its blank inserted once (released is
+asserted equal to the golden as the negative control);
 each detector has a positive case and a negative control, the precedent log has
 a golden round-trip against the committed seed, and `tests/test_learning_wiring.py`
 pins the workflow wiring (context channel, three-file branch parity, keyless

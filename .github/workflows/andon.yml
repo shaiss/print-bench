@@ -1,0 +1,235 @@
+name: Andon cord status (AI bypass)
+
+# The visible record of the AI andon cord (docs/andon-cord.md). The cord is
+# ONE repo variable, AI_ANDON_CORD: set to 'pulled' it bypasses every
+# AI-consuming workflow job in this repository — grey/skipped, never red, no
+# provider API call, no needs-decision escalation. A skipped job is mute,
+# though, so this hourly reconciler gives the pulled state a timestamped
+# trail: the first time it observes the cord pulled it opens ONE sticky
+# status issue (label `andon-cord` + `notice`, body starting with the
+# `<!-- andon-cord -->` marker), and the first time it observes the cord
+# released it comments the observed timespan on that issue and closes it.
+# A re-pull opens a fresh issue, so the closed issues are the episode
+# history. Every decision and every rendered byte comes from tools/andon
+# (pure, tested, stdlib-only, GET-only); this workflow supplies the trigger
+# and the ONE write.
+#
+# KEYLESS and CONF-LESS. It holds no provider secret and runs no agent —
+# no secret is referenced anywhere in this file (tools/andon/tests/
+# test_workflow.py pins it) — and it is a lightweight reconcile, not an
+# armed routine, so it needs no conf and no cadence-sync entry
+# (scripts/cadence-sync-check.sh checks only the armed routines) — the
+# growth-board-sync.yml precedent.
+#
+# NEVER GATE THIS WORKFLOW ON THE CORD ITSELF. Every other AI job carries
+# `vars.AI_ANDON_CORD != 'pulled'`; this one must run WHILE the cord is
+# pulled, or the issue could never open — and while it is released, or the
+# issue could never close. The reconcile job's `if:` therefore reads only
+# the default-branch pin (test_workflow.py pins the absence of the leg).
+#
+# ITS ONE WRITE is opening or closing the status issue (the github-script
+# step below), driven by the tool's decision — never a label on any other
+# issue, never a comment elsewhere, never `needs-decision` (that label parks
+# the autonomy selector and would make a pulled cord look like a decision
+# request). `issues: write` is granted to the reconcile job alone; the
+# workflow-level default is contents: read, and the off-branch notice job
+# below holds `permissions: {}` — it exists only to say why nothing ran.
+#
+# After pulling (or releasing) the cord, dispatch this workflow to stamp
+# the issue immediately instead of waiting for the next hourly firing;
+# `dry_run` prints the decision and writes nothing.
+#
+# SECURITY: `schedule` runs in the base repo's context from the default
+# branch, and the job pins itself to the default branch so a
+# workflow_dispatch against a PR branch can't run that branch's tooling
+# with the ambient token's issues:write. Listed in docs/actions-security.md.
+
+on:
+  schedule:
+    # Hourly at :43 (a free minute — the burn runs at :17 and the design run
+    # at :23 hourly; the other routines sit on their own daily/weekly
+    # minutes). This is a lightweight reconcile, not an armed routine — it
+    # needs no conf and no cadence-sync entry (scripts/cadence-sync-check.sh
+    # checks only the armed routines). Hourly bounds how long a pull goes
+    # unrecorded and how long a released cord's issue stays open.
+    - cron: '43 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print the decision but write nothing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read   # checkout the trusted default-branch tools/andon
+
+concurrency:
+  # Serialize this workflow with itself so two reconciles can't race the
+  # issue: a dispatch landing beside the hourly firing must not open twice.
+  group: andon
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile the andon status issue
+    # Pin to the default BRANCH ref: this job holds issues:write, and
+    # workflow_dispatch can target any in-repo ref — so a dispatch against a
+    # PR branch (or a TAG) must not run that ref's tooling with it. Compare
+    # github.ref against refs/heads/<default>, not github.ref_name against
+    # the bare name: github.ref_name would also match a tag NAMED like the
+    # default branch (refs/tags/main → "main"), letting a dispatch against
+    # such a tag slip through; github.ref carries the refs/tags/ prefix, so
+    # it never does. On schedule github.ref is already refs/heads/<default>.
+    # NO cord leg here, on purpose — see the header.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write   # the one write: open or close the status issue
+    steps:
+      - name: Check out trusted tooling
+        uses: actions/checkout@v7
+        with:
+          # Pin the checkout to the default branch too, not just the job
+          # guard: defence in depth so the tooling this job runs with
+          # issues:write is always the default branch's, never a
+          # dispatch-selected ref's.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Decide (tools/andon, GET-only)
+        id: decide
+        env:
+          PYTHONPATH: tools/andon/src
+          GH_TOKEN: ${{ github.token }}
+          # The variable's RAW value, env-indirected (never interpolated
+          # into the script); the tool compares it EXACTLY the way GitHub's
+          # case-insensitive `==` does — no whitespace trimming — so it is
+          # the exact word: 'Pulled' pulls it too, while 'pulled ' (trailing
+          # space) reads as released here just as it does at every workflow
+          # gate, and an unset variable reads as released. Passed in the
+          # --opt=value form so a value starting with a dash can never be
+          # taken for an option.
+          CORD: ${{ vars.AI_ANDON_CORD }}
+        run: |
+          set -euo pipefail
+          python3 -m andon decide --repo "$GITHUB_REPOSITORY" --cord="$CORD" \
+            --gh-output "$GITHUB_OUTPUT" --out-dir .andon
+
+      - name: Open or close the status issue (the one write)
+        if: steps.decide.outputs.action != 'none' && inputs.dry_run != true
+        uses: actions/github-script@v9
+        env:
+          ACTION: ${{ steps.decide.outputs.action }}
+          ISSUE_NUMBER: ${{ steps.decide.outputs.issue_number }}
+        with:
+          script: |
+            // The one write surface of the whole workflow. The status issue
+            // is found belt-and-braces: by its label (unspoofable machine
+            // state — write access required to set it) AND by the marker
+            // tools/andon renders as the body's first line. These literals
+            // are pinned equal to andon.policy's constants by
+            // tools/andon/tests/test_workflow.py.
+            const fs = require('fs');
+            const MARKER = '<!-- andon-cord -->';
+            const LABEL = 'andon-cord';
+            const NOTICE_LABEL = 'notice';
+            const TITLE = '🛑 AI andon cord pulled — AI usage bypassed';
+            const action = process.env.ACTION;
+
+            // Ensure a label exists (idempotent, race-tolerant —
+            // provider-triage's getLabel → 404 → createLabel idiom).
+            async function ensureLabel(name, color, description) {
+              try {
+                await github.rest.issues.getLabel({ ...context.repo, name });
+              } catch (e) {
+                if (e.status !== 404) throw e;
+                try {
+                  await github.rest.issues.createLabel({
+                    ...context.repo, name, color, description,
+                  });
+                } catch (_) { /* raced: another run created it first */ }
+              }
+            }
+
+            if (action === 'open') {
+              const body = fs.readFileSync('.andon/body.md', 'utf8');
+              if (!body.startsWith(MARKER)) {
+                core.setFailed('body.md does not start with the andon marker — refusing to open');
+                return;
+              }
+              await ensureLabel(LABEL, 'b60205',
+                'The AI andon cord is pulled — every AI-consuming workflow is bypassed '
+                + '(docs/andon-cord.md); opened once on pull, closed once on release');
+              await ensureLabel(NOTICE_LABEL, 'bfdadc',
+                'Informational only — no action required; one alert when opened, one when closed');
+              // Belt-and-braces re-check under the concurrency group: the
+              // tool decided from its own GET, but a status issue opened
+              // between that read and this write must not get a twin. The
+              // issues listing interleaves PRs — never select a PR, the same
+              // defensive filter the gather layer applies.
+              const open = await github.paginate(github.rest.issues.listForRepo, {
+                ...context.repo, state: 'open', labels: LABEL, per_page: 100,
+              });
+              const existing = open.find(
+                (i) => !i.pull_request && (i.body || '').startsWith(MARKER));
+              if (existing) {
+                core.notice(`AI andon cord status issue already open: ${existing.html_url} — not opening a twin.`);
+                return;
+              }
+              const created = await github.rest.issues.create({
+                ...context.repo, title: TITLE, body, labels: [LABEL, NOTICE_LABEL],
+              });
+              core.notice(`AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — opened the status issue ${created.data.html_url}; it closes itself once the cord is released — see docs/andon-cord.md.`);
+            } else if (action === 'close') {
+              const issue_number = Number(process.env.ISSUE_NUMBER);
+              if (!Number.isInteger(issue_number) || issue_number <= 0) {
+                core.setFailed(`close decided without a valid issue number (${process.env.ISSUE_NUMBER})`);
+                return;
+              }
+              const comment = fs.readFileSync('.andon/comment.md', 'utf8');
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number, body: comment,
+              });
+              const updated = await github.rest.issues.update({
+                ...context.repo, issue_number, state: 'closed', state_reason: 'completed',
+              });
+              core.notice(`AI andon cord released — closed the status issue ${updated.data.html_url} with the observed timespan.`);
+            } else {
+              core.setFailed(`unknown action '${action}' from tools/andon`);
+            }
+
+      - name: Explain a no-op
+        if: steps.decide.outputs.action == 'none' || inputs.dry_run == true
+        env:
+          DRY_RUN: ${{ inputs.dry_run == true }}
+          ACTION: ${{ steps.decide.outputs.action }}
+          PULLED: ${{ steps.decide.outputs.pulled }}
+          ISSUE_NUMBER: ${{ steps.decide.outputs.issue_number }}
+          OPENED_AT: ${{ steps.decide.outputs.opened_at }}
+        run: |
+          if [ "${DRY_RUN:-}" = "true" ]; then
+            echo "::notice::Dry run — tools/andon decided action=${ACTION:-none} (cord pulled=${PULLED:-false}); the status issue was not touched."
+          elif [ "${PULLED:-}" = "true" ]; then
+            echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — still pulled since ${OPENED_AT:-?}; the status issue #${ISSUE_NUMBER:-?} stays open and nothing was written. Release the cord (delete the variable, or set it to anything but 'pulled') to resume — see docs/andon-cord.md."
+          else
+            echo "::notice::AI andon cord is released and no status issue is open — nothing to reconcile."
+          fi
+
+  offbranch-notice:
+    # The visible no-op: the reconcile job pins itself to the default branch,
+    # so a dispatch from any other ref would be a mute, fully-skipped run.
+    # Keyless and permission-less (no issues grant of any kind — this job
+    # writes nothing anywhere), inverse-gated on the same pin: the
+    # disarmed-notice pattern the routine workflows use.
+    if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain why nothing ran
+        env:
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: echo "::notice::the andon reconciler only runs from the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."
