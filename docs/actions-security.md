@@ -38,6 +38,7 @@ Every workflow in `.github/workflows/` that has a `workflow_dispatch` trigger **
 | `avatar.yml` | `workflow_dispatch` | contents, pull-requests | `GITHUB_TOKEN` | none — inputs shape-validated, draft PR only | unpinned |
 | `backlog-burn-config.yml` | `issue_comment`, `workflow_dispatch` | issues, pull-requests | `REGEN_TOKEN` | none | trusted base-branch tooling only (see note) |
 | `growth-board-sync.yml` | `issues`, schedule, `workflow_dispatch` | none via `GITHUB_TOKEN` (contents:read + issues:read); writes only the GitHub Project | `PROJECT_TOKEN` (Projects scope only — the same secret as `roadmap-sync.yml`) | `PROJECT_TOKEN` presence (absent → `::notice::` no-op) | pinned to `default_branch`; `persist-credentials: false` |
+| `andon.yml` | schedule, `workflow_dispatch` | issues (only, on the `reconcile` job; workflow default contents:read) — its one write is opening or closing the `andon-cord` status issue (`docs/andon-cord.md`) | none — keyless (`GITHUB_TOKEN` only; the tool's tests pin that no `secrets.` appears in the file) | none by design — it must run while the `AI_ANDON_CORD` cord is pulled (to open) and released (to close); `dry_run` input writes nothing | pinned to `refs/heads/<default_branch>` (tag-safe `github.ref` compare) and the checkout to `default_branch`; `persist-credentials: false` |
 
 Notes:
 

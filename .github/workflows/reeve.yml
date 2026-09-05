@@ -55,6 +55,13 @@
 # AND the repo variable REEVE_ENABLED == "true". Either off → inert. The
 # decision is code (`reeve armed`), unit-tested over the full 2×2 matrix, not
 # YAML expression soup.
+#  *  AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set
+#     to 'pulled' bypasses this workflow's AI job (`greenlight`, the drafter)
+#     with a single ::notice:: — grey, never red, no provider call, no
+#     escalation. Orthogonal to the arming variable: it overrides an armed
+#     routine without touching it. The deterministic `report` and `observe`
+#     jobs keep running, and the report carries a 🛑 banner line while the
+#     cord is pulled (`reeve run --andon`).
 #
 # Cadence lives twice by necessity (Actions cannot read a file for
 # on.schedule): the cron literal below and the conf's `cadence:` key must stay
@@ -172,11 +179,17 @@ jobs:
         id: report
         env:
           GH_TOKEN: ${{ github.token }}
+          # The AI andon cord's live value (a repo variable, not a secret —
+          # the reporter stays keyless); env-indirected, never inline in run:.
+          # 'pulled' adds the one 🛑 banner line to the report; the tool
+          # normalizes case exactly as GitHub's expression comparison does.
+          AI_ANDON_CORD: ${{ vars.AI_ANDON_CORD }}
         run: |
           # GET-only run-health reads via src/reeve/github.py (the groomer's
           # pattern); the sticky upsert remains the sole write.
           reeve run --root . --repo "$GITHUB_REPOSITORY" \
-            --conf .github/reeve.conf --out report.md > /dev/null
+            --conf .github/reeve.conf --andon "$AI_ANDON_CORD" \
+            --out report.md > /dev/null
           {
             echo "## Reeve — bench health"
             echo ""
@@ -276,11 +289,18 @@ jobs:
     # the same belt-and-braces as the assessor's: this job carries a write
     # scope and a provider secret, and a hand-dispatch against a PR branch must
     # not run that branch's skill code with either.
+    # The AI andon cord (docs/andon-cord.md) skips this WHOLE job — the
+    # drafter's ship steps, the exhaustion diagnose/red gates, and also the
+    # keyless poll step inside it (the 👍 push-through), so a thumbs-up on a
+    # prior greenlight waits for release: documented collateral. `observe`
+    # below un-couples itself from this skip so the learning half keeps
+    # recording; `disarmed-notice` says why in one ::notice::.
     needs: report
     if: >-
       vars.REEVE_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
       && needs.report.result == 'success'
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # Job budget 60 = head-step timeout (30) + one tail-step timeout (25)
     # + 5 min headroom. The GLM head keeps main's WHOLE pre-#544 job budget
@@ -887,10 +907,13 @@ jobs:
     # the drafter regardless of its outcome: a round that resolved yesterday is
     # recorded today even if today's drafting died — the deterministic half
     # keeps learning through an agent outage.
+    # While the AI andon cord is pulled the drafter job is skipped, but this
+    # deterministic, keyless job must keep recording resolved rounds — so a
+    # cord-skipped `greenlight` does not skip it (docs/andon-cord.md).
     needs: greenlight
     if: >-
       always()
-      && needs.greenlight.result != 'skipped'
+      && (needs.greenlight.result != 'skipped' || vars.AI_ANDON_CORD == 'pulled')
       && vars.REEVE_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
@@ -1051,8 +1074,9 @@ jobs:
 
   disarmed-notice:
     # The visible no-op: a skipped gated job is mute, so a sibling with no
-    # permissions and no secrets says why nothing happened.
-    if: vars.REEVE_ENABLED != 'true' || github.ref_name != github.event.repository.default_branch
+    # permissions and no secrets says why nothing happened — including the
+    # AI andon cord, which greys the `greenlight` job (docs/andon-cord.md).
+    if: vars.REEVE_ENABLED != 'true' || github.ref_name != github.event.repository.default_branch || vars.AI_ANDON_CORD == 'pulled'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -1063,8 +1087,13 @@ jobs:
           # into run: (the siblings' template-injection rule).
           ENABLED_VAR: ${{ vars.REEVE_ENABLED }}
           REF: ${{ github.ref_name }}
+          # A boolean string computed in the expression layer, so GitHub's
+          # case-insensitive comparison stays authoritative.
+          ANDON: ${{ vars.AI_ANDON_CORD == 'pulled' }}
         run: |
-          if [ "$ENABLED_VAR" != "true" ]; then
+          if [ "${ANDON:-}" = "true" ]; then
+            echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — Reeve's greenlight drafter did not run (the deterministic report and observer ran and are unaffected; the report carries the 🛑 banner); no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume — see docs/andon-cord.md."
+          elif [ "$ENABLED_VAR" != "true" ]; then
             echo "::notice::Reeve is disarmed — set the repo variable REEVE_ENABLED=true (and keep .github/reeve.conf 'enabled: true') to arm it. Two keys must agree; this is the live one."
           else
             echo "::notice::Reeve only runs from the default branch — this dispatch targeted '${REF}'."

@@ -42,6 +42,10 @@ name: Labeler (scheduled issue triage)
 # Safety properties (same as the siblings):
 #   * TWO keys must agree to run: committed `enabled: true` AND
 #     LABELER_ENABLED == 'true'. Either off → inert.
+#   * AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set
+#     to 'pulled' bypasses this workflow's AI job with a single ::notice:: —
+#     grey, never red, no provider call, no escalation. Orthogonal to the
+#     arming variable: it overrides an armed routine without touching it.
 #   * Non-destructive: the routine only ADDS labels (never removes) and only to
 #     issues that carry no routing label yet, so a re-run cannot re-route, and a
 #     wrong label is one click for a human to remove.
@@ -106,9 +110,12 @@ jobs:
     # dispatch against a PR branch must not run that branch's skill/selector code
     # with the secret. On `schedule` github.ref_name is already the default
     # branch, so this only ever blocks a hand-dispatch against a non-default ref.
+    # Plus the AI andon cord (docs/andon-cord.md): AI_ANDON_CORD == 'pulled'
+    # skips this job grey — the disarmed-notice sibling explains the pull.
     if: >-
       vars.LABELER_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # Job budget 45 = 2 × run-step timeout (20) + 5 min headroom. Labelling is
     # light, but the walk below is five run steps in a row (three GLM links,
@@ -595,9 +602,13 @@ jobs:
     # The `label` job is gated at job level, so an unset arming variable (the
     # default clone/fork state) or a dispatch against a non-default ref skips it
     # silently. This sibling makes that legible. No secrets, no write perms.
+    # A pulled AI andon cord (docs/andon-cord.md) skips the gated job the same
+    # way, so this sibling explains that too — checked first, since the cord
+    # overrides an armed routine.
     if: >-
       vars.LABELER_ENABLED != 'true'
       || github.ref_name != github.event.repository.default_branch
+      || vars.AI_ANDON_CORD == 'pulled'
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -606,8 +617,11 @@ jobs:
           ARMED: ${{ vars.LABELER_ENABLED }}
           REF: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ANDON: ${{ vars.AI_ANDON_CORD == 'pulled' }}
         run: |
-          if [ "${ARMED:-}" != "true" ]; then
+          if [ "${ANDON:-}" = "true" ]; then
+            echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — the labeler did not run; no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume — see docs/andon-cord.md."
+          elif [ "${ARMED:-}" != "true" ]; then
             echo "::notice::the labeler is disarmed — set the LABELER_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/labeler.conf; both must agree before it runs."
           else
             echo "::notice::the labeler only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."

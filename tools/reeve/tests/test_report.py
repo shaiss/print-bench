@@ -10,7 +10,7 @@ import pathlib
 
 from reeve.config import Config
 from reeve.detectors import evaluate
-from reeve.report import MARKER, render
+from reeve.report import ANDON_BANNER, MARKER, render
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -28,6 +28,36 @@ def _render_fixture():
 def test_report_matches_golden():
     golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
     assert _render_fixture() == golden
+
+
+def test_andon_pulled_adds_exactly_one_banner_line_and_nothing_else():
+    # The AI andon cord (docs/andon-cord.md): pulled inserts ANDON_BANNER and
+    # its blank once, under the H1, MARKER still first — and NOTHING else
+    # moves, so the pulled body minus that insertion is today's golden bytes.
+    snapshot = _load_snapshot()
+    cfg = Config()
+    result = evaluate(snapshot, cfg)
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    released = render(result, snapshot, cfg)
+    pulled = render(result, snapshot, cfg, andon_pulled=True)
+    assert released == golden
+    assert pulled.splitlines()[0] == MARKER
+    assert pulled.count(ANDON_BANNER) == 1
+    assert ANDON_BANNER not in released
+    assert pulled.replace(ANDON_BANNER + "\n\n", "", 1) == released
+    # Byte-pin the wording itself: the golden pair.
+    pulled_golden = (FIXTURES / "report.andon-pulled.golden.md").read_text(encoding="utf-8")
+    assert pulled == pulled_golden
+
+
+def test_andon_released_is_the_golden_bytes():
+    # Negative control: an explicit andon_pulled=False renders the golden —
+    # the released path never carries a banner (or a "released" line).
+    snapshot = _load_snapshot()
+    cfg = Config()
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    assert render(evaluate(snapshot, cfg), snapshot, cfg, andon_pulled=False) == golden
+    assert ANDON_BANNER not in golden
 
 
 def test_report_is_byte_deterministic():

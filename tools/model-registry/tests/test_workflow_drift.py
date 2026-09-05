@@ -875,6 +875,311 @@ def test_row_coverage_guard_rejects_a_row_no_workflow_resolves():
         _assert_every_consumer_has_a_row(_registry_consumers(texts), ROUTINES)
 
 
+# ── AI andon cord coverage (docs/andon-cord.md) ──────────────────────────────
+#
+# ONE repo variable, AI_ANDON_CORD: set to 'pulled' it must bypass EVERY
+# AI-consuming job in .github/workflows/ — grey/skipped, never red, no
+# provider call, no escalation — with exactly one ::notice:: explaining the
+# bypass, while every deterministic job keeps running. The pins below hold
+# that property over the WORKFLOWS rather than over a hand-kept list: a job is
+# AI-consuming iff its block spends a provider key or runs an agent action,
+# so a future AI-consuming job is enrolled the moment it references a key, and
+# cannot land uncorded (the same enumerate-the-tree discipline as the
+# ROUTINES row-coverage pin above — a list would let a new job slip past).
+
+# The job-level gate leg every AI-consuming job's `if:` must carry (as its
+# LAST folded line — the arming variable stays the first line, a shape the
+# spike-converter pin depends on), and the explain leg the visible-no-op
+# sibling / step keys on.
+ANDON_JOB_LEG = "vars.AI_ANDON_CORD != 'pulled'"
+ANDON_EXPLAIN_LEG = "vars.AI_ANDON_CORD == 'pulled'"
+
+# A provider-key SPEND: `anthropic_api_key: ${{ secrets.X }}`, `zai-key:
+# ${{ secrets.X }}`, `ZAI_KEY: ${{ secrets.X }}`. The negative lookahead
+# excludes the presence probes deterministic jobs carry (`HAS_ZAI: ${{
+# secrets.ZAI_KEY != '' }}`) so they are not flagged; CLAUDE_KEY is in the
+# alternation because design-run's Anthropic tail wires that alias (see
+# _ALIAS_MARKER below) — without it that tail would be invisible.
+_AI_SPEND = re.compile(r"secrets\.(ANTHROPIC_API_KEY|ZAI_KEY|CLAUDE_KEY)\b(?!\s*!=\s*'')")
+# The agent action and the exhaustion-triage action: a job carrying either
+# reaches a provider even when the key is wired through a composite input.
+_AI_ACTIONS = ("anthropics/claude-code-action", "./.github/actions/provider-triage")
+
+# Deterministic jobs with ONE AI step each: the job must keep running (CI's
+# regen still renders previews; the groomer still writes its report) so the
+# cord lives on the AI STEP's own `if:` instead of the job header. Every step
+# in such a job that spends a key must carry the leg.
+ANDON_STEP_GATED = {("ci.yml", "regen"), ("backlog-groomer.yml", "groom")}
+
+# The roster the enumerator finds on the live tree, by hand — so a reader sees
+# what the cord covers, and a silent shrink (a job whose key reference moved
+# into a shape the regex no longer sees) or grow (a new AI-consuming job) is
+# caught here and reconciled deliberately, not absorbed.
+ANDON_AI_JOBS = {
+    ("adoption-assessor.yml", "assess"),
+    ("auto-review.yml", "jane-review"),
+    ("auto-review.yml", "drik-review"),
+    ("auto-review.yml", "pm-triage"),
+    ("auto-review.yml", "design-coach"),
+    ("backlog-burn.yml", "burn"),
+    ("backlog-groomer.yml", "groom"),
+    ("chunker.yml", "chunk"),
+    ("ci.yml", "regen"),
+    ("design-run.yml", "run"),
+    ("growth-twitter.yml", "drain"),
+    ("labeler.yml", "label"),
+    ("lifestyle-clip.yml", "generate"),
+    ("lifestyle-shot.yml", "generate"),
+    ("model-smoke.yml", "smoke"),
+    ("oracle.yml", "oracle"),
+    ("product-scout.yml", "scout"),
+    ("product-still.yml", "generate"),
+    ("reeve-growth.yml", "reeve-growth"),
+    ("reeve.yml", "greenlight"),
+    ("spike-converter.yml", "convert"),
+    ("wright.yml", "propose"),
+    ("wright.yml", "signoff"),
+}
+
+# The consumers outside the ROUTINES table the enumerator must never lose:
+# the four reviewers, the Oracle, the smoke probe and the three image/clip
+# generators. With the table's rows, this is the floor the enumerated set
+# must cover — so the regex can never quietly shrink below the known roster.
+_ANDON_NON_ROUTINE_AI_JOBS = {
+    ("auto-review.yml", "jane-review"),
+    ("auto-review.yml", "drik-review"),
+    ("auto-review.yml", "pm-triage"),
+    ("auto-review.yml", "design-coach"),
+    ("oracle.yml", "oracle"),
+    ("model-smoke.yml", "smoke"),
+    ("lifestyle-shot.yml", "generate"),
+    ("product-still.yml", "generate"),
+    ("lifestyle-clip.yml", "generate"),
+}
+
+_ANDON_JOB_IF = re.compile(r"^    if:", re.MULTILINE)
+
+
+def _without_comments(block: str) -> str:
+    """The block with its comment lines dropped: a comment quoting the leg or
+    a secret must neither enrol a job nor satisfy a pin on its behalf."""
+    return "\n".join(l for l in block.splitlines() if not l.lstrip().startswith("#"))
+
+
+def _job_header(block: str) -> str:
+    """The job's text above its first step — where the job-level `if:` lives
+    (`_step_condition` folds it exactly as it folds a step's)."""
+    return re.split(r"\n      - ", block)[0]
+
+
+def _job_steps(block: str) -> list[str]:
+    """The job's step chunks, in order (the 6-space `- ` list the workflows
+    here all use)."""
+    return re.split(r"\n      - ", block)[1:]
+
+
+def _is_ai_consuming(block: str) -> tuple[bool, str]:
+    """Whether a job block reaches a provider, and the first reference that
+    says so (for the failure message)."""
+    body = _without_comments(block)
+    for action in _AI_ACTIONS:
+        if action in body:
+            return True, action
+    m = _AI_SPEND.search(body)
+    if m:
+        return True, m.group(0)
+    return False, ""
+
+
+def _ai_consuming_jobs(texts: dict[str, str]) -> dict[tuple[str, str], str]:
+    """Every (workflow, job) that reaches a provider, with its block."""
+    found: dict[tuple[str, str], str] = {}
+    for workflow, text in texts.items():
+        for job, block in _job_blocks(text).items():
+            consuming, _why = _is_ai_consuming(block)
+            if consuming:
+                found[(workflow, job)] = block
+    return found
+
+
+def _job_level_cord_gated(block: str) -> bool:
+    """True when the job's own `if:` carries the gate leg."""
+    header = _without_comments(_job_header(block))
+    if not _ANDON_JOB_IF.search(header):
+        return False
+    return ANDON_JOB_LEG in _step_condition(header)
+
+
+def _assert_every_ai_job_gates_on_the_cord(texts: dict[str, str]) -> None:
+    """Every AI-consuming job is gated on the cord — at the job level, or for
+    the allow-listed deterministic jobs, on every key-spending step."""
+    jobs = _ai_consuming_jobs(texts)
+    floor = {(row.workflow, row.job) for row in ROUTINES.values()} | _ANDON_NON_ROUTINE_AI_JOBS
+    lost = floor - set(jobs)
+    assert not lost, (
+        f"known AI-consuming job(s) the enumerator no longer sees: {sorted(lost)} "
+        "— the key/action reference moved into a shape _AI_SPEND / _AI_ACTIONS "
+        "do not match, so the cord pin would silently stop covering them")
+    for (workflow, job), block in sorted(jobs.items()):
+        _consuming, why = _is_ai_consuming(block)
+        if (workflow, job) in ANDON_STEP_GATED:
+            spending = [chunk for chunk in _job_steps(block)
+                        if _is_ai_consuming(chunk)[0]]
+            assert spending, (
+                f"{workflow} [{job}]: allow-listed as step-gated but no step "
+                "references a provider — drop it from ANDON_STEP_GATED")
+            for chunk in spending:
+                name = re.search(r"^\s*name:\s*(.+)$", chunk, re.MULTILINE)
+                step = name.group(1).strip() if name else chunk.splitlines()[0].strip()
+                _consuming, why = _is_ai_consuming(chunk)
+                body = _without_comments(chunk)
+                has_if = re.search(r"^\s*if:", body, re.MULTILINE)
+                cond = _step_condition(body) if has_if else ""
+                assert has_if and ANDON_JOB_LEG in cond, (
+                    f"{workflow} [{job}]: step '{step}' references {why} but "
+                    f"is not gated on {ANDON_JOB_LEG} — pulling the cord would "
+                    "not stop it (the job is deterministic and stays running, "
+                    "so its AI step must carry the leg itself)")
+            continue
+        header = _without_comments(_job_header(block))
+        has_if = _ANDON_JOB_IF.search(header)
+        cond = _step_condition(header) if has_if else ""
+        assert has_if and ANDON_JOB_LEG in cond, (
+            f"{workflow} [{job}]: AI-consuming job (references {why}) is not "
+            f"gated on {ANDON_JOB_LEG} — pulling the cord would not stop it")
+
+
+def _assert_every_corded_workflow_explains_the_pull(texts: dict[str, str]) -> None:
+    """A skipped job is mute, so every workflow the cord gates must say why
+    nothing ran: some job that is NOT itself job-level cord-gated keys a
+    ::notice:: on the explain leg — a disarmed-notice / andon-notice /
+    oracle-andon sibling, auto-review's review-stamp env + notice, ci.yml's
+    regen notice step, the groomer's notice step."""
+    jobs = _ai_consuming_jobs(texts)
+    for workflow in sorted({workflow for workflow, _job in jobs}):
+        explained = False
+        for _job, block in _job_blocks(texts[workflow]).items():
+            if _job_level_cord_gated(block):
+                continue  # skipped with the cord — cannot be the explainer
+            body = _without_comments(block)
+            if ANDON_EXPLAIN_LEG in body and "::notice::" in body:
+                explained = True
+                break
+        assert explained, (
+            f"{workflow}: the cord gates its AI job(s) but no ungated job keys "
+            f"a ::notice:: on {ANDON_EXPLAIN_LEG} — a pulled cord would leave "
+            "the run mute (grey, with nothing saying why); add the "
+            "disarmed-notice-style sibling, or a notice step in a job that "
+            "keeps running")
+
+
+def test_every_ai_consuming_job_gates_on_the_andon_cord():
+    _assert_every_ai_job_gates_on_the_cord(_all_workflow_texts())
+
+
+def test_every_corded_workflow_explains_the_pull():
+    _assert_every_corded_workflow_explains_the_pull(_all_workflow_texts())
+
+
+def test_andon_ai_job_roster_is_the_expected_set():
+    # The roster pin: the enumerated set equals the hand-derived one, so a
+    # shrink or a grow is reconciled on purpose (a new AI-consuming job joins
+    # ANDON_AI_JOBS in the same PR that cords it).
+    found = set(_ai_consuming_jobs(_all_workflow_texts()))
+    assert found == ANDON_AI_JOBS, (
+        f"AI-consuming roster drifted — new: {sorted(found - ANDON_AI_JOBS)}, "
+        f"gone: {sorted(ANDON_AI_JOBS - found)}")
+
+
+def test_andon_reconciler_itself_is_not_corded():
+    # SANITY: andon.yml (the status-issue reconciler) reads the variable but
+    # spends no key and runs no agent — so it is outside the AI set, and its
+    # reconcile job must NOT gate on the cord: it has to run WHILE the cord is
+    # pulled to open the status issue, and after release to close it.
+    texts = _all_workflow_texts()
+    assert "andon.yml" in texts, "andon.yml is missing from .github/workflows/"
+    assert not any(workflow == "andon.yml" for workflow, _job in _ai_consuming_jobs(texts)), (
+        "andon.yml enumerated as AI-consuming — it must spend no provider key")
+    blocks = _job_blocks(texts["andon.yml"])
+    assert "reconcile" in blocks, "andon.yml has no `reconcile` job"
+    assert not _job_level_cord_gated(blocks["reconcile"]), (
+        "andon.yml [reconcile] gates on the cord — it could never open or "
+        "close the status issue")
+
+
+def test_andon_guard_rejects_a_job_that_shed_its_leg():
+    # NEGATIVE CONTROL A (in-memory): the labeler's `label` job without its
+    # folded leg line must fail naming that job — derived from the live text.
+    texts = _all_workflow_texts()
+    victim = "labeler.yml"
+    leg = f"\n      && {ANDON_JOB_LEG}"
+    assert leg in texts[victim], "tamper target not found — the fixture is stale"
+    texts[victim] = texts[victim].replace(leg, "", 1)
+    with pytest.raises(AssertionError, match=r"labeler\.yml \[label\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+_ROGUE_JOB = """\
+  rogue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+"""
+
+
+def test_andon_guard_rejects_a_future_uncorded_ai_job(tmp_path):
+    # NEGATIVE CONTROL B (tmp_path): a NEW agent job with no `if:` at all,
+    # appended to a copy of the tree, must fail naming it — the property the
+    # pin exists for: a future AI-consuming job cannot land uncorded.
+    import shutil
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    for path in (REPO_ROOT / ".github" / "workflows").glob("*.yml"):
+        shutil.copy(path, workflows_dir)
+    victim = workflows_dir / "labeler.yml"
+    text = victim.read_text(encoding="utf-8")
+    assert "  rogue:" not in text, "tamper target collides — the fixture is stale"
+    victim.write_text(text.rstrip("\n") + "\n\n" + _ROGUE_JOB, encoding="utf-8")
+    texts = {p.name: p.read_text(encoding="utf-8")
+             for p in sorted(workflows_dir.glob("*.yml"))}
+    assert ("labeler.yml", "rogue") in _ai_consuming_jobs(texts), (
+        "the rogue job was not enumerated — the enumerator, not the gate, is broken")
+    with pytest.raises(AssertionError, match=r"labeler\.yml \[rogue\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+def test_andon_guard_rejects_a_workflow_that_stopped_explaining():
+    # NEGATIVE CONTROL C (in-memory): lifestyle-shot.yml's andon-notice job
+    # with its explain leg removed leaves the workflow mute — the explain
+    # pin must fail naming the workflow.
+    texts = _all_workflow_texts()
+    victim = "lifestyle-shot.yml"
+    block = _job_blocks(texts[victim])["andon-notice"]
+    assert ANDON_EXPLAIN_LEG in block, "tamper target not found — the fixture is stale"
+    muted = block.replace(ANDON_EXPLAIN_LEG, "false")
+    texts[victim] = texts[victim].replace(block, muted, 1)
+    _assert_every_ai_job_gates_on_the_cord(texts)  # the gate side is intact
+    with pytest.raises(AssertionError, match=r"lifestyle-shot\.yml"):
+        _assert_every_corded_workflow_explains_the_pull(texts)
+
+
+def test_andon_guard_rejects_a_step_gated_job_that_shed_its_leg():
+    # NEGATIVE CONTROL D (in-memory): ci.yml's regen is a deterministic job
+    # whose ONE AI step (product-page drafting) carries the cord — strip the
+    # leg from that step's inline `if:` and the pin must fail naming the job.
+    texts = _all_workflow_texts()
+    victim = "ci.yml"
+    leg = f" && {ANDON_JOB_LEG}"
+    block = _job_blocks(texts[victim])["regen"]
+    assert block.count(leg) == 1, "tamper target not found — the fixture is stale"
+    texts[victim] = texts[victim].replace(block, block.replace(leg, "", 1), 1)
+    with pytest.raises(AssertionError, match=r"ci\.yml \[regen\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+
 # An explicit in-workflow marker naming a step's secret as an alias for a
 # registry provider's declared secret: `registry-secret-alias:
 # <alias>=<registry-secret>` (design-run's anthropic link wires CLAUDE_KEY, a

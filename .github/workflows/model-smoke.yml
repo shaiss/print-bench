@@ -34,6 +34,12 @@ name: Model chain smoke
 # Read-only permissions; the provider secrets are the only exposure, the same
 # accepted posture as the other key-holding workflows.
 #
+# AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set to
+# 'pulled' bypasses the smoke job (a real paid request per link, on both
+# providers) with a single ::notice:: — grey, never red, no provider call,
+# even on a manual dispatch. Dispatch again after release if a registry edit
+# shipped unproven meanwhile.
+#
 # Each provider's secret is wired LITERALLY below (the Actions constraint the
 # registry documents): a new provider stanza needs its secret line added here
 # in the same PR, or its links report "secret not set" and are skipped.
@@ -59,9 +65,17 @@ jobs:
     name: Smoke the registry chains
     # Skip fork PRs: no provider secrets there, so a live smoke can only fail
     # "proves nothing". Dispatch runs and same-repo PRs still smoke for real.
+    # Under the AI andon cord the job is skipped outright (see the if: below).
+    #
+    # AI andon cord (docs/andon-cord.md): every link ping is a real paid
+    # request on a provider key, and the header's rule is that a run which
+    # attempts nothing FAILS — so the cord must skip the job, never blank the
+    # keys. The sibling andon-notice job says why nothing ran. The parentheses
+    # are load-bearing: && binds tighter than || in GitHub expressions.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      vars.AI_ANDON_CORD != 'pulled' &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -101,3 +115,14 @@ jobs:
             python3 -m model_registry smoke "$c" || rc=1
           done
           exit "$rc"
+
+  andon-notice:
+    # The visible no-op: a skipped gated job is mute, so a sibling with no
+    # permissions and no secrets says why nothing ran.
+    if: vars.AI_ANDON_CORD == 'pulled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain why nothing ran
+        run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — the model-chain smoke was not run; no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume; dispatch this workflow afterwards if a registry edit shipped unproven meanwhile — see docs/andon-cord.md."

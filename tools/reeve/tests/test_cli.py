@@ -8,7 +8,7 @@ import json
 import pathlib
 
 from reeve.cli import main
-from reeve.report import MARKER
+from reeve.report import ANDON_BANNER, MARKER
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -48,6 +48,56 @@ def test_run_over_a_temp_repo(tmp_path, capsys):
     out = capsys.readouterr().out
     assert out.startswith(MARKER)
     assert "0 gate-run record(s)" in out   # empty repo → no history
+
+
+def test_report_andon_flag_is_case_insensitive_like_github(monkeypatch, capsys):
+    # `vars.AI_ANDON_CORD == 'pulled'` compares case-insensitively in Actions,
+    # so a variable set to 'Pulled' bypasses every AI job — the tool must agree
+    # and banner the report, never red it (a choices= usage error would).
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    rc = main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", "Pulled"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert out.startswith(MARKER)
+    assert out.count(ANDON_BANNER) == 1
+    assert out == (FIXTURES / "report.andon-pulled.golden.md").read_text(encoding="utf-8")
+
+
+def test_report_andon_env_is_the_default_source(monkeypatch, capsys):
+    # No flag: the cord is read from $AI_ANDON_CORD (the workflow's env path).
+    monkeypatch.setenv("AI_ANDON_CORD", "pulled")
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json")]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(MARKER)
+    assert out.count(ANDON_BANNER) == 1
+
+
+def test_report_andon_released_renders_the_golden_bytes(monkeypatch, capsys):
+    # Negative control: any value but 'pulled' — and an unset variable — is
+    # released, and released is byte-for-byte today's golden.
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", "released"]) == 0
+    assert capsys.readouterr().out == golden
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", ""]) == 0
+    assert capsys.readouterr().out == golden
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json")]) == 0
+    assert capsys.readouterr().out == golden
+
+
+def test_run_andon_pulled_banners_the_workflow_verb(tmp_path, monkeypatch, capsys):
+    # `run` is the verb reeve.yml invokes (`reeve run ... --andon "$AI_ANDON_CORD"`).
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    (tmp_path / "telemetry").mkdir()
+    rc = main(["run", "--root", str(tmp_path), "--andon", "pulled"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == MARKER
+    assert out.count(ANDON_BANNER) == 1
+    assert "0 gate-run record(s)" in out   # the report itself still renders
+    # And released over the same tree carries no banner.
+    assert main(["run", "--root", str(tmp_path), "--andon", ""]) == 0
+    assert ANDON_BANNER not in capsys.readouterr().out
 
 
 def test_run_without_repo_is_offline_and_not_evaluated(tmp_path, capsys):

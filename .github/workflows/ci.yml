@@ -69,6 +69,7 @@ jobs:
       reeve_tests: ${{ steps.filter.outputs.reeve_tests }}
       brief_sources_tests: ${{ steps.filter.outputs.brief_sources_tests }}
       growth_tests: ${{ steps.filter.outputs.growth_tests }}
+      andon_tests: ${{ steps.filter.outputs.andon_tests }}
       styles: ${{ steps.filter.outputs.styles }}
       gate: ${{ steps.filter.outputs.gate }}
       gate_designs: ${{ steps.filter.outputs.gate_designs }}
@@ -164,8 +165,10 @@ jobs:
           # and push this job runs five generators out of the PR branch, and
           # a same-repo PR could read a contents:write token straight out of
           # the config (ANTHROPIC_API_KEY is exposed to the same code, but
-          # only for the one step that needs it). The push below supplies the
-          # token explicitly instead — the same shape lifestyle-shot.yml uses.
+          # only for the one step that needs it, and not at all while the AI
+          # andon cord is pulled — docs/andon-cord.md). The push below
+          # supplies the token explicitly instead — the same shape
+          # lifestyle-shot.yml uses.
           # Fork PRs were never exposed: their token is read-only and they get
           # no secrets.
           persist-credentials: false
@@ -414,7 +417,11 @@ jobs:
           ./scripts/gallery.sh
 
       - name: Draft product pages that do not pass their gate (Claude API)
-        if: steps.plan.outputs.designs != ''
+        # STEP-level, never job-level: regen is deliberately ungated (four jobs
+        # `needs:` it, one required — see the job comment above), so the AI
+        # andon cord (docs/andon-cord.md) skips only this one step, the only
+        # place in ci.yml a provider key is materialized.
+        if: steps.plan.outputs.designs != '' && vars.AI_ANDON_CORD != 'pulled'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DESIGNS: ${{ steps.plan.outputs.designs }}
@@ -433,6 +440,12 @@ jobs:
             ./scripts/product-page.sh "$n" \
               || echo "::warning::could not draft a product page for ${n} — see the 'Design product pages' job"
           done
+
+      - name: AI andon cord — product-page drafting bypassed
+        # The skipped step above is mute; say why. Gated on designs != '' so a
+        # docs-only PR (nothing to draft either way) does not carry the notice.
+        if: steps.plan.outputs.designs != '' && vars.AI_ANDON_CORD == 'pulled'
+        run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — product-page drafting (the one Claude API call in CI) was skipped; previews, animations, product shots and the gallery were regenerated deterministically as usual; no provider API call was made. Release the cord to resume — see docs/andon-cord.md."
 
       - name: Commit and push what changed
         id: commit
@@ -727,6 +740,29 @@ jobs:
         # Includes test_server_parity.py, which pins the posting server's
         # self-contained weighted-length copy to growth.tweetlen.
         run: python -m pytest tools/growth/tests -q
+
+  andon-tests:
+    name: andon unit tests
+    needs: changes
+    if: needs.changes.outputs.andon_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install andon
+        # The AI andon cord's reconciler (docs/andon-cord.md). Stdlib-only
+        # like its siblings — the [test] extra is just pytest; the scheduled
+        # andon workflow reads the package straight from the checkout.
+        run: pip install -e 'tools/andon[test]'
+      - name: Run tests
+        # Pins the reconciler workflow's shape (job/cron/marker parity with
+        # the tool), so andon.yml and ci.yml edits re-run these too.
+        run: python -m pytest tools/andon/tests -q
 
   model-registry-tests:
     name: model-registry unit tests
@@ -1701,6 +1737,7 @@ jobs:
       - reeve-tests
       - brief-sources-tests
       - growth-tests
+      - andon-tests
       - telemetry-tests
       - ci-gates-tests
       - docs-standards
