@@ -176,7 +176,7 @@ Every deterministic job: the CI gates (render, printcheck, test-slice, readme-ga
 
 ## Consequence for design PRs
 
-A design PR needs two clean, current reviewer sign-offs to merge, and the reviewers do not run while the cord is pulled — so `reviewer-signoff` **blocks** design PRs until the cord is released (the round retries on its own) or a maintainer applies the `signoff-override` label.
+A design PR needs two clean, current reviewer sign-offs to merge, and the reviewers do not run while the cord is pulled — so `reviewer-signoff` **blocks** design PRs until the cord is released (then push, or close and reopen the PR, to re-fire a review round — nothing re-fires on its own) or a maintainer applies the `signoff-override` label.
 
 ## How to release
 

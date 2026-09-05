@@ -49,8 +49,10 @@ releasing to stamp (or close) the issue immediately.
 
 Every job that can spend a provider key, run an agent, or escalate a provider
 failure carries the gate leg `vars.AI_ANDON_CORD != 'pulled'` at **job level**
-(the one exception is CI's product-page step, gated at step level because its
-`regen` job is a required-context dependency). Job-level gating is the point:
+(the two exceptions are CI's product-page step, gated at step level because
+its `regen` job is a required-context dependency, and the groomer's two
+narrative steps, because its `groom` job must keep posting the deterministic
+report). Job-level gating is the point:
 nothing inside a gated job runs while the cord is pulled — not the keyless
 Select and resolve steps, not the provider-triage probe that files
 `needs-decision` escalations, not the "turn red" tail steps. A skipped job is

@@ -1096,7 +1096,7 @@ jobs:
           ANDON: ${{ vars.AI_ANDON_CORD == 'pulled' }}
         run: |
           if [ "${ANDON:-}" = "true" ]; then
-            echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — Reeve's greenlight drafter did not run (the deterministic report and observer ran and are unaffected; the report carries the 🛑 banner); no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume — see docs/andon-cord.md."
+            echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — Reeve's greenlight drafter did not run (the cord leaves the deterministic report and observer untouched — they run whenever Reeve is armed, and the report then carries the 🛑 banner); no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume — see docs/andon-cord.md."
           elif [ "$ENABLED_VAR" != "true" ]; then
             echo "::notice::Reeve is disarmed — set the repo variable REEVE_ENABLED=true (and keep .github/reeve.conf 'enabled: true') to arm it. Two keys must agree; this is the live one."
           else
