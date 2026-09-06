@@ -61,11 +61,12 @@ name: Wright (scheduled agent forge — propose + Reeve sign-off)
 #     ::notice:: — grey, never red, no provider call, no escalation.
 #     Orthogonal to the arming variable: it overrides an armed routine
 #     without touching it.
-#   * Bounded on both halves: propose is capped per run (WRIGHT_MAX_BRIEFS)
-#     and skipped entirely while enough briefs are already pending
-#     (WRIGHT_MAX_PENDING, computed in the trusted Select step); sign-off is
-#     capped per run (SIGNOFF_MAX_VERDICTS) and bound to the trusted Select
-#     step's issue set.
+#   * Bounded on both halves: propose is capped per run (WRIGHT_MAX_BRIEFS —
+#     counted in the shared WRIGHT_CAP_STATE file, so the cap spans the whole
+#     chain walk and not one link, #566) and skipped entirely while enough
+#     briefs are already pending (WRIGHT_MAX_PENDING, computed in the trusted
+#     Select step); sign-off is capped per run (SIGNOFF_MAX_VERDICTS) and
+#     bound to the trusted Select step's issue set.
 #   * The one escalation-shaped write — arming a brief — is fenced twice: the
 #     sign-off tool's deterministic sensitive-path guard DOWNGRADES any
 #     approve whose brief touches the bench's protection machinery (existing
@@ -78,9 +79,11 @@ name: Wright (scheduled agent forge — propose + Reeve sign-off)
 #     the additive settings.json allows AND each other's write tool — the
 #     propose agent cannot sign off, the sign-off agent cannot file — kept
 #     honest by scripts/wright-perms-check.sh.
-#   * Every link of each walk carries the SAME surface, backstop, cap, bound
-#     and prompt as its half's head link — only the model, secret and
-#     endpoint differ per step.
+#   * Every link of each walk carries the SAME surface, backstop, bound and
+#     prompt as its half's head link — the propose walk additionally counts
+#     against ONE per-walk brief cap (the shared WRIGHT_CAP_STATE file every
+#     propose link step names, #566) — only the model, secret and endpoint
+#     differ per step.
 
 on:
   schedule:
@@ -700,7 +703,17 @@ jobs:
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
       # The per-run brief cap, enforced by wright_mcp.py's filing tool. One
       # brief per firing × 4 firings/day keeps the queue reviewable; the
-      # pending cap below stops even that when the queue is full.
+      # pending cap below stops even that when the queue is full. What makes
+      # the cap span the chain WALK — not one link — is WRIGHT_CAP_STATE, set
+      # on every link step below (issue #566): each link is its own
+      # claude-code-action step spawning a fresh MCP server process, so an
+      # in-process counter reset to 0 per link and a walk could file
+      # cap-per-link. Every link step counts filings from that one shared
+      # runner.temp file (fresh per job, so the count is run-scoped and never
+      # persists) — the reeve.yml REEVE_GREENLIGHT_STATE pattern, adopted from
+      # the scout's SCOUT_CAP_STATE (#565). The server refuses to file if a
+      # link step lacks it, so a future link 4 that forgets the env fails
+      # loudly, never silently uncapped.
       WRIGHT_MAX_BRIEFS: '1'
       # Skip proposing entirely while this many briefs are already pending a
       # verdict or armed-but-unbuilt — backpressure so the forge can never
@@ -822,7 +835,9 @@ jobs:
       # (served by wright_mcp.py via --mcp-config) — a JSON-argument tool so a
       # rich multi-line brief body never touches a shell command line; it
       # hardcodes the `agent-brief` label, requires the `Agent brief:` title
-      # prefix, and caps briefs per run. READING is the wrapper
+      # prefix, and caps briefs per run — counted in the shared
+      # WRIGHT_CAP_STATE file each link step's env names, so the cap spans the
+      # whole walk and not one link (#566). READING is the wrapper
       # wright-helper.sh (list-briefs / read-thread / pulse / run-health —
       # all read-only) plus Read/Grep/Glob; never Write, never a general
       # Bash. --settings closes the additive allow leak from settings.json
@@ -848,7 +863,12 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
           # The MCP filing tool inherits this env and authenticates with it.
+          # WRIGHT_CAP_STATE is what spans the brief cap across the walk
+          # (#566): step-level env because the runner context is unavailable
+          # in job env, the SAME runner.temp path on every link step, and the
+          # server counts filings from that one shared file.
           GITHUB_TOKEN: ${{ github.token }}
+          WRIGHT_CAP_STATE: ${{ runner.temp }}/wright-briefs
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -867,10 +887,13 @@ jobs:
       # ZAI_KEY) and gated on the Anthropic key's own presence. Claude via
       # api.anthropic.com: a plain API key (pay-per-token) is the right fit
       # for an unattended bot — no OAuth token / subscription seat. The same
-      # pin, permission, github_token, effort, cap, MCP filing tool, wrapper
-      # read verbs, backstop, transcript posture and prompt as the GLM link —
-      # only the model, secret and endpoint differ. Which model runs is the
-      # registry's call (the cheap Anthropic tier).
+      # pin, permission, github_token, effort, MCP filing tool, wrapper
+      # read verbs, backstop, transcript posture and prompt as the GLM link,
+      # and the same walk-spanning brief cap — the shared WRIGHT_CAP_STATE
+      # file these steps name, so the count the GLM link advanced is the count
+      # this link starts from (#566) — only the model, secret and endpoint
+      # differ. Which model runs is the registry's call (the cheap Anthropic
+      # tier).
       - name: Propose via Anthropic (Claude, chain link 2)
         id: propose_anthropic_2
         if: >-
@@ -883,8 +906,11 @@ jobs:
         continue-on-error: true
         env:
           # Same reason as the Z.AI step: the MCP filing tool inherits this
-          # env and authenticates with it.
+          # env and authenticates with it — plus the SAME WRIGHT_CAP_STATE
+          # path, so the count the GLM link advanced is the count this link
+          # starts from (#566).
           GITHUB_TOKEN: ${{ github.token }}
+          WRIGHT_CAP_STATE: ${{ runner.temp }}/wright-briefs
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -910,6 +936,8 @@ jobs:
         timeout-minutes: 20
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # Same walk-spanning cap state as the earlier links (#566).
+          WRIGHT_CAP_STATE: ${{ runner.temp }}/wright-briefs
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
