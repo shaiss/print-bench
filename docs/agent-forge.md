@@ -79,8 +79,11 @@ in the family. The design spends its entire safety budget there:
    from a closed constant taxonomy, label-first (decide.yml's fail-closed
    ordering), one verdict per brief (marker dedup), capped per run.
 5. **Bounded volume.** Propose is capped at `WRIGHT_MAX_BRIEFS` (1) per
-   firing and skipped entirely while ≥ `WRIGHT_MAX_PENDING` (3) briefs are
-   pending or armed-unbuilt — backpressure computed in trusted workflow
+   firing — counted in the shared `WRIGHT_CAP_STATE` file every link step of
+   the propose walk names, so the cap spans the whole chain walk and not one
+   server process (#566; the scout's `SCOUT_CAP_STATE`, #565) — and skipped
+   entirely while ≥ `WRIGHT_MAX_PENDING` (3) briefs are pending or
+   armed-unbuilt — backpressure computed in trusted workflow
    bash, so the forge can never flood the queue it feeds.
 6. **Everything is reversible before it is real.** A wrong label is one
    click to undo; an armed brief only ever becomes a *draft* PR; the Oracle
@@ -137,7 +140,7 @@ dedup, and for `needs-decision` threads whose answer is a small tool).
 | Prompt injection in an issue Wright reads | dontAsk over {read wrapper, filing tool, file reads}; deny backstop; worst case = 1 bounded `agent-brief`/firing that Reeve then judges |
 | Prompt injection in a brief the sign-off reads | the same surface split; a steered approve still passes the write-time re-read, the closed label taxonomy, and the sensitive-path guard; worst case = arming one in-taxonomy brief whose build is still a gated draft PR |
 | A brief targeting the fence (backstops, decide.yml, secrets, arming vars) | the deterministic sensitive-path guard: approve → `needs-decision`, never armed |
-| Brief flood | `WRIGHT_MAX_BRIEFS` (tool-enforced) + `WRIGHT_MAX_PENDING` backpressure (trusted bash) |
+| Brief flood | `WRIGHT_MAX_BRIEFS` (tool-enforced, walk-spanning via the shared `WRIGHT_CAP_STATE` file — #566) + `WRIGHT_MAX_PENDING` backpressure (trusted bash) |
 | Duplicate verdicts / re-judging | verdict-label re-read + marker dedup, both at write time |
 | Verdict label applied but comment lost | label-first ordering — the label is the operative record; the next Select excludes the brief, so no re-rule |
 | Sign-off model chain head dies | the `wright-signoff` chain walks past it since #544 (labeler-style): three GLM links, then the Anthropic tail (`claude-sonnet-5` → `claude-haiku-4-5`), and total exhaustion runs `provider-triage` → `classify`, escalating a human-fixable cause once through the `needs-decision` gate. Reeve's `routine-dead` detector does **not** watch wright.yml yet (`ROUTINE_WORKFLOWS` covers the four #326 routines) — extending it is a named first agent-brief (see Future work) |
