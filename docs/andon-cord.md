@@ -168,9 +168,12 @@ read the banner as "the skipped runs are expected": a pulled cord is not
 
 ## What the cord does not do
 
-- It does **not** close the seven open `🚦 Provider unusable` escalations, or
-  any other issue. The cord silences the symptom; it does not change the credit
-  state. Fund the account, rotate the key, or close the escalations by hand.
+- It does **not** close any open `🚦 Provider unusable` escalation, or any
+  other issue. The cord silences the symptom; it does not change the credit
+  state. Fund the account, rotate the key, or resolve the escalation by hand
+  (since #550 there is one shared issue per cause, not one per chain — the
+  seven the 2026-09-04 quota day opened are the pre-#550 record, see
+  `docs/decision-gate.md`).
 - It does **not** fix a quota. Release it before the reset and the routines
   will walk their chains to exhaustion again.
 - It does **not** stop a human-dispatched deterministic job — a dispatched
