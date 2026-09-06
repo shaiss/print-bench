@@ -48,16 +48,20 @@ name: Spike converter (scheduled design-brief conversion)
 #     list-briefs / read-thread — GETs only), and its only write is the scout
 #     MCP tool, whose server hardcodes the `design-brief` label, requires the
 #     `Design brief:` title prefix and caps briefs per run at SCOUT_MAX_BRIEFS
-#     (1 here — the extractor's one-candidate-per-firing rule made structural).
-#     A prompt-injected run can at worst file one design-brief proposal —
-#     noise a human closes.
+#     (1 here — the extractor's one-candidate-per-firing rule made structural)
+#     — counted in the shared SCOUT_CAP_STATE file, so the cap spans the
+#     whole chain walk and not one link (#565). A prompt-injected run can at
+#     worst file one design-brief proposal — noise a human closes.
 #   * The converter's deny backstop (.claude/spike-converter-settings.json,
 #     via --settings) neutralizes the additive settings.json allows
 #     (chunk-helper, label-helper, assessor-helper AND the scout's own
 #     scout-helper included — the converter files via MCP only), kept honest
 #     by scripts/spike-converter-perms-check.sh.
-#   * Every link of the walk carries the SAME surface, backstop, cap and
-#     prompt — only the model, secret and endpoint differ per step.
+#   * Every link of the walk carries the SAME surface, backstop and prompt,
+#     and counts against ONE per-walk filing cap (the shared SCOUT_CAP_STATE
+#     file every link step names — a link that files its fill and dies still
+#     counts when the next link runs, #565) — only the model, secret and
+#     endpoint differ per step.
 #
 # UNATTENDED FILING (the one place this sibling's semantics need saying out
 # loud): the skill's step 4 is dry-run-by-default with "only when the human
@@ -157,7 +161,16 @@ jobs:
       # The per-run filing cap, enforced by the reused scout MCP server. The
       # extractor emits ONE candidate per firing, so 1 is the structural
       # ceiling — set explicitly (not omitted) so a future widening is a
-      # visible diff, the product-scout.yml pattern.
+      # visible diff, the product-scout.yml pattern. What makes that cap span
+      # the chain WALK — not one link — is SCOUT_CAP_STATE, set on every link
+      # step below (issue #565): each link is its own claude-code-action step
+      # spawning a fresh MCP server process, so an in-process counter reset to
+      # 0 per link and a walk could file cap-per-link. Every link step counts
+      # filings from that one shared runner.temp file (fresh per job, so the
+      # count is run-scoped and never persists) — the reeve.yml
+      # REEVE_GREENLIGHT_STATE pattern. The server refuses to file if a link
+      # step lacks it, so a future link 4 that forgets the env fails loudly,
+      # never silently uncapped.
       SCOUT_MAX_BRIEFS: '1'
     steps:
       - uses: actions/checkout@v7
@@ -336,7 +349,12 @@ jobs:
           # READ wrapper's `gh issue list`/`view` GETs use it too — so it must
           # be exported here. GITHUB_REPOSITORY / GITHUB_RUN_ID are set by
           # Actions automatically, SCOUT_MAX_BRIEFS from the job env.
+          # SCOUT_CAP_STATE is what spans the cap across the walk (#565):
+          # step-level env because the runner context is unavailable in job
+          # env, the SAME runner.temp path on every link step, and the server
+          # counts filings from that one shared file.
           GITHUB_TOKEN: ${{ github.token }}
+          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -360,10 +378,13 @@ jobs:
       # want of ZAI_KEY) and gated on the Anthropic key's own presence. Claude
       # via api.anthropic.com: a plain API key (pay-per-token) is the right
       # fit for an unattended bot — no OAuth token / subscription seat. The
-      # same pin, permission, github_token, effort, cap, reused MCP filing
+      # same pin, permission, github_token, effort, reused MCP filing
       # tool, wrapper read verbs, backstop, transcript posture and prompt as
-      # the GLM link — only the model, secret and endpoint differ. Which model
-      # runs is the registry's call (the cheap Anthropic tier).
+      # the GLM link, and the same walk-spanning filing cap — the shared
+      # SCOUT_CAP_STATE file these steps name, so the count the GLM link
+      # advanced is the count this
+      # link starts from (#565) — only the model, secret and endpoint differ.
+      # Which model runs is the registry's call (the cheap Anthropic tier).
       - name: Run via Anthropic (Claude, chain link 2)
         id: run_anthropic_2
         if: >-
@@ -375,8 +396,11 @@ jobs:
         continue-on-error: true
         env:
           # Same reason as the Z.AI step: the MCP filing tool and the read
-          # wrapper's gh GETs inherit this env and authenticate with it.
+          # wrapper's gh GETs inherit this env and authenticate with it —
+          # plus the SAME SCOUT_CAP_STATE path, so the count the GLM link
+          # advanced is the count this link starts from (#565).
           GITHUB_TOKEN: ${{ github.token }}
+          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -403,6 +427,8 @@ jobs:
         timeout-minutes: 20
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # Same walk-spanning cap state as the earlier links (#565).
+          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
