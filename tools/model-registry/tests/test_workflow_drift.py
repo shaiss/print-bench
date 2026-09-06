@@ -3211,6 +3211,15 @@ def test_oracle_escalates_through_the_shared_reason_keyed_rule():
     assert "provider-escalation:${" not in text and "provider-${" not in text, (
         "oracle.yml interpolates a chain into a provider-escalation marker/id "
         "— the per-chain dedup key is back (issue #550)")
+    # The step's checkout is the BASE branch (#333's blindness posture) while
+    # its text comes from the PR head, so it must probe for the subcommand
+    # and degrade to a warning in the window where a PR changes this call
+    # before the module reaches main — a red advisory job is the #347 noise
+    # this leg exists to avoid.
+    assert "escalate --help" in text, (
+        "oracle.yml's escalate step no longer probes for the subcommand — "
+        "on a PR that changes this call the base-branch checkout lacks it "
+        "and the step would argparse-red instead of warning")
 
 
 def test_escalation_rule_guard_discriminates_a_shed_shared_call():
@@ -3224,11 +3233,14 @@ def test_escalation_rule_guard_discriminates_a_shed_shared_call():
 
 def test_escalation_rule_guard_discriminates_a_regrown_per_chain_marker():
     # NEGATIVE CONTROL: reintroduce a per-chain marker interpolation into
-    # either surface and the pin must fail.
+    # either surface and the pin must fail. Replaces every occurrence — the
+    # step also probes for the subcommand (the base-branch bootstrap window),
+    # so a first-occurrence-only tamper could land on the probe and miss the
+    # real call.
     text = _oracle_text()
     tampered = text.replace(
         "python3 -m model_registry escalate",
-        "MARKER=`provider-escalation:${CHAIN}`; python3 -m model_registry escalate", 1)
+        "MARKER=`provider-escalation:${CHAIN}`; python3 -m model_registry escalate")
     assert tampered != text, "tamper target not found — the fixture is stale"
     assert "provider-escalation:${" in tampered
 

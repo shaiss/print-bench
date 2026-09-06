@@ -517,7 +517,11 @@ jobs:
       # issue a routine's would and one /decide resolves the set. The Oracle is
       # advisory, so the outcomes warn rather than fail. Trusted base-branch
       # Python from the checkout, no PR-head code (the workflow's standing
-      # posture); issues:write is already held.
+      # posture); issues:write is already held. That posture has one bootstrap
+      # consequence: this workflow's TEXT comes from the PR head, while the
+      # checkout is the base — so a PR that changes this call runs against a
+      # base that may not carry the subcommand yet. The run block probes for
+      # it and degrades to a loud warning (never a red run) in that window.
       - name: Escalate a human-fixable provider failure (HITL needs-decision)
         id: escalate
         if: steps.ready.outputs.ready == 'true' && steps.classify.outputs.class == 'needs-human'
@@ -529,6 +533,10 @@ jobs:
           CONTEXT: the Oracle's opposite-vendor review chain (its reviews skip, not red, while it is dark)
         run: |
           set -uo pipefail
+          if ! python3 -m model_registry escalate --help >/dev/null 2>&1; then
+            echo "::warning::the base branch's model-registry does not carry 'escalate' yet (this PR adds it) — the Oracle's $REASON escalation cannot be filed from this run. Once the PR merges, later exhaustions file normally; until then raise it by hand if unseen (docs/decision-gate.md)."
+            exit 0
+          fi
           python3 -m model_registry escalate "$CHAIN" \
             --reason "$REASON" --context "$CONTEXT" \
             --repo "${{ github.repository }}" --token-env ESCALATION_TOKEN
