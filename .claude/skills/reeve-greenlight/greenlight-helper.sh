@@ -74,8 +74,11 @@
 #     wrapper invocations in a state file — a bash wrapper has no in-process
 #     counter to keep, unlike the scout/growth MCP tools.
 #   * idempotency: refuse when the issue already carries a greenlight marker
-#     comment — the loop posts only where none exists, enforced by a LIVE read
-#     at write time rather than assumed from a possibly-stale list.
+#     comment BY A TRUSTED AUTHOR (#546: the workflow's own bot login or a
+#     write-level collaborator — the same author test the approval poll
+#     applies; an untrusted commenter's pasted marker is not a marker) — the
+#     loop posts only where none exists, enforced by a LIVE read at write
+#     time rather than assumed from a possibly-stale list.
 #
 # All verbs act on the current repository; gh is authenticated in the action
 # from GH_TOKEN/GITHUB_TOKEN. Run from the repo root (the conf is read
@@ -200,22 +203,51 @@ approval_footer() {
   [ "${2:-}" != "1" ] || echo "Approving this one also applies \`autonomy-ok\`, arming the scheduled backlog burn to pick the work up and land it as a draft PR a human still merges."
 }
 
-# LIVE idempotency check (not the possibly-stale selection snapshot): any
+# The login the workflow's OWN token posts as (mirrored from
+# greenlight.WORKFLOW_BOT_LOGIN in tools/reeve, not imported — the wrapper
+# must run without the tool installed). A marker under it is the loop's own,
+# trusted by identity with no permission lookup.
+WORKFLOW_BOT_LOGIN="github-actions[bot]"
+
+# LIVE idempotency check (not the possibly-stale selection snapshot): a
 # greenlight marker for THIS issue — any verdict, any marker version — means
-# the loop has already been here. Written as a die-on-duplicate called as a
-# plain statement, NEVER inside an `if` condition: bash disables `set -e`
-# inside functions invoked from a condition, so an `if already…` shape would
-# turn a FAILED live read (gh error, network blip) into "not greenlighted" and
-# post anyway — fail-open. This way a failed read aborts the whole post, the
-# same fail-closed discipline as the labeler's no-reroute check. Note gh's
-# `--json comments` returns an OBJECT ({"comments":[…]}), so the jq program is
-# rooted at .comments — `.[].body` is the gh-api array form and errors here.
+# the loop has already been here, **when its author is one the loop trusts**
+# (#546, the same author test the approval poll has applied since #518): the
+# workflow's own bot login, or a login whose real repository permission is
+# write-level. Anyone who can comment used to be able to park a decision out
+# of the drafter's queue by pasting a marker; now an untrusted author's
+# marker is not a marker, on this side too. Written as a
+# die-on-duplicate called as a plain statement, NEVER inside an `if`
+# condition: bash disables `set -e` inside functions invoked from a
+# condition, so an `if already…` shape would turn a FAILED live read (gh
+# error, network blip) into "not greenlighted" and post anyway — fail-open.
+# This way a failed read aborts the whole post — and so does a failed
+# PERMISSION read, for the same reason: an unreadable author aborts rather
+# than drafts. Note gh's `--json comments` returns an OBJECT
+# ({"comments":[…]}), so the jq program is rooted at .comments — `.[].body`
+# is the gh-api array form and errors here. jq keeps the author attribution
+# honest on multiline bodies (a bash line-per-comment split could not), and
+# `unique` makes each distinct marker author cost at most one lookup.
 reject_if_greenlighted() {
-  local n="$1" bodies
-  bodies="$(gh issue view "$n" --repo "$repo" --json comments --jq '.comments[].body')"
-  if grep -q "<!-- reeve-greenlight v[0-9] issue=$n " <<<"$bodies"; then
-    die "#$n already carries a greenlight; the loop posts only where none exists"
-  fi
+  local n="$1" authors login perm
+  authors="$(gh issue view "$n" --repo "$repo" --json comments \
+    --jq ".comments | map(select(.body | test(\"<!-- reeve-greenlight v[0-9]+ issue=$n \")) | (.author.login // \"\")) | unique | .[]")"
+  while IFS= read -r login; do
+    [ -n "$login" ] || continue          # a loginless author is never trusted
+    if [ "$login" = "$WORKFLOW_BOT_LOGIN" ]; then
+      die "#$n already carries a greenlight; the loop posts only where none exists"
+    fi
+    # Only a GitHub login reaches the API path: logins are [A-Za-z0-9-]
+    # (+ the app-bot "[bot]" suffix), and this keeps a hostile "login" from
+    # ever steering the fixed path below anywhere else.
+    [[ "$login" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]] \
+      || die "reject_if_greenlighted: refusing to read permission for malformed login '$login'"
+    perm="$(gh api "repos/$repo/collaborators/$login/permission" --jq .permission)"
+    case "$perm" in
+      admin|maintain|write)
+        die "#$n already carries a greenlight; the loop posts only where none exists" ;;
+    esac
+  done <<<"$authors"
 }
 
 # Offline proof that every enforcement above still fires. Nothing here touches
@@ -270,20 +302,42 @@ case "$1 $2" in
   "issue list")
     [ -f "$GH_FIXTURES/issue-list" ] && cat "$GH_FIXTURES/issue-list"
     exit 0 ;;
+  "api repos/"*"collaborators/"*"/permission")
+    # The marker-author trust read (#546): repos/<o>/<r>/collaborators/<login>
+    # /permission --jq .permission. Answered ONLY from a declared
+    # perm-<login> fixture — an undeclared lookup is a hard error, so a case
+    # can never pass as untrusted-by-accident: every permission read a case
+    # makes must be pinned by its fixture.
+    login="$(basename "$(dirname "$2")")"
+    if [ -f "$GH_FIXTURES/perm-$login" ]; then
+      cat "$GH_FIXTURES/perm-$login"
+      exit 0
+    fi
+    echo "gh stub: no perm-$login fixture — declare the permission read this case makes" >&2
+    exit 9 ;;
   *) echo "gh stub: unexpected invocation: $*" >&2; exit 9 ;;
 esac
 STUB
   chmod +x "$stub/gh"
 
   # Two fixture repos: one whose conf caps greenlights at 2, one whose conf
-  # does not carry the key at all (the default-6 path). Issue 5 arrives
-  # already greenlighted.
+  # does not carry the key at all (the default-6 path). A comments-<n>
+  # fixture holds the AUTHOR LOGINS of issue #n's marker-carrying comments
+  # (what the wrapper's jq emits): issue 5 arrives already greenlighted BY
+  # THE LOOP'S OWN BOT LOGIN (trusted by identity, no permission read), issue
+  # 90 carries a marker by a read-only drive-by (untrusted), issue 91 a
+  # marker by a write-level human (trusted, through the permission read the
+  # perm-<login> fixtures declare).
   fx="$tmp/fx"
   repo_key="$tmp/repo-key"; repo_plain="$tmp/repo-plain"
   mkdir -p "$repo_key/.github" "$repo_plain/.github"
   printf 'greenlight_cap: 2\n' > "$repo_key/.github/reeve.conf"
   printf 'enabled: true\n'  > "$repo_plain/.github/reeve.conf"
-  printf '<!-- reeve-greenlight v1 issue=5 verdict=yes -->\nOld greenlight.\n' > "$fx/comments-5"
+  printf 'github-actions[bot]\n' > "$fx/comments-5"
+  printf 'driveby\n' > "$fx/comments-90"
+  printf 'read\n'    > "$fx/perm-driveby"
+  printf 'shaiss\n'  > "$fx/comments-91"
+  printf 'write\n'   > "$fx/perm-shaiss"
   printf '#5 Parked A\n#9 Parked B\n' > "$fx/issue-list"
 
   # run_w <repo-dir> <selected-issues-or--> <wrapper args…> — one wrapper
@@ -335,9 +389,10 @@ reasoning"; then
   [ "$(posts)" = "2" ] || { echo "FAIL  selftest: cap run published $(posts) posts (want 2)"; return 1; }
   echo "ok    selftest: a post past the greenlight_cap conf key is refused (cap held at 2)"
 
-  # Refusal: the issue already carries a greenlight (live marker check) — and
-  # the refusal must NOT consume the cap (issue 5 is refused, then two fresh
-  # posts still fit the cap of 2 and the third is refused for the cap itself).
+  # Refusal: the issue already carries a greenlight by the loop's own bot
+  # login (live marker check) — and the refusal must NOT consume the cap
+  # (issue 5 is refused, then two fresh posts still fit the cap of 2 and the
+  # third is refused for the cap itself).
   reset
   if run_w "$repo_key" - post-greenlight 5 --verdict no --body "GREENLIGHT: NO
 reasoning"; then
@@ -353,6 +408,32 @@ reasoning"; then
   fi
   [ "$(posts)" = "2" ] || { echo "FAIL  selftest: idempotency run published $(posts) posts (want 2)"; return 1; }
   echo "ok    selftest: a post onto an existing greenlight is refused and consumes no cap"
+
+  # Refusal (#546): a marker by a TRUSTED HUMAN — a real write-level
+  # permission — counts through the permission read, so the post is refused.
+  # This is the path the bot-login case never touches: the marker's author is
+  # an ordinary login, resolved by the collaborator-permission read.
+  reset
+  if run_w "$repo_key" - post-greenlight 91 --verdict yes --body "GREENLIGHT: YES
+reasoning"; then
+    echo "FAIL  selftest: a post onto a trusted human's greenlight was NOT refused"; return 1
+  fi
+  [ "$(posts)" = "0" ] || { echo "FAIL  selftest: a trusted-human-marker refusal still published"; return 1; }
+  echo "ok    selftest: a marker by a write-permission human is trusted (permission read → refused)"
+
+  # NOT a refusal (#546, the fix this pins): an UNTRUSTED author's
+  # marker-looking comment is not a marker — the post goes through, so a
+  # drive-by commenter cannot park a decision out of the drafter's queue.
+  reset
+  if ! run_w "$repo_key" - post-greenlight 90 --verdict yes --body "GREENLIGHT: YES
+reasoning"; then
+    echo "FAIL  selftest: an untrusted author's pasted marker blocked the post"; return 1
+  fi
+  [ "$(posts)" = "1" ] || { echo "FAIL  selftest: the untrusted-marker case published $(posts) posts (want 1)"; return 1; }
+  first="$(awk '/^===POST===/{getline; print; exit}' "$tmp/posts")"
+  [ "$first" = "<!-- reeve-greenlight v1 issue=90 verdict=yes -->" ] \
+    || { echo "FAIL  selftest: the untrusted-marker post's marker line is wrong: '$first'"; return 1; }
+  echo "ok    selftest: an untrusted author's pasted marker does NOT refuse the post"
 
   # Fail-closed: a FAILED live read (gh error) must abort the post, never
   # fall through as "not greenlighted" — the `if already…` shape this wrapper
