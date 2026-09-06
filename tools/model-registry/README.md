@@ -86,6 +86,22 @@ python3 -m model_registry shape backlog-burn --head zai \
 # composite action runs this and escalates the human-fixable causes through the
 # decision gate; every chain-walking workflow invokes it on exhaustion.
 ZAI_KEY=... ANTHROPIC_API_KEY=... python3 -m model_registry classify review
+
+# The write half of `classify` (issue #550): raise or join the shared,
+# reason-keyed HITL escalation for a chain that exhausted with a needs-human
+# reason. The dedup key is the REASON, not the chain — it reuses any OPEN
+# `provider-escalation:*` issue whose reason matches, appending this chain's
+# detail line to the body (never a duplicate issue), or files exactly one
+# carrying the reason-tailored remediation and the decision id
+# `provider-<reason>` — so a dual-provider outage opens ONE needs-decision
+# issue and one /decide resolves every chain that joined. The token is read
+# from the env var --token-env NAMES (never a value on the command line).
+# Both escalation surfaces call it: the provider-triage composite action and
+# oracle.yml's own exhaustion leg. Advisory on every decided outcome
+# (::warning::, exit 0); exit 1 only on a guard firing or the GitHub API
+# refusing.
+GITHUB_TOKEN=... python3 -m model_registry escalate backlog-burn \
+  --reason billing --context "the backlog-burn routine" --repo owner/name
 ```
 
 Stdlib-only, so a workflow runs it straight from the checkout with

@@ -339,15 +339,19 @@ def test_routine_chains_are_smokeable_from_their_head_provider():
 
 def test_post_is_the_packages_only_network_seam():
     # Confinement (the backlog-groomer discipline): network imports live in
-    # smoke.py only, so every other module stays statically network-free.
+    # the two NAMED seams only — smoke.py (provider endpoints) and
+    # escalation.py (the GitHub API, issue #550) — so every other module
+    # stays statically network-free.
+    seams = {"smoke.py", "escalation.py"}
     pkg = pathlib.Path(smoke.__file__).parent
     for src in pkg.glob("*.py"):
         text = src.read_text(encoding="utf-8")
-        if src.name == "smoke.py":
+        if src.name in seams:
             assert "urllib" in text
         else:
             assert "urllib" not in text and "http.client" not in text, (
-                f"{src.name} gained network I/O outside the smoke seam")
+                f"{src.name} gained network I/O outside the two named seams "
+                f"({sorted(seams)})")
 
 
 # ── classify_chain: the escalation-facing diagnosis (issue #347) ──────────────
