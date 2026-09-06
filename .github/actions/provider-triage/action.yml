@@ -7,11 +7,13 @@ description: >-
   probes each configured link with a live 1-token request to recover the real
   HTTP cause (`model-registry classify`, issue #347), then exposes the aggregate
   `class` (the action bucket) and `reason` (the finer cause) as outputs and
-  escalates on the account/config causes. It is ADVISORY: it never fails the
-  job — the calling workflow decides whether to red on the class — it only
-  classifies and, on a human-fixable cause, escalates once. Reuses the Oracle's
-  classify-and-escalate pattern (oracle.yml) as one shared, tested unit instead
-  of a copy per routine.
+  escalates on the account/config causes. The escalation is shared and
+  reason-keyed (issue #550): every chain that exhausts with the same reason
+  joins one open issue — per-chain detail lines in the body — so one `/decide`
+  resolves the set; the rule lives in `model_registry.escalation`, the same
+  tested unit oracle.yml's own exhaustion leg calls. It is ADVISORY: it never
+  fails the job on a decided outcome — the calling workflow decides whether to
+  red on the class — it only classifies and escalates.
 
 inputs:
   chain:
@@ -70,103 +72,28 @@ runs:
         python3 -m model_registry classify "$CHAIN" --gh-output "$GITHUB_OUTPUT"
 
     # needs-human — the account/config problem CI cannot fix (out of credit, out
-    # of tokens, or a bad/missing key). Raise it ONCE through the decision gate
-    # (a single deduped needs-decision issue keyed by a per-chain marker),
-    # remediation tailored to the reason, instead of reddening every run with an
-    # undifferentiated failure. dead / transient / servable are the caller's to
-    # message. Trusted base-branch github-script, no PR-head code.
+    # of tokens, or a bad/missing key). Raise it through the decision gate as
+    # ONE shared, reason-keyed needs-decision issue (issue #550): a chain that
+    # exhausts while an open issue for its reason exists JOINS it — detail line
+    # in the body, never a duplicate issue — so a dual-provider outage files one
+    # escalation and one /decide resolves the whole set, with remediation
+    # tailored to the reason. dead / transient / servable are the caller's to
+    # message. The whole rule lives in model_registry.escalation (tested, and
+    # shared with oracle.yml's own exhaustion leg, so the two surfaces cannot
+    # drift apart); trusted base-branch Python from the caller's checkout, no
+    # PR-head code — the same trust posture as the classify step above.
     - id: escalate
       if: ${{ inputs.escalate == 'true' && steps.classify.outputs.class == 'needs-human' }}
-      uses: actions/github-script@v9
+      shell: bash
       env:
+        PYTHONPATH: tools/model-registry/src
+        ESCALATION_TOKEN: ${{ inputs.github-token }}
         CHAIN: ${{ inputs.chain }}
         REASON: ${{ steps.classify.outputs.reason }}
         CONTEXT: ${{ inputs.context }}
-      with:
-        github-token: ${{ inputs.github-token }}
-        script: |
-          const chain = process.env.CHAIN;
-          const reason = process.env.REASON;
-          const contextLabel = process.env.CONTEXT;
-          const marker = `<!-- provider-escalation:${chain} -->`;
-          const decisionId = `provider-${chain}`;
-          const label = 'needs-decision';
-
-          // The reason IS the button a human pushes — say which, and where.
-          const REMEDIATION = {
-            billing: 'The provider account is **out of credit** (a billing/balance ' +
-              'rejection). **Fund the account**, then confirm.',
-            quota: 'The provider account is **out of tokens for the period** (a ' +
-              'quota / spend-cap rejection). **Raise the cap or wait for the reset**, ' +
-              'then confirm.',
-            auth: 'The API key is **invalid, expired, or revoked** (an auth rejection). ' +
-              '**Rotate the key**, then confirm.',
-            'no-key': 'No provider secret is configured for this chain at all. ' +
-              '**Set the key**, then confirm.',
-          };
-          const remedy = REMEDIATION[reason] ||
-            `A human-fixable account/config problem (\`${reason}\`). Fix it, then confirm.`;
-
-          // Ensure the decision-gate label exists (create-on-demand, tolerate a
-          // race with a sibling run) — docs/decision-gate.md's ensure-label idiom.
-          try {
-            await github.rest.issues.getLabel({ ...context.repo, name: label });
-          } catch (e) {
-            if (e.status !== 404) throw e;
-            try {
-              await github.rest.issues.createLabel({
-                ...context.repo, name: label, color: 'D93F0B',
-                description: 'A human decision is required before an agentic run can proceed',
-              });
-            } catch (_) { /* raced: another run created it first */ }
-          }
-
-          // One escalation per chain: reuse the OPEN needs-decision issue whose
-          // body carries this chain's marker rather than filing a duplicate every
-          // run. When a human resolves it (/decide clears the label, or the issue
-          // is closed) the next exhaustion is free to re-escalate.
-          const open = await github.paginate(github.rest.issues.listForRepo, {
-            ...context.repo, state: 'open', labels: label, per_page: 100,
-          });
-          const existing = open.find((i) => (i.body || '').includes(marker));
-          if (existing) {
-            core.warning(
-              `provider-triage: ${chain} still unusable (${reason}). Open ` +
-              `escalation: ${existing.html_url} — not filing a duplicate.`);
-            return;
-          }
-
-          const body = [
-            marker,
-            `🚦 DECISION NEEDED — \`${decisionId}\``,
-            ``,
-            `${contextLabel} (registry chain \`${chain}\`) failed on **every** link, and ` +
-            `the model-registry classifier read the cause as **${reason}** — an ` +
-            `account/config problem CI cannot fix, not a transient outage or a bad ` +
-            `model id.`,
-            ``,
-            `${remedy}`,
-            ``,
-            `Until it is resolved this chain's agentic runs cannot produce output.`,
-            ``,
-            `**yes** → the key is funded / rotated / configured and working. Confirm ` +
-            `by dispatching \`model-smoke.yml\` with input \`${chain}\`, then resolve.`,
-            `**no**  → accept this chain staying dark for now; this closes the ` +
-            `escalation without a code change.`,
-            ``,
-            `**Context:** classifier reason \`${reason}\` on chain \`${chain}\`. The ` +
-            `registry itself is correct — this is an account/key problem, behaviour ` +
-            `from issue #347.`,
-            ``,
-            `Resolve with \`/decide yes ${decisionId}\` or \`/decide no ${decisionId}\`.`,
-          ].join('\n');
-
-          const created = await github.rest.issues.create({
-            ...context.repo,
-            title: `🚦 Provider unusable: ${chain} (${reason})`,
-            body,
-            labels: [label],
-          });
-          core.warning(
-            `provider-triage: filed HITL escalation for ${chain} (${reason}): ` +
-            `${created.data.html_url}`);
+        REPO: ${{ github.repository }}
+      run: |
+        set -uo pipefail
+        python3 -m model_registry escalate "$CHAIN" \
+          --reason "$REASON" --context "$CONTEXT" --repo "$REPO" \
+          --token-env ESCALATION_TOKEN

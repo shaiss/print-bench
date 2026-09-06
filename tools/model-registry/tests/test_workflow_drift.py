@@ -3161,6 +3161,78 @@ def test_triage_wiring_guard_discriminates_a_wrong_chain():
         "weakened into a restatement")
 
 
+# ── The escalation dedup rule: reason-keyed, shared by BOTH surfaces ─────────
+#
+# Issue #550: the escalation used to be deduped PER CHAIN (marker
+# `provider-escalation:<chain>`, decision id `provider-<chain>`), so the one
+# event that fans out — a dual-provider outage, the only way a #544 chain
+# exhausts — opened up to fifteen needs-decision issues, one per chain, each
+# needing its own /decide. The rule is now reason-keyed and lives in ONE
+# tested place, model_registry.escalation, and BOTH escalation surfaces call
+# it: the provider-triage composite action and oracle.yml's own exhaustion leg
+# (which had a private `oracle-provider-escalation:<chain>` family). The pins
+# below hold each surface to the shared rule call and to no per-chain marker
+# or decision id surviving anywhere in it — a surface that quietly regrew its
+# own inline escalation is the drift that reopens #550.
+
+ORACLE_ESCALATION_LEG = "Escalate a human-fixable provider failure (HITL needs-decision)"
+
+
+def test_provider_triage_escalates_through_the_shared_reason_keyed_rule():
+    action = TRIAGE_ACTION.read_text(encoding="utf-8")
+    # The escalation runs the one shared, tested rule…
+    assert "model_registry escalate" in action, (
+        "provider-triage no longer runs `model_registry escalate` — its "
+        "escalation left the shared, reason-keyed rule (issue #550) and went "
+        "back to inline, untested JavaScript")
+    # …and carries no per-chain marker or decision id of its own: the dedup
+    # key is the reason, so a `${chain}` interpolation into a marker/id is
+    # the old rule regrown.
+    assert "provider-escalation:${" not in action, (
+        "provider-triage interpolates the chain into a provider-escalation "
+        "marker/id — the per-chain dedup key is back (issue #550)")
+    assert "provider-${" not in action and "decisionId" not in action, (
+        "provider-triage builds a decision id inline — the id is "
+        "model_registry.escalation's to derive (provider-<reason>)")
+
+
+def test_oracle_escalates_through_the_shared_reason_keyed_rule():
+    text = _oracle_text()
+    # The Oracle's own exhaustion leg calls the SAME command the composite
+    # action does — one rule, one marker family, so its escalations join the
+    # same per-reason issue a routine's would.
+    assert "model_registry escalate" in text, (
+        "oracle.yml no longer runs `model_registry escalate` — its exhaustion "
+        "leg left the shared, reason-keyed rule (issue #550)")
+    assert "oracle-provider-escalation" not in text, (
+        "oracle.yml still carries its private oracle-provider-escalation "
+        "marker family — the Oracle's escalations no longer share an issue "
+        "with the routines' (issue #550)")
+    assert "provider-escalation:${" not in text and "provider-${" not in text, (
+        "oracle.yml interpolates a chain into a provider-escalation marker/id "
+        "— the per-chain dedup key is back (issue #550)")
+
+
+def test_escalation_rule_guard_discriminates_a_shed_shared_call():
+    # NEGATIVE CONTROL: strip the shared call from the action and the pin
+    # must fail — otherwise it proves nothing.
+    action = TRIAGE_ACTION.read_text(encoding="utf-8")
+    tampered = action.replace("model_registry escalate", "model_registry classify", 1)
+    assert tampered != action, "tamper target not found — the fixture is stale"
+    assert "model_registry escalate" not in tampered
+
+
+def test_escalation_rule_guard_discriminates_a_regrown_per_chain_marker():
+    # NEGATIVE CONTROL: reintroduce a per-chain marker interpolation into
+    # either surface and the pin must fail.
+    text = _oracle_text()
+    tampered = text.replace(
+        "python3 -m model_registry escalate",
+        "MARKER=`provider-escalation:${CHAIN}`; python3 -m model_registry escalate", 1)
+    assert tampered != text, "tamper target not found — the fixture is stale"
+    assert "provider-escalation:${" in tampered
+
+
 # ── The agent forge (Wright + Reeve's sign-off, docs/agent-forge.md) ─────────
 #
 # The forge is ONE workflow (wright.yml) carrying TWO walks — `wright` (the
