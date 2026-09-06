@@ -46,8 +46,10 @@ name: Reeve growth (scheduled growth-post queueing)
 #   * Advisory-only + bounded: the run's ONLY write is the queue tool, which
 #     hardcodes the `growth-queue` + `channel:twitter` labels (never
 #     `approved-to-post`, `priority:high`, or any routing label) and caps items
-#     per run at GROWTHQ_MAX_POSTS. A prompt-injected run can at worst file a
-#     bounded number of draft queue items — noise a human closes.
+#     per run at GROWTHQ_MAX_POSTS — counted in the shared GROWTHQ_CAP_STATE
+#     file, so the cap spans the whole chain walk and not one link (#567). A
+#     prompt-injected run can at worst file a bounded number of draft queue
+#     items — noise a human closes.
 #   * The deny backstop (.claude/reeve-growth-settings.json, via --settings)
 #     neutralizes the additive settings.json allows AND denies the poster, kept
 #     honest by scripts/reeve-growth-perms-check.sh — on EVERY link of the walk,
@@ -131,10 +133,19 @@ jobs:
       # dedup-context, triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
-      # The per-run queue cap, enforced by the queue server (queue_mcp.py). With
-      # the daily cadence this is drafts/day: 2 → ~14/week, a healthy buffer over
-      # Lark's ~7 posts/week without flooding the human's review. Bump it for
-      # more supply; the human still culls every draft.
+      # The per-run queue cap, enforced by the queue server (queue_mcp.py).
+      # With the daily cadence this is drafts/day: 2 → ~14/week, a healthy
+      # buffer over Lark's ~7 posts/week without flooding the human's review.
+      # Bump it for more supply; the human still culls every draft. What makes
+      # the cap span the chain WALK — not one link — is GROWTHQ_CAP_STATE, set
+      # on every link step below (issue #567): each link is its own
+      # claude-code-action step spawning a fresh MCP server process, so an
+      # in-process counter reset to 0 per link and a walk could queue
+      # cap-per-link. Every link step counts filings from that one shared
+      # runner.temp file (fresh per job, so the count is run-scoped and never
+      # persists) — the reeve.yml REEVE_GREENLIGHT_STATE pattern. The server
+      # refuses to file if a link step lacks it, so a future link 4 that
+      # forgets the env fails loudly, never silently uncapped.
       GROWTHQ_MAX_POSTS: '2'
     steps:
       - uses: actions/checkout@v7
@@ -324,8 +335,13 @@ jobs:
           # The queue MCP tool (queue_mcp.py) inherits this step's env and
           # authenticates the GitHub REST call with this token (issues:write is
           # all the job grants). GITHUB_REPOSITORY / GITHUB_RUN_ID are set by
-          # Actions; GROWTHQ_MAX_POSTS from the job env.
+          # Actions; GROWTHQ_MAX_POSTS from the job env. GROWTHQ_CAP_STATE is
+          # what spans the queue cap across the walk (#567): step-level env
+          # because the runner context is unavailable in job env, the SAME
+          # runner.temp path on every link step below, and the server counts
+          # filings from that one shared file.
           GITHUB_TOKEN: ${{ github.token }}
+          GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -375,9 +391,12 @@ jobs:
       # ZAI_KEY) and gated on the Anthropic key's own presence. Claude via
       # api.anthropic.com: a plain API key (pay-per-token) is the right fit
       # for an unattended bot — no OAuth token / subscription seat. The same
-      # pin, permission, github_token, effort, cap, MCP queue tool, backstop,
-      # transcript posture and prompt as the GLM link — only the model, secret
-      # and endpoint differ. Which model runs is the registry's call.
+      # pin, permission, github_token, effort, MCP queue tool, backstop,
+      # transcript posture and prompt as the GLM link, and the same
+      # walk-spanning queue cap — the shared GROWTHQ_CAP_STATE file these
+      # steps name, so the count the GLM link advanced is the count this link
+      # starts from (#567) — only the model, secret and endpoint differ. Which
+      # model runs is the registry's call.
       - name: Run via Anthropic (Claude, chain link 2)
         id: run_anthropic_2
         if: >-
@@ -389,8 +408,11 @@ jobs:
         continue-on-error: true
         env:
           # Same reason as the Z.AI step: the queue MCP tool inherits this env
-          # and authenticates with it.
+          # and authenticates with it — plus the SAME GROWTHQ_CAP_STATE path,
+          # so the count the GLM link advanced is the count this link starts
+          # from (#567).
           GITHUB_TOKEN: ${{ github.token }}
+          GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -440,7 +462,11 @@ jobs:
         # the step (and the job) — the walk is over.
         timeout-minutes: 20
         env:
+          # Same as links 1 and 2: the queue MCP tool's token plus the SAME
+          # GROWTHQ_CAP_STATE path, so a walk that reached here still counts
+          # everything earlier links queued (#567).
           GITHUB_TOKEN: ${{ github.token }}
+          GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
