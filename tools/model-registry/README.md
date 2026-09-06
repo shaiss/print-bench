@@ -81,10 +81,15 @@ python3 -m model_registry shape backlog-burn --head zai \
 # (the cause behind it — billing / quota / auth / no-key / rate-limit / outage /
 # bad-model-id / served). With --gh-output it appends `class=…` and `reason=…` so
 # a workflow can route *out of credit* vs *out of tokens* vs *a bad key* each to
-# its own remediation instead of one undifferentiated red. Exit 0 regardless —
-# the class/reason ARE the signal. The shared `.github/actions/provider-triage`
-# composite action runs this and escalates the human-fixable causes through the
-# decision gate; every chain-walking workflow invokes it on exhaustion.
+# its own remediation instead of one undifferentiated red. A 429 is read by its
+# BODY, not its status (issue #545): Z.AI's code-1310 period-quota exhaustion is
+# `quota`/needs-human while its 1313 fair-usage throttle stays `rate-limit`, and
+# a quota body naming its reset time (`limit will reset at <ts>`, `regain access
+# on <date>`) surfaces as `reset=…` so the escalation can say WHEN the chain
+# comes back. Exit 0 regardless — the class/reason ARE the signal. The shared
+# `.github/actions/provider-triage` composite action runs this and escalates the
+# human-fixable causes through the decision gate; every chain-walking workflow
+# invokes it on exhaustion.
 ZAI_KEY=... ANTHROPIC_API_KEY=... python3 -m model_registry classify review
 ```
 
@@ -150,7 +155,8 @@ When a chain *does* exhaust every link, each consumer invokes the shared
 `.github/actions/provider-triage` composite action, which runs `classify` to
 recover the cause and escalates a human-fixable one (out of credit / out of
 tokens / bad or missing key) through the `needs-decision` gate — so a scheduled
-red nobody is watching becomes one deduped, reason-tailored ask instead. A dead
+red nobody is watching becomes one deduped, reason-tailored ask (naming the
+reset time when the provider's body carried one) instead. A dead
 model id still reds (a registry defect); a rate limit or outage just retries.
 
 The `review` chain's Anthropic backstop is itself a chain — Opus 4.8 → Sonnet 5
@@ -170,13 +176,16 @@ a link is exactly what the live smoke confirms, rather than a static claim.)
   drift guard).
 - `src/model_registry/cli.py` — `check` / `resolve` / `chain` / `show` / `smoke` /
   `classify` / `shape`; `resolve` emits the `$GITHUB_OUTPUT` links a workflow
-  consumes, `classify` emits `class` + `reason` for a workflow's exhaustion
-  branch, `shape` fails a resolve step whose chain does not fit the walk.
+  consumes, `classify` emits `class` + `reason` (and `reset`, when a quota body
+  named one) for a workflow's exhaustion branch, `shape` fails a resolve step
+  whose chain does not fit the walk.
 - `src/model_registry/smoke.py` — the live-callability proof (issue #298) and the
   package's single network seam (`_post`); everything else stays statically
   network-free, and a test enforces that confinement. `diagnose_chain` reduces an
-  exhausted chain to `(class, reason)`; `_reason_fine` is the finest cause and
-  the coarse `_classify_fine` verdict is DERIVED from it, so the two cannot drift.
+  exhausted chain to `(class, reason, reset)`; `_reason_fine` is the finest cause
+  and the coarse `_classify_fine` verdict is DERIVED from it, so the two cannot
+  drift — and a 429 is judged by its body (Z.AI code 1310 = quota, 1313 =
+  throttle), never by the status alone (issue #545).
 - `src/model_registry/__main__.py` — `python -m model_registry` for the no-install
   workflow invocation.
 
@@ -197,7 +206,9 @@ A positive case and a negative control for every parser rule, the CLI's
 skipped, and never green with nothing attempted) through its injected seam,
 `classify`'s class **and** reason for every cause (billing vs quota vs auth vs
 rate-limit vs outage vs a dead id, with the reason↔class consistency pinned so
-the split can't misroute), the walk-shape rule (a fitting chain, a head off the
+the split can't misroute), the 429 body shapes (Z.AI 1310 quota vs 1313
+throttle vs a bodiless 429, each with a negative control, plus the reset-time
+extraction — issue #545), the walk-shape rule (a fitting chain, a head off the
 conf provider, a link on the wrong slot's provider, a chain the walk cannot
 carry), and the drift guard that holds `.github/models/registry.conf` and its
 consumer workflows in correspondence — including that every chain-walking

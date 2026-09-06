@@ -6,7 +6,8 @@ description: >-
   hide their own provider error ("full output hidden for security"), so this
   probes each configured link with a live 1-token request to recover the real
   HTTP cause (`model-registry classify`, issue #347), then exposes the aggregate
-  `class` (the action bucket) and `reason` (the finer cause) as outputs and
+  `class` (the action bucket) and `reason` (the finer cause) as outputs — plus
+  `reset`, the reset time a quota-exhaustion body named (issue #545) — and
   escalates on the account/config causes. It is ADVISORY: it never fails the
   job — the calling workflow decides whether to red on the class — it only
   classifies and, on a human-fixable cause, escalates once. Reuses the Oracle's
@@ -51,6 +52,13 @@ outputs:
       The finer cause — served | bad-model-id | billing | quota | auth | no-key
       | rate-limit | outage.
     value: ${{ steps.classify.outputs.reason }}
+  reset:
+    description: >-
+      The reset time a quota-exhaustion body named (Z.AI 1310 "Your limit will
+      reset at <ts>" / Anthropic usage-cap "You will regain access on <date>"),
+      verbatim — empty when the cause named none. Says WHEN the chain comes
+      back (issue #545).
+    value: ${{ steps.classify.outputs.reset }}
 
 runs:
   using: composite
@@ -81,12 +89,14 @@ runs:
       env:
         CHAIN: ${{ inputs.chain }}
         REASON: ${{ steps.classify.outputs.reason }}
+        RESET: ${{ steps.classify.outputs.reset }}
         CONTEXT: ${{ inputs.context }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
           const chain = process.env.CHAIN;
           const reason = process.env.REASON;
+          const reset = process.env.RESET || '';
           const contextLabel = process.env.CONTEXT;
           const marker = `<!-- provider-escalation:${chain} -->`;
           const decisionId = `provider-${chain}`;
@@ -106,6 +116,14 @@ runs:
           };
           const remedy = REMEDIATION[reason] ||
             `A human-fixable account/config problem (\`${reason}\`). Fix it, then confirm.`;
+
+          // When the provider's own error body named WHEN the quota comes back
+          // (issue #545), say so — "wait for the reset" with the date beats a
+          // vague ask, and a human can decide to simply out-wait the wall.
+          const resetLine = reset
+            ? `The provider's error body names the reset: **${reset}** — after ` +
+              'then (or once the cap is raised), confirm with a smoke run.'
+            : '';
 
           // Ensure the decision-gate label exists (create-on-demand, tolerate a
           // race with a sibling run) — docs/decision-gate.md's ensure-label idiom.
@@ -146,6 +164,7 @@ runs:
             `model id.`,
             ``,
             `${remedy}`,
+            ...(resetLine ? [resetLine, ''] : []),
             ``,
             `Until it is resolved this chain's agentic runs cannot produce output.`,
             ``,
