@@ -25,9 +25,13 @@ filing an `agent-brief` issue:
   * the title MUST start with `Agent brief:` — output is always a
     recognisable Wright proposal a human (and Reeve) can find and cull;
   * a per-run cap (`WRIGHT_MAX_BRIEFS`, default 1) bounds how many issues one
-    run can file — a run-scoped in-process counter the agent cannot reach or
-    reset, so at worst a hijacked run files a bounded number of proposals,
-    noise Reeve declines, never an escalation;
+    run can file — counted in a state file every link step of the chain walk
+    shares (`WRIGHT_CAP_STATE`, the reeve.yml `REEVE_GREENLIGHT_STATE` pattern;
+    issue #566, lifted from the scout's #565), so the bound spans the whole
+    walk and not one server process. The agent can neither set env vars nor
+    write files, so it cannot reach or reset the count; at worst a hijacked
+    run files a bounded number of proposals, noise Reeve declines, never an
+    escalation;
   * its GitHub writes are `POST /issues` on the CURRENT repo plus an
     idempotent ensure-label for `agent-brief` only — it never edits an
     existing issue's labels, never touches another repo, and pushes no code.
@@ -41,9 +45,12 @@ so stdout carries nothing but JSON-RPC.
 
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 BRIEF_LABEL = "agent-brief"
 BRIEF_LABEL_COLOR = "8250DF"
@@ -55,11 +62,63 @@ SERVER_NAME = "wright"
 # echo the client's requested version (the most compatible choice).
 DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 
-# Per-run cap. GITHUB_RUN_ID is set and stable across one Actions run and this
-# process lives for that whole run, so an in-process counter is naturally
-# run-scoped. Attended (no run id) the cap is skipped — a human is the trust
-# boundary, the same posture the scout takes.
-_filed_this_run = 0
+# --- The walk-spanning brief cap (issue #566; lifted from scout_mcp.py #565) --
+#
+# Every link of a chain walk is its own claude-code-action step, so this server
+# process — and anything in-process — restarts at link N+1. An in-process
+# counter therefore caps ONE LINK, not the run: a link that files up to the cap
+# and then dies (agent error, step timeout) hands the next link a fresh counter
+# with the same prompt, so a 3-link walk could file up to 3x the cap. The count
+# must live where every link can see it: a state file the workflow names via
+# WRIGHT_CAP_STATE, one path shared by every link step of the propose job (the
+# reeve.yml REEVE_GREENLIGHT_STATE precedent, adopted from scout_mcp.py's
+# SCOUT_CAP_STATE per that file's SIBLING ADOPTION note — the three functions
+# below lifted verbatim under this half's own env-var name, not a
+# re-derivation). runner.temp is fresh per job, so the file is run-scoped and
+# never persists across runs.
+CAP_STATE_ENV = "WRIGHT_CAP_STATE"
+
+
+def _cap_state_path():
+    """The shared state-file path for this run, or None attended.
+
+    Attended (no GITHUB_RUN_ID) the cap is skipped entirely — a human is the
+    trust boundary — so no state file is required. Unattended the path comes
+    from the env var the workflow sets; an empty value is returned as-is so the
+    caller can refuse: filing on without it would silently fall back to
+    per-process counting, which is exactly the per-link reset this mechanism
+    exists to kill.
+    """
+    if not os.environ.get("GITHUB_RUN_ID", "").strip():
+        return None
+    return os.environ.get(CAP_STATE_ENV, "").strip()
+
+
+def _cap_state_count(path):
+    """How many briefs this run has already filed, per the shared state file.
+
+    One JSON record per successful write, so the count is the number of
+    non-empty lines; an absent file is a run that has filed nothing yet (the
+    first successful write creates it). Any other read failure raises — an
+    unreadable state must refuse, never count as zero.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return sum(1 for line in fh if line.strip())
+    except FileNotFoundError:
+        return 0
+    except OSError as e:
+        raise RuntimeError(f"cannot read {CAP_STATE_ENV} file {path}: {e}") from e
+
+
+def _cap_state_record(path, number, url):
+    """Append ONE record — only ever AFTER a successful filing, so refused and
+    failed attempts never consume the cap (the greenlight wrapper's rule). The
+    record doubles as the audit trail of what a link that later died filed."""
+    rec = {"issue": number, "url": url,
+           "filed_at": datetime.now(timezone.utc).isoformat()}
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
 
 # Captured by the selftest so it can assert the exact POST payload (the label
 # hardcode) without a network call. `None` in normal operation.
@@ -132,7 +191,6 @@ def _create_issue(title, body):
 
 def _file_agent_brief(arguments):
     """Create ONE agent-brief issue. Wright's entire write taxonomy."""
-    global _filed_this_run
     title = (arguments or {}).get("title")
     body = (arguments or {}).get("body")
     if not isinstance(title, str) or not title.strip():
@@ -146,16 +204,31 @@ def _file_agent_brief(arguments):
         )
 
     # Per-run cap — enforced only inside an Actions run (the unattended case
-    # the cap exists to bound); attended, a human is the trust boundary.
-    run_id = os.environ.get("GITHUB_RUN_ID", "").strip()
-    if run_id:
+    # the cap exists to bound); attended, a human is the trust boundary. The
+    # count is read from the shared state file so it spans the whole chain
+    # walk, not this one server process (#566).
+    state = _cap_state_path()
+    if state is not None:
+        if not state:
+            return _tool_error(
+                f"file_agent_brief: {CAP_STATE_ENV} is not set but this is an "
+                "unattended run (GITHUB_RUN_ID is set) — the workflow must give "
+                "every link step the same state-file path (the reeve.yml "
+                "REEVE_GREENLIGHT_STATE pattern) or the brief cap cannot span "
+                "the chain walk; refusing to file"
+            )
         try:
             cap = int(os.environ.get("WRIGHT_MAX_BRIEFS", "1"))
         except ValueError:
             cap = 1
-        if _filed_this_run >= cap:
+        try:
+            filed = _cap_state_count(state)
+        except RuntimeError as e:
+            return _tool_error(f"file_agent_brief: {e}")
+        if filed >= cap:
             return _tool_error(
-                f"per-run brief cap reached ({_filed_this_run}/{cap}); refusing to file more"
+                f"per-run brief cap reached ({filed}/{cap} filed across the "
+                "chain walk so far); refusing to file more"
             )
 
     try:
@@ -166,10 +239,16 @@ def _file_agent_brief(arguments):
     except Exception as e:  # noqa: BLE001 — surface any failure to the agent
         return _tool_error(f"failed to file brief: {type(e).__name__}: {e}")
 
-    _filed_this_run += 1
     url = issue.get("html_url", "(unknown url)")
     number = issue.get("number", "?")
-    log(f"filed #{number} {url} ({_filed_this_run} this run)")
+    if state:
+        try:
+            _cap_state_record(state, number, url)
+        except OSError as e:
+            log(f"WARNING: filed #{number} but could not append its "
+                f"{CAP_STATE_ENV} record ({e}) — this filing will not count "
+                f"toward the walk cap")
+    log(f"filed #{number} {url}")
     return _tool_text(f"FILED #{number} {url}")
 
 
@@ -274,15 +353,20 @@ def selftest():
     """Prove the write surface's security invariants fire, offline. A guard
     that is never exercised can be weakened and every other check stays green
     (the repo's standing rule), so these are the cases a live run cannot show."""
-    global _filed_this_run, _last_payload
+    global _last_payload
     os.environ["WRIGHT_MCP_FAKE"] = "1"
-    os.environ.pop("GITHUB_RUN_ID", None)
     fails = []
 
     def check(name, cond):
         print(f"{'ok  ' if cond else 'FAIL'}  {name}")
         if not cond:
             fails.append(name)
+
+    # Pin the environment: each case below decides attended/unattended itself,
+    # so an ambient Actions GITHUB_RUN_ID (this selftest runs inside CI) must
+    # not leak into the attended cases.
+    os.environ.pop("GITHUB_RUN_ID", None)
+    os.environ.pop(CAP_STATE_ENV, None)
 
     # Input guards reject and file nothing.
     check("missing title is rejected",
@@ -295,8 +379,8 @@ def selftest():
           _file_agent_brief({"title": "Design brief: x", "body": "x"}).get("isError") is True)
 
     # A valid call files and stamps the hardcoded label — no caller input can
-    # change it (there is no label argument to pass).
-    _filed_this_run = 0
+    # change it (there is no label argument to pass). Attended here (no run
+    # id): the cap is skipped and no state file is required.
     ok = _file_agent_brief({"title": "Agent brief: good one",
                             "body": "## Gap\n| a | b |\nyes"})
     check("a well-formed brief files", ok.get("isError") is False)
@@ -305,16 +389,64 @@ def selftest():
                             "body": "## Gap\n| a | b |\nyes",
                             "labels": [BRIEF_LABEL]})
 
-    # The per-run cap fires inside an Actions run (GITHUB_RUN_ID set).
+    # The walk-spanning cap (issue #566), inside an Actions run.
     os.environ["GITHUB_RUN_ID"] = "selftest-run"
-    os.environ["WRIGHT_MAX_BRIEFS"] = "1"
-    _filed_this_run = 0
-    r1 = _file_agent_brief({"title": "Agent brief: one", "body": "b"})
-    r2 = _file_agent_brief({"title": "Agent brief: two", "body": "b"})
-    check("cap lets through up to WRIGHT_MAX_BRIEFS", r1.get("isError") is False)
-    check("cap refuses the brief past WRIGHT_MAX_BRIEFS",
-          r2.get("isError") is True and "cap reached" in r2["content"][0]["text"])
+    os.environ["WRIGHT_MAX_BRIEFS"] = "2"
+
+    # Unwired: run id set but no state path. Fail closed — per-process
+    # counting is exactly the per-link reset the state file replaces.
+    r = _file_agent_brief({"title": "Agent brief: unwired", "body": "b"})
+    check("an unattended run without WRIGHT_CAP_STATE refuses (fail closed)",
+          r.get("isError") is True and CAP_STATE_ENV in r["content"][0]["text"])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "wright-briefs")
+        os.environ[CAP_STATE_ENV] = state
+
+        # In-process: up to the cap files, the next is refused, and the count
+        # the refusals read comes from the state file.
+        r1 = _file_agent_brief({"title": "Agent brief: one", "body": "b"})
+        r2 = _file_agent_brief({"title": "Agent brief: two", "body": "b"})
+        r3 = _file_agent_brief({"title": "Agent brief: three", "body": "b"})
+        check("cap lets through up to WRIGHT_MAX_BRIEFS",
+              r1.get("isError") is False and r2.get("isError") is False)
+        check("cap refuses the brief past WRIGHT_MAX_BRIEFS",
+              r3.get("isError") is True and "cap reached" in r3["content"][0]["text"])
+        check("each successful filing appended one state record",
+              _cap_state_count(state) == 2)
+
+        # THE cross-process property (#566): link N files its fill and then
+        # dies; link N+1 is a FRESH process whose only memory of the run is the
+        # state file. A real subprocess against the pre-populated file is the
+        # exact situation an in-process counter got wrong.
+        probe = [sys.executable, os.path.abspath(__file__), "--selftest-cap-child"]
+
+        proc = subprocess.run(probe + [state], env=dict(os.environ),
+                              capture_output=True, text=True)
+        check("a fresh process counting from a state file at the cap refuses "
+              "(the cross-process property)",
+              proc.returncode == 0 and proc.stdout.startswith("REFUSED"))
+
+        # One below the cap → the fresh process files, and the shared file
+        # advances — so the link after IT sees the incremented count too.
+        state2 = os.path.join(tmp, "wright-briefs-2")
+        _cap_state_record(state2, 41, "https://example.invalid/41")
+        proc = subprocess.run(probe + [state2], env=dict(os.environ),
+                              capture_output=True, text=True)
+        check("a fresh process one below the cap files (cross-process)",
+              proc.returncode == 0 and proc.stdout.startswith("FILED"))
+        check("the fresh process's filing advanced the shared state file",
+              _cap_state_count(state2) == 2)
+
+    # Attended behavior is unchanged: no GITHUB_RUN_ID means the cap is
+    # skipped — no state file needed, filing not bounded by WRIGHT_MAX_BRIEFS.
+    os.environ.pop(CAP_STATE_ENV, None)
     os.environ.pop("GITHUB_RUN_ID", None)
+    os.environ["WRIGHT_MAX_BRIEFS"] = "1"
+    a1 = _file_agent_brief({"title": "Agent brief: attended one", "body": "b"})
+    a2 = _file_agent_brief({"title": "Agent brief: attended two", "body": "b"})
+    check("attended (no GITHUB_RUN_ID) skips the cap — no state file required",
+          a1.get("isError") is False and a2.get("isError") is False)
     os.environ.pop("WRIGHT_MAX_BRIEFS", None)
 
     # The JSON-RPC surface exposes exactly the one tool.
@@ -328,9 +460,30 @@ def selftest():
     return 0
 
 
+def selftest_cap_child(state_path):
+    """One filing attempt in THIS fresh process — the parent selftest's
+    cross-process case. The parent's module state died with its process; the
+    only thing this process knows about the run's filings is the state file it
+    is handed, which is exactly link N+1's view after link N filed and died
+    (issue #566). Prints FILED/REFUSED for the parent to assert on."""
+    os.environ["WRIGHT_MCP_FAKE"] = "1"
+    os.environ["GITHUB_RUN_ID"] = "selftest-link-n+1"
+    os.environ[CAP_STATE_ENV] = state_path
+    r = _file_agent_brief({"title": "Agent brief: cross-process probe", "body": "b"})
+    outcome = "REFUSED" if r.get("isError") else "FILED"
+    print(f"{outcome}: {r['content'][0]['text']}")
+    return 0
+
+
 def main():
     if "--selftest" in sys.argv:
         raise SystemExit(selftest())
+    if "--selftest-cap-child" in sys.argv:
+        i = sys.argv.index("--selftest-cap-child")
+        if i + 1 >= len(sys.argv):
+            log("--selftest-cap-child needs the state-file path argument")
+            raise SystemExit(2)
+        raise SystemExit(selftest_cap_child(sys.argv[i + 1]))
     log(f"starting (repo={os.environ.get('GITHUB_REPOSITORY', '?')}, "
         f"run={os.environ.get('GITHUB_RUN_ID', 'attended')})")
     for line in sys.stdin:
