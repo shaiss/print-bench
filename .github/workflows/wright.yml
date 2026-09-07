@@ -64,8 +64,10 @@ name: Wright (scheduled agent forge — propose + Reeve sign-off)
 #   * Bounded on both halves: propose is capped per run (WRIGHT_MAX_BRIEFS)
 #     and skipped entirely while enough briefs are already pending
 #     (WRIGHT_MAX_PENDING, computed in the trusted Select step); sign-off is
-#     capped per run (SIGNOFF_MAX_VERDICTS) and bound to the trusted Select
-#     step's issue set.
+#     capped per run (SIGNOFF_MAX_VERDICTS — counted in the shared
+#     SIGNOFF_CAP_STATE state file every sign-off link step names, so the cap
+#     spans the whole chain walk and not one link, #568) and bound to the
+#     trusted Select step's issue set.
 #   * The one escalation-shaped write — arming a brief — is fenced twice: the
 #     sign-off tool's deterministic sensitive-path guard DOWNGRADES any
 #     approve whose brief touches the bench's protection machinery (existing
@@ -78,9 +80,12 @@ name: Wright (scheduled agent forge — propose + Reeve sign-off)
 #     the additive settings.json allows AND each other's write tool — the
 #     propose agent cannot sign off, the sign-off agent cannot file — kept
 #     honest by scripts/wright-perms-check.sh.
-#   * Every link of each walk carries the SAME surface, backstop, cap, bound
-#     and prompt as its half's head link — only the model, secret and
-#     endpoint differ per step.
+#   * Every link of each walk carries the SAME surface, backstop, bound and
+#     prompt as its half's head link — only the model, secret and endpoint
+#     differ per step — and the sign-off's links count against ONE per-walk
+#     verdict cap: the shared SIGNOFF_CAP_STATE file every sign-off link step
+#     names, so a link that posts its fill and dies still counts when the
+#     next link runs (#568).
 
 on:
   schedule:
@@ -179,7 +184,17 @@ jobs:
       # triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
-      # The per-run verdict cap, enforced by signoff_mcp.py.
+      # The per-run verdict cap, enforced by the sign-off MCP server
+      # (signoff_mcp.py). What makes the cap span the chain WALK — not one
+      # link — is SIGNOFF_CAP_STATE, set on every sign-off link step below
+      # (issue #568): each link is its own claude-code-action step spawning a
+      # fresh MCP server process, so an in-process counter reset to 0 per
+      # link and a five-link walk could attempt cap-per-link verdicts. Every
+      # link step counts verdicts from that one shared runner.temp file
+      # (fresh per job, so the count is run-scoped and never persists) — the
+      # reeve.yml REEVE_GREENLIGHT_STATE pattern. The server refuses to post
+      # if a link step lacks it, so a future link 6 that forgets the env
+      # fails loudly, never silently uncapped.
       SIGNOFF_MAX_VERDICTS: '3'
       # The autopilot switch: 'true' lets an approve verdict arm the brief
       # (`autonomy-ok` + `points-<n>`); anything else makes every approve
@@ -361,7 +376,10 @@ jobs:
       # sensitive-path guard that downgrades an approve touching protection
       # machinery to needs-decision, applies labels from a fixed taxonomy
       # label-first (decide.yml's fail-closed ordering), refuses a duplicate,
-      # and caps verdicts per run. READING stays on Wright's read-only wrapper
+      # and caps verdicts per run — counted across the walk in the shared
+      # SIGNOFF_CAP_STATE state file (#568), so a link that posts its fill
+      # and dies still counts when the next link runs. READING stays on
+      # Wright's read-only wrapper
       # wright-helper.sh (both path spellings) plus Read/Grep/Glob — never
       # Write, never a general Bash. --settings closes the additive allow leak
       # from settings.json with the sign-off's OWN deny backstop
@@ -398,6 +416,13 @@ jobs:
           # The trusted Select step's bounded issue set — the MCP write tool
           # refuses any issue not in it.
           SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          # SIGNOFF_CAP_STATE is what spans the verdict cap across the walk
+          # (#568): step-level env because the runner context is unavailable
+          # in job env, the SAME runner.temp path on every sign-off link
+          # step, and the server counts verdicts from that one shared file —
+          # a link that posts its fill and dies still counts when the next
+          # link runs.
+          SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -411,7 +436,9 @@ jobs:
 
       # The GLM tail (#327): links 2 and 3 of the registry's `wright-signoff`
       # chain, reached only when every earlier link did not succeed — the
-      # same env/bound/pin/backstop/prompt as link 1, only the model differs.
+      # same env/bound/pin/backstop/prompt as link 1, including the shared
+      # SIGNOFF_CAP_STATE path (#568), so the count link 1 advanced is the
+      # count these links start from — only the model differs.
       - name: Sign off via Z.AI (GLM, chain link 2)
         id: signoff_zai_2
         if: >-
@@ -429,6 +456,9 @@ jobs:
           API_TIMEOUT_MS: "3000000"
           GITHUB_TOKEN: ${{ github.token }}
           SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          # The SAME walk-spanning cap state as link 1 (#568): the count the
+          # earlier link advanced is the count this link starts from.
+          SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -457,6 +487,9 @@ jobs:
           API_TIMEOUT_MS: "3000000"
           GITHUB_TOKEN: ${{ github.token }}
           SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          # The SAME walk-spanning cap state as link 1 (#568): the count the
+          # earlier link advanced is the count this link starts from.
+          SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -471,7 +504,9 @@ jobs:
       # for want of ZAI_KEY) and gated on the Anthropic key's own presence.
       # Claude via api.anthropic.com: a plain API key (pay-per-token) is the
       # right fit for an unattended bot — no OAuth token / subscription seat.
-      # The same pin, permission, github_token, effort, verdict cap, MCP
+      # The same pin, permission, github_token, effort, walk-spanning verdict
+      # cap (the shared SIGNOFF_CAP_STATE file these steps name, so the count
+      # the GLM links advanced is the count the tail starts from, #568), MCP
       # write tool, wrapper read verbs, sign-off backstop, selection bound,
       # transcript posture and prompt as the GLM links — only the model,
       # secret and endpoint differ. Which model runs is the registry's call
@@ -492,9 +527,12 @@ jobs:
         env:
           # Same reasons as the Z.AI steps: the MCP write tool inherits this
           # env and authenticates with it, and refuses any issue outside the
-          # trusted Select step's bound.
+          # trusted Select step's bound — plus the SAME SIGNOFF_CAP_STATE
+          # path (#568), so the count the GLM links advanced is the count
+          # this link starts from.
           GITHUB_TOKEN: ${{ github.token }}
           SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -523,6 +561,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          # Same walk-spanning cap state as the earlier links (#568).
+          SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
