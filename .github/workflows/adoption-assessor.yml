@@ -57,13 +57,18 @@ name: Adoption-study assessor (scheduled advisory verdicts)
 #   * Advisory-only + bounded: the run's write surface is the MCP tool
 #     post_adoption_disposition, which hardcodes the advisory framing, requires
 #     the `adoption-study` label, applies NO label, and caps dispositions per
-#     run. The agent is handed only the trusted Select step's bounded issue set.
+#     run — counted in the shared ASSESSOR_CAP_STATE file, so the cap spans the
+#     whole chain walk and not one link (#569). The agent is handed only the
+#     trusted Select step's bounded issue set.
 #   * The assessor's deny backstop (.claude/adoption-assessor-settings.json, via
 #     --settings) neutralizes the additive settings.json allows (chunk-helper,
 #     label-helper AND scout-helper — none is the assessor's surface), kept
 #     honest by scripts/adoption-assessor-perms-check.sh.
 #   * Every link of the walk carries the SAME surface, backstop, bounded issue
-#     set and prompt — only the model, secret and endpoint differ per step.
+#     set and prompt, and counts against ONE per-walk disposition cap (the
+#     shared ASSESSOR_CAP_STATE file every link step names — a link that posts
+#     its fill and dies still counts when the next link runs, #569) — only the
+#     model, secret and endpoint differ per step.
 
 on:
   schedule:
@@ -405,6 +410,19 @@ jobs:
           # The trusted Select step's bounded issue set, bound into the agent's
           # environment so the MCP write tool can refuse any issue not in it.
           ASSESSOR_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          # ASSESSOR_CAP_STATE is what spans the disposition cap across the
+          # walk (#569): each link is its own claude-code-action step spawning
+          # a fresh MCP server process, so an in-process counter reset to 0 per
+          # link and a walk could post cap-per-link. Every link step counts
+          # postings from that one shared runner.temp file (fresh per job, so
+          # the count is run-scoped and never persists) — the reeve.yml
+          # REEVE_GREENLIGHT_STATE pattern, lifted from the scout's #565
+          # reference implementation. Step-level env because the runner
+          # context is unavailable in job env, and the SAME path on every link
+          # step below; the server refuses to post if a link step lacks it, so
+          # a future link 4 that forgets the env fails loudly, never silently
+          # uncapped.
+          ASSESSOR_CAP_STATE: ${{ runner.temp }}/assessor-dispositions
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -427,8 +445,10 @@ jobs:
       # for an unattended bot — no OAuth token / subscription seat. The same
       # pin, permission, github_token, effort, bounded issue set, MCP write
       # tool, wrapper read verbs, backstop, transcript posture and prompt as
-      # the GLM link — only the model, secret and endpoint differ. Which model
-      # runs is the registry's call.
+      # the GLM link, and the same walk-spanning disposition cap — the shared
+      # ASSESSOR_CAP_STATE file these steps name, so the count the GLM link
+      # advanced is the count this link starts from (#569) — only the model,
+      # secret and endpoint differ. Which model runs is the registry's call.
       - name: Run via Anthropic (Claude, chain link 2)
         id: run_anthropic_2
         if: >-
@@ -442,9 +462,12 @@ jobs:
         env:
           # Same reason as the Z.AI step: the MCP write tool inherits this env
           # and authenticates with it, and refuses any issue outside the
-          # trusted Select step's set.
+          # trusted Select step's set — plus the SAME ASSESSOR_CAP_STATE path,
+          # so the count the GLM link advanced is the count this link starts
+          # from (#569).
           GITHUB_TOKEN: ${{ github.token }}
           ASSESSOR_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          ASSESSOR_CAP_STATE: ${{ runner.temp }}/assessor-dispositions
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -472,6 +495,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ASSESSOR_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+          # Same walk-spanning cap state as the earlier links (#569).
+          ASSESSOR_CAP_STATE: ${{ runner.temp }}/assessor-dispositions
         uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
