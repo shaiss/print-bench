@@ -45,9 +45,11 @@ name: Growth agent — Twitter/X (scheduled queue drain)
 # shares their two-key safety model, their trusted-Select bounding and —
 # since issue #544 Part B — the scout's cross-provider chain walk (one run
 # step per registry link, the GLM head then the Anthropic tail; every link
-# carries the SAME backstop, tool surface, channel-credential env and prompt
-# — only the model, secret and endpoint differ, so the link that happens to
-# serve can climb no rung of the arming ladder another could not). Unlike
+# carries the SAME backstop, tool surface, channel-credential env and prompt,
+# and counts against ONE per-walk post cap — the shared GROWTH_CAP_STATE
+# state file every link step names (#570) — only the model, secret and
+# endpoint differ, so the link that happens to serve can climb no rung of
+# the arming ladder another could not). Unlike
 # them its write surface can eventually reach OUTSIDE the repo, which is why
 # it alone carries the third (live) key and the per-item approval gate.
 #
@@ -448,7 +450,10 @@ jobs:
       # THE ARMING LADDER SURVIVES ON EVERY LINK (docs/growth.md): all three
       # steps carry the same trusted-Select candidate binding, the same
       # committed cap + approval switch, the same live key and the same
-      # channel credentials — the posting tool enforces the three rungs at
+      # channel credentials, and count against ONE per-walk post cap (the
+      # shared GROWTH_CAP_STATE file every link step names — a link that
+      # posts its fill and dies still counts when the next link runs, #570)
+      # — the posting tool enforces the three rungs at
       # write time from THAT env, so the link that happens to serve changes
       # nothing about what may be published. The default GITHUB_TOKEN is
       # right: issue comments trigger no workflow.
@@ -497,10 +502,19 @@ jobs:
           # policy's cap + approval switch, the live key, and the channel
           # credentials (all empty until a human configures them — empty
           # means every drain is a dry run, by design). Every link of the
-          # walk carries this block verbatim.
+          # walk carries this block verbatim — GROWTH_CAP_STATE included
+          # (issue #570): each link is its own claude-code-action step
+          # spawning a fresh MCP server process, so an in-process counter
+          # reset to 0 per link and a walk could post cap-per-link. The
+          # server counts posts from that one shared runner.temp file (fresh
+          # per job, so the count is run-scoped and never persists) — the
+          # reeve.yml REEVE_GREENLIGHT_STATE pattern — and refuses to post if
+          # a link step lacks it, so a future link 4 that forgets the env
+          # fails loudly, never silently uncapped.
           GITHUB_TOKEN: ${{ github.token }}
           GROWTH_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
           GROWTH_MAX_POSTS: ${{ steps.policy.outputs.max_posts }}
+          GROWTH_CAP_STATE: ${{ runner.temp }}/growth-posts
           GROWTH_REQUIRE_APPROVAL: ${{ steps.policy.outputs.require_approval }}
           GROWTH_TWITTER_LIVE: ${{ vars.GROWTH_TWITTER_LIVE }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
@@ -527,7 +541,10 @@ jobs:
       # The same pin, permission, github_token, effort, MCP posting tool,
       # backstop, transcript posture, env contract (candidate binding, cap,
       # approval switch, live key, channel credentials) and prompt as the GLM
-      # link — only the model, secret and endpoint differ. Which model runs
+      # link, and the same walk-spanning post cap — the shared
+      # GROWTH_CAP_STATE file these steps name, so the count the GLM link
+      # advanced is the count this link starts from (#570) — only the model,
+      # secret and endpoint differ. Which model runs
       # is the registry's call.
       - name: Run via Anthropic (Claude, chain link 2)
         id: run_anthropic_2
@@ -541,10 +558,13 @@ jobs:
         continue-on-error: true
         env:
           # Same reason as the Z.AI step: the posting MCP server inherits
-          # this env, and it is the server's whole configuration surface.
+          # this env, and it is the server's whole configuration surface —
+          # plus the SAME GROWTH_CAP_STATE path, so the count the GLM link
+          # advanced is the count this link starts from (#570).
           GITHUB_TOKEN: ${{ github.token }}
           GROWTH_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
           GROWTH_MAX_POSTS: ${{ steps.policy.outputs.max_posts }}
+          GROWTH_CAP_STATE: ${{ runner.temp }}/growth-posts
           GROWTH_REQUIRE_APPROVAL: ${{ steps.policy.outputs.require_approval }}
           GROWTH_TWITTER_LIVE: ${{ vars.GROWTH_TWITTER_LIVE }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
@@ -575,6 +595,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GROWTH_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
           GROWTH_MAX_POSTS: ${{ steps.policy.outputs.max_posts }}
+          # Same walk-spanning cap state as the earlier links (#570).
+          GROWTH_CAP_STATE: ${{ runner.temp }}/growth-posts
           GROWTH_REQUIRE_APPROVAL: ${{ steps.policy.outputs.require_approval }}
           GROWTH_TWITTER_LIVE: ${{ vars.GROWTH_TWITTER_LIVE }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
