@@ -45,9 +45,12 @@ rather than trusting anything the model supplies:
     fail-closed ordering): a half-failed write leaves the brief RULED (the
     label is the operative verdict) rather than eternally re-selected;
   * it refuses a DUPLICATE (a hidden marker on a prior sign-off comment,
-    scanned across every comment page), caps verdicts per run, and its only
-    GitHub writes are label-add + comment on the CURRENT repo. It never
-    removes a label, never closes an issue, never touches code.
+    scanned across every comment page), caps verdicts per run — counted in a
+    state file every link step of the chain walk shares (`SIGNOFF_CAP_STATE`,
+    the reeve.yml `REEVE_GREENLIGHT_STATE` pattern; issue #568), so the bound
+    spans the whole walk and not one server process — and its only GitHub
+    writes are label-add + comment on the CURRENT repo. It never removes a
+    label, never closes an issue, never touches code.
 The run allow-lists ONLY this tool (`mcp__reeve_signoff__post_reeve_signoff`),
 the read wrapper's verbs, and the read-only file tools; the deny backstop
 (.claude/reeve-signoff-settings.json) additionally denies Wright's FILING
@@ -56,10 +59,13 @@ tool, so the judge can never file briefs. Stdlib only; logs to stderr.
 
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import unicodedata
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 BRIEF_LABEL = "agent-brief"
 VERDICT_LABELS = ("autonomy-ok", "needs-decision", "wright-declined")
@@ -152,11 +158,71 @@ SENSITIVE_PATTERNS = (
     "wright.conf",
 )
 
-# Per-run cap — GITHUB_RUN_ID is set and stable across one Actions run and
-# this process lives for that whole run, so an in-process counter is naturally
-# run-scoped. Attended (no run id) the cap is skipped — a human is the trust
-# boundary, the same posture every sibling tool takes.
-_posted_this_run = 0
+# --- The walk-spanning verdict cap (issue #568) -------------------------------
+#
+# Every link of a chain walk is its own claude-code-action step, so this server
+# process — and anything in-process — restarts at link N+1. An in-process
+# counter therefore caps ONE LINK, not the run: a link that posts up to the cap
+# and then dies (agent error, step timeout) hands the next link a fresh counter
+# with the same prompt, so the sign-off job's five-link walk (three GLM links
+# plus the two-link Anthropic tail) could attempt up to 5x the cap verdicts.
+# The count must live where every link can see it: a state file the workflow
+# names via SIGNOFF_CAP_STATE, one path shared by every link step of the job
+# (the reeve.yml REEVE_GREENLIGHT_STATE precedent). runner.temp is fresh per
+# job, so the file is run-scoped and never persists across runs.
+#
+# SIBLING ADOPTION (#549's splits): this block is lifted verbatim from
+# scout_mcp.py (#565, PR #585) under this server's own env-var name — growth-
+# queue has already done the same (PR #588). The remaining siblings
+# (adoption-assessor, growth-twitter) lift the three functions below the same
+# way; they are deliberately self-contained — stdlib only, no sign-off-specific
+# coupling — so adoption is a copy plus the CAP_STATE_ENV constant, not a
+# re-derivation of the mechanism.
+CAP_STATE_ENV = "SIGNOFF_CAP_STATE"
+
+
+def _cap_state_path():
+    """The shared state-file path for this run, or None attended.
+
+    Attended (no GITHUB_RUN_ID) the cap is skipped entirely — a human is the
+    trust boundary — so no state file is required. Unattended the path comes
+    from the env var the workflow sets; an empty value is returned as-is so the
+    caller can refuse: posting on without it would silently fall back to
+    per-process counting, which is exactly the per-link reset this mechanism
+    exists to kill.
+    """
+    if not os.environ.get("GITHUB_RUN_ID", "").strip():
+        return None
+    return os.environ.get(CAP_STATE_ENV, "").strip()
+
+
+def _cap_state_count(path):
+    """How many verdicts this run has already posted, per the shared state
+    file.
+
+    One JSON record per successful write, so the count is the number of
+    non-empty lines; an absent file is a run that has posted nothing yet (the
+    first successful write creates it). Any other read failure raises — an
+    unreadable state must refuse, never count as zero.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return sum(1 for line in fh if line.strip())
+    except FileNotFoundError:
+        return 0
+    except OSError as e:
+        raise RuntimeError(f"cannot read {CAP_STATE_ENV} file {path}: {e}") from e
+
+
+def _cap_state_record(path, number, url):
+    """Append ONE record — only ever AFTER a successful verdict, so refused
+    and failed attempts never consume the cap (the greenlight wrapper's rule).
+    The record doubles as the audit trail of what a link that later died
+    posted."""
+    rec = {"issue": number, "url": url,
+           "posted_at": datetime.now(timezone.utc).isoformat()}
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
 
 # Captured by the selftest so it can assert exact writes (labels applied, in
 # what order, and the comment body) without a network call.
@@ -316,7 +382,6 @@ def _post_reeve_signoff(arguments):
     """Post ONE verdict (comment + label) on a pending agent-brief issue,
     after validating the target at write time. The sign-off's entire write
     taxonomy — labels come from constants, never from arguments."""
-    global _posted_this_run
     args = arguments or {}
     number = args.get("number")
     verdict = args.get("verdict")
@@ -351,14 +416,32 @@ def _post_reeve_signoff(arguments):
             f"issue #{number} is not in this run's candidate set {sorted(selected)}; refusing")
 
     # --- per-run cap (unattended only) -------------------------------------
-    if os.environ.get("GITHUB_RUN_ID", "").strip():
+    # Enforced only inside an Actions run (the unattended case the cap exists
+    # to bound); attended, a human is the trust boundary. The count is read
+    # from the shared state file so it spans the whole chain walk, not this
+    # one server process (#568).
+    state = _cap_state_path()
+    if state is not None:
+        if not state:
+            return _tool_error(
+                f"post_reeve_signoff: {CAP_STATE_ENV} is not set but this is an "
+                "unattended run (GITHUB_RUN_ID is set) — the workflow must give "
+                "every link step the same state-file path (the reeve.yml "
+                "REEVE_GREENLIGHT_STATE pattern) or the verdict cap cannot span "
+                "the chain walk; refusing to post"
+            )
         try:
             cap = int(os.environ.get("SIGNOFF_MAX_VERDICTS", "3"))
         except ValueError:
             cap = 3
-        if _posted_this_run >= cap:
+        try:
+            posted_count = _cap_state_count(state)
+        except RuntimeError as e:
+            return _tool_error(f"post_reeve_signoff: {e}")
+        if posted_count >= cap:
             return _tool_error(
-                f"per-run verdict cap reached ({_posted_this_run}/{cap}); refusing to post more")
+                f"per-run verdict cap reached ({posted_count}/{cap} posted "
+                "across the chain walk so far); refusing to post more")
 
     # --- re-read the target and enforce state at WRITE time ----------------
     try:
@@ -458,9 +541,15 @@ def _post_reeve_signoff(arguments):
             f"labels applied but the comment failed ({type(e).__name__}: {e}) — "
             f"the verdict label on #{number} is the operative record")
 
-    _posted_this_run += 1
     url = posted.get("html_url", "(unknown url)")
-    log(f"signed off #{number} as {effective} {url} ({_posted_this_run} this run)")
+    if state:
+        try:
+            _cap_state_record(state, number, url)
+        except OSError as e:
+            log(f"WARNING: signed off #{number} but could not append its "
+                f"{CAP_STATE_ENV} record ({e}) — this verdict will not count "
+                f"toward the walk cap")
+    log(f"signed off #{number} as {effective} {url}")
     return _tool_text(f"SIGNED-OFF #{number} verdict={verdict} recorded={effective} "
                       f"labels={','.join(to_apply)} {url}")
 
@@ -586,10 +675,13 @@ def selftest():
     """Prove every write-surface invariant fires, offline — the negative-
     control discipline the perms-checks follow, applied to the one
     escalation-shaped write in the routine family."""
-    global _posted_this_run, _FAKE_ISSUES, _FAKE_COMMENTS, _write_log
+    global _FAKE_ISSUES, _FAKE_COMMENTS, _write_log
     os.environ["SIGNOFF_MCP_FAKE"] = "1"
     os.environ.pop("SIGNOFF_SELECTED_ISSUES", None)
     os.environ.pop("GITHUB_RUN_ID", None)
+    # Pin the cap-state env too: each case below decides attended/unattended
+    # itself, so an ambient SIGNOFF_CAP_STATE must not leak in.
+    os.environ.pop(CAP_STATE_ENV, None)
     os.environ["WRIGHT_AUTO_ARM"] = "true"
     fails = []
 
@@ -602,11 +694,10 @@ def selftest():
         return res.get("isError") is True
 
     def reset():
-        global _FAKE_ISSUES, _FAKE_COMMENTS, _write_log, _posted_this_run
+        global _FAKE_ISSUES, _FAKE_COMMENTS, _write_log
         _FAKE_ISSUES = {}
         _FAKE_COMMENTS = {}
         _write_log = []
-        _posted_this_run = 0
 
     # Input guards.
     reset()
@@ -727,18 +818,81 @@ def selftest():
           and "autonomy-ok" not in labels14)
     os.environ["WRIGHT_AUTO_ARM"] = "true"
 
-    # Per-run cap (unattended: GITHUB_RUN_ID set).
+    # The walk-spanning verdict cap (issue #568), inside an Actions run.
     reset()
     os.environ["GITHUB_RUN_ID"] = "selftest-run"
-    os.environ["SIGNOFF_MAX_VERDICTS"] = "1"
+    os.environ["SIGNOFF_MAX_VERDICTS"] = "2"
+
+    # Unwired: run id set but no state path. Fail closed — per-process
+    # counting is exactly the per-link reset the state file replaces.
     _FAKE_ISSUES[15] = _fresh_brief(15)
-    _FAKE_ISSUES[16] = _fresh_brief(16)
-    r1 = _post_reeve_signoff({"number": 15, "verdict": "decline", "body": "x"})
-    r2 = _post_reeve_signoff({"number": 16, "verdict": "decline", "body": "x"})
-    check("the cap lets through up to SIGNOFF_MAX_VERDICTS", r1.get("isError") is False)
-    check("the cap refuses past SIGNOFF_MAX_VERDICTS",
-          err(r2) and "cap reached" in r2["content"][0]["text"])
+    r = _post_reeve_signoff({"number": 15, "verdict": "decline", "body": "x"})
+    check("an unattended run without SIGNOFF_CAP_STATE refuses (fail closed)",
+          err(r) and CAP_STATE_ENV in r["content"][0]["text"])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "signoff-verdicts")
+        os.environ[CAP_STATE_ENV] = state
+
+        # In-process: up to the cap posts, the next is refused, and the count
+        # the refusal reads comes from the state file.
+        _FAKE_ISSUES[16] = _fresh_brief(16)
+        _FAKE_ISSUES[17] = _fresh_brief(17)
+        _FAKE_ISSUES[18] = _fresh_brief(18)
+        r1 = _post_reeve_signoff({"number": 16, "verdict": "decline", "body": "x"})
+        r2 = _post_reeve_signoff({"number": 17, "verdict": "decline", "body": "x"})
+        r3 = _post_reeve_signoff({"number": 18, "verdict": "decline", "body": "x"})
+        check("the cap lets through up to SIGNOFF_MAX_VERDICTS",
+              r1.get("isError") is False and r2.get("isError") is False)
+        check("the cap refuses the verdict past SIGNOFF_MAX_VERDICTS",
+              err(r3) and "cap reached" in r3["content"][0]["text"])
+        check("each successful verdict appended one state record",
+              _cap_state_count(state) == 2)
+
+        # An unreadable state path (a directory) refuses rather than counting
+        # zero — a state the server cannot read must bound, never unbound.
+        os.environ[CAP_STATE_ENV] = tmp
+        _FAKE_ISSUES[19] = _fresh_brief(19)
+        r = _post_reeve_signoff({"number": 19, "verdict": "decline", "body": "x"})
+        check("an unreadable state file refuses (never counts as zero)",
+              err(r) and "cannot read" in r["content"][0]["text"])
+        os.environ[CAP_STATE_ENV] = state
+
+        # THE cross-process property (#568): link N posts its fill and then
+        # dies; link N+1 is a FRESH process whose only memory of the run is
+        # the state file. A real subprocess against the pre-populated file is
+        # the exact situation an in-process counter got wrong.
+        probe = [sys.executable, os.path.abspath(__file__), "--selftest-cap-child"]
+
+        proc = subprocess.run(probe + [state], env=dict(os.environ),
+                              capture_output=True, text=True)
+        check("a fresh process counting from a state file at the cap refuses "
+              "(the cross-process property)",
+              proc.returncode == 0 and proc.stdout.startswith("REFUSED"))
+
+        # One below the cap → the fresh process posts, and the shared file
+        # advances — so the link after IT sees the incremented count too.
+        state2 = os.path.join(tmp, "signoff-verdicts-2")
+        _cap_state_record(state2, 21, "https://example.invalid/21")
+        proc = subprocess.run(probe + [state2], env=dict(os.environ),
+                              capture_output=True, text=True)
+        check("a fresh process one below the cap posts (cross-process)",
+              proc.returncode == 0 and proc.stdout.startswith("SIGNED-OFF"))
+        check("the fresh process's verdict advanced the shared state file",
+              _cap_state_count(state2) == 2)
+
+    # Attended behavior is unchanged: no GITHUB_RUN_ID means the cap is
+    # skipped — no state file needed, verdicts not bounded by
+    # SIGNOFF_MAX_VERDICTS.
+    os.environ.pop(CAP_STATE_ENV, None)
     os.environ.pop("GITHUB_RUN_ID", None)
+    os.environ["SIGNOFF_MAX_VERDICTS"] = "1"
+    _FAKE_ISSUES[22] = _fresh_brief(22)
+    _FAKE_ISSUES[23] = _fresh_brief(23)
+    a1 = _post_reeve_signoff({"number": 22, "verdict": "decline", "body": "x"})
+    a2 = _post_reeve_signoff({"number": 23, "verdict": "decline", "body": "x"})
+    check("attended (no GITHUB_RUN_ID) skips the cap — no state file required",
+          a1.get("isError") is False and a2.get("isError") is False)
     os.environ.pop("SIGNOFF_MAX_VERDICTS", None)
 
     # The JSON-RPC surface exposes exactly the one tool.
@@ -752,7 +906,37 @@ def selftest():
     return 0
 
 
+def selftest_cap_child(state_path):
+    """One verdict attempt in THIS fresh process — the parent selftest's
+    cross-process case. The parent's module state died with its process; the
+    only thing this process knows about the run's verdicts is the state file
+    it is handed, which is exactly link N+1's view after link N posted and
+    died (issue #568). Prints SIGNED-OFF/REFUSED for the parent to assert on.
+
+    Unlike the scout's child (#565), this one must SEED the fake target: the
+    sign-off server re-reads its target at write time (the scout only files),
+    so a fresh process with an empty fake store would refuse on "not found"
+    rather than exercise the cap."""
+    os.environ["SIGNOFF_MCP_FAKE"] = "1"
+    os.environ["GITHUB_RUN_ID"] = "selftest-link-n+1"
+    os.environ[CAP_STATE_ENV] = state_path
+    _FAKE_ISSUES[99] = _fresh_brief(99)
+    r = _post_reeve_signoff({"number": 99, "verdict": "decline",
+                             "body": "cross-process probe"})
+    outcome = "REFUSED" if r.get("isError") else "SIGNED-OFF"
+    print(f"{outcome}: {r['content'][0]['text']}")
+    return 0
+
+
 def main():
+    if "--selftest" in sys.argv:
+        raise SystemExit(selftest())
+    if "--selftest-cap-child" in sys.argv:
+        i = sys.argv.index("--selftest-cap-child")
+        if i + 1 >= len(sys.argv):
+            log("--selftest-cap-child needs the state-file path argument")
+            raise SystemExit(2)
+        raise SystemExit(selftest_cap_child(sys.argv[i + 1]))
     if "--selftest" in sys.argv:
         raise SystemExit(selftest())
     log(f"starting (repo={os.environ.get('GITHUB_REPOSITORY', '?')}, "
