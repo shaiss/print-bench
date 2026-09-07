@@ -32,7 +32,11 @@ TARGET at write time rather than trusting the issue number the model supplies:
     the comment is always a recognisable auto-draft a human still dispositions;
   * it applies NO label (the disposition stays the human's call), its only
     GitHub write is `POST /issues/{n}/comments` on the CURRENT repo, and a per-run
-    cap bounds how many comments one run can post.
+    cap bounds how many comments one run can post — counted in a state file
+    every link step of the chain walk shares (`ASSESSOR_CAP_STATE`, the reeve.yml
+    `REEVE_GREENLIGHT_STATE` pattern; issue #569), so the bound spans the whole
+    walk and not one server process. The agent can neither set env vars nor
+    write files, so it cannot reach or reset the count.
 The run allow-lists ONLY this tool (`mcp__assessor__post_adoption_disposition`),
 the wrapper's read verbs, and the read-only file tools — never `Write`, never a
 general `Bash`. Stdlib only (no pip install in the unattended run); logs go to
@@ -41,9 +45,12 @@ stderr so stdout carries nothing but JSON-RPC.
 
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 ADOPTION_STUDY_LABEL = "adoption-study"
 DISPOSITION_PREFIX = "disposition:"
@@ -62,11 +69,66 @@ SERVER_NAME = "assessor"
 # echo the client's requested version (the most compatible choice).
 DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 
-# Per-run cap — GITHUB_RUN_ID is set and stable across one Actions run and this
-# process lives for that whole run, so an in-process counter is naturally
-# run-scoped. Attended (no run id) the cap is skipped — a human is the trust
-# boundary, the same posture the scout and wrapper take.
-_posted_this_run = 0
+# --- The walk-spanning disposition cap (issue #569) ---------------------------
+#
+# Every link of a chain walk is its own claude-code-action step, so this server
+# process — and anything in-process — restarts at link N+1. An in-process
+# counter therefore caps ONE LINK, not the run: a link that posts up to the cap
+# and then dies (agent error, step timeout) hands the next link a fresh counter
+# with the same prompt, so a 3-link walk could post up to 3x the cap. The count
+# must live where every link can see it: a state file the workflow names via
+# ASSESSOR_CAP_STATE, one path shared by every link step of the job (the reeve.yml
+# REEVE_GREENLIGHT_STATE precedent). runner.temp is fresh per job, so the file
+# is run-scoped and never persists across runs.
+#
+# Lifted from scout_mcp.py's #565 reference implementation — the mechanism, not
+# just the idea: the three functions below are deliberately self-contained
+# (stdlib only, no scout-specific coupling), so the remaining #549 siblings
+# (wright, growth-queue, reeve-signoff, growth-twitter) lift them the same way.
+CAP_STATE_ENV = "ASSESSOR_CAP_STATE"
+
+
+def _cap_state_path():
+    """The shared state-file path for this run, or None attended.
+
+    Attended (no GITHUB_RUN_ID) the cap is skipped entirely — a human is the
+    trust boundary — so no state file is required. Unattended the path comes
+    from the env var the workflow sets; an empty value is returned as-is so the
+    caller can refuse: posting on without it would silently fall back to
+    per-process counting, which is exactly the per-link reset this mechanism
+    exists to kill.
+    """
+    if not os.environ.get("GITHUB_RUN_ID", "").strip():
+        return None
+    return os.environ.get(CAP_STATE_ENV, "").strip()
+
+
+def _cap_state_count(path):
+    """How many dispositions this run has already posted, per the shared state
+    file.
+
+    One JSON record per successful post, so the count is the number of
+    non-empty lines; an absent file is a run that has posted nothing yet (the
+    first successful post creates it). Any other read failure raises — an
+    unreadable state must refuse, never count as zero.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return sum(1 for line in fh if line.strip())
+    except FileNotFoundError:
+        return 0
+    except OSError as e:
+        raise RuntimeError(f"cannot read {CAP_STATE_ENV} file {path}: {e}") from e
+
+
+def _cap_state_record(path, number, url):
+    """Append ONE record — only ever AFTER a successful post, so refused and
+    failed attempts never consume the cap (the greenlight wrapper's rule). The
+    record doubles as the audit trail of what a link that later died posted."""
+    rec = {"issue": number, "url": url,
+           "posted_at": datetime.now(timezone.utc).isoformat()}
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
 
 # Captured by the selftest so it can assert the exact comment body (the advisory
 # framing + marker) without a network call. `None` in normal operation.
@@ -180,7 +242,6 @@ def _post_adoption_disposition(arguments):
     """Post ONE advisory split-verdict comment on a filed adoption-study issue,
     after validating the target at write time. The assessor's entire write
     taxonomy — it applies no label and touches no other repo."""
-    global _posted_this_run
     args = arguments or {}
     number = args.get("number")
     body = args.get("body")
@@ -207,14 +268,30 @@ def _post_adoption_disposition(arguments):
         )
 
     # --- per-run cap (unattended only) -------------------------------------
-    if os.environ.get("GITHUB_RUN_ID", "").strip():
+    # The count is read from the shared state file so it spans the whole chain
+    # walk, not this one server process (#569).
+    state = _cap_state_path()
+    if state is not None:
+        if not state:
+            return _tool_error(
+                f"post_adoption_disposition: {CAP_STATE_ENV} is not set but this "
+                "is an unattended run (GITHUB_RUN_ID is set) — the workflow must "
+                "give every link step the same state-file path (the reeve.yml "
+                "REEVE_GREENLIGHT_STATE pattern) or the disposition cap cannot "
+                "span the chain walk; refusing to post"
+            )
         try:
             cap = int(os.environ.get("ASSESSOR_MAX_DISPOSITIONS", "5"))
         except ValueError:
             cap = 5
-        if _posted_this_run >= cap:
+        try:
+            posted_count = _cap_state_count(state)
+        except RuntimeError as e:
+            return _tool_error(f"post_adoption_disposition: {e}")
+        if posted_count >= cap:
             return _tool_error(
-                f"per-run disposition cap reached ({_posted_this_run}/{cap}); refusing to post more"
+                f"per-run disposition cap reached ({posted_count}/{cap} posted "
+                "across the chain walk so far); refusing to post more"
             )
 
     # --- re-read the target and enforce state at WRITE time ----------------
@@ -261,9 +338,15 @@ def _post_adoption_disposition(arguments):
     except Exception as e:  # noqa: BLE001
         return _tool_error(f"failed to comment on #{number}: {type(e).__name__}: {e}")
 
-    _posted_this_run += 1
     url = posted.get("html_url", "(unknown url)")
-    log(f"posted disposition on #{number} {url} ({_posted_this_run} this run)")
+    if state:
+        try:
+            _cap_state_record(state, number, url)
+        except OSError as e:
+            log(f"WARNING: posted disposition on #{number} but could not append "
+                f"its {CAP_STATE_ENV} record ({e}) — this posting will not count "
+                f"toward the walk cap")
+    log(f"posted disposition on #{number} {url}")
     return _tool_text(f"POSTED disposition on #{number} {url}")
 
 
@@ -369,10 +452,15 @@ def selftest():
     """Prove the write surface's security invariants fire, offline. A guard that
     is never exercised can be weakened and every other check stays green (the
     repo's standing rule), so these are the cases a live run cannot show."""
-    global _posted_this_run, _FAKE_ISSUES, _FAKE_COMMENTS
+    global _FAKE_ISSUES, _FAKE_COMMENTS
     os.environ["ASSESSOR_MCP_FAKE"] = "1"
+    # Pin the environment: each case below decides attended/unattended itself,
+    # so an ambient Actions GITHUB_RUN_ID (this selftest runs inside CI) must
+    # not leak into the attended cases — and an ambient ASSESSOR_CAP_STATE must
+    # not leak into the unattended ones.
     os.environ.pop("ASSESSOR_SELECTED_ISSUES", None)
     os.environ.pop("GITHUB_RUN_ID", None)
+    os.environ.pop(CAP_STATE_ENV, None)
     fails = []
 
     def check(name, cond):
@@ -407,8 +495,8 @@ def selftest():
     check("a non-positive number is rejected",
           err(_post_adoption_disposition({"number": 0, "body": "x"})))
 
-    # A valid post succeeds and stamps the advisory framing + marker.
-    _posted_this_run = 0
+    # A valid post succeeds and stamps the advisory framing + marker. Attended
+    # here (no run id): the cap is skipped and no state file is required.
     ok = _post_adoption_disposition({"number": 1, "body": "## Redundant\n| a | b |\n..."})
     check("a well-formed disposition posts", ok.get("isError") is False)
     check("the posted body carries the marker",
@@ -434,18 +522,72 @@ def selftest():
           _post_adoption_disposition({"number": 6, "body": "x"}).get("isError") is False)
     os.environ.pop("ASSESSOR_SELECTED_ISSUES", None)
 
-    # Per-run cap (unattended: GITHUB_RUN_ID set).
+    # The walk-spanning cap (issue #569), inside an Actions run.
     os.environ["GITHUB_RUN_ID"] = "selftest-run"
-    os.environ["ASSESSOR_MAX_DISPOSITIONS"] = "1"
-    _posted_this_run = 0
+    os.environ["ASSESSOR_MAX_DISPOSITIONS"] = "2"
     _FAKE_ISSUES[10] = {"number": 10, "state": "open", "labels": [{"name": "adoption-study"}]}
     _FAKE_ISSUES[11] = {"number": 11, "state": "open", "labels": [{"name": "adoption-study"}]}
-    r1 = _post_adoption_disposition({"number": 10, "body": "x"})
-    r2 = _post_adoption_disposition({"number": 11, "body": "x"})
-    check("the cap lets through up to ASSESSOR_MAX_DISPOSITIONS", r1.get("isError") is False)
-    check("the cap refuses past ASSESSOR_MAX_DISPOSITIONS",
-          err(r2) and "cap reached" in r2["content"][0]["text"])
+    _FAKE_ISSUES[12] = {"number": 12, "state": "open", "labels": [{"name": "adoption-study"}]}
+
+    # Unwired: run id set but no state path. Fail closed — per-process
+    # counting is exactly the per-link reset the state file replaces.
+    r = _post_adoption_disposition({"number": 10, "body": "x"})
+    check("an unattended run without ASSESSOR_CAP_STATE refuses (fail closed)",
+          err(r) and CAP_STATE_ENV in r["content"][0]["text"])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "assessor-dispositions")
+        os.environ[CAP_STATE_ENV] = state
+
+        # In-process: up to the cap posts, the next is refused, and the count
+        # the refusal reads comes from the state file.
+        r1 = _post_adoption_disposition({"number": 10, "body": "x"})
+        r2 = _post_adoption_disposition({"number": 11, "body": "x"})
+        r3 = _post_adoption_disposition({"number": 12, "body": "x"})
+        check("the cap lets through up to ASSESSOR_MAX_DISPOSITIONS",
+              r1.get("isError") is False and r2.get("isError") is False)
+        check("the cap refuses past ASSESSOR_MAX_DISPOSITIONS",
+              err(r3) and "cap reached" in r3["content"][0]["text"])
+        check("each successful posting appended one state record",
+              _cap_state_count(state) == 2)
+
+        # THE cross-process property (#569): link N posts its fill and then
+        # dies; link N+1 is a FRESH process whose only memory of the run is the
+        # state file. A real subprocess against the pre-populated file is the
+        # exact situation an in-process counter got wrong.
+        probe = [sys.executable, os.path.abspath(__file__), "--selftest-cap-child"]
+
+        proc = subprocess.run(probe + [state], env=dict(os.environ),
+                              capture_output=True, text=True)
+        check("a fresh process counting from a state file at the cap refuses "
+              "(the cross-process property)",
+              proc.returncode == 0 and proc.stdout.startswith("REFUSED")
+              and "cap reached" in proc.stdout)
+
+        # One below the cap → the fresh process posts, and the shared file
+        # advances — so the link after IT sees the incremented count too.
+        state2 = os.path.join(tmp, "assessor-dispositions-2")
+        _cap_state_record(state2, 41, "https://example.invalid/41")
+        proc = subprocess.run(probe + [state2], env=dict(os.environ),
+                              capture_output=True, text=True)
+        check("a fresh process one below the cap posts (cross-process)",
+              proc.returncode == 0 and proc.stdout.startswith("FILED"))
+        check("the fresh process's posting advanced the shared state file",
+              _cap_state_count(state2) == 2)
+
+    # Attended behavior is unchanged: no GITHUB_RUN_ID means the cap is
+    # skipped — no state file needed, posting not bounded by
+    # ASSESSOR_MAX_DISPOSITIONS. Fresh issues (13, 14): #6 was posted on above
+    # and the duplicate guard would refuse it regardless of the cap.
+    os.environ.pop(CAP_STATE_ENV, None)
     os.environ.pop("GITHUB_RUN_ID", None)
+    os.environ["ASSESSOR_MAX_DISPOSITIONS"] = "1"
+    _FAKE_ISSUES[13] = {"number": 13, "state": "open", "labels": [{"name": "adoption-study"}]}
+    _FAKE_ISSUES[14] = {"number": 14, "state": "open", "labels": [{"name": "adoption-study"}]}
+    a1 = _post_adoption_disposition({"number": 13, "body": "x"})
+    a2 = _post_adoption_disposition({"number": 14, "body": "x"})
+    check("attended (no GITHUB_RUN_ID) skips the cap — no state file required",
+          a1.get("isError") is False and a2.get("isError") is False)
     os.environ.pop("ASSESSOR_MAX_DISPOSITIONS", None)
 
     # The JSON-RPC surface exposes exactly the one tool.
@@ -459,9 +601,37 @@ def selftest():
     return 0
 
 
+def selftest_cap_child(state_path):
+    """One disposition attempt in THIS fresh process — the parent selftest's
+    cross-process case. The parent's module state died with its process; the
+    only thing this process knows about the run's postings is the state file it
+    is handed, which is exactly link N+1's view after link N posted and died
+    (issue #569). Prints POSTED/REFUSED for the parent to assert on."""
+    global _FAKE_ISSUES
+    os.environ["ASSESSOR_MCP_FAKE"] = "1"
+    os.environ["GITHUB_RUN_ID"] = "selftest-link-n+1"
+    os.environ[CAP_STATE_ENV] = state_path
+    # The candidate-set binding stays unset (attended-posture binding: an
+    # unbound run posts on any valid target) and this process owns its fake
+    # issue store, so nothing of the parent leaks in but the state file.
+    os.environ.pop("ASSESSOR_SELECTED_ISSUES", None)
+    _FAKE_ISSUES = {60: {"number": 60, "state": "open",
+                         "labels": [{"name": "adoption-study"}]}}
+    r = _post_adoption_disposition({"number": 60, "body": "cross-process probe"})
+    outcome = "REFUSED" if r.get("isError") else "FILED"
+    print(f"{outcome}: {r['content'][0]['text']}")
+    return 0
+
+
 def main():
     if "--selftest" in sys.argv:
         raise SystemExit(selftest())
+    if "--selftest-cap-child" in sys.argv:
+        i = sys.argv.index("--selftest-cap-child")
+        if i + 1 >= len(sys.argv):
+            log("--selftest-cap-child needs the state-file path argument")
+            raise SystemExit(2)
+        raise SystemExit(selftest_cap_child(sys.argv[i + 1]))
     log(f"starting (repo={os.environ.get('GITHUB_REPOSITORY', '?')}, "
         f"run={os.environ.get('GITHUB_RUN_ID', 'attended')})")
     for line in sys.stdin:
