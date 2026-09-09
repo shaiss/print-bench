@@ -11,8 +11,9 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 > gates and slices, but several signature details are deliberately simplified and
 > tracked as their own issues: numerals are debossed (not yet true cut-through
 > stencil, [#601](https://github.com/shaiss/print-bench/issues/601)); the two-tone red-through-white only appears
-> in the planned two-tone render ([#600](https://github.com/shaiss/print-bench/issues/600)); the base is a plain
-> truss (the tapered space-frame is [#603](https://github.com/shaiss/print-bench/issues/603)); the balls split as
+> in the planned two-tone render ([#600](https://github.com/shaiss/print-bench/issues/600)); the base tapers to
+> needle points but has no red structural core, and isn't yet a reusable
+> space-frame library ([#603](https://github.com/shaiss/print-bench/issues/603)); the balls split as
 > crude hemispheres (a proper flat seam is [#602](https://github.com/shaiss/print-bench/issues/602)); and the
 > internal drive is a placeholder (a real bevel differential is
 > [#604](https://github.com/shaiss/print-bench/issues/604)). See NOTES.md.
@@ -30,8 +31,10 @@ whole clock would print as one fused lump):
 
 - `hours-half` / `minutes-half` — one hemisphere of each ~78 mm faceted ball,
   printed flat-face-down (print two of each for a full ball).
-- `base-segment` — one ~127 mm triangulated truss segment (three make the
-  383 mm base).
+- `base-segment` — the constant-section **centre** truss segment (~127 mm).
+- `base-end` — one of the two **tapering end wings** that come to a needle point
+  and carry a stalk boss over the motor pod (print two; three segments total make
+  the ~383 mm base).
 - `mock-drive` — the v0 placeholder gear cluster that sits inside a ball, visible
   through the slot.
 
@@ -48,8 +51,8 @@ preview.
   **dome does have overhangs** in v0 (an inherent hemisphere caveat) — light
   supports on the ball halves are acceptable until the seam/orientation work in
   [#602](https://github.com/shaiss/print-bench/issues/602).
-- **Orientation:** ball halves cut-face-down; truss segment as modeled; mock
-  drive flat.
+- **Orientation:** ball halves cut-face-down; truss segments bottom-chord-down
+  (as modeled); mock drive flat.
 
 ## Parameters
 

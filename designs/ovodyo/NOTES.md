@@ -36,6 +36,15 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   knife-edge thin spots (a scaled faceted copy leaves them).
 - **Printable unit = hemisphere:** a whole ball prints on a point (CRITICAL bed
   contact). The ball halves cut at the equator and print flat-face-down.
+- **Base = tapered space-frame:** the reference base is a long shallow lattice
+  that tapers to needle points at both ends. Modelled as a triangular section
+  (two bottom chords + a ridge, Warren-diagonal bottom deck) whose width AND
+  height follow `base_t(x)`: full across the centre segment (`|x| <= seg_len/2`),
+  then linear down to a small nub over each end segment — so the middle third is
+  full-section and the outer thirds point. Three bolted segments: a constant
+  `base-segment` (centre) and two mirror `base-end` wings (tapering, each carrying
+  a stalk boss over its motor pod). Both gate 100/100. The reusable
+  `lib/spaceframe.scad` and the red structural core stay #603.
 
 ## v0 simplifications → which issue upgrades each
 
@@ -44,7 +53,7 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
 | Numerals **debossed**, not cut-through; arbitrary per-face rotation; default font | #601 (parametric stencil glyphs + two-sided `fusecheck` counter gate) |
 | Two-tone invisible in single-material render | #600 (two-tone reveal render) |
 | Helical slot is a fixed inline cut | #601 (tunable `helical_window` brand module + sever-guard) |
-| Base is a **straight rectangular** truss (reference tapers to needle points) | #603 (`lib/spaceframe.scad`) |
+| Base tapers in-design but has **no red structural core** and isn't a reusable lib | #603 (`lib/spaceframe.scad` + the red core box) |
 | Ball splits as a **crude flat hemisphere**, glued | #602 (flat great-circle mating ring, threaded/snap) |
 | Deliverable gated as loose parts; no `ci.plate` | #604 (`ci.plate`/`ci.fusecheck` multi-object 3MF) |
 | Drive is a **placeholder** spur-disc cluster | #604 (`lib/bevel.scad` real differential) + #600 (kinematics gate proves it lands upright) |
@@ -55,14 +64,17 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
 ## Print orientation & gate status
 
 - Ball halves: cut-face-down (flat ring on the bed); faceted dome has overhangs
-  (v0 caveat, #602). Truss segment: as modelled. Mock drive: flat.
+  (v0 caveat, #602). Truss segments: bottom-chord-down (as modelled). Mock drive:
+  flat.
 - `gate.sh --slice ovodyo`: hours-half/minutes-half 84/100 (PRINTABLE WITH
-  CAVEATS — dome overhang, some thin wall), base-segment 100/100, mock-drive
-  100/100; all slice. No CRITICAL, no failure.
+  CAVEATS — dome overhang, some thin wall), base-segment (centre) 100/100,
+  base-end (tapering wing) 100/100, mock-drive 100/100; all slice. No CRITICAL,
+  no failure.
 
 ## Resume context
 
 Entry `ovodyo.scad` dispatches on `part`: assembled | hours-half | minutes-half |
-hours-ball | minutes-ball | base-segment | mock-drive. The `-ball` parts are the
-full shells used only in the assembled preview; the `-half` parts are the
-printable units. Previews are frozen in `previews/cameras.conf`.
+hours-ball | minutes-ball | base-segment | base-end | mock-drive. The `-ball`
+parts are the full shells used only in the assembled preview; the `-half` parts
+are the printable units. `base-segment` is the constant centre truss; `base-end`
+is a tapering end wing (print two). Previews are frozen in `previews/cameras.conf`.
