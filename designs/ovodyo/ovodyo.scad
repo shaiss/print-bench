@@ -11,8 +11,9 @@
 include <geodesic-ball.scad>  // the faceted numbered-ball generator (#600)
 
 /* [What to render] */
-// assembled | hours-half | minutes-half | hours-ball | minutes-ball |
-// base-segment | base-end | mock-drive | base-mech | pod-drive
+// assembled | hours-top | hours-bottom | minutes-top | minutes-bottom |
+// hours-ball | minutes-ball | base-segment | base-end | mock-drive |
+// base-mech | pod-drive
 part = "assembled";
 
 /* [Overall (from the reference: 383 x 78 x 163 mm)] */
@@ -43,6 +44,16 @@ bridge_w = 1.2;
 // Helical mechanism-window width (mm) and how far it wraps (turns)
 slot_width = 10;
 slot_turns = 0.5;
+
+/* [Ball seam] */
+// The ball prints in two halves. It is tilted POLE-UP (a pentagon face to each
+// pole) so the equatorial cut runs through the triangle band and bisects NO
+// number face — even numbers land on the top half, odd on the bottom. The two
+// halves locate on short alignment dowels seated in bosses at the seam (a keyed
+// register; #602 upgrades this flat butt joint to a captive threaded/snap seam).
+// Dowel diameter (mm) and how deep the dowel seat is (straddling the seam):
+seam_dowel_d = 2.8;
+seam_dowel_depth = 12;
 
 /* [Stalks & base] */
 // Brass support-shaft diameter (mm) — a bought rod (vitamin)
@@ -77,15 +88,59 @@ module minutes_ball() {
                 slot = true, slot_width = slot_width, slot_turns = -slot_turns);
 }
 
-// One printable HEMISPHERE, cut at the equator and sitting flat on the bed
-// (dome up). A sphere prints on a point; the real design splits each ball into
-// two halves that print flat-face-down. v0 uses a crude flat great-circle cut;
-// issue #602 turns it into a proper flat mating ring (threaded/snap seam).
-module ball_half(hours = true) {
-  intersection() {
-    if (hours) hours_ball(); else minutes_ball();
-    translate([0, 0, ball_d]) cube(ball_d * 2, center = true);  // keep z >= 0
+// Pole-up tilt: bring a pentagon face to each ±z pole so the equatorial split
+// runs through the triangle band and no number face is bisected. atan2(1,PHI)
+// is the colatitude of icosa vertex [0,1,PHI], so this rotation lands it on +z.
+_pole_up = atan2(1, PHI);
+
+// Alignment-dowel bosses at the seam. Three lugs on the inner wall straddle the
+// cut plane at irregular azimuths (so the halves seat at exactly one clocking);
+// a dowel hole is drilled down each. Because they are drilled in the WHOLE ball
+// before it is split, the two halves' holes register by construction.
+_seam_boss_r  = ball_d / 2 - 4;   // lug seat radius (embedded in the wall)
+_seam_az      = [24, 150, 262];   // irregular azimuths (deg), keyed clocking
+
+module _seam_bosses() {
+  for (a = _seam_az)
+    rotate([0, 0, a]) translate([_seam_boss_r, 0, 0])
+      cylinder(d = 8, h = 14, center = true, $fn = 32);   // lug straddling z=0
+}
+module _seam_dowels() {
+  for (a = _seam_az)
+    rotate([0, 0, a]) translate([_seam_boss_r, 0, 0])
+      cylinder(d = seam_dowel_d, h = seam_dowel_depth, center = true, $fn = 24);
+}
+
+// The pole-up ball with dowel bosses added and their holes drilled — the common
+// solid both printable halves are cut from.
+module _ball_for_split(hours = true) {
+  difference() {
+    union() {
+      rotate([_pole_up, 0, 0]) { if (hours) hours_ball(); else minutes_ball(); }
+      _seam_bosses();
+    }
+    _seam_dowels();
   }
+}
+
+// One printable HEMISPHERE, cut at the equator (through the triangle band) and
+// sitting flat cut-face-down on the bed (dome up). `top` selects the +z half
+// (even numbers) or the -z half (odd numbers); the bottom half is flipped so it
+// too prints flat-face-down. Print two halves per ball — a top AND a bottom —
+// to get all 12 numbers. #602 upgrades the flat butt joint + dowels to a
+// captive threaded/snap seam; the faceted dome still has light overhangs (v0).
+module ball_half(hours = true, top = true) {
+  if (top)
+    intersection() {
+      _ball_for_split(hours);
+      translate([0, 0, ball_d]) cube(ball_d * 2, center = true);   // keep z >= 0
+    }
+  else
+    rotate([180, 0, 0])                                            // flip dome-up
+      intersection() {
+        _ball_for_split(hours);
+        translate([0, 0, -ball_d]) cube(ball_d * 2, center = true); // keep z <= 0
+      }
 }
 
 // ---- drivetrain gear primitives -------------------------------------------
@@ -306,9 +361,16 @@ module base_truss(a, b) {
 }
 
 // a stalk boss sitting on the ridge at x (its height follows the taper)
+// A boss on the ridge that RECEIVES the brass support rod: a socket bored to the
+// rod diameter + a printer clearance, so the vitamin actually seats (it used to
+// be a solid stub the rod had nowhere to enter).
 module stalk_boss(x) {
   translate([x, 0, base_h(x)])
-    cylinder(d = stalk_d + 5, h = 6, $fn = 32);
+    difference() {
+      cylinder(d = stalk_d + 5, h = 8, $fn = 32);
+      translate([0, 0, 2])
+        cylinder(d = stalk_d + 0.4, h = 8, $fn = 32);   // rod socket, 0.4 mm clearance
+    }
 }
 
 // CENTRE segment (constant section) — the gated representative part
@@ -353,8 +415,10 @@ module assembled() {
 // ---- dispatch --------------------------------------------------------------
 
 if      (part == "assembled")    assembled();
-else if (part == "hours-half")   ball_half(hours = true);   // printable hemisphere
-else if (part == "minutes-half") ball_half(hours = false);
+else if (part == "hours-top")    ball_half(hours = true,  top = true);   // even numbers + 12
+else if (part == "hours-bottom") ball_half(hours = true,  top = false);  // odd numbers
+else if (part == "minutes-top")  ball_half(hours = false, top = true);
+else if (part == "minutes-bottom") ball_half(hours = false, top = false);
 else if (part == "hours-ball")   { hours_ball();   ball_core(gb_hours()); }    // preview (two-tone)
 else if (part == "minutes-ball") { minutes_ball(); ball_core(gb_minutes()); }
 else if (part == "base-segment") base_segment();           // constant centre segment
