@@ -19,21 +19,49 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
 
 ## Key decisions
 
-- **Ball geometry:** a true geodesic icosphere, matching the reference far more
-  closely than the v0 icosidodecahedron did. Each of the icosahedron's 20
-  triangular faces is subdivided to frequency `facet_freq` (default 3) and every
-  point projected to the sphere; the convex hull of those points is the geodesic
-  ball (a fine triangular field whose only sharp points are the 12 fivefold icosa
-  vertices). Intersecting with 12 planes — one per vertex direction, at radius
-  `r*plaque` — slices each fivefold tip into a flat **pentagon number-plaque**.
-  `facet_freq` sets the triangle fineness (2–3 ≈ the reference's snub-dodeca-like
-  density; 4+ reads too smooth and the plaques dissolve); `plaque` sets plaque
-  size (0.92 gives prominent number faces with a safe wall). Generator is
-  `geodesic-ball.scad`, **design-local for now** — issue #600 promotes it to a
-  first-party `lib/geodesic-ball.scad` with demo/guards/mates.
-- **Hollowing:** a spherical cavity sized to the plaque inradius minus `wall`, so
-  the wall is `>= wall` at every face and thicker toward the vertices — no
-  knife-edge thin spots (a scaled faceted copy leaves them).
+- **Ball geometry:** a **chamfered dodecahedron** — 12 big FLUSH pentagon
+  number-faces (the reference's headline: bold numbers on the outermost faces)
+  with the 20 dodecahedron vertices shaved into triangular corner facets, so it
+  reads as a chunky faceted dice-ball. Built (in `geodesic-ball.scad`,
+  `gb_faceted_ball`) as the intersection of 12 pentagon half-spaces at radius
+  `d/2` and 20 triangle half-spaces at `tri_k·d/2`; `tri_k` (default 1.05) sets
+  how deep the corner triangles cut — 1.0 ≈ a full icosidodecahedron (biggest
+  triangles), ≥1.12 collapses to a plain dodecahedron (no visible chamfer). The
+  pentagons at `d/2` are the outermost faces, so the numerals read face-on.
+  **Two earlier constructions were wrong and are recorded so they aren't
+  retried:** (a) a geodesic icosphere clipped into pentagon *plaques* recessed
+  the numbers into ~5 mm dimples where they were unreadable from any oblique
+  angle; (b) a true icosidodecahedron *recesses* its pentagons below the
+  triangles (pentagon plane 0.832·R < triangle plane 0.934·R), so the numbered
+  faces again sat in valleys — and worse, the cavity sphere (sized off a wrong
+  0.951·R "pentagon" constant) bulged out through each pentagon and `difference`
+  carved a round hole on every number face. The chamfered dodecahedron puts the
+  numbered pentagons *outermost*, which is the whole point. Generator is
+  **design-local for now** — issue #600 promotes it to `lib/geodesic-ball.scad`
+  with demo/guards/mates.
+- **Numerals:** **cut clean through** the shell to the red interior (the
+  reference's read-through red numbers), stencilised so no enclosed counter
+  (0/4/6/8/9, and 0/6/8/9 offset from centre in a two-digit "10"/"00") drops
+  out. `_gb_stencil` subtracts two full-width horizontal ties in the counter
+  band (±0.13·bh — squarely through every counter ring, not out at the edges
+  where they missed the offset "0" of "10") plus a central vertical tie. Proved
+  island-free by rendering each half and requiring CGAL `Volumes: 2` (a dropped
+  counter shows as a third volume). This delivers what was deferred to #601;
+  the tunable brand-module `helical_window` + sever-guard stay #601.
+- **Hollowing:** a spherical cavity at `d/2·_GB_PENT_R − wall` (the pentagon
+  plane minus the wall), so the wall is `>= wall` at every pentagon face and
+  thicker toward the triangles/vertices — no knife-edge thin spots that a scaled
+  faceted copy would leave.
+- **Base mechanism:** the reference's exposed "gears in the base" are modelled as
+  PREVIEW-ONLY red working parts (like the ball's red core — coloured, never in a
+  printed part, `colour` ignored on STL export): a **geared stepper + a
+  horizontal reduction gear-train at each pod**, a **bevel take-off** turning each
+  train up its vertical stalk at 90°, and a **central electronics bay** (PCB +
+  ATmega + DRV8833 + USB-C + WS2812 row). Gears are hand-rolled trapezoidal-tooth
+  approximations (`mech_spur`/`mech_bevel`, no BOSL2 dependency, fast) — they
+  *represent* the drive, they are not cut for a running fit. A real meshing
+  involute differential gated as turning is still #604; the reusable
+  `lib/spaceframe.scad` + red structural core stay #603.
 - **Printable unit = hemisphere:** a whole ball prints on a point (CRITICAL bed
   contact). The ball halves cut at the equator and print flat-face-down.
 - **Base = tapered space-frame:** the reference base is a long shallow lattice
@@ -48,33 +76,46 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
 
 ## v0 simplifications → which issue upgrades each
 
-| v0 shortcut | Upgraded by |
+Done in this pass (were v0 shortcuts): cut-through stencil numerals, the visible
+red interior/two-tone (preview), and the exposed base drivetrain. What remains:
+
+| v0 shortcut still open | Upgraded by |
 |---|---|
-| Numerals **debossed**, not cut-through; arbitrary per-face rotation; default font | #601 (parametric stencil glyphs + two-sided `fusecheck` counter gate) |
-| Two-tone invisible in single-material render | #600 (two-tone reveal render) |
-| Helical slot is a fixed inline cut | #601 (tunable `helical_window` brand module + sever-guard) |
-| Base tapers in-design but has **no red structural core** and isn't a reusable lib | #603 (`lib/spaceframe.scad` + the red core box) |
+| Helical slot is a fixed inline cut (not yet a tunable brand module) | #601 (tunable `helical_window` brand module + sever-guard) |
+| Two-tone shown only in preview colour, no committed two-tone reveal render | #600 (two-tone reveal render) |
+| Base drivetrain is a **preview representation** (hand-rolled trapezoidal gears, not involute, not cut to a running fit; no red structural core; not a reusable lib) | #604 (`lib/bevel.scad` real meshing differential + kinematics gate) + #603 (`lib/spaceframe.scad` + red core) |
 | Ball splits as a **crude flat hemisphere**, glued | #602 (flat great-circle mating ring, threaded/snap) |
 | Deliverable gated as loose parts; no `ci.plate` | #604 (`ci.plate`/`ci.fusecheck` multi-object 3MF) |
-| Drive is a **placeholder** spur-disc cluster | #604 (`lib/bevel.scad` real differential) + #600 (kinematics gate proves it lands upright) |
-| Ball generator is design-local | #600 (promote to `lib/`) |
+| Ball generator is design-local | #600 (promote to `lib/`, with a `tri_k` guard + facet mate) |
 | No committed style pack / stylelift metrics | #601 (style pack + facet/openness metrics) |
 | No stability/CoG check; balls high on thin stalks | #603 (ballast + CoG/tip-over gate) |
 
 ## Print orientation & gate status
 
-- Ball halves: cut-face-down (flat ring on the bed); faceted dome has overhangs
-  (v0 caveat, #602). Truss segments: bottom-chord-down (as modelled). Mock drive:
-  flat.
-- `gate.sh --slice ovodyo`: hours-half/minutes-half 84/100 (PRINTABLE WITH
-  CAVEATS — dome overhang, some thin wall), base-segment (centre) 100/100,
-  base-end (tapering wing) 100/100, mock-drive 100/100; all slice. No CRITICAL,
-  no failure.
+- Ball halves: cut-face-down (flat ring on the bed); the faceted dome has
+  overhangs and the sharp facet edges sample as thin walls (both inherent v0
+  caveats of splitting a faceted ball at the equator, the #602 seam/orientation
+  work). Truss segments: bottom-chord-down (as modelled). Mock-drive gear: flat.
+- `gate.sh --slice ovodyo`: hours-half/minutes-half **76/100 (PRINTABLE WITH
+  CAVEATS** — ~10 % dome overhang, ~4 % thin sampled wall at the facet edges,
+  both #602; watertight, one body — the cut-through numerals do NOT drop a
+  counter), base-segment 100/100, base-end 100/100, mock-drive 100/100; all
+  slice. No CRITICAL, no failure. (The score fell from the debossed-numeral v0's
+  84 because the numerals now cut fully through and the faceting is sharper; the
+  caveats are the seam/orientation ones #602 owns.)
 
 ## Resume context
 
 Entry `ovodyo.scad` dispatches on `part`: assembled | hours-half | minutes-half |
-hours-ball | minutes-ball | base-segment | base-end | mock-drive. The `-ball`
-parts are the full shells used only in the assembled preview; the `-half` parts
-are the printable units. `base-segment` is the constant centre truss; `base-end`
-is a tapering end wing (print two). Previews are frozen in `previews/cameras.conf`.
+hours-ball | minutes-ball | base-segment | base-end | mock-drive | base-mech |
+pod-drive. The `-ball` parts are the full shells used only in the assembled
+preview; the `-half` parts are the printable units. `base-segment` is the
+constant centre truss; `base-end` is a tapering end wing (print two).
+`base-mech` (whole drivetrain) and `pod-drive` (one pod's gear train) are
+PREVIEW-ONLY coloured mechanism — not in `ci.parts`, not printed. The ball's
+faceting is `_GB_TRI_K` in `geodesic-ball.scad`; the numeral stencil ties are
+`_gb_stencil` (proved island-free by CGAL `Volumes: 2`). Previews are frozen in
+`previews/cameras.conf` (added `base-mech`). NOTE: `--viewall` mis-scales this
+design because the ball's rotated half-space cubes fatten OpenSCAD's preview
+bbox — render scratch shots with an explicit camera `dist`; the committed
+previews use explicit cameras so they are unaffected.
