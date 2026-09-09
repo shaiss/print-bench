@@ -11,7 +11,8 @@
 include <geodesic-ball.scad>  // the faceted numbered-ball generator (#600)
 
 /* [What to render] */
-// assembled | hours-half | minutes-half | hours-ball | minutes-ball | base-segment | base-end | mock-drive
+// assembled | hours-half | minutes-half | hours-ball | minutes-ball |
+// base-segment | base-end | mock-drive | base-mech | pod-drive
 part = "assembled";
 
 /* [Overall (from the reference: 383 x 78 x 163 mm)] */
@@ -23,16 +24,22 @@ ball_spacing = 200;
 ball_center_z = 124;
 
 /* [Ball surface] */
-// Geodesic subdivision frequency: higher = finer triangular field, rounder ball
-facet_freq = 3;
-// Pentagon-plaque plane as a fraction of radius: smaller = larger number plaques
-plaque = 0.92;
+// Faceting: how far out the 20 triangle-corner-chamfer planes sit (× ball
+// radius). 1.0 = biggest triangular facets (≈ an icosidodecahedron); 1.05 =
+// dominant pentagon number-faces with crisp corners (the reference); >=1.12 = a
+// plain dodecahedron with clean corners. The 12 numbered pentagons stay flush at
+// the ball radius regardless.
+facet = 1.05;
 // Shell wall (mm) — keep >= 1.2
 wall = 2.2;
-// Numeral glyph height (mm)
-glyph_h = 11;
-// Numeral recess depth (mm). v0 = debossed; #601 makes it true cut-through.
-deboss = 1.0;
+// Numeral glyph height (mm) — bold, near the pentagon inradius so the numbers
+// read across a room (the reference's headline feature)
+glyph_h = 14;
+// Numerals cut clean through the shell to the red interior (reference), stencilised
+// so no counter drops out; false = debossed recess
+numerals_through = true;
+// Stencil bridge-bar width (mm) — the ties that keep 0/4/6/8/9 counters attached
+bridge_w = 1.2;
 // Helical mechanism-window width (mm) and how far it wraps (turns)
 slot_width = 10;
 slot_turns = 0.5;
@@ -58,17 +65,16 @@ $fn = 48;
 // ---- balls -----------------------------------------------------------------
 
 module hours_ball() {
-  geodesic_ball(d = ball_d, nums = gb_hours(), freq = facet_freq, plaque = plaque,
-                wall = wall, glyph_h = glyph_h, deboss = deboss, through = false,
+  geodesic_ball(d = ball_d, nums = gb_hours(), tri_k = facet,
+                wall = wall, glyph_h = glyph_h, through = numerals_through, bridge = bridge_w,
                 slot = true, slot_width = slot_width, slot_turns = slot_turns);
 }
 
 module minutes_ball() {
-  // opposite-handed slot phase differentiates it from the hours ball
-  rotate([0, 0, 36])
-    geodesic_ball(d = ball_d, nums = gb_minutes(), freq = facet_freq, plaque = plaque,
-                  wall = wall, glyph_h = glyph_h, deboss = deboss, through = false,
-                  slot = true, slot_width = slot_width, slot_turns = -slot_turns);
+  // opposite-handed slot differentiates it from the hours ball
+  geodesic_ball(d = ball_d, nums = gb_minutes(), tri_k = facet,
+                wall = wall, glyph_h = glyph_h, through = numerals_through, bridge = bridge_w,
+                slot = true, slot_width = slot_width, slot_turns = -slot_turns);
 }
 
 // One printable HEMISPHERE, cut at the equator and sitting flat on the bed
@@ -82,30 +88,168 @@ module ball_half(hours = true) {
   }
 }
 
-// ---- mock drive (v0 placeholder; real bevel differential is #604) ----------
+// ---- drivetrain gear primitives -------------------------------------------
+// Hand-rolled gears (no BOSL2 dependency, fast to render): trapezoidal teeth on
+// a pitch circle. Not true involute — these represent the mechanism in the
+// preview, they are not cut for a running fit (a real involute differential
+// gated as turning is issue #604). One 2D profile drives both the spur and the
+// bevel, so a train and its right-angle take-off share a tooth count.
 
-// A mock toothed disc. Teeth straddle the rim so they stay ONE body with the
-// hub (a real involute gear is lib/bevel.scad, issue #604).
-module mock_gear(d = 24, h = 5, teeth = 20) {
-  hub_r = d * 0.42;
-  union() {
-    cylinder(r = hub_r + 0.6, h = h);
-    for (i = [0 : teeth - 1])
-      rotate([0, 0, i * 360 / teeth])
-        translate([hub_r, 0, h / 2])
-          cube([2.6, 2.0, h], center = true);
+// module = mod (circular tooth size). pitch radius pr = mod*teeth/2; a pair
+// meshes when their centre distance == pr1 + pr2.
+function mech_pr(teeth, mod) = mod * teeth / 2;
+
+// The 2D gear profile: root disc + `teeth` radial trapezoids (wide at the root,
+// narrow at the tip), with the bore removed.
+module mech_spur2d(teeth = 16, mod = 1.6, bore = 3.2) {
+  pr = mech_pr(teeth, mod);
+  rr = pr - 1.25 * mod;                    // dedendum (root) radius
+  ra = pr + mod;                           // addendum (tip) radius
+  tw = 360 / teeth;
+  difference() {
+    union() {
+      circle(r = rr + 0.15, $fn = max(64, teeth * 4));
+      for (i = [0 : teeth - 1]) rotate(i * tw)
+        polygon([[rr, -mod * 1.05], [ra, -mod * 0.5], [ra, mod * 0.5], [rr, mod * 1.05]]);
+    }
+    if (bore > 0) circle(d = bore, $fn = 24);
   }
 }
 
-// v0 placeholder differential: a flat-sitting crown gear + hub + a 90-degree
-// bevel pinion beside it, low and stable. Replaced by a real meshing bevel
-// differential in issue #604 (and verified turning by the gate in #600).
+// A flat spur gear, `th` thick, with optional round lightening holes.
+module mech_spur(teeth = 16, mod = 1.6, th = 4, bore = 3.2, lighten = false) {
+  pr = mech_pr(teeth, mod);
+  linear_extrude(height = th, convexity = 8) {
+    difference() {
+      mech_spur2d(teeth, mod, bore);
+      if (lighten)
+        for (i = [0 : 4]) rotate(i * 72)
+          translate([pr * 0.5, 0]) circle(d = pr * 0.42, $fn = 20);
+    }
+  }
+}
+
+// A bevel gear: the same 2D profile tapered to a cone by linear_extrude(scale),
+// so it hands a horizontal layshaft off to a vertical one at 90°. The scale
+// shrinks the bore too, so it is re-drilled straight.
+module mech_bevel(teeth = 16, mod = 1.6, face = 6, bore = 3.2) {
+  difference() {
+    linear_extrude(height = face, scale = 0.5, convexity = 8) mech_spur2d(teeth, mod, 0);
+    translate([0, 0, -0.5]) cylinder(d = bore, h = face + 1, $fn = 24);
+  }
+}
+
+// A 15 mm can-type geared stepper (the reference's 15 mm 1:99 unit): the motor
+// can, a smaller gearhead collar, and the output shaft. Axis is +z; length runs
+// back along -z. Rendered as the steel `mech_steel` vitamin.
+module stepper15(shaft = 8) {
+  color(mech_steel) {
+    translate([0, 0, -20]) cylinder(d = 15, h = 15, $fn = 40);     // motor can
+    translate([0, 0, -6])  cylinder(d = 12, h = 6,  $fn = 40);     // gearhead collar
+  }
+  color(mech_steel2) cylinder(d = 3, h = shaft, $fn = 20);         // output shaft
+}
+
+// A gear lying in the x–z plane (axis along y), so a whole train reads face-on
+// from the front of the clock the way the reference's exposed gears do.
+module gear_xz(teeth, mod, th = 5, bore = 3.2, lighten = false)
+  rotate([90, 0, 0]) translate([0, 0, -th / 2]) mech_spur(teeth, mod, th, bore, lighten);
+
+// One pod drivetrain (origin = the stalk foot; `sgn` = +1 right / −1 left so it
+// builds outward toward the pod). A geared stepper at the outer end drives a
+// pinion into a horizontal reduction chain that runs back to the stalk, where a
+// bevel pair turns the last gear's motion up the vertical stalk at 90°. All the
+// gears sit in the x–z plane at one shaft height, framed by the open lattice —
+// the reference's "gears in the base". Preview-only (coloured working parts).
+module pod_drive(sgn = 1) {
+  m  = 1.0;                                   // gear module for the whole train
+  z0 = 9;                                     // shaft height above the bottom deck
+  th = 5;
+  // Chain from the stalk (x=0) outward: final(18T) → idler(12T) → idler(16T) →
+  // pinion(9T)+stepper. Each x-step is the meshing centre distance pr_a+pr_b.
+  xF = 0;
+  x2 = xF + sgn * (mech_pr(18, m) + mech_pr(12, m));
+  x1 = x2 + sgn * (mech_pr(12, m) + mech_pr(16, m));
+  x0 = x1 + sgn * (mech_pr(16, m) + mech_pr(9,  m));
+  // final gear at the stalk foot + the take-off bevel that turns up the stalk
+  translate([xF, 0, z0]) color(mech_red) gear_xz(18, m, th, 4, true);
+  translate([xF, 0, z0]) color(mech_red2) rotate([90, 0, 0]) mech_bevel(14, m, 6, 4); // layshaft bevel (axis +z after this)
+  translate([xF, 0, z0 + 2]) color(mech_red2) mech_bevel(14, m, 6, 4);                // stalk bevel (axis +z)
+  // reduction idlers
+  translate([x2, 0, z0]) color(mech_red)  gear_xz(12, m, th, 3, true);
+  translate([x1, 0, z0]) color(mech_red)  gear_xz(16, m, th, 3, true);
+  // pinion + geared stepper at the outer end (stepper can sits behind, −y)
+  translate([x0, 0, z0]) {
+    color(mech_red) gear_xz(9, m, th, 3);
+    rotate([90, 0, 0]) stepper15();           // shaft +y into the pinion, can behind
+  }
+  // a slim layshaft tying the chain together, along x at the shaft line
+  color(mech_steel2)
+    translate([min(xF, x0) - 3, 0, z0]) rotate([0, 90, 0]) cylinder(d = 2, h = abs(x0 - xF) + 6, $fn = 16);
+}
+
+// Central electronics bay (the reference's middle segment): a PCB carrying the
+// ATmega, the DRV8833 driver, a USB-C jack and a row of WS2812 LEDs — the
+// board a stranger can see is doing the timekeeping. Preview vitamins.
+module electronics_bay() {
+  color(mech_pcb) translate([0, 0, 6]) cube([70, 26, 1.6], center = true);   // PCB
+  color(mech_chip) {
+    translate([-14, 4, 8]) cube([12, 12, 3], center = true);                 // ATmega
+    translate([10, -3, 8]) cube([9, 7, 2.5], center = true);                 // DRV8833
+  }
+  color(mech_steel2) translate([34, 0, 6.5]) cube([8, 9, 3.5], center = true); // USB-C jack
+  for (i = [-2 : 2])                                                          // WS2812 row
+    color("#f8f8f8") translate([i * 12, -9, 7]) cube([4, 4, 1.4], center = true);
+}
+
+// The whole base drivetrain, placed in the truss: a pod at each stalk plus the
+// centre bay. Preview-only (coloured working parts), never a printed part.
+module base_mech() {
+  translate([-ball_spacing / 2, 0, 0]) pod_drive(sgn = -1);
+  translate([ ball_spacing / 2, 0, 0]) pod_drive(sgn =  1);
+  electronics_bay();
+}
+
+// A single gated representative gear (keeps a printable drivetrain part in CI):
+// the stage-1 reduction spur, the biggest single gear in the train.
 module mock_drive() {
-  union() {
-    mock_gear(d = 30, h = 6, teeth = 26);                     // ring/crown gear, flat
-    cylinder(d = 11, h = 9);                                  // hub
-    translate([0, 0, 9]) cylinder(d = 4, h = 9);              // inner drive-shaft stub
-    translate([23, 0, 0]) mock_gear(d = 16, h = 6, teeth = 16); // meshing pinion, flat
+  mech_spur(30, 1.6, 6, 5, true);
+  cylinder(d = 10, h = 9, $fn = 32);          // hub/boss
+}
+
+// ---- ball red interior (PREVIEW-ONLY two-tone; never in the printed shell) --
+// The reference is white shell + red working parts: the numerals read red
+// because they cut through to a red interior, and the slot frames a red spiral
+// gear. These modules colour that interior for the assembled/ball previews.
+// They are deliberately NOT part of hours_ball()/minutes_ball() (which ball_half
+// slices for printing), so the printable hemisphere stays a clean white shell.
+
+// Working-parts palette (PREVIEW-ONLY, hoisted so the drivetrain above can use
+// it): the reference is a white shell over red mechanism, with steel motors and
+// a green PCB. Never affects a printed part (colour is ignored on STL export).
+mech_red    = "#c0231f";                 // primary red mechanism
+mech_red2   = "#8f1a16";                 // shaded red (bevels / recessed parts)
+mech_steel  = "#9aa0a6";                 // motor can
+mech_steel2 = "#c8ccd0";                 // shafts / connectors
+mech_pcb    = "#1f6f43";                 // PCB substrate
+mech_chip   = "#141414";                 // chips
+
+// The red working-parts interior for a ball (the reference's white-shell /
+// red-numerals two-tone). Two red elements, both PREVIEW-ONLY and never part of
+// the printed white hemisphere:
+//   1. a red numeral INLAY that fills each cut-through glyph flush with the
+//      plaque, so the numbers read bold red (a backing sphere alone left them as
+//      dark slits behind a 2 mm-deep cut);
+//   2. a red core sphere just inside the cavity, so the slot window frames red.
+// `nums` is the ball's numeral set so the inlay lands exactly in its cut voids.
+module ball_core(nums) {
+  inner_r = ball_d / 2 * _GB_PENT_R - wall;                       // the cavity radius
+  color(mech_red) {
+    sphere(r = inner_r, $fn = 72);                                // red core, framed by the slot
+    intersection() {
+      gb_numbers(ball_d, nums, glyph_h, 0, true, wall, bridge = bridge_w);
+      gb_faceted_ball(ball_d - 0.8, tri_k = facet);               // inlay, recessed ~0.4 mm (no z-fight)
+    }
   }
 }
 
@@ -191,17 +335,18 @@ module stalk(x) {
 
 module assembled() {
   full_base();
+  base_mech();                          // the red gear-trains, motors and PCB in the base
   stalk(-ball_spacing / 2);
   stalk( ball_spacing / 2);
-  // hours ball (left) with mock drive peeking through the slot
+  // hours ball (left): white shell with the red interior read through numerals + slot
   translate([-ball_spacing / 2, 0, ball_center_z]) {
     hours_ball();
-    mock_drive();
+    ball_core(gb_hours());
   }
   // minutes ball (right)
   translate([ball_spacing / 2, 0, ball_center_z]) {
     minutes_ball();
-    mock_drive();
+    ball_core(gb_minutes());
   }
 }
 
@@ -210,9 +355,11 @@ module assembled() {
 if      (part == "assembled")    assembled();
 else if (part == "hours-half")   ball_half(hours = true);   // printable hemisphere
 else if (part == "minutes-half") ball_half(hours = false);
-else if (part == "hours-ball")   hours_ball();              // full shell (preview)
-else if (part == "minutes-ball") minutes_ball();
+else if (part == "hours-ball")   { hours_ball();   ball_core(gb_hours()); }    // preview (two-tone)
+else if (part == "minutes-ball") { minutes_ball(); ball_core(gb_minutes()); }
 else if (part == "base-segment") base_segment();           // constant centre segment
 else if (part == "base-end")     base_end();               // tapering end wing
 else if (part == "mock-drive")   mock_drive();
+else if (part == "base-mech")    base_mech();              // preview: the base drivetrain
+else if (part == "pod-drive")    pod_drive();              // preview: one pod's gear train
 else assembled();
