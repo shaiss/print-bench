@@ -8,8 +8,7 @@
 // issue upgrades. Requirements/decisions: NOTES.md. Charter: PM.md.
 // All dimensions in millimeters.
 
-use <geodesic-ball.scad>      // the faceted numbered-ball generator (#600)
-use <printability.scad>
+include <geodesic-ball.scad>  // the faceted numbered-ball generator (#600)
 
 /* [What to render] */
 // assembled | hours-ball | minutes-ball | base-segment | mock-drive

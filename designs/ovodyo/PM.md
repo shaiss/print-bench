@@ -23,13 +23,13 @@ exactly why they live here.
 | N4 | Honest colour code: **red = every working part** (gears, numerals, slot, core) | — | reference | never |
 
 *v0 status:* N1 is represented as debossed numerals + a real through-slot (true
-cut-through numerals = [#601](../../issues/601)); N2 is not yet mechanized (mock
-drive; real differential + verification = [#604](../../issues/604)/[#600](../../issues/600));
-N3/N4 hold geometrically (two-tone shown only in the two-tone render, [#600](../../issues/600)).
+cut-through numerals = [#601](https://github.com/shaiss/print-bench/issues/601)); N2 is not yet mechanized (mock
+drive; real differential + verification = [#604](https://github.com/shaiss/print-bench/issues/604)/[#600](https://github.com/shaiss/print-bench/issues/600));
+N3/N4 hold geometrically (two-tone shown only in the two-tone render, [#600](https://github.com/shaiss/print-bench/issues/600)).
 
 ## Out of scope
 
-**Deferred** (in the [#599](../../issues/599) backlog): the geodesic-ball lib
+**Deferred** (in the [#599](https://github.com/shaiss/print-bench/issues/599) backlog): the geodesic-ball lib
 (#600), true stencil numerals (#601), flat parting seam (#602), tapered
 space-frame base (#603), real bevel differential + `ci.plate` deliverable (#604).
 
