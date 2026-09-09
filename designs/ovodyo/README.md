@@ -8,15 +8,20 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 **v0 base** the improvement backlog ([#599](https://github.com/shaiss/print-bench/issues/599)) refines.
 
 > **v0 — a working substrate, not the finished clock.** The geometry renders,
-> gates and slices, but several signature details are deliberately simplified and
-> tracked as their own issues: numerals are debossed (not yet true cut-through
-> stencil, [#601](https://github.com/shaiss/print-bench/issues/601)); the two-tone red-through-white only appears
-> in the planned two-tone render ([#600](https://github.com/shaiss/print-bench/issues/600)); the base tapers to
-> needle points but has no red structural core, and isn't yet a reusable
-> space-frame library ([#603](https://github.com/shaiss/print-bench/issues/603)); the balls split as
-> crude hemispheres (a proper flat seam is [#602](https://github.com/shaiss/print-bench/issues/602)); and the
-> internal drive is a placeholder (a real bevel differential is
-> [#604](https://github.com/shaiss/print-bench/issues/604)). See NOTES.md.
+> gates and slices, and the signature look is here: chunky faceted dice-balls
+> (chamfered dodecahedra — twelve flush pentagon faces plus triangular corner
+> facets), **bold numerals cut clean through** each shell to a red interior
+> (stencilised so no counter drops out), and the reference's **exposed gearing in
+> the base** — a geared stepper and reduction gear-train at each pod, a bevel
+> take-off up each stalk, and a central electronics bay. The base drivetrain and
+> the red interior are shown as **preview-only coloured parts** (a single-material
+> print is one colour; the two colours are the intent). Several things are still
+> deliberately simplified and tracked as issues: the base gears *represent* the
+> drive but aren't a real meshing involute differential, and the base has no red
+> structural core or reusable space-frame library ([#603](https://github.com/shaiss/print-bench/issues/603)/[#604](https://github.com/shaiss/print-bench/issues/604)); the balls
+> split as crude hemispheres (a proper flat seam is [#602](https://github.com/shaiss/print-bench/issues/602)); the slot isn't
+> yet a tunable brand module ([#601](https://github.com/shaiss/print-bench/issues/601)); and there's no committed two-tone
+> reveal render yet ([#600](https://github.com/shaiss/print-bench/issues/600)). See NOTES.md.
 
 ![Hero — the whole clock](previews/hero.png)
 
@@ -35,11 +40,14 @@ whole clock would print as one fused lump):
 - `base-end` — one of the two **tapering end wings** that come to a needle point
   and carry a stalk boss over the motor pod (print two; three segments total make
   the ~383 mm base).
-- `mock-drive` — the v0 placeholder gear cluster that sits inside a ball, visible
-  through the slot.
+- `mock-drive` — a single representative reduction gear from the base train,
+  kept as a gated printable part.
 
-Select a part with `-D 'part="hours-half"'`; the default render is the assembled
-preview.
+The base drivetrain (gear-trains, steppers, bevels, PCB) and the balls' red
+interior are **preview-only** — colours are ignored on STL export, so they are
+not printable parts. See them assembled in the hero image and the `base-mech`
+gallery preview. Select a part with `-D 'part="hours-half"'` (or `base-mech` /
+`pod-drive` to preview the mechanism); the default render is the assembled clock.
 
 ## Print settings
 
@@ -61,14 +69,18 @@ Customizer sections; override with `-D 'name=value'`):
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `ball_d` | 78 mm | ball outer diameter |
-| `facet_freq` | 3 | geodesic subdivision — higher = finer triangular field, rounder ball |
-| `plaque` | 0.92 | pentagon-plaque plane (fraction of radius) — lower = larger number plaques |
-| `wall` | 2.2 mm | shell wall thickness |
-| `glyph_h` | 11 mm | numeral height |
+| `ball_d` | 78 mm | ball outer diameter (across the pentagon faces) |
+| `wall` | 2.2 mm | shell wall thickness at the pentagon faces |
+| `glyph_h` | 14 mm | numeral height (bold, near the pentagon inradius) |
+| `numerals_through` | true | cut numbers clean through to the red interior; false = debossed recess |
+| `bridge_w` | 1.2 mm | stencil bridge width — the ties that keep 0/4/6/8/9 counters attached |
 | `slot_width` | 10 mm | helical mechanism-window width |
 | `slot_turns` | 0.5 | how far the slot wraps |
 | `seg_len` | 127 mm | one base-segment length (×3 = 383 mm) |
+
+The ball's faceting is `_GB_TRI_K` in `geodesic-ball.scad` (default 1.05):
+1.0 gives the biggest triangular corner facets (≈ an icosidodecahedron), ≥1.12
+a plain dodecahedron with clean corners.
 
 ## Assembly & use
 

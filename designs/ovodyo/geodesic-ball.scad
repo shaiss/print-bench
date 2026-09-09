@@ -45,71 +45,88 @@ function gb_icosa_verts() = [
   [ PHI, 0,  1 ], [ PHI, 0, -1 ], [-PHI, 0,  1 ], [-PHI, 0, -1 ],
 ];
 
-_GB_EDGE2 = 4.0;                    // squared icosahedron edge length for the above
+// The 20 dodecahedron-vertex directions == the 20 triangular-facet normals (the
+// corners we shave off the dodecahedron). These are the icosahedral-face centres.
+function gb_dodeca_verts() =
+  let (I = 1 / PHI)
+  concat(
+    [ for (a=[-1,1], b=[-1,1], c=[-1,1]) [a, b, c] ],   // (±1,±1,±1)
+    [ [0, I, PHI],[0, I,-PHI],[0,-I, PHI],[0,-I,-PHI] ],
+    [ [I, PHI,0],[I,-PHI,0],[-I, PHI,0],[-I,-PHI,0] ],
+    [ [PHI,0, I],[PHI,0,-I],[-PHI,0, I],[-PHI,0,-I] ]
+  );
 
-function _gb_sq(a, b) =
-  (a[0]-b[0])*(a[0]-b[0]) + (a[1]-b[1])*(a[1]-b[1]) + (a[2]-b[2])*(a[2]-b[2]);
+// The numbered pentagon faces sit at exactly d/2 — they are the OUTERMOST flush
+// faces (the whole point, so the numerals read face-on instead of being buried
+// in a valley the way a true icosidodecahedron recesses its pentagons). Kept as
+// a fraction (=1) so gb_numbers, the cavity and ball_core share one plane
+// definition. (The earlier 0.9510565 was doubly wrong: it wasn't the pentagon
+// plane AND the icosidodecahedron recessed the pentagons, so the cavity sphere
+// bulged out through each number face and difference() carved a round hole.)
+_GB_PENT_R = 1.0;                        // centre → pentagon face = d/2
 
-// The 20 triangular faces, derived (not hand-typed): every vertex triple whose
-// three pairwise distances are all one edge. The icosahedron graph's only
-// 3-cliques are its faces, so this yields exactly the 20 faces.
-function gb_icosa_faces() =
-  let (V = gb_icosa_verts())
-  [ for (i = [0:11]) for (j = [i+1:11]) for (k = [j+1:11])
-      if (abs(_gb_sq(V[i], V[j]) - _GB_EDGE2) < 0.01
-       && abs(_gb_sq(V[i], V[k]) - _GB_EDGE2) < 0.01
-       && abs(_gb_sq(V[j], V[k]) - _GB_EDGE2) < 0.01)
-      [i, j, k] ];
+// How far out the 20 triangle-chamfer planes sit, as a multiple of d/2. The
+// dodecahedron's own vertices are at 1.2584·(d/2); a chamfer plane between 1.0
+// and 1.2584 shaves each vertex into a flat triangle while the 12 pentagons stay
+// full-size and flush. Smaller = bigger (deeper) triangle facets; 1.0 cuts them
+// level with the pentagons (≈ icosidodecahedron). The default reads like the
+// reference: dominant number pentagons with crisp triangular corners.
+_GB_TRI_K = 1.05;
 
-// Subdivide one face (A,B,C) to frequency f and project every point to radius R.
-function _gb_face_pts(A, B, C, f, R) =
-  [ for (i = [0:f]) for (j = [0:f-i])
-      let (p = A + (B - A) * (i / f) + (C - A) * (j / f))
-      p / norm(p) * R ];
-
-// Every geodesic vertex, all 20 faces (duplicates on shared edges are harmless
-// to the hull).
-function gb_geo_pts(freq, R) =
-  let (V = gb_icosa_verts(), F = gb_icosa_faces())
-  [ for (f = F) each _gb_face_pts(V[f[0]], V[f[1]], V[f[2]], freq, R) ];
-
-// The geodesic ball before the plaques are cut: convex hull of the projected
-// points. Every projected point lies on radius R, so all are hull vertices.
-module _gb_geo_hull(freq, R) {
-  hull() for (p = gb_geo_pts(freq, R)) translate(p) sphere(r = 0.01, $fn = 4);
+// A half-space {p : p·n̂ <= dist}, as a large cube whose +face is that plane.
+module _gb_halfspace(n, dist, big = 600) {
+  _gb_align_z_to(n) translate([0, 0, dist - big / 2]) cube(big, center = true);
 }
 
-// Intersection of the 12 vertex-normal half-spaces {p . v_hat <= r_plaque}. Each
-// plane clips only the small cap around its fivefold vertex, so intersecting the
-// ball with this cell flattens all 12 tips into pentagons and leaves the
-// triangular field between them untouched.
-module _gb_plaque_cell(r_plaque) {
-  BIG = 1000;
-  intersection()
-    for (v = gb_icosa_verts())
-      _gb_align_z_to(v) translate([0, 0, r_plaque - BIG / 2]) cube(BIG, center = true);
-}
-
-// The faceted ball solid (before hollowing / cutting).
-//   d       outer diameter (vertex-to-opposite-vertex ~ d)
-//   freq    icosa-face subdivision frequency; higher = finer triangular field
-//   plaque  plaque-plane radius as a fraction of r; smaller = larger pentagons
-module gb_faceted_ball(d = 78, freq = 3, plaque = 0.94) {
-  r = d / 2;
+// The faceted ball solid (before hollowing / cutting): a dodecahedron whose 20
+// vertices are chamfered into triangles — 12 big flush pentagon number-faces at
+// d/2 plus 20 triangular corner facets. Built as the intersection of 12 pentagon
+// half-spaces (at d/2) and 20 triangle half-spaces (at tri_k·d/2). `freq`/
+// `plaque` are accepted for call-site compatibility but do not shape the solid.
+module gb_faceted_ball(d = 78, freq = 2, plaque = 0.95, tri_k = _GB_TRI_K) {
+  R = d / 2;
+  // A tight axis-aligned bounding cube keeps OpenSCAD's preview bounding box (and
+  // therefore --viewall) correct: the half-space cubes below are rotated, so
+  // their fat AABBs would otherwise make --viewall zoom miles out. The solid's
+  // true extent is ~1.26·R on any axis; d*1.35 clears it with margin, no clip.
   intersection() {
-    _gb_geo_hull(freq, r);
-    _gb_plaque_cell(r * plaque);
+    cube(d * 1.35, center = true);
+    intersection_for (n = gb_icosa_verts())  _gb_halfspace(n, R);          // 12 pentagons
+    intersection_for (n = gb_dodeca_verts()) _gb_halfspace(n, R * tri_k);  // 20 triangles
   }
 }
 
-// The 12 numeral cut/deboss tools, unioned. `nums` is a list of 12 strings in
-// gb_icosa_verts() order. `through` cuts fully through the wall (islands are the
-// caller's problem until #601 adds bridges); otherwise a debossed recess. The
-// glyphs sit on the flat pentagon plaques, so their plane is r*plaque.
+// A stencilised glyph string: the text with thin bridge bars SUBTRACTED, so when
+// this is used as a cut tool through a shell every enclosed counter (0,4,6,8,9)
+// stays joined to the surrounding wall by an uncut bridge — no island drops out.
+// This is the reference's stencil look, and it is font-agnostic (no stencil font
+// is installed here). Two horizontal bars cross the upper/lower counters and one
+// vertical bar adds a central tie; `bridge` is their width (>= a few nozzle
+// widths so each tie prints solid).
+module _gb_stencil(s, size = 11, bridge = 1.3, font = "Liberation Sans:style=Bold") {
+  bw = size * 2.8;                        // span comfortably past 1-2 digits
+  bh = size * 1.7;
+  difference() {
+    text(s, size = size, halign = "center", valign = "center", font = font, $fn = 24);
+    // Two full-width horizontal ties in the counter band (±0.13·bh, NOT out at the
+    // edges) cross every digit's counter ring — including a 0/6/8/9 offset from
+    // centre in a two-digit number like "10"/"00", which a single central vertical
+    // tie misses (that was the dropped-island bug the mate/fuse gates would catch).
+    for (yy = [-bh * 0.13, bh * 0.13]) translate([0, yy]) square([bw, bridge], center = true);
+    square([bridge, bh], center = true);   // central vertical tie (helps tall counters)
+  }
+}
+
+// The 12 numeral tools, unioned. `nums` is a list of 12 strings in
+// gb_icosa_verts() order. `through` cuts a real stencil void clean through the
+// wall to the (red) interior — the reference's read-through numerals — using
+// _gb_stencil so no counter drops out; otherwise a debossed recess. The glyphs
+// sit on the flat pentagon plaques, so their plane is r*plaque.
 module gb_numbers(d = 78, nums = [], glyph_h = 11, depth = 0.8, through = false,
-                  wall = 2.0, plaque = 0.94, font = "Liberation Sans:style=Bold") {
+                  wall = 2.0, plaque = 0.94, bridge = 1.3,
+                  font = "Liberation Sans:style=Bold") {
   r = d / 2;
-  face_r = r * plaque;                    // the flat pentagon-plaque plane
+  face_r = r * _GB_PENT_R;                 // the flat pentagon-face plane
   cut = through ? wall + 2 : depth + 0.2; // how deep the tool reaches
   z0  = through ? face_r - wall - 1 : face_r - depth;
   for (i = [0 : min(len(nums), 12) - 1]) {
@@ -117,43 +134,47 @@ module gb_numbers(d = 78, nums = [], glyph_h = 11, depth = 0.8, through = false,
     _gb_align_z_to(dir)
       translate([0, 0, z0])
         linear_extrude(height = cut)
-          text(nums[i], size = glyph_h, halign = "center", valign = "center",
-               font = font, $fn = 24);
+          _gb_stencil(nums[i], glyph_h, bridge, font);
   }
 }
 
-// One helical slot cut, bounded to the ball. Reveals the interior/drive.
-module gb_slot(d = 78, width = 12, turns = 0.55, starts = 1) {
-  r = d / 2;
+// One helical slot: a narrow radial blade swept with a twist and clipped to the
+// wall shell (inner_r .. r+2), so it cuts clean THROUGH the wall wherever it
+// runs and reads as a thin band spiralling around the ball (the reference's
+// "swirl") rather than a wide crater. `inner_r` is the cavity radius so the clip
+// spans the whole wall including the recessed pentagon faces.
+module gb_slot(d = 78, width = 7, turns = 0.5, starts = 1, inner_r = 0) {
+  r  = d / 2;
+  ir = (inner_r > 0) ? inner_r - 0.5 : r * 0.78;  // clip below the innermost face
   for (s = [0 : starts - 1])
     rotate([0, 0, s * 360 / starts])
       intersection() {
-        sphere(r = r + 1, $fn = 96);
-        linear_extrude(height = 2 * r + 2, twist = 360 * turns, center = true,
-                       $fn = 96)
-          translate([r * 0.55, 0])
-            square([width, r * 1.6], center = true);
+        difference() { sphere(r = r + 2, $fn = 96); sphere(r = ir, $fn = 96); }  // wall shell
+        linear_extrude(height = 2 * r + 4, twist = 360 * turns, center = true, $fn = 120)
+          translate([r * 0.5, 0]) square([r * 1.2, width], center = true);       // thin blade
       }
 }
 
-// The finished part: a hollow faceted shell with numerals and the slot.
+// The finished part: a hollow faceted shell with numerals and the slot. `tri_k`
+// sets the corner-chamfer depth (see gb_faceted_ball); `freq`/`plaque` are kept
+// for call-site compatibility and no longer shape the solid.
 module geodesic_ball(d = 78, nums = [], freq = 3, plaque = 0.94, wall = 2.0,
-                     glyph_h = 11, deboss = 0.8, through = false,
+                     glyph_h = 11, deboss = 0.8, through = false, bridge = 1.3,
                      slot = true, slot_width = 12, slot_turns = 0.55,
-                     font = "Liberation Sans:style=Bold") {
-  // Hollow with a SPHERICAL cavity sized to the plaque plane minus `wall`, so
-  // the wall is >= `wall` at the plaques (the closest-in outer surface) and
-  // thicker everywhere the triangular field bulges out toward the vertices.
-  inner_r = d / 2 * plaque - wall;
+                     tri_k = _GB_TRI_K, font = "Liberation Sans:style=Bold") {
+  // Hollow with a SPHERICAL cavity sized to the pentagon plane minus `wall`, so
+  // the wall is >= `wall` at the pentagon number-faces (the closest-in outer
+  // surface) and thicker everywhere the triangles/vertices bulge outward.
+  inner_r = d / 2 * _GB_PENT_R - wall;
   assert(inner_r > 0.5,
-         "geodesic_ball: wall too large for d/plaque — the inner cavity radius would be <= 0");
+         "geodesic_ball: wall too large for d — the inner cavity radius would be <= 0");
   difference() {
     difference() {
-      gb_faceted_ball(d, freq, plaque);
+      gb_faceted_ball(d, freq, plaque, tri_k);
       sphere(r = inner_r, $fn = 96);
     }
-    gb_numbers(d, nums, glyph_h, deboss, through, wall, plaque, font);
-    if (slot) gb_slot(d, slot_width, slot_turns);
+    gb_numbers(d, nums, glyph_h, deboss, through, wall, plaque, bridge, font);
+    if (slot) gb_slot(d, slot_width, slot_turns, inner_r = inner_r);
   }
 }
 

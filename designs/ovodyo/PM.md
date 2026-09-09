@@ -22,10 +22,15 @@ exactly why they live here.
 | N3 | Heavy **faceted** spheres on **brass stalks** over a **genuinely airy** base | 12 pentagon plaques; base fills <25% of its bbox | reference | never |
 | N4 | Honest colour code: **red = every working part** (gears, numerals, slot, core) | — | reference | never |
 
-*v0 status:* N1 is represented as debossed numerals + a real through-slot (true
-cut-through numerals = [#601](https://github.com/shaiss/print-bench/issues/601)); N2 is not yet mechanized (mock
-drive; real differential + verification = [#604](https://github.com/shaiss/print-bench/issues/604)/[#600](https://github.com/shaiss/print-bench/issues/600));
-N3/N4 hold geometrically (two-tone shown only in the two-tone render, [#600](https://github.com/shaiss/print-bench/issues/600)).
+*v0 status:* N1 now holds geometrically — the numerals are **cut clean through**
+the shell to a red interior (stencilised, island-free), alongside the real
+through-slot (the tunable-brand-module part of [#601](https://github.com/shaiss/print-bench/issues/601) remains). N2 is not
+yet truly mechanized — the base now carries a full *represented* drivetrain
+(geared steppers + reduction gear-trains + bevel take-offs), but a real meshing
+involute differential the kinematics gate proves lands a face upright is
+[#604](https://github.com/shaiss/print-bench/issues/604). N3 holds (chamfered-dodecahedron faceted balls, brass
+stalks, airy tapered truss). N4 holds in the preview (red = every working part:
+gears, numerals, slot, core); a committed two-tone reveal render is [#600](https://github.com/shaiss/print-bench/issues/600).
 
 ## Out of scope
 
