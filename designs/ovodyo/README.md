@@ -59,9 +59,10 @@ Customizer sections; override with `-D 'name=value'`):
 | Parameter | Default | What it does |
 |---|---|---|
 | `ball_d` | 78 mm | ball outer diameter |
-| `facet_mix` | 1.05 | pentagon/triangle balance (higher = larger number plaques) |
+| `facet_freq` | 3 | geodesic subdivision — higher = finer triangular field, rounder ball |
+| `plaque` | 0.92 | pentagon-plaque plane (fraction of radius) — lower = larger number plaques |
 | `wall` | 2.2 mm | shell wall thickness |
-| `glyph_h` | 9 mm | numeral height |
+| `glyph_h` | 11 mm | numeral height |
 | `slot_width` | 10 mm | helical mechanism-window width |
 | `slot_turns` | 0.5 | how far the slot wraps |
 | `seg_len` | 127 mm | one base-segment length (×3 = 383 mm) |
