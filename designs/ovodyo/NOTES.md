@@ -19,10 +19,16 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
 
 ## Key decisions
 
-- **Ball geometry:** intersection of a dodecahedron (its 12 faces are the number
-  plaques) and an icosahedron (its 20 faces cut the triangular field), both built
-  from dual-aligned golden-ratio vertices so the plaques land exactly on the icosa
-  vertices. `facet_mix` tunes the pentagon:triangle balance. Generator is
+- **Ball geometry:** a true geodesic icosphere, matching the reference far more
+  closely than the v0 icosidodecahedron did. Each of the icosahedron's 20
+  triangular faces is subdivided to frequency `facet_freq` (default 3) and every
+  point projected to the sphere; the convex hull of those points is the geodesic
+  ball (a fine triangular field whose only sharp points are the 12 fivefold icosa
+  vertices). Intersecting with 12 planes — one per vertex direction, at radius
+  `r*plaque` — slices each fivefold tip into a flat **pentagon number-plaque**.
+  `facet_freq` sets the triangle fineness (2–3 ≈ the reference's snub-dodeca-like
+  density; 4+ reads too smooth and the plaques dissolve); `plaque` sets plaque
+  size (0.92 gives prominent number faces with a safe wall). Generator is
   `geodesic-ball.scad`, **design-local for now** — issue #600 promotes it to a
   first-party `lib/geodesic-ball.scad` with demo/guards/mates.
 - **Hollowing:** a spherical cavity sized to the plaque inradius minus `wall`, so

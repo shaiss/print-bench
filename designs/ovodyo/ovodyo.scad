@@ -23,12 +23,14 @@ ball_spacing = 200;
 ball_center_z = 124;
 
 /* [Ball surface] */
-// Pentagon/triangle balance: lower = more triangles, higher = more pentagon
-facet_mix = 1.05;
+// Geodesic subdivision frequency: higher = finer triangular field, rounder ball
+facet_freq = 3;
+// Pentagon-plaque plane as a fraction of radius: smaller = larger number plaques
+plaque = 0.92;
 // Shell wall (mm) — keep >= 1.2
 wall = 2.2;
 // Numeral glyph height (mm)
-glyph_h = 9;
+glyph_h = 11;
 // Numeral recess depth (mm). v0 = debossed; #601 makes it true cut-through.
 deboss = 1.0;
 // Helical mechanism-window width (mm) and how far it wraps (turns)
@@ -55,16 +57,16 @@ $fn = 48;
 // ---- balls -----------------------------------------------------------------
 
 module hours_ball() {
-  geodesic_ball(d = ball_d, nums = gb_hours(), mix = facet_mix, wall = wall,
-                glyph_h = glyph_h, deboss = deboss, through = false,
+  geodesic_ball(d = ball_d, nums = gb_hours(), freq = facet_freq, plaque = plaque,
+                wall = wall, glyph_h = glyph_h, deboss = deboss, through = false,
                 slot = true, slot_width = slot_width, slot_turns = slot_turns);
 }
 
 module minutes_ball() {
   // opposite-handed slot phase differentiates it from the hours ball
   rotate([0, 0, 36])
-    geodesic_ball(d = ball_d, nums = gb_minutes(), mix = facet_mix, wall = wall,
-                  glyph_h = glyph_h, deboss = deboss, through = false,
+    geodesic_ball(d = ball_d, nums = gb_minutes(), freq = facet_freq, plaque = plaque,
+                  wall = wall, glyph_h = glyph_h, deboss = deboss, through = false,
                   slot = true, slot_width = slot_width, slot_turns = -slot_turns);
 }
 
