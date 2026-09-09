@@ -85,12 +85,13 @@ module _gb_halfspace(n, dist, big = 600) {
 // `plaque` are accepted for call-site compatibility but do not shape the solid.
 module gb_faceted_ball(d = 78, freq = 2, plaque = 0.95, tri_k = _GB_TRI_K) {
   R = d / 2;
-  // A tight axis-aligned bounding cube keeps OpenSCAD's preview bounding box (and
-  // therefore --viewall) correct: the half-space cubes below are rotated, so
-  // their fat AABBs would otherwise make --viewall zoom miles out. The solid's
-  // true extent is ~1.26·R on any axis; d*1.35 clears it with margin, no clip.
+  // render() forces this convex solid to a concrete mesh even in preview, so
+  // OpenSCAD reports its TRUE (tight) bounding box. Without it the rotated
+  // half-space cubes below carry fat axis-aligned boxes that OpenSCAD unions for
+  // the preview bbox, and --viewall (the contact-sheet, gallery thumbnails)
+  // zooms the whole clock down to a speck.
+  render()
   intersection() {
-    cube(d * 1.35, center = true);
     intersection_for (n = gb_icosa_verts())  _gb_halfspace(n, R);          // 12 pentagons
     intersection_for (n = gb_dodeca_verts()) _gb_halfspace(n, R * tri_k);  // 20 triangles
   }
