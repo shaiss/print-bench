@@ -19,10 +19,22 @@
 // Issue #600 promotes it to lib/geodesic-ball.scad with the demo, guards.conf
 // (refuse a plaque that makes two pentagons adjacent, a bridge below nozzle-tie)
 // and mates the first-party-lib contract requires.
-
-include <BOSL2/std.scad>
+//
+// Self-contained on purpose: no library includes, so the design renders under
+// both the stable and the nightly/manifold CI engines with nothing to resolve.
 
 PHI = (1 + sqrt(5)) / 2;
+
+// Rotate children so local +Z points along `dir` (replaces BOSL2 rot(from,to)).
+module _gb_align_z_to(dir) {
+  d = dir / norm(dir);
+  ax = [-d[1], d[0], 0];                       // cross([0,0,1], d)
+  if (norm(ax) < 1e-9) {
+    if (d[2] >= 0) children(); else rotate([180, 0, 0]) children();
+  } else {
+    rotate(a = acos(max(-1, min(1, d[2]))), v = ax) children();
+  }
+}
 
 // 12 icosahedron vertex directions == the 12 pentagon-face normals.
 function gb_icosa_verts() = [
@@ -73,8 +85,7 @@ module gb_numbers(d = 78, nums = [], glyph_h = 11, depth = 0.8, through = false,
   z0  = through ? face_r - wall - 1 : face_r - depth;
   for (i = [0 : min(len(nums), 12) - 1]) {
     dir = gb_icosa_verts()[i];
-    dn  = dir / norm(dir);
-    rot(from = [0, 0, 1], to = dn)
+    _gb_align_z_to(dir)
       translate([0, 0, z0])
         linear_extrude(height = cut)
           text(nums[i], size = glyph_h, halign = "center", valign = "center",

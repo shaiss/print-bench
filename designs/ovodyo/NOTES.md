@@ -3,7 +3,7 @@
 ## Goal
 
 A clean-room, print-bench-native re-creation of Mectolab's "ovodyo" kinetic
-dice-ball clock, built as the **v0 base** every issue in the [#599](../../issues/599)
+dice-ball clock, built as the **v0 base** every issue in the [#599](https://github.com/shaiss/print-bench/issues/599)
 improvement backlog modifies. The reference study and the improvement brainstorm
 were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
 

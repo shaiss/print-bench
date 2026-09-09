@@ -5,17 +5,17 @@ ball shows the hour, the right ball the minutes in five-minute steps, each numbe
 sitting on one of twelve pentagon plaques. A helical slot cut through each shell
 frames the gears inside, so the mechanism is the ornament. This is a clean-room
 re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
-**v0 base** the improvement backlog ([#599](../../issues/599)) refines.
+**v0 base** the improvement backlog ([#599](https://github.com/shaiss/print-bench/issues/599)) refines.
 
 > **v0 — a working substrate, not the finished clock.** The geometry renders,
 > gates and slices, but several signature details are deliberately simplified and
 > tracked as their own issues: numerals are debossed (not yet true cut-through
-> stencil, [#601](../../issues/601)); the two-tone red-through-white only appears
-> in the planned two-tone render ([#600](../../issues/600)); the base is a plain
-> truss (the tapered space-frame is [#603](../../issues/603)); the balls split as
-> crude hemispheres (a proper flat seam is [#602](../../issues/602)); and the
+> stencil, [#601](https://github.com/shaiss/print-bench/issues/601)); the two-tone red-through-white only appears
+> in the planned two-tone render ([#600](https://github.com/shaiss/print-bench/issues/600)); the base is a plain
+> truss (the tapered space-frame is [#603](https://github.com/shaiss/print-bench/issues/603)); the balls split as
+> crude hemispheres (a proper flat seam is [#602](https://github.com/shaiss/print-bench/issues/602)); and the
 > internal drive is a placeholder (a real bevel differential is
-> [#604](../../issues/604)). See NOTES.md.
+> [#604](https://github.com/shaiss/print-bench/issues/604)). See NOTES.md.
 
 ![Hero — the whole clock](previews/hero.png)
 
@@ -47,7 +47,7 @@ preview.
 - **Supports:** the truss and mock drive print support-free; the faceted ball
   **dome does have overhangs** in v0 (an inherent hemisphere caveat) — light
   supports on the ball halves are acceptable until the seam/orientation work in
-  [#602](../../issues/602).
+  [#602](https://github.com/shaiss/print-bench/issues/602).
 - **Orientation:** ball halves cut-face-down; truss segment as modeled; mock
   drive flat.
 
@@ -69,7 +69,7 @@ Customizer sections; override with `-D 'name=value'`):
 ## Assembly & use
 
 Print two halves per ball and join them around the drive (v0: glue/tape the crude
-hemisphere seam — a real captive seam is [#602](../../issues/602)). Three truss
+hemisphere seam — a real captive seam is [#602](https://github.com/shaiss/print-bench/issues/602)). Three truss
 segments bolt end to end; a brass rod (≈4.5 mm) is the support stalk from each pod
 to a ball centre. The real clock is driven by a geared stepper through a bevel
 differential and homed with a hall sensor — the electronics and true drive are out
