@@ -11,7 +11,7 @@
 include <geodesic-ball.scad>  // the faceted numbered-ball generator (#600)
 
 /* [What to render] */
-// assembled | hours-ball | minutes-ball | base-segment | mock-drive
+// assembled | hours-half | minutes-half | hours-ball | minutes-ball | base-segment | mock-drive
 part = "assembled";
 
 /* [Overall (from the reference: 383 x 78 x 163 mm)] */
@@ -116,7 +116,7 @@ module strut(p1, p2, d = strut_d) {
 }
 
 // one triangular-section truss segment, its near end at x=0
-module base_segment(L = seg_len, taper = false) {
+module base_segment(L = seg_len) {
   bl = L / bays;
   w = truss_w / 2;
   // bottom chords + ridge chord
