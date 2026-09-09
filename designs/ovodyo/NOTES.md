@@ -62,8 +62,20 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   *represent* the drive, they are not cut for a running fit. A real meshing
   involute differential gated as turning is still #604; the reusable
   `lib/spaceframe.scad` + red structural core stay #603.
-- **Printable unit = hemisphere:** a whole ball prints on a point (CRITICAL bed
-  contact). The ball halves cut at the equator and print flat-face-down.
+- **Printable unit = a numbered top + bottom half.** A whole ball prints on a
+  point (CRITICAL bed contact), so each ball splits in two. The split is
+  **pole-up**: the ball is tilted by `atan2(1,PHI)` so a pentagon face sits at
+  each ±z pole, which puts the equatorial cut through the triangle band and
+  bisects **no** number face — the top half carries 12/2/4/6/8/10, the bottom
+  1/3/5/7/9/11 (and the minutes equivalents). This fixes the earlier bug where
+  BOTH `hours-half`/`minutes-half` were the same z≥0 dome, so four numbers lived
+  on no printable part. Parts are now `hours-top`/`hours-bottom`/`minutes-top`/
+  `minutes-bottom`; the bottom half is flipped 180° so it too prints
+  flat-cut-face-down. The halves **key on three dowels** (Ø2.8, irregular
+  azimuths 24/150/262° so they seat at one clocking) drilled through bosses on
+  the inner wall at the seam, in the whole ball before the split so the two
+  halves' holes register by construction. The captive threaded/snap seam stays
+  #602; the faceted dome still has light overhangs (v0 caveat, #602).
 - **Base = tapered space-frame:** the reference base is a long shallow lattice
   that tapers to needle points at both ends. Modelled as a triangular section
   (two bottom chords + a ridge, Warren-diagonal bottom deck) whose width AND
@@ -84,7 +96,7 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
 | Helical slot is a fixed inline cut (not yet a tunable brand module) | #601 (tunable `helical_window` brand module + sever-guard) |
 | Two-tone shown only in preview colour, no committed two-tone reveal render | #600 (two-tone reveal render) |
 | Base drivetrain is a **preview representation** (hand-rolled trapezoidal gears, not involute, not cut to a running fit; no red structural core; not a reusable lib) | #604 (`lib/bevel.scad` real meshing differential + kinematics gate) + #603 (`lib/spaceframe.scad` + red core) |
-| Ball splits as a **crude flat hemisphere**, glued | #602 (flat great-circle mating ring, threaded/snap) |
+| Ball halves key on **loose dowels + glue** (flat butt joint) | #602 (captive threaded/snap mating seam) |
 | Deliverable gated as loose parts; no `ci.plate` | #604 (`ci.plate`/`ci.fusecheck` multi-object 3MF) |
 | Ball generator is design-local | #600 (promote to `lib/`, with a `tri_k` guard + facet mate) |
 | No committed style pack / stylelift metrics | #601 (style pack + facet/openness metrics) |
@@ -96,21 +108,23 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
   overhangs and the sharp facet edges sample as thin walls (both inherent v0
   caveats of splitting a faceted ball at the equator, the #602 seam/orientation
   work). Truss segments: bottom-chord-down (as modelled). Mock-drive gear: flat.
-- `gate.sh --slice ovodyo`: hours-half/minutes-half **76/100 (PRINTABLE WITH
-  CAVEATS** — ~10 % dome overhang, ~4 % thin sampled wall at the facet edges,
-  both #602; watertight, one body — the cut-through numerals do NOT drop a
-  counter), base-segment 100/100, base-end 100/100, mock-drive 100/100; all
-  slice. No CRITICAL, no failure. (The score fell from the debossed-numeral v0's
-  84 because the numerals now cut fully through and the faceting is sharper; the
-  caveats are the seam/orientation ones #602 owns.)
+- `gate.sh --slice ovodyo` (CI manifold engine): hours-top/hours-bottom/
+  minutes-top/minutes-bottom **84/100 (PRINTABLE WITH CAVEATS** — dome overhang
+  + thin sampled wall at the facet edges, both #602; watertight, one body — the
+  cut-through numerals do NOT drop a counter and the seam bisects no number),
+  base-segment 100/100, base-end 100/100 (with the bored stalk socket),
+  mock-drive 100/100; all slice. No CRITICAL, no failure. (Local stable-engine
+  2021.01 scores the halves ~76; the caveats are the seam/orientation ones #602
+  owns.)
 
 ## Resume context
 
-Entry `ovodyo.scad` dispatches on `part`: assembled | hours-half | minutes-half |
-hours-ball | minutes-ball | base-segment | base-end | mock-drive | base-mech |
-pod-drive. The `-ball` parts are the full shells used only in the assembled
-preview; the `-half` parts are the printable units. `base-segment` is the
-constant centre truss; `base-end` is a tapering end wing (print two).
+Entry `ovodyo.scad` dispatches on `part`: assembled | hours-top | hours-bottom |
+minutes-top | minutes-bottom | hours-ball | minutes-ball | base-segment |
+base-end | mock-drive | base-mech | pod-drive. The `-ball` parts are the full
+shells used only in the assembled preview; the `-top`/`-bottom` parts are the
+printable units (pole-up split; `ball_half(hours, top)` builds them). `base-segment`
+is the constant centre truss; `base-end` is a tapering end wing (print two).
 `base-mech` (whole drivetrain) and `pod-drive` (one pod's gear train) are
 PREVIEW-ONLY coloured mechanism — not in `ci.parts`, not printed. The ball's
 faceting is `_GB_TRI_K` in `geodesic-ball.scad`; the numeral stencil ties are

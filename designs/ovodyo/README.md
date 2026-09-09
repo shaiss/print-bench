@@ -19,7 +19,8 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 > deliberately simplified and tracked as issues: the base gears *represent* the
 > drive but aren't a real meshing involute differential, and the base has no red
 > structural core or reusable space-frame library ([#603](https://github.com/shaiss/print-bench/issues/603)/[#604](https://github.com/shaiss/print-bench/issues/604)); the balls
-> split as crude hemispheres (a proper flat seam is [#602](https://github.com/shaiss/print-bench/issues/602)); the slot isn't
+> split cleanly into a numbered top and bottom half keyed on dowels, but the
+> captive (threaded/snap) seam is still [#602](https://github.com/shaiss/print-bench/issues/602); the slot isn't
 > yet a tunable brand module ([#601](https://github.com/shaiss/print-bench/issues/601)); and there's no committed two-tone
 > reveal render yet ([#600](https://github.com/shaiss/print-bench/issues/600)). See NOTES.md.
 
@@ -34,19 +35,23 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 The printable parts (the assembled render is a preview only — a single STL of the
 whole clock would print as one fused lump):
 
-- `hours-half` / `minutes-half` — one hemisphere of each ~78 mm faceted ball,
-  printed flat-face-down (print two of each for a full ball).
+- `hours-top` + `hours-bottom` — the two halves of the ~78 mm hours ball. It is
+  split **pole-up** through the triangle band, so no number face is cut by the
+  seam: the top carries **12, 2, 4, 6, 8, 10** and the bottom **1, 3, 5, 7, 9,
+  11**. Print one of each for a complete hours ball.
+- `minutes-top` + `minutes-bottom` — likewise for the minutes ball (00–55 in 5s).
 - `base-segment` — the constant-section **centre** truss segment (~127 mm).
 - `base-end` — one of the two **tapering end wings** that come to a needle point
-  and carry a stalk boss over the motor pod (print two; three segments total make
-  the ~383 mm base).
-- `mock-drive` — a single representative reduction gear from the base train,
-  kept as a gated printable part.
+  and carry a bored stalk boss over the motor pod (print two; three segments
+  total make the ~383 mm base).
+- `mock-drive` — a single representative reduction gear, kept as a gated
+  printability sample of the (otherwise preview-only) drivetrain, not a placed
+  assembly part.
 
 The base drivetrain (gear-trains, steppers, bevels, PCB) and the balls' red
 interior are **preview-only** — colours are ignored on STL export, so they are
 not printable parts. See them assembled in the hero image and the `base-mech`
-gallery preview. Select a part with `-D 'part="hours-half"'` (or `base-mech` /
+gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
 `pod-drive` to preview the mechanism); the default render is the assembled clock.
 
 ## Print settings
@@ -84,9 +89,15 @@ a plain dodecahedron with clean corners.
 
 ## Assembly & use
 
-Print two halves per ball and join them around the drive (v0: glue/tape the crude
-hemisphere seam — a real captive seam is [#602](https://github.com/shaiss/print-bench/issues/602)). Three truss
-segments bolt end to end; a brass rod (≈4.5 mm) is the support stalk from each pod
-to a ball centre. The real clock is driven by a geared stepper through a bevel
-differential and homed with a hall sensor — the electronics and true drive are out
-of scope for this geometry v0 (see NOTES.md and the backlog).
+Print a **top and a bottom half** per ball (they carry different numbers) and
+join them around the equator: three short dowels (≈2.8 mm, e.g. filament
+offcuts) drop into the bosses at the seam and key the halves at one clocking, so
+the facets line up; glue or tape holds them (v0 — a captive threaded/snap seam is
+[#602](https://github.com/shaiss/print-bench/issues/602)). A brass rod (≈4.5 mm) is the support stalk: it seats into the
+bored boss on each end segment and reaches the ball centre. The three truss
+segments join end to end (printed bolt/flange joints are [#603](https://github.com/shaiss/print-bench/issues/603)). The real
+clock is driven by a geared stepper through a bevel differential and homed with a
+hall sensor — the drivetrain here is a preview representation and the electronics
+are out of scope for this geometry v0; the printed drive interface (a hub in the
+ball, an index that lands a face upright, a real meshing differential) is the
+mechanical work tracked in [#600](https://github.com/shaiss/print-bench/issues/600)/[#604](https://github.com/shaiss/print-bench/issues/604). See NOTES.md and the backlog.
