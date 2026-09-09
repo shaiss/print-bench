@@ -1,24 +1,25 @@
 // geodesic-ball.scad — faceted "dice-ball" generator for the ovodyo clock.
 //
-// A sphere-inflated faceted solid on full icosahedral symmetry: 12 flat
-// PENTAGONAL number-plaques at the icosahedron-vertex directions (the natural
-// even spacing for 12 numbers), with a triangular field between them. The 12
-// plaques carry numerals (debossed in v0; #601 converts them to true
-// cut-through stencil with nozzle-tied bridges) and the shell carries one
-// helical slot (#601 makes it a tunable brand module) that reveals the drive.
+// A geodesic icosphere with the 12 fivefold vertices flattened into flat
+// PENTAGONAL number-plaques (the natural even spacing for 12 numbers), the rest
+// of the surface a fine TRIANGULAR field — the reference's "faceted dice-ball on
+// full icosahedral symmetry" (spherical d12/d20). The 12 plaques carry numerals
+// (debossed in v0; #601 converts them to true cut-through stencil with
+// nozzle-tied bridges) and the shell carries one helical slot (#601 makes it a
+// tunable brand module) that reveals the drive.
 //
-// Construction: intersection of a dodecahedron (its 12 faces ARE the pentagon
-// plaques) with an icosahedron (its 20 faces cut the triangular field). Both
-// are built by hull() of their canonical golden-ratio vertices, so the two are
-// dual-aligned by construction — the dodeca faces point exactly along the
-// icosa vertices, which is where the numerals go. `facet_mix` tunes the
-// pentagon:triangle balance (the study left the exact frequency open; this is
-// the free parameter). See designs/ovodyo and issue #600 (geodesic-ball lib).
+// Construction (faithful to the reference, replacing the coarse v0
+// icosidodecahedron): subdivide each of the icosahedron's 20 triangular faces to
+// frequency `freq`, project every point to the sphere, and take the convex hull
+// — a geodesic ball whose only sharp points are the 12 fivefold icosa vertices.
+// Then intersect with 12 planes (one per vertex direction, at radius r*plaque),
+// which slices each 5-fold tip into a flat pentagon plaque for the numerals.
+// `freq` sets the triangle fineness (higher = rounder, finer field, ~snub-
+// dodecahedron density at 2-3); `plaque` sets how deep the plaque plane cuts
+// (smaller = bigger pentagon). See designs/ovodyo and issue #600 (geodesic-ball
+// lib), which promotes this to lib/ with the demo/guards/mates.
 //
-// v0 scope: this is DESIGN-LOCAL to designs/ovodyo (not a shared lib yet).
-// Issue #600 promotes it to lib/geodesic-ball.scad with the demo, guards.conf
-// (refuse a plaque that makes two pentagons adjacent, a bridge below nozzle-tie)
-// and mates the first-party-lib contract requires.
+// v0 scope: DESIGN-LOCAL to designs/ovodyo (not a shared lib yet).
 //
 // Self-contained on purpose: no library includes, so the design renders under
 // both the stable and the nightly/manifold CI engines with nothing to resolve.
@@ -36,51 +37,79 @@ module _gb_align_z_to(dir) {
   }
 }
 
-// 12 icosahedron vertex directions == the 12 pentagon-face normals.
+// 12 icosahedron vertex directions == the 12 pentagon-plaque normals (edge
+// length 2 for these golden-ratio coords).
 function gb_icosa_verts() = [
   [ 0,  1,  PHI], [ 0,  1, -PHI], [ 0, -1,  PHI], [ 0, -1, -PHI],
   [ 1,  PHI, 0 ], [ 1, -PHI, 0 ], [-1,  PHI, 0 ], [-1, -PHI, 0 ],
   [ PHI, 0,  1 ], [ PHI, 0, -1 ], [-PHI, 0,  1 ], [-PHI, 0, -1 ],
 ];
 
-// 20 dodecahedron vertices (dual-aligned with the icosa above).
-function gb_dodeca_verts() = concat(
-  [ for (x = [-1, 1], y = [-1, 1], z = [-1, 1]) [x, y, z] ],
-  [ for (a = [-1, 1], b = [-1, 1]) [0, a * (1 / PHI), b * PHI] ],
-  [ for (a = [-1, 1], b = [-1, 1]) [a * (1 / PHI), b * PHI, 0] ],
-  [ for (a = [-1, 1], b = [-1, 1]) [a * PHI, 0, b * (1 / PHI)] ]
-);
+_GB_EDGE2 = 4.0;                    // squared icosahedron edge length for the above
 
-// circumradius of the raw coordinate sets (both dodeca families norm to this)
-_GB_ICO_R = sqrt(1 + PHI * PHI);   // ~1.902
-_GB_DOD_R = sqrt(3);               // ~1.732
+function _gb_sq(a, b) =
+  (a[0]-b[0])*(a[0]-b[0]) + (a[1]-b[1])*(a[1]-b[1]) + (a[2]-b[2])*(a[2]-b[2]);
 
-// A convex solid = hull of tiny spheres at the given points, scaled so the
-// coordinate circumradius maps to `circ`.
-module _gb_hull(pts, raw_r, circ) {
-  s = circ / raw_r;
-  hull() for (p = pts) translate(p * s) sphere(r = 0.01, $fn = 6);
+// The 20 triangular faces, derived (not hand-typed): every vertex triple whose
+// three pairwise distances are all one edge. The icosahedron graph's only
+// 3-cliques are its faces, so this yields exactly the 20 faces.
+function gb_icosa_faces() =
+  let (V = gb_icosa_verts())
+  [ for (i = [0:11]) for (j = [i+1:11]) for (k = [j+1:11])
+      if (abs(_gb_sq(V[i], V[j]) - _GB_EDGE2) < 0.01
+       && abs(_gb_sq(V[i], V[k]) - _GB_EDGE2) < 0.01
+       && abs(_gb_sq(V[j], V[k]) - _GB_EDGE2) < 0.01)
+      [i, j, k] ];
+
+// Subdivide one face (A,B,C) to frequency f and project every point to radius R.
+function _gb_face_pts(A, B, C, f, R) =
+  [ for (i = [0:f]) for (j = [0:f-i])
+      let (p = A + (B - A) * (i / f) + (C - A) * (j / f))
+      p / norm(p) * R ];
+
+// Every geodesic vertex, all 20 faces (duplicates on shared edges are harmless
+// to the hull).
+function gb_geo_pts(freq, R) =
+  let (V = gb_icosa_verts(), F = gb_icosa_faces())
+  [ for (f = F) each _gb_face_pts(V[f[0]], V[f[1]], V[f[2]], freq, R) ];
+
+// The geodesic ball before the plaques are cut: convex hull of the projected
+// points. Every projected point lies on radius R, so all are hull vertices.
+module _gb_geo_hull(freq, R) {
+  hull() for (p = gb_geo_pts(freq, R)) translate(p) sphere(r = 0.01, $fn = 4);
+}
+
+// Intersection of the 12 vertex-normal half-spaces {p . v_hat <= r_plaque}. Each
+// plane clips only the small cap around its fivefold vertex, so intersecting the
+// ball with this cell flattens all 12 tips into pentagons and leaves the
+// triangular field between them untouched.
+module _gb_plaque_cell(r_plaque) {
+  BIG = 1000;
+  intersection()
+    for (v = gb_icosa_verts())
+      _gb_align_z_to(v) translate([0, 0, r_plaque - BIG / 2]) cube(BIG, center = true);
 }
 
 // The faceted ball solid (before hollowing / cutting).
-//   d    outer diameter (plaque-to-opposite-plaque ~ d)
-//   mix  icosa circumradius as a fraction of the dodeca's; lower = more
-//        triangle, higher = more pentagon. 1.0 ~ icosidodecahedron-ish.
-module gb_faceted_ball(d = 78, mix = 1.0) {
+//   d       outer diameter (vertex-to-opposite-vertex ~ d)
+//   freq    icosa-face subdivision frequency; higher = finer triangular field
+//   plaque  plaque-plane radius as a fraction of r; smaller = larger pentagons
+module gb_faceted_ball(d = 78, freq = 3, plaque = 0.94) {
   r = d / 2;
   intersection() {
-    _gb_hull(gb_dodeca_verts(), _GB_DOD_R, r);              // pentagons
-    _gb_hull(gb_icosa_verts(),  _GB_ICO_R, r * mix);        // triangles
+    _gb_geo_hull(freq, r);
+    _gb_plaque_cell(r * plaque);
   }
 }
 
 // The 12 numeral cut/deboss tools, unioned. `nums` is a list of 12 strings in
-// gb_icosa_verts() order. `through` cuts fully through the wall (islands are
-// the caller's problem until #601 adds bridges); otherwise a debossed recess.
+// gb_icosa_verts() order. `through` cuts fully through the wall (islands are the
+// caller's problem until #601 adds bridges); otherwise a debossed recess. The
+// glyphs sit on the flat pentagon plaques, so their plane is r*plaque.
 module gb_numbers(d = 78, nums = [], glyph_h = 11, depth = 0.8, through = false,
-                  wall = 2.0, font = "Liberation Sans:style=Bold") {
+                  wall = 2.0, plaque = 0.94, font = "Liberation Sans:style=Bold") {
   r = d / 2;
-  face_r = r * 0.7947;                    // dodeca inradius / circumradius
+  face_r = r * plaque;                    // the flat pentagon-plaque plane
   cut = through ? wall + 2 : depth + 0.2; // how deep the tool reaches
   z0  = through ? face_r - wall - 1 : face_r - depth;
   for (i = [0 : min(len(nums), 12) - 1]) {
@@ -108,23 +137,22 @@ module gb_slot(d = 78, width = 12, turns = 0.55, starts = 1) {
 }
 
 // The finished part: a hollow faceted shell with numerals and the slot.
-module geodesic_ball(d = 78, nums = [], mix = 1.0, wall = 2.0,
+module geodesic_ball(d = 78, nums = [], freq = 3, plaque = 0.94, wall = 2.0,
                      glyph_h = 11, deboss = 0.8, through = false,
                      slot = true, slot_width = 12, slot_turns = 0.55,
                      font = "Liberation Sans:style=Bold") {
-  // Hollow with a SPHERICAL cavity sized to the plaque inradius, so the wall is
-  // >= `wall` at every face and thicker toward the vertices — no knife-edge thin
-  // spots the way a scaled-down faceted copy leaves. (0.7947 = dodecahedron
-  // inradius/circumradius, the pentagon-face distance.)
-  inner_r = d / 2 * 0.7947 - wall;
+  // Hollow with a SPHERICAL cavity sized to the plaque plane minus `wall`, so
+  // the wall is >= `wall` at the plaques (the closest-in outer surface) and
+  // thicker everywhere the triangular field bulges out toward the vertices.
+  inner_r = d / 2 * plaque - wall;
   assert(inner_r > 0.5,
-         "geodesic_ball: wall too large for d — the inner cavity radius would be <= 0");
+         "geodesic_ball: wall too large for d/plaque — the inner cavity radius would be <= 0");
   difference() {
     difference() {
-      gb_faceted_ball(d, mix);
+      gb_faceted_ball(d, freq, plaque);
       sphere(r = inner_r, $fn = 96);
     }
-    gb_numbers(d, nums, glyph_h, deboss, through, wall, font);
+    gb_numbers(d, nums, glyph_h, deboss, through, wall, plaque, font);
     if (slot) gb_slot(d, slot_width, slot_turns);
   }
 }
