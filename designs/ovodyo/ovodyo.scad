@@ -11,7 +11,7 @@
 include <geodesic-ball.scad>  // the faceted numbered-ball generator (#600)
 
 /* [What to render] */
-// assembled | hours-half | minutes-half | hours-ball | minutes-ball | base-segment | mock-drive
+// assembled | hours-half | minutes-half | hours-ball | minutes-ball | base-segment | base-end | mock-drive
 part = "assembled";
 
 /* [Overall (from the reference: 383 x 78 x 163 mm)] */
@@ -44,9 +44,10 @@ stalk_d = 4.5;
 strut_d = 2.8;
 // One base segment length (mm); 3 segments make the 383 mm base
 seg_len = 127;
-// Truss depth (side chord spacing, mm) and height (ridge, mm)
-truss_w = 66;
-truss_h = 30;
+// Truss max width (deck chord spacing, mm) and max ridge height (mm), both at
+// the centre; each tapers to a needle point at the ends
+truss_w = 76;
+truss_h = 34;
 // Bays per segment
 bays = 4;
 
@@ -108,7 +109,32 @@ module mock_drive() {
   }
 }
 
-// ---- base truss ------------------------------------------------------------
+// ---- base truss (tapered space-frame → needle points at both ends) ---------
+// The reference base is a long, shallow lattice that tapers to sharp points at
+// both ends, in three bolted segments: a constant-section CENTRE and two
+// tapering END wings that carry the stalk bosses over the motor pods. The
+// triangular section (two bottom chords + a ridge) shrinks in BOTH width and
+// height toward the tips. (The reusable lib/spaceframe.scad and the red
+// structural core are issue #603; this is the in-design silhouette.)
+
+n_bays  = 3 * bays;                       // stations 0..n_bays over the whole base
+base_L  = 3 * seg_len;                     // total length (383 mm)
+base_half = base_L / 2;
+
+// taper: 1 across the centre segment, then linear down to a small tip over each
+// end segment (so the middle third is full-section and the outer thirds point)
+function base_t(x) =
+  (abs(x) <= seg_len / 2) ? 1
+  : max(0.05, 1 - (abs(x) - seg_len / 2) / seg_len);
+
+function base_h(x) = truss_h * base_t(x);            // ridge height at x
+function _bw(x)    = truss_w / 2 * base_t(x);        // deck half-width at x
+function _bx(i)    = -base_half + i * (base_L / n_bays);   // station x
+
+// the three section nodes at station i
+function _BL(i) = [_bx(i), -_bw(_bx(i)), 0];
+function _BR(i) = [_bx(i),  _bw(_bx(i)), 0];
+function _RD(i) = [_bx(i), 0, base_h(_bx(i))];
 
 module strut(p1, p2, d = strut_d) {
   hull() {
@@ -117,44 +143,50 @@ module strut(p1, p2, d = strut_d) {
   }
 }
 
-// one triangular-section truss segment, its near end at x=0
-module base_segment(L = seg_len) {
-  bl = L / bays;
-  w = truss_w / 2;
-  // bottom chords + ridge chord
-  strut([0, -w, 0], [L, -w, 0]);
-  strut([0,  w, 0], [L,  w, 0]);
-  strut([0, 0, truss_h], [L, 0, truss_h]);
-  for (i = [0 : bays]) {
-    x = i * bl;
-    // cross tie + ridge posts (triangular section)
-    strut([x, -w, 0], [x, w, 0]);
-    strut([x, -w, 0], [x, 0, truss_h]);
-    strut([x,  w, 0], [x, 0, truss_h]);
+// the lattice for stations [a..b]: bottom + ridge chords, a Warren diagonal in
+// the bottom deck, and per-station triangular cross-bracing. Near a tip the
+// section shrinks to a small nub, so degenerate near-zero struts are harmless.
+module base_truss(a, b) {
+  for (i = [a : b - 1]) {
+    strut(_BL(i), _BL(i + 1));             // bottom chords
+    strut(_BR(i), _BR(i + 1));
+    strut(_RD(i), _RD(i + 1));             // ridge chord
+    if (i % 2 == 0) strut(_BL(i), _BR(i + 1));   // Warren diagonal (bottom deck)
+    else            strut(_BR(i), _BL(i + 1));
   }
-  // Warren diagonals in the bottom deck
-  for (i = [0 : bays - 1]) {
-    x = i * bl;
-    if (i % 2 == 0) strut([x, -w, 0], [x + bl, w, 0]);
-    else            strut([x, w, 0], [x + bl, -w, 0]);
+  for (i = [a : b]) {
+    strut(_BL(i), _BR(i));                 // cross tie
+    strut(_BL(i), _RD(i));                 // ridge posts
+    strut(_BR(i), _RD(i));
   }
-  // a stalk boss on the ridge mid-segment
-  translate([L / 2, 0, truss_h])
-    cylinder(d = stalk_d + 5, h = 6, center = false, $fn = 32);
+}
+
+// a stalk boss sitting on the ridge at x (its height follows the taper)
+module stalk_boss(x) {
+  translate([x, 0, base_h(x)])
+    cylinder(d = stalk_d + 5, h = 6, $fn = 32);
+}
+
+// CENTRE segment (constant section) — the gated representative part
+module base_segment() { base_truss(bays, 2 * bays); }
+
+// one END wing, tapering to a needle point, with its stalk boss over the pod
+module base_end() {
+  base_truss(0, bays);
+  stalk_boss(-ball_spacing / 2);
 }
 
 module full_base() {
-  // three segments end to end, centred on x=0
-  total = 3 * seg_len;
-  for (s = [0 : 2])
-    translate([-total / 2 + s * seg_len, 0, 0]) base_segment();
+  base_truss(0, n_bays);                   // the whole tapered lattice
+  stalk_boss(-ball_spacing / 2);
+  stalk_boss( ball_spacing / 2);
 }
 
 // ---- assembled preview -----------------------------------------------------
 
 module stalk(x) {
-  translate([x, 0, truss_h])
-    cylinder(d = stalk_d, h = ball_center_z - truss_h, $fn = 32);
+  translate([x, 0, base_h(x)])
+    cylinder(d = stalk_d, h = ball_center_z - base_h(x), $fn = 32);
 }
 
 module assembled() {
@@ -180,6 +212,7 @@ else if (part == "hours-half")   ball_half(hours = true);   // printable hemisph
 else if (part == "minutes-half") ball_half(hours = false);
 else if (part == "hours-ball")   hours_ball();              // full shell (preview)
 else if (part == "minutes-ball") minutes_ball();
-else if (part == "base-segment") base_segment();
+else if (part == "base-segment") base_segment();           // constant centre segment
+else if (part == "base-end")     base_end();               // tapering end wing
 else if (part == "mock-drive")   mock_drive();
 else assembled();
