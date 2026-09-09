@@ -117,6 +117,8 @@ module geodesic_ball(d = 78, nums = [], mix = 1.0, wall = 2.0,
   // spots the way a scaled-down faceted copy leaves. (0.7947 = dodecahedron
   // inradius/circumradius, the pentagon-face distance.)
   inner_r = d / 2 * 0.7947 - wall;
+  assert(inner_r > 0.5,
+         "geodesic_ball: wall too large for d — the inner cavity radius would be <= 0");
   difference() {
     difference() {
       gb_faceted_ball(d, mix);
