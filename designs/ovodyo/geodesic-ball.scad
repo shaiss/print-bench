@@ -118,25 +118,41 @@ module _gb_stencil(s, size = 11, bridge = 1.3, font = "Liberation Sans:style=Bol
   }
 }
 
-// The 12 numeral tools, unioned. `nums` is a list of 12 strings in
-// gb_icosa_verts() order. `through` cuts a real stencil void clean through the
-// wall to the (red) interior — the reference's read-through numerals — using
-// _gb_stencil so no counter drops out; otherwise a debossed recess. The glyphs
-// sit on the flat pentagon plaques, so their plane is r*plaque.
-module gb_numbers(d = 78, nums = [], glyph_h = 11, depth = 0.8, through = false,
-                  wall = 2.0, plaque = 0.94, bridge = 1.3,
-                  font = "Liberation Sans:style=Bold") {
+// ONE face's numeral tool — the per-face body of gb_numbers, exposed so the
+// tumble kinematics check (designs/ovodyo/tumble.scad) can pose a single
+// numeral's cutter exactly as the ball ships it. The stencil of `s` sits on the
+// plaque whose outward normal is `face_dir`, turned `rot` degrees in-plane
+// (CCW as seen from outside the ball, i.e. about the outward normal) before it
+// is extruded along that normal; rot = 0 is the un-rotated placement (the 2D
+// glyph's +y is _gb_align_z_to's image of +y).
+module gb_number_cutter(d = 78, s = "", glyph_h = 11, face_dir = [0, 0, 1], rot = 0,
+                        depth = 0.8, through = false, wall = 2.0, bridge = 1.3,
+                        font = "Liberation Sans:style=Bold") {
   r = d / 2;
   face_r = r * _GB_PENT_R;                 // the flat pentagon-face plane
   cut = through ? wall + 2 : depth + 0.2; // how deep the tool reaches
   z0  = through ? face_r - wall - 1 : face_r - depth;
-  for (i = [0 : min(len(nums), 12) - 1]) {
-    dir = gb_icosa_verts()[i];
-    _gb_align_z_to(dir)
-      translate([0, 0, z0])
+  _gb_align_z_to(face_dir)
+    translate([0, 0, z0])
+      rotate([0, 0, rot])
         linear_extrude(height = cut)
-          _gb_stencil(nums[i], glyph_h, bridge, font);
-  }
+          _gb_stencil(s, glyph_h, bridge, font);
+}
+
+// The 12 numeral tools, unioned. `nums` is a list of 12 strings in
+// gb_icosa_verts() order. `through` cuts a real stencil void clean through the
+// wall to the (red) interior — the reference's read-through numerals — using
+// _gb_stencil so no counter drops out; otherwise a debossed recess. The glyphs
+// sit on the flat pentagon plaques, so their plane is r*plaque. `rots` is an
+// optional list of per-FACE in-plane rotations (deg, same order as `nums`) so a
+// numeral can be clocked to read upright when its face presents (the tumble
+// stop table); a missing entry means 0.
+module gb_numbers(d = 78, nums = [], glyph_h = 11, depth = 0.8, through = false,
+                  wall = 2.0, plaque = 0.94, bridge = 1.3,
+                  font = "Liberation Sans:style=Bold", rots = []) {
+  for (i = [0 : min(len(nums), 12) - 1])
+    gb_number_cutter(d, nums[i], glyph_h, gb_icosa_verts()[i],
+                     (i < len(rots)) ? rots[i] : 0, depth, through, wall, bridge, font);
 }
 
 // One helical slot: a narrow radial blade swept with a twist and clipped to the
@@ -158,11 +174,13 @@ module gb_slot(d = 78, width = 7, turns = 0.5, starts = 1, inner_r = 0) {
 
 // The finished part: a hollow faceted shell with numerals and the slot. `tri_k`
 // sets the corner-chamfer depth (see gb_faceted_ball); `freq`/`plaque` are kept
-// for call-site compatibility and no longer shape the solid.
+// for call-site compatibility and no longer shape the solid; `rots` is the
+// optional per-face numeral clocking gb_numbers documents.
 module geodesic_ball(d = 78, nums = [], freq = 3, plaque = 0.94, wall = 2.0,
                      glyph_h = 11, deboss = 0.8, through = false, bridge = 1.3,
                      slot = true, slot_width = 12, slot_turns = 0.55,
-                     tri_k = _GB_TRI_K, font = "Liberation Sans:style=Bold") {
+                     tri_k = _GB_TRI_K, font = "Liberation Sans:style=Bold",
+                     rots = []) {
   // Hollow with a SPHERICAL cavity sized to the pentagon plane minus `wall`, so
   // the wall is >= `wall` at the pentagon number-faces (the closest-in outer
   // surface) and thicker everywhere the triangles/vertices bulge outward.
@@ -174,7 +192,7 @@ module geodesic_ball(d = 78, nums = [], freq = 3, plaque = 0.94, wall = 2.0,
       gb_faceted_ball(d, freq, plaque, tri_k);
       sphere(r = inner_r, $fn = 96);
     }
-    gb_numbers(d, nums, glyph_h, deboss, through, wall, plaque, bridge, font);
+    gb_numbers(d, nums, glyph_h, deboss, through, wall, plaque, bridge, font, rots);
     if (slot) gb_slot(d, slot_width, slot_turns, inner_r = inner_r);
   }
 }
