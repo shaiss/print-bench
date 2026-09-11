@@ -60,12 +60,14 @@ gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
   single-material).
 - **Layer height:** 0.2 mm.
 - **Infill:** 15–20 %.
-- **Supports:** the truss and mock drive print support-free; the faceted ball
-  **dome does have overhangs** in v0 (an inherent hemisphere caveat) — light
-  supports on the ball halves are acceptable until the seam/orientation work in
-  [#602](https://github.com/shaiss/print-bench/issues/602).
-- **Orientation:** ball halves cut-face-down; truss segments bottom-chord-down
-  (as modeled); mock drive flat.
+- **Supports:** none. The truss and mock drive print support-free, and the
+  ball halves print **pole-down** (see Orientation), which makes the cavity an
+  open bowl and keeps every facet and the seam ring's 45° thread flanks
+  support-free.
+- **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
+  first layer and the seam ring is the top of the print (as the parts render);
+  truss segments bottom-chord-down (as modeled); mock drive flat; the seam
+  coupon as rendered.
 
 ## Parameters
 
@@ -81,6 +83,7 @@ Customizer sections; override with `-D 'name=value'`):
 | `bridge_w` | 1.2 mm | stencil bridge width — the ties that keep 0/4/6/8/9 counters attached |
 | `slot_width` | 10 mm | helical mechanism-window width |
 | `slot_turns` | 0.5 | how far the slot wraps |
+| `seam_tol` | 0.25 mm | radial clearance of the captive threaded seam — the one fit to tune; print the seam coupon first and step it by 0.05 (bigger = looser) |
 | `seg_len` | 127 mm | one base-segment length (×3 = 383 mm) |
 
 The ball's faceting is `_GB_TRI_K` in `geodesic-ball.scad` (default 1.05):
@@ -90,10 +93,16 @@ a plain dodecahedron with clean corners.
 ## Assembly & use
 
 Print a **top and a bottom half** per ball (they carry different numbers) and
-join them around the equator: three short dowels (≈2.8 mm, e.g. filament
-offcuts) drop into the bosses at the seam and key the halves at one clocking, so
-the facets line up; glue or tape holds them (v0 — a captive threaded/snap seam is
-[#602](https://github.com/shaiss/print-bench/issues/602)). A brass rod (≈4.5 mm) is the support stalk: it seats into the
+**screw them together** around the equator: the bottom half carries a short
+threaded ring standing up from its flat seam face, the top half the matching
+thread inside its rim. Line the facets up, drop the top half on — it only
+enters at that one clocking — and turn it **exactly one full turn** until the
+flat faces meet; the facets line up again as they close and the seam reads as
+one fine line. No glue, no dowels, and it unscrews the same way to reach the
+mechanism. **Print the seam coupon first** (`ovodyo-coupon.scad`: a male ring
+and a female puck side by side) and tune `seam_tol` in 0.05 mm steps until the
+puck runs on by hand with light drag and seats without rattle — then render
+the halves with that value. A brass rod (≈4.5 mm) is the support stalk: it seats into the
 bored boss on each end segment and reaches the ball centre. The three truss
 segments join end to end (printed bolt/flange joints are [#603](https://github.com/shaiss/print-bench/issues/603)). The real
 clock is driven by a geared stepper through a bevel differential and homed with a
