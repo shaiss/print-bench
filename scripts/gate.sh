@@ -26,6 +26,14 @@
 #                                  mandatory negative control that must not
 #                                  (proves the check can fail). Never
 #                                  printchecked or sliced
+#   designs/<name>/ci.kinematics   SWEPT fit checks (issue #607): the same
+#                                  boolean parts rendered at every step of a
+#                                  parameter sweep or at every declared
+#                                  landing stop — `empty`/`nonempty` must
+#                                  hold at every step, `empty-control`/
+#                                  `nonempty-control` must break at some
+#                                  step. Format and selftest:
+#                                  scripts/kinematics-check.sh
 #   designs/<name>/derives.conf    lineage of a derivative design: the
 #                                  parent(s) it includes, the parent parts it
 #                                  claims to replace, and any diamond-ok:
@@ -451,6 +459,24 @@ gate_one() {
     fi
   fi
 
+  # Swept kinematics checks (designs/<name>/ci.kinematics, issue #607): the
+  # fitcheck idea over a parameter sweep. A gear pair that clears at one phase
+  # can jam at another, and an indexed shell that lands flat at stop 0 can
+  # roll at stop 3, so each boolean part is rendered at every step of a sweep
+  # (`sweep <param>` over [0,1)) or at every declared landing stop (`stops
+  # <param> <v1,...>`): `empty`/`nonempty` must hold at EVERY step, and the
+  # mandatory `empty-control`/`nonempty-control` must break at SOME step, or
+  # the checks are unfalsifiable. Parser, sweep and the fixture-backed
+  # --selftest live in scripts/kinematics-check.sh (run by check.sh); this
+  # block only hands it the design's source and manifest. Never printchecked
+  # or sliced, like fitchecks. A design without the manifest is untouched.
+  if [[ -f "designs/${name}/ci.kinematics" ]]; then
+    echo "== ${name}: kinematics (designs/${name}/ci.kinematics) =="
+    if ! ./scripts/kinematics-check.sh "$src" "designs/${name}/ci.kinematics" "$name"; then
+      fail=1
+    fi
+  fi
+
   local args=()
   if [[ -f "designs/${name}/printcheck.args" ]]; then
     # Word-splitting the flag file is intended; `|| true` keeps set -e from
@@ -482,18 +508,27 @@ gate_one() {
   # (coordinates in printcheck's rested frame — lowest point at z=0):
   #   flexure X0,Y0,Z0:X1,Y1,Z1     global, repeatable — faces whose centroid is
   #                                 inside are dropped before counting
-  #   assert  <stl-basename> <min>  that sliced STL, minus the flexure zones,
-  #                                 must split into >= <min> bodies
+  #   assert  <stl-basename> <min> [<max>]
+  #                                 that sliced STL, minus the flexure zones,
+  #                                 must split into >= <min> bodies — and, when
+  #                                 <max> is given, <= <max> (issue #612 part 2;
+  #                                 the sugar `assert <stl> =N` means min=max=N)
   #   control <part>         <max>  MANDATORY negative control: the KNOWN-FUSED
   #                                 pose (-D part="<part>", a real dispatch
   #                                 branch), same flexure zones, must stay <=<max>
   # A detected fuse (assert bodies < min) is a STRONG WARN, not a hard fail — the
-  # reviewers (Jane/Drik) must consciously sign it off. A broken check is a hard
-  # FAIL: no assert or no control (issue #37 — a check that cannot fail is
-  # worthless), a malformed line, a control part with no dispatch branch, an
-  # assert STL the gate never rendered (a fuse check on an unsliced part proves
-  # nothing), or a control that no longer fuses (an over-large flexure AABB that
-  # would mask a real fuse also splits the fused control, and is caught here).
+  # reviewers (Jane/Drik) must consciously sign it off. An EXTRA body (assert
+  # bodies > max) is the opposite defect and a hard FAIL: a freed counter island
+  # (a stencil "0" whose tether never printed) or a dropped part is not
+  # something a reviewer waves through. The bound's semantics live in
+  # `fusecheck --bound` (tools/printcheck, pytest-pinned), so the gate and a
+  # hand run cannot drift; this block only tokenises the line and words the
+  # verdict. A broken check is a hard FAIL: no assert or no control (issue #37
+  # — a check that cannot fail is worthless), a malformed line (a max below its
+  # min included), a control part with no dispatch branch, an assert STL the
+  # gate never rendered (a fuse check on an unsliced part proves nothing), or a
+  # control that no longer fuses (an over-large flexure AABB that would mask a
+  # real fuse also splits the fused control, and is caught here).
   local fusef="designs/${name}/ci.fusecheck"
   if [[ -f "$fusef" ]]; then
     local uline ukey uarg1 uarg2 urest
@@ -523,9 +558,22 @@ gate_one() {
       case "$ukey" in
         flexure) : ;;   # gathered in the first pass
         assert)
-          if [[ -z "$uarg1" || -z "$uarg2" || -n "$urest" \
-                || ! "$uarg2" =~ ^[0-9]+$ ]]; then
-            echo "FAIL  fusecheck ${name}: malformed assert line \"${uline}\" — expected 'assert <stl-basename> <min_bodies>'"
+          # Tokenise the bound: `<min>` (the legacy one-sided floor), `<min>
+          # <max>` (two-sided) or `=N` (min = max = N). ubound is the spec
+          # handed to `fusecheck --bound`; ulo/uhi/ubtext only word the lines.
+          local ubound="" ulo="" uhi="" ubtext=""
+          if [[ -n "$uarg1" && -n "$uarg2" ]]; then
+            if [[ -z "$urest" && "$uarg2" =~ ^=([0-9]+)$ ]]; then
+              ubound="$uarg2"; ulo="${BASH_REMATCH[1]}"; uhi="$ulo"; ubtext="= ${ulo}"
+            elif [[ -z "$urest" && "$uarg2" =~ ^[0-9]+$ ]]; then
+              ubound="$uarg2"; ulo="$uarg2"; ubtext=">= ${ulo}"
+            elif [[ "$uarg2" =~ ^[0-9]+$ && "$urest" =~ ^[0-9]+$ \
+                    && "$urest" -ge "$uarg2" ]]; then
+              ubound="${uarg2}:${urest}"; ulo="$uarg2"; uhi="$urest"; ubtext="${ulo}..${uhi}"
+            fi
+          fi
+          if [[ -z "$ubound" ]]; then
+            echo "FAIL  fusecheck ${name}: malformed assert line \"${uline}\" — expected 'assert <stl-basename> <min_bodies> [<max_bodies>]' (max >= min) or 'assert <stl-basename> =N'"
             fail=1
             continue
           fi
@@ -539,18 +587,29 @@ gate_one() {
             fail=1
             continue
           fi
-          local ubodies
-          if ! ubodies="$(python3 -m printcheck.fusecheck "$astl" \
-                          ${fz_args[@]+"${fz_args[@]}"})"; then
-            echo "FAIL  fusecheck ${name}: fusecheck failed on ${astl}"
-            fail=1
-            continue
-          fi
-          if [[ "$ubodies" -ge "$uarg2" ]]; then
-            echo "ok    fusecheck ${name}: ${uarg1} splits into ${ubodies} bodies (>= ${uarg2}) once the flexure is removed — the mechanism separates"
-          else
-            echo "warn  fusecheck ${name}: ${uarg1} splits into only ${ubodies} body/bodies (< ${uarg2}) once the flexure is removed — likely FUSED; reviewer signoff required"
-          fi ;;
+          # fusecheck prints the count and carries the verdict in its exit
+          # code: 0 within the bound, 3 below min (the fuse), 4 above max (an
+          # extra body), anything else a measurement error.
+          local ubodies urc=0
+          ubodies="$(python3 -m printcheck.fusecheck "$astl" --bound "$ubound" \
+                     ${fz_args[@]+"${fz_args[@]}"})" || urc=$?
+          case "$urc" in
+            0)
+              if [[ -z "$uhi" ]]; then
+                # One-sided: the line every existing manifest already emits.
+                echo "ok    fusecheck ${name}: ${uarg1} splits into ${ubodies} bodies (>= ${ulo}) once the flexure is removed — the mechanism separates"
+              else
+                echo "ok    fusecheck ${name}: ${uarg1} splits into ${ubodies} bodies (${ubtext}) once the flexure is removed — the mechanism separates and nothing came loose"
+              fi ;;
+            3)
+              echo "warn  fusecheck ${name}: ${uarg1} splits into only ${ubodies} body/bodies (< ${ulo}) once the flexure is removed — likely FUSED; reviewer signoff required" ;;
+            4)
+              echo "FAIL  fusecheck ${name}: ${uarg1} splits into ${ubodies} bodies (> ${uhi}; bound ${ubtext}) once the flexure is removed — extra body = freed island / dropped part; a body nothing holds is a defect, not a signoff"
+              fail=1 ;;
+            *)
+              echo "FAIL  fusecheck ${name}: fusecheck failed on ${astl}"
+              fail=1 ;;
+          esac ;;
         control)
           if [[ -z "$uarg1" || -z "$uarg2" || -n "$urest" \
                 || ! "$uarg2" =~ ^[0-9]+$ ]]; then

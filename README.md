@@ -262,6 +262,10 @@ surfaces studies awaiting a read live in
   archived sushi-battleship),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
+  `stencil-glyphs.scad` (clean-room 2D stencil digits 0-9 with bridged
+  counters, no `text()`/TTF, for numerals cut through a shell),
+  `bevel.scad` (FDM bevel and spur gear pairs from one generator and one
+  clearance, on BOSL2's gears),
   each with a `*-demo.scad` regression render, plus vendored
   [BOSL2](https://github.com/BelfrySCAD/BOSL2)
 - `build/` — generated STL/PNG outputs (gitignored)
@@ -414,6 +418,12 @@ surfaces studies awaiting a read live in
     slicer imports as N parts) from a `ci.plate` manifest, so a two-part
     design isn't handed over as one fused STL; `--check` gates the object
     count, `--selftest` proves it discriminates a fused body
+  - `kinematics-check.sh` — the kinematics verification gate: swept
+    fitchecks from a `ci.kinematics` manifest, so a gear pair is proven
+    clear and engaged at every phase of a mesh cycle and an indexed face is
+    proven flat and upright at every landing stop, with mandatory negative
+    controls; `--selftest` proves it on the fixtures under
+    `scripts/kinematics-fixtures/`
   - `gate-summary.py` — turns a gate log into the CI results table
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and
