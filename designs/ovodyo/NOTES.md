@@ -133,7 +133,71 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   full-section and the outer thirds point. Three bolted segments: a constant
   `base-segment` (centre) and two mirror `base-end` wings (tapering, each carrying
   a stalk boss over its motor pod). Both gate 100/100. The reusable
-  `lib/spaceframe.scad` and the red structural core stay #603.
+  `lib/spaceframe.scad` stays #603.
+- **Base product half (#603 item 10 / #604 item 8):** the base becomes a
+  printable product on top of the v0 lattice — same silhouette, four additions.
+  - **Airiness (N3) measured, not asserted.** Solid volume of the printed base
+    (trimesh on the gated STLs) over the bounding box of the assembled base:
+    **before** 21,889 mm³ / 1,110,408 mm³ (383.7 × 78.7 × 36.7) = **1.97 %**;
+    **after** — segment 9,213 + 2 × wing 6,486 + core 32,353 + 2 × plug 92 =
+    **54,713 mm³** / 1,164,911 mm³ (386.6 × 78.7 × 38.3, tip beads and feet
+    included) = **4.70 %** (4.5 % on the charter's 383 × 76 × (34 + 8) box).
+    The 25 % ceiling has 20 points of headroom; the core is a slim keel and the
+    lattice stays the side-view silhouette.
+  - **Red structural core (`base-core`, N4 red = a working part).** A keel
+    120 × 63 × 8.8 mm that seats in the centre segment only, between the bottom
+    chords and under the 9 mm gear line, with a 28 mm trough for the PCB (floor
+    4.6, the PCB underside is 5.2). Its **underside is the negative of the deck
+    lattice**: a diamond channel (46° roof, support-free; inradius strut_d/2 +
+    `core_fit` 0.3) along every cross tie and Warren diagonal of the centre
+    segment, drawn from the same `_BL/_BR` node functions `base_truss` uses —
+    so the sockets ARE the struts and the core can seat in exactly one pose
+    (the Warren zigzag is not 180°-symmetric about the segment centre, and the
+    tie pitch pins x). It is slid in along x through the segment's open end
+    frame, flat-bottom riding on the deck struts, and drops the channel depth
+    onto them when the pattern aligns; the flanks (vertical 2.6 mm skirt, then
+    leaning in to a 48.4 mm top) clear the ridge posts in that raised pose.
+    `core-seat` proves the seated core ∩ segment struts is empty; the control
+    shifts it half a bay so the ties run through the keel (702 facets).
+  - **Ballast (stated assumption, not a claim).** Two sealed pockets, one per
+    rail: floor `core_wall` 1.4 above the bottom, walls 1.4, a 44°-from-vertical
+    inner slope and outer wall (never an overhang from inside), a flat ceiling
+    strip < 5 mm wide (a bridgeable span), and the channels' humps offset by the
+    wall so the cavity keeps >= 1.4 to every socket. Cavity volume (numeric
+    integration of the section minus the humps, 0.1 mm grid): **11.8 cm³** for
+    both pockets. Vitamin: **Ø2 mm steel shot** (chrome-steel bearing balls or
+    #9-size steel shot); at 7.85 g/cm³ × ~0.60 random packing ≈ 4.7 g/cm³ the
+    fill is **≈ 55 g (2 × 28 g)**. Filled through a Ø3.2 port in the +x end
+    face of each pocket (round, so its roof bridges; placed above every socket
+    crest with a full wall under it and clear of the end-bay diagonal's hump),
+    closed by `base-plug` (print two): a Ø5 × 1.2 head proud on the end face,
+    inside the 3.5 mm gap to the segment's end tie, and a 3.3 → 2.7 mm tapered
+    shank that wedges in the 4.2 mm end wall. Fill and plug BEFORE sliding the
+    core in. `pocket-clear` proves the cavity ∩ the core's outer 1.2 mm shell
+    (the section eroded by 1.2 + the sockets grown by 1.2, ends included) is
+    empty; the control raises the ceiling through the roof (156 facets). Whether
+    55 g at z ≈ 5 mm is enough against two ~50 g balls at 124 mm is the
+    **CoG/tip-over gate that is NOT in scope tonight** — this number is an
+    assumption to be measured, never a README stability claim.
+  - **Feet.** Each wing carries two Ø7 pads under its inner-end chord nodes
+    (`_bx(bays)` − 4 in x, `_bw` − 2 in y: hanging below the chord, inboard of
+    its outer face, invisible from the hero camera). The pad bottom is FLUSH
+    with the chord underside (a first cut hung them 1.5 mm below and printcheck
+    rightly reported a 39 mm² bed contact + tip-over: the wing would have
+    printed standing on two pads) and carries a Ø4.9 × 0.7 recess for a
+    **Ø5 mm × 1.5 mm hemispherical stick-on silicone bumper** (vitamin; the
+    recess is kept under 5 mm so its roof is a bridgeable span, 100/100). The
+    base stands on four bumpers 0.8 mm proud; the tips float 0.8 mm.
+  - **Tips.** `base_t` keeps its form; the floor is `tip_nub` 0.01 (was 0.05)
+    and a `tip_d` = 2 × strut_d = Ø5.6 bead at the tip station, bottom flush
+    with the chords, encloses the three converging strut ends — the needle ends
+    in one round nose, no cap, no truncated bay.
+  - **Deliverable = the plate.** `ci.plate` lists the eight production part
+    VALUES (four ball halves, base-segment, base-end, base-core, base-plug);
+    plate.sh merges each value once, so a part printed twice (base-end, base-plug)
+    is listed once and duplicated in the slicer (documented on the page).
+    `plate.sh --check`: 8 separate objects == 8 declared parts. The assembled
+    render stays a preview.
 
 ## v0 simplifications → which issue upgrades each
 
@@ -146,10 +210,10 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
 | Two-tone shown only in preview colour, no committed two-tone reveal render | #600 (two-tone reveal render) |
 | Base drivetrain is a **preview representation** (hand-rolled trapezoidal gears, not involute, not cut to a running fit; no red structural core; not a reusable lib) | #604 (`lib/bevel.scad` real meshing differential + kinematics gate) + #603 (`lib/spaceframe.scad` + red core) |
 | Ball halves key on **loose dowels + glue** (flat butt joint) | #602 (captive threaded/snap mating seam) |
-| Deliverable gated as loose parts; no `ci.plate` | #604 (`ci.plate`/`ci.fusecheck` multi-object 3MF) |
+| ~~Deliverable gated as loose parts; no `ci.plate`~~ done: `ci.plate` → `build/ovodyo-plate.3mf`, 8 objects | (`ci.fusecheck` stays with the seam work) |
 | Ball generator is design-local | #600 (promote to `lib/`, with a `tri_k` guard + facet mate) |
 | No committed style pack / stylelift metrics | #601 (style pack + facet/openness metrics) |
-| No stability/CoG check; balls high on thin stalks | #603 (ballast + CoG/tip-over gate) |
+| Ballast pockets + a stated ≈55 g shot fill exist, but no CoG/tip-over gate proves it is enough | #603 (CoG/tip-over gate) |
 
 ## Tumble kinematics (N2)
 
@@ -290,6 +354,12 @@ max error ≤ 3°, every face presented once, and monotone stops.
   mock-drive 100/100; all slice. No CRITICAL, no failure. (Local stable-engine
   2021.01 scores the halves ~76; the caveats are the seam/orientation ones #602
   owns.)
+- Base product half (local stable 2021.01, `gate.sh ovodyo` exit 0): base-end
+  100/100 with the feet + nose (flat bed contact on the chords and pads),
+  **base-core 100/100** (flat-bottom-down: every socket roof is a 46° chamfer,
+  the pocket ceilings are < 5 mm bridges, walls >= 1.4), **base-plug 100/100**
+  (head-down). Fit checks: core-seat 0 facets, core-seat-ctrl 702, pocket-clear
+  0, pocket-ctrl 156 (`lineage.sh facet-count`). Plate: 8 objects == 8 parts.
 
 ## Print this first
 
@@ -331,7 +401,12 @@ gated by `ci.kinematics`); `hours-posed` previews the hours ball at `-D
 yoke_deg=φ` for a viewer at +x (camera `0,0,0,90,0,90,260`). The `-ball` parts are the full
 shells used only in the assembled preview; the `-top`/`-bottom` parts are the
 printable units (pole-up split; `ball_half(hours, top)` builds them). `base-segment`
-is the constant centre truss; `base-end` is a tapering end wing (print two).
+is the constant centre truss; `base-end` is a tapering end wing (print two,
+each with a Ø5.6 nose bead and two bumper feet at its wide end); `base-core` is
+the red ballast keel that seats in the centre segment (`core_body()`, modelled
+in place on z = 0) and `base-plug` its port plug (print two); `core-seat`,
+`core-seat-ctrl`, `pocket-clear`, `pocket-ctrl` are the `ci.fitchecks` parts
+(never printed). `ci.plate` builds the multi-object 3MF deliverable.
 `base-mech` (whole drivetrain) and `pod-drive` (one pod's gear train) are
 PREVIEW-ONLY coloured mechanism — not in `ci.parts`, not printed. The ball's
 faceting is `_GB_TRI_K` in `geodesic-ball.scad`; the numeral stencil ties are
