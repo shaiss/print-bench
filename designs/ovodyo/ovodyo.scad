@@ -9,11 +9,13 @@
 // All dimensions in millimeters.
 
 include <geodesic-ball.scad>  // the faceted numbered-ball generator (#600)
+use <threads-fdm.scad>        // the captive seam's male/female thread pair (#602)
+use <printability.scad>       // chamfered_cylinder for the seam coupon pucks
 
 /* [What to render] */
 // assembled | hours-top | hours-bottom | minutes-top | minutes-bottom |
 // hours-ball | minutes-ball | base-segment | base-end | mock-drive |
-// base-mech | pod-drive
+// base-mech | pod-drive | seam-coupon | seam-fit | seam-fit-ctrl
 part = "assembled";
 
 /* [Overall (from the reference: 383 x 78 x 163 mm)] */
@@ -49,11 +51,33 @@ slot_turns = 0.5;
 // The ball prints in two halves. It is tilted POLE-UP (a pentagon face to each
 // pole) so the equatorial cut runs through the triangle band and bisects NO
 // number face — even numbers land on the top half, odd on the bottom. The two
-// halves locate on short alignment dowels seated in bosses at the seam (a keyed
-// register; #602 upgrades this flat butt joint to a captive threaded/snap seam).
-// Dowel diameter (mm) and how deep the dowel seat is (straddling the seam):
-seam_dowel_d = 2.8;
-seam_dowel_depth = 12;
+// halves join on a CAPTIVE THREADED SEAM (#602, lib/threads-fdm.scad): the
+// bottom half grows a short male ring up from its flat seam face just inside
+// the shell, the top half carries the matching female thread cut into an
+// internal rim boss, and the halves screw closed in exactly ONE turn. The seam
+// plane stays a true flat great circle. See NOTES.md "Ball seam" for the
+// starts/pitch arithmetic and "Print this first" for tuning.
+// Radial thread clearance (mm) — THE one tunable. Print the seam coupon first
+// and step it by 0.05: bigger = looser.
+seam_tol = 0.25;
+// Thread crest (major) diameter of the male ring (mm)
+seam_d = 70;
+// Radial thread depth (mm); the flanks are 45° so both halves print supportless
+seam_depth = 1.0;
+// Pitch (mm). Single start, so pitch == lead; the neck is exactly one pitch
+// tall, which makes the closing rotation exactly 360°.
+seam_pitch = 5;
+// Male ring wall under the thread root (mm)
+seam_ring_w = 2.0;
+// Half-height of the seam band (mm) in which the helical slot is interrupted so
+// it never crosses the mating ring — the slot becomes two arcs either side of
+// the seam. Numeral cuts come no closer than ~5.5 mm to the seam; keep <= 5.
+seam_band = 5;
+// 45° chamfer on the outer seam edge of each half (mm) so the seam reads as one
+// crisp line and the mating faces meet square, not on an elephant's foot
+seam_chamfer = 0.6;
+// Helix segments per turn (thread_helix's `seg`); 48 is legal to d_major 93
+seam_seg = 48;
 
 /* [Stalks & base] */
 // Brass support-shaft diameter (mm) — a bought rod (vitamin)
@@ -93,54 +117,197 @@ module minutes_ball() {
 // is the colatitude of icosa vertex [0,1,PHI], so this rotation lands it on +z.
 _pole_up = atan2(1, PHI);
 
-// Alignment-dowel bosses at the seam. Three lugs on the inner wall straddle the
-// cut plane at irregular azimuths (so the halves seat at exactly one clocking);
-// a dowel hole is drilled down each. Because they are drilled in the WHOLE ball
-// before it is split, the two halves' holes register by construction.
-_seam_boss_r  = ball_d / 2 - 4;   // lug seat radius (embedded in the wall)
-_seam_az      = [24, 150, 262];   // irregular azimuths (deg), keyed clocking
+// ---- captive threaded seam (#602) -----------------------------------------
+// One thread pair from lib/threads-fdm.scad, so male and female cannot drift:
+// the bottom half carries the male RING (thread_neck bored to a ring) standing
+// on its seam face, the top half the female GROOVE (thread_bore_cut + the
+// mandatory minor bore) in an internal rim boss. Single start, neck height ==
+// pitch: the seated clocking is unique (the ball has NO rotational symmetry
+// about the pole axis once it carries twelve different numerals, so only the
+// identity clocking reassembles it — NOTES.md has the starts arithmetic) and
+// the closing rotation is exactly 360°: line the facets up, drop the top on
+// (it only enters at that one clocking), one full turn, and the facets are
+// lined up again as the faces meet.
+seam_len       = seam_pitch;                     // neck height: one lead, one turn
+_seam_r_maj    = seam_d / 2;                     // male crest radius
+_seam_r_min    = _seam_r_maj - seam_depth;       // male root radius
+_seam_r_in     = _seam_r_min - seam_ring_w;      // male ring inner radius
+_seam_r_bore   = _seam_r_min + seam_tol;         // female MINOR bore (mandatory)
+_seam_over     = 0.3;                            // groove runs this far past the neck top, then closes
+_seam_mouth    = 0.6;                            // female mouth chamfer (breaks the bore edge)
+_cavity_r      = ball_d / 2 * _GB_PENT_R - wall; // the shell's spherical cavity radius
+_seam_weld_r   = _cavity_r + 0.5;                // boss outer sphere: 0.5 mm into the wall, so it welds
+// Rim-boss roof cone: radius grows tan(40°) per mm of height, i.e. the roof is
+// 50° from horizontal — a 40° overhang, inside the 45° rule with margin (a
+// roof at exactly 45° tessellates to 44.98° and sits on printcheck's threshold).
+_seam_roof     = tan(40);
+// Top boss height at the bore: the groove's closed top plus enough roof rise to
+// keep >= 1.2 mm of wall outside the groove crest (radial seam_depth + 1.2)
+_seam_boss_top = seam_len + _seam_over + (seam_depth + 1.2) / _seam_roof;
+// Bottom foundation depth: the roof must reach the cavity wall from the ring's
+// inner radius, plus a 2 mm plate where it meets the wall
+_seam_found_h  = (_cavity_r - _seam_r_in) / _seam_roof + 2;
 
-module _seam_bosses() {
-  for (a = _seam_az)
-    rotate([0, 0, a]) translate([_seam_boss_r, 0, 0])
-      cylinder(d = 8, h = 14, center = true, $fn = 32);   // lug straddling z=0
-}
-module _seam_dowels() {
-  for (a = _seam_az)
-    rotate([0, 0, a]) translate([_seam_boss_r, 0, 0])
-      cylinder(d = seam_dowel_d, h = seam_dowel_depth, center = true, $fn = 24);
-}
-
-// The pole-up ball with dowel bosses added and their holes drilled — the common
-// solid both printable halves are cut from.
-module _ball_for_split(hours = true) {
+// The male ring: the library neck (lead-in chamfer included) bored to a ring
+// `seam_ring_w` thick under the root. Sits on z = 0, rises `seam_len`.
+module _seam_neck() {
   difference() {
-    union() {
-      rotate([_pole_up, 0, 0]) { if (hours) hours_ball(); else minutes_ball(); }
-      _seam_bosses();
-    }
-    _seam_dowels();
+    thread_neck(seam_d, seam_depth, seam_pitch, 1, seam_len, seg = seam_seg);
+    translate([0, 0, -1]) cylinder(r = _seam_r_in, h = seam_len + 2, $fn = 96);
   }
 }
 
-// One printable HEMISPHERE, cut at the equator (through the triangle band) and
-// sitting flat cut-face-down on the bed (dome up). `top` selects the +z half
-// (even numbers) or the -z half (odd numbers); the bottom half is flipped so it
-// too prints flat-face-down. Print two halves per ball — a top AND a bottom —
-// to get all 12 numbers. #602 upgrades the flat butt joint + dowels to a
-// captive threaded/snap seam; the faceted dome still has light overhangs (v0).
-module ball_half(hours = true, top = true) {
-  if (top)
+// The female cutter, rising from z = 0: the MANDATORY minor bore (per
+// thread_bore_cut's doc it cuts the groove only — without the bore the top
+// half is a solid plug the ring cannot enter, watertight and gate-passing),
+// the groove itself, and a small mouth chamfer on the bore edge.
+module _seam_female_cut() {
+  translate([0, 0, -1]) cylinder(r = _seam_r_bore, h = _seam_boss_top + 3, $fn = 96);
+  thread_bore_cut(seam_d, seam_depth, seam_pitch, 1, seam_len, seam_tol,
+                  over = _seam_over, seg = seam_seg);
+  translate([0, 0, -0.01])
+    cylinder(r1 = _seam_r_bore + _seam_mouth, r2 = _seam_r_bore, h = _seam_mouth + 0.01, $fn = 96);
+}
+
+// The rim boss inside the cavity at the seam — the top half's female blank
+// (bore radius `_seam_r_bore`, `_seam_boss_top` tall) or the bottom half's
+// neck foundation (bore `_seam_r_in`, `_seam_found_h` deep). Bounded by the
+// cavity sphere grown 0.5 mm (so it welds into the wall) and by a roof cone
+// (`_seam_roof`) from the bore edge out to the wall, so its cavity-facing end
+// is never a flat ledge: printed pole-down that end faces the bed, and the
+// roof prints as a 40° overhang. The roof also keeps the boss clear of the
+// numeral cuts, which come no closer than r ≈ 36.6 within 7 mm of the seam
+// (the boss is at r <= 35.0 by z = 7).
+module _seam_boss(top = true) {
+  r0  = top ? _seam_r_bore : _seam_r_in;
+  h   = top ? _seam_boss_top : _seam_found_h;
+  zlo = top ? -1 : -h - 1;
+  difference() {
     intersection() {
-      _ball_for_split(hours);
-      translate([0, 0, ball_d]) cube(ball_d * 2, center = true);   // keep z >= 0
+      sphere(r = _seam_weld_r, $fn = 96);
+      if (top) cylinder(r1 = r0 + _seam_roof * h, r2 = r0, h = h, $fn = 96);
+      else translate([0, 0, -h]) cylinder(r1 = r0, r2 = r0 + _seam_roof * h, h = h, $fn = 96);
+    }
+    translate([0, 0, zlo]) cylinder(r = r0, h = h + 2, $fn = 96);
+  }
+}
+
+// Refills the shell WALL (not the cavity) within |z| <= seam_band, which is
+// how the helical slot is clipped short of the seam in each half: the slot
+// becomes two arcs reading as one interrupted helix, and never crosses the
+// mating ring (a deliberate divergence from the reference's "the slot is the
+// seam", accepted in #602). Numeral cuts stay outside the band.
+module _seam_band_fill() {
+  intersection() {
+    difference() {
+      rotate([_pole_up, 0, 0]) gb_faceted_ball(ball_d, tri_k = facet);
+      sphere(r = _cavity_r, $fn = 96);
+    }
+    cube([ball_d * 2, ball_d * 2, 2 * seam_band], center = true);
+  }
+}
+
+// The 45° chamfer along the OUTER seam edge, following every facet: within
+// `seam_chamfer` of the seam each of the ball's 32 face planes n·p <= D is
+// tightened to n·p <= D - c + sgn·z, i.e. the half-space with normal
+// (n - sgn·ẑ) at offset D - c, so the surface pulls in by (c - |z|) along its
+// own normal and the two halves meet on a crisp V line with square faces.
+function _seam_rotx(v, a) = [v[0], v[1] * cos(a) - v[2] * sin(a), v[1] * sin(a) + v[2] * cos(a)];
+function _seam_planes() = let (R = ball_d / 2)
+  concat([for (n = gb_icosa_verts())  [_seam_rotx(n / norm(n), _pole_up), R]],
+         [for (n = gb_dodeca_verts()) [_seam_rotx(n / norm(n), _pole_up), R * facet]]);
+module _seam_halfspace(n, dist, big = 600) {           // {p : n̂·p <= dist}
+  d  = n / norm(n);
+  ax = [-d[1], d[0], 0];
+  if (norm(ax) < 1e-9)
+    translate([0, 0, (d[2] >= 0 ? dist - big / 2 : -dist + big / 2)]) cube(big, center = true);
+  else
+    rotate(a = acos(max(-1, min(1, d[2]))), v = ax)
+      translate([0, 0, dist - big / 2]) cube(big, center = true);
+}
+module _seam_edge_chamfer(sgn = 1) {
+  tilted = [for (pl = _seam_planes()) let (m = pl[0] - [0, 0, sgn])
+              if (norm(m) > 0.3) [m / norm(m), (pl[1] - seam_chamfer) / norm(m)]];
+  intersection_for (t = tilted) _seam_halfspace(t[0], t[1]);
+}
+
+// The pole-up ball with the seam band refilled — the common shell both halves
+// are cut from (the bosses differ per half, so they are added in ball_half_seated).
+module _ball_body(hours = true) {
+  rotate([_pole_up, 0, 0]) { if (hours) hours_ball(); else minutes_ball(); }
+  _seam_band_fill();
+}
+
+// One HEMISPHERE in the ball frame at the SEATED pose: seam plane z = 0, the
+// top half above it carrying the female boss, the bottom half below it with
+// the male ring standing up through z = 0. This is the frame the fit checks
+// intersect in (`seam-fit`); ball_half() orients it for the bed.
+module ball_half_seated(hours = true, top = true) {
+  if (top)
+    difference() {
+      intersection() {
+        union() { _ball_body(hours); _seam_boss(top = true); }
+        translate([0, 0, ball_d]) cube(ball_d * 2, center = true);   // keep z >= 0
+        _seam_edge_chamfer(1);
+      }
+      _seam_female_cut();
     }
   else
-    rotate([180, 0, 0])                                            // flip dome-up
+    union() {
       intersection() {
-        _ball_for_split(hours);
-        translate([0, 0, -ball_d]) cube(ball_d * 2, center = true); // keep z <= 0
+        union() { _ball_body(hours); _seam_boss(top = false); }
+        translate([0, 0, -ball_d]) cube(ball_d * 2, center = true);  // keep z <= 0
+        _seam_edge_chamfer(-1);
       }
+      _seam_neck();
+    }
+}
+
+// One printable HEMISPHERE, POLE-DOWN on the bed: the flat pole pentagon is the
+// first layer, the seam ring is the top of the print. `top` selects the +z half
+// (even numbers, female thread) or the -z half (odd numbers, male ring). Print
+// two halves per ball — a top AND a bottom — to get all 12 numbers. Pole-down
+// is forced by the seam (a ring standing on the seam face cannot print
+// seam-face-down) and is also the overhang-free orientation for a hollow
+// hemisphere: the cavity is an open bowl, not a ceiling, and the faces next to
+// the pole lean out at 26.6°.
+module ball_half(hours = true, top = true) {
+  translate([0, 0, ball_d / 2])
+    if (top) rotate([180, 0, 0]) ball_half_seated(hours, true);
+    else     ball_half_seated(hours, false);
+}
+
+// Fit proof (designs/ovodyo/ci.fitchecks): the male ring intersected with the
+// top half at the seated pose must render EMPTY at seam_tol; the control parks
+// the top half a quarter-turn off (pitch/4 axial mismatch) and must interfere.
+module seam_fit(ctrl = false) {
+  intersection() {
+    _seam_neck();
+    rotate([0, 0, ctrl ? 90 : 0]) ball_half_seated(hours = true, top = true);
+  }
+}
+
+// "Print this first": the male ring on a thin chamfered flange (the seam face
+// stand-in) beside a chamfered puck carrying the female cut, mouth UP the way
+// the top half prints — both from the production seam modules, nothing copied.
+// Tune seam_tol on this pair before printing four ball halves.
+module seam_coupon() {
+  gap      = 6;
+  flange_r = _seam_r_maj + seam_tol + 2;     // 2 mm past the female crest, like the seam face
+  puck_r   = _seam_r_maj + seam_tol + 3;     // 3 mm of wall around the groove crest
+  puck_h   = _seam_boss_top;
+  translate([-(puck_r + gap), 0, 0]) {
+    difference() {
+      chamfered_cylinder(d = 2 * flange_r, h = 1.5, chamfer1 = 0.6, chamfer2 = 0);
+      translate([0, 0, -1]) cylinder(r = _seam_r_in, h = 4, $fn = 96);
+    }
+    translate([0, 0, 1.5 - 0.01]) _seam_neck();
+  }
+  translate([puck_r + gap, 0, puck_h]) rotate([180, 0, 0])
+    difference() {
+      chamfered_cylinder(d = 2 * puck_r, h = puck_h, chamfer1 = 0.6, chamfer2 = 0.6);
+      _seam_female_cut();
+    }
 }
 
 // ---- drivetrain gear primitives -------------------------------------------
@@ -426,4 +593,7 @@ else if (part == "base-end")     base_end();               // tapering end wing
 else if (part == "mock-drive")   mock_drive();
 else if (part == "base-mech")    base_mech();              // preview: the base drivetrain
 else if (part == "pod-drive")    pod_drive();              // preview: one pod's gear train
+else if (part == "seam-coupon")  seam_coupon();            // print this first: male ring + female puck
+else if (part == "seam-fit")     seam_fit(false);          // fitcheck: must render EMPTY
+else if (part == "seam-fit-ctrl") seam_fit(true);          // fitcheck control: must interfere
 else assembled();
