@@ -157,22 +157,25 @@ All commands run from the repo root.
 # `fusecheck`) on the SLICED STL — never a -D pose — to catch a print-in-place
 # mechanism that welds shut (a living hinge stays watertight and one body, so
 # printcheck can't see it): `flexure <aabb>` drops the thin hinge zone,
-# `assert <stl> <min>` requires the rest to split into >= min separable bodies
-# (a fuse is a STRONG WARN needing reviewer signoff, not a hard fail), and
-# `control <part> <max>` is the mandatory known-fused negative control proving
-# the check can still fire. A designs/<name>/ci.kinematics manifest (issue
-# #607, scripts/kinematics-check.sh) additionally gates SWEPT fit parts — the
-# fitcheck idea over a parameter sweep, for a rotational mesh (a gear pair at N
-# phases across one mesh cycle must show zero interference AND never separate)
-# or an index/landing pose (at each declared stop the presenting face lands
-# within tolerance of reader-upright and its numeral is not rolled or
-# mirrored): `steps <n>` (default 12) sets the resolution, `sweep <param>`
-# -D's <param> over [0,1), `stops <param> <v1,v2,...>` evaluates later verbs
-# at those values instead, `empty <part>` / `nonempty <part>` must hold at
-# EVERY step, and `empty-control <part>` / `nonempty-control <part>` are the
-# mandatory negative controls that must break at SOME step (a pair that jams,
-# a pair that gaps out, a rolled face, a mirrored numeral) or the checks are
-# unfalsifiable. CI runs this.
+# `assert <stl> <min> [<max>]` requires the rest to split into >= min separable
+# bodies (a fuse is a STRONG WARN needing reviewer signoff, not a hard fail)
+# and — with a max, or the sugar `assert <stl> =N` for exactly N — into <= max
+# (an extra body is a freed counter island or a dropped part: a hard FAIL no
+# reviewer waves through; the bound's semantics live in `fusecheck --bound`,
+# issue #612), and `control <part> <max>` is the mandatory known-fused
+# negative control proving the check can still fire. A designs/<name>/ci.kinematics
+# manifest (issue #607, scripts/kinematics-check.sh) additionally gates SWEPT
+# fit parts — the fitcheck idea over a parameter sweep, for a rotational mesh
+# (a gear pair at N phases across one mesh cycle must show zero interference
+# AND never separate) or an index/landing pose (at each declared stop the
+# presenting face lands within tolerance of reader-upright and its numeral is
+# not rolled or mirrored): `steps <n>` (default 12) sets the resolution,
+# `sweep <param>` -D's <param> over [0,1), `stops <param> <v1,v2,...>`
+# evaluates later verbs at those values instead, `empty <part>` /
+# `nonempty <part>` must hold at EVERY step, and `empty-control <part>` /
+# `nonempty-control <part>` are the mandatory negative controls that must
+# break at SOME step (a pair that jams, a pair that gaps out, a rolled face,
+# a mirrored numeral) or the checks are unfalsifiable. CI runs this.
 ./scripts/gate.sh [--slice] [<name>...]
 
 # Lineage of derivative designs (designs/<name>/derives.conf): `check`
