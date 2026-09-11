@@ -1,0 +1,19 @@
+# Production parts for the multi-object 3MF plate deliverable,
+# build/ovodyo-plate.3mf (scripts/plate.sh, gate.sh --check). The parts print
+# SEPARATELY and assemble by hand, so the deliverable is the plate (N distinct
+# objects the slicer imports as N parts), never the assembled render, which
+# would import as one welded body (the multi-part-fuse rule).
+#
+# One line per part VALUE (plate.sh merges each ci.parts value once): a part
+# printed more than once — base-end (two wings) and base-plug (one per ballast
+# pocket) — is listed once here and duplicated in the slicer; the README says
+# how many of each. Coupons, fit-check parts (core-seat*, pocket-*), the
+# preview-only mock-drive sample and the assembled preview are NOT plate parts.
+hours-top
+hours-bottom
+minutes-top
+minutes-bottom
+base-segment
+base-end
+base-core
+base-plug

@@ -1,0 +1,14 @@
+# Red structural core (base-core) fit proofs — dispatch parts of ovodyo.scad.
+# core-seat: the seated core ∩ the centre segment's struts must be EMPTY — the
+#   keel's underside sockets nest every deck tie and Warren diagonal without
+#   cutting a strut, and the flanks clear the ridge posts.
+# core-seat-ctrl: the same core shifted half a bay along x, so the ties run
+#   through the keel — the mandatory negative control (must overlap).
+# pocket-clear: the ballast cavity ∩ the core's outer 1.2 mm shell wall must be
+#   EMPTY — the cavity is fully enclosed with >= 1.2 mm of wall to the outer
+#   skin, the ends, the PCB trough and every strut channel.
+# pocket-ctrl: the cavity over-filled up through the roof — must overlap.
+core-seat        empty
+core-seat-ctrl   interferes
+pocket-clear     empty
+pocket-ctrl      interferes
