@@ -1,0 +1,9 @@
+# Structural refusal (selftest: must FAIL before rendering): `sotp` and `sto`
+# are typos of landing.scad's `stop`. A -D of a name the source never assigns
+# binds nothing and OpenSCAD says nothing, so the geometry sits at one pose
+# and every check "holds" at every value — the swept/stepped parameter must
+# be a top-level assignment of the entry .scad, and both lines must be named.
+sweep sotp
+empty landing-flat
+stops sto 0,1
+empty-control landing-flat-rolled

@@ -49,13 +49,21 @@
 # `steps`) was declared most recently above it; a check before any `sweep` or
 # `stops` line is malformed. The swept/stepped parameter must be a plain
 # top-level variable of the entry .scad (the -D override replaces its
-# assignment, exactly like `part`); never sweep `$t` — top-level assignments
-# evaluate before a -D'd special variable lands (see animations.conf). A manifest is validated whole — syntax, dispatch
-# branches, the mandatory controls — BEFORE the first render, so a typo never
-# burns render minutes and a structurally unfalsifiable manifest fails without
-# measuring anything. The renders then fail fast: an `empty` check stops at
-# the first step that shows facets, a control stops at the first step that
-# satisfies it (usually the first — a control is cheap by construction).
+# assignment, exactly like `part`), and the gate CHECKS that it is — an
+# assignment `<param> = …` at the start of a line of the entry file itself,
+# comments stripped — because a -D of a name the source never assigns binds
+# nothing and OpenSCAD says nothing: the geometry sits at one pose and every
+# check holds at every value (`sweep kin_phse` is a green gate over one
+# frame). Never sweep `$t` — top-level assignments evaluate before a -D'd
+# special variable lands (see animations.conf). A `stops` list is capped at
+# KIN_MAX_STEPS values, the same cap `steps` carries: the render budget is
+# bounded either way. A manifest is validated whole — syntax, the parameter,
+# dispatch branches, the mandatory controls — BEFORE the first render, so a
+# typo never burns render minutes and a structurally unfalsifiable manifest
+# fails without measuring anything. The renders then fail fast: an `empty`
+# check stops at the first step that shows facets, a control stops at the
+# first step that satisfies it (usually the first — a control is cheap by
+# construction).
 #
 # Facets, not exit codes, and the same helpers as gate.sh's fitcheck block and
 # mate-check.sh: lineage_render_binstl turns OpenSCAD's "Current top level
@@ -63,14 +71,36 @@
 # reads the binary STL (absent file = 0). A part whose name has no
 # `part == "<part>"` dispatch branch in the source renders empty and would
 # pass `empty` forever — the typo IS a pass — so the branch is required, the
-# way ci.fitchecks requires it.
+# way ci.fitchecks requires it. The source is grepped with its `//` and
+# `/* */` comments stripped (kin_strip_comments), so a branch that exists only
+# in the header prose, or a part name quoted in a comment, cannot satisfy it;
+# the same stripped text is what the parameter check above reads.
+#
+# WRONG-GEOMETRY WARNINGS fail the check. lineage_render_binstl returns
+# success on a render whose only complaint is a WARNING, and on the
+# cleanly-empty path it prints nothing at all — so a checked part whose
+# module is misspelled, or whose include is missing, renders EMPTY and passes
+# `empty` with a mesh that is not the design's. This gate asks the helper for
+# the full render log (LINEAGE_RENDER_LOG, its optional out-parameter) and
+# fails a check whose log carries a `WARNING: Ignoring unknown …` (module,
+# function, variable) or `WARNING: Can't open …` (include file, `use` library)
+# line: the class scripts/check.sh's FATAL_WARN names as "silently produced
+# the WRONG SHAPE", plus the two siblings only an instantiating render can
+# reach. Every other WARNING (2-manifold, deprecation) stays advisory, exactly
+# as in check.sh. gate.sh's fitcheck block and mate-check.sh render through
+# the same helper and do not check this today — the same exposure, noted
+# here so the two rules can be aligned rather than discovered.
 #
 # Output is the house style gate-summary.py and tools/telemetry already read:
 # `ok    kinematics <label>: …` / `FAIL  kinematics <label>: …` (no summary
-# shape claims these, exactly like fitcheck lines), and a render failure is
-# reported as `FAIL  <label>: kinematics <part> render failed` — the fitcheck
-# precedent's shape, which the summary's "failed before printcheck ran" list
-# already collects.
+# shape claims these, exactly like fitcheck lines), a wrong-geometry warning
+# is `FAIL  kinematics <label>: <part> render emitted a wrong-geometry
+# warning: <first warning line>`, and a render failure is reported as
+# `FAIL  <label> (kinematics <part> at <param>=<v>): render failed` — the
+# `FAIL  <design> (part=<part>): render failed` shape gate.sh uses for a
+# part render, which the summary's "failed before printcheck ran" list
+# (regex `FAIL\s+(.+: (?:render failed|\S+ not found))$`, the same one in
+# tools/telemetry) collects: the `: ` must sit right before `render failed`.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -84,8 +114,47 @@ source ./scripts/lineage.sh
 KIN_DEFAULT_STEPS=12
 KIN_MAX_STEPS=64
 KIN_OUT="build/.kinematics"
+# The render-log lines that mean the mesh is not the design's (see the
+# header): check.sh's FATAL_WARN class, widened to the two siblings a real
+# render can also hit ("unknown variable", "Can't open library").
+KIN_WRONG_GEOMETRY_WARN="^WARNING: (Ignoring unknown|Can't open)"
 
 trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
+
+# The source with every `//` and `/* */` comment removed, line structure
+# kept, so a grep for a dispatch branch or a top-level assignment can only
+# match code. POSIX awk, one pass: a `/*` opens a block that swallows text
+# (across lines) up to the next `*/`; a `//` outside a block drops the rest
+# of its line. A `//` inside a string literal is cut too (an http:// in an
+# echo) — the check gets stricter on that line, never looser, the safe
+# direction for a gate.
+kin_strip_comments() {
+  awk '
+    {
+      line = $0; out = ""
+      while (length(line) > 0) {
+        if (inblk) {
+          i = index(line, "*/")
+          if (i == 0) { line = ""; break }
+          line = substr(line, i + 2); inblk = 0
+        } else {
+          b = index(line, "/*"); l = index(line, "//")
+          if (b == 0 && l == 0) { out = out line; line = ""; break }
+          if (l > 0 && (b == 0 || l < b)) { out = out substr(line, 1, l - 1); line = ""; break }
+          out = out substr(line, 1, b - 1); line = substr(line, b + 2); inblk = 1
+        }
+      }
+      print out
+    }' "$1"
+}
+
+# Does the comment-stripped source ($1) assign <name> ($2) at the start of a
+# line — `name = …`, not `name == …`? That is the top-level assignment a -D
+# replaces; anything else (an include's variable, a module parameter, a typo)
+# leaves the -D binding nothing.
+kin_declares_var() {
+  grep -Eq "^[[:space:]]*${2}[[:space:]]*=([^=]|$)" <<<"$1"
+}
 
 # Run one manifest against one source. Prints the ok/FAIL lines, returns 0
 # when every check and control behaved as declared, 1 otherwise. Globals are
@@ -103,6 +172,9 @@ kin_run() {
     echo "FAIL  kinematics ${label}: manifest ${manifest} not found"
     return 1
   fi
+  # Every grep against the source below reads this, never the raw file.
+  local stripped
+  stripped="$(kin_strip_comments "$src")"
 
   # ---- pass 1: parse + validate the whole manifest before any render ----
   # Each accepted check becomes one record "verb|part|mode|param|values"
@@ -131,6 +203,14 @@ kin_run() {
           fail=1
           continue
         fi
+        # The name must be an assignment the -D can replace: a -D of a name
+        # the source never assigns binds nothing, silently, and every check
+        # then holds at every value over one unmoving pose. The mode is still
+        # entered so the checks below are validated in this same pass.
+        if ! kin_declares_var "$stripped" "$a"; then
+          echo "FAIL  kinematics ${label}: sweep parameter \"${a}\" is not a top-level variable of ${src} — a -D of a name the source never assigns binds nothing, so the geometry would sit at one pose and every check would pass vacuously"
+          fail=1
+        fi
         mode="sweep" param="$a" values="" ;;
       stops)
         if [[ -z "$a" || -z "$b" || -n "$rest" || ! "$a" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
@@ -140,6 +220,13 @@ kin_run() {
         fi
         local v ok=1 vals="" vals_arr
         IFS=',' read -ra vals_arr <<<"$b"
+        # The same cap as `steps`: the render budget of a manifest is bounded
+        # per check either way, and an unbounded list is a typo'd paste.
+        if (( ${#vals_arr[@]} > KIN_MAX_STEPS )); then
+          echo "FAIL  kinematics ${label}: malformed line \"${line}\" — stops carries ${#vals_arr[@]} values, at most ${KIN_MAX_STEPS} allowed (KIN_MAX_STEPS, the same cap as 'steps')"
+          fail=1
+          continue
+        fi
         for v in "${vals_arr[@]}"; do
           if [[ ! "$v" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then ok=0; break; fi
           vals+="${vals:+ }${v}"
@@ -148,6 +235,11 @@ kin_run() {
           echo "FAIL  kinematics ${label}: malformed line \"${line}\" — stops values must be comma-separated numbers"
           fail=1
           continue
+        fi
+        # Same rule and same reason as `sweep` above.
+        if ! kin_declares_var "$stripped" "$a"; then
+          echo "FAIL  kinematics ${label}: stops parameter \"${a}\" is not a top-level variable of ${src} — a -D of a name the source never assigns binds nothing, so the geometry would sit at one pose and every check would pass vacuously"
+          fail=1
         fi
         mode="stops" param="$a" values="$vals" ;;
       empty|nonempty|empty-control|nonempty-control)
@@ -163,8 +255,10 @@ kin_run() {
         fi
         # A real DISPATCH selector in the source, as ci.fitchecks demands: a
         # part with no branch renders empty and passes `empty` vacuously.
+        # Grepped with comments stripped, so a branch that exists only in
+        # the header prose cannot satisfy it.
         if ! [[ "$a" =~ ^[A-Za-z0-9_-]+$ ]] \
-           || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${a}\"" "$src"; then
+           || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${a}\"" <<<"$stripped"; then
           echo "FAIL  kinematics ${label}: no 'part == \"${a}\"' dispatch branch in ${src} — a part with no branch renders empty and passes vacuously"
           fail=1
           continue
@@ -214,16 +308,27 @@ kin_run() {
   for rec in "${checks[@]}"; do
     IFS='|' read -r verb vpart vmode vparam vlist <<<"$rec"
     read -ra vals <<<"$vlist"
-    local total="${#vals[@]}" unit="steps" i v facets stl verdict=""
+    local total="${#vals[@]}" unit="steps" i v facets stl logf warn verdict=""
     [[ "$vmode" == "stops" ]] && unit="stops"
     stl="${KIN_OUT}/${label}-${vpart}.stl"
+    logf="${KIN_OUT}/${label}-${vpart}.log"
     for ((i = 0; i < total; i++)); do
       v="${vals[$i]}"
       renders=$((renders + 1))
-      if ! lineage_render_binstl "$src" "$stl" -D "part=\"${vpart}\"" -D "${vparam}=${v}"; then
-        echo "FAIL  ${label}: kinematics ${vpart} render failed"
-        echo "      (${vparam}=${v}, ${unit%s} $((i + 1))/${total})"
+      # LINEAGE_RENDER_LOG is the helper's optional out-parameter: OpenSCAD's
+      # full output lands in $logf on every path, so the WARNING test below
+      # sees the cleanly-empty render the helper reports as a silent success.
+      if ! LINEAGE_RENDER_LOG="$logf" lineage_render_binstl "$src" "$stl" -D "part=\"${vpart}\"" -D "${vparam}=${v}"; then
+        echo "FAIL  ${label} (kinematics ${vpart} at ${vparam}=${v}): render failed"
+        echo "      (${unit%s} $((i + 1))/${total})"
         verdict="render-failed"
+        break
+      fi
+      warn="$(grep -E -m1 "$KIN_WRONG_GEOMETRY_WARN" "$logf" || true)"
+      if [[ -n "$warn" ]]; then
+        echo "FAIL  kinematics ${label}: ${vpart} render emitted a wrong-geometry warning: ${warn}"
+        echo "      (${vparam}=${v}, ${unit%s} $((i + 1))/${total}) — the mesh it left behind is not the design's, so it is not measured"
+        verdict="wrong-geometry"
         break
       fi
       facets="$(lineage_facet_count "$stl")" || facets=unreadable
@@ -309,8 +414,14 @@ kin_selftest() {
     "landing.neg-unfalsifiable-nonempty.kinematics|fail|no 'nonempty-control'"
     "landing.neg-no-check.kinematics|fail|no 'empty' or 'nonempty' check"
     "landing.neg-no-dispatch.kinematics|fail|no 'part == \"landing-nope\"' dispatch branch"
+    "broken.neg-comment-dispatch.kinematics|fail|no 'part == \"broken-in-line-comment\"' dispatch branch;;no 'part == \"broken-in-block-comment\"' dispatch branch"
+    "landing.neg-bad-param.kinematics|fail|sweep parameter \"sotp\" is not a top-level variable of;;stops parameter \"sto\" is not a top-level variable of"
+    "landing.neg-too-many-stops.kinematics|fail|stops carries 65 values, at most 64 allowed"
     "landing.neg-check-before-sweep.kinematics|fail|has no sweep or stops declared before it"
     "landing.neg-malformed.kinematics|fail|expected 'steps <n>';;expected 'sweep <param>';;stops values must be comma-separated numbers;;expected 'empty <part>';;unknown directive \"frobnicate\""
+    # -- render faults the gate must report, never measure --
+    "broken.neg-render-failed.kinematics|fail|(kinematics broken-assert at stop=0): render failed"
+    "broken.neg-wrong-geometry.kinematics|fail|broken-unknown-module render emitted a wrong-geometry warning: WARNING: Ignoring unknown module 'no_such_module'"
   )
   local row mf expect subs label src out st sub missing
   for row in "${rows[@]}"; do
