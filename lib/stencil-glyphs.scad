@@ -32,11 +32,19 @@
 // all ten digits plus "12", "05", "10", "00" cut THROUGH a thin plate,
 // CGAL-rendered by check.sh, and the plate must stay ONE body (Volumes: 2 in
 // OpenSCAD's summary — one solid, one outer void). An island that came loose
-// would show as an extra volume. That is the library's regression test; the
-// gate that makes it enforceable on a SLICED part — where a tether can still
-// weld or vanish under a slicer's own rules — is the two-sided fusecheck of
-// #612 part 2 (tools/printcheck + gate.sh), which counts separable bodies on
-// the sliced STL and asserts exactly N.
+// would show as an extra volume. That is the library's regression test, and
+// it is enforced automatically rather than read by eye (check.sh fails a
+// demo only on ERROR/WARNING, never on a volume count): tools/printcheck/
+// tests/test_stencil_demo.py renders the demo and asserts fusecheck counts
+// ONE body, then renders it with -D 'demo_bridged=false' and asserts more
+// than one (the negative control — every counter freed); and stencil-glyphs-
+// mates.conf (mate-check.sh, inside check.sh) probes the tether geometry
+// itself, a box intersected with a cut plate exactly where a "0" and an "8"
+// tether must stand, with the same probe against bridged = false as its
+// control. The gate that carries the proof onto a SLICED part — where a
+// tether can still weld or vanish under a slicer's own rules — is the
+// two-sided fusecheck of #612 part 2 (tools/printcheck + gate.sh), which
+// counts separable bodies on the sliced STL and asserts exactly N.
 //
 // The same modules serve the POSITIVE use: linear_extrude a glyph and it is a
 // raised numeral, bridge gaps included (the family's stencil identity), or
@@ -57,10 +65,14 @@
 //       on the origin, `spacing` between glyph boxes.
 //   stencil_text_width(s, h, spacing = 0.12*h)      -> total width, mm
 //   stencil_glyph_width(c, h)                       -> one glyph's advance, mm
+//       Both width helpers refuse h <= 0 like the modules do: they are the
+//       caller's fit check, and a width scaled by a zero or negative height
+//       (0, or a negative "width") is a fit check that lies.
 //
 // GUARDS (every one has a refusing case in stencil-glyphs-guards.conf)
-//   h > 0; stroke >= 0.8 (two extrusion widths) and <= 0.26*h (heavier closes
-//   the counters); bridge_min >= 0.8; bridge >= bridge_min and <= 0.25*h;
+//   h > 0 (the modules AND the two width functions); stroke >= 0.8 (two
+//   extrusion widths) and <= 0.26*h (heavier closes the counters);
+//   bridge_min >= 0.8; bridge >= bridge_min and <= 0.25*h;
 //   n an integer 0-9; stencil_text refuses a non-string, an empty string and
 //   any character outside digits/':'/' '.
 //
@@ -88,12 +100,16 @@ function _sg_spacing_default(h) = 0.12 * h;
 
 // One glyph's advance width (mm) — digits are tabular.
 function stencil_glyph_width(c, h) =
+    assert(is_num(h) && h > 0,
+           str("stencil_glyph_width: cap height h must be positive (mm), got ", h))
     assert(_sg_char_ok(c), str("stencil_glyph_width: unsupported character '", c,
                                "' (digits 0-9, ':' and ' ' only)"))
     (c == ":" || c == " ") ? _sg_wc() * h : _sg_w() * h;
 
 // Total laid-out width (mm) of stencil_text(s, h, spacing = spacing).
 function stencil_text_width(s, h, spacing = undef) =
+    assert(is_num(h) && h > 0,
+           str("stencil_text_width: cap height h must be positive (mm), got ", h))
     assert(is_string(s), str("stencil_text_width: s must be a string, got ", s))
     let (sp = is_undef(spacing) ? _sg_spacing_default(h) : spacing)
     len(s) == 0 ? 0 : _sg_x(s, len(s), h, sp) - sp;

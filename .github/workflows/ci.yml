@@ -588,6 +588,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Install OpenSCAD (cached)
+        # tests/test_stencil_demo.py renders lib/stencil-glyphs-demo.scad and
+        # counts its bodies with fusecheck (the counter-tether proof, #612).
+        # It skips itself where openscad/xvfb-run are absent, so this step is
+        # what makes that proof actually run in CI — the classifier forces
+        # this job on any lib/ change. Same cached, postinst-free package set
+        # as scad-check (docs-check.sh enforces the allowlist).
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+        with:
+          packages: openscad openscad-mcad xvfb
+          version: "2026-08"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
