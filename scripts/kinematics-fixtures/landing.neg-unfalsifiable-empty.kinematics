@@ -1,0 +1,4 @@
+# Structural refusal (selftest: must FAIL before rendering): an empty check
+# with no empty-control.
+stops stop 0
+empty landing-flat
