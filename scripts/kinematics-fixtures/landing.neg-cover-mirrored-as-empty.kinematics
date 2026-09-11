@@ -1,0 +1,5 @@
+# Negative control (selftest: must FAIL): the mirrored numeral declared to
+# cover the upright template.
+stops stop 0
+empty landing-glyph-cover-mirrored
+empty-control landing-glyph-cover-mirrored

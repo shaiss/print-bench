@@ -1,0 +1,13 @@
+# Index / landing-pose gate on the pentagon numeral shell in landing.scad
+# (selftest: PASS). At each of the five stops the presenting face must land
+# flat within tolerance and its numeral must read upright and right-handed;
+# the rolled and mirrored poses prove every check can fail.
+stops stop 0,1,2,3,4
+empty landing-flat                          # posed shell ∩ beyond-the-face slab
+empty landing-flat-in-tol                   # the same, rolled by half the tolerance
+nonempty landing-glyph                      # posed numeral ∩ the chiral-stroke probe
+empty landing-glyph-cover                   # shrunk upright template − posed numeral
+empty-control landing-flat-rolled           # mis-landed by 20°: must poke through
+empty-control landing-glyph-cover-mirrored  # mirrored numeral: template stroke uncovered
+nonempty-control landing-glyph-mirrored     # mirrored numeral: stroke on the other side
+nonempty-control landing-glyph-rolled       # rolled numeral: stroke off the probe

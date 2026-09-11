@@ -185,6 +185,20 @@ else
   echo "-- plate selftest: skipped (prusa-slicer not on PATH)"
 fi
 
+# And this proves the kinematics gate (scripts/kinematics-check.sh, the swept
+# fitcheck behind designs/<name>/ci.kinematics — issue #607) still passes what
+# it must and fires on every control: a BOSL2 spur pair swept through one mesh
+# cycle must read clear-and-engaged at every phase while its jam and gap pairs
+# fire, and a pentagon numeral shell at five landing stops must read
+# flat-and-upright while its rolled and mirrored poses fire — plus every
+# structural refusal (a check with no control, a part with no dispatch branch,
+# a malformed line). A sweep gate that has never seen a jam looks exactly like
+# one that cannot see one. ~1–2 min of coarse CGAL on the fixtures.
+echo "-- kinematics selftest: scripts/kinematics-check.sh --selftest"
+if ! ./scripts/kinematics-check.sh --selftest; then
+  fail=1
+fi
+
 # And this proves the `render` camera opt still works on the installed
 # OpenSCAD build (issue #400): --render is value-taking on some builds
 # (2021.01, the 2026.08 nightly) and a bare trailing flag makes the parser
