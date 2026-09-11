@@ -91,7 +91,8 @@ trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[
 # when every check and control behaved as declared, 1 otherwise. Globals are
 # not touched — the selftest runs this in a subshell per row.
 kin_run() {
-  local src="$1" manifest="$2" label="${3:-$(basename "$manifest")}"
+  local src="$1" manifest="$2"
+  local label="${3:-$(basename "$manifest")}"
   local fail=0
 
   if [[ ! -f "$src" ]]; then
