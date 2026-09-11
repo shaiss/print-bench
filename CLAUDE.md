@@ -157,10 +157,13 @@ All commands run from the repo root.
 # `fusecheck`) on the SLICED STL — never a -D pose — to catch a print-in-place
 # mechanism that welds shut (a living hinge stays watertight and one body, so
 # printcheck can't see it): `flexure <aabb>` drops the thin hinge zone,
-# `assert <stl> <min>` requires the rest to split into >= min separable bodies
-# (a fuse is a STRONG WARN needing reviewer signoff, not a hard fail), and
-# `control <part> <max>` is the mandatory known-fused negative control proving
-# the check can still fire. CI runs this.
+# `assert <stl> <min> [<max>]` requires the rest to split into >= min separable
+# bodies (a fuse is a STRONG WARN needing reviewer signoff, not a hard fail)
+# and — with a max, or the sugar `assert <stl> =N` for exactly N — into <= max
+# (an extra body is a freed counter island or a dropped part: a hard FAIL no
+# reviewer waves through; the bound's semantics live in `fusecheck --bound`,
+# issue #612), and `control <part> <max>` is the mandatory known-fused
+# negative control proving the check can still fire. CI runs this.
 ./scripts/gate.sh [--slice] [<name>...]
 
 # Lineage of derivative designs (designs/<name>/derives.conf): `check`
