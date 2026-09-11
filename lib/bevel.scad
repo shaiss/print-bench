@@ -1,6 +1,7 @@
 // bevel.scad — FDM bevel (and spur) gear PAIRS from one generator, one clearance.
 // All dimensions in millimeters, all angles in degrees. Use from a design with:
-//   use <bevel.scad>
+//   use <bevel.scad>          (or include <bevel.scad>; both work on 2021.01 and
+//                              on the dev snapshots — see _bosl2_env below)
 //
 // Built on BOSL2's gears.scad (BSD-2-Clause, vendored at lib/BOSL2/). BOSL2
 // already draws a bevel gear; what it does not do is keep a PAIR honest. Its
@@ -381,6 +382,43 @@ function _which_check(which, a, b) =
 // Bore cutter (shared by bevel and spur gears)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// BOSL2's dynamic environment, re-established per call
+// ---------------------------------------------------------------------------
+// BOSL2 configures its attachment/tag machinery through `$` special variables
+// assigned at the TOP LEVEL of its own files ($tags_shown = "ALL", $tag = "",
+// $overlap = 0, ...). Special variables are dynamically scoped from the CALL
+// SITE, and a file this library is `use`d from never ran those assignments:
+// OpenSCAD 2021.01 happens to leak a used file's top-level `$` assignments
+// into calls made from the importer, the 2025 dev snapshots (the manifold
+// engine CI's render gate runs) do not — every BOSL2 gear call then trips
+// `assert(is_list($tags_shown) || $tags_shown == "ALL")` in attachments.scad.
+// Rather than requiring every consumer to `include <BOSL2/std.scad>` itself,
+// the two modules that reach BOSL2 geometry run their bodies inside this
+// wrapper, which sets every top-level special BOSL2 defines (attachments.scad
+// L20-56, gears.scad L22-29, transforms.scad $transform) to BOSL2's own
+// default. `use <bevel.scad>` and `include <bevel.scad>` therefore behave the
+// same on both engines; mate-check.sh / guard-check.sh (which always `use`
+// the library) pass under the nightly because of this block.
+module _bosl2_env() {
+    $tags = undef;          $save_tag = undef;      $tag = "";
+    $tag_prefix = "";       $overlap = 0;           $color = "default";
+    $save_color = undef;    $anchor_override = undef; $attach_to = undef;
+    $attach_anchor = [CENTER, CENTER, UP, 0];       $attach_alignment = undef;
+    $parent_anchor = BOTTOM; $parent_spin = 0;      $parent_orient = UP;
+    $parent_size = undef;   $parent_geom = undef;   $parent_parts = undef;
+    $change_anchors = undef; $attach_inside = false;
+    $edge_angle = undef;    $edge_length = undef;
+    $tags_shown = "ALL";    $tags_hidden = [];
+    $ghost_this = false;    $ghost = false;         $ghosting = false;
+    $highlight_this = false; $highlight = false;
+    $parent_gear_type = undef; $parent_gear_pitch = undef; $parent_gear_teeth = undef;
+    $parent_gear_pa = undef; $parent_gear_helical = undef; $parent_gear_thickness = undef;
+    $parent_gear_dir = undef; $parent_gear_travel = 0;
+    $transform = IDENT;
+    children();
+}
+
 // A through-hole of bore + 2*tol along z over [z0, z1], with an optional
 // D-flat: `flat` is the shaft's across-flat dimension, so the flat face of
 // the hole sits at x = flat - bore/2 + tol and the material beyond it stays.
@@ -418,41 +456,43 @@ module _bevel_bore(bore, tol, flat, z0, z1) {
 //            orientation; "pitchbase": large-end pitch circle on z = 0.
 module bevel_gear_fdm(n, mate_n, mod, face = undef, shaft_angle = 90, tol = bevel_tol,
                       bore = 0, back = undef, flat = 0, phase = 0, anchor = "apex") {
-    face_ = is_undef(face) ? bevel_face_default(n, mate_n, mod, shaft_angle) : face;
-    back_ = bevel_back_h(n, mate_n, mod, shaft_angle, tol, back);
-    ok = _bevel_check(n, mate_n, mod, face_, shaft_angle, tol, bore, back_, flat);
-    assert(anchor == "apex" || anchor == "back" || anchor == "pitchbase",
-           str("bevel: anchor must be \"apex\", \"back\" or \"pitchbase\" (got ", anchor, ")"));
-    $gear_steps = _BEVEL_GEAR_STEPS;
-    $fn = _BEVEL_FN;
+    _bosl2_env() {
+        face_ = is_undef(face) ? bevel_face_default(n, mate_n, mod, shaft_angle) : face;
+        back_ = bevel_back_h(n, mate_n, mod, shaft_angle, tol, back);
+        ok = _bevel_check(n, mate_n, mod, face_, shaft_angle, tol, bore, back_, flat);
+        assert(anchor == "apex" || anchor == "back" || anchor == "pitchbase",
+               str("bevel: anchor must be \"apex\", \"back\" or \"pitchbase\" (got ", anchor, ")"));
+        $gear_steps = _BEVEL_GEAR_STEPS;
+        $fn = _BEVEL_FN;
 
-    d     = bevel_cone_angle(n, mate_n, shaft_angle);
-    pr    = bevel_pitch_r(n, mod);
-    ded   = bevel_dedendum(mod, tol);
-    apexh = bevel_apex_h(n, mate_n, mod, shaft_angle);
-    // Large-end tip and root points on the back cone, in the pitchbase frame
-    // (r, z), then the fill's top: that line shifted `tol` away from the apex.
-    off   = tol * [sin(d), -cos(d)];
-    tip   = [pr + mod * cos(d),  mod * sin(d)] + off;
-    root  = [pr - ded * cos(d), -ded * sin(d)] + off;
-    z_top = apexh;                          // the apex, above the small end
+        d     = bevel_cone_angle(n, mate_n, shaft_angle);
+        pr    = bevel_pitch_r(n, mod);
+        ded   = bevel_dedendum(mod, tol);
+        apexh = bevel_apex_h(n, mate_n, mod, shaft_angle);
+        // Large-end tip and root points on the back cone, in the pitchbase frame
+        // (r, z), then the fill's top: that line shifted `tol` away from the apex.
+        off   = tol * [sin(d), -cos(d)];
+        tip   = [pr + mod * cos(d),  mod * sin(d)] + off;
+        root  = [pr - ded * cos(d), -ded * sin(d)] + off;
+        z_top = apexh;                          // the apex, above the small end
 
-    dz = anchor == "apex" ? -apexh : anchor == "back" ? back_ : 0;
-    translate([0, 0, dz]) difference() {
-        union() {
-            bevel_gear(mod = mod, teeth = n, mate_teeth = mate_n, shaft_angle = shaft_angle,
-                       face_width = face_, bottom = back_, cone_backing = false,
-                       pressure_angle = _BEVEL_PA,
-                       clearance = bevel_clearance(mod, tol), backlash = bevel_backlash(tol),
-                       spiral = 0, cutter_radius = 0, slices = 1,
-                       gear_spin = phase, anchor = "pitchbase");
-            // The under-tooth fill (see header), only where the tooth ends
-            // would overhang.
-            if (d < _BEVEL_FILL_BELOW)
-                rotate_extrude()
-                    polygon([[0, -back_], [tip.x, -back_], tip, root, [0, root.y]]);
+        dz = anchor == "apex" ? -apexh : anchor == "back" ? back_ : 0;
+        translate([0, 0, dz]) difference() {
+            union() {
+                bevel_gear(mod = mod, teeth = n, mate_teeth = mate_n, shaft_angle = shaft_angle,
+                           face_width = face_, bottom = back_, cone_backing = false,
+                           pressure_angle = _BEVEL_PA,
+                           clearance = bevel_clearance(mod, tol), backlash = bevel_backlash(tol),
+                           spiral = 0, cutter_radius = 0, slices = 1,
+                           gear_spin = phase, anchor = "pitchbase");
+                // The under-tooth fill (see header), only where the tooth ends
+                // would overhang.
+                if (d < _BEVEL_FILL_BELOW)
+                    rotate_extrude()
+                        polygon([[0, -back_], [tip.x, -back_], tip, root, [0, root.y]]);
+            }
+            _bevel_bore(bore, tol, flat, -back_, z_top);
         }
-        _bevel_bore(bore, tol, flat, -back_, z_top);
     }
 }
 
@@ -500,14 +540,16 @@ module bevel_pair_interference(n1, n2, mod, face = undef, shaft_angle = 90, tol 
 // One spur gear standing on z = 0, th thick, axis +z, tooth 0 on +y before
 // `phase`. Same one-tol rule and bore/flat as the bevel gear.
 module spur_gear_fdm(n, mate_n, mod, th, tol = bevel_tol, bore = 0, flat = 0, phase = 0) {
-    ok = _spur_check(n, mate_n, mod, th, tol, bore, flat);
-    $gear_steps = _BEVEL_GEAR_STEPS;
-    $fn = _BEVEL_FN;
-    difference() {
-        spur_gear(mod = mod, teeth = n, thickness = th, pressure_angle = _BEVEL_PA,
-                  clearance = bevel_clearance(mod, tol), backlash = bevel_backlash(tol),
-                  gear_spin = phase, anchor = BOTTOM);
-        _bevel_bore(bore, tol, flat, 0, th);
+    _bosl2_env() {
+        ok = _spur_check(n, mate_n, mod, th, tol, bore, flat);
+        $gear_steps = _BEVEL_GEAR_STEPS;
+        $fn = _BEVEL_FN;
+        difference() {
+            spur_gear(mod = mod, teeth = n, thickness = th, pressure_angle = _BEVEL_PA,
+                      clearance = bevel_clearance(mod, tol), backlash = bevel_backlash(tol),
+                      gear_spin = phase, anchor = BOTTOM);
+            _bevel_bore(bore, tol, flat, 0, th);
+        }
     }
 }
 
