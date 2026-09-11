@@ -1,0 +1,21 @@
+# ovodyo tumble-to-index kinematics manifest (charter N2, #607).
+#
+# LANDING half (this file, from designs/ovodyo/tumble.scad): the hours ball as
+# it ships, posed by Q(phi) at each baked stop, must present a flat plaque
+# within tumble_tol_deg of the viewer (+x) with its numeral upright and
+# unmirrored. Every row is a real CGAL render whose facet count is read
+# (0 = empty), the way ci.fitchecks reads boolean fit parts.
+#   steps <n>              sweep resolution the mesh rows use (deg per step)
+#   stops <param> <list>   evaluate the verbs below at each -D <param>=<value>
+#   empty <part>           must render 0 facets at EVERY listed value
+#   empty-control <part>   must render >0 facets at SOME listed value (the
+#                          negative control proving the empty check can fail)
+# The MESH rows for the sun/crown bevel pair (tooth engagement, backlash, the
+# stalk-gap sweep over tumble_crown_range()) are added by the mechanism agent.
+steps 8
+stops stop 0,1,2,3,4,5,6,7,8,9,10,11
+empty landing-flat
+empty-control landing-flat-ctrl
+empty landing-glyph
+empty-control landing-glyph-rolled
+empty-control landing-glyph-mirrored

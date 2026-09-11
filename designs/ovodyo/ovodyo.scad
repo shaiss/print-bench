@@ -11,12 +11,19 @@
 include <geodesic-ball.scad>  // the faceted numbered-ball generator (#600)
 use <threads-fdm.scad>        // the captive seam's male/female thread pair (#602)
 use <printability.scad>       // chamfered_cylinder for the seam coupon pucks
+include <tumble.scad>         // tumble-to-index kinematics: stop table, frames, landing probes (N2, #607)
 
 /* [What to render] */
 // assembled | hours-top | hours-bottom | minutes-top | minutes-bottom |
 // hours-ball | minutes-ball | base-segment | base-end | mock-drive |
 // base-mech | pod-drive | seam-coupon | seam-fit | seam-fit-ctrl
+// base-mech | pod-drive | landing-flat | landing-flat-ctrl | landing-glyph |
+// landing-glyph-rolled | landing-glyph-mirrored | hours-posed
 part = "assembled";
+// landing-pose stop index 0..11 (ci.kinematics): the stop the landing-* parts test
+stop = 0;
+// continuous yoke angle (deg) for posed previews (hours-posed)
+yoke_deg = 0;
 
 /* [Overall (from the reference: 383 x 78 x 163 mm)] */
 // Ball outer diameter (mm)
@@ -99,17 +106,21 @@ $fn = 48;
 
 // ---- balls -----------------------------------------------------------------
 
+// Numerals are placed in TUMBLE order (tumble.scad): numeral k lives on the face
+// that presents at stop k, clocked by tumble_rots() so it reads upright there.
 module hours_ball() {
-  geodesic_ball(d = ball_d, nums = gb_hours(), tri_k = facet,
+  geodesic_ball(d = ball_d, nums = tumble_nums(gb_hours()), tri_k = facet,
                 wall = wall, glyph_h = glyph_h, through = numerals_through, bridge = bridge_w,
-                slot = true, slot_width = slot_width, slot_turns = slot_turns);
+                slot = true, slot_width = slot_width, slot_turns = slot_turns,
+                rots = tumble_rots());
 }
 
 module minutes_ball() {
   // opposite-handed slot differentiates it from the hours ball
-  geodesic_ball(d = ball_d, nums = gb_minutes(), tri_k = facet,
+  geodesic_ball(d = ball_d, nums = tumble_nums(gb_minutes()), tri_k = facet,
                 wall = wall, glyph_h = glyph_h, through = numerals_through, bridge = bridge_w,
-                slot = true, slot_width = slot_width, slot_turns = -slot_turns);
+                slot = true, slot_width = slot_width, slot_turns = -slot_turns,
+                rots = tumble_rots());
 }
 
 // Pole-up tilt: bring a pentagon face to each ±z pole so the equatorial split
@@ -469,7 +480,8 @@ module ball_core(nums) {
   color(mech_red) {
     sphere(r = inner_r, $fn = 72);                                // red core, framed by the slot
     intersection() {
-      gb_numbers(ball_d, nums, glyph_h, 0, true, wall, bridge = bridge_w);
+      gb_numbers(ball_d, tumble_nums(nums), glyph_h, 0, true, wall, bridge = bridge_w,
+                 rots = tumble_rots());                            // same tumble order/clocking as the cuts
       gb_faceted_ball(ball_d - 0.8, tri_k = facet);               // inlay, recessed ~0.4 mm (no z-fight)
     }
   }
@@ -596,4 +608,12 @@ else if (part == "pod-drive")    pod_drive();              // preview: one pod's
 else if (part == "seam-coupon")  seam_coupon();            // print this first: male ring + female puck
 else if (part == "seam-fit")     seam_fit(false);          // fitcheck: must render EMPTY
 else if (part == "seam-fit-ctrl") seam_fit(true);          // fitcheck control: must interfere
+// tumble kinematics (N2, ci.kinematics): landing-pose booleans at stop `stop`
+else if (part == "landing-flat")           landing_flat(stop);           // empty: plaque within tol of +x
+else if (part == "landing-flat-ctrl")      landing_flat_ctrl(stop);      // control: 20 deg off, must hit
+else if (part == "landing-glyph")          landing_glyph(stop);          // empty: numeral upright + unmirrored
+else if (part == "landing-glyph-rolled")   landing_glyph_rolled(stop);   // control: template rolled 30 deg
+else if (part == "landing-glyph-mirrored") landing_glyph_mirrored(stop); // control: template mirrored
+else if (part == "hours-posed")            // preview: the hours ball posed at yoke_deg, viewer at +x
+  tumble_pose(yoke_deg) tumble_ball_frame() { hours_ball(); ball_core(gb_hours()); }
 else assembled();
