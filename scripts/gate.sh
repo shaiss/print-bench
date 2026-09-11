@@ -26,6 +26,14 @@
 #                                  mandatory negative control that must not
 #                                  (proves the check can fail). Never
 #                                  printchecked or sliced
+#   designs/<name>/ci.kinematics   SWEPT fit checks (issue #607): the same
+#                                  boolean parts rendered at every step of a
+#                                  parameter sweep or at every declared
+#                                  landing stop — `empty`/`nonempty` must
+#                                  hold at every step, `empty-control`/
+#                                  `nonempty-control` must break at some
+#                                  step. Format and selftest:
+#                                  scripts/kinematics-check.sh
 #   designs/<name>/derives.conf    lineage of a derivative design: the
 #                                  parent(s) it includes, the parent parts it
 #                                  claims to replace, and any diamond-ok:
@@ -447,6 +455,24 @@ gate_one() {
     fi
     if [[ "$n_empty" -eq 0 ]]; then
       echo "FAIL  fitcheck ${name}: ci.fitchecks carries no \"empty\" check — a manifest of controls alone proves nothing about the fit it exists to gate"
+      fail=1
+    fi
+  fi
+
+  # Swept kinematics checks (designs/<name>/ci.kinematics, issue #607): the
+  # fitcheck idea over a parameter sweep. A gear pair that clears at one phase
+  # can jam at another, and an indexed shell that lands flat at stop 0 can
+  # roll at stop 3, so each boolean part is rendered at every step of a sweep
+  # (`sweep <param>` over [0,1)) or at every declared landing stop (`stops
+  # <param> <v1,...>`): `empty`/`nonempty` must hold at EVERY step, and the
+  # mandatory `empty-control`/`nonempty-control` must break at SOME step, or
+  # the checks are unfalsifiable. Parser, sweep and the fixture-backed
+  # --selftest live in scripts/kinematics-check.sh (run by check.sh); this
+  # block only hands it the design's source and manifest. Never printchecked
+  # or sliced, like fitchecks. A design without the manifest is untouched.
+  if [[ -f "designs/${name}/ci.kinematics" ]]; then
+    echo "== ${name}: kinematics (designs/${name}/ci.kinematics) =="
+    if ! ./scripts/kinematics-check.sh "$src" "designs/${name}/ci.kinematics" "$name"; then
       fail=1
     fi
   fi

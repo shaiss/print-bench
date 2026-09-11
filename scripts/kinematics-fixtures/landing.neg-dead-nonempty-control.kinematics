@@ -1,0 +1,5 @@
+# Negative control (selftest: must FAIL): a nonempty-control that never gaps
+# out — the upright numeral itself — so the non-empty check is unfalsifiable.
+stops stop 0,1
+nonempty landing-glyph
+nonempty-control landing-glyph
