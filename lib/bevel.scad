@@ -419,6 +419,21 @@ module _bosl2_env() {
     children();
 }
 
+// PUBLIC: the same environment, for a caller that `use`s this library and
+// transforms its gears at top level. `use <bevel.scad>` exposes BOSL2's
+// modules transitively — including its `translate`/`rotate`/`scale`
+// REDEFINITIONS (transforms.scad, "Saving and restoring of transformations"),
+// which multiply into `$transform` — while a used file's top-level `$`
+// assignments are not visible at the call site on the dev snapshots. So
+// `use <bevel.scad>` + `translate(...) bevel_pair(...)` warns "unknown
+// variable $transform" there (2021.01 leaks the used file's specials, which
+// is why it passes locally). Wrap such calls: bevel_env() { translate(...)
+// bevel_pair(...); }. A design that `include`s BOSL2 (or this library) does
+// not need it — its own top level carries BOSL2's specials. Every module in
+// this library already runs inside the environment, so bare calls are fine
+// either way; only the caller's OWN transforms around them need the wrapper.
+module bevel_env() { _bosl2_env() children(); }
+
 // A through-hole of bore + 2*tol along z over [z0, z1], with an optional
 // D-flat: `flat` is the shaft's across-flat dimension, so the flat face of
 // the hole sits at x = flat - bore/2 + tol and the material beyond it stays.
@@ -507,15 +522,17 @@ module bevel_gear_fdm(n, mate_n, mod, face = undef, shaft_angle = 90, tol = beve
 module bevel_pair(n1, n2, mod, face = undef, shaft_angle = 90, tol = bevel_tol,
                   bore1 = 0, bore2 = 0, which = "both", explode = 0, phase = 0,
                   back1 = undef, back2 = undef, flat1 = 0, flat2 = 0) {
-    ok = _which_check(which, "pinion", "crown");
-    if (which != "crown")
-        translate([0, 0, -explode])
-            bevel_gear_fdm(n1, n2, mod, face, shaft_angle, tol, bore1, back1, flat1,
-                           phase = phase, anchor = "apex");
-    if (which != "pinion")
-        rotate([shaft_angle, 0, 0]) translate([0, 0, -explode])
-            bevel_gear_fdm(n2, n1, mod, face, shaft_angle, tol, bore2, back2, flat2,
-                           phase = bevel_mate_phase(n1, n2, phase), anchor = "apex");
+    _bosl2_env() {
+        ok = _which_check(which, "pinion", "crown");
+        if (which != "crown")
+            translate([0, 0, -explode])
+                bevel_gear_fdm(n1, n2, mod, face, shaft_angle, tol, bore1, back1, flat1,
+                               phase = phase, anchor = "apex");
+        if (which != "pinion")
+            rotate([shaft_angle, 0, 0]) translate([0, 0, -explode])
+                bevel_gear_fdm(n2, n1, mod, face, shaft_angle, tol, bore2, back2, flat2,
+                               phase = bevel_mate_phase(n1, n2, phase), anchor = "apex");
+    }
 }
 
 // The interference solid of the meshed pair: pinion ∩ crown. Empty (zero
@@ -525,11 +542,13 @@ module bevel_pair(n1, n2, mod, face = undef, shaft_angle = 90, tol = bevel_tol,
 // the negative controls use it to put tooth on tooth.
 module bevel_pair_interference(n1, n2, mod, face = undef, shaft_angle = 90, tol = bevel_tol,
                                phase = 0, crown_phase = undef) {
-    intersection() {
-        bevel_gear_fdm(n1, n2, mod, face, shaft_angle, tol, phase = phase);
-        rotate([shaft_angle, 0, 0])
-            bevel_gear_fdm(n2, n1, mod, face, shaft_angle, tol,
-                           phase = is_undef(crown_phase) ? bevel_mate_phase(n1, n2, phase) : crown_phase);
+    _bosl2_env() {
+        intersection() {
+            bevel_gear_fdm(n1, n2, mod, face, shaft_angle, tol, phase = phase);
+            rotate([shaft_angle, 0, 0])
+                bevel_gear_fdm(n2, n1, mod, face, shaft_angle, tol,
+                               phase = is_undef(crown_phase) ? bevel_mate_phase(n1, n2, phase) : crown_phase);
+        }
     }
 }
 
@@ -558,21 +577,25 @@ module spur_gear_fdm(n, mate_n, mod, th, tol = bevel_tol, bore = 0, flat = 0, ph
 // the wheel that much further out along +x.
 module spur_pair(n1, n2, mod, th, tol = bevel_tol, bore1 = 0, bore2 = 0,
                  which = "both", explode = 0, phase = 0, flat1 = 0, flat2 = 0) {
-    ok = _which_check(which, "pinion", "wheel");
-    if (which != "wheel")
-        spur_gear_fdm(n1, n2, mod, th, tol, bore1, flat1, phase = -90 + phase);
-    if (which != "pinion")
-        translate([spur_dist(n1, n2, mod) + explode, 0, 0])
-            spur_gear_fdm(n2, n1, mod, th, tol, bore2, flat2, phase = spur_mate_phase(n1, n2, phase));
+    _bosl2_env() {
+        ok = _which_check(which, "pinion", "wheel");
+        if (which != "wheel")
+            spur_gear_fdm(n1, n2, mod, th, tol, bore1, flat1, phase = -90 + phase);
+        if (which != "pinion")
+            translate([spur_dist(n1, n2, mod) + explode, 0, 0])
+                spur_gear_fdm(n2, n1, mod, th, tol, bore2, flat2, phase = spur_mate_phase(n1, n2, phase));
+    }
 }
 
 // Pinion ∩ wheel for the spur pair; `wheel_phase` overrides the meshed spin
 // for negative controls.
 module spur_pair_interference(n1, n2, mod, th, tol = bevel_tol, phase = 0, wheel_phase = undef) {
-    intersection() {
-        spur_gear_fdm(n1, n2, mod, th, tol, phase = -90 + phase);
-        translate([spur_dist(n1, n2, mod), 0, 0])
-            spur_gear_fdm(n2, n1, mod, th, tol,
-                          phase = is_undef(wheel_phase) ? spur_mate_phase(n1, n2, phase) : wheel_phase);
+    _bosl2_env() {
+        intersection() {
+            spur_gear_fdm(n1, n2, mod, th, tol, phase = -90 + phase);
+            translate([spur_dist(n1, n2, mod), 0, 0])
+                spur_gear_fdm(n2, n1, mod, th, tol,
+                              phase = is_undef(wheel_phase) ? spur_mate_phase(n1, n2, phase) : wheel_phase);
+        }
     }
 }
