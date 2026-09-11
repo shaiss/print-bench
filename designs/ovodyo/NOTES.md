@@ -70,12 +70,57 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   1/3/5/7/9/11 (and the minutes equivalents). This fixes the earlier bug where
   BOTH `hours-half`/`minutes-half` were the same z≥0 dome, so four numbers lived
   on no printable part. Parts are now `hours-top`/`hours-bottom`/`minutes-top`/
-  `minutes-bottom`; the bottom half is flipped 180° so it too prints
-  flat-cut-face-down. The halves **key on three dowels** (Ø2.8, irregular
-  azimuths 24/150/262° so they seat at one clocking) drilled through bosses on
-  the inner wall at the seam, in the whole ball before the split so the two
-  halves' holes register by construction. The captive threaded/snap seam stays
-  #602; the faceted dome still has light overhangs (v0 caveat, #602).
+  `minutes-bottom`. The halves join on the captive threaded seam below.
+- **Ball seam = a captive single-start thread (#602 item 7), one turn to close.**
+  Built from `lib/threads-fdm.scad` so male and female come from one helix
+  generator: the bottom half grows a **male ring** (`thread_neck` bored to a
+  2 mm ring, `_seam_neck`) 5 mm up from its flat seam face at crest Ø70, just
+  inside the Ø73.6 cavity; the top half carries the **female groove**
+  (`thread_bore_cut` plus the minor bore its doc says the caller owes, plus a
+  0.6 mm mouth chamfer, `_seam_female_cut`) in an internal rim boss
+  (`_seam_boss`). The seam plane stays a true flat great circle; the halves
+  mate on the flat annulus from the female crest (r 35.25) out to the facets
+  (r ≥ 41.7), i.e. ≥ 6 mm of square face, and each half's outer seam edge has
+  a 0.6 mm 45° chamfer that follows every facet (`_seam_edge_chamfer`, the
+  ball's 32 face planes re-tilted within 0.6 mm of the seam) so the seam
+  reads as one crisp V line. `seam_tol` (0.25 mm radial) is the ONE tunable.
+  **Starts arithmetic — why a single start, not 2–3:** an S-start thread has
+  S seated clockings 360°/S apart, and every one of them is a valid seat for
+  the *thread*; but the assembled *ball* has exactly one valid clocking — the
+  pentagon ring is 72°-periodic about the pole, the 20 triangle chamfer planes
+  are not (checked numerically against the generator's own plane set: no
+  rotation about the pole but 360° maps them onto themselves), and the twelve
+  numerals are all different anyway. 2 starts seat at 180° (≡ 36° in the
+  pentagon period: half a facet off, numbers scrambled), 3 at 120° (≡ 48°),
+  5 at 72° (pentagons align, triangles and numerals don't). Only 360/S ≡ 0
+  works, so S = 1; then neck length = pitch = 5 mm makes the closing rotation
+  length/lead × 360° = **exactly 360°**: line the facets up, drop the top on
+  (a single start only enters at that one clocking), one full turn, and they
+  line up again as the faces meet. Guards at these numbers: single start so
+  only the lead bound applies, `w_root = 0.25·5 + flank_add(tol) + 2·1.0 =
+  3.25 + 0.83·tol < 5` ⇒ tol < 2.1 mm (the coupon's 0.15–0.45 window is far
+  inside); chord `(70/2)(1 − cos(180/48)) = 0.075 ≤ 0.1`; core 34 > 0.4.
+  **Slot:** the helical slot is refilled within |z| ≤ 5 of the seam
+  (`_seam_band_fill`, wall only), so it never crosses the mating ring and
+  reads as two arcs of one interrupted helix — the divergence from the
+  reference's "the slot is the seam" that #602 accepts. The band and the boss
+  are sized to the numerals: the cut-through glyphs come no closer than
+  |z| = 5.5 to the seam and r ≈ 36.6 within |z| ≤ 7 (measured in the pole-up
+  frame), so the boss stops at ≈ 7.9 mm (at r ≤ 35.0 by z = 7) under a roof
+  cone 50° from horizontal and the refill at 5. **Print orientation changed
+  to pole-down** for both halves: a ring standing on the seam face cannot
+  print seam-face-down, and pole-down is the better orientation for a hollow
+  hemisphere anyway (the cavity is an open bowl instead of a 40 mm ceiling;
+  the faces next to the pole lean out at 26.6°; the boss roofs print as 40°
+  overhangs — a roof at exactly 45° tessellates to 44.98° and sits on
+  printcheck's threshold, so 40° buys margin). What remains flagged is the
+  generator's: the chamfer facets ringing the pole pentagon sit 37°+ off the
+  pole axis, i.e. 52°+ overhangs when pole-down (~1.7 k mm² low on the print;
+  a slicer prints them with some droop, no support needed) — a `tri_k` /
+  chamfer-alignment matter for the lib, not the seam. The pole pentagon
+  (numeral and all) is the first layer, the seam ring the top. Proven by
+  `ci.fitchecks`: `seam-fit` (male ring ∩ top half at the seated pose) renders
+  empty at `seam_tol`; `seam-fit-ctrl` (top half a quarter-turn off) interferes.
 - **Base = tapered space-frame:** the reference base is a long shallow lattice
   that tapers to needle points at both ends. Modelled as a triangular section
   (two bottom chords + a ridge, Warren-diagonal bottom deck) whose width AND
@@ -116,6 +161,35 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
   mock-drive 100/100; all slice. No CRITICAL, no failure. (Local stable-engine
   2021.01 scores the halves ~76; the caveats are the seam/orientation ones #602
   owns.)
+
+## Print this first
+
+`designs/ovodyo/ovodyo-coupon.scad` (part `seam-coupon`, gated as
+`build/ovodyo-coupon.stl`) is the seam's tuning coupon: the production male
+ring on a thin chamfered flange beside a chamfered puck carrying the production
+female cut, mouth up the way the top half prints. Both come from the same
+`_seam_neck` / `_seam_female_cut` modules the ball halves use, so the
+`seam_tol` that fits here is the one the four halves get. It is 164 mm wide
+(two Ø70 rings side by side) and 7 mm tall — a ≥ 170 mm bed, a few minutes of
+print, same material and profile as the halves.
+
+- **What to tune:** `seam_tol`, the radial thread clearance, in **0.05 mm
+  steps** (`-D 'seam_tol=0.30'` on the coupon, then on every half). Default
+  0.25; the usual window is 0.15–0.45 (the library's guards allow up to ~2.1).
+- **What a good fit feels like:** the puck starts on the ring by hand within
+  the first quarter turn, runs the full turn with light, even drag and no
+  tools, and seats flat against the flange with no rattle when you push it
+  sideways or rock it. A faint "click" as the flanks load up at the end of the
+  turn is right; grinding or needing to force it is too tight.
+- **Too tight / won't start:** raise `seam_tol` by 0.05 and reprint the
+  coupon. **Rattles, wobbles, or spins back off:** lower it by 0.05.
+- **First-layer squish** tightens the first groove of a bore printed mouth-down
+  and fattens the ring's foot; both coupon pucks print seam-side up like the
+  halves, so what you feel is what the ball will do. If the puck starts hard
+  but runs free afterwards, that is elephant's foot on the ring's flange —
+  fix the first layer (z-offset / flow) rather than the tolerance.
+- Then render the four halves with the winning value and print them
+  pole-down (see Key decisions: Ball seam).
 
 ## Resume context
 
