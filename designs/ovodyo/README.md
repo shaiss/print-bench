@@ -42,8 +42,20 @@ whole clock would print as one fused lump):
 - `minutes-top` + `minutes-bottom` — likewise for the minutes ball (00–55 in 5s).
 - `base-segment` — the constant-section **centre** truss segment (~127 mm).
 - `base-end` — one of the two **tapering end wings** that come to a needle point
-  and carry a bored stalk boss over the motor pod (print two; three segments
-  total make the ~383 mm base).
+  (a Ø5.6 mm round nose) and carry a bored stalk boss over the motor pod, with
+  two small recessed foot pads under the wide end for stick-on bumpers (print
+  two; three segments total make the ~383 mm base).
+- `base-core` — the **red structural core**: a slim ballast keel that slides
+  into the centre segment and drops onto the deck struts (its underside is the
+  lattice's negative, so it seats one way only) under the PCB, with two sealed
+  pockets you fill with ~55 g of Ø2 mm steel shot through the plugged ports on
+  its end face. Print it in red — it is a working part.
+- `base-plug` — the tapered plug that closes each ballast port (print two).
+
+The printable deliverable is the **multi-object plate**, `build/ovodyo-plate.3mf`
+(built by `./scripts/plate.sh ovodyo` from `ci.plate`): the eight production
+parts as eight separate objects a slicer imports as parts — duplicate `base-end`
+and `base-plug` in the slicer to print two of each.
 - `mock-drive` — a single representative reduction gear, kept as a gated
   printability sample of the (otherwise preview-only) drivetrain, not a placed
   assembly part.
@@ -66,8 +78,14 @@ gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
   support-free.
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
   first layer and the seam ring is the top of the print (as the parts render);
-  truss segments bottom-chord-down (as modeled); mock drive flat; the seam
-  coupon as rendered.
+  truss segments bottom-chord-down (as modeled — the wings stand on their
+  chords and foot pads); core keel flat-bottom-down (as modeled); plug
+  head-down; mock drive flat; the seam coupon as rendered. All the base parts
+  print support-free.
+- **Vitamins for the base:** Ø2 mm steel shot for the core's ballast pockets
+  (≈ 55 g, filled and plugged before the core goes in — the amount is a starting
+  assumption, see NOTES.md), and four Ø5 mm × 1.5 mm hemispherical stick-on
+  silicone bumpers for the foot recesses.
 
 ## Parameters
 
@@ -85,6 +103,10 @@ Customizer sections; override with `-D 'name=value'`):
 | `slot_turns` | 0.5 | how far the slot wraps |
 | `seam_tol` | 0.25 mm | radial clearance of the captive threaded seam — the one fit to tune; print the seam coupon first and step it by 0.05 (bigger = looser) |
 | `seg_len` | 127 mm | one base-segment length (×3 = 383 mm) |
+| `core_fit` | 0.3 mm | radial clearance of the core's strut sockets — tune on your printer so the keel drops onto the deck without rattling |
+| `core_len` | 120 mm | length of the red core keel inside the centre segment |
+| `tip_d` | 5.6 mm | round nose at each wing tip (2 × `strut_d`) |
+| `foot_recess_d` | 4.9 mm | foot-pad recess, sized to a Ø5 mm stick-on bumper |
 
 The ball's faceting is `_GB_TRI_K` in `geodesic-ball.scad` (default 1.05):
 1.0 gives the biggest triangular corner facets (≈ an icosidodecahedron), ≥1.12
