@@ -264,6 +264,8 @@ surfaces studies awaiting a read live in
   its tuned-fit tolerances),
   `stencil-glyphs.scad` (clean-room 2D stencil digits 0-9 with bridged
   counters, no `text()`/TTF, for numerals cut through a shell),
+  `bevel.scad` (FDM bevel and spur gear pairs from one generator and one
+  clearance, on BOSL2's gears),
   each with a `*-demo.scad` regression render, plus vendored
   [BOSL2](https://github.com/BelfrySCAD/BOSL2)
 - `build/` — generated STL/PNG outputs (gitignored)
