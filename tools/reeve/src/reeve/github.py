@@ -37,7 +37,7 @@ import re
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 API_ROOT = "https://api.github.com"
 
@@ -258,16 +258,28 @@ def gather_run_health(
     }
 
 
-def carries_greenlight(comments: list[Any]) -> bool:
-    """Whether any comment in ``comments`` opens with a greenlight marker.
+def carries_greenlight(
+    comments: list[Any], trusted: Callable[[str], bool]
+) -> bool:
+    """Whether any comment in ``comments`` opens with a greenlight marker
+    **whose author ``trusted`` vouches for**.
 
     Pure, so the selection rule is testable without the seam: the wrapper
     writes the marker as the comment's first line, and its live idempotency
-    check greps that same line — this is the read-side mirror, prefix-matched
-    so any marker version or verdict (yes/no/route) counts.
+    check applies the same two tests — this is the read-side mirror,
+    prefix-matched so any marker version or verdict (yes/no/route) counts.
+    The author test is the one the approval poll has applied since #518
+    (:func:`greenlight.marker_author_trusted` over the memoized
+    :func:`permission_of`): a marker counts only under the workflow's own
+    bot login or a login with a real write-level permission, so anyone who
+    can comment cannot park a decision out of the drafter's queue by pasting
+    one (issue #546). ``trusted`` is injected — the driver supplies the live
+    permission read — and consulted only for a comment that IS a marker: no
+    lookup is spent on ordinary comments.
     """
     return any(
         _first_line(c.get("body", "")).startswith(GREENLIGHT_MARKER)
+        and trusted((c.get("user") or {}).get("login", ""))
         for c in comments
     )
 
@@ -277,7 +289,9 @@ def is_provider_escalation(body: str | None) -> bool:
     return PROVIDER_ESCALATION_MARKER in (body or "")
 
 
-def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
+def gather_greenlight_queue(
+    repo: str, token: str, trusted: Callable[[str], bool]
+) -> dict[str, Any]:
     """The greenlight loop's work-list, from the live repo (issue #443).
 
     Every OPEN issue parked at the decision gate (``needs-decision``), plus
@@ -285,10 +299,18 @@ def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
     workflow's Select step reads this and hands the agent only the rest, so
     the drafter never even sees an issue it cannot post on (the wrapper
     re-checks live at write time; this is the selection, not the enforcement).
+    A marker counts only when its author passes ``trusted`` (issue #546: the
+    same ``greenlight.marker_author_trusted`` rule the poll applies, so an
+    untrusted commenter's pasted marker leaves the issue queued — dropping it
+    on any marker-looking text was a denial of service on the queue). A
+    permission read that raises propagates: the select step fails loud and
+    every issue waits for the next run — the fail-closed direction, never
+    "treat an unreadable author as untrusted and draft anyway".
     A parked issue that is a provider-triage escalation (its body carries
     ``PROVIDER_ESCALATION_MARKER``) stays in ``parked`` — it IS at the gate —
     but never enters ``queue``, and its thread is not even read.
-    Still GET-only: two listings per issue and nothing else.
+    Still GET-only: two listings per issue, plus at most one collaborator
+    permission read per distinct marker author.
     """
     parked: list[dict[str, Any]] = []
     for item in _paged(
@@ -315,7 +337,7 @@ def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
             f"{API_ROOT}/repos/{repo}/issues/{issue['number']}/comments?per_page=100",
             token,
         )
-        if not carries_greenlight(comments):
+        if not carries_greenlight(comments, trusted):
             queue.append(issue)
 
     # Oldest first (the sibling routines' bias — a decision parked longest
