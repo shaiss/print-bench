@@ -27,7 +27,10 @@ Printed **in pairs** (one holder per wall, one pair per rod):
   setting, `screw_count=2`, grows the flange for heavier installs — a hung
   pair over ~10 kg; see Assembly).
 - `collar` — the rod socket: Ø54 × 40.6 mm knurled tube, internal printed
-  thread below, Ø40.6 rod bore above.
+  thread below, Ø40.6 rod bore above (default `engagement_depth=28`).
+- `collar-shallow` — the same collar at `engagement_depth=12` (far side of
+  the push-in-deep / drop-in-shallow install). Gated and shipped in the
+  Release; not on the plate (the plate is the default-depth holder pair).
 - `thread-coupon` / `bore-coupon` — the "print this first" fit checks (see
   Print settings).
 
@@ -37,16 +40,18 @@ slicer. STL carries no object separation, so exporting the two into a *single*
 STL imports as one fused body and welds them together — v1's field-test failure
 (NOTES.md). Two ways to get the parts, both give the separation:
 
-- **Downloaded a Release:** you get two files, `boss` and `collar` — import
-  **both** and keep them as separate objects. (No v2 Release is tagged yet —
-  releases are cut on a tag, not on merge — so until one exists, use the clone
-  path below.) The Release carries the **default-depth** parts: for the
-  push-in-deep / drop-in-shallow install, render the far-side collar shallow
-  (`engagement_depth=12`) before install day.
+- **Downloaded a Release:** you get `boss`, `collar`, and `collar-shallow` —
+  import what you need and keep them as separate objects. (No v2 Release is
+  tagged yet — releases are cut on a tag, not on merge — so until one exists,
+  use the clone path below.) The plate is still the default-depth holder pair
+  (`boss` + `collar`); grab `collar-shallow` from the Release for the far side
+  of the push-in-deep / drop-in-shallow install.
 - **Cloned the repo:** `./scripts/plate.sh alcove-rod-socket` bundles the two
-  into one multi-object 3MF (`build/alcove-rod-socket-plate.3mf`) — the same two
-  objects in one file. (The 3MF is a local build artifact; it isn't attached to
-  the GitHub Release yet — that's a tracked follow-up.)
+  default-depth parts into one multi-object 3MF
+  (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file.
+  Render the far-side collar with `-D 'part="collar-shallow"'` (or take it from
+  a Release once tagged). (The 3MF is a local build artifact; it isn't attached
+  to the GitHub Release yet — that's a tracked follow-up.)
 
 Either way, saving bed space is fine — lay the two parts **side by side and
 flat** (the plate's `--merge` does exactly that). Don't stack them **one on top
@@ -56,21 +61,13 @@ over open air — the ~10-layers-in spaghetti from v1.
 **A rod takes a pair — two holders**, so print (or import) the set **twice**. For
 the push-in-deep / drop-in-shallow install (Assembly step 3, Parameters table)
 the two holders share the **same boss**; only the far holder's collar differs —
-render it shallow with `engagement_depth=12`. So a deep+shallow pair is two
-bosses + one default collar + one shallow collar. **Neither shipped set — the
-Release nor the plate — carries that shallow collar yet**; render it before
-install day with **`-D 'part="collar"' -D 'engagement_depth=12'`** (the
-`part="collar"` is essential — the file defaults to `part="assembly"`, so
-without it you'd export the fused two-part preview as one STL, the very failure
-this fixes). Shipping the shallow collar as a gated part is the charter's
-#1 backlog item (B3 in PM.md).
+use `collar-shallow` (`engagement_depth=12`). So a deep+shallow pair is two
+bosses + one default collar + one shallow collar.
 
-**Twice can be one print.** Import both objects (or the plate), select
-both → right-click → **Add Duplicate**: four objects in one ~3 h 21 m run.
-For the deep+shallow pair, make the duplicate collar the shallow one — swap
-one of the two collars for a render with
-`-D 'part="collar"' -D 'engagement_depth=12'` — so the run is boss ×2, one
-default collar, one shallow. Two such plates fit the 256 × 256 mm P2S bed.
+**Twice can be one print.** Import both plate objects (or the plate), select
+both → right-click → **Add Duplicate**, then swap one of the two collars for
+`collar-shallow` — so the run is boss ×2, one default collar, one shallow.
+Two such plates fit the 256 × 256 mm P2S bed.
 
 ![The collar in its print orientation](previews/collar-print.png)
 
@@ -92,30 +89,32 @@ default collar, one shallow. Two such plates fit the 256 × 256 mm P2S bed.
   locally eat the 0.3 mm radial sliding fit.
 - **Infill:** 20% gyroid.
 - **Supports:** none needed anywhere, by design.
-- **Bed adhesion:** brim the **collar**, per-object (Bambu Studio and most
-  slicers brim per object — select just the collar). Its first layer is a thin
-  ~2.2 mm annular rim carrying a 40.6 mm tube, the part that can lift; the boss
-  doesn't need it — it prints flange-down on a full Ø58.8 disc, the best contact
-  on the plate. Cheap insurance on the collar rim's own merits (the v1 field
-  failure was *packaging*, not adhesion — see NOTES.md — so the plate is what
-  fixes that; the brim is separate). A per-object collar brim can't reach the
-  ~5.7 mm gap to the boss, so nothing bridges. (Brim the *whole plate* instead
-  and the two brims may meet in one web; it should peel clean, but that is
-  **untested** — predicted, not observed, and the proving print is what
-  confirms it. Per-object avoids the question.)
+- **Bed adhesion:** brim the **collar** (and `collar-shallow`), per-object
+  (Bambu Studio and most slicers brim per object — select just the collar).
+  Its first layer is a thin ~2.2 mm annular rim carrying a 40.6 mm tube, the
+  part that can lift; the boss doesn't need it — it prints flange-down on a
+  full Ø58.8 disc, the best contact on the plate. Cheap insurance on the
+  collar rim's own merits (the v1 field failure was *packaging*, not adhesion
+  — see NOTES.md — so the plate is what fixes that; the brim is separate). A
+  per-object collar brim can't reach the ~5.7 mm gap to the boss, so nothing
+  bridges. (Brim the *whole plate* instead and the two brims may meet in one
+  web; it should peel clean, but that is **untested** — predicted, not
+  observed, and the proving print is what confirms it. Per-object avoids the
+  question.)
 - **Orientation:** print every part as rendered — boss flange-down, collar
-  rod-mouth-down (the internal thread prints at the top of the collar, never
-  on the first layer). Never flip the collar grip-band-down for a nicer
-  face: the printed thread has to stay up top. If the collar's first-layer
-  ring lifts, fix it with the brim above — don't flip the part.
-- **Print order:** both coupons first, then tune (below), then a pair.
+  (and collar-shallow) rod-mouth-down (the internal thread prints at the top
+  of the collar, never on the first layer). Never flip the collar
+  grip-band-down for a nicer face: the printed thread has to stay up top. If
+  the collar's first-layer ring lifts, fix it with the brim above — don't
+  flip the part.
+- **Print order:** both coupons first, then tune (below), then a pair
+  (deep+shallow: two bosses, one `collar`, one `collar-shallow`).
 
-The gate scores three of the four gated parts 92/100 with one warning each
-— thin walls (2–5% of sampled surface under 0.8 mm on the boss, collar and
-thread coupon; the bore coupon is clean). That is the tessellated thread
-crests and the knurl ridges, not the 3.2 mm load path; it is by design and
-needs no slicer action. The coupon carries the same profile, so a coupon
-that prints clean says the parts will too.
+The gate scores the boss / collar / collar-shallow / thread-coupon set with
+the same thin-wall warning pattern (tessellated thread crests and knurl
+ridges under 0.8 mm on a few percent of sampled surface; the bore coupon is
+clean). That is by design and needs no slicer action. The coupon carries the
+same profile, so a coupon that prints clean says the parts will too.
 
 ![The thread coupon — male stub and female ring side by side](previews/coupon.png)
 
@@ -126,14 +125,14 @@ barrel reading — "40 mm" is sometimes the finial size, not the pole.
 
 The ones you are most likely to touch (all in `alcove-rod-socket.scad`,
 Customizer-grouped; override on the command line with `-D 'rod_d=38.5'` —
-and pair it with `-D 'part="collar"'`, or you'll export the fused assembly
-preview instead of a printable part):
+and pair it with `-D 'part="collar"'` or `-D 'part="collar-shallow"'`, or
+you'll export the fused assembly preview instead of a printable part):
 
 | Parameter | Default | What it does |
 |---|---|---|
 | `rod_d` | 40.0 mm | rod barrel outer Ø where it sits in the socket |
 | `rod_clearance` | 0.6 mm | diametral slip added to `rod_d` → socket bore |
-| `engagement_depth` | 28 mm | how deep the rod plugs in; print the far holder shallower (e.g. 12) for the push-in-deep / drop-in-shallow install |
+| `engagement_depth` | 28 mm | deep-side rod plug depth (`collar`); far side is the gated `collar-shallow` part at 12 mm |
 | `thread_tol` | 0.3 mm | radial thread fit — dial on the thread coupon |
 | `screw_count` | 1 | 1 central M5, or 2 off-axis (grows the flange; stops boss spin) |
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
@@ -154,11 +153,10 @@ proof: print them in your material first and trust them over this page.
    (derivation in NOTES).
 2. Slide the collars over the rod before hanging it — one at each end.
 3. Thread each collar onto its boss until the rim seats on the plate. For a
-   rigid rod between two fixed walls: set one holder's `engagement_depth`
-   deep and the other shallow (e.g. 12 mm) — push into the deep side, drop
-   the shallow end in, tighten both collars. Cut the rod ≈ **18–20 mm short
-   of the mouth-to-mouth span** (28 mm deep − 12 mm shallow + each mouth's
-   lead-in).
+   rigid rod between two fixed walls: use one default `collar` (deep) and one
+   `collar-shallow` — push into the deep side, drop the shallow end in,
+   tighten both collars. Cut the rod ≈ **18–20 mm short of the mouth-to-mouth
+   span** (28 mm deep − 12 mm shallow + each mouth's lead-in).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out — **holding the flange still** as you
    unthread, because unscrewing friction can walk the single M5 out of the
