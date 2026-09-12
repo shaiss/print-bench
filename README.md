@@ -261,6 +261,8 @@ surfaces studies awaiting a read live in
   archived sushi-battleship),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
+  `helical-window.scad` (the ovodyo signature slot as a cut-through or
+  debossed brand-mark cutter, with a sever guard),
   each with a `*-demo.scad` regression render, plus vendored
   [BOSL2](https://github.com/BelfrySCAD/BOSL2)
 - `build/` — generated STL/PNG outputs (gitignored)
