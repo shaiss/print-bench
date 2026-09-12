@@ -76,6 +76,30 @@ class Config:
     overhang_limit_deg: float = 45.0
     # A face this close to the lowest point counts as sitting on the bed.
     bed_tol_mm: float = 0.01
+    # --- the faceted, cut-through look -------------------------------------
+    # What separates a design facet from the mesh's own tessellation is the
+    # curve resolution the mesh itself declares: a fold turning no more than
+    # one segment of the finest curve the part draws is that curve's
+    # tessellation, whatever its absolute angle. When a part draws no curve at
+    # all there is nothing to normalise against, so the smooth-curve
+    # convention stands in (a curve a design means to be smooth is drawn at
+    # $fn >= 48, i.e. folds of 7.5 degrees or less).
+    fn_curve_fallback: int = 48
+    # Absorbs the spread in a measured segment count (the mode's median turn
+    # wobbles by about a segment) without letting a genuinely steeper fold
+    # through.
+    tessellation_slack: float = 1.1
+    # Edges of the sharpness histogram, in degrees of fold turn. A readable
+    # ladder rather than even bins: the interesting action is between "finest
+    # drawn curve" (~5 deg at $fn=64) and "corner" (90).
+    histogram_bins_deg: tuple = (0.5, 2, 5, 10, 20, 35, 55, 90, 180)
+    # --- openness (projected void fraction) ---------------------------------
+    # Directions sampled on the sphere, and parallel lines sampled per
+    # direction, for the pose-stable void integral. Deterministic: a Fibonacci
+    # lattice for the directions, a golden-spiral disc for the offsets, no
+    # randomness anywhere.
+    void_dirs: int = 48
+    void_rays_per_dir: int = 32
 
 
 def load_mesh(path: str | Path) -> trimesh.Trimesh:
@@ -792,6 +816,259 @@ def _symmetry(mesh: trimesh.Trimesh, cfg: Config) -> dict:
     return out
 
 
+def _curve_resolution(edges: dict, features: dict) -> float | None:
+    """The finest curve resolution the mesh itself draws, in segments/turn.
+
+    The honest evidence is the *edge* rounding vocabulary and the cylindrical
+    features: a rounding mode is one edge band drawn at one resolution (every
+    fold in it turns the same amount), and a cylindrical feature is a uniform
+    circle — both carry an `implied_fn` a design actually chose. Form
+    curvature is deliberately excluded: a barrel or a sphere is a
+    parameterized surface whose fold angle varies across it, so a mode's
+    median turn there describes where the surface's own parameterization
+    happens to sample, not a resolution the author wrote. A uv sphere of
+    $fn=64 compresses to 0.7-degree folds at its poles, which drags the
+    median to ~2.9 degrees and would report $fn=126 — a threshold finer than
+    the author's own sampling, calling their equator folds design facets. The
+    latitude rings of that same sphere are detected as cylinders at $fn=64,
+    which is the truth the surface mode buried.
+
+    The finest reported resolution is what the sharpness metric normalises
+    against: a part that draws its curves at $fn=64 has declared 5.6 degrees
+    to be tessellation, so its 45-degree folds must be design; a part whose
+    finest curve is an 8-sided barrel has declared 45 degrees to be a curve's
+    segment, so the same fold there is tessellation.
+    """
+    reported = []
+    for side in ("convex", "concave"):
+        for mode in (edges.get("rounding") or {}).get(side, []):
+            if mode.get("implied_fn"):
+                reported.append(float(mode["implied_fn"]))
+    for cyl in features.get("cylinders", []):
+        if cyl.get("implied_fn"):
+            reported.append(float(cyl["implied_fn"]))
+    return max(reported) if reported else None
+
+
+def _facetedness(mesh: trimesh.Trimesh, edges: dict, features: dict,
+                 cfg: Config) -> dict:
+    """Dihedral-sharpness histogram: how much of the shaped edge length is
+    *design facet* rather than tessellation.
+
+    A style built from flat facets meeting at decided angles — a low-poly
+    solid, stencil-cut glyphs, a truss — is the opposite of the smoothed
+    vocabulary above, and `softness` cannot see it: a fully faceted part and
+    a coarsely drawn smooth one both turn steep folds everywhere. What tells
+    them apart is not the angle but the resolution the mesh claims for its
+    own curves. A fold turning one segment of the finest curve the part
+    actually draws is that curve's tessellation; a fold turning decisively
+    more than that is a corner somebody drew. The threshold is therefore
+    derived per mesh (`tessellation_turn_deg` = 360/$fn, with a little slack)
+    rather than fixed, which is why a coarse export of a smooth part earns no
+    facetedness credit for its tessellation edges: its own curves are its
+    coarsest evidence, and they explain every fold it has.
+
+    Shares are of *shaped* edge length — folds turning at least `flat_deg`,
+    the same denominator `softness` uses — so the coplanar diagonals every
+    quad strip is made of never dilute the count.
+    """
+    angles = np.asarray(mesh.face_adjacency_angles, dtype=float)
+    edges_arr = mesh.face_adjacency_edges
+    verts = mesh.vertices
+    if not len(angles):
+        return {"fn_curve": None, "tessellation_turn_deg": None,
+                "sharpness": 0.0, "shaped_length_mm": 0.0,
+                "facet_length_mm": 0.0, "histogram": []}
+    lengths = np.linalg.norm(verts[edges_arr[:, 0]] - verts[edges_arr[:, 1]],
+                             axis=1)
+    shaped = angles >= np.radians(cfg.flat_deg)
+
+    fn_curve = _curve_resolution(edges, features)
+    floor = cfg.fn_curve_fallback if fn_curve is None else fn_curve
+    tess_turn = cfg.tessellation_slack * 360.0 / floor
+    facet = shaped & (np.degrees(angles) > tess_turn)
+
+    shaped_len = float(lengths[shaped].sum())
+    facet_len = float(lengths[facet].sum())
+    bins = []
+    bounds = cfg.histogram_bins_deg
+    for lo, hi in zip(bounds[:-1], bounds[1:]):
+        inside = shaped & (angles > np.radians(lo)) & (angles <= np.radians(hi))
+        length = float(lengths[inside].sum())
+        bins.append({
+            "lo_deg": lo, "hi_deg": hi,
+            "length_mm": round(length, 3),
+            "share": round(length / shaped_len, 4) if shaped_len > 0 else 0.0,
+            # A bin straddling the tessellation threshold carries both kinds;
+            # flag it by whichever kind owns more of its length.
+            "facet": bool(lengths[inside & facet].sum() > length / 2),
+        })
+    return {
+        "fn_curve": round(fn_curve, 1) if fn_curve else None,
+        "tessellation_turn_deg": round(tess_turn, 2),
+        "sharpness": round(facet_len / shaped_len, 4) if shaped_len > 0 else 0.0,
+        "shaped_length_mm": round(shaped_len, 3),
+        "facet_length_mm": round(facet_len, 3),
+        "histogram": bins,
+    }
+
+
+def _fibonacci_sphere(n: int) -> np.ndarray:
+    """N near-uniform directions: a Fibonacci lattice, deterministic."""
+    i = np.arange(n) + 0.5
+    phi = np.arccos(1.0 - 2.0 * i / n)          # uniform in cos: uniform on sphere
+    golden = np.pi * (1 + 5 ** 0.5)
+    theta = golden * i
+    return np.stack([np.sin(phi) * np.cos(theta),
+                     np.sin(phi) * np.sin(theta),
+                     np.cos(phi)], axis=1)
+
+
+def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
+    """Projected-void-fraction: how much of the form is open, pose-stably.
+
+    A single projection cannot answer "how open is this part" — face-on, a
+    stencil plate is mostly void; edge-on it is almost all material — and any
+    *chosen* projection smuggles the answer in with the choice. So integrate
+    over the sphere instead: for each of `void_dirs` near-uniform directions,
+    cast a fan of parallel lines through the part and measure the open share
+    of that view's silhouette — lines that cross the convex hull but never
+    meet material. The mean of the per-view open fractions is a solid-angle
+    integral, so rotating the part permutes the directions and changes
+    nothing: the pose stability is in the construction, not the sampling
+    luck.
+
+    The convex hull is the reference silhouette, so deep concavities count as
+    openness alongside true cut-throughs — the honest reading of this number
+    is "how airy is the form", and a lattice or a stencil scores high for the
+    same reason a solid block scores zero.
+
+    The largest gap a line threads through (`max_void_span_mm`) is the size
+    of the biggest cut-through — for a stencilled part, the glyph — reported
+    as a fraction of the part's largest dimension so a rule can demand
+    legible marks (`glyph height >= 0.15 x part diameter`). The narrowest
+    material span (`min_bridge_mm`) is measured the way `walls` measures
+    thickness — inward normal rays from area-weighted surface samples, fixed
+    seed — because a thin web between two cut-outs is the thinnest wall the
+    part has, and a bridge under two extrusion widths will not print clean.
+    """
+    if not mesh.is_watertight or len(mesh.faces) == 0:
+        return {"measured": False, "reason": "mesh is not watertight"}
+    hull = mesh.convex_hull
+    centre = hull.bounds.mean(axis=0)
+    radius = float(np.linalg.norm(hull.vertices - centre, axis=1).max())
+    if radius <= 0:
+        return {"measured": False, "reason": "degenerate part"}
+
+    directions = _fibonacci_sphere(cfg.void_dirs)
+    # Golden-spiral disc offsets: even coverage of each view, no randomness.
+    j = np.arange(cfg.void_rays_per_dir)
+    discs = radius * np.sqrt((j + 0.5) / len(j))
+    angles = j * np.pi * (3 - 5 ** 0.5)
+    offsets = np.stack([discs * np.cos(angles), discs * np.sin(angles)], axis=1)
+
+    span = 4.0 * radius          # far enough that every line crosses everything
+    eps = 1e-6 * radius          # merge numerical double-hits, ignore dust
+    per_view = []
+    void_spans: list[float] = []
+    for w in directions:
+        helper = np.array([0.0, 0.0, 1.0]) if abs(w[2]) < 0.9 \
+            else np.array([1.0, 0.0, 0.0])
+        u = np.cross(w, helper)
+        u /= np.linalg.norm(u)
+        v = np.cross(w, u)
+        origins = (centre + offsets[:, 0, None] * u + offsets[:, 1, None] * v
+                   - w * span / 2)
+        ray_dirs = np.tile(w, (len(origins), 1))
+        solid, solid_ray, _ = mesh.ray.intersects_location(
+            origins, ray_dirs, multiple_hits=True)
+        outline, outline_ray, _ = hull.ray.intersects_location(
+            origins, ray_dirs, multiple_hits=True)
+        solid_d = _distances_by_ray(solid, solid_ray, origins)
+        hull_d = _distances_by_ray(outline, outline_ray, origins)
+        votes = solid_votes = 0
+        for ray, chord in hull_d.items():
+            # A convex body gives exactly an entry and an exit; a ray with
+            # less is a numerical grazing and costs only itself.
+            if len(chord) < 2:
+                continue
+            h0, h1 = chord[0], chord[-1]
+            votes += 1
+            merged: list[float] = []
+            for d in solid_d.get(ray, []):
+                if h0 - eps <= d <= h1 + eps:
+                    if not merged or d - merged[-1] > eps:
+                        merged.append(d)
+            if not merged:
+                gap = h1 - h0            # threads the form without meeting it
+                if gap > eps:
+                    void_spans.append(gap)
+                continue
+            solid_votes += 1
+            if len(merged) % 2:
+                continue        # unfinished entry/exit pair: no span stats
+            bounds = [h0] + merged + [h1]
+            for k in range(0, len(bounds) - 1, 2):
+                gap = bounds[k + 1] - bounds[k]
+                if gap > eps:
+                    void_spans.append(gap)
+        if votes:
+            per_view.append(1.0 - solid_votes / votes)
+
+    longest = float(np.max(mesh.extents))
+    thinnest = _thinnest_span(mesh, cfg)
+    return {
+        "measured": True,
+        "void_fraction": round(float(np.mean(per_view)), 4) if per_view else 0.0,
+        "directions": int(cfg.void_dirs),
+        "rays_per_direction": int(cfg.void_rays_per_dir),
+        "views_with_void": int(sum(1 for v in per_view if v > 0)),
+        "max_void_span_mm": round(max(void_spans), 3) if void_spans else 0.0,
+        "max_void_span_fraction": (round(max(void_spans) / longest, 4)
+                                   if void_spans and longest > 0 else 0.0),
+        "min_bridge_mm": round(thinnest, 3) if thinnest is not None else None,
+    }
+
+
+def _distances_by_ray(locations: np.ndarray, index_ray: np.ndarray,
+                      origins: np.ndarray) -> dict[int, list[float]]:
+    """Hit distances along each ray of a batched intersect_location call."""
+    out: dict[int, list[float]] = {}
+    if len(locations):
+        dist = np.linalg.norm(locations - origins[index_ray], axis=1)
+        for ray, d in zip(index_ray, dist):
+            out.setdefault(int(ray), []).append(float(d))
+    for ray in out:
+        out[ray].sort()
+    return out
+
+
+def _thinnest_span(mesh: trimesh.Trimesh, cfg: Config) -> float | None:
+    """The narrowest material span, measured the way `walls` measures.
+
+    Inward normal rays from area-weighted surface samples: a web between two
+    cut-outs is bounded by exactly such walls, and the ray from one crosses
+    the web to the next, so the minimum over samples is the bridge a rule
+    about printing clean needs. Faces carry area, so — unlike chord sampling
+    — no grazing near a cut-out's corner can mint a sliver-thickness that
+    exists nowhere on the part.
+    """
+    areas = np.asarray(mesh.area_faces, dtype=float)
+    total = float(areas.sum())
+    if total <= 0:
+        return None
+    n = min(cfg.thickness_samples, int((areas > 0).sum()))
+    rng = np.random.default_rng(0)                      # fixed: results repeat
+    idx = rng.choice(len(mesh.faces), size=n, replace=False, p=areas / total)
+    directions = -np.asarray(mesh.face_normals)[idx]
+    origins = np.asarray(mesh.triangles_center)[idx] + directions * 1e-4
+    hits, ray_idx, _ = mesh.ray.intersects_location(origins, directions,
+                                                    multiple_hits=False)
+    if not len(hits):
+        return None
+    return float(np.linalg.norm(hits - origins[ray_idx], axis=1).min())
+
+
 def measure(path: str | Path, cfg: Config | None = None) -> dict:
     """Measure every style-bearing property of a mesh file."""
     cfg = cfg or Config()
@@ -800,6 +1077,9 @@ def measure(path: str | Path, cfg: Config | None = None) -> dict:
     internal = edges.pop("_internal", None)
     features = (_cylindrical_features(mesh, internal, cfg) if internal
                 else {"cylinders": [], "count": 0})
+    # Reads the curve resolutions the passes above measured, so it must run
+    # after them — but it only adds a key, it changes nothing they reported.
+    edges["facetedness"] = _facetedness(mesh, edges, features, cfg)
     walls = _walls(mesh, cfg)
     massing = _massing(mesh)
 
@@ -829,6 +1109,7 @@ def measure(path: str | Path, cfg: Config | None = None) -> dict:
         "features": features,
         "orientation": _orientation(mesh, cfg),
         "walls": walls,
+        "openness": _openness(mesh, cfg),
         "symmetry": _symmetry(mesh, cfg),
         "ratios": ratios,
         "config": asdict(cfg),
