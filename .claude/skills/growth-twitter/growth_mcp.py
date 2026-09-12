@@ -39,7 +39,12 @@ server trusts nothing and layers every gate the desk has:
     (URLs = 23, wide code points = 2, hard cap 280 — the parity test pins
     the two implementations together); an over-weight tweet is refused, so
     an unpostable draft can never burn the approval.
-  * PER-RUN CAP. `GROWTH_MAX_POSTS` (default 1) bounds an unattended run.
+  * PER-RUN CAP. `GROWTH_MAX_POSTS` (default 1) bounds an unattended run —
+    counted in a state file every link step of the chain walk shares
+    (`GROWTH_CAP_STATE`, the reeve.yml `REEVE_GREENLIGHT_STATE` pattern; issue
+    #570), so the bound spans the whole walk and not one server process. The
+    agent can neither set env vars nor write files, so it cannot reach or
+    reset the count.
   * The GitHub writes are: the outcome comment, and — after a LIVE post
     only — closing the drained queue issue (queue semantics: the message
     was delivered). Never a label, never another repo, never code.
@@ -54,9 +59,12 @@ Logs go to stderr so stdout carries nothing but JSON-RPC.
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 QUEUE_LABEL = "growth-queue"
@@ -110,13 +118,88 @@ def _tweet_weight(text):
     return total
 
 
-# --- run state ---------------------------------------------------------------
+# --- the walk-spanning post cap (issue #570) ---------------------------------
+#
+# Every link of a chain walk is its own claude-code-action step, so this
+# server process — and anything in-process — restarts at link N+1. An
+# in-process counter therefore caps ONE LINK, not the run: a link that posts
+# up to the cap and then dies (agent error, step timeout) hands the next link
+# a fresh counter with the same prompt, so a 3-link walk could post up to 3x
+# the cap — and this is the one server whose writes can eventually publish
+# OUTSIDE the repo, so a cap that lies about its own scope matters more here
+# even with the one-post-per-item marker guards in place (#549 split 6). The
+# count must live where every link can see it: a state file the workflow
+# names via GROWTH_CAP_STATE, one path shared by every link step of the job
+# (the reeve.yml REEVE_GREENLIGHT_STATE precedent). runner.temp is fresh per
+# job, so the file is run-scoped and never persists across runs.
+#
+# SIBLING ADOPTION (scout_mcp.py's #565 note): the three functions below are
+# lifted verbatim from its mechanism — deliberately self-contained, stdlib
+# only — so adoption is a copy plus the CAP_STATE_ENV constant, not a
+# re-derivation of the mechanism.
+CAP_STATE_ENV = "GROWTH_CAP_STATE"
 
-# Per-run cap. GITHUB_RUN_ID is set and stable across one Actions run and
-# this process lives for that whole run, so an in-process counter is
-# naturally run-scoped. Attended (no run id) the cap is skipped — a human is
-# the trust boundary, the same posture the sibling servers take.
-_posted_this_run = 0
+
+def _cap_state_path():
+    """The shared state-file path for this run, or None attended.
+
+    Attended (no GITHUB_RUN_ID) the cap is skipped entirely — a human is the
+    trust boundary — so no state file is required. Unattended the path comes
+    from the env var the workflow sets; an empty value is returned as-is so the
+    caller can refuse: posting on without it would silently fall back to
+    per-process counting, which is exactly the per-link reset this mechanism
+    exists to kill.
+    """
+    if not os.environ.get("GITHUB_RUN_ID", "").strip():
+        return None
+    return os.environ.get(CAP_STATE_ENV, "").strip()
+
+
+def _cap_state_count(path):
+    """How many posts this run has already consumed, per the shared state file.
+
+    One JSON record per consumed slot, so the count is the number of
+    non-empty lines; an absent file is a run that has posted nothing yet (the
+    first record creates it). Any other read failure raises — an unreadable
+    state must refuse, never count as zero.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return sum(1 for line in fh if line.strip())
+    except FileNotFoundError:
+        return 0
+    except OSError as e:
+        raise RuntimeError(f"cannot read {CAP_STATE_ENV} file {path}: {e}") from e
+
+
+def _cap_state_record(path, number, url, outcome):
+    """Append ONE record — after a post attempt that consumed a cap slot.
+    Unlike the filing siblings, a FAILED live attempt counts too: the X API
+    call itself is what the cap bounds (an attempt that died mid-post still
+    spent it), matching the in-process counter this replaces, which
+    incremented on the same paths. The record doubles as the audit trail of
+    what a link that later died posted."""
+    rec = {"issue": number, "url": url, "outcome": outcome,
+           "posted_at": datetime.now(timezone.utc).isoformat()}
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+def _cap_state_note(state, number, url, outcome):
+    """Record one consumed slot when a state file is in play (attended runs
+    have none — the cap is skipped). A record that cannot be appended is a
+    WARNING, never a refusal: the post already happened and refusing after
+    the fact would strand the outcome — but the slot goes uncounted, so the
+    walk's remaining links could post one more than the cap. The
+    one-post-per-item markers still bound distinct posts."""
+    if not state:
+        return
+    try:
+        _cap_state_record(state, number, url, outcome)
+    except OSError as e:
+        log(f"WARNING: consumed a post slot on #{number} but could not append "
+            f"its {CAP_STATE_ENV} record ({e}) — this post will not count "
+            f"toward the walk cap")
 
 # Captured by the selftest so it can assert exact payloads without a network
 # call. `None`/empty in normal operation.
@@ -317,7 +400,6 @@ def _post_tweet(arguments):
     """Drain ONE queue item to the channel — dry-run comment by default, a
     live tweet only behind the live key + approval label. Lark's entire
     write taxonomy."""
-    global _posted_this_run
     args = arguments or {}
     number = args.get("number")
     text = args.get("text")
@@ -358,15 +440,35 @@ def _post_tweet(arguments):
         return _tool_error(
             f"issue #{number} is not in this run's candidate set {sorted(selected)}; refusing")
 
-    # --- per-run cap (unattended only) -------------------------------------
-    if os.environ.get("GITHUB_RUN_ID", "").strip():
+    # --- per-run cap, spanning the chain walk (unattended only) ------------
+    # Enforced only inside an Actions run (the unattended case the cap exists
+    # to bound); attended, a human is the trust boundary. The count is read
+    # from the shared state file so it spans the whole chain walk, not this
+    # one server process (#570) — and an unattended run without the path
+    # fails closed, because posting on would silently fall back to the exact
+    # per-link reset the state file replaces.
+    state = _cap_state_path()
+    if state is not None:
+        if not state:
+            return _tool_error(
+                f"post_tweet: {CAP_STATE_ENV} is not set but this is an "
+                "unattended run (GITHUB_RUN_ID is set) — the workflow must "
+                "give every link step the same state-file path (the reeve.yml "
+                "REEVE_GREENLIGHT_STATE pattern) or the post cap cannot span "
+                "the chain walk; refusing to post"
+            )
         try:
             cap = int(os.environ.get("GROWTH_MAX_POSTS", "1"))
         except ValueError:
             cap = 1
-        if _posted_this_run >= cap:
+        try:
+            posted = _cap_state_count(state)
+        except RuntimeError as e:
+            return _tool_error(f"post_tweet: {e}")
+        if posted >= cap:
             return _tool_error(
-                f"per-run post cap reached ({_posted_this_run}/{cap}); refusing to post more")
+                f"per-run post cap reached ({posted}/{cap} posted across the "
+                "chain walk so far); refusing to post more")
 
     # --- re-read the target and enforce state at WRITE time ----------------
     try:
@@ -443,7 +545,7 @@ def _post_tweet(arguments):
             for part in thread:
                 last_id = _x_post(part, reply_to=last_id)
         except Exception as e:  # noqa: BLE001
-            _posted_this_run += 1
+            _cap_state_note(state, number, None, "live-attempt-failed")
             reason = f"{type(e).__name__}: {e}"
             if not posted_any:
                 # The FIRST tweet never went out, so NOTHING was published — the
@@ -495,11 +597,11 @@ def _post_tweet(arguments):
         except Exception as e:  # noqa: BLE001
             # The tweet is out and the claim marker already guards against a
             # re-post; surface the bookkeeping failure loudly.
-            _posted_this_run += 1
+            _cap_state_note(state, number, tweet_url, "posted-recording-failed")
             return _tool_error(
                 f"tweet posted ({tweet_url}) but recording it on #{number} "
                 f"failed: {type(e).__name__}: {e} — close the item by hand")
-        _posted_this_run += 1
+        _cap_state_note(state, number, tweet_url, "posted-live")
         log(f"posted live for #{number}: {tweet_url}")
         return _tool_text(f"POSTED live for #{number} {tweet_url} (queue item closed)")
 
@@ -523,9 +625,9 @@ def _post_tweet(arguments):
         return _tool_error(f"GitHub API error {e.code} commenting on #{number}: {detail}")
     except Exception as e:  # noqa: BLE001
         return _tool_error(f"failed to comment on #{number}: {type(e).__name__}: {e}")
-    _posted_this_run += 1
     url = posted.get("html_url", "(unknown url)")
-    log(f"dry-ran #{number} {url} ({_posted_this_run} this run)")
+    _cap_state_note(state, number, url, "dry-run")
+    log(f"dry-ran #{number} {url}")
     return _tool_text(f"DRY-RUN recorded on #{number} {url}")
 
 
@@ -636,11 +738,14 @@ def selftest():
     that is never exercised can be weakened and every other check stays green
     (the repo's standing rule) — and THIS surface can reach outside the repo,
     so these are the cases that must never regress."""
-    global _posted_this_run, _last_comment, _last_close, _last_tweets, _last_deleted
+    global _last_comment, _last_close, _last_tweets, _last_deleted
     global _FAKE_ISSUES, _FAKE_COMMENTS
     os.environ["GROWTH_MCP_FAKE"] = "1"
+    # Pin the environment: each case below decides attended/unattended
+    # itself, so an ambient Actions GITHUB_RUN_ID / GROWTH_CAP_STATE (this
+    # selftest runs inside CI) must not leak into the attended cases.
     for var in ("GROWTH_SELECTED_ISSUES", "GITHUB_RUN_ID", "GROWTH_TWITTER_LIVE",
-                "GROWTH_REQUIRE_APPROVAL", "GROWTH_MAX_POSTS",
+                "GROWTH_REQUIRE_APPROVAL", "GROWTH_MAX_POSTS", CAP_STATE_ENV,
                 "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"):
         os.environ.pop(var, None)
     fails = []
@@ -828,18 +933,69 @@ def selftest():
           r.get("isError") is False and DRYRUN_MARKER in _last_comment["body"])
     os.environ.pop("GROWTH_TWITTER_LIVE", None)
 
-    # Per-run cap (unattended: GITHUB_RUN_ID set). Default cap is 1.
+    # The walk-spanning per-run cap (issue #570), inside an Actions run
+    # (GITHUB_RUN_ID set). Default cap is 1.
     os.environ["GITHUB_RUN_ID"] = "selftest-run"
-    _posted_this_run = 0
     _FAKE_ISSUES[20] = q(20, OK)
     _FAKE_ISSUES[21] = q(21, OK)
-    r1 = _post_tweet({"number": 20, "text": "one"})
-    r2 = _post_tweet({"number": 21, "text": "two"})
-    check("the cap lets through GROWTH_MAX_POSTS (default 1)",
-          r1.get("isError") is False)
-    check("the cap refuses past the limit",
-          err(r2) and "cap reached" in r2["content"][0]["text"])
+
+    # Unwired: run id set but no state path. Fail closed — per-process
+    # counting is exactly the per-link reset the state file replaces.
+    r = _post_tweet({"number": 20, "text": "unwired"})
+    check("an unattended run without GROWTH_CAP_STATE refuses (fail closed)",
+          err(r) and CAP_STATE_ENV in r["content"][0]["text"])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "growth-posts")
+        os.environ[CAP_STATE_ENV] = state
+
+        # In-process: one post consumes the default cap of 1 (a DRY-RUN
+        # counts — the same semantics the in-process counter had), and the
+        # refusal the next call reads counts from the state file.
+        r1 = _post_tweet({"number": 20, "text": "one"})
+        r2 = _post_tweet({"number": 21, "text": "two"})
+        check("the cap lets through GROWTH_MAX_POSTS (default 1)",
+              r1.get("isError") is False)
+        check("the cap refuses past the limit",
+              err(r2) and "cap reached" in r2["content"][0]["text"])
+        check("the consumed slot appended one state record",
+              _cap_state_count(state) == 1)
+
+        # THE cross-process property (#570): link N posts its fill and then
+        # dies; link N+1 is a FRESH process whose only memory of the run is
+        # the state file. A real subprocess against the pre-populated file is
+        # the exact situation an in-process counter got wrong.
+        probe = [sys.executable, os.path.abspath(__file__), "--selftest-cap-child"]
+
+        proc = subprocess.run(probe + [state], env=dict(os.environ),
+                              capture_output=True, text=True)
+        check("a fresh process counting from a state file at the cap refuses "
+              "(the cross-process property)",
+              proc.returncode == 0 and proc.stdout.startswith("REFUSED"))
+
+        # An EMPTY state file (nothing posted yet) → the fresh process posts
+        # (a dry-run, in this env), and the shared file advances — so the
+        # link after IT sees the incremented count too.
+        state2 = os.path.join(tmp, "growth-posts-2")
+        os.environ[CAP_STATE_ENV] = state2
+        proc = subprocess.run(probe + [state2], env=dict(os.environ),
+                              capture_output=True, text=True)
+        check("a fresh process with an empty state file posts (cross-process)",
+              proc.returncode == 0 and proc.stdout.startswith("POSTED"))
+        check("the fresh process's post advanced the shared state file",
+              _cap_state_count(state2) == 1)
+
+    os.environ.pop(CAP_STATE_ENV, None)
     os.environ.pop("GITHUB_RUN_ID", None)
+
+    # Attended behavior is unchanged: no GITHUB_RUN_ID means the cap is
+    # skipped — no state file needed or required.
+    _FAKE_ISSUES[22] = q(22, OK)
+    _FAKE_ISSUES[23] = q(23, OK)
+    a1 = _post_tweet({"number": 22, "text": "attended one"})
+    a2 = _post_tweet({"number": 23, "text": "attended two"})
+    check("attended (no GITHUB_RUN_ID) skips the cap — no state file required",
+          a1.get("isError") is False and a2.get("isError") is False)
 
     # The JSON-RPC surface exposes exactly the one tool.
     check("tools/list exposes exactly post_tweet",
@@ -852,9 +1008,32 @@ def selftest():
     return 0
 
 
+def selftest_cap_child(state_path):
+    """One post attempt in THIS fresh process — the parent selftest's
+    cross-process case. The parent's module state died with its process; the
+    only thing this process knows about the run's posts is the state file it
+    is handed, which is exactly link N+1's view after link N posted and died
+    (issue #570). Prints POSTED/REFUSED for the parent to assert on."""
+    os.environ["GROWTH_MCP_FAKE"] = "1"
+    os.environ["GITHUB_RUN_ID"] = "selftest-link-n+1"
+    os.environ[CAP_STATE_ENV] = state_path
+    _FAKE_ISSUES[40] = {"number": 40, "state": "open",
+                        "labels": [{"name": n} for n in (QUEUE_LABEL, CHANNEL_LABEL)]}
+    r = _post_tweet({"number": 40, "text": "cross-process probe"})
+    outcome = "REFUSED" if r.get("isError") else "POSTED"
+    print(f"{outcome}: {r['content'][0]['text']}")
+    return 0
+
+
 def main():
     if "--selftest" in sys.argv:
         raise SystemExit(selftest())
+    if "--selftest-cap-child" in sys.argv:
+        i = sys.argv.index("--selftest-cap-child")
+        if i + 1 >= len(sys.argv):
+            log("--selftest-cap-child needs the state-file path argument")
+            raise SystemExit(2)
+        raise SystemExit(selftest_cap_child(sys.argv[i + 1]))
     log(f"starting (repo={os.environ.get('GITHUB_REPOSITORY', '?')}, "
         f"run={os.environ.get('GITHUB_RUN_ID', 'attended')}, "
         f"mode={'LIVE' if _live_mode() else 'dry-run'})")
