@@ -1,0 +1,6 @@
+# Printable parts to render and gate in CI. The head is the print-in-place
+# mechanism (ball printed captive in the socket, stud on top); the base is the
+# M4 foot plate. The default render is the assembled preview only — never a
+# deliverable (the two parts print separately and join with one M4 bolt).
+head
+base
