@@ -49,9 +49,13 @@ STL imports as one fused body and welds them together — v1's field-test failur
 - **Cloned the repo:** `./scripts/plate.sh alcove-rod-socket` bundles the two
   default-depth parts into one multi-object 3MF
   (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file.
-  Render the far-side collar with `-D 'part="collar-shallow"'` (or take it from
-  a Release once tagged). (The 3MF is a local build artifact; it isn't attached
-  to the GitHub Release yet — that's a tracked follow-up.)
+  For the far-side shallow collar, run `./scripts/gate.sh alcove-rod-socket`
+  (or `--slice`) and take the gated STL at
+  `build/alcove-rod-socket-collar-shallow.stl` — that is the printcheck'd
+  artifact, not a hand-render. Advanced override only: `-D 'part="collar-shallow"'`
+  if you need to re-export outside the gate. (The 3MF is a local build
+  artifact; it isn't attached to the GitHub Release yet — that's a tracked
+  follow-up.)
 
 Either way, saving bed space is fine — lay the two parts **side by side and
 flat** (the plate's `--merge` does exactly that). Don't stack them **one on top
@@ -113,8 +117,10 @@ Two such plates fit the 256 × 256 mm P2S bed.
 The gate scores the boss / collar / collar-shallow / thread-coupon set with
 the same thin-wall warning pattern (tessellated thread crests and knurl
 ridges under 0.8 mm on a few percent of sampled surface; the bore coupon is
-clean). That is by design and needs no slicer action. The coupon carries the
-same profile, so a coupon that prints clean says the parts will too.
+clean) — `collar-shallow` is 54×54×24.6 mm at printcheck 92/100, matching the
+default collar's pattern. That is by design and needs no slicer action. The
+coupon carries the same profile, so a coupon that prints clean says the parts
+will too.
 
 ![The thread coupon — male stub and female ring side by side](previews/coupon.png)
 
