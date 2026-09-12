@@ -734,7 +734,7 @@ else if (part == "cutaway-cross")
     // (they sit at y = +-port_gap/2); `cutaway` is the shot that shows those.
     difference() {
         nuggs_turnaround();
-        translate([-300, 0, -200]) cube([600, 300, 600]);
+        translate([-300, -300, -200]) cube([600, 300, 600]);
     }
 else if (part == "cutaway-ridge")
     // Section on the ridge plane (x = 0) — the plane the roof slot lived on
