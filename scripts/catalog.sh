@@ -20,13 +20,17 @@
 #
 #   - the closed vocabulary + display order live in designs/categories.conf
 #     ("<slug> | <label>", order = display order);
-#   - NUGGS is DERIVED — a design named "nuggs"/"nuggs-*" that ALSO includes the
-#     lib/nuggs-coupling.scad standard is in the nuggs group and carries no
-#     catalog.conf. The cross-check runs BOTH directions: a design that includes
-#     the coupling but is not named nuggs-* is mis-grouped and fails, and a
-#     nuggs-*-NAMED design that does NOT include the coupling is a name collision
-#     (e.g. nuggs-yard, named for the hamster), not a NUGGS module — it is
-#     grouped by its declared category like any other design;
+#   - NUGGS is DERIVED — a design named "nuggs"/"nuggs-*" that ALSO reaches the
+#     lib/nuggs-coupling.scad standard through its include closure is in the
+#     nuggs group and carries no catalog.conf. The closure, not the design's own
+#     include lines, is the signal (issue #517): a derivative inherits the
+#     coupling through its parent (nuggs-turnaround-tee via nuggs-turnaround),
+#     and that inheritance is what makes it a NUGGS module. The cross-check runs
+#     BOTH directions over the same closure: a design that reaches the coupling
+#     but is not named nuggs-* is mis-grouped and fails, and a nuggs-*-NAMED
+#     design that reaches the coupling NOWHERE in its closure is a name
+#     collision (e.g. nuggs-yard, named for the hamster), not a NUGGS module —
+#     it is grouped by its declared category like any other design;
 #   - every other design declares `category: <slug>` in designs/<name>/catalog.conf.
 #
 # `order` re-uses `./scripts/lineage.sh order` for within-group ordering and
@@ -183,20 +187,86 @@ strip_scad_comments() {
   ' "$1"
 }
 
-# Does the design's entry .scad pull in the NUGGS coupling standard? A
-# commented-out include/use does NOT count (issue #509 / CodeRabbit) — strip
-# comments first, then match line by line.
+# The <...> targets of every live include/use directive in a .scad file, one
+# per line. Comment-stripped first (issue #509 / CodeRabbit), and line-oriented
+# like the coupling match always was: a directive and its target must sit on one
+# line to count. grep -o emits every match on a line, and reads awk's whole
+# output (no -q early exit, so no SIGPIPE under pipefail); `|| true` covers the
+# zero-directive file, where grep -o exits 1.
+scad_directives() {
+  strip_scad_comments "$1" \
+    | grep -oE '(include|use)[[:space:]]*<[^>]+>' \
+    | sed -E 's/^(include|use)[[:space:]]*<//; s/>$//' \
+    || true
+}
+
+# Resolve one directive target against the file that carries it, the way the
+# scripts set OPENSCADPATH for OpenSCAD itself: the including file's own
+# directory first (the `../<parent>/<parent>.scad` derivative form, and a
+# coupon's bare `include <entry.scad>`), then lib/ (first-party + vendored
+# libraries), then the repo root (`styles/<name>/style.scad`). Echoes the
+# resolved path, or nothing for a target no candidate holds — an unresolvable
+# directive is a leaf of the walk, never an error (the echo-check in check.sh
+# owns unresolved-include reporting).
+resolve_directive() { # <target> <including-file>
+  local p="$1" from="$2" cand
+  for cand in "$(dirname "$from")/$p" "${ROOT%/}/lib/$p" "${ROOT%/}/$p"; do
+    [[ -f "$cand" ]] && { printf '%s\n' "$cand"; return 0; }
+  done
+  return 0
+}
+
+# Does the design REACH the NUGGS coupling standard through its include
+# closure (issue #517)? The entry .scad's own directives are level one; every
+# directive that resolves to another FIRST-PARTY file (designs/, top-level
+# lib/*.scad, styles/) extends the closure transitively, so a derivative that
+# inherits the coupling through its parent — nuggs-turnaround-tee including
+# nuggs-turnaround, which `use`s the coupling — is a NUGGS module, not a name
+# collision. Two boundaries keep the walk bounded and honest:
+#   - the coupling itself is matched by NAME (`*nuggs-coupling.scad`), exactly
+#     as the one-file scan matched it — the directive names the standard, so it
+#     counts even where the file does not resolve (the selftest's throwaway
+#     trees carry no lib/);
+#   - recursion enters first-party files only. First-party is the CLAUDE.md
+#     set — anything under designs/ or styles/, and a .scad DIRECTLY in lib/
+#     (the single level the first-party libs occupy; vendored libraries live in
+#     subdirectories of lib/, so anything deeper is a vendored leaf), plus
+#     unresolvable targets are leaves too — the coupling is a first-party
+#     standard no vendored file can reach.
+# A visited set makes the walk terminate on cyclic includes.
 includes_coupling() {
   local entry="${DESIGNS_DIR}/$1/$1.scad"
   [[ -f "$entry" ]] || return 1
-  # Capture the stripped text, then grep it — NOT `strip … | grep -q`. Under
-  # `set -o pipefail`, grep -q exits on its first match and closes the pipe, so
-  # awk takes SIGPIPE and the pipeline reports failure even though the coupling
-  # matched; the race only trips on files big enough that grep exits before awk
-  # finishes (the real designs, not the tiny selftest fixtures).
-  local stripped
-  stripped="$(strip_scad_comments "$entry")"
-  grep -qE '(include|use)[[:space:]]*<[^>]*nuggs-coupling\.scad>' <<<"$stripped"
+  local -a queue=("$entry")
+  local -A seen=()
+  local f p resolved
+  while (( ${#queue[@]} > 0 )); do
+    f="${queue[0]}"
+    queue=("${queue[@]:1}")
+    [[ -n "${seen[$f]:-}" ]] && continue
+    seen["$f"]=1
+    while IFS= read -r p; do
+      [[ -n "$p" ]] || continue
+      # The directive names the coupling: reached, at whatever depth.
+      [[ "$p" == *nuggs-coupling.scad ]] && return 0
+      resolved="$(resolve_directive "$p" "$f")"
+      [[ -n "$resolved" ]] || continue
+      case "$resolved" in
+        "${ROOT%/}/designs/"* | "${ROOT%/}/styles/"*)
+          [[ -z "${seen[$resolved]:-}" ]] && queue+=("$resolved")
+          ;;
+        "${ROOT%/}/lib/"*)
+          # First-party libs sit DIRECTLY in lib/ as .scad; a subdirectory of
+          # lib/ is a vendored tree, which the walk treats as a leaf.
+          case "$resolved" in
+            "${ROOT%/}/lib/"*"/"* ) ;; # deeper than one level: vendored, a leaf
+            *.scad) [[ -z "${seen[$resolved]:-}" ]] && queue+=("$resolved") ;;
+          esac
+          ;;
+      esac
+    done < <(scad_directives "$f")
+  done
+  return 1
 }
 
 # Resolve every design's group into the GROUP map. Returns non-zero and prints
@@ -223,22 +293,23 @@ resolve_groups() {
       continue
     fi
 
-    # The NUGGS cross-check, both directions (#374). A design that includes the
-    # coupling but is NOT named nuggs-* belongs in NUGGS and should carry the
-    # prefix. A design NAMED nuggs-* that does NOT include the coupling is a name
-    # collision (e.g. nuggs-yard, named for the hamster, not the port), so it is
-    # not a NUGGS module: it falls through here and is grouped by its declared
-    # category like any other design — the reverse test just below cannot fire on
-    # it, since it has no coupling to flag.
+    # The NUGGS cross-check, both directions (#374), over the include closure
+    # (#517). A design that reaches the coupling but is NOT named nuggs-*
+    # belongs in NUGGS and should carry the prefix. A design NAMED nuggs-* that
+    # reaches the coupling NOWHERE in its closure is a name collision (e.g.
+    # nuggs-yard, named for the hamster, not the port), so it is not a NUGGS
+    # module: it falls through here and is grouped by its declared category like
+    # any other design — the reverse test just below cannot fire on it, since it
+    # has no coupling to flag.
     if includes_coupling "$name"; then
-      err "designs/${name}: includes lib/nuggs-coupling.scad but is not named nuggs-* — a NUGGS module must carry the nuggs- prefix"
+      err "designs/${name}: reaches lib/nuggs-coupling.scad through its include closure but is not named nuggs-* — a NUGGS module must carry the nuggs- prefix"
       fails=$((fails + 1))
     fi
 
     cat="$(read_category "$name")"
     if [[ -z "$cat" ]]; then
       if is_nuggs "$name"; then
-        err "designs/${name}: named nuggs-* but does not include lib/nuggs-coupling.scad, so it is not a NUGGS module — declare a 'category:' in designs/${name}/catalog.conf like any other design (or add the coupling to make it a real NUGGS module)"
+        err "designs/${name}: named nuggs-* but reaches lib/nuggs-coupling.scad nowhere in its include closure (own file or parents), so it is not a NUGGS module — declare a 'category:' in designs/${name}/catalog.conf like any other design (or reach the coupling to make it a real NUGGS module)"
       else
         err "designs/${name}: no 'category:' in designs/${name}/catalog.conf (see ${VOCAB_FILE})"
       fi
@@ -518,6 +589,95 @@ catalog_selftest() {
     echo "ok    selftest: a live coupling directive after a block comment still makes a NUGGS module"
   else
     echo "FAIL  selftest: comment stripping ate a live coupling directive"; fails=$((fails + 1))
+  fi
+
+  # ---- positive: a derivative reaches the coupling through its parent (#517) ----
+  # The nuggs-turnaround-tee shape: the parent `use`s the coupling, the
+  # derivative's own file never names it — only the include closure sees the
+  # inheritance, and that inheritance is what makes it a NUGGS module (no
+  # catalog.conf, grouped under nuggs, nested under its parent).
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  _mk nuggs-parent                   # _mk gives a nuggs-* fixture the coupling
+  mkdir -p "$tmp/designs/nuggs-child"
+  {
+    printf '// nuggs-child fixture (coupling inherited, never named here)\n'
+    printf 'include <../nuggs-parent/nuggs-parent.scad>\n'
+  } >"$tmp/designs/nuggs-child/nuggs-child.scad"
+  printf '# nuggs-child\n\nThe nuggs-child design.\n' >"$tmp/designs/nuggs-child/README.md"
+  printf 'variant-of: nuggs-parent\n' >"$tmp/designs/nuggs-child/derives.conf"
+  if _run check >/dev/null 2>&1 \
+     && [[ "$(_run order 2>/dev/null | awk -F'\t' '$4=="nuggs-child"{print $1}')" == "nuggs" ]]; then
+    echo "ok    selftest: a derivative reaches the coupling through its parent (include closure, #517)"
+  else
+    echo "FAIL  selftest: a derivative inheriting the coupling was not recognised as a NUGGS module"; fails=$((fails + 1))
+  fi
+
+  # ---- positive: the closure recurses — a two-hop chain still reaches it ------
+  # Grandparent holds the coupling; the middle and the leaf only include their
+  # own parent. One level of look-behind would seat the grandparent alone; the
+  # closure is transitive or it is not a closure.
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  _mk nuggs-gp
+  local hop
+  for hop in mid:gp leaf:mid; do
+    local n="${hop%%:*}" p="${hop##*:}"
+    mkdir -p "$tmp/designs/nuggs-$n"
+    printf '// nuggs-%s fixture (coupling two hops up, via nuggs-%s)\n' "$n" "$p" \
+      >"$tmp/designs/nuggs-$n/nuggs-$n.scad"
+    printf 'include <../nuggs-%s/nuggs-%s.scad>\n' "$p" "$p" >>"$tmp/designs/nuggs-$n/nuggs-$n.scad"
+    printf '# nuggs-%s\n\nThe nuggs-%s design.\n' "$n" "$n" >"$tmp/designs/nuggs-$n/README.md"
+    printf 'variant-of: nuggs-%s\n' "$p" >"$tmp/designs/nuggs-$n/derives.conf"
+  done
+  local hops
+  hops="$(_run order 2>/dev/null | awk -F'\t' '$4=="nuggs-mid"||$4=="nuggs-leaf"{print $1}' | sort -u)"
+  if [[ "$hops" == "nuggs" ]]; then
+    echo "ok    selftest: the closure recurses (coupling reached two parents up)"
+  else
+    echo "FAIL  selftest: a two-hop inheritance was not recognised (got '${hops}')"; fails=$((fails + 1))
+  fi
+
+  # ---- negative: a derivative reaching the coupling NOWHERE is still a collision -
+  # The collision rule survives the closure unchanged: a nuggs-* name whose
+  # whole closure (own file AND parents) never reaches the coupling is a name
+  # collision — grouped by its declared category, exactly like nuggs-yard.
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  _mk plain everyday-functional      # not nuggs-*, no coupling anywhere
+  mkdir -p "$tmp/designs/nuggs-der-collide"
+  printf '// nuggs-der-collide fixture (parents hold no coupling either)\n' \
+    >"$tmp/designs/nuggs-der-collide/nuggs-der-collide.scad"
+  printf 'include <../plain/plain.scad>\n' >>"$tmp/designs/nuggs-der-collide/nuggs-der-collide.scad"
+  printf '# nuggs-der-collide\n\nThe nuggs-der-collide design.\n' \
+    >"$tmp/designs/nuggs-der-collide/README.md"
+  printf 'variant-of: plain\n' >"$tmp/designs/nuggs-der-collide/derives.conf"
+  printf 'category: everyday-functional\n' >"$tmp/designs/nuggs-der-collide/catalog.conf"
+  if grp="$(_run order 2>/dev/null)" \
+     && [[ "$(awk -F'\t' '$4=="nuggs-der-collide"{print $1}' <<<"$grp")" == "everyday-functional" ]]; then
+    echo "ok    selftest: a derivative reaching the coupling nowhere is still a name collision"
+  else
+    echo "FAIL  selftest: a closure-less derivative was not treated as the collision it is"; fails=$((fails + 1))
+  fi
+
+  # ---- positive: a cyclic include closure terminates (#517) ------------------
+  # Mutual includes are legal geometry-sharing OpenSCAD; the walk must not
+  # chase them forever. Neither file reaches the coupling, so the nuggs-* name
+  # is a collision that declares a category — and the answer arrives at all.
+  rm -rf "$tmp/designs"/*/ 2>/dev/null || true
+  mkdir -p "$tmp/designs/nuggs-mutA" "$tmp/designs/nuggs-mutB"
+  printf '// nuggs-mutA fixture\ninclude <../nuggs-mutB/nuggs-mutB.scad>\n' \
+    >"$tmp/designs/nuggs-mutA/nuggs-mutA.scad"
+  printf '// nuggs-mutB fixture (includes A right back)\ninclude <../nuggs-mutA/nuggs-mutA.scad>\n' \
+    >"$tmp/designs/nuggs-mutB/nuggs-mutB.scad"
+  printf '# nuggs-mutA\n\nThe nuggs-mutA design.\n' >"$tmp/designs/nuggs-mutA/README.md"
+  printf '# nuggs-mutB\n\nThe nuggs-mutB design.\n' >"$tmp/designs/nuggs-mutB/README.md"
+  printf 'category: everyday-functional\n' >"$tmp/designs/nuggs-mutA/catalog.conf"
+  printf 'category: everyday-functional\n' >"$tmp/designs/nuggs-mutB/catalog.conf"
+  # (timeout around the script itself — a hang is the failure being controlled
+  # for, and `timeout` cannot wrap the _run shell function.)
+  if grp="$(timeout 30 ./scripts/catalog.sh --root "$tmp" order 2>/dev/null)" \
+     && [[ "$(awk -F'\t' '$4=="nuggs-mutA"{print $1}' <<<"$grp")" == "everyday-functional" ]]; then
+    echo "ok    selftest: a cyclic include closure terminates and answers"
+  else
+    echo "FAIL  selftest: a cyclic include closure hung or mis-grouped"; fails=$((fails + 1))
   fi
 
   # ---- negative: a vocabulary that omits the derived 'nuggs' group is refused -
