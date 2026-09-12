@@ -60,6 +60,25 @@ def ok_post(calls):
     return post
 
 
+# The three observed #545 bodies, verbatim from the runs that surfaced the
+# defect — the exact evidence the 429-body mapping must read (Z.AI's two 429s,
+# distinguished only by their numeric `code`, and Anthropic's usage-cap 400).
+ZAI_1310_BODY = (
+    '{"type":"error","error":{"type":"rate_limit_error","code":"1310",'
+    '"message":"[1310][Weekly/Monthly Limit Exhausted. '
+    'Your limit will reset at 2026-09-04 18:30:53]"}}'
+)
+ZAI_1313_BODY = (
+    '{"type":"error","error":{"type":"rate_limit_error","code":"1313",'
+    '"message":"[1313][Fair Use Throttle. Please retry your request in a few minutes]"}}'
+)
+ANTHROPIC_USAGE_CAP_BODY = (
+    '{"type":"error","error":{"type":"invalid_request_error",'
+    '"message":"You have reached your specified API usage limits. '
+    'You will regain access on 2026-10-01 at 00:00 UTC."}}'
+)
+
+
 def test_all_configured_links_served_exits_0(tmp_path):
     calls = []
     env = {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}
@@ -521,6 +540,16 @@ def test_reason_fine_reproduces_the_coarse_verdict_exactly():
     cases = [
         (200, "{}", "served", "ok"),
         (429, "slow down", "rate-limit", "transient"),
+        # 429s are judged by their BODY (issue #545): Z.AI answers a period-quota
+        # exhaustion and a fair-usage throttle with the same status and the same
+        # rate_limit_error type — only the numeric code tells them apart, and the
+        # code decides before any marker does. A bodiless 429 stays the throttle
+        # it always read as.
+        (429, ZAI_1310_BODY, "quota", "needs_human"),
+        (429, '{"error":{"code":1310,"message":"[1310][Weekly/Monthly Limit Exhausted]"}}',
+         "quota", "needs_human"),
+        (429, ZAI_1313_BODY, "rate-limit", "transient"),
+        (429, "", "rate-limit", "transient"),
         (408, "timeout", "outage", "transient"),
         (503, "down", "outage", "transient"),
         (520, "cf", "outage", "transient"),
@@ -563,10 +592,10 @@ def test_diagnose_billing_vs_quota_are_distinct_reasons(tmp_path):
     # The whole point: both are needs-human, but a depleted balance ("fund it")
     # and an exhausted quota ("out of tokens — raise the cap / wait") route to
     # different remediation, so they must surface as DIFFERENT reasons.
-    _, klass_b, reason_b = smoke.diagnose_chain(
+    _, klass_b, reason_b, _reset_b = smoke.diagnose_chain(
         load(tmp_path), "review", {"ZAI_KEY": "zk"},
         _post_status(400, '{"error":{"message":"credit balance too low"}}'))
-    _, klass_q, reason_q = smoke.diagnose_chain(
+    _, klass_q, reason_q, _reset_q = smoke.diagnose_chain(
         load(tmp_path), "review", {"ZAI_KEY": "zk"},
         _post_status(400, '{"error":{"message":"monthly quota exceeded"}}'))
     assert klass_b == klass_q == "needs-human"   # same action bucket …
@@ -574,17 +603,17 @@ def test_diagnose_billing_vs_quota_are_distinct_reasons(tmp_path):
 
 
 def test_diagnose_auth_reason_is_distinct_from_billing(tmp_path):
-    _, klass, reason = smoke.diagnose_chain(
+    _, klass, reason, _reset = smoke.diagnose_chain(
         load(tmp_path), "review", {"ZAI_KEY": "zk"},
         _post_status(401, '{"error":{"message":"invalid x-api-key"}}'))
     assert klass == "needs-human" and reason == "auth"
 
 
 def test_diagnose_rate_limit_and_outage_split_the_transient_bucket(tmp_path):
-    _, k_rl, r_rl = smoke.diagnose_chain(
+    _, k_rl, r_rl, _rs_rl = smoke.diagnose_chain(
         load(tmp_path), "review", {"ZAI_KEY": "zk"},
         _post_status(429, '{"error":{"message":"slow down"}}'))
-    _, k_out, r_out = smoke.diagnose_chain(
+    _, k_out, r_out, _rs_out = smoke.diagnose_chain(
         load(tmp_path), "review", {"ZAI_KEY": "zk"}, _post_status(520, "outage"))
     assert k_rl == k_out == "transient"
     assert r_rl == "rate-limit" and r_out == "outage"
@@ -593,13 +622,13 @@ def test_diagnose_rate_limit_and_outage_split_the_transient_bucket(tmp_path):
 def test_diagnose_network_error_reason_is_outage(tmp_path):
     def post(url, headers, payload):
         raise OSError("connection refused")
-    lines, klass, reason = smoke.diagnose_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
+    lines, klass, reason, _reset = smoke.diagnose_chain(load(tmp_path), "review", {"ZAI_KEY": "zk"}, post)
     assert klass == "transient" and reason == "outage"
     assert any("connection refused" in l for l in lines)
 
 
 def test_diagnose_dead_id_reason_is_bad_model_id(tmp_path):
-    _, klass, reason = smoke.diagnose_chain(
+    _, klass, reason, _reset = smoke.diagnose_chain(
         load(tmp_path), "review", {"ZAI_KEY": "zk"},
         _post_status(404, '{"error":{"message":"model not found"}}'))
     assert klass == "dead" and reason == "bad-model-id"
@@ -608,7 +637,7 @@ def test_diagnose_dead_id_reason_is_bad_model_id(tmp_path):
 def test_diagnose_no_secret_reason_is_no_key(tmp_path):
     # Distinct from billing/auth: nothing to fund or rotate — the secret is just
     # not set. An escalation keys off this to say "set the key", not "fund it".
-    lines, klass, reason = smoke.diagnose_chain(load(tmp_path), "review", {}, _post_status(200, "{}"))
+    lines, klass, reason, _reset = smoke.diagnose_chain(load(tmp_path), "review", {}, _post_status(200, "{}"))
     assert klass == "needs-human" and reason == "no-key"
     assert any("[no-key]" in l for l in lines)
 
@@ -621,7 +650,7 @@ def test_diagnose_aggregate_reason_follows_the_winning_class(tmp_path):
         if b"claude-opus-5" in payload:
             return 404, '{"error":{"message":"model not found"}}'
         return 400, '{"error":{"message":"credit balance too low"}}'
-    _, klass, reason = smoke.diagnose_chain(
+    _, klass, reason, _reset = smoke.diagnose_chain(
         load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
     assert klass == "dead" and reason == "bad-model-id"
 
@@ -631,7 +660,7 @@ def test_diagnose_servable_reason_is_served(tmp_path):
         if b"glm-5.2" in payload:
             return 200, "{}"
         return 400, '{"error":{"message":"credit balance too low"}}'
-    _, klass, reason = smoke.diagnose_chain(
+    _, klass, reason, _reset = smoke.diagnose_chain(
         load(tmp_path), "review", {"ZAI_KEY": "zk", "ANTHROPIC_API_KEY": "ak"}, post)
     assert klass == "servable" and reason == "served"
 
@@ -649,7 +678,7 @@ def test_classify_chain_facade_still_returns_the_2_tuple(tmp_path):
 
 
 def test_diagnose_secret_values_never_reach_the_report(tmp_path):
-    lines, _, _ = smoke.diagnose_chain(
+    lines, _, _, _ = smoke.diagnose_chain(
         load(tmp_path), "review",
         {"ZAI_KEY": "sec-zai-value", "ANTHROPIC_API_KEY": "sec-an-value"},
         _post_status(400, "credit balance too low"))
@@ -673,3 +702,129 @@ def test_cli_classify_writes_reason_alongside_class(tmp_path, capsys, monkeypatc
     written = gh.read_text(encoding="utf-8")
     assert "class=needs-human\n" in written and "reason=billing\n" in written
     assert "REASON review: billing" in capsys.readouterr().out
+
+
+# ── issue #545: a 429 is judged by its body, and the reset time it names is
+# carried through — Z.AI's code-1310 period-quota exhaustion is quota /
+# needs-human (so provider-triage escalates with the reset date), its 1313
+# fair-usage throttle and a bodiless 429 stay transient, and Anthropic's
+# usage-cap 400 is quota with its regain-access date. A test per observed
+# shape, each with its negative control.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_zai_1310_period_exhaustion_is_quota_needs_human_with_reset(tmp_path):
+    # AC1 + AC5: the body of run 33679772675 — a 429 typed rate_limit_error
+    # whose code 1310 says the weekly/monthly quota is EXHAUSTED until a named
+    # timestamp (a ~46-hour wall, not a burst throttle). It must read
+    # quota / needs-human, never the pre-fix rate-limit / transient retry, and
+    # the reset time must surface as the machine-readable diagnose output.
+    lines, klass, reason, reset = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"}, _post_status(429, ZAI_1310_BODY))
+    assert klass == "needs-human" and reason == "quota"
+    assert reset == "2026-09-04 18:30:53"
+    assert "RESET review: 2026-09-04 18:30:53" in lines
+    # The smoke gate's own coarse verdict stays inconclusive — a quota wall is
+    # external to the registry, so model-smoke stays green on it BY DESIGN; the
+    # escalation is classify's job (the issue asks for the right class, not a
+    # red smoke).
+    assert smoke._classify(429, ZAI_1310_BODY) == "inconc"
+
+
+def test_zai_1313_fair_use_throttle_stays_transient(tmp_path):
+    # AC2: the other 429 Z.AI sends — the fair-usage throttle the same run hit
+    # hours earlier, measured in minutes. It must stay rate-limit / transient:
+    # a retry clears it and no human should be asked anything. The negative
+    # control for AC1 — same status, same rate_limit_error type, other code.
+    _, klass, reason, reset = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"}, _post_status(429, ZAI_1313_BODY))
+    assert klass == "transient" and reason == "rate-limit"
+    assert reset == ""
+
+
+def test_bodiless_429_stays_rate_limit_transient(tmp_path):
+    # AC3 + negative control: a 429 with no parseable body carries no quota
+    # evidence, so the conservative default — the pre-fix behaviour, which is
+    # CORRECT for the shapes the issue says are transient — must hold, at both
+    # the unit and the aggregate level.
+    for body in ("", "Too Many Requests"):
+        assert smoke._reason_fine(429, body) == "rate-limit", body
+        assert smoke._classify_fine(429, body) == "transient", body
+    _, klass, reason, reset = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"}, _post_status(429, ""))
+    assert klass == "transient" and reason == "rate-limit" and reset == ""
+
+
+def test_anthropic_usage_cap_400_is_quota_needs_human_with_reset(tmp_path):
+    # AC4 + AC5: the owner-observed second shape (PR #548's smoke, job
+    # 100434006607) — an HTTP 400 invalid_request_error naming the account's
+    # monthly usage cap with a regain-access date. quota / needs-human with the
+    # date carried the same way as Z.AI's reset — never `dead`, which is what
+    # the raw 400 used to read as (a "registry defect" nobody could fix).
+    lines, klass, reason, reset = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(400, ANTHROPIC_USAGE_CAP_BODY))
+    assert klass == "needs-human" and reason == "quota"
+    assert reset == "2026-10-01 at 00:00 UTC"
+    assert "RESET review: 2026-10-01 at 00:00 UTC" in lines
+    # …and the smoke verdict the owner saw as FAIL stays what a quota condition
+    # is: inconclusive, not a #298 registry defect.
+    assert smoke._classify(400, ANTHROPIC_USAGE_CAP_BODY) == "inconc"
+
+
+def test_generic_429_and_non_usage_400_do_not_flip_to_quota(tmp_path):
+    # AC6 negative controls: the classifier must still be able to say transient
+    # and dead — a generic worded 429 (rate_limit_error type, no code, no quota
+    # words) stays rate-limit / transient, and a non-usage 400 (an invalid model
+    # id) stays dead — so the new quota mapping cannot swallow the shapes it
+    # must not.
+    _, klass_rl, reason_rl, reset_rl = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(429, '{"error":{"type":"rate_limit_error","message":"slow down"}}'))
+    assert klass_rl == "transient" and reason_rl == "rate-limit" and reset_rl == ""
+    _, klass_dead, reason_dead, _ = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"},
+        _post_status(400, '{"error":{"message":"invalid model id: nope"}}'))
+    assert klass_dead == "dead" and reason_dead == "bad-model-id"
+
+
+def test_quota_body_without_a_date_invents_no_reset(tmp_path):
+    # AC6 negative control for the extraction: a 1310 quota body whose message
+    # names no reset timestamp yields reason quota with reset "" — the
+    # timestamp is read from the provider's own words or not at all, never
+    # guessed, so the escalation cannot promise a date the body never gave.
+    body = ('{"error":{"type":"rate_limit_error","code":"1310",'
+            '"message":"[1310][Weekly/Monthly Limit Exhausted]"}}')
+    _, klass, reason, reset = smoke.diagnose_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"}, _post_status(429, body))
+    assert klass == "needs-human" and reason == "quota" and reset == ""
+
+
+def test_smoke_summary_names_the_reset_on_a_quota_429(tmp_path):
+    # Issue #545 ask 2, the smoke-summary half: an INCONC 429 whose body names
+    # the reset carries it on the line, so the summary a human reads in the
+    # model-smoke log says WHEN the chain comes back without parsing the body.
+    lines, code = smoke.smoke_chain(
+        load(tmp_path), "review", {"ZAI_KEY": "zk"}, _post_status(429, ZAI_1310_BODY))
+    assert code == 0
+    assert any(l.startswith("INCONC") and "resets 2026-09-04 18:30:53" in l for l in lines)
+    assert any(l.startswith("WARN") and "NOT PROVEN" in l for l in lines)
+
+
+def test_cli_classify_writes_reset_to_gh_output(tmp_path, capsys, monkeypatch):
+    # AC5's machine-readable half: `classify --gh-output` appends `reset=<ts>`
+    # next to class/reason when the winning class's quota body named one, and
+    # prints the RESET line — the step-output contract provider-triage's
+    # escalation body reads.
+    p = tmp_path / "registry.conf"
+    p.write_text(textwrap.dedent(REG), encoding="utf-8")
+    gh = tmp_path / "gh_output"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ak")
+    monkeypatch.delenv("ZAI_KEY", raising=False)
+    monkeypatch.setattr(
+        smoke, "_post", lambda url, headers, payload: (429, ZAI_1310_BODY))
+    assert main(["--path", str(p), "classify", "review", "--gh-output", str(gh)]) == 0
+    written = gh.read_text(encoding="utf-8")
+    assert "class=needs-human\n" in written
+    assert "reason=quota\n" in written
+    assert "reset=2026-09-04 18:30:53\n" in written
+    assert "RESET review: 2026-09-04 18:30:53" in capsys.readouterr().out

@@ -39,6 +39,7 @@ without a key.  The report never contains a secret value: only env-var *names*
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Callable, Mapping, Optional
@@ -97,6 +98,69 @@ _FUNDING_MARKERS = _BILLING_MARKERS + _QUOTA_MARKERS
 # a person; a rate limit needs only patience.
 _RATE_LIMIT_MARKERS = ("rate limit", "rate_limit")
 
+# Z.AI answers BOTH of its over-limit conditions with HTTP 429 typed
+# ``rate_limit_error`` (issue #545), and only the numeric ``code`` field tells
+# them apart — the observed bodies:
+#
+#   * ``1310`` — weekly/monthly (period) limit EXHAUSTED: a hard quota wall for
+#     hours-to-days, carrying "Your limit will reset at <timestamp>". A human
+#     decides whether to wait or raise the cap, so it is ``quota`` /
+#     ``needs_human``, never a retryable throttle.
+#   * ``1313`` — fair-usage throttle: minutes, a retry clears it. Deliberately
+#     NOT listed here, so it falls through to the rate-limit reading below.
+#
+# The code is checked BEFORE the marker ladder because the 1310 body carries
+# ``"type":"rate_limit_error"`` — the rate-limit marker would otherwise swallow
+# it, which is exactly the #545 defect (a two-day outage classified transient,
+# so provider-triage retried instead of escalating).
+_ZAI_PERIOD_EXHAUSTED_CODES = ("1310",)
+
+
+def _zai_error_code(body: str) -> str:
+    """The numeric ``error.code`` ZAI nests in an error body, as a string.
+
+    ``""`` when the body is not JSON, has no ``error`` object, or carries no
+    ``code`` — every non-Z.AI shape included, so the call is safe on any body.
+    ``str()`` normalises a JSON number (``1310``) and string (``"1310"``) alike;
+    the observed body spelled it a string, but both readings mean the same wall.
+    """
+    try:
+        obj = json.loads(body)
+    except ValueError:
+        return ""
+    err = obj.get("error") if isinstance(obj, dict) else None
+    if not isinstance(err, dict):
+        return ""
+    return str(err.get("code") or "")
+
+
+# The two wordings a provider uses to say WHEN an exhausted quota comes back —
+# the timestamp a human waiting (rather than raising the cap) acts on, carried
+# into the classify output so the escalation issue can name it (issue #545).
+# Both are anchored on a leading YYYY-MM-DD so nothing short grabs the capture.
+_RESET_PATTERNS = (
+    # Z.AI 1310: "[1310][Weekly/Monthly Limit Exhausted. Your limit will
+    # reset at 2026-09-04 18:30:53]"
+    re.compile(r"limit will reset at (\d{4}-\d{2}-\d{2}[^\]]*)", re.IGNORECASE),
+    # Anthropic spend-cap 400: "You have reached your specified API usage
+    # limits. You will regain access on 2026-10-01 at 00:00 UTC."
+    re.compile(r"regain access on (\d{4}-\d{2}-\d{2}[^.]*)", re.IGNORECASE),
+)
+
+
+def _reset_at(body: str) -> str:
+    """The reset time a quota-exhaustion body names, verbatim (``""`` if none).
+
+    Pure evidence extraction from the provider's own words — a body that names
+    no date yields ``""``, never a guess; a truncated body (the smoke echoes
+    only the first ``_BODY_SNIPPET`` bytes) simply does not match.
+    """
+    for pattern in _RESET_PATTERNS:
+        match = pattern.search(body)
+        if match:
+            return match.group(1).strip()
+    return ""
+
 # The union is what ``_classify`` (the coarse ok/dead/inconc verdict the smoke
 # gate exits on) treats as an account/quota rejection — external to the registry,
 # so inconclusive either way. The funding/rate-limit split above matters only to
@@ -134,16 +198,34 @@ def _reason_fine(status: int, body: str) -> str:
     ``billing`` (fund the account) vs ``quota`` (out of tokens — raise the cap or
     wait) vs ``auth`` (rotate the key) among the human-fixable, and ``rate-limit``
     vs ``outage`` among the retryable. ``bad-model-id`` stays the #298 registry
-    defect. The status/marker ORDER is unchanged from the old ``_classify_fine``,
-    so ``_REASON_TO_FINE[_reason_fine(...)]`` reproduces its verdict exactly.
+    defect. The status/marker order is unchanged from the old ``_classify_fine``
+    for every status except 429 — where the body is now read BEFORE the verdict
+    (issue #545): a 429 typed ``rate_limit_error`` can still be a period-quota
+    exhaustion (Z.AI code 1310), which a person must wait out or raise, so the
+    Z.AI code and the funding markers outrank the "it's a 429, retry" default.
     """
     if status == 200:
         return "served"
-    if _is_transient(status):               # 408/429/5xx: provider-side, retry
-        return "rate-limit" if status == 429 else "outage"
+    low = body.lower()
+    if status == 429:
+        # Not automatically a throttle (issue #545). The Z.AI code first — it is
+        # the one signal that survives the ``rate_limit_error`` type boilerplate
+        # both conditions share — then the funding words, so a worded period
+        # exhaustion on ANY provider ("limit exhausted", "usage limit … regain
+        # access") also reads as the human-fixable quota it is. Only a 429 with
+        # no quota/billing evidence stays the retryable throttle it always was
+        # (Z.AI's 1313 fair-usage throttle lands here, by not being listed).
+        if _zai_error_code(body) in _ZAI_PERIOD_EXHAUSTED_CODES:
+            return "quota"                  # 1310: period limit exhausted, resets at <ts>
+        if any(marker in low for marker in _BILLING_MARKERS):
+            return "billing"                # worded funding rejection at a 429 status
+        if any(marker in low for marker in _QUOTA_MARKERS):
+            return "quota"                  # "weekly limit exhausted" on any provider
+        return "rate-limit"                 # 1313 / generic / bodiless 429: retry
+    if _is_transient(status):               # 408/5xx: provider-side, retry
+        return "outage"
     if status == 401:                       # missing/invalid key: a human rotates
         return "auth"
-    low = body.lower()
     if any(marker in low for marker in _RATE_LIMIT_MARKERS):
         return "rate-limit"                 # worded rate limit at a non-429 status
     # Billing BEFORE quota: a depleted balance ("credit balance exhausted") also
@@ -258,7 +340,12 @@ def smoke_chain(
             proven += 1
             lines.append(f"ok    {where}: served a 1-token request")
         elif verdict == "inconc":
-            lines.append(f"INCONC  {where}: HTTP {status} — {body}")
+            # When the body names when the account comes back (a quota
+            # exhaustion), say so in the summary itself — the raw body already
+            # shows, but a parsed "resets <ts>" is the line a human reads.
+            reset = _reset_at(body)
+            when = f" — resets {reset}" if reset else ""
+            lines.append(f"INCONC  {where}: HTTP {status} — {body}{when}")
         else:  # dead — the id is genuinely unservable (#298)
             dead += 1
             lines.append(f"FAIL  {where}: HTTP {status} — {body}")
@@ -330,12 +417,17 @@ def diagnose_chain(
                           or ``outage`` (timeout / 5xx / network). Retry next run.
 
     The class stays the proven, precedence-ordered action signal every existing
-    caller branches on; the reason is the new sub-signal that lets a message say
+    caller branches on; the reason is the sub-signal that lets a message say
     *billing* vs *out-of-tokens* vs *bad key* instead of the undifferentiated
     "needs-human". The aggregate reason is the cause of the FIRST link (report
     order) that produced the aggregate class — deterministic, and the reason a
-    reader sees first in the per-link lines. Returns
-    ``(report_lines, aggregate_class, aggregate_reason)``; the class IS the signal,
+    reader sees first in the per-link lines. Since issue #545 a quota body that
+    names its reset time also surfaces it: per link on the line, and — when the
+    winning class's links named one — as the fourth return element and a
+    ``RESET`` line, so the escalation can say *when* the chain comes back rather
+    than just "raise the cap or wait". Returns
+    ``(report_lines, aggregate_class, aggregate_reason, reset_at)`` (``reset_at``
+    ``""`` when no link of the winning class named one); the class IS the signal,
     there is no exit code. A chain with no configured secret reduces to
     ``needs-human`` / ``no-key`` — a human must set the key.
     """
@@ -344,11 +436,14 @@ def diagnose_chain(
     lines: list[str] = []
     seen: set[str] = set()
     first_reason_by_class: dict[str, str] = {}   # class -> reason of its first link
+    first_reset_by_class: dict[str, str] = {}    # class -> reset its first link named
     attempted = 0
 
-    def record(cls: str, reason: str) -> None:
+    def record(cls: str, reason: str, reset: str = "") -> None:
         seen.add(cls)
         first_reason_by_class.setdefault(cls, reason)
+        if reset:
+            first_reset_by_class.setdefault(cls, reset)
 
     for link in reg.resolve(chain_id):
         where = f"link {link.position} {link.model} ({link.provider})"
@@ -364,12 +459,14 @@ def diagnose_chain(
             lines.append(f"transient   {where}: [outage] network error — {exc}")
             continue
         reason = _reason_fine(status, body)
+        reset = _reset_at(body)
         cls = _FINE_TO_CLASS[_REASON_TO_FINE[reason]]
-        record(cls, reason)
+        record(cls, reason, reset)
+        when = f" — resets {reset}" if reset else ""
         if cls == "servable":
             lines.append(f"servable    {where}: [{reason}] served a 1-token request")
         else:
-            lines.append(f"{cls:<11} {where}: [{reason}] HTTP {status} — {body}")
+            lines.append(f"{cls:<11} {where}: [{reason}] HTTP {status} — {body}{when}")
     if attempted == 0:
         # No secret set for any link: a human must configure the key. Its own
         # ``no-key`` reason, so an escalation says "set the secret" rather than
@@ -381,9 +478,12 @@ def diagnose_chain(
         )
     aggregate = next(c for c in _CLASS_PRECEDENCE if c in seen)
     reason = first_reason_by_class[aggregate]
+    reset = first_reset_by_class.get(aggregate, "")
     lines.append(f"REASON {chain_id}: {reason}")
+    if reset:
+        lines.append(f"RESET {chain_id}: {reset}")
     lines.append(f"CLASS {chain_id}: {aggregate}")
-    return lines, aggregate, reason
+    return lines, aggregate, reason, reset
 
 
 def classify_chain(
@@ -395,7 +495,8 @@ def classify_chain(
     """Back-compat 2-tuple facade over ``diagnose_chain`` (aggregate class only).
 
     Callers that only branch on the action bucket keep this shape; callers wanting
-    the finer cause for a human-facing message use ``diagnose_chain`` directly.
+    the finer cause — or the reset time a quota body named — for a human-facing
+    message use ``diagnose_chain`` directly.
     """
-    lines, aggregate, _reason = diagnose_chain(reg, chain_id, env, post)
+    lines, aggregate, _reason, _reset = diagnose_chain(reg, chain_id, env, post)
     return lines, aggregate
