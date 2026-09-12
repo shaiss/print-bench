@@ -1,0 +1,6 @@
+# Printable parts gated by CI. The default render equals `hamster` (flat print
+# pose). The hinge/seam coupon is auto-discovered from
+# sweetheart-hamster-coupon.scad; the nest-seat coupon is auto-discovered from
+# sweetheart-hamster-nest-coupon.scad (`<name>-*-coupon.scad` — gated as the
+# wrapper file itself, not via a ci.parts -D path).
+hamster
