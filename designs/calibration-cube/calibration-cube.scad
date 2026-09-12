@@ -87,9 +87,10 @@ module size_sweep(sizes = sweep_sizes, gap = sweep_gap) {
             calibration_cube(sizes[i]);
 }
 
-if (part == "cube5") calibration_cube(5);
+if (part == "cube") calibration_cube();
+else if (part == "cube5") calibration_cube(5);
 else if (part == "cube10") calibration_cube(10);
 else if (part == "cube20") calibration_cube(20);
 else if (part == "cube30") calibration_cube(30);
 else if (part == "sweep") size_sweep();
-else calibration_cube();
+else assert(false, str("calibration-cube: unknown part '", part, "'"));
