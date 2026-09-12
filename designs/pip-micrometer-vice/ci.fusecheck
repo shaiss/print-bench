@@ -1,0 +1,16 @@
+# Deterministic fuse detector (tools/printcheck fusecheck), run on the SLICED
+# STL. No flexure zone: the three bodies separate by design (the screw is
+# captive, the jaw is strung on it), so the plain body count IS the proof —
+# a weld anywhere on the slide or thread path drops the count below the
+# assert and reads as a STRONG WARN.
+#
+# The assembly: static body + screw-with-knob + moving jaw = 3 bodies.
+assert pip-micrometer-vice.stl 3
+# The coupon: plate (with the thread stubs and channel stubs merged into it)
+# + 3 free nuts + 3 in-place sliders = 7 bodies. A slider or nut welded to
+# its station reads low.
+assert pip-micrometer-vice-coupon.stl 7
+# Known-fused control: every running clearance flipped past touching — the
+# saddle, rail, bore and thread fits all overlap — must render as ONE body,
+# proving the detector can still see a weld.
+control fused 1
