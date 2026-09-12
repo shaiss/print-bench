@@ -198,13 +198,14 @@ module hinge_web() {
         cube([2*(g + web_ov), web_len, web_t]);
 }
 
-// Nest-on coupon (B2): the CLOSED ring pocket at production nest_w /
-// nest_depth — same heart2d(nest_w) profile nest_cavity() cuts, depth
-// nest_depth*2 (both halves when shut) — carved into a thick pad so walls
-// stay printcheck-healthy. Absolute nest, not a scaled-down fake.
-// Discarded: S=0.85 + nest_on on the body coupon (walls thin to ~0.01 mm);
-// clipped production half (correct walls, but full-hamster CGAL + two nest
-// islands far apart in flat pose). No detent (B1 out of scope).
+// Nest-seat coupon (B2): open heart pocket at production nest_w / nest_depth
+// (depth nest_depth*2 = closed-cavity depth) carved into a thick pad so walls
+// stay printcheck-healthy. Absolute nest, not a scaled-down fake. Proves
+// open-pocket band seat only — not closed-box carry, nest-crown stone
+// headroom, or the reveal fold (see NOTES.md). Discarded: S=0.85 + nest_on on
+// the body coupon (walls thin to ~0.01 mm); clipped production half (correct
+// walls, but full-hamster CGAL + two nest islands far apart in flat pose).
+// No detent (B1 out of scope).
 module nest_coupon() {
     floor_t = 2.4;                 // bed floor under the pocket (≥ 1.2 mm)
     wall = 2.4;                    // rim around the heart (≥ 1.2 mm)

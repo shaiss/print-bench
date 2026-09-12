@@ -27,7 +27,7 @@ folds shut.
   hinge flex and seam fit (`nest_on` off on purpose).
 - `sweetheart-hamster-nest-coupon` — thick heart pad with the **production**
   closed nest (`nest_w` / `nest_depth` as shipped); drop a ring in to prove
-  seat before the full print.
+  the ring seats before the full print.
 
 ## Print settings
 

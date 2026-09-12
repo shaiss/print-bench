@@ -195,6 +195,26 @@ bundle_one() {    # bundle_one <name> <version>
   if [[ -f "${ddir}/${name}-coupon.scad" ]]; then
     labels+=("coupon"); dvals+=("coupon"); files+=("${name}-coupon.stl")
   fi
+  # Secondary print-this-first wrappers (<name>-*-coupon.scad), same discovery
+  # gate.sh uses — keep release contents aligned with what CI gated.
+  local sec
+  shopt -s nullglob
+  for sec in "${ddir}/${name}"-*-coupon.scad; do
+    shopt -u nullglob
+    local sec_base
+    sec_base="$(basename "$sec" .scad)"
+    # Skip if ci.parts already listed the same stem (e.g. nest-coupon).
+    local dup=0 lab
+    for lab in "${labels[@]+"${labels[@]}"}"; do
+      if [[ "${name}-${lab}" == "$sec_base" || "$lab" == "$sec_base" ]]; then
+        dup=1; break
+      fi
+    done
+    if [[ "$dup" -eq 0 ]]; then
+      labels+=("$sec_base"); dvals+=("coupon-file:$sec"); files+=("${sec_base}.stl")
+    fi
+  done
+  shopt -u nullglob
 
   local partsfile
   partsfile="$(mktemp)"
@@ -207,6 +227,10 @@ bundle_one() {    # bundle_one <name> <version>
       # identically to gate.sh, so the script is self-contained.
       case "$dval" in
         coupon)  render_coupon "$name" "$buildstl" ;;
+        coupon-file:*)
+          echo "== ${name} (coupon $(basename "${dval#coupon-file:}")): render =="
+          xvfb-run -a "$OPENSCAD_BIN" ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
+            -o "$buildstl" "${dval#coupon-file:}" ;;
         default) render_part "$name" "" "$buildstl" ;;
         part:*)  render_part "$name" "${dval#part:}" "$buildstl" ;;
       esac

@@ -119,19 +119,38 @@ carry that failure mode.
 
 ### 2. Nest seat — `sweetheart-hamster-nest-coupon.scad` (B2)
 
-A thick heart **pad** carved with the **production** closed pocket —
-`heart2d(nest_w)` at the shipped `nest_w = 22` / `nest_depth = 6`, depth
-`nest_depth*2` (both halves when shut) — so walls stay ≥ 2.4 mm. Drop a real
-ring into the pocket: if it seats without rocking on the rim, the full
-hamster's nest will too. Log the result as a FIELD-TEST entry (part:
-`nest-coupon`) — charter v1 DoD accepts nest-on coupon evidence in place of a
-full-print field test for Drik's "nestles a ring" claim.
+A thick heart **pad** carved with the **production** nest profile —
+`heart2d(nest_w)` at the shipped `nest_w = 22` / `nest_depth = 6`, pocket
+depth `nest_depth*2` (the closed cavity's total depth) — so walls stay ≥ 2.4 mm.
+**Keep the filename** (`…-nest-coupon.scad`); do not rename it to steal the
+canonical `…-coupon.scad` auto-discover slot from the hinge wrapper.
+`gate.sh` discovers `<name>-*-coupon.scad` and gates this wrapper file
+directly (printcheck + test-slice).
+
+**What this coupon proves (and what it does not):**
+
+| Proves | Does **not** prove |
+|---|---|
+| Open-pocket **band seat** at production `nest_w` / nest depth — drop a ring band in; it should sit without rocking on the rim | Closed-box **carry** (halves folded, ring retained in transit) |
+| | Nest-crown **stone headroom** (the arch overhang in the real body) |
+| | The **reveal fold** (hinge flex + parting on the full massing) |
+
+Those unproven claims still need a full-hamster FIELD-TEST (or a later coupon
+aimed at them). Charter v1 DoD accepts nest-on coupon evidence only for the
+band-seat slice of Drik's "nestles a ring" claim — not as a stand-in for carry,
+crown clearance, or fold.
+
+**FIELD-TEST logging:** when you print this coupon, record what you actually
+tested — e.g. band outer Ø / US size, `nest-coupon` open pocket, seated without
+rock / rocked on rim / too tight — not a claim about the closed gift.
 
 **Hypotheses discarded for B2:** (a) re-enable `nest_on` on the S=0.85 hinge
 coupon — wall-thinning, measured above; (b) AABB-clip a production half around
 the nest — correct walls, but still pays full-hamster CGAL and the two nest
 islands sit ~90 mm apart in the flat pose; (c) retune main `nest_w` /
-`nest_depth` — out of scope, those stay as shipped.
+`nest_depth` — out of scope, those stay as shipped; (d) rename this wrapper to
+`${name}-coupon.scad` — would steal the hinge coupon's auto-discover slot
+(Jane: keep as-named; gate secondary wrappers explicitly).
 
 B1 friction detent is not in this coupon (carry-flat gift assumption stands).
 
@@ -151,7 +170,9 @@ B1 friction detent is not in this coupon (carry-flat gift assumption stands).
 ## Field test log
 
 <!-- Append one FIELD-TEST entry per real print (templates/FIELD-TEST.md). -->
-<!-- Nest-seat path (B2): print nest-coupon, seat a ring, log here — e.g.
-     Part(s): nest-coupon; Result: ring seats / rocks / too tight; that entry
-     satisfies v1 DoD's nest-on coupon alternative to a full-print field test. -->
+<!-- Nest-seat path (B2): print sweetheart-hamster-nest-coupon, drop a band
+     into the open pocket, log what you tested — e.g.
+     Part(s): nest-coupon (open pocket); Band: US-7 / Ø mm; Result: seats,
+     no rock | rocks on rim | too tight. That entry covers band-seat only;
+     do not claim closed-box carry, stone headroom, or reveal fold from it. -->
 _None yet._

@@ -60,7 +60,7 @@ reveal), contact-sheet (as-printed). Frozen; add rows, never repurpose.
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
 | B1 | Closure / friction detent + ring retention | The hot path is cycle #2 (the handover); a box that flops open pre-spoils the surprise, and a loose ring rattles | v0.3 geometry |
-| B2 | Nest-on coupon variant | **Landed** — gated `nest-coupon` pad at production `nest_w`/`nest_depth` (hinge coupon stays nest-off) | new gated part |
+| B2 | Nest-on coupon variant | **Landed** — `sweetheart-hamster-nest-coupon.scad` gated as a secondary `<name>-*-coupon.scad` wrapper (absolute production nest; hinge coupon stays nest-off) | new gated wrapper |
 | B3 | `fold=85` closed-pose hero + seam close-up (new cameras) | Shows the hinge tab the closed gift actually carries; the bed-level parting-gap close-up (a slice of each island in frame) is the visual anchor every flare-vs-gap round has lacked — the 0.5 mm seam is sub-pixel at whole-part scale | two new `cameras.conf` lines, one camera pass |
 | B4 | Rattle / concealment revisit | A snug band (B1's `nest_w` guidance) barely rattles; confirm after the first field test | page + field test |
 | B5 | Page tips: cold-PLA clause, two-color pause-and-swap belly heart, won't-part ladder consolidation | Cheap honesty + a nice gift trick; one canonical ladder telling in **First layer** with the `part_gap` cell and the Assembly paragraph pointing there — five homes is five chances to re-drift; ride the next page pass | page only |
@@ -80,3 +80,4 @@ reveal), contact-sheet (as-printed). Frozen; add rows, never repurpose.
 | 2026-08-23 | `pip_hinge` stays deferred | ~5 folds ever — a many-cycle hinge solves a problem this object doesn't have |
 | 2026-08-29 | Round 4 (post-merge, PR #411): the NOTES supports straggler and the README tack-break flex direction ruled act-now as one copy-only follow-up commit on main (round 3's clause had merged unlanded); seam close-up camera routed to B3's camera pass, five-home ladder consolidation routed to B5 | The round-4 PM triage's ruling; the copy edits landed as #462 |
 | 2026-09-12 | B2: ship gated `nest-coupon` (absolute production nest pad); keep hinge coupon `nest_on=false`; do not retune main `nest_w`/`nest_depth` | Wall-thinning at S=0.85 + nest_on measured; absolute pad keeps walls ≥2.4 mm; B1 detent still out of scope |
+| 2026-09-12 | B2 follow-up: gate discovers `<name>-*-coupon.scad` so the nest wrapper is gated as-named (does not steal `<name>-coupon.scad`); NOTES honesty — coupon = open-pocket band seat only | Jane/Rosa/Drik act-now on #635 |
