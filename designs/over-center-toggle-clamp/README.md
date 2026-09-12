@@ -18,7 +18,10 @@ glue-up overnight; **above ~6 mm the lever will not stay closed**, and below
 ~0.8 mm (the dead-center gap) the jaws cannot touch the work at all. Other
 stock is a parameter change, not a redesign: set `dead_center_gap` ≈ your
 thickness − 0.5 mm and reprint — the `[over-center]` echo lines print the
-locked band for whatever numbers you set.
+locked band for whatever numbers you set. In practice most people tune for
+the one or two thicknesses they really clamp and leave it there — and
+because a retuned clamp is visually identical to a default one, mark the
+paddle with paint pen the day you retune.
 
 **The feel is the tell:** a hard seat into the stop means the locked band
 (vibration-proof — file away; by geometry, pending the field test); a
@@ -32,6 +35,8 @@ so a fat-but-nominal 1.6 mm board lands arch-held, not locked. "Sized for
 ![The clamp at its printed open pose](previews/iso-open.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
+
+![Looking up under the lever: the band, its film shelves, and daylight between every moving part and the plate](previews/under-lever.png)
 
 ## What you get
 
@@ -127,18 +132,21 @@ not a tweak — there is no screw to tighten, by design.
 **Measuring the forces:** the coupon is the instrument. Bolt its posts to
 anything rigid with the pull tab hanging down, add weight to the tab hole
 until the beam snaps through — that weight is the arch's snap force
-(~1.07 kg predicted). Switch force at the handle ≈ that weight × 1.16;
+(~1.07 kg predicted). No lab masses needed —
+a 1-litre bottle of water in a light bag is ~1.0 kg, and the page's ±35 %
+window makes bottle + mug more than enough granularity. Switch force at the
+handle ≈ that weight × 1.16;
 holding force in the locked band is set by the linkage lock and the jaw
 structure, not the flexure (~30 N design budget). If the snap weight is
 more than ~35 % off prediction, tune `E_mod` to your roll of PETG and let
 the asserts re-derive the rest.
 
-![Coupon — the force-measuring artifact](previews/coupon.png)
+![Coupon — the force-measuring artifact: the tab is the arm at the apex; the hole is through its tip.](previews/coupon.png)
 
-![Plan view: jaws, rails, mounts](previews/top-open.png)
+![Coupon, wide — the whole span in one frame: both posts, the arch, and the tab standing at the apex with the hole through its tip](previews/coupon-wide.png)
+
+![Plan view: jaws, rails, mounts per the spec above — too fine to read here](previews/top-open.png)
 
 ![Side elevation: the Z stack and the arch](previews/mechanism.png)
 
 ![Cam flank and handle at the printed pose](previews/cam-closeup.png)
-
-![Looking up under the lever: the band, its film shelves, and daylight between every moving part and the plate](previews/under-lever.png)
