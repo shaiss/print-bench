@@ -154,3 +154,33 @@ one strip:
   with a user PAT, so ci.yml fires and regen renders + commits the shot on
   the PR branch. Local cameras.conf previews (contact-sheet, tilted-pose,
   collar-closeup) are rendered and committed here.
+- `/pm` checkpoint against the brief: scope held — the diff is exactly
+  head / base / coupon + their manifests, previews and product page; every
+  out-of-scope item from the contract is absent (no two-joint arm, no metal
+  clamp screw, no second base, no payload-plate fallback); the named fits
+  are realized as parameters AND measured off the exports (see above); the
+  payload figure stays honest (design target, field-test number). The one
+  recorded style deviation remains D4 (¼″-20 + M4 vs the pack's M3
+  vocabulary).
+- **D8 — the style-gate conflict that stopped the run (unresolved, needs a
+  maintainer call).** `stylelift check` fails `corner-radius` on the head:
+  measured dominant 10.0089 mm vs the family's 4 ±35. Every actual edge
+  treatment measures in-family (chamfer 0.6, wing-region 5.23, implied
+  $fn 96, softness, grammar — all pass). The 10.0 is the Ø20 ball — the
+  brief's own Must-fit dimension. Probes isolate it: a bare Ø20 sphere
+  classifies as *form* (excluded from the token, correctly); sphere +
+  buried d8 shank still form; **sphere + shank + BOSL2 ¼″-20 screw flips
+  to rounding, dominant 10.016**. Mechanism: `measure.py` closes a region
+  as form only while its fold-turn stays within [350°, 400°]
+  (`closed_turn_deg`..400.0); the thread's usable folds bridge into the
+  sphere's region, push the sum past the cap, and the sphere is dumped
+  into the corner-radius token. No legitimate in-design fix exists: the
+  ball and stud are brief-mandated, and the surviving "fixes" are gate
+  games (break the thread's fold continuity to steer the classifier, or
+  dilute the ball's 35 % share below the rule's 0.12 `when` threshold with
+  kilometers of decorative 4 mm rounds). The real fix is in
+  `tools/stylelift` (form classification) or the pack's `style.json`
+  (the rule) — both outside this contract's Touches, and a design run
+  does not edit its own detector. Run stopped before pushing a PR with a
+  red required check; branch `claude/issue-593-design-run` carries the
+  design (all other gates green, 3 gate runs in telemetry, fail 1 → 0).
