@@ -91,11 +91,14 @@ stated defaults:
   belly heart stands `heart_proud = 4 mm` off the skin so it reads in front of
   the cheeks; the same heart, in the nest, is the ring pocket.
 
-## Print this first (coupon)
+## Print this first (coupons)
 
-`sweetheart-hamster-coupon.scad` is a smaller copy (same modules, `S = 0.85`,
-ring nest off) that prints fast so you can tune the two fits before the full
-print:
+Two coupons, for the two fits the full print cannot cheaply prove:
+
+### 1. Hinge / seam — `sweetheart-hamster-coupon.scad`
+
+A smaller copy (same modules, `S = 0.85`, **ring nest off**) that prints fast
+so you can tune the living hinge and parting gap before the full print:
 
 - **Living-hinge web** (`web_t`, default 0.7 mm): flex it a few times. **PETG/PP
   fold for many cycles; PLA cracks.** If it tears, raise `web_t` or switch
@@ -108,6 +111,29 @@ print:
   0.025 mm, under the printer's noise floor), coupon first. The `ci.fitchecks`
   prove the modelled gap is real (the halves clear)
   and that the check can fail (a negative gap interferes).
+
+`nest_on = false` on this coupon is deliberate: an absolute-size nest
+(`nest_w` / `nest_depth`) carved into the downscaled body thins walls to
+~0.01 mm (printcheck 76/100, 6 % under 0.8 mm). The hinge tuner must not
+carry that failure mode.
+
+### 2. Nest seat — `sweetheart-hamster-nest-coupon.scad` (B2)
+
+A thick heart **pad** carved with the **production** closed pocket —
+`heart2d(nest_w)` at the shipped `nest_w = 22` / `nest_depth = 6`, depth
+`nest_depth*2` (both halves when shut) — so walls stay ≥ 2.4 mm. Drop a real
+ring into the pocket: if it seats without rocking on the rim, the full
+hamster's nest will too. Log the result as a FIELD-TEST entry (part:
+`nest-coupon`) — charter v1 DoD accepts nest-on coupon evidence in place of a
+full-print field test for Drik's "nestles a ring" claim.
+
+**Hypotheses discarded for B2:** (a) re-enable `nest_on` on the S=0.85 hinge
+coupon — wall-thinning, measured above; (b) AABB-clip a production half around
+the nest — correct walls, but still pays full-hamster CGAL and the two nest
+islands sit ~90 mm apart in the flat pose; (c) retune main `nest_w` /
+`nest_depth` — out of scope, those stay as shipped.
+
+B1 friction detent is not in this coupon (carry-flat gift assumption stands).
 
 ## Known caveats
 
@@ -125,4 +151,7 @@ print:
 ## Field test log
 
 <!-- Append one FIELD-TEST entry per real print (templates/FIELD-TEST.md). -->
+<!-- Nest-seat path (B2): print nest-coupon, seat a ring, log here — e.g.
+     Part(s): nest-coupon; Result: ring seats / rocks / too tight; that entry
+     satisfies v1 DoD's nest-on coupon alternative to a full-print field test. -->
 _None yet._

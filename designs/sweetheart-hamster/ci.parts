@@ -1,0 +1,6 @@
+# Printable parts gated by CI. The default render equals `hamster` (flat print
+# pose); naming it keeps the nest-on coupon a first-class gated deliverable
+# beside it. The hinge/seam coupon is auto-discovered from
+# sweetheart-hamster-coupon.scad and needs no line here.
+hamster
+nest-coupon
