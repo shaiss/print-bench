@@ -14,12 +14,17 @@ import shapely
 import trimesh
 
 from make_probe_models import (chamfered_prism, chamfered_slab, drilled_plate,
-                               rounded_prism, rounded_slab, sharp_prism,
-                               shelled_tube, tapered_boss_plate)
+                               pierced_rounded_box, rounded_prism, rounded_slab,
+                               sharp_prism, shelled_tube, smooth_ball,
+                               stencil_plate, tapered_boss_plate)
 from stylelift import measure
 from stylelift.cli import main
-from stylelift.emit import lift, render_tokens, sync
-from stylelift.spec import Status, StyleSpec, conform, snap_fn, verdict
+from stylelift.emit import lift, render_style_md, render_tokens, sync
+from stylelift.measure import Config
+from stylelift.report import measurement_text
+from stylelift.spec import (BRIDGE_MIN_WIDTHS, GLYPH_MIN_FRACTION,
+                            LINE_WIDTH_MM, Status, StyleSpec, conform, derive,
+                            snap_fn, verdict)
 
 
 def save(tmp_path, mesh, name):
@@ -604,3 +609,235 @@ def test_unsupported_share_is_addressable_by_a_rule(tmp_path):
                      "b.stl"))
     assert isinstance(dig(r, "orientation.unsupported_share"), float)
     assert dig(r, "orientation.dominant_slopes.0.angle_deg") is None
+
+
+# --------------------------------------------------------------------------
+# The faceted, cut-through look: dihedral sharpness, openness, legibility
+# --------------------------------------------------------------------------
+
+def test_the_smooth_solid_fixture_earns_no_facet_and_no_void(tmp_path):
+    """Negative control for both new metrics at once.
+
+    A sphere has no decided edge and no cut-through: every fold it has is one
+    segment of its own tessellation, and its coarsest folds still turn 11.25
+    degrees. A sharpness metric that credits those folds is reading angles
+    rather than design; a void metric that finds openness here is reading
+    noise.
+    """
+    r = measure(save(tmp_path, smooth_ball(), "ball.stl"))
+    facet, open_ = r["edges"]["facetedness"], r["openness"]
+    assert facet["sharpness"] == pytest.approx(0.0, abs=1e-6)
+    assert facet["fn_curve"] == pytest.approx(32, abs=2)
+    assert all(not b["facet"] for b in facet["histogram"])
+    assert open_["measured"] is True
+    assert open_["void_fraction"] == pytest.approx(0.0, abs=1e-6)
+    assert open_["views_with_void"] == 0
+    assert open_["max_void_span_mm"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_the_stencil_plate_is_all_facet_and_open(tmp_path):
+    """Positive control: the faceted, cut-through look, with every number
+    arithmetic on the builder's arguments."""
+    r = measure(save(tmp_path, stencil_plate(), "stencil.stl"))
+    facet, open_ = r["edges"]["facetedness"], r["openness"]
+    # Nothing curved was drawn, so nothing is explained as tessellation: the
+    # 45-degree outline chamfers and the 90-degree slot corners are all design.
+    assert facet["fn_curve"] is None
+    assert facet["tessellation_turn_deg"] == pytest.approx(
+        1.1 * 360.0 / 48.0, abs=0.1)
+    assert facet["sharpness"] == pytest.approx(1.0, abs=0.05)
+    facet_share = sum(b["share"] for b in facet["histogram"] if b["facet"])
+    assert facet_share > 0.9
+    assert open_["void_fraction"] > 0.05
+    assert open_["views_with_void"] > 0
+    assert open_["min_bridge_mm"] == pytest.approx(4.0, abs=0.05)
+
+
+def test_sharpness_normalizes_against_the_meshs_own_fn(tmp_path):
+    """The coarse-$fn negative control: the same 45-degree folds, opposite
+    verdicts.
+
+    A rounded box whose corners are drawn at $fn=8 turns 45-degree curve
+    folds — exactly the turn the stencil plate's outline makes. Here they are
+    tessellation, because the mesh's finest curve explains every one of them,
+    and the facet length is the top and bottom rims alone. Pierce the same
+    box with a $fn=64 bore and the finest curve is finer than the fold, so
+    those very folds become design facets. A fixed shallow-angle cutoff
+    cannot produce this flip; normalizing against declared $fn can.
+    """
+    coarse = measure(save(tmp_path, pierced_rounded_box(bore_d=0.0),
+                          "coarse.stl"))["edges"]["facetedness"]
+    assert coarse["fn_curve"] == pytest.approx(8.0, abs=0.5)
+    assert coarse["tessellation_turn_deg"] == pytest.approx(1.1 * 45.0, abs=1.0)
+    # rims only: 2 x the rounded rectangle's perimeter, 2*(w-2r) + 2*(d-2r)
+    # + 2*pi*r, is the arithmetic the builder's arguments predict
+    perimeter = 2 * (40.0 - 6.0) + 2 * (30.0 - 6.0) + 2 * math.pi * 3.0
+    assert coarse["facet_length_mm"] == pytest.approx(2 * perimeter, rel=0.01)
+    assert next(b for b in coarse["histogram"]
+                if b["lo_deg"] == 35)["facet"] is False
+
+    pierced = measure(save(tmp_path, pierced_rounded_box(),
+                           "pierced.stl"))["edges"]["facetedness"]
+    assert pierced["fn_curve"] == pytest.approx(64.0, abs=2.0)
+    assert next(b for b in pierced["histogram"]
+                if b["lo_deg"] == 35)["facet"] is True
+    assert pierced["facet_length_mm"] > coarse["facet_length_mm"]
+
+
+def test_void_fraction_is_pose_stable_and_the_estimate_knows_it(tmp_path):
+    """Rotating the part permutes the view directions and changes nothing.
+
+    The tolerance is the Fibonacci lattice's sampling error, not pose
+    dependence — and the second half proves that reading: growing the
+    direction count shrinks the spread, which a pose-dependent measurement
+    would not.
+    """
+    paths = []
+    for k, rot in enumerate([(30, 40, 50), (77, 13, 201), (111, 227, 64),
+                             (255, 255, 0), (7, 333, 17)]):
+        mesh = stencil_plate()
+        axis = np.array(rot, float)
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(
+            math.radians(float(np.linalg.norm(axis))),
+            axis / np.linalg.norm(axis)))
+        paths.append(save(tmp_path, mesh, f"rot{k}.stl"))
+    vals = [measure(p)["openness"]["void_fraction"] for p in paths]
+    assert max(vals) - min(vals) <= 0.03
+
+    fine = [measure(p, Config(void_dirs=192))["openness"]["void_fraction"]
+            for p in paths]
+    assert max(fine) - min(fine) <= 0.01
+    assert max(fine) - min(fine) < max(vals) - min(vals)
+
+
+def test_glyphs_too_small_to_read_measure_below_the_legibility_bound(tmp_path):
+    """The glyph half of the legibility rule, as a measurement.
+
+    A 2 mm slot on a 60 mm part is a mark nobody reads; its largest open
+    channel stays under 15% of the part even though a ray threads the slot's
+    depth. (The span is the longest chord of a void region, so a deep slot
+    measures its depth — the rule bounds read scale, and a pack wanting the
+    aperture too has `min_bridge_mm` beside it.)
+    """
+    r = measure(save(tmp_path, stencil_plate(slot_w=2.0, slot_h=2.0),
+                     "tiny.stl"))
+    assert r["openness"]["max_void_span_fraction"] < GLYPH_MIN_FRACTION
+
+
+def test_a_web_too_thin_to_print_measures_as_one(tmp_path):
+    """The bridge half of the legibility rule, as a measurement: the same
+    plate with the web dropped below two extrusion lines."""
+    r = measure(save(tmp_path, stencil_plate(web=0.5), "thin.stl"))
+    assert r["openness"]["min_bridge_mm"] == pytest.approx(0.5, abs=0.02)
+
+
+def test_openness_declares_itself_unmeasured_on_a_leaky_mesh(tmp_path):
+    """A non-watertight mesh has no inside, so line crossing counts mean
+    nothing; the metric says so instead of reporting a number."""
+    box = trimesh.creation.box(extents=[10, 10, 10])
+    box.update_faces(np.arange(len(box.faces)) != 0)
+    r = measure(save(tmp_path, box, "leaky.stl"))
+    assert r["openness"]["measured"] is False
+    assert r["openness"]["reason"]
+    assert "void_fraction" not in r["openness"]
+    # ...and a rule over the metric skips rather than fails the part
+    spec = StyleSpec(name="s", rules=[{
+        "id": "openness", "metric": "openness.void_fraction",
+        "op": "min", "value": 0.05, "severity": "required"}])
+    result = conform(r, spec)[0]
+    assert result.status is Status.SKIP
+
+
+def test_a_cut_through_reference_proposes_the_legibility_pair(tmp_path):
+    """A style lifted from a cut-through reference carries the legibility rule
+    as required rules, with the constants the issue states."""
+    r = measure(save(tmp_path, stencil_plate(), "ref.stl"))
+    tokens, rules = derive(r, "stencil-test")
+    by_id = {rule["id"]: rule for rule in rules}
+
+    glyph = by_id["legible-glyph"]
+    assert glyph["metric"] == "openness.max_void_span_fraction"
+    assert glyph["value"] == GLYPH_MIN_FRACTION
+    assert glyph["severity"] == "required"
+    assert glyph["when"] == {"metric": "openness.max_void_span_mm",
+                             "op": "min", "value": 0.01}
+    bridge = by_id["bridge-width"]
+    assert bridge["metric"] == "openness.min_bridge_mm"
+    assert bridge["value"] == pytest.approx(BRIDGE_MIN_WIDTHS * LINE_WIDTH_MM)
+    assert bridge["severity"] == "required"
+    assert by_id["facet-sharpness"]["metric"] == "edges.facetedness.sharpness"
+    assert tokens["void_fraction"] == pytest.approx(
+        r["openness"]["void_fraction"], abs=5e-4)
+
+
+def test_a_solid_reference_proposes_no_legibility_rules(tmp_path):
+    """A smooth solid family gets the mirrored proposals — a facet ceiling and
+    a closed form — and never rules about glyphs it does not have."""
+    r = measure(save(tmp_path, smooth_ball(), "ball.stl"))
+    tokens, rules = derive(r, "smooth-test")
+    ids = {rule["id"] for rule in rules}
+    assert "legible-glyph" not in ids
+    assert "bridge-width" not in ids
+    assert "closed-form" in ids
+    assert "no-design-facets" in ids
+    # and the mirrored family holds its own reference to it — though only
+    # advisory and when-gated rules apply, so the verdict is honestly "there
+    # is nothing required here to compare" rather than a pass
+    results = conform(r, StyleSpec(name="smooth-test", tokens=tokens,
+                                   rules=rules))
+    assert verdict(results).startswith("NOT COMPARABLE")
+
+
+def test_check_separates_the_fixtures_by_the_new_rules(tmp_path, capsys):
+    """AC3 end to end: one pack lifted from the stencil reference passes the
+    conforming fixture and fails each breaker for its own reason."""
+    ref = save(tmp_path, stencil_plate(), "ref.stl")
+    pack = tmp_path / "pack"
+    lift([ref], "stencil-test", pack)
+
+    expect = {"ok.stl": (0, "IN STYLE"),
+              "tiny.stl": (1, "OFF-STYLE"),
+              "thin.stl": (1, "OFF-STYLE"),
+              "ball.stl": (1, "NOT COMPARABLE")}
+    meshes = {"ok.stl": stencil_plate(),
+              "tiny.stl": stencil_plate(slot_w=2.0, slot_h=2.0),
+              "thin.stl": stencil_plate(web=0.5),
+              "ball.stl": smooth_ball()}
+    for name, mesh in meshes.items():
+        path = save(tmp_path, mesh, name)
+        rc = main(["check", path, "--style", str(pack)])
+        out = capsys.readouterr().out
+        want_rc, want_verdict = expect[name]
+        assert rc == want_rc, f"{name}: exit {rc}, wanted {want_rc}\n{out}"
+        assert want_verdict in out, f"{name}: verdict missing\n{out}"
+
+    # and the JSON surface names which rule broke, for the two real failures
+    assert main(["check", save(tmp_path, meshes["tiny.stl"], "tiny2.stl"),
+                 "--style", str(pack), "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    broken = {r["rule"] for r in payload["results"] if r["status"] == "fail"}
+    assert broken == {"legible-glyph"}
+    assert main(["check", save(tmp_path, meshes["thin.stl"], "thin2.stl"),
+                 "--style", str(pack), "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    broken = {r["rule"] for r in payload["results"] if r["status"] == "fail"}
+    assert broken == {"bridge-width"}
+
+
+def test_the_new_metrics_reach_the_report_and_pack_surfaces(tmp_path):
+    """measure + report + emit are the surfaces the issue names: the numbers
+    must be legible in the text report and carried into a lifted pack."""
+    path = save(tmp_path, stencil_plate(), "stencil.stl")
+    text = measurement_text(measure(path))
+    assert "FACETEDNESS" in text and "sharpness" in text
+    assert "OPENNESS" in text and "void fraction" in text
+    assert "narrowest bridge" in text
+
+    pack = tmp_path / "pack"
+    spec = lift([path], "stencil-test", pack)["spec"]
+    markdown = render_style_md(spec)
+    assert "Facet sharpness" in markdown
+    assert "Void fraction" in markdown
+    assert "Narrowest bridge" in markdown
+    # both are targets the checker compares against, not numbers to build with
+    assert "style_sharpness" not in render_tokens(spec)
