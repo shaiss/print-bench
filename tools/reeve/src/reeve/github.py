@@ -74,14 +74,16 @@ NEEDS_DECISION_LABEL = "needs-decision"
 # greenlighted", exactly the wrapper's own live idempotency check.
 GREENLIGHT_MARKER = "<!-- reeve-greenlight v"
 
-# The marker `.github/actions/provider-triage` writes into the body of the
-# needs-decision issue it files when a chain is exhausted (one per registry
-# chain, so every converted walk can raise one — issue #544). That issue is an
-# account/key ask with a fixed remedy — fund the account, raise the cap,
-# rotate the key — not a decision a charter verdict can rule on, so the
-# greenlight Select skips it rather than hand the drafter a yes/no it cannot
-# give. Mirrored, not imported (the action is JavaScript); matched anywhere
-# in the body, where the action writes it as the first line.
+# The marker `model_registry.escalation` (behind `.github/actions/
+# provider-triage` and oracle.yml's own exhaustion leg) writes into the body
+# of the needs-decision issue a chain-exhaustion escalates into — one shared
+# issue per classified REASON since #550, so every chain that exhausts with
+# the same cause joins one thread. That issue is an account/key ask with a
+# fixed remedy — fund the account, raise the cap, rotate the key — not a
+# decision a charter verdict can rule on, so the greenlight Select skips it
+# rather than hand the drafter a yes/no it cannot give. Mirrored, not
+# imported (model_registry is a separate package); matched anywhere in the
+# body, where the writer puts it as the first line.
 PROVIDER_ESCALATION_MARKER = "<!-- provider-escalation:"
 
 # The scheduled routines whose death Reeve watches (the #312 incident class:

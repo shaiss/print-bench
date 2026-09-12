@@ -261,8 +261,8 @@ jobs:
           LABEL: ${{ steps.policy.outputs.label }}
         run: |
           set -euo pipefail
-          # `run` gathers the live snapshot (open issues + their SHIP-LOCK
-          # comments, open PRs, remote branches) and applies the policy. It
+          # `run` gathers the live snapshot (open issues + their comment
+          # threads, open PRs, remote branches) and applies the policy. It
           # writes `issue=<n>` (empty when nothing is eligible) to $GITHUB_OUTPUT
           # and a markdown block to $GITHUB_STEP_SUMMARY. Same selector the
           # backlog burn uses, pointed at the design-brief label.
@@ -339,7 +339,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
@@ -363,7 +363,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
@@ -385,7 +385,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
@@ -420,7 +420,7 @@ jobs:
         # repo secrets; the motivating run 31967535913 authenticated with
         # CLAUDE_KEY). The drift guard reads <alias>=<registry-secret> here and
         # pins the step to that provider's endpoint.
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
@@ -443,7 +443,7 @@ jobs:
         # registry-secret-alias: CLAUDE_KEY=ANTHROPIC_API_KEY — same alias as
         # link 4 (the marker must sit inside every step chunk the drift guard
         # reads).
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
