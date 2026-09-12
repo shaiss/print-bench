@@ -30,10 +30,11 @@ otherwise 0.  A run where every attempted link was ``INCONC`` (nothing proven,
 but nothing proved *unservable*) exits 0 with a loud ``WARN`` so it is never
 mistaken for "proven".
 
-``_post`` is the package's single HTTP seam — nothing else in model_registry
-touches the network, and the tests replace ``_post`` to exercise every outcome
-without a key.  The report never contains a secret value: only env-var *names*
-(public identifiers, committed in the registry) and response bodies.
+``_post`` is the package's provider-endpoint HTTP seam — nothing else in
+model_registry touches a provider API (escalation.py owns the GitHub-API seam),
+and the tests replace ``_post`` to exercise every outcome without a key.  The
+report never contains a secret value: only env-var *names* (public identifiers,
+committed in the registry) and response bodies.
 """
 
 from __future__ import annotations
