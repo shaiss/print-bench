@@ -11,24 +11,48 @@
 # semantics and ordering: corroborating branches and closing PRs are checked
 # FIRST, so a claim backed by real work is never orphaned.
 #
+# DISPOSITION BY ARTIFACT, NOT EXIT CODE (issue #538): the workflow's ship
+# links are claude-code-action steps that exit 0 whenever the agent ended its
+# turn without an API error — an agent that claimed, produced no branch, no
+# PR and no decline, and stopped, still reports outcome 'success'. So this
+# script trusts exactly one signal from the workflow: the explicit 'not-run'
+# value meaning no ship link ran at all. Every other value — 'success'
+# included — gets the full corroboration read below, and the disposition is
+# derived from what exists on GitHub:
+#   delivered  a claude/issue-<N>-* branch or an open closing PR exists
+#   declined   a 🚢 DECLINED / 🚦 DECISION NEEDED comment posted after the
+#              latest claim, or that claim already reading SHIP-LOCK
+#              WITHDRAWN in the agent's own (non-death) wording
+#   dead       anything else — withdrawal posted, death counted, escalation
+#              at the threshold — regardless of the exit code passed in,
+#              which is carried in the withdrawal body as a diagnostic only
+# The workflow gates its red-on-death and provider-triage steps on the
+# `delivered`/`declined` outputs, never on the walk's outcome string.
+#
 # ACCEPTED RACE: the cleanup withdraws the LATEST active lock, so in the rare
 # case a hand-run claimed the same issue between our lock and our death, that
 # claim gets withdrawn too. The branch/PR corroboration above means real work
-# is never orphaned, and a re-claim costs the hand-run one comment.
+# is never orphaned, and a re-claim costs the hand-run one comment. The
+# artifact-derived disposition opens a second door to the same race: an
+# exit-0 run that never claimed (it found the issue taken and stopped
+# silently) is scored dead and withdraws the rival claim it found. Both doors
+# end in the same trade — a comment the rival re-posts — and neither can
+# orphan real work.
 #
 # Usage:
 #   scripts/routine-lock-cleanup.sh --repo <owner/name> --issue <N> \
-#       --agent-outcome <success|failure|cancelled|skipped> \
+#       --agent-outcome <not-run|success|failure|cancelled|skipped> \
 #       --run-url <url> --routine <design-run|backlog-burn> \
 #       [--escalate-after <n>]                                # default 3
 #   scripts/routine-lock-cleanup.sh --selftest
 #
-# Live mode needs GH_TOKEN (gh api auth) — checked after the success/skipped
-# no-op, so a delivered run concludes without it. Appends `withdrawn=` and
-# `escalated=` to $GITHUB_OUTPUT and one summary line to $GITHUB_STEP_SUMMARY
-# when those are set. Exit codes: 0 = decided and acted (including a no-op);
-# 1 = a GitHub API call failed (fail loud — a cleanup that can't clean must
-# go red, or the ghost locks return silently); 2 = usage.
+# Live mode needs GH_TOKEN (gh api auth) — checked after the not-run no-op,
+# so a run with no ship link at all concludes without it. Appends
+# `delivered=`, `declined=`, `withdrawn=` and `escalated=` to $GITHUB_OUTPUT
+# and one summary line to $GITHUB_STEP_SUMMARY when those are set. Exit
+# codes: 0 = decided and acted (including a no-op); 1 = a GitHub API call
+# failed (fail loud — a cleanup that can't clean must go red, or the ghost
+# locks return silently); 2 = usage.
 set -euo pipefail
 
 # Absolute path to this script, captured before the cd so --selftest can
@@ -58,7 +82,7 @@ usage() {  # [message]
   [ $# -eq 0 ] || echo "routine-lock-cleanup: $*" >&2
   cat >&2 <<'EOF'
 usage: scripts/routine-lock-cleanup.sh --repo <owner/name> --issue <N>
-           --agent-outcome <success|failure|cancelled|skipped>
+           --agent-outcome <not-run|success|failure|cancelled|skipped>
            --run-url <url> --routine <design-run|backlog-burn>
            [--escalate-after <n>]
        scripts/routine-lock-cleanup.sh --selftest
@@ -79,19 +103,63 @@ command -v jq >/dev/null 2>&1 || {
 
 # ---- pure decision functions (JSON/text on stdin, no network) -------------
 
+# The comment markers a deliberate terminal stop leads with (the skill's §1
+# decline and §8 decision-gate forms). Counted as "declined" only when posted
+# AFTER the latest claim, so a previous run's decline never vouches for this
+# one.
+DECLINE_MARKER_1='🚢 DECLINED'
+DECLINE_MARKER_2='🚦 DECISION NEEDED'
+
+# The latest SHIP-LOCK comment (claim or withdrawal form alike), or null.
+# First-of-ties on equal created_at, matching Python max() in the selector
+# exactly (jq max_by would keep the last of ties).
+JQ_LATEST_LOCK='def latest_lock:
+  [ .[] | select(fl(.body) | startswith($marker)) ]
+  | if length == 0 then null
+    else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
+    end;'
+
 # stdin: NDJSON comments {body, created_at}. Prints the latest SHIP-LOCK's
-# state, "active" or "none" — the selector's _ship_lock_state without the
-# staleness branch (this cleanup acts on its own run's death, not on age).
+# state, "active", "withdrawn" or "none" — the selector's _ship_lock_state
+# split by cause: "withdrawn" distinguishes a claim somebody released from
+# "none" (no lock comment at all), because only the former is evidence of a
+# deliberate terminal stop by the run that claimed.
 lock_state() {
-  jq -rs --arg marker "$LOCK_MARKER" "$JQ_FL"'
-    [ .[] | select(fl(.body) | startswith($marker)) ]
-    | if length == 0 then "none"
-      # First-of-ties on equal created_at, matching Python max() in the
-      # selector exactly (jq max_by would keep the last of ties).
-      elif ((reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
-            | fl(.body) | ascii_upcase | contains("WITHDRAWN"))
-        then "none"
+  jq -rs --arg marker "$LOCK_MARKER" "$JQ_FL $JQ_LATEST_LOCK"'
+    latest_lock as $l
+    | if $l == null then "none"
+      elif ($l | fl(.body) | ascii_upcase | contains("WITHDRAWN")) then "withdrawn"
       else "active" end'
+}
+
+# stdin: NDJSON comments. Prints true/false: a 🚢 DECLINED or 🚦 DECISION
+# NEEDED comment was posted strictly after the latest claim — the skill's own
+# terminal-stop markers. A decline posted BEFORE the claim (a previous run's)
+# does not count, and neither does the marker mid-line: the skill leads its
+# stop comments with the marker.
+decline_indicated() {
+  jq -rs --arg marker "$LOCK_MARKER" --arg d1 "$DECLINE_MARKER_1" --arg d2 "$DECLINE_MARKER_2" \
+    "$JQ_FL $JQ_LATEST_LOCK"'
+    latest_lock as $l
+    | if $l == null then false
+      else [ .[] | select(.created_at > $l.created_at)
+             | select(fl(.body) | startswith($d1) or startswith($d2)) ]
+           | length > 0
+      end'
+}
+
+# stdin: NDJSON comments. Prints true/false: the latest lock comment is one
+# of THIS script's own death-withdrawal notices (first line starts with
+# DEATH_PREFIX). That is a death, not a decline — an agent's own release (the
+# skill's §0.6 edit) carries its own wording, never this prefix — and must
+# not be read as a deliberate stop by the current run.
+death_marked() {
+  jq -rs --arg marker "$LOCK_MARKER" --arg prefix "$DEATH_PREFIX" \
+    "$JQ_FL $JQ_LATEST_LOCK"'
+    latest_lock as $l
+    | if $l == null then false
+      else ($l | fl(.body) | startswith($prefix))
+      end'
 }
 
 # stdin: branch names, one per line. $1: the issue number (validated as an
@@ -159,60 +227,82 @@ note() {  # one line → $GITHUB_STEP_SUMMARY when running under Actions
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$1" >> "$GITHUB_STEP_SUMMARY"; fi
 }
 
-conclude() {  # withdrawn escalated summary — the single successful exit path
-  emit withdrawn "$1"
-  emit escalated "$2"
-  note "routine-lock-cleanup (${ROUTINE}, #${ISSUE}): $3"
+conclude() {  # delivered declined withdrawn escalated summary — the one exit path
+  emit delivered "$1"
+  emit declined "$2"
+  emit withdrawn "$3"
+  emit escalated "$4"
+  note "routine-lock-cleanup (${ROUTINE}, #${ISSUE}): $5"
   exit 0
 }
 
 # ---- live flow ------------------------------------------------------------
 
 run_live() {
-  # 1. A run that delivered — or never started — left nothing to release.
-  # Before the GH_TOKEN check on purpose: the common healthy path needs no
-  # auth and no network.
-  case "$OUTCOME" in
-    success|skipped)
-      echo "::notice::agent outcome '$OUTCOME' — no orphaned lock to release on #$ISSUE"
-      conclude false false "no-op (agent outcome: $OUTCOME)"
-      ;;
-  esac
+  # 1. The one workflow signal this script trusts: 'not-run' means no ship
+  # link ran at all (the walk's all-skipped case — a cancelled-before-agent
+  # job, or the agent steps' key/dry-run gates all taking the skip path).
+  # Everything else gets the corroboration read below, because a ship link's
+  # exit code does not mean what the workflow used to think it means (#538):
+  # claude-code-action exits 0 whenever the agent ended its turn without an
+  # API error, pushed branch or not. Before the GH_TOKEN check on purpose:
+  # this path needs no auth and no network.
+  if [ "$OUTCOME" = "not-run" ]; then
+    echo "::notice::no ship link ran (outcome '$OUTCOME') — nothing to release on #$ISSUE"
+    conclude false false false false "no-op (no ship link ran)"
+  fi
 
   if [ -z "${GH_TOKEN:-}" ]; then
-    echo "routine-lock-cleanup: GH_TOKEN is required to clean up after agent outcome '$OUTCOME'" >&2
+    echo "routine-lock-cleanup: GH_TOKEN is required to derive the disposition for agent outcome '$OUTCOME'" >&2
     exit 1
   fi
 
   # 2/3. Corroboration before the lock (the selector's own ordering): a
   # claude/issue-<N>-* branch or a closing PR means the claim is backed by
-  # real work in flight — leave it alone.
+  # real work in flight — delivered, whatever the ship links' exit codes
+  # said (a link can time out a minute after pushing).
   local branches prs comments state
   branches="$(gh_api --paginate "/repos/$REPO/branches?per_page=100" --jq '.[].name')"
   if branch_corroborates "$ISSUE" <<<"$branches"; then
-    echo "::notice::a claude/issue-$ISSUE-* branch exists — the claim is backed by real work; not withdrawing"
-    conclude false false "no-op (a corroborating branch exists)"
+    echo "::notice::a claude/issue-$ISSUE-* branch exists — the run delivered; not withdrawing"
+    conclude true false false false "delivered (a corroborating branch exists)"
   fi
 
   prs="$(gh_api --paginate "/repos/$REPO/pulls?state=open&per_page=100" \
     --jq '.[] | {ref: (.head.ref // ""), body: (.body // "")}')"
   if [ "$(pr_corroborates "$ISSUE" <<<"$prs")" = "true" ]; then
-    echo "::notice::an open PR already closes #$ISSUE — the claim is backed by real work; not withdrawing"
-    conclude false false "no-op (an open PR closes #$ISSUE)"
+    echo "::notice::an open PR already closes #$ISSUE — the run delivered; not withdrawing"
+    conclude true false false false "delivered (an open PR closes #$ISSUE)"
   fi
 
-  # 4. The latest lock's state, per the selector's first-non-blank-line rule.
+  # 4. A deliberate terminal stop by the run that claimed: the skill's own
+  # §1/§8 stop comment posted after its claim, or its §0.6 release (the claim
+  # edited to SHIP-LOCK WITHDRAWN in the agent's wording — never this
+  # script's DEATH_PREFIX, which marks a death, not a decline).
   comments="$(gh_api --paginate "/repos/$REPO/issues/$ISSUE/comments?per_page=100" \
     --jq '.[] | {body: (.body // ""), created_at: .created_at}')"
+  if [ "$(decline_indicated <<<"$comments")" = "true" ]; then
+    echo "::notice::a DECLINED/DECISION NEEDED comment follows the claim on #$ISSUE — a deliberate stop, not a death"
+    conclude false true false false "declined (a stop comment follows the claim)"
+  fi
   state="$(lock_state <<<"$comments")"
+  if [ "$state" = "withdrawn" ] && [ "$(death_marked <<<"$comments")" != "true" ]; then
+    echo "::notice::the claim on #$ISSUE already reads SHIP-LOCK WITHDRAWN in the agent's own wording — it released its lock"
+    conclude false true false false "declined (the claim was self-withdrawn)"
+  fi
   if [ "$state" != "active" ]; then
+    # No lock this run could have left (never claimed, or the latest lock is
+    # one of our own death-withdrawal notices from an earlier firing). No
+    # withdrawal, no death to count — but NOT delivered and NOT declined: the
+    # workflow's red gate reads those and decides.
     echo "::notice::no active SHIP-LOCK on #$ISSUE — nothing to release"
-    conclude false false "no-op (no active lock)"
+    conclude false false false false "no-op (no active lock)"
   fi
 
-  # 5. Withdraw — a new comment, never a deletion: timestamps are the record.
+  # 5. Dead — regardless of the exit code passed in. Withdraw: a new
+  # comment, never a deletion: timestamps are the record.
   local body
-  body="$(printf '%s\n\n- routine: %s\n- agent outcome: %s\n- run: %s\n\nThe claim above is released (not deleted — timestamps are the record) so the next firing can select this issue again.' \
+  body="$(printf '%s\n\n- routine: %s\n- agent outcome (diagnostic only — the disposition is derived from the artifacts above): %s\n- run: %s\n\nThe claim above is released (not deleted — timestamps are the record) so the next firing can select this issue again.' \
     "$WITHDRAW_LINE" "$ROUTINE" "$OUTCOME" "$RUN_URL")"
   gh_api --method POST "/repos/$REPO/issues/$ISSUE/comments" -f body="$body" >/dev/null
   echo "::notice::withdrew a dead $ROUTINE run's SHIP-LOCK on #$ISSUE (agent outcome: $OUTCOME)"
@@ -224,7 +314,7 @@ run_live() {
   deaths="$(count_dead_withdrawals <<<"$comments")"
   total=$(( deaths + 1 ))
   if ! should_escalate "$deaths" "$ESCALATE_AFTER"; then
-    conclude true false "withdrew a dead run's SHIP-LOCK (death $total of $ESCALATE_AFTER before escalation)"
+    conclude false false true false "withdrew a dead run's SHIP-LOCK (death $total of $ESCALATE_AFTER before escalation)"
   fi
 
   # Ensure the label exists — the ensure-label idiom from the decision gate:
@@ -247,7 +337,7 @@ run_live() {
     "$id" "$total" "$ROUTINE" "$RUN_URL" "$id" "$id")"
   gh_api --method POST "/repos/$REPO/issues/$ISSUE/comments" -f body="$body" >/dev/null
   echo "::notice::escalated #$ISSUE to a human decision ($id) after $total dead runs"
-  conclude true true "withdrew the lock and escalated ($total dead runs >= $ESCALATE_AFTER) — parked with $DECISION_LABEL"
+  conclude false false true true "withdrew the lock and escalated ($total dead runs >= $ESCALATE_AFTER) — parked with $DECISION_LABEL"
 }
 
 # ---- selftest (fully offline: fixtures + the no-op/refusal CLI paths) -----
@@ -279,8 +369,8 @@ EOF
 {"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
 {"body": "🚢 SHIP-LOCK withdrawn — taking it back", "created_at": "2026-08-03T00:00:00Z"}
 EOF
-  [ "$(lock_state < "$tmp/withdrawn.ndjson")" = "none" ] \
-    || st_fail "a lowercase-withdrawn latest lock was not classified none"
+  [ "$(lock_state < "$tmp/withdrawn.ndjson")" = "withdrawn" ] \
+    || st_fail "a lowercase-withdrawn latest lock was not classified withdrawn"
   cat > "$tmp/reclaimed.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK withdrawn — taking it back", "created_at": "2026-08-01T00:00:00Z"}
 {"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-03T00:00:00Z"}
@@ -314,6 +404,51 @@ EOF
     || st_fail "a marker below a non-blank first line was counted as a lock"
   echo "ok    selftest: lock classification (active / withdrawn / none / mid-line / first-non-blank)"
 
+  # -- decline detection: the skill's §1/§8 stop markers AFTER the claim -----
+  # Positive: a DECLINED or DECISION NEEDED comment strictly after the latest
+  # claim reads as a deliberate stop. Negative controls: the same marker
+  # BEFORE the claim (a previous run's decline never vouches for this one),
+  # the marker mid-line, and a thread with no claim at all.
+  cat > "$tmp/declined-after.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z"}
+EOF
+  [ "$(decline_indicated < "$tmp/declined-after.ndjson")" = "true" ] \
+    || st_fail "a DECLINED comment after the claim was not read as a decline"
+  cat > "$tmp/decision-after.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "🚦 DECISION NEEDED — `tol-default-loosen`\n\nparked per the gate", "created_at": "2026-08-02T00:00:00Z"}
+EOF
+  [ "$(decline_indicated < "$tmp/decision-after.ndjson")" = "true" ] \
+    || st_fail "a DECISION NEEDED comment after the claim was not read as a decline"
+  cat > "$tmp/declined-before.ndjson" <<'EOF'
+{"body": "🚢 DECLINED — earlier run gave up here", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\nclaimed afresh", "created_at": "2026-08-02T00:00:00Z"}
+EOF
+  [ "$(decline_indicated < "$tmp/declined-before.ndjson")" = "false" ] \
+    || st_fail "a decline posted BEFORE the claim wrongly vouched for this run"
+  cat > "$tmp/declined-midline.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "beware the 🚢 DECLINED marker mid-line", "created_at": "2026-08-02T00:00:00Z"}
+EOF
+  [ "$(decline_indicated < "$tmp/declined-midline.ndjson")" = "false" ] \
+    || st_fail "a mid-line decline marker was counted as a stop comment"
+  [ "$(decline_indicated < "$tmp/nolock.ndjson")" = "false" ] \
+    || st_fail "a thread with no claim at all read as declined"
+
+  # -- death-marking: our own withdrawal notice is a death, not a decline ---
+  cat > "$tmp/our-death.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\n- routine: backlog-burn", "created_at": "2026-08-02T00:00:00Z"}
+EOF
+  [ "$(death_marked < "$tmp/our-death.ndjson")" = "true" ] \
+    || st_fail "our own death-withdrawal notice was not death-marked"
+  [ "$(death_marked < "$tmp/withdrawn.ndjson")" = "false" ] \
+    || st_fail "an agent's own (non-death) withdrawal was wrongly death-marked"
+  [ "$(death_marked < "$tmp/nolock.ndjson")" = "false" ] \
+    || st_fail "a thread with no lock at all read as death-marked"
+  echo "ok    selftest: decline detection (after-claim / before-claim / mid-line / no-claim) + death marking"
+
   # -- branch corroboration + the near-miss --------------------------------
   printf 'main\nclaude/issue-281-fix-thing\n' | branch_corroborates 281 \
     || st_fail "claude/issue-281-* did not corroborate issue 281"
@@ -337,24 +472,133 @@ EOF
     || st_fail "a claude/issue-38-* head branch did not corroborate issue 38"
   echo "ok    selftest: closing keywords + #9-vs-#95 boundary"
 
-  # -- success/skipped no-op, end to end, plus the tokenless refusal -------
+  # -- the not-run no-op, end to end, plus the tokenless refusals ----------
+  # 'not-run' is the one workflow signal that concludes with no GitHub read.
   : > "$tmp/out"
   GITHUB_OUTPUT="$tmp/out" GITHUB_STEP_SUMMARY="$tmp/sum" "$SELF" \
-    --repo o/r --issue 1 --agent-outcome success --run-url u --routine design-run \
-    >/dev/null || st_fail "a success outcome did not no-op cleanly"
-  grep -qx 'withdrawn=false' "$tmp/out" || st_fail "the success no-op did not emit withdrawn=false"
-  grep -qx 'escalated=false' "$tmp/out" || st_fail "the success no-op did not emit escalated=false"
-  GITHUB_OUTPUT='' GITHUB_STEP_SUMMARY='' "$SELF" \
-    --repo o/r --issue 1 --agent-outcome skipped --run-url u --routine backlog-burn \
-    >/dev/null || st_fail "a skipped outcome did not no-op cleanly"
-  # Negative control: a dead outcome must NOT no-op — with no GH_TOKEN it must
+    --repo o/r --issue 1 --agent-outcome not-run --run-url u --routine design-run \
+    >/dev/null || st_fail "a not-run outcome did not no-op cleanly"
+  for kv in delivered=false declined=false withdrawn=false escalated=false; do
+    grep -qx "$kv" "$tmp/out" || st_fail "the not-run no-op did not emit $kv"
+  done
+  # Negative control — THE #538 assertion: every other outcome, 'success'
+  # included, must reach the corroboration read, so with no GH_TOKEN it must
   # refuse loudly (exit 1) before touching the network, never exit 0.
-  rc=0
-  env GH_TOKEN= GITHUB_OUTPUT= GITHUB_STEP_SUMMARY= "$SELF" \
-    --repo o/r --issue 1 --agent-outcome cancelled --run-url u --routine design-run \
-    >/dev/null 2>&1 || rc=$?
-  [ "$rc" = 1 ] || st_fail "a cancelled outcome with no GH_TOKEN exited $rc, not 1"
-  echo "ok    selftest: success/skipped no-op + tokenless negative control"
+  for outcome in success failure cancelled skipped; do
+    rc=0
+    env GH_TOKEN= GITHUB_OUTPUT= GITHUB_STEP_SUMMARY= "$SELF" \
+      --repo o/r --issue 1 --agent-outcome "$outcome" --run-url u --routine design-run \
+      >/dev/null 2>&1 || rc=$?
+    [ "$rc" = 1 ] || st_fail "a '$outcome' outcome with no GH_TOKEN exited $rc, not 1 — the exit-code no-op is back"
+  done
+  echo "ok    selftest: not-run no-op + tokenless refusal for every other outcome"
+
+  # -- disposition end to end over a gh stub -------------------------------
+  # The three rows the fix is named for, plus escalation, proven against the
+  # REAL CLI: a stub gh serves fixture JSON for the script's GETs (applying
+  # the same --jq filter the real gh would) and logs every POST, so the
+  # dispositions and the "which comments got posted" side are both asserted.
+  mkdir -p "$tmp/bin"
+  cat > "$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+# selftest double: fixture-backed gh. GETs serve ${GH_STUB_FIXTURES}/<name>.json
+# piped through the --jq filter the caller passed; POSTs are logged verbatim.
+set -u
+filter=''
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --jq) filter="$2"; shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+joined="${args[*]}"
+case "$joined" in
+  *"--method POST"*) printf '%s\n' "$joined" >> "${GH_STUB_POSTLOG:?}"; exit 0 ;;
+  *"/branches?"*) fixture=branches ;;
+  *"/pulls?state=open"*) fixture=pulls ;;
+  *"/comments?per_page=100"*) fixture=comments ;;
+  *"repos/o/r/labels"*) fixture=labels ;;
+  *) echo "gh stub: unhandled api call: $joined" >&2; exit 1 ;;
+esac
+# -r: gh api --jq prints string results raw (the ensure-label idiom greps
+# unquoted names), so the stub must too or branch corroboration never fires.
+if [ -n "$filter" ]; then jq -r "$filter" < "${GH_STUB_FIXTURES:?}/$fixture.json"; else cat "$GH_STUB_FIXTURES/$fixture.json"; fi
+STUB
+  chmod +x "$tmp/bin/gh"
+
+  # run_case <name> <outcome> -- runs the real CLI over $tmp/<name>-fix/
+  e2e() {  # name outcome
+    local name="$1" outcome="$2"
+    : > "$tmp/$name-postlog"
+    : > "$tmp/$name-out"
+    PATH="$tmp/bin:$PATH" GH_TOKEN=stub GH_STUB_FIXTURES="$tmp/$name-fix" \
+      GH_STUB_POSTLOG="$tmp/$name-postlog" GITHUB_OUTPUT="$tmp/$name-out" \
+      GITHUB_STEP_SUMMARY='' "$SELF" \
+      --repo o/r --issue 1 --agent-outcome "$outcome" --run-url u --routine backlog-burn \
+      >/dev/null || st_fail "the '$name' case exited non-zero"
+  }
+  e2e_fix() {  # case fixture json → writes $tmp/<case>-fix/<fixture>.json
+    mkdir -p "$tmp/$1-fix"
+    printf '%s\n' "$3" > "$tmp/$1-fix/$2.json"
+  }
+  no_posts() {  # name
+    [ ! -s "$tmp/$1-postlog" ] || st_fail "the '$1' case posted to GitHub: $(cat "$tmp/$1-postlog")"
+  }
+
+  # Row 1 (#538's exact shape): exit 0, an active claim, nothing else → dead.
+  e2e_fix dead comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix dead branches '[]'
+  e2e_fix dead pulls '[]'
+  e2e dead success
+  grep -qx 'withdrawn=true' "$tmp/dead-out" || st_fail "exit-0 + no branch/PR/decline did not emit withdrawn=true"
+  grep -qx 'delivered=false' "$tmp/dead-out" || st_fail "the dead case did not emit delivered=false"
+  grep -qx 'declined=false' "$tmp/dead-out" || st_fail "the dead case did not emit declined=false"
+  grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/dead-postlog" \
+    || st_fail "the dead case did not post the withdrawal comment"
+
+  # Row 2: exit 0 with a corroborating branch → delivered, nothing posted.
+  e2e_fix branch comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix branch branches '[{"name": "claude/issue-1-the-fix"}]'
+  e2e_fix branch pulls '[]'
+  e2e branch success
+  grep -qx 'delivered=true' "$tmp/branch-out" || st_fail "exit-0 + branch did not emit delivered=true"
+  no_posts branch
+
+  # Row 3: exit 0 with a DECLINED comment after the claim → declined, nothing
+  # posted (the lock is left to age out through the selector's staleness, per
+  # the fix's design).
+  e2e_fix declined comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z"},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z"}]'
+  e2e_fix declined branches '[]'
+  e2e_fix declined pulls '[]'
+  e2e declined success
+  grep -qx 'declined=true' "$tmp/declined-out" || st_fail "exit-0 + DECLINED did not emit declined=true"
+  no_posts declined
+
+  # Row 3b: exit 0 with the claim self-withdrawn in the agent's own wording →
+  # declined (its §0.6 release), nothing posted.
+  e2e_fix selfwd comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z"},{"body": "🚢 SHIP-LOCK WITHDRAWN — this run is stopping without shipping", "created_at": "2026-09-01T15:02:00Z"}]'
+  e2e_fix selfwd branches '[]'
+  e2e_fix selfwd pulls '[]'
+  e2e selfwd success
+  grep -qx 'declined=true' "$tmp/selfwd-out" || st_fail "a self-withdrawn claim did not emit declined=true"
+  no_posts selfwd
+
+  # Escalation still fires at the threshold under the new disposition: two
+  # prior death-withdrawals + this death → withdrawal, label add, decision
+  # comment, escalated=true.
+  e2e_fix esc comments '[{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\ndetails", "created_at": "2026-09-01T00:00:00Z"},{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\ndetails", "created_at": "2026-09-02T00:00:00Z"},{"body": "🚢 SHIP-LOCK\n\nclaimed again", "created_at": "2026-09-03T00:00:00Z"}]'
+  e2e_fix esc branches '[]'
+  e2e_fix esc pulls '[]'
+  e2e_fix esc labels '[{"name": "needs-decision"}]'
+  e2e esc failure
+  grep -qx 'escalated=true' "$tmp/esc-out" || st_fail "the 3rd death did not emit escalated=true"
+  grep -q -- '--method POST /repos/o/r/issues/1/labels' "$tmp/esc-postlog" \
+    || st_fail "the escalation did not add the needs-decision label"
+  grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/esc-postlog" \
+    || st_fail "the escalation did not post the decision comment"
+
+  echo "ok    selftest: end-to-end dispositions (dead / delivered / declined / self-withdrawn / escalated)"
 
   # -- escalation fires at the threshold, not below it ---------------------
   cat > "$tmp/two-deaths.ndjson" <<'EOF'
@@ -400,7 +644,7 @@ EOF
     {body: ($lock + "\n\nclaimed"), created_at: "2026-08-01T00:00:00Z"},
     {body: ($wd + "\n\n- routine: design-run"), created_at: "2026-08-02T00:00:00Z"}' \
     > "$tmp/ours.ndjson"
-  [ "$(lock_state < "$tmp/ours.ndjson")" = "none" ] \
+  [ "$(lock_state < "$tmp/ours.ndjson")" = "withdrawn" ] \
     || st_fail "our own withdrawal line does not release the lock for the selector"
   echo "ok    selftest: withdrawal first line stays selector-compatible"
 
@@ -444,8 +688,8 @@ done
   || usage "--repo, --issue, --agent-outcome, --run-url and --routine are all required"
 # The issue number reaches grep/jq patterns and API paths — integers only.
 case "$ISSUE" in ''|*[!0-9]*) usage "--issue must be an integer, got '$ISSUE'" ;; esac
-case "$OUTCOME" in success|failure|cancelled|skipped) : ;;
-  *) usage "--agent-outcome must be success|failure|cancelled|skipped, got '$OUTCOME'" ;; esac
+case "$OUTCOME" in not-run|success|failure|cancelled|skipped) : ;;
+  *) usage "--agent-outcome must be not-run|success|failure|cancelled|skipped, got '$OUTCOME'" ;; esac
 case "$ROUTINE" in design-run|backlog-burn) : ;;
   *) usage "--routine must be design-run|backlog-burn, got '$ROUTINE'" ;; esac
 case "$ESCALATE_AFTER" in ''|0|*[!0-9]*) usage "--escalate-after must be a positive integer, got '$ESCALATE_AFTER'" ;; esac
