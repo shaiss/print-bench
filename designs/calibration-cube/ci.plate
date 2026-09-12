@@ -1,0 +1,12 @@
+# Production parts for the multi-object 3MF plate deliverable,
+# build/calibration-cube-plate.3mf (scripts/plate.sh, gate.sh --check).
+#
+# Four dimensional-accuracy cubes (5 / 10 / 20 / 30 mm) print SEPARATELY on
+# one plate. A single STL of all four imports as one multi-body (or fused)
+# lump; the plate packs them as N distinct objects the slicer imports as N
+# parts. The parametric default `cube` and the `sweep` layout preview are
+# NOT plate parts.
+cube5
+cube10
+cube20
+cube30

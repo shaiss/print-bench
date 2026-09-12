@@ -1,0 +1,9 @@
+# Printable parts gated by CI. `cube` is the starter single cube (parametric
+# via `size`, default 20 mm). The cube5/10/20/30 set is the multi-size strip
+# (charter backlog B1); ci.plate packs those four as the plate deliverable.
+# `sweep` is a layout preview only — not listed here, not a plate part.
+cube
+cube5
+cube10
+cube20
+cube30
