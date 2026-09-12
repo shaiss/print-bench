@@ -233,8 +233,8 @@ jobs:
           LABEL: ${{ steps.policy.outputs.label }}
         run: |
           set -euo pipefail
-          # `run` gathers the live snapshot (open issues + their SHIP-LOCK
-          # comments, open PRs, remote branches) and applies the policy. It
+          # `run` gathers the live snapshot (open issues + their comment
+          # threads, open PRs, remote branches) and applies the policy. It
           # writes `issue=<n>` (empty when nothing is eligible) to
           # $GITHUB_OUTPUT and a markdown block to $GITHUB_STEP_SUMMARY.
           backlog-burn run --repo "$GITHUB_REPOSITORY" --label "$LABEL"

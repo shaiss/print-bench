@@ -38,9 +38,23 @@ one** issue, applying, in order:
    §0.3 takeover rule allows, it does **not** block: otherwise a dead run would
    freeze the issue out of the burn forever, since the skill's own takeover
    only runs for an issue this selector actually hands it.
-4. **oldest-first** — among what survives, the oldest issue by creation time
+4. **not freshly declined** (issue #530) — excluded while the thread's
+   *latest* `🚢 DECLINED` comment is inside a 24 h cooldown: a run already
+   looked at the brief and walked away (a blocking open question nobody has
+   answered), so an unanswered decline must not monopolize every hourly
+   firing while the runnable briefs behind it starve — #515 measured seven
+   declines in three days. Two properties hold by construction: a decline
+   **expires, never buries** — after the window the brief is eligible again,
+   and each later decline restarts it — and **any owner activity re-arms
+   immediately**: a comment newer than the latest decline that is not
+   machine-posted makes the brief eligible regardless of the window.
+   Because the routines post through the same PAT identity as the owner
+   (#515: the declines, the withdrawals and the owner's own answer are all
+   one login), "machine-posted" cannot be an author test — it is a first-line
+   marker test (`🚢`/`🚦`/`🏷`/`🧩` prefixes) plus GitHub's `Bot` author type.
+5. **oldest-first** — among what survives, the oldest issue by creation time
    (tie-broken by number, so the pick is deterministic across runs).
-5. **cap of one** — everything past the first eligible issue is deferred to
+6. **cap of one** — everything past the first eligible issue is deferred to
    the next firing, so a bad night costs one PR, not five.
 
 `select` is a **pure function of the snapshot** — no network — which is what

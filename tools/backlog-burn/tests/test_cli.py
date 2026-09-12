@@ -22,7 +22,7 @@ def _snapshot():
                 "title": "issue 42",
                 "createdAt": "2026-08-01T00:00:00Z",
                 "labels": ["autonomy-ok"],
-                "shipLockComments": [],
+                "comments": [],
             }
         ],
         "openPRs": [],
