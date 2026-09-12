@@ -1,0 +1,11 @@
+# Production parts for the multi-object 3MF plate deliverable,
+# build/hex-bit-rail-plate.3mf (scripts/plate.sh, gate.sh --check).
+#
+# The two rails print SEPARATELY (short-bit rail + long-bit rail). A single
+# STL of both imports into the slicer as ONE fused body and prints welded —
+# the multi-part-fuse field test. The plate packs them as N distinct objects
+# the slicer imports as N parts; the assembled render stays a preview.
+#
+# A subset of ci.parts: the coupon and the fit proofs are NOT plate parts.
+rail-short
+rail-long
