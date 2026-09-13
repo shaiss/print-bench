@@ -128,6 +128,21 @@ def _cap_state_record(path, number, url):
         fh.write(json.dumps(rec) + "\n")
 
 
+def _cap_state_ensure_appendable(path):
+    """Fail-closed preflight: the state path must be appendable BEFORE a
+    GitHub write. Create the file if absent (zero filed so far); refuse if
+    the path is readable-but-not-appendable or its directory is missing —
+    otherwise a successful filing that can't be recorded lets later links
+    exceed the walk cap."""
+    try:
+        with open(path, "a", encoding="utf-8"):
+            pass
+    except OSError as e:
+        raise RuntimeError(
+            f"cannot append to {CAP_STATE_ENV} file {path}: {e}"
+        ) from e
+
+
 def log(msg):
     """Diagnostics go to stderr — stdout is reserved for JSON-RPC frames."""
     print(f"queue_mcp: {msg}", file=sys.stderr, flush=True)
@@ -234,6 +249,10 @@ def _queue_growth_post(arguments):
                 f"per-run queue cap reached ({filed}/{cap} filed across the "
                 "chain walk so far); refusing to file more"
             )
+        try:
+            _cap_state_ensure_appendable(state)
+        except RuntimeError as e:
+            return _tool_error(f"queue_growth_post: {e}")
 
     try:
         issue = _create_issue(title, body, channel)
