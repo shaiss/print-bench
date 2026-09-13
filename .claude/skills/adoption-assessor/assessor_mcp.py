@@ -130,6 +130,21 @@ def _cap_state_record(path, number, url):
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec) + "\n")
 
+
+def _cap_state_ensure_appendable(path):
+    """Fail-closed preflight: the state path must be appendable BEFORE a
+    GitHub write. Create the file if absent (zero posted so far); refuse if
+    the path is readable-but-not-appendable or its directory is missing —
+    otherwise a successful post that can't be recorded lets later links
+    exceed the walk cap."""
+    try:
+        with open(path, "a", encoding="utf-8"):
+            pass
+    except OSError as e:
+        raise RuntimeError(
+            f"cannot append to {CAP_STATE_ENV} file {path}: {e}"
+        ) from e
+
 # Captured by the selftest so it can assert the exact comment body (the advisory
 # framing + marker) without a network call. `None` in normal operation.
 _last_comment = None
@@ -293,6 +308,10 @@ def _post_adoption_disposition(arguments):
                 f"per-run disposition cap reached ({posted_count}/{cap} posted "
                 "across the chain walk so far); refusing to post more"
             )
+        try:
+            _cap_state_ensure_appendable(state)
+        except RuntimeError as e:
+            return _tool_error(f"post_adoption_disposition: {e}")
 
     # --- re-read the target and enforce state at WRITE time ----------------
     try:
@@ -571,7 +590,7 @@ def selftest():
         proc = subprocess.run(probe + [state2], env=dict(os.environ),
                               capture_output=True, text=True)
         check("a fresh process one below the cap posts (cross-process)",
-              proc.returncode == 0 and proc.stdout.startswith("FILED"))
+              proc.returncode == 0 and proc.stdout.startswith("POSTED"))
         check("the fresh process's posting advanced the shared state file",
               _cap_state_count(state2) == 2)
 
@@ -618,7 +637,7 @@ def selftest_cap_child(state_path):
     _FAKE_ISSUES = {60: {"number": 60, "state": "open",
                          "labels": [{"name": "adoption-study"}]}}
     r = _post_adoption_disposition({"number": 60, "body": "cross-process probe"})
-    outcome = "REFUSED" if r.get("isError") else "FILED"
+    outcome = "REFUSED" if r.get("isError") else "POSTED"
     print(f"{outcome}: {r['content'][0]['text']}")
     return 0
 
