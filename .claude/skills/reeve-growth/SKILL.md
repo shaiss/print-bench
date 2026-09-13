@@ -217,9 +217,11 @@ queue server, reused here — wired via `--mcp-config
 .claude/skills/growth-queue/queue-mcp.json`). It hardcodes the `growth-queue`
 + `channel:<name>` labels, requires the `Growth post:` title prefix, validates
 the channel against a closed set, and caps how many items one run may file
-(`GROWTHQ_MAX_POSTS`) with a run-scoped in-process counter — so a
-prompt-injected run can at worst file a bounded number of draft queue items,
-noise a human closes, never a post and never an escalation. The run
+(`GROWTHQ_MAX_POSTS`) — counted in the `GROWTHQ_CAP_STATE` state file every
+link step of the chain walk shares, so the bound spans the whole walk and not
+one server process (#567) — so a prompt-injected run can at worst file a
+bounded number of draft queue items, noise a human closes, never a post and
+never an escalation. The run
 allow-lists exactly that tool plus the read-only file tools — never `Write`,
 never a general `Bash`, never the poster. The deny backstop
 (`.claude/reeve-growth-settings.json`) closes the additive-allow leak from
