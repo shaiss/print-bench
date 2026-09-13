@@ -61,6 +61,7 @@ jobs:
       printcheck_tests: ${{ steps.filter.outputs.printcheck_tests }}
       stylelift_tests: ${{ steps.filter.outputs.stylelift_tests }}
       lineage_tests: ${{ steps.filter.outputs.lineage_tests }}
+      cogcheck_tests: ${{ steps.filter.outputs.cogcheck_tests }}
       backlog_burn_tests: ${{ steps.filter.outputs.backlog_burn_tests }}
       backlog_groomer_tests: ${{ steps.filter.outputs.backlog_groomer_tests }}
       telemetry_tests: ${{ steps.filter.outputs.telemetry_tests }}
@@ -635,6 +636,26 @@ jobs:
         run: pip install -e 'tools/lineage[test]'
       - name: Run tests
         run: python -m pytest tools/lineage/tests -q
+
+  cogcheck-tests:
+    name: cogcheck unit tests
+    needs: changes
+    if: needs.changes.outputs.cogcheck_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install cogcheck
+        # Stdlib-only like lineage — gate.sh imports it straight from src/
+        # with no install step, so the [test] extra is just pytest.
+        run: pip install -e 'tools/cogcheck[test]'
+      - name: Run tests
+        run: python -m pytest tools/cogcheck/tests -q
 
   backlog-burn-tests:
     name: backlog-burn unit tests
@@ -1731,6 +1752,7 @@ jobs:
       - printcheck-tests
       - stylelift-tests
       - lineage-tests
+      - cogcheck-tests
       - backlog-burn-tests
       - backlog-groomer-tests
       - model-registry-tests
