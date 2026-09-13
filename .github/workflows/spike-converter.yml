@@ -337,7 +337,7 @@ jobs:
           # be exported here. GITHUB_REPOSITORY / GITHUB_RUN_ID are set by
           # Actions automatically, SCOUT_MAX_BRIEFS from the job env.
           GITHUB_TOKEN: ${{ github.token }}
-        uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -377,7 +377,7 @@ jobs:
           # Same reason as the Z.AI step: the MCP filing tool and the read
           # wrapper's gh GETs inherit this env and authenticate with it.
           GITHUB_TOKEN: ${{ github.token }}
-        uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -403,7 +403,7 @@ jobs:
         timeout-minutes: 20
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
