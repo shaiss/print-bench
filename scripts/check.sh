@@ -199,6 +199,18 @@ if ! ./scripts/kinematics-check.sh --selftest; then
   fail=1
 fi
 
+# And this proves the CoG stability verdict still discriminates: a stable
+# configuration passes, one whose CoG falls outside its support footprint is
+# flagged TIP-RISK, and a malformed manifest is refused loudly (tools/cogcheck,
+# ci.cog, issue #623). The issue #37 rule again — a check that cannot fail is
+# worthless — and the negative control is the half a green run never exercises
+# on its own, since no committed design ships a ci.cog yet. Pure stdlib: no
+# OpenSCAD, no slicer, so it runs everywhere check.sh does, unconditionally.
+echo "-- cog-check selftest: scripts/cog-check.sh --selftest"
+if ! ./scripts/cog-check.sh --selftest; then
+  fail=1
+fi
+
 # And this proves the `render` camera opt still works on the installed
 # OpenSCAD build (issue #400): --render is value-taking on some builds
 # (2021.01, the 2026.08 nightly) and a bare trailing flag makes the parser
