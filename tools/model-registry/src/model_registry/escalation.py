@@ -142,8 +142,8 @@ def render_body(reason: str, details: Sequence[str],
     reset_lines: list[str] = []
     if reset:
         reset_lines = [
-            f"The provider's error body names the reset: **{reset}** — after "
-            "then (or once the cap is raised), confirm with a smoke run.",
+            f"The provider's error body names the reset: **{reset}**. After "
+            "that (or once the cap is raised), confirm with a smoke run.",
             "",
         ]
     return "\n".join([
