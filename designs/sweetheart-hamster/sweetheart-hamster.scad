@@ -71,14 +71,11 @@ web_len = 16;
 // both ridges to make the print one foldable piece, so it spans ±(g+web_ov).
 web_ov = 6;
 
-/* [CI fit-check — not a print parameter] */
-// "" = the model (flat PRINT pose). "fitcheck" = boolean intersection of the two
-// halves in the FLAT pose CI slices (must be EMPTY: they clear). "fitcheck_neg"
-// and "fused" reproduce the v0.1 WELD by dropping the fold axis back below the
-// top (fold_hz): the intersection INTERFERES (proves the empty check can fail),
-// and the union is one connected body that fusecheck's control catches. Wired by
-// ci.fitchecks and ci.fusecheck.
-part = "";
+/* [CI / parts — not a print-fit parameter] */
+// "" / "hamster" = the model (flat PRINT pose). "nest-coupon" = the absolute
+// nest-seat coupon (B2). "fitcheck" / "fitcheck_neg" / "fused" = boolean /
+// fusecheck controls (see ci.fitchecks, ci.fusecheck).
+part = ""; // [hamster, nest-coupon]
 // Fold axis for the deliberately-welded controls (pre-scale) — v0.1's value,
 // which welds because it sits below the 60.13 mm top. Not a print parameter.
 fused_hz = 30;
@@ -201,6 +198,27 @@ module hinge_web() {
         cube([2*(g + web_ov), web_len, web_t]);
 }
 
+// Nest-seat coupon (B2): open heart pocket at production nest_w / nest_depth
+// (depth nest_depth*2 = closed-cavity depth) carved into a thick pad so walls
+// stay printcheck-healthy. Absolute nest, not a scaled-down fake. Proves
+// open-pocket band seat only — not closed-box carry, nest-crown stone
+// headroom, or the reveal fold (see NOTES.md). Discarded: S=0.85 + nest_on on
+// the body coupon (walls thin to ~0.01 mm); clipped production half (correct
+// walls, but full-hamster CGAL + two nest islands far apart in flat pose).
+// No detent (B1 out of scope).
+module nest_coupon() {
+    floor_t = 2.4;                 // bed floor under the pocket (≥ 1.2 mm)
+    wall = 2.4;                    // rim around the heart (≥ 1.2 mm)
+    cavity_h = nest_depth * 2;     // closed-box depth (both halves)
+    difference() {
+        linear_extrude(cavity_h + floor_t)
+            offset(r = wall) heart2d(nest_w);
+        translate([0, 0, floor_t])
+            linear_extrude(cavity_h + 0.02)
+                heart2d(nest_w);
+    }
+}
+
 // Place a half at the given fold about the bed hinge line (x=0, z=0, axis Y):
 // fold=0 = FLAT print pose (default), fold=90 = folded up to assembled. `hz`
 // selects the fold-axis height (production default, or fused_hz for a control).
@@ -218,9 +236,11 @@ module model() {
     if (fold < 60) hinge_web();
 }
 
-// --- part dispatch (ci.fitchecks + ci.fusecheck) --------------------------
-if (part == "" || part == undef) {
+// --- part dispatch (ci.parts + ci.fitchecks + ci.fusecheck) ---------------
+if (part == "" || part == undef || part == "hamster") {
     model();
+} else if (part == "nest-coupon") {
+    nest_coupon();
 } else if (part == "fitcheck") {
     // FLAT (printed) pose — the pose CI actually slices: do the two half-bodies
     // overlap where they shouldn't? Must be EMPTY. v0.1 tested the CLOSED pose

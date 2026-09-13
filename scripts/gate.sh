@@ -20,6 +20,12 @@
 #   designs/<name>/<name>-coupon.scad  "print this first" coupon wrapper;
 #                                  rendered as build/<name>-coupon.stl and
 #                                  gated like any other part
+#   designs/<name>/<name>-*-coupon.scad  additional coupon wrappers (e.g.
+#                                  <name>-nest-coupon.scad, <name>-bore-coupon.scad);
+#                                  each rendered as build/<basename>.stl and
+#                                  gated the same way — so a second print-this-
+#                                  first file cannot ship broken while only a
+#                                  ci.parts -D path stays green
 #   designs/<name>/ci.fitchecks    boolean fit checks between the design's
 #                                  parts: `<part> empty` must render zero
 #                                  facets, `<part> interferes` is the
@@ -358,13 +364,17 @@ gate_one() {
     fi
   fi
 
-  # "Print this first" coupon wrapper (repo convention, see CLAUDE.md): a
-  # ≤10-line include-and-override wrapper on the production modules. It is
-  # the first STL a user prints, so it gets the same printcheck + test-slice
-  # treatment as the parts it stands in for.
-  local coupon="designs/${name}/${name}-coupon.scad"
+  # "Print this first" coupon wrappers (repo convention, see CLAUDE.md): a
+  # ≤10-line include-and-override on the production modules. The canonical
+  # <name>-coupon.scad is the hinge/fit tuner; additional <name>-*-coupon.scad
+  # files (nest seat, bore slip, …) are first-class print-this-first wrappers
+  # too and must be gated as files — a ci.parts -D path alone would leave a
+  # broken wrapper shipping green. Each wrapper is the first STL a user opens
+  # for that fit, so it gets the same printcheck + test-slice treatment.
+  local coupon coupon_stl coupon_base already
+  coupon="designs/${name}/${name}-coupon.scad"
   if [[ -f "$coupon" ]]; then
-    local coupon_stl="build/${name}-coupon.stl"
+    coupon_stl="build/${name}-coupon.stl"
     echo "== ${name} (coupon): render =="
     if ! xvfb-run -a "$OPENSCAD_BIN" ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
         -o "$coupon_stl" "$coupon"; then
@@ -374,6 +384,32 @@ gate_one() {
       stls+=("$coupon_stl")
     fi
   fi
+  # Secondary coupons: <name>-<role>-coupon.scad (does not match the canonical
+  # <name>-coupon.scad above). Basename is the STL stem so nest-coupon and
+  # bore-coupon land next to their ci.parts peers when both exist; if ci.parts
+  # already queued the same path, re-render from the WRAPPER (overwrites) and
+  # do not double-enqueue — printcheck then judges the file the user opens.
+  shopt -s nullglob
+  for coupon in designs/${name}/${name}-*-coupon.scad; do
+    shopt -u nullglob
+    coupon_base="$(basename "$coupon" .scad)"
+    coupon_stl="build/${coupon_base}.stl"
+    echo "== ${name} (coupon ${coupon_base}): render =="
+    if ! xvfb-run -a "$OPENSCAD_BIN" ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
+        -o "$coupon_stl" "$coupon"; then
+      echo "FAIL  ${name} (coupon ${coupon_base}): render failed"
+      fail=1
+      continue
+    fi
+    already=0
+    for s in ${stls[@]+"${stls[@]}"}; do
+      if [[ "$s" == "$coupon_stl" ]]; then already=1; break; fi
+    done
+    if [[ "$already" -eq 0 ]]; then
+      stls+=("$coupon_stl")
+    fi
+  done
+  shopt -u nullglob
 
   # Boolean fit checks (designs/<name>/ci.fitchecks): each line names a part
   # value that renders a boolean between the design's other parts, plus the
