@@ -32,6 +32,15 @@
 #                                  mandatory negative control that must not
 #                                  (proves the check can fail). Never
 #                                  printchecked or sliced
+#   designs/<name>/ci.cog          CoG / tip-over stability manifest (format:
+#                                  tools/cogcheck): per-part densities,
+#                                  non-printed masses, assembly transforms and
+#                                  a required stability margin, checked
+#                                  against the gate's rendered STLs. A TIP
+#                                  RISK is a WARN (fusecheck precedent); a
+#                                  broken manifest, an unmeasurable mesh, or a
+#                                  manifest part this run never rendered is a
+#                                  FAIL
 #   designs/<name>/derives.conf    lineage of a derivative design: the
 #                                  parent(s) it includes, the parent parts it
 #                                  claims to replace, and any diamond-ok:
@@ -657,6 +666,44 @@ gate_one() {
       fi
     else
       echo "WARN  ${name}: ci.plate present but prusa-slicer not on PATH — plate 3MF check skipped"
+    fi
+  fi
+
+  # CoG / tip-over stability (designs/<name>/ci.cog, issue #623). Every gate
+  # above proves the part PRINTS; none of them proves the assembled object
+  # STANDS — two heavy spheres cantilevered high on thin stalks over a low
+  # airy truss slice beautifully, score 100/100, and tip over on a desk bump.
+  # tools/cogcheck measures the assembled object (per-part mass from the
+  # rendered mesh × the manifest's density, non-printed hardware as point
+  # masses, transforms into the standing frame) and compares the CoG's ground
+  # projection against the convex hull of the contact geometry. A TIP-RISK
+  # verdict is a WARN, not a fail — the fusecheck precedent: a tip risk is a
+  # design call to look at, not a gate failure. A broken manifest or
+  # unmeasurable mesh IS a fail (a check that cannot run is not a check), and
+  # so is a manifest naming an STL this run never rendered: a stale build/
+  # artifact from an earlier gate would put a CoG on geometry that did not
+  # ship, which is worse than no CoG at all.
+  if [[ -f "designs/${name}/ci.cog" ]]; then
+    local cogline cogkey cogval cogbad=0
+    while IFS= read -r cogline || [[ -n "$cogline" ]]; do
+      cogline="${cogline%%#*}"
+      cogkey="" cogval=""
+      read -r cogkey cogval _ <<<"$cogline" || true
+      [[ "$cogkey" == "part:" ]] || continue
+      local cogstl="build/${cogval}" matched=0 s
+      for s in ${stls[@]+"${stls[@]}"}; do
+        if [[ "$s" == "$cogstl" ]]; then matched=1; break; fi
+      done
+      if [[ "$matched" -eq 0 ]]; then
+        echo "FAIL  cogcheck ${name}: manifest names ${cogval}, which the gate never rendered — a CoG on a stale mesh proves nothing"
+        fail=1
+        cogbad=1
+      fi
+    done < "designs/${name}/ci.cog"
+    if [[ "$cogbad" -eq 0 ]]; then
+      if ! "$(dirname "$0")/cog-check.sh" "$name"; then
+        fail=1
+      fi
     fi
   fi
 
