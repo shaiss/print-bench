@@ -472,7 +472,7 @@ jobs:
           && env.HAS_GH_TOKEN != 'true'
           && steps.lock_cleanup.outputs.delivered == 'true'
         run: |
-          echo "::notice::the draft PR for #${{ steps.select.outputs.issue }} was opened with GITHUB_TOKEN, so CI will not auto-run on it — push any commit, or set the GH_TOKEN repo secret (a PAT with contents + pull-requests + issues write) so future ships trigger checks automatically."
+          echo "::notice::if a draft PR for #${{ steps.select.outputs.issue }} was opened with GITHUB_TOKEN, CI will not auto-run on it — push any commit, or set the GH_TOKEN repo secret (a PAT with contents + pull-requests + issues write) so future ships trigger checks automatically."
 
       - name: Explain a skipped agentic run
         if: >-
@@ -574,7 +574,7 @@ jobs:
               echo "- provider: ${PROVIDER} (head)"
               echo "- ship walk: ${SHIP:-skipped} (diagnostic only)"
               if [ "${DELIVERED}" = "true" ]; then
-                echo "- disposition: delivered — a corroborating branch or an open closing PR exists (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /ship-issue verdict and the draft PR)"
+                echo "- disposition: delivered — a corroborating branch or an open closing PR exists (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /ship-issue verdict and any draft PR)"
               elif [ "${DECLINED}" = "true" ]; then
                 echo "- disposition: declined — the run stopped deliberately (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}))"
               else
