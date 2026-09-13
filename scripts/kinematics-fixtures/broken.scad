@@ -18,6 +18,10 @@
 //                             manifests above be well-formed
 //   assembled                 the same cube (not gated)
 // Units: mm. Tiny on purpose — the selftest renders it, nobody prints it.
+//
+// Also: `nested_phase` is assigned ONLY inside a module body (never at
+// top level), and `counterpart == "broken-counterpart-only"` is a lookalike
+// that must NOT satisfy a `part == "…"` dispatch check.
 
 /* [Landing stop] */
 stop = 0;               // integer stop index, stepped by the gate
@@ -29,12 +33,21 @@ part = "assembled";     // which branch to render (see the header)
  * and the block comment is what the stripper must see through.
  */
 
+// Nested-only assignment: a -D of nested_phase would bind nothing useful
+// for top-level geometry; the gate must reject it as a sweep parameter.
+module nested_only() {
+    nested_phase = 0;
+}
+
 if (part == "broken-assert") {          // if (part == "broken-in-line-comment") — prose, not a branch
     assert(false, "kinematics fixture: this branch fails on purpose");
     cube(1);
 } else if (part == "broken-unknown-module") {
     no_such_module();                   // WARNING: Ignoring unknown module — renders empty
 } else if (part == "broken-solid") {
+    cube(1);
+} else if (counterpart == "broken-counterpart-only") {
+    // Lookalike identifier: must NOT count as part == "broken-counterpart-only"
     cube(1);
 } else if (part == "assembled") {
     cube(1);

@@ -1,0 +1,6 @@
+# Structural refusal (selftest: must FAIL before rendering): the source has
+# counterpart == "broken-counterpart-only" but no part == "…" selector for
+# that name. A substring match on "part" would falsely accept it.
+stops stop 0
+empty broken-counterpart-only
+empty-control broken-solid

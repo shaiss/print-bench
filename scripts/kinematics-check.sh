@@ -50,12 +50,13 @@
 # `stops` line is malformed. The swept/stepped parameter must be a plain
 # top-level variable of the entry .scad (the -D override replaces its
 # assignment, exactly like `part`), and the gate CHECKS that it is — an
-# assignment `<param> = …` at the start of a line of the entry file itself,
-# comments stripped — because a -D of a name the source never assigns binds
-# nothing and OpenSCAD says nothing: the geometry sits at one pose and every
-# check holds at every value (`sweep kin_phse` is a green gate over one
-# frame). Never sweep `$t` — top-level assignments evaluate before a -D'd
-# special variable lands (see animations.conf). A `stops` list is capped at
+# assignment `<param> = …` at top-level scope of the entry file itself
+# (outside any `{…}` module/block, comments stripped) — because a -D of a
+# name the source never assigns at top level binds nothing and OpenSCAD
+# says nothing: the geometry sits at one pose and every check holds at
+# every value (`sweep kin_phse` is a green gate over one frame). Never
+# sweep `$t` — top-level assignments evaluate before a -D'd special
+# variable lands (see animations.conf). A `stops` list is capped at
 # KIN_MAX_STEPS values, the same cap `steps` carries: the render budget is
 # bounded either way. A manifest is validated whole — syntax, the parameter,
 # dispatch branches, the mandatory controls — BEFORE the first render, so a
@@ -71,10 +72,12 @@
 # reads the binary STL (absent file = 0). A part whose name has no
 # `part == "<part>"` dispatch branch in the source renders empty and would
 # pass `empty` forever — the typo IS a pass — so the branch is required, the
-# way ci.fitchecks requires it. The source is grepped with its `//` and
-# `/* */` comments stripped (kin_strip_comments), so a branch that exists only
-# in the header prose, or a part name quoted in a comment, cannot satisfy it;
-# the same stripped text is what the parameter check above reads.
+# way ci.fitchecks requires it. The matcher demands an identifier boundary
+# before `part`, so `counterpart == "…"` cannot satisfy it. The source is
+# grepped with its `//` and `/* */` comments stripped (kin_strip_comments),
+# so a branch that exists only in the header prose, or a part name quoted
+# in a comment, cannot satisfy it; the same stripped text is what the
+# parameter check above reads.
 #
 # WRONG-GEOMETRY WARNINGS fail the check. lineage_render_binstl returns
 # success on a render whose only complaint is a WARNING, and on the
@@ -148,12 +151,29 @@ kin_strip_comments() {
     }' "$1"
 }
 
-# Does the comment-stripped source ($1) assign <name> ($2) at the start of a
-# line — `name = …`, not `name == …`? That is the top-level assignment a -D
-# replaces; anything else (an include's variable, a module parameter, a typo)
-# leaves the -D binding nothing.
+# Does the comment-stripped source ($1) assign <name> ($2) at TOP LEVEL —
+# `name = …` (not `name == …`) outside any `{…}` block? That is the
+# assignment a -D replaces; a nested assignment inside a module/function,
+# an include's variable, a module parameter, or a typo leaves the -D
+# binding nothing (or overriding the wrong binding).
 kin_declares_var() {
-  grep -Eq "^[[:space:]]*${2}[[:space:]]*=([^=]|$)" <<<"$1"
+  awk -v name="$2" '
+    BEGIN { depth = 0; found = 0 }
+    {
+      line = $0; n = length(line); i = 1
+      while (i <= n && substr(line, i, 1) ~ /[[:space:]]/) i++
+      if (depth == 0 && i <= n) {
+        rest = substr(line, i)
+        if (rest ~ "^" name "[[:space:]]*=([^=]|$)") found = 1
+      }
+      for (; i <= n; i++) {
+        c = substr(line, i, 1)
+        if (c == "{") depth++
+        else if (c == "}" && depth > 0) depth--
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  ' <<<"$1"
 }
 
 # Run one manifest against one source. Prints the ok/FAIL lines, returns 0
@@ -256,9 +276,10 @@ kin_run() {
         # A real DISPATCH selector in the source, as ci.fitchecks demands: a
         # part with no branch renders empty and passes `empty` vacuously.
         # Grepped with comments stripped, so a branch that exists only in
-        # the header prose cannot satisfy it.
+        # the header prose cannot satisfy it. Identifier boundary before
+        # `part` so `counterpart == "…"` cannot pass as `part == "…"`.
         if ! [[ "$a" =~ ^[A-Za-z0-9_-]+$ ]] \
-           || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${a}\"" <<<"$stripped"; then
+           || ! grep -Eq '(^|[^A-Za-z0-9_$])part[[:space:]]*==[[:space:]]*"'"${a}"'"' <<<"$stripped"; then
           echo "FAIL  kinematics ${label}: no 'part == \"${a}\"' dispatch branch in ${src} — a part with no branch renders empty and passes vacuously"
           fail=1
           continue
@@ -415,6 +436,8 @@ kin_selftest() {
     "landing.neg-no-check.kinematics|fail|no 'empty' or 'nonempty' check"
     "landing.neg-no-dispatch.kinematics|fail|no 'part == \"landing-nope\"' dispatch branch"
     "broken.neg-comment-dispatch.kinematics|fail|no 'part == \"broken-in-line-comment\"' dispatch branch;;no 'part == \"broken-in-block-comment\"' dispatch branch"
+    "broken.neg-counterpart-dispatch.kinematics|fail|no 'part == \"broken-counterpart-only\"' dispatch branch"
+    "broken.neg-nested-param.kinematics|fail|sweep parameter \"nested_phase\" is not a top-level variable of"
     "landing.neg-bad-param.kinematics|fail|sweep parameter \"sotp\" is not a top-level variable of;;stops parameter \"sto\" is not a top-level variable of"
     "landing.neg-too-many-stops.kinematics|fail|stops carries 65 values, at most 64 allowed"
     "landing.neg-check-before-sweep.kinematics|fail|has no sweep or stops declared before it"
