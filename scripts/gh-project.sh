@@ -5,12 +5,13 @@
 # TWO BOARDS, one emitter (pass `--board <name>` before the subcommand;
 # default `autonomy`):
 #   * autonomy — the roadmap board (issue #148): the autonomy loop's backlog,
-#     with a human-owned Stage and Story points. docs/roadmap-board.md.
+#     with a human-owned Stage, Story points, and a Maturity lens (product
+#     maturity; source of truth is maturity:* on Product health). docs/roadmap-board.md.
 #   * growth   — the Lark approval board (docs/growth.md): where each queued
 #     Twitter/X post sits, so a human can see and approve them. Its Stage is a
 #     pure LENS the growth-board-sync workflow derives from each queue issue's
 #     state + labels + markers (growth.board.stage_of), so it has no Story
-#     points and its Stage is always set, never set-if-new.
+#     points, no Maturity, and its Stage is always set, never set-if-new.
 #
 # WHY a recipe you run, not an API call the automation makes: this session's
 # tooling cannot create or populate a Projects v2 board (the board/field/item
@@ -58,11 +59,16 @@ DEFAULT_BOARD="autonomy"
 # (Todo/In Progress/Done) the CLI cannot reshape, so we add "Stage" and group
 # the board by it in the UI (view config is UI-only). Options are ordered; names
 # only (the CLI can't set colours). POINTS_FIELD is a NUMBER field, or empty for
-# a board that does not estimate.
+# a board that does not estimate. MATURITY_FIELD is a SINGLE_SELECT lens on the
+# autonomy board only (empty on growth) — product maturity, not workflow Stage;
+# the git-native maturity:* label on the pinned Product health issue is the
+# source of truth (see docs/roadmap-board.md).
 PROJECT_TITLE=""
 STAGE_FIELD=""
 STAGE_OPTIONS=""
 POINTS_FIELD=""
+MATURITY_FIELD=""
+MATURITY_OPTIONS=""
 
 select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
   BOARD="$1"
@@ -74,6 +80,11 @@ select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
       # Story points, Fibonacci 1/2/3/5/8 by convention: a chunked one-PR
       # sub-issue is 1-3; a bigger estimate is a hint it should be re-chunked.
       POINTS_FIELD="Story points"
+      # Maturity lens (not Stage): ideation → prototype → hitl → mvp. Board
+      # field only — do not confuse with Stage; source of truth is maturity:*
+      # on the Product health issue.
+      MATURITY_FIELD="Maturity"
+      MATURITY_OPTIONS="ideation,prototype,hitl,mvp"
       ;;
     growth)
       PROJECT_TITLE="print-bench growth"
@@ -86,8 +97,11 @@ select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
       # Approved (a human's approved-to-post label) -> Posted; Parked is
       # needs-decision, Attention is a live claim that never closed.
       STAGE_OPTIONS="Queued,Drafted,Approved,Posted,Parked,Attention"
-      # Growth posts are not estimated: no Story points field.
+      # Growth posts are not estimated: no Story points field. Maturity is
+      # autonomy-only (product-health lens), not a growth-desk concept.
       POINTS_FIELD=""
+      MATURITY_FIELD=""
+      MATURITY_OPTIONS=""
       ;;
     *)
       die "unknown board '$1' (known: autonomy, growth)"
@@ -113,6 +127,8 @@ TITLE="$PROJECT_TITLE"
 STAGE_FIELD="$STAGE_FIELD"
 STAGE_OPTIONS="$STAGE_OPTIONS"
 POINTS_FIELD="$POINTS_FIELD"
+MATURITY_FIELD="$MATURITY_FIELD"
+MATURITY_OPTIONS="$MATURITY_OPTIONS"
 EOF
   # Part A — steps 0-1 and the field_absent helper (every board has these).
   cat <<'EOF'
@@ -195,6 +211,27 @@ else
   echo "field exists: $STAGE_FIELD"
 fi
 EOF
+
+  # Part D — the "Maturity" (SINGLE_SELECT) lens, emitted ONLY for a board
+  # whose spec carries one (autonomy). Distinct from Stage: workflow position
+  # vs product maturity. A board without Maturity (growth) gets no Maturity
+  # bash in its recipe at all.
+  if [ -n "$MATURITY_FIELD" ]; then
+    cat <<'EOF'
+
+# 4. "Maturity" (SINGLE_SELECT) — create if absent. A lens only: the
+#    git-native maturity:* label on the pinned Product health issue is the
+#    source of truth (same asymmetry as points-<n> vs Story points). Do not
+#    reuse or reshape Stage for this.
+if field_absent "$MATURITY_FIELD"; then
+  gh project field-create "$NUM" --owner "$OWNER" --name "$MATURITY_FIELD" \
+    --data-type SINGLE_SELECT --single-select-options "$MATURITY_OPTIONS"
+  echo "created field: $MATURITY_FIELD (SINGLE_SELECT: $MATURITY_OPTIONS)"
+else
+  echo "field exists: $MATURITY_FIELD"
+fi
+EOF
+  fi
 
   # The closing add-item hint, matched to the board (points for autonomy, the
   # first Stage option as the entry stage for a lens board like growth).
@@ -357,6 +394,13 @@ selftest() {
   grep -qFe '--data-type SINGLE_SELECT' <<<"$out" || die "selftest: Stage single-select field missing"
   grep -qF 'Backlog,Ready,In progress,In review,Done' <<<"$out" \
     || die "selftest: stage options missing"
+  # Maturity lens (autonomy only): distinct SINGLE_SELECT, exact option list.
+  grep -qF 'MATURITY_FIELD="Maturity"' <<<"$out" || die "selftest: Maturity field name not substituted"
+  grep -qF 'ideation,prototype,hitl,mvp' <<<"$out" \
+    || die "selftest: Maturity options missing"
+  # Stage options must remain the workflow pipeline — Maturity must not replace them.
+  grep -qF 'STAGE_OPTIONS="Backlog,Ready,In progress,In review,Done"' <<<"$out" \
+    || die "selftest: Stage options were altered (Maturity must not reuse Stage)"
   grep -qF 'gh auth refresh -s project' <<<"$out" || die "selftest: project-scope refresh missing"
   # The refresh must be guarded so an env-var token (CI/automation) doesn't abort
   # the recipe under set -e (Vercel agent review on #164).
@@ -419,6 +463,11 @@ selftest() {
   grep -qFe '--data-type NUMBER' <<<"$grec" \
     && die "selftest: growth board must not emit a Story points NUMBER field" || true
   grep -qFe '--data-type SINGLE_SELECT' <<<"$grec" || die "selftest: growth Stage single-select field missing"
+  # Growth must not carry the autonomy Maturity lens.
+  grep -qF 'MATURITY_FIELD="Maturity"' <<<"$grec" \
+    && die "selftest: growth board must not emit a Maturity field" || true
+  grep -qF 'ideation,prototype,hitl,mvp' <<<"$grec" \
+    && die "selftest: growth board must not emit Maturity options" || true
   # add-item on the growth board: a growth Stage is accepted and substituted.
   local gadd
   gadd="$("$SELF" --board growth add-item "https://github.com/shaiss/print-bench/issues/1" --stage Approved)"

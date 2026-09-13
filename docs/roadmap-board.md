@@ -46,6 +46,7 @@ carried by a clone, exactly like the rest of the repo's config.
 | Title | `print-bench autonomy` | owner `shaiss` (a user, not an org) |
 | `Stage` (single-select) | Backlog · Ready · In progress · In review · Done | our pipeline. See the built-in-Status note below |
 | `Story points` (number) | Fibonacci 1/2/3/5/8 | a chunked one-PR sub-issue is 1–3; bigger = re-chunk |
+| `Maturity` (single-select) | ideation · prototype · hitl · mvp | **lens only** — see Maturity below. Not on the growth board |
 | Milestone | GitHub's built-in Milestone field | fed by repo milestones (`gh api …/milestones`) — groups chunked epics + children |
 
 **Two things the CLI can't do (documented one-time UI steps):**
@@ -116,6 +117,29 @@ each genuinely-small (auto-armed) one-PR child it files with one of `points-1`,
 sized — an estimate of 5+ is its signal to split the piece further, not to file
 it. And a **human triaging** applies the label by hand to anything else. Either
 way the label is an opt-in seam: an issue without one simply carries no estimate.
+
+## Maturity (the `maturity:*` label on Product health)
+
+`Maturity` is a **board lens**, not a second workflow Stage. The recipe adds a
+distinct `Maturity` single-select (`ideation`, `prototype`, `hitl`, `mvp`) on
+**`print-bench autonomy` only** — never on `print-bench growth`, and never by
+reshaping or reusing `Stage`.
+
+The source of truth is git-native: the `maturity:*` label on the pinned
+**Product health** issue
+([#646](https://github.com/shaiss/print-bench/issues/646)), not the card field.
+That is the same deliberate asymmetry as `points-<n>` vs **Story points**:
+
+| Field | Owned where | Role |
+|---|---|---|
+| `Stage` | board (human drags; sync is set-if-new) | workflow position of a card |
+| `Story points` | `points-<n>` label on the issue | estimate; board mirrors the label |
+| `Maturity` | `maturity:*` on Product health | product maturity; board field is a lens |
+
+Re-run `scripts/gh-project.sh setup | bash` after this field lands in the spec to
+create it on the live board (idempotent: `field_absent` + `field-create`). Setting
+or syncing Maturity values is out of scope for the provisioning recipe — keep
+the Product health label current; treat the board column as the surface.
 
 ## One-time UI steps (views + milestones)
 
