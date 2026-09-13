@@ -259,6 +259,9 @@ surfaces studies awaiting a read live in
   `print-in-place.scad` (print-in-place slide rails, tabs, end-stops,
   sacrificial membranes and a teardrop-bore hinge, extracted from the
   archived sushi-battleship),
+  `spaceframe.scad` (parametric space-frame trusses — warren/pratt/vierendeel
+  topologies, cosine taper to needle ends, a separate core/web split for
+  two-tone exports),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
   each with a `*-demo.scad` regression render, plus vendored
