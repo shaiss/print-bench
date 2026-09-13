@@ -937,8 +937,6 @@ def main():
             log("--selftest-cap-child needs the state-file path argument")
             raise SystemExit(2)
         raise SystemExit(selftest_cap_child(sys.argv[i + 1]))
-    if "--selftest" in sys.argv:
-        raise SystemExit(selftest())
     log(f"starting (repo={os.environ.get('GITHUB_REPOSITORY', '?')}, "
         f"run={os.environ.get('GITHUB_RUN_ID', 'attended')}, "
         f"auto_arm={_auto_arm()})")
