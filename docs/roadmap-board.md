@@ -139,12 +139,14 @@ That is the same deliberate asymmetry as `points-<n>` vs **Story points**:
 
 Re-run `scripts/gh-project.sh setup | bash` after this field lands in the spec to
 create it on the live board (idempotent: `field_absent` + `field-create`). If
-**Maturity already exists**, the recipe does **not** add new options (`gh`
-cannot grow a SINGLE_SELECT via `field-create`) — add `rc` (or any later option)
-once in the Project UI so the live board matches the committed set. Setting or
-syncing Maturity values is out of scope for the provisioning recipe — keep the
-Product health label current; treat the board column as the surface. Do not
-retarget Product health's `maturity:*` label from this recipe.
+**Maturity already exists**, the recipe **validates** it is `SINGLE_SELECT` with
+options exactly `ideation,prototype,hitl,rc,mvp` (order + set) and only then
+prints `field exists`; a wrong type or option mismatch **fails loudly** listing
+live vs expected. `gh` cannot grow a SINGLE_SELECT via `field-create` — add or
+fix options once in the Project UI, then re-run. Setting or syncing Maturity
+*values* is out of scope for the provisioning recipe — keep the Product health
+label current; treat the board column as the surface. Do not retarget Product
+health's `maturity:*` label from this recipe.
 
 ## One-time UI steps (views + milestones)
 

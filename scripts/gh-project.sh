@@ -223,16 +223,37 @@ EOF
 #    git-native maturity:* label on the pinned Product health issue is the
 #    source of truth (same asymmetry as points-<n> vs Story points). Do not
 #    reuse or reshape Stage for this.
-#    If the field already exists, this step is a no-op: gh cannot add options
-#    to an existing SINGLE_SELECT via field-create. After a options-set change
-#    (e.g. adding rc), add the new option once in the Project UI (or equivalent
-#    GraphQL) so the live board matches MATURITY_OPTIONS.
+#    If the field already exists, validate it is SINGLE_SELECT with options
+#    exactly equal to MATURITY_OPTIONS (order + set). Compatible → "field
+#    exists"; incompatible → fail listing live vs expected. gh cannot add
+#    options to an existing SINGLE_SELECT via field-create — fix mismatches
+#    once in the Project UI (or GraphQL), then re-run.
 if field_absent "$MATURITY_FIELD"; then
   gh project field-create "$NUM" --owner "$OWNER" --name "$MATURITY_FIELD" \
     --data-type SINGLE_SELECT --single-select-options "$MATURITY_OPTIONS"
   echo "created field: $MATURITY_FIELD (SINGLE_SELECT: $MATURITY_OPTIONS)"
 else
-  echo "field exists: $MATURITY_FIELD (options not reconciled — add missing options in the UI if the spec grew)"
+  # Accept either GraphQL typename or dataType (gh versions differ).
+  _mat_type=$(gh project field-list "$NUM" --owner "$OWNER" -L 200 --format json \
+    --jq ".fields[] | select(.name==\"$MATURITY_FIELD\") | (.dataType // .type // \"\")")
+  case "$_mat_type" in
+    SINGLE_SELECT|ProjectV2SingleSelectField) ;;
+    *)
+      echo "Maturity field exists but is not SINGLE_SELECT (got: ${_mat_type:-unknown})" >&2
+      echo "  expected: SINGLE_SELECT with options exactly: $MATURITY_OPTIONS" >&2
+      exit 1
+      ;;
+  esac
+  _mat_opts=$(gh project field-list "$NUM" --owner "$OWNER" -L 200 --format json \
+    --jq ".fields[] | select(.name==\"$MATURITY_FIELD\") | [(.options // [])[].name] | join(\",\")")
+  if [ "$_mat_opts" != "$MATURITY_OPTIONS" ]; then
+    echo "Maturity field options mismatch (must match exactly):" >&2
+    echo "  live:     ${_mat_opts:-<none>}" >&2
+    echo "  expected: $MATURITY_OPTIONS" >&2
+    echo "  gh cannot grow/reorder a SINGLE_SELECT via field-create — add or fix options in the Project UI, then re-run." >&2
+    exit 1
+  fi
+  echo "field exists: $MATURITY_FIELD (SINGLE_SELECT: $MATURITY_OPTIONS)"
 fi
 EOF
   fi
@@ -404,6 +425,18 @@ selftest() {
   grep -qF 'MATURITY_FIELD="Maturity"' <<<"$out" || die "selftest: Maturity field name not substituted"
   grep -qF 'ideation,prototype,hitl,rc,mvp' <<<"$out" \
     || die "selftest: Maturity options missing"
+  # The recipe must emit the real field-create / SINGLE_SELECT command path
+  # (not only header MATURITY_* assignments).
+  grep -qF 'gh project field-create "$NUM" --owner "$OWNER" --name "$MATURITY_FIELD"' <<<"$out" \
+    || die "selftest: Maturity field-create command path missing from autonomy recipe"
+  # Patterns that start with -- must use grep -e/-- so grep does not treat them as flags.
+  grep -qFe '--data-type SINGLE_SELECT --single-select-options "$MATURITY_OPTIONS"' <<<"$out" \
+    || die "selftest: Maturity SINGLE_SELECT create flags missing from autonomy recipe"
+  # Existing-field path must validate type + exact options (fail on mismatch).
+  grep -qF 'Maturity field options mismatch' <<<"$out" \
+    || die "selftest: Maturity existing-field options mismatch guard missing"
+  grep -qE 'SINGLE_SELECT\|ProjectV2SingleSelectField' <<<"$out" \
+    || die "selftest: Maturity existing-field SINGLE_SELECT type check missing"
   # Stage options must remain the workflow pipeline — Maturity must not replace them.
   grep -qF 'STAGE_OPTIONS="Backlog,Ready,In progress,In review,Done"' <<<"$out" \
     || die "selftest: Stage options were altered (Maturity must not reuse Stage)"
