@@ -22,6 +22,16 @@ SCHEMA = "stylelift/style@1"
 # snapped up to this ladder so a spec never asks for $fn = 83.
 FN_LADDER = (16, 24, 32, 48, 64, 96, 128, 180, 256)
 
+# Legibility of cut-through marks. These are the numbers a style pack's rules
+# quote when its parts carry stencil glyphs or windows: a mark smaller than
+# this fraction of the part cannot be read at the distance a mark is read
+# from, and a web thinner than this many extrusion lines will not print as
+# the line the design drew. When the reference itself is cut through, derive()
+# proposes both as required rules; a hand-written pack copies the same shape.
+GLYPH_MIN_FRACTION = 0.15   # glyph height >= 0.15 x part diameter
+BRIDGE_MIN_WIDTHS = 2.0     # bridge width >= 2 x line width
+LINE_WIDTH_MM = 0.4         # the extrusion width the bridge bound assumes
+
 
 class Status(str, Enum):
     PASS = "pass"
@@ -361,6 +371,42 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
                    "dominant edge grammar",
         })
 
+    # Facetedness is the axis softness cannot see: a stencil-cut plate and a
+    # coarsely drawn smooth one both turn steep folds everywhere, and only the
+    # share of that edge length which the mesh's own curves do NOT explain as
+    # tessellation is design. Whichever side the reference sits on is the
+    # family's look, so a smooth reference proposes a ceiling, a faceted one
+    # a floor.
+    facet = dig(measurement, "edges.facetedness") or {}
+    sharpness = facet.get("sharpness")
+    if sharpness is not None:
+        sharpness = round(float(sharpness), 3)
+        tokens["sharpness"] = sharpness
+        if sharpness >= 0.5:
+            rules.append({
+                "id": "facet-sharpness",
+                "metric": "edges.facetedness.sharpness",
+                "op": "min", "value": round(max(0.25, sharpness * 0.6), 3),
+                "severity": "advisory",      # a length share; see soft-edges
+                "when": {"metric": "edges.facetedness.shaped_length_mm",
+                         "op": "min", "value": 1.0},
+                "why": "this is a faceted family: most of its shaped edge "
+                       "length is decided angle above what its own curve "
+                       "resolution explains as tessellation",
+            })
+        elif sharpness <= 0.2:
+            rules.append({
+                "id": "no-design-facets",
+                "metric": "edges.facetedness.sharpness",
+                "op": "max", "value": round(max(0.3, sharpness * 2 + 0.15), 3),
+                "severity": "advisory",      # a length share; see soft-edges
+                "when": {"metric": "edges.facetedness.shaped_length_mm",
+                         "op": "min", "value": 1.0},
+                "why": "this is a smooth family: its edges are curve "
+                       "tessellation, and folds that steep but undeclared "
+                       "would read as unwanted facets",
+            })
+
     if walls.get("shelled"):
         wall = walls.get("mode_mm")
         if wall:
@@ -375,6 +421,66 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
                 "when": {"metric": "walls.shelled", "op": "min", "value": 1},
                 "why": f"the family builds at about {wall:g} mm of material; "
                        "thinner walls change how solid the part feels",
+            })
+
+    # How airy the form is, pose-stably, and — when the family really is cut
+    # through — the legibility pair: a glyph big enough to read and webs wide
+    # enough to print. Those two are required, not advisory: a stencil that
+    # fails them does not merely look off-style, it cannot do its job.
+    openness = measurement.get("openness") or {}
+    if openness.get("measured"):
+        void = float(openness.get("void_fraction") or 0.0)
+        tokens["void_fraction"] = round(void, 3)
+        measured_gate = {"metric": "openness.measured", "op": "min", "value": 1}
+        if void >= 0.05:
+            rules.append({
+                "id": "openness",
+                "metric": "openness.void_fraction",
+                "op": "min", "value": round(void * 0.6, 3),
+                "severity": "advisory",
+                "when": measured_gate,
+                "why": f"the reference is cut through ({void:.0%} of its "
+                       "silhouette is open); a solid part reads as a "
+                       "different family entirely",
+            })
+            rules.append({
+                "id": "legible-glyph",
+                "metric": "openness.max_void_span_fraction",
+                "op": "min", "value": GLYPH_MIN_FRACTION,
+                "severity": "required",
+                # Gated on "a cut-through measurably exists", not on the void
+                # fraction: a plate of tiny glyphs has almost no open area but
+                # is exactly the part the legibility rule exists for. A solid
+                # part spans nothing, so it skips.
+                "when": {"metric": "openness.max_void_span_mm",
+                         "op": "min", "value": 0.01},
+                "why": f"the family's cut-throughs are legible marks: the "
+                       f"largest must span at least {GLYPH_MIN_FRACTION:.0%} "
+                       "of the part, or it cannot be read at the distance a "
+                       "mark is read from",
+            })
+            bridge = _mm(BRIDGE_MIN_WIDTHS * LINE_WIDTH_MM)
+            rules.append({
+                "id": "bridge-width",
+                "metric": "openness.min_bridge_mm",
+                "op": "min", "value": bridge,
+                "severity": "required",
+                "when": {"metric": "openness.max_void_span_mm",
+                         "op": "min", "value": 0.01},
+                "why": f"the webs between cut-throughs must print as the "
+                       f"lines the design drew: at least "
+                       f"{BRIDGE_MIN_WIDTHS:g} extrusion widths of "
+                       f"{LINE_WIDTH_MM:g} mm, i.e. {bridge:g} mm",
+            })
+        else:
+            rules.append({
+                "id": "closed-form",
+                "metric": "openness.void_fraction",
+                "op": "max", "value": 0.02,
+                "severity": "advisory",
+                "when": measured_gate,
+                "why": "the family is solid: cut-throughs would change how "
+                       "it reads more than any edge treatment could",
             })
 
     hole = dig(measurement, "features.dominant_hole_d_mm")

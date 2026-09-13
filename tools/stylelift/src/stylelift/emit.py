@@ -12,7 +12,7 @@ import hashlib
 from pathlib import Path
 
 from .measure import measure
-from .spec import StyleSpec, derive
+from .spec import LINE_WIDTH_MM, StyleSpec, derive
 
 # Tokens that become OpenSCAD variables: the numbers somebody types into
 # geometry. Ratios and targets stay in style.json, where the checker reads them.
@@ -31,7 +31,8 @@ SCAD_TOKENS = (
 # Tokens that exist so a rule has something to compare against, and that you
 # would never build with. Kept out of style.scad: a design that wrote
 # `softness = 0.79` into its geometry would be doing something meaningless.
-CHECK_ONLY = frozenset({"softness", "bbox_fill", "grammar_rounded"})
+CHECK_ONLY = frozenset({"softness", "bbox_fill", "grammar_rounded",
+                        "sharpness", "void_fraction"})
 
 
 def sha256(path: str | Path) -> str:
@@ -158,6 +159,27 @@ def _evidence_table(spec: StyleSpec) -> list[str]:
                     f"{edges['form']['dominant_r_mm']:.3g} mm |")
     if chamfers.get("dominant_leg_mm"):
         rows.append(f"| Chamfer leg | {chamfers['dominant_leg_mm']:.3g} mm |")
+    facet = edges.get("facetedness") or {}
+    if facet.get("sharpness") is not None:
+        rows.append(
+            f"| Facet sharpness | {facet['sharpness']:.0%} of shaped edge "
+            "length is design facet"
+            + (f" (tessellation under {facet['tessellation_turn_deg']:g} deg)"
+               if facet.get("tessellation_turn_deg") is not None else "")
+            + " |")
+    openness = m.get("openness") or {}
+    if openness.get("measured"):
+        rows.append(f"| Void fraction | {openness['void_fraction']:.1%} "
+                    f"(solid-angle mean over {openness['directions']} views) |")
+        if openness.get("max_void_span_mm"):
+            rows.append(
+                f"| Largest cut-through | {openness['max_void_span_mm']:.3g} mm "
+                f"({openness['max_void_span_fraction']:.0%} of the part) |")
+        if openness.get("min_bridge_mm") is not None:
+            rows.append(
+                f"| Narrowest bridge | {openness['min_bridge_mm']:.3g} mm "
+                f"({openness['min_bridge_mm'] / LINE_WIDTH_MM:g} extrusion "
+                f"lines at {LINE_WIDTH_MM:g} mm) |")
     if massing.get("bbox_fill") is not None:
         rows.append(f"| Fills its bounding box | {massing['bbox_fill']:.0%} |")
     if m.get("walls", {}).get("shelled"):
