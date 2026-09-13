@@ -38,6 +38,7 @@ drifts. Read the outputs and run §2 accordingly:
 | `printcheck_tests` | `pytest tools/printcheck/tests` |
 | `stylelift_tests` | `pytest tools/stylelift/tests` |
 | `lineage_tests` | `pytest tools/lineage/tests` |
+| `cogcheck_tests` | `pytest tools/cogcheck/tests` |
 | `backlog_burn_tests` | `pytest tools/backlog-burn/tests` |
 | `backlog_groomer_tests` | `pytest tools/backlog-groomer/tests` |
 | `model_registry_tests` | `pytest tools/model-registry/tests` |
@@ -79,6 +80,7 @@ actionlint .github/workflows/*.yml   # if missing: install pinned, same as ci.ym
 python -m pytest tools/printcheck/tests -q           # if printcheck_tests=true
 python -m pytest tools/stylelift/tests -q            # if stylelift_tests=true
 python -m pytest tools/lineage/tests -q              # if lineage_tests=true
+python -m pytest tools/cogcheck/tests -q             # if cogcheck_tests=true
 python -m pytest tools/backlog-burn/tests -q         # if backlog_burn_tests=true
 python -m pytest tools/backlog-groomer/tests -q      # if backlog_groomer_tests=true
 python -m pytest tools/model-registry/tests -q       # if model_registry_tests=true
@@ -98,7 +100,7 @@ The pytest lines presume the suite's package is importable. CI pip-installs each
 one before running it; locally the SessionStart hook installs only `printcheck`
 and `stylelift`. Of the rest, the suites whose tests bootstrap `src/` into
 `sys.path` themselves (`lineage`, `stylelift`, `model-registry`, `ci-gates`,
-`backlog-burn`) collect with no install, while `reeve`, `backlog-groomer`,
+`backlog-burn`, `cogcheck`) collect with no install, while `reeve`, `backlog-groomer`,
 `telemetry`, `brief-sources` and `growth` die at collection with
 `ModuleNotFoundError` in a fresh session — run `pip install -e 'tools/<t>[test]'`
 on those first (the same command CI's job uses).
