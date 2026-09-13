@@ -181,10 +181,12 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
    Will not lock / grinds → lower 0.05. If it inserts but the quarter-turn
    grinds near the lock, deburr the sector tips' first layer with a blade
    before touching `port_tol` — or set Elephant foot compensation to 0.2 mm
-   for the coupon and the node.
+   **on the coupon** (not the node: EFC insets the first layer's outline,
+   which is the only adhesion the node's twelve free-standing islands have —
+   deburr the node after the print instead).
    Caliper the bore while you're at it: under 79.0 mm means the printer is
    shrinking.
-4. Only then commit the full module (~195 mm tall, ~21 h and ~300 g at 0.2 mm — check the spool).
+4. Only then commit the full module (~195 mm tall, 1 d 0 h 12 m / 349.52 g at 0.2 mm — check the spool).
 
 ## Print settings
 
@@ -209,6 +211,11 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
   under it and asserts 199 parametrically.
 
 ## Session log
+
+- 2026-08-31 (post-merge, recorded in the #508 copy pass): CI's gate on the
+  merged head scores the turnaround **92/100** where the runs recorded here
+  score **84/100** — local-vs-CI **printcheck version skew**, not a geometry
+  change. The score never moved; a future round should not try to "fix" it.
 
 - 2026-08-30 (issue #499 — the roof was open to the air at the y-ends): the
   crown cap as shipped was union(truncated ellipsoid, gable vault), and the

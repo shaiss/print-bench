@@ -35,7 +35,7 @@ its source live in [`designs/nuggs/PM.md`](../nuggs/PM.md) (N2) and
 - `turnaround` — the node (≈ 99 × 205 × 195 mm at defaults): an oblate chamber
   over a solid web, two Ø80 mm ports on the underside, six ceiling vents.
 - `coupon` — the standard NUGGS port stub (~21 mm, ~2 h 17 m to print) for
-  tuning the joint fit before you commit ~21 h of printing.
+  tuning the joint fit before you commit the 1 d 0 h 12 m print.
 
 The port faces the hero can't show are in the 4-view contact sheet's
 bottom-iso quadrant — the port-face view, both rings on their sector feet —
@@ -71,12 +71,19 @@ and, at first-layer resolution, in
 
 ![Crown profile, dead-on — the two roof planes and ridge of the vault](previews/cutaway-profile.png)
 
-![Section along the turn axis — the vault hipped down into the end](previews/cutaway-ridge.png)
+![Section along the turn axis — the vault hipped down into the end; the dark band is the shell seen edge-on, not a window](previews/cutaway-ridge.png)
 
 ## Print settings
 
-- **Material:** PLA preferred; PETG if it must live warm — expect a sagged
-  web underside, and slow the roof overhangs.
+- **Material:** PLA preferred; PETG if it must live warm. **Natural or
+  uncoloured filament is a safety decision, not a colour preference:** a
+  gnawing rodent abrades pigment straight into its mouth, and the chamber
+  ceiling is within a standing animal's reach. In PETG, know where the
+  symptoms land before you chase them: a **sagged web underside** faces the
+  bed inside a ~10 mm slot no blade reaches, and the roof prints **ridged
+  behind the Ø9 vents** — accept both, slow the roof, re-check the fit after.
+  Expect strings between the islands for the first hour — they merge away at
+  the port plane; let it run.
 - **Layer height:** 0.2 mm.
 - **Infill:** 15–20 % is plenty; the shell does the work.
 - **Seam:** Back (or scarf) — same setting for the coupon and the node; stock
@@ -87,18 +94,23 @@ and, at first-layer resolution, in
   anchored bridge, the belly dome is pole-flush on the bed, and the crown is
   the hipped vault above. The whole part is support-free as modelled. Keep
   auto-supports **off** even if your slicer offers them: anything it builds
-  inside the chamber is unreachable through six Ø9 mm vents.
+  inside the chamber is unreachable through six Ø9 mm vents. The roof
+  undersides print ridged at 46° — that's inside the chamber, by design.
 - **Orientation:** as modelled — both ports down, sector tips on the bed, the
   chamber up. Do not rotate it.
-- **Brim:** off. Only the sector tips touch the bed (the web is the bridge at
-  the port plane, 10 mm up), so the first ~50 layers print as twelve small
-  islands that merge at the port plane — expected, not a fault. A brim would
-  weld across the mating feet. Give it a clean sheet and no draft over the
-  bed, and watch the first hour — twelve free-standing islands is where a
-  21 h print dies if it's going to.
+- **Brim:** off — adhesion comes from **mouse ears placed radially outside
+  the port ring**, not a brim. Only the sector tips touch the bed (the web is
+  the bridge at the port plane, 10 mm up), so the first ~50 layers print as
+  twelve small islands that merge at the port plane — expected, not a fault.
+  A brim would weld across the mating feet; ears large enough to tie the
+  islands together would have to bridge an inter-foot gap, and they snap off
+  at the one-layer interface, leaving exactly the scar the deburr step below
+  already prescribes. Give it a clean sheet and no draft over the bed, and
+  watch the first hour — twelve free-standing islands is where a
+  1 d 0 h 12 m print dies if it's going to.
 - **Heads up:** ~195 mm tall — check your Z. It fits the 256×256×256 class
   this family gates on, but it is a big print: CI's test-slice reports
-  **~21 h and ~300 g** at 0.2 mm (the coupon is ~2 h 17 m).
+  **1 d 0 h 12 m and 349.52 g** at 0.2 mm (the coupon is ~2 h 17 m).
 
 ## Parameters
 
@@ -117,8 +129,10 @@ at the top of [`nuggs-turnaround.scad`](nuggs-turnaround.scad).
 | `wall` | 2.4 mm | Shell thickness — about six perimeters at a stock 0.42 line width; leave wall loops at default. |
 
 Override on the command line with, e.g., `-D 'port_tol=0.35'`. Every dimension
-above is enforced by an `assert` in the `.scad`, so a value that breaks the
-welfare geometry fails the render instead of shipping.
+above is enforced by an `assert` in the `.scad`, so an out-of-range value
+fails the render. That seals the *dimensions*, not the whole part — the #499
+roof gap scored 84/100, watertight, with every assert green — so the gates
+and the previews, not the asserts alone, are what shippable rests on.
 
 ## Assembly & use
 
@@ -130,7 +144,9 @@ welfare geometry fails the render instead of shipping.
    `port_tol` +0.05; will not lock → lower 0.05. If it inserts but the
    quarter-turn grinds near the lock, deburr the sector tips' first layer with
    a blade before touching `port_tol` — or set Elephant foot compensation to
-   0.2 mm for the coupon and the node.
+   0.2 mm **on the coupon**. Leave EFC off the node and deburr it after the
+   print instead: EFC insets the first layer's outline, and that outline is
+   the only adhesion twelve free-standing islands have.
    The coupon also previews what the first ~50 layers will look like: the
    same sector feet, printed as free-standing islands.
 2. **Print the node** ports-down, no supports, no brim.
@@ -146,13 +162,19 @@ welfare geometry fails the render instead of shipping.
    dish; that is fine — it is a pass-through, not a refuge, and the den is the
    module that wants the bedding — but strip the dish's bedding at the weekly
    clean: the vents' no-purchase argument assumes the ceiling stays a full
-   standing reach away, and a packed mound shortens it. Clean it hand-wash
-   only, lukewarm (≤ 50 °C), never the dishwasher: heat deforms PLA, and a
+   standing reach away, and a packed mound shortens it. You don't have to
+   wait for the weekly clean to catch one: a torch through a vent when you
+   change the water tells you — if you can see a mound, strip it, and the
+   drum going quiet is the same tell. Before you twist the node off for any
+   of that cleaning, check it is empty: tap and listen, then a flashlight
+   through two vents — sound is one-directional, and a sleeping hamster is
+   silent in an opaque drum. Clean it hand-wash only, lukewarm (≤ 50 °C),
+   never the dishwasher: heat deforms PLA, and a
    deformed tube is a *narrowed* tube — the material failure mode is the
    injury failure mode (family charter N7).
 
 One stated trade, so it isn't an omission: the chamber is opaque, and **you
 will never see the turn** — you'll hear her cross before you see her (six
-open vents carry sound, and ~300 g of hollow shell is a drum at 2 a.m., her
+open vents carry sound, and 349.52 g of hollow shell is a drum at 2 a.m., her
 prime time). If watching matters, transparent PETG buys you a silhouette; a
 windowed variant is a possible future derivative.
