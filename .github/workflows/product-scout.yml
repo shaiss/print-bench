@@ -40,15 +40,21 @@ name: Product scout (scheduled design-brief proposals)
 #     grey, never red, no provider call, no escalation. Orthogonal to the
 #     arming variable: it overrides an armed routine without touching it.
 #   * Advisory-only + bounded: the run's ONLY shell surface is
-#     .claude/skills/product-scout/scout-helper.sh, whose file-brief verb
+#     .claude/skills/product-scout/scout-helper.sh, and its only write is the
+#     MCP filing tool (mcp__scout__file_design_brief, scout_mcp.py), which
 #     hardcodes the `design-brief` label (never `autonomy-ok` &c.) and caps
-#     briefs per run at SCOUT_MAX_BRIEFS. A prompt-injected run can at worst file
-#     a bounded number of design-brief proposals — noise a human closes.
+#     briefs per run at SCOUT_MAX_BRIEFS — counted in the shared SCOUT_CAP_STATE
+#     file, so the cap spans the whole chain walk and not one link (#565). A
+#     prompt-injected run can at worst file a bounded number of design-brief
+#     proposals — noise a human closes.
 #   * The scout's deny backstop (.claude/scout-settings.json, via --settings)
 #     neutralizes the additive settings.json allows (chunk-helper AND
 #     label-helper included), kept honest by scripts/scout-perms-check.sh.
-#   * Every link of the walk carries the SAME surface, backstop, cap and
-#     prompt — only the model, secret and endpoint differ per step.
+#   * Every link of the walk carries the SAME surface, backstop and prompt,
+#     and counts against ONE per-walk brief cap (the shared SCOUT_CAP_STATE
+#     file every link step names — a link that files its fill and dies still
+#     counts when the next link runs, #565) — only the model, secret and
+#     endpoint differ per step.
 
 on:
   schedule:
@@ -134,8 +140,19 @@ jobs:
       # triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
-      # The per-run brief cap, enforced by scout-helper.sh's file-brief verb. Bump
-      # it to let one run seed more of the backlog; the human still culls.
+      # The per-run brief cap, enforced by the scout MCP filing server
+      # (scout_mcp.py — the unattended run's filing path; the wrapper's
+      # file-brief verb is the attended leftover). Bump it to let one run seed
+      # more of the backlog; the human still culls. What makes the cap span
+      # the chain WALK — not one link — is SCOUT_CAP_STATE, set on every link
+      # step below (issue #565): each link is its own claude-code-action step
+      # spawning a fresh MCP server process, so an in-process counter reset to
+      # 0 per link and a walk could file cap-per-link. Every link step counts
+      # filings from that one shared runner.temp file (fresh per job, so the
+      # count is run-scoped and never persists) — the reeve.yml
+      # REEVE_GREENLIGHT_STATE pattern. The server refuses to file if a link
+      # step lacks it, so a future link 4 that forgets the env fails loudly,
+      # never silently uncapped.
       SCOUT_MAX_BRIEFS: '3'
     steps:
       - uses: actions/checkout@v7
@@ -305,8 +322,12 @@ jobs:
           # authenticates to the GitHub REST API with this token (issues:write is
           # all the job grants), so it must be exported here — GITHUB_REPOSITORY /
           # GITHUB_RUN_ID are set by Actions automatically, SCOUT_MAX_BRIEFS from
-          # the job env.
+          # the job env. SCOUT_CAP_STATE is what spans the cap across the walk
+          # (#565): step-level env because the runner context is unavailable in
+          # job env, the SAME runner.temp path on every link step, and the
+          # server counts filings from that one shared file.
           GITHUB_TOKEN: ${{ github.token }}
+          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
         uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -340,10 +361,12 @@ jobs:
       # ZAI_KEY) and gated on the Anthropic key's own presence. Claude via
       # api.anthropic.com: a plain API key (pay-per-token) is the right fit
       # for an unattended bot — no OAuth token / subscription seat. The same
-      # pin, permission, github_token, effort, cap, MCP filing tool, wrapper
-      # read verbs, backstop, transcript posture and prompt as the GLM link —
-      # only the model, secret and endpoint differ. Which model runs is the
-      # registry's call (the cheap Anthropic tier).
+      # pin, permission, github_token, effort, MCP filing tool, wrapper
+      # read verbs, backstop, transcript posture and prompt as the GLM link,
+      # and the same walk-spanning brief cap — the shared SCOUT_CAP_STATE file
+      # these steps name, so the count the GLM link advanced is the count this
+      # link starts from (#565) — only the model, secret and endpoint differ.
+      # Which model runs is the registry's call (the cheap Anthropic tier).
       - name: Run via Anthropic (Claude, chain link 2)
         id: run_anthropic_2
         if: >-
@@ -355,8 +378,11 @@ jobs:
         continue-on-error: true
         env:
           # Same reason as the Z.AI step: the MCP filing tool inherits this env
-          # and authenticates with it.
+          # and authenticates with it — plus the SAME SCOUT_CAP_STATE path, so
+          # the count the GLM link advanced is the count this link starts from
+          # (#565).
           GITHUB_TOKEN: ${{ github.token }}
+          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
         uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -381,6 +407,8 @@ jobs:
         timeout-minutes: 20
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # Same walk-spanning cap state as the earlier links (#565).
+          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
         uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
