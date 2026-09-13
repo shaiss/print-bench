@@ -227,11 +227,14 @@ WORKFLOW_BOT_LOGIN="github-actions[bot]"
 # ({"comments":[…]}), so the jq program is rooted at .comments — `.[].body`
 # is the gh-api array form and errors here. jq keeps the author attribution
 # honest on multiline bodies (a bash line-per-comment split could not), and
-# `unique` makes each distinct marker author cost at most one lookup.
+# `unique` makes each distinct marker author cost at most one lookup. The
+# select matches the selection side's rule (github.carries_greenlight /
+# greenlight.first_line): only the first non-blank line, stripped, may start
+# with the marker — a trusted user quoting a marker mid-body is not one.
 reject_if_greenlighted() {
   local n="$1" authors login perm
   authors="$(gh issue view "$n" --repo "$repo" --json comments \
-    --jq ".comments | map(select(.body | test(\"<!-- reeve-greenlight v[0-9]+ issue=$n \")) | (.author.login // \"\")) | unique | .[]")"
+    --jq ".comments | map(select((.body // \"\") | split(\"\\n\") | map(gsub(\"^[[:space:]]+|[[:space:]]+$\"; \"\")) | map(select(length > 0)) | (.[0] // \"\") | test(\"^<!-- reeve-greenlight v[0-9]+ issue=$n \")) | (.author.login // \"\")) | unique | .[]")"
   while IFS= read -r login; do
     [ -n "$login" ] || continue          # a loginless author is never trusted
     if [ "$login" = "$WORKFLOW_BOT_LOGIN" ]; then
