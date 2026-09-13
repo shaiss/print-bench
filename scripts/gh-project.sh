@@ -110,11 +110,10 @@ select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
   esac
 }
 
-# Emit the provisioning recipe from the spec above. Deterministic and
-# side-effect-free: it only prints. The spec values are substituted into a
-# header (unquoted heredoc); the body is literal (quoted heredoc) and reads them
-# as its own runtime variables, so the recipe is the single source and this
-# emitter needs no `gh` itself.
+# Emit the provisioning recipe for the active board spec. The recipe creates
+# missing fields but cannot reconcile options on an existing SINGLE_SELECT;
+# those require a separate UI or GraphQL update. This function is deterministic
+# and side-effect-free: it only prints and does not invoke `gh` itself.
 emit_recipe() {
   cat <<EOF
 #!/usr/bin/env bash
@@ -383,6 +382,8 @@ add_item_cli() {
   emit_add_item "$url" "$stage" "$points" "$stage_if_new"
 }
 
+# Verify setup and add-item recipe generation, including validation failures,
+# against both supported board specs. Terminates on the first failed assertion.
 selftest() {
   local out
   out="$(emit_recipe)"
