@@ -46,7 +46,7 @@ carried by a clone, exactly like the rest of the repo's config.
 | Title | `print-bench autonomy` | owner `shaiss` (a user, not an org) |
 | `Stage` (single-select) | Backlog · Ready · In progress · In review · Done | our pipeline. See the built-in-Status note below |
 | `Story points` (number) | Fibonacci 1/2/3/5/8 | a chunked one-PR sub-issue is 1–3; bigger = re-chunk |
-| `Maturity` (single-select) | ideation · prototype · hitl · mvp | **lens only** — see Maturity below. Not on the growth board |
+| `Maturity` (single-select) | ideation · prototype · hitl · rc · mvp | **lens only** — see Maturity below. Not on the growth board. `rc` = early-user / release candidate |
 | Milestone | GitHub's built-in Milestone field | fed by repo milestones (`gh api …/milestones`) — groups chunked epics + children |
 
 **Two things the CLI can't do (documented one-time UI steps):**
@@ -121,9 +121,10 @@ way the label is an opt-in seam: an issue without one simply carries no estimate
 ## Maturity (the `maturity:*` label on Product health)
 
 `Maturity` is a **board lens**, not a second workflow Stage. The recipe adds a
-distinct `Maturity` single-select (`ideation`, `prototype`, `hitl`, `mvp`) on
-**`print-bench autonomy` only** — never on `print-bench growth`, and never by
-reshaping or reusing `Stage`.
+distinct `Maturity` single-select
+(`ideation`, `prototype`, `hitl`, `rc`, `mvp`) on **`print-bench autonomy`
+only** — never on `print-bench growth`, and never by reshaping or reusing
+`Stage`. `rc` is early-user / release candidate (Atlas/Shai maturity v0.1).
 
 The source of truth is git-native: the `maturity:*` label on the pinned
 **Product health** issue
@@ -137,9 +138,13 @@ That is the same deliberate asymmetry as `points-<n>` vs **Story points**:
 | `Maturity` | `maturity:*` on Product health | product maturity; board field is a lens |
 
 Re-run `scripts/gh-project.sh setup | bash` after this field lands in the spec to
-create it on the live board (idempotent: `field_absent` + `field-create`). Setting
-or syncing Maturity values is out of scope for the provisioning recipe — keep
-the Product health label current; treat the board column as the surface.
+create it on the live board (idempotent: `field_absent` + `field-create`). If
+**Maturity already exists**, the recipe does **not** add new options (`gh`
+cannot grow a SINGLE_SELECT via `field-create`) — add `rc` (or any later option)
+once in the Project UI so the live board matches the committed set. Setting or
+syncing Maturity values is out of scope for the provisioning recipe — keep the
+Product health label current; treat the board column as the surface. Do not
+retarget Product health's `maturity:*` label from this recipe.
 
 ## One-time UI steps (views + milestones)
 

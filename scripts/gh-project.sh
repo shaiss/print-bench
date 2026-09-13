@@ -80,11 +80,12 @@ select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
       # Story points, Fibonacci 1/2/3/5/8 by convention: a chunked one-PR
       # sub-issue is 1-3; a bigger estimate is a hint it should be re-chunked.
       POINTS_FIELD="Story points"
-      # Maturity lens (not Stage): ideation → prototype → hitl → mvp. Board
-      # field only — do not confuse with Stage; source of truth is maturity:*
-      # on the Product health issue.
+      # Maturity lens (not Stage): ideation → prototype → hitl → rc → mvp.
+      # Board field only — do not confuse with Stage; source of truth is
+      # maturity:* on the Product health issue. `rc` = early-user / release
+      # candidate (v0.1 shared set with Atlas/Shai).
       MATURITY_FIELD="Maturity"
-      MATURITY_OPTIONS="ideation,prototype,hitl,mvp"
+      MATURITY_OPTIONS="ideation,prototype,hitl,rc,mvp"
       ;;
     growth)
       PROJECT_TITLE="print-bench growth"
@@ -223,12 +224,16 @@ EOF
 #    git-native maturity:* label on the pinned Product health issue is the
 #    source of truth (same asymmetry as points-<n> vs Story points). Do not
 #    reuse or reshape Stage for this.
+#    If the field already exists, this step is a no-op: gh cannot add options
+#    to an existing SINGLE_SELECT via field-create. After a options-set change
+#    (e.g. adding rc), add the new option once in the Project UI (or equivalent
+#    GraphQL) so the live board matches MATURITY_OPTIONS.
 if field_absent "$MATURITY_FIELD"; then
   gh project field-create "$NUM" --owner "$OWNER" --name "$MATURITY_FIELD" \
     --data-type SINGLE_SELECT --single-select-options "$MATURITY_OPTIONS"
   echo "created field: $MATURITY_FIELD (SINGLE_SELECT: $MATURITY_OPTIONS)"
 else
-  echo "field exists: $MATURITY_FIELD"
+  echo "field exists: $MATURITY_FIELD (options not reconciled — add missing options in the UI if the spec grew)"
 fi
 EOF
   fi
@@ -396,7 +401,7 @@ selftest() {
     || die "selftest: stage options missing"
   # Maturity lens (autonomy only): distinct SINGLE_SELECT, exact option list.
   grep -qF 'MATURITY_FIELD="Maturity"' <<<"$out" || die "selftest: Maturity field name not substituted"
-  grep -qF 'ideation,prototype,hitl,mvp' <<<"$out" \
+  grep -qF 'ideation,prototype,hitl,rc,mvp' <<<"$out" \
     || die "selftest: Maturity options missing"
   # Stage options must remain the workflow pipeline — Maturity must not replace them.
   grep -qF 'STAGE_OPTIONS="Backlog,Ready,In progress,In review,Done"' <<<"$out" \
@@ -466,7 +471,7 @@ selftest() {
   # Growth must not carry the autonomy Maturity lens.
   grep -qF 'MATURITY_FIELD="Maturity"' <<<"$grec" \
     && die "selftest: growth board must not emit a Maturity field" || true
-  grep -qF 'ideation,prototype,hitl,mvp' <<<"$grec" \
+  grep -qF 'ideation,prototype,hitl,rc,mvp' <<<"$grec" \
     && die "selftest: growth board must not emit Maturity options" || true
   # add-item on the growth board: a growth Stage is accepted and substituted.
   local gadd
