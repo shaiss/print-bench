@@ -584,6 +584,13 @@ def test_oracle_drift_guard_catches_a_dropped_backstop():
 #   expression still reading only one provider's links after the tail
 #   crossed would send a healthy tail run red and (via
 #   routine-lock-cleanup) withdraw a live run's SHIP-LOCK.
+# * the SHIP-LOCK routines' gates key on the DISPOSITION, not the walk
+#   (#538): claude-code-action exits 0 whenever the agent ends its turn
+#   without an API error, so the walk's 'success' is not evidence the run
+#   delivered. Their red and triage gates read the lock cleanup's
+#   `delivered`/`declined` outputs and must carry NO walk-outcome clause —
+#   a re-added `(walk) != 'success'` would score an exit-0 run that claimed
+#   but pushed nothing as healthy.
 #
 # Every pin has a negative control below (a tampered copy the pin must
 # reject) — the repo's standing rule that a check which cannot fail proves
@@ -613,10 +620,15 @@ class Routine(NamedTuple):
                 step's `--layout` literal must say
     gates       the exhaustion gates: every step whose `if:` must fire
                 exactly when NO link succeeded (the routine's red step and
-                its provider-triage step), by step name
+                its provider-triage step), by step name — for ship_lock rows
+                read that as "unless the lock cleanup derived delivered or
+                declined" (_assert_ship_lock_gate_follows_disposition)
     ship_lock   True for the SHIP-LOCK routines (the burn, the design run):
                 AGENT_OUTCOME is then assigned twice — the lock cleanup and
-                the red-on-death gate — and both copies must agree
+                the red-on-death gate — and both copies must agree; the walk
+                expression is three-valued (success / not-run / failure) and
+                the gates key on the lock cleanup's disposition outputs
+                instead of the walk (#538)
     permission_mode, backstop, mcp_config, allowed
                 the agent SURFACE every ship step must carry verbatim on its
                 `claude_args:` line — read off the routine's head link when
@@ -2525,13 +2537,22 @@ def _assert_routine_walk_outcome_covers_every_link(
     Resolve the chain, take the walk's step ids in link order, and evaluate
     each AGENT_OUTCOME / RUN / SHIP expression under every outcome
     combination of those steps. Any state where a link succeeded must yield
-    'success' — and the all-dead states must not. The all-dead states must
-    further yield the outcome of the LAST LINK THAT ACTUALLY RAN (the last
-    non-'skipped' link), and 'skipped' only when EVERY link was skipped:
-    routine-lock-cleanup.sh reads 'skipped' as "the agent never ran, nothing
-    to release", so a walk that reported 'skipped' after the GLM links FAILED
-    and the keyless Anthropic tail was skipped left a dead run's SHIP-LOCK
-    standing (the bare `|| steps.<link5>.outcome` tail did exactly that).
+    'success' — and the all-dead states must not.
+
+    The all-dead value is routine-shaped (#538):
+
+    - SHIP-LOCK routines (backlog-burn, design-run) carry the three-valued
+      walk: 'not-run' ONLY when every link was skipped, 'failure' otherwise.
+      The value is diagnostic input to routine-lock-cleanup.sh, which no-ops
+      on 'not-run' — an expression reporting 'not-run' after a link ran
+      makes the cleanup skip a dead run and leave its SHIP-LOCK standing.
+      ('failure' — not the raw last-ran outcome — because claude-code-action
+      exits 0 without delivering, so the walk's 'success' is not evidence of
+      anything; the DISPOSITION lives in the lock cleanup's artifact read.)
+    - Every other routine keeps the last-ran rule: the all-dead states yield
+      the outcome of the LAST LINK THAT ACTUALLY RAN (the last non-'skipped'
+      link), and 'skipped' only when EVERY link was skipped.
+
     Factored out so the negative controls can run it against tampered text.
     """
     global _PROVIDER_UNDER_TEST
@@ -2557,6 +2578,17 @@ def _assert_routine_walk_outcome_covers_every_link(
                         f"outcomes {outcomes} — a link succeeded but the "
                         "walk's outcome is not success; the expression does "
                         "not cover every link of the walk")
+                elif row.ship_lock:
+                    want = "not-run" if all(
+                        o == "skipped" for o in state) else "failure"
+                    assert got == want, (
+                        f"{where}: {var} read {got!r} with link outcomes "
+                        f"{outcomes} — expected {want!r}: the three-valued "
+                        "SHIP-LOCK walk must read 'not-run' only when EVERY "
+                        "link was skipped and 'failure' otherwise; a "
+                        "'not-run' (or a stray raw outcome) after a link ran "
+                        "tells routine-lock-cleanup the agent never ran and "
+                        "leaves a dead run's SHIP-LOCK standing")
                 else:
                     assert got != "success", (
                         f"{where}: {var} read {got!r} with no link having "
@@ -2720,7 +2752,83 @@ def test_routine_exhaustion_gates_fire_on_whole_chain_failure():
             "step among its exhaustion gates — its `if:` would go unsimulated")
         text = _routine_text(row.workflow)
         for step_name in row.gates:
-            _assert_gate_fires_on_whole_walk_failure(reg, row, text, step_name)
+            if row.ship_lock:
+                _assert_ship_lock_gate_follows_disposition(
+                    reg, row, text, step_name)
+            else:
+                _assert_gate_fires_on_whole_walk_failure(
+                    reg, row, text, step_name)
+
+
+# The SHIP-LOCK routines' counterpart of _assert_gate_fires_on_whole_walk_
+# failure, keyed on the #538 lesson: a ship link's exit code is not evidence.
+# claude-code-action exits 0 whenever the agent ends its turn without an API
+# error — pushed a branch, opened a PR, posted a decline, or silently stopped
+# after claiming; the walk expression cannot tell those apart (that is why it
+# folds every ran-but-not-success outcome into 'failure' and stays
+# diagnostic). So the red-on-death and provider-triage gates must key on the
+# ONE thing that can tell them apart: routine-lock-cleanup.sh's
+# artifact-derived disposition outputs, read from the `lock_cleanup` step.
+_DISPOSITION_TAIL = ("steps.lock_cleanup.outputs.delivered != 'true' "
+                     "&& steps.lock_cleanup.outputs.declined != 'true'")
+
+
+def _assert_ship_lock_gate_follows_disposition(
+        reg: Registry, row: Routine, text: str, step_name: str) -> None:
+    """The named gate's `if` must fire unless the run delivered or declined.
+
+    Structural, not simulated — the disposition lives in GitHub state (does a
+    corroborating branch exist? a closing PR? a stop comment?), which no walk
+    outcome combination can represent. What CAN be pinned is that the gate
+    reads it: the delivered/declined legs present, the key/arming legs
+    present (the degraded paths must not go red), and NO walk-step outcome
+    read anywhere in the condition — a re-added `(walk) != 'success'` clause
+    is the exact #538 regression, scoring an exit-0 run that claimed but
+    pushed nothing as healthy.
+    """
+    workflow = row.workflow
+    where = f"{row.workflow} [{row.job}]"
+    job = _routine_job_text(text, row)
+    walk_ids = _routine_walk_ids(reg, row, job)
+    cond = _gate_condition(job, step_name, where)
+    # The legs the walk gates require for the same reasons: the keyless
+    # degraded path (every link skipped, the pinned ::notice:: skip) must
+    # not go red, and a paused-in-git routine must not fire its gates.
+    assert re.search(r"steps\.policy\.outputs\.key_present\s*==\s*'1'", cond), (
+        f"{where}: the '{step_name}' gate carries no "
+        "steps.policy.outputs.key_present == '1' leg — with no key set for any "
+        "provider the walk is all-skipped and this gate would turn the "
+        "pinned ::notice:: skip into a red run (or a live triage probe)")
+    assert re.search(r"steps\.policy\.outputs\.(enabled|armed)\s*==\s*'true'", cond), (
+        f"{where}: the '{step_name}' gate carries no arming leg "
+        "(steps.policy.outputs.enabled == 'true') — it would fire with the "
+        "routine paused in git")
+    for leg in ("delivered", "declined"):
+        assert re.search(
+            rf"steps\.lock_cleanup\.outputs\.{leg}\s*!=\s*'true'", cond), (
+            f"{where}: the '{step_name}' gate carries no "
+            f"steps.lock_cleanup.outputs.{leg} != 'true' leg — without it an "
+            f"artifact-{leg} run is scored dead: the gate would fail the job "
+            "(or run a live triage probe) over work the cleanup just proved "
+            "exists")
+    # The load-bearing #538 rule: no walk-outcome read in the gate. Checked
+    # before the exact-tail match so the re-added-walk-clause negative
+    # control reports the cause, not the symptom.
+    for sid in walk_ids:
+        assert f"steps.{sid}.outcome" not in cond, (
+            f"{where}: the '{step_name}' gate reads steps.{sid}.outcome — a "
+            "SHIP-LOCK gate must key on the lock cleanup's artifact-derived "
+            "disposition, never the walk's outcome string: claude-code-action "
+            "exits 0 whenever the agent ends its turn without an API error, "
+            "so a walk-success clause scores an exit-0 run that claimed but "
+            "pushed nothing as healthy (#538)")
+    # After stripping the legs the simulation fixes green, the surviving
+    # clause is exactly the two disposition legs — nothing else sneaks in.
+    sim_cond = _strip_fixed_green_legs(cond)
+    assert sim_cond.strip() == _DISPOSITION_TAIL, (
+        f"{where}: the '{step_name}' condition does not reduce to the "
+        f"disposition tail ({_DISPOSITION_TAIL!r}) after stripping the "
+        f"fixed-green legs: {sim_cond!r}")
 
 
 def _gate_chunk(job_text: str, step_name: str) -> str:
@@ -2765,27 +2873,112 @@ def test_gate_guard_rejects_a_red_step_without_its_arming_leg():
         _assert_gate_fires_on_whole_walk_failure(reg, row, tampered, EXHAUSTED_RED_STEP)
 
 
-def test_burn_checkless_pr_notice_fires_only_on_a_successful_walk():
-    # The burn's "Note a checkless draft PR" notice reads the walk too — the
-    # positive form `(walk) == 'success'`: it must fire for ANY link's
-    # success (a PR was opened, by whichever provider) and never otherwise.
+def _assert_burn_checkless_notice_follows_delivery(
+        reg: Registry, row: Routine, text: str) -> None:
+    """The burn's checkless-PR notice must fire on the lock cleanup's
+    `delivered` output (#538) — the artifact-derived fact that a branch or
+    closing PR exists — never on the walk's success: an exit-0 ship link
+    that pushed nothing would otherwise produce a notice about a draft PR
+    that does not exist. Factored out for the negative control."""
+    workflow = row.workflow
+    where = f"{row.workflow} [{row.job}]"
+    job = _routine_job_text(text, row)
+    walk_ids = _routine_walk_ids(reg, row, job)
+    cond = _gate_condition(job, "Note a checkless draft PR (no CI-triggering PAT)", where)
+    assert re.search(
+        r"steps\.lock_cleanup\.outputs\.delivered\s*==\s*'true'", cond), (
+        f"{where}: the checkless-PR notice no longer fires on "
+        "steps.lock_cleanup.outputs.delivered == 'true' — it must key on the "
+        "artifact-derived disposition, not the walk")
+    assert re.search(r"steps\.policy\.outputs\.key_present\s*==\s*'1'", cond), (
+        f"{where}: the checkless-PR notice lost its key_present leg")
+    assert re.search(r"steps\.policy\.outputs\.enabled\s*==\s*'true'", cond), (
+        f"{where}: the checkless-PR notice lost its arming leg")
+    for sid in walk_ids:
+        assert f"steps.{sid}.outcome" not in cond, (
+            f"{where}: the checkless-PR notice reads steps.{sid}.outcome — "
+            "it must key on the delivered disposition, not the walk's "
+            "exit-code success (#538)")
+
+
+def test_burn_checkless_pr_notice_follows_the_delivered_disposition():
+    reg = Registry.load(str(REGISTRY))
+    row = ROUTINES["backlog-burn"]
+    _assert_burn_checkless_notice_follows_delivery(
+        reg, row, _routine_text(row.workflow))
+
+
+def test_burn_checkless_notice_guard_rejects_a_walk_clause():
+    # NEGATIVE CONTROL: swap the notice's delivered leg back to the pre-#538
+    # `(walk) == 'success'` clause — an exit-0 run that delivered nothing
+    # would then trigger a notice about a draft PR that does not exist. The
+    # no-walk-read rule must reject it.
     reg = Registry.load(str(REGISTRY))
     row = ROUTINES["backlog-burn"]
     workflow = row.workflow
-    job = _routine_job_text(_routine_text(workflow), row)
-    global _PROVIDER_UNDER_TEST
-    _PROVIDER_UNDER_TEST = _routine_provider(row.conf)
-    walk_ids = _routine_walk_ids(reg, row, job)
-    cond = _gate_condition(job, "Note a checkless draft PR (no CI-triggering PAT)", workflow)
-    sim = _strip_fixed_green_legs(cond)
-    sim = re.sub(r"env\.HAS_GH_TOKEN\s*!=\s*'true'\s*&&\s*", "", sim)
-    mm = re.match(r"^\((.+)\)\s*==\s*'success'\s*$", sim.strip())
-    assert mm, f"{workflow}: the checkless-PR notice clause changed shape: {sim!r}"
-    for state in _walk_states(len(walk_ids)):
-        walk = _eval_github_expression(mm.group(1), dict(zip(walk_ids, state)))
-        assert isinstance(walk, str)
-        assert (walk == "success") == ("success" in state), (
-            f"{workflow}: the checkless-PR notice misreads walk state {state}")
+    text = _routine_text(workflow)
+    job = _routine_job_text(text, row)
+    chunk = _gate_chunk(job, "Note a checkless draft PR (no CI-triggering PAT)")
+    live = _live_walk_expression(job, workflow)
+    tampered_chunk = re.sub(
+        r"&& steps\.lock_cleanup\.outputs\.delivered == 'true'",
+        f"&& ({live}) == 'success'", chunk, count=1)
+    assert tampered_chunk != chunk, (
+        "tamper did not land — the notice's delivered leg moved shape")
+    tampered = text.replace(chunk, tampered_chunk, 1)
+    # The delivered-leg presence rule fires first (the swap removed the
+    # leg); both it and the no-walk-read rule name the same cause.
+    with pytest.raises(AssertionError, match="artifact-derived disposition"):
+        _assert_burn_checkless_notice_follows_delivery(reg, row, tampered)
+
+
+def test_ship_lock_gate_guard_rejects_a_dropped_disposition_leg():
+    # NEGATIVE CONTROL, both SHIP-LOCK routines, both their gates: a gate
+    # that dropped its delivered leg would fail the job (and run a live
+    # triage probe) over work the cleanup just proved exists — a run that
+    # pushed its branch a minute before a link timed out.
+    reg = Registry.load(str(REGISTRY))
+    lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
+    assert lock_rows, "no SHIP-LOCK routine in the ROUTINES table"
+    for row in lock_rows:
+        for step_name in row.gates:
+            tampered = _gate_without_leg(
+                row, step_name,
+                r"steps\.lock_cleanup\.outputs\.delivered != 'true'")
+            with pytest.raises(
+                    AssertionError,
+                    match="no steps.lock_cleanup.outputs.delivered"):
+                _assert_ship_lock_gate_follows_disposition(
+                    reg, row, tampered, step_name)
+
+
+def test_ship_lock_gate_guard_rejects_a_walk_clause():
+    # NEGATIVE CONTROL for #538 itself, both SHIP-LOCK routines: re-adding
+    # `(walk) != 'success'` to the red gate — on top of the disposition
+    # legs, exactly how the regression would land — makes an exit-0 run
+    # that claimed but pushed nothing green again (the walk reads 'success',
+    # the gate goes quiet). The no-walk-read rule must reject it.
+    reg = Registry.load(str(REGISTRY))
+    lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
+    assert lock_rows, "no SHIP-LOCK routine in the ROUTINES table"
+    for row in lock_rows:
+        step_name = "Turn a dead agentic run red"
+        workflow = row.workflow
+        text = _routine_text(workflow)
+        job = _routine_job_text(text, row)
+        chunk = _gate_chunk(job, step_name)
+        live = _live_walk_expression(job, workflow)
+        leg = "&& steps.lock_cleanup.outputs.declined != 'true'\n"
+        assert leg in chunk, (
+            f"{workflow}: the red gate's declined leg moved shape — the "
+            "tamper target is stale")
+        tampered_chunk = chunk.replace(
+            leg, leg + f"          && ({live}) != 'success'\n", 1)
+        tampered = text.replace(chunk, tampered_chunk, 1)
+        assert tampered != text, "tamper did not land — the fixture is stale"
+        with pytest.raises(AssertionError, match="artifact-derived"):
+            _assert_ship_lock_gate_follows_disposition(
+                reg, row, tampered, step_name)
 
 
 def _live_walk_expression(job_text: str, workflow: str) -> str:
@@ -2838,13 +3031,19 @@ def test_walk_outcome_guard_fires_on_a_stale_link1_expression():
 
 
 def test_exhaustion_gate_guards_fire_on_a_stale_link1_gate():
-    """Negative control for every exhaustion-gate simulation, every
-    routine: a gate still pinned to link 1 would fire (fail the job, or run
-    a live triage probe) after a healthy link-2 or tail run. Derive the
-    mutation from each workflow's live expression and require each gate's
-    simulation to fail."""
+    """Negative control for every walk-reading exhaustion gate: a gate still
+    pinned to link 1 would fire (fail the job, or run a live triage probe)
+    after a healthy link-2 or tail run. Derive the mutation from each
+    workflow's live expression and require each gate's simulation to fail.
+    The SHIP-LOCK routines are excluded — their gates key on the lock
+    cleanup's disposition and carry no walk clause to go stale (#538); the
+    stale link-1 mutation on them is caught by
+    test_walk_outcome_guard_fires_on_a_stale_link1_expression, and their
+    gates carry their own negative controls below."""
     reg = Registry.load(str(REGISTRY))
-    for row in ROUTINES.values():
+    walk_gated = [r for r in ROUTINES.values() if not r.ship_lock]
+    assert walk_gated, "no walk-gated routine left in the ROUTINES table"
+    for row in walk_gated:
         tampered = _stale_link1_copy(row)
         for step_name in row.gates:
             with pytest.raises(AssertionError, match="does not cover the whole chain"):
@@ -2870,15 +3069,18 @@ def test_walk_outcome_guard_fires_on_a_single_provider_expression():
     tampered = text.replace(live, head_only)
     with pytest.raises(AssertionError, match="does not cover every link"):
         _assert_routine_walk_outcome_covers_every_link(reg, row, tampered)
-    with pytest.raises(AssertionError, match="does not cover the whole chain"):
-        _assert_gate_fires_on_whole_walk_failure(reg, row, tampered, TRIAGE_STEP)
+    # No gate half here since #538: the burn's gates key on the lock
+    # cleanup's disposition and carry no walk clause, so this mutation is
+    # invisible to them BY DESIGN — their own negative controls
+    # (_a_dropped_disposition_leg / _a_walk_clause) prove they can fail.
 
 
 def _bare_tail_copy(row: Routine) -> str:
     """A copy of the workflow whose EVERY walk-outcome expression is reverted
     to the bare-last-link tail (`… || steps.<last link>.outcome`, the
     original #544 form): derived from the live expression by stripping the
-    nested last-ran fallback, never from a hand-copied literal."""
+    nested last-ran fallback, never from a hand-copied literal. Only the
+    walk-gated (non-ship_lock) routines carry that form since #538."""
     workflow = row.workflow
     text = _routine_text(workflow)
     live = _live_walk_expression(_routine_job_text(text, row), workflow)
@@ -2888,7 +3090,9 @@ def _bare_tail_copy(row: Routine) -> str:
         r" || steps.\1.outcome", live)
     assert bare != live, (
         f"{workflow}: the live walk expression carries no nested last-ran "
-        "fallback to strip — the negative-control derivation is stale")
+        "fallback to strip — the negative-control derivation is stale (a "
+        "ship_lock row reached the walk-gated derivation: route it to "
+        "_last_link_not_run_copy instead)")
     assert text.count(live) >= 2
     return text.replace(live, bare)
 
@@ -2896,14 +3100,64 @@ def _bare_tail_copy(row: Routine) -> str:
 def test_walk_outcome_guard_fires_on_a_bare_tail_expression():
     """Negative control for the last-ran rule: the bare-tail form reads
     'skipped' whenever the tail was skipped for want of its key — even after
-    the head links FAILED — so routine-lock-cleanup would no-op on a dead run
-    and leave its SHIP-LOCK standing. The simulation must reject it, for every
-    routine, on exactly that rule (the any-success half still passes: the bare
-    tail does cover every link's success)."""
+    the head links FAILED — so the walk reports 'skipped' over a walk where a
+    link ran and died. The simulation must reject it, for every walk-gated
+    routine, on exactly that rule (the any-success half still passes: the
+    bare tail does cover every link's success)."""
     reg = Registry.load(str(REGISTRY))
-    for row in ROUTINES.values():
+    walk_gated = [r for r in ROUTINES.values() if not r.ship_lock]
+    assert walk_gated, "no walk-gated routine left in the ROUTINES table"
+    for row in walk_gated:
         tampered = _bare_tail_copy(row)
         with pytest.raises(AssertionError, match="last link that actually ran"):
+            _assert_routine_walk_outcome_covers_every_link(reg, row, tampered)
+
+
+def _last_link_not_run_copy(row: Routine) -> str:
+    """A copy of the workflow whose EVERY walk-outcome expression has its
+    all-skipped conjunction collapsed to a LAST-LINK-ONLY read — the #538
+    regression shape for the three-valued walk: `… || steps.<last
+    link>.outcome == 'skipped' && 'not-run' || 'failure'` reports 'not-run'
+    whenever only the keyless tail was skipped, even after the head links
+    FAILED, and routine-lock-cleanup.sh no-ops on 'not-run'. Derived from the
+    live expression, never a hand-copied literal."""
+    workflow = row.workflow
+    text = _routine_text(workflow)
+    live = _live_walk_expression(_routine_job_text(text, row), workflow)
+    m = re.search(
+        r"\(steps\.\w+\.outcome == 'skipped' && [^()]*\)"
+        r" && 'not-run' \|\| 'failure'$", live)
+    assert m, (
+        f"{workflow}: the live walk expression carries no all-skipped "
+        "not-run conjunction to collapse — the negative-control derivation "
+        "is stale (a walk-gated row reached the ship_lock derivation: route "
+        "it to _bare_tail_copy instead)")
+    tail_ids = re.findall(r"steps\.(\w+)\.outcome", m.group(0))
+    collapsed = (f"steps.{tail_ids[-1]}.outcome == 'skipped'"
+                 " && 'not-run' || 'failure'")
+    tampered_expr = live[:m.start()] + collapsed
+    assert tampered_expr != live, "tamper did not land — the fixture is stale"
+    assert text.count(live) >= 2, (
+        f"{workflow}: the live walk expression appears {text.count(live)} "
+        "time(s) — the negative-control mutation would not represent the "
+        "regression; update the derivation")
+    return text.replace(live, tampered_expr)
+
+
+def test_walk_outcome_guard_fires_on_a_last_link_only_not_run_expression():
+    """Negative control for the #538 three-valued rule, every SHIP-LOCK
+    routine: an expression that decides 'not-run' from the LAST link alone
+    reports 'not-run' after the head links failed and only the keyless tail
+    was skipped — the cleanup then no-ops on a dead run and leaves its
+    SHIP-LOCK standing. The simulation must reject it on exactly that rule
+    (the any-success half still passes: the success branches cover every
+    link)."""
+    reg = Registry.load(str(REGISTRY))
+    lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
+    assert lock_rows, "no SHIP-LOCK routine in the ROUTINES table"
+    for row in lock_rows:
+        tampered = _last_link_not_run_copy(row)
+        with pytest.raises(AssertionError, match="leaves a dead run's SHIP-LOCK standing"):
             _assert_routine_walk_outcome_covers_every_link(reg, row, tampered)
 
 
