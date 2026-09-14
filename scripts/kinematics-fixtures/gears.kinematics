@@ -1,0 +1,9 @@
+# Rotational-mesh gate on the BOSL2 spur pair in gears.scad (selftest: PASS).
+# One mesh cycle of kin_phase in 8 steps: the pair must never interfere and
+# never separate, and the jam/gap pairs prove both checks can fail.
+steps 8
+sweep kin_phase
+empty mesh-clear             # gearA ∩ gearB — no interference at any phase
+nonempty mesh-engaged        # grow(gearA) ∩ gearB — teeth still touching at every phase
+empty-control mesh-jam       # centre distance shrunk: must interfere
+nonempty-control mesh-gap    # centre distance grown: must gap out

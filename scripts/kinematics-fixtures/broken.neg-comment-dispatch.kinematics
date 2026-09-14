@@ -1,0 +1,8 @@
+# Structural refusal (selftest: must FAIL before rendering): both parts are
+# named in broken.scad — one in a // comment, one in a /* */ block — but
+# neither has a real `part == "..."` dispatch branch, so both would render
+# empty and pass. The raw-source grep this gate used to run matched both;
+# comments are stripped before the check now, and both must be refused.
+stops stop 0
+empty broken-in-line-comment
+empty-control broken-in-block-comment
