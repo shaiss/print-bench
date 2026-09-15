@@ -27,6 +27,10 @@ inputs:
     description: ANTHROPIC_API_KEY value (empty when the run holds no Anthropic key).
     required: false
     default: ""
+  openrouter-key:
+    description: OPENROUTER_API_KEY value (empty when the run holds no OpenRouter key).
+    required: false
+    default: ""
   github-token:
     description: A token with issues:write, for filing the escalation issue.
     required: true
@@ -67,6 +71,7 @@ runs:
         CHAIN: ${{ inputs.chain }}
         ZAI_KEY: ${{ inputs.zai-key }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-key }}
+        OPENROUTER_API_KEY: ${{ inputs.openrouter-key }}
       run: |
         set -uo pipefail
         python3 -m model_registry classify "$CHAIN" --gh-output "$GITHUB_OUTPUT"

@@ -133,7 +133,9 @@ jobs:
       # their own) plus `key_present` = either one (the any-key gate the lock
       # cleanup, triage, red-on-death and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      HAS_OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # Surfaced the same way so a step can note when the CI-triggering PAT is
       # absent — see the note on the ship steps below.
       HAS_GH_TOKEN: ${{ secrets.GH_TOKEN != '' }}
@@ -176,13 +178,15 @@ jobs:
           esac
           [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
           [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
-          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
+          [ "$HAS_OPENROUTER_KEY" = "true" ] && openrouter_key=1 || openrouter_key=0
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ] || [ "$openrouter_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "label=$label"
             echo "provider=$provider"
             echo "zai_key_present=$zai_key"
             echo "anthropic_key_present=$anthropic_key"
+            echo "openrouter_key_present=$openrouter_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
@@ -219,7 +223,7 @@ jobs:
           conf_provider="$(backlog-burn config --get provider)"
           # One layout entry per ship step below, in file order.
           python3 -m model_registry shape backlog-burn --head "$conf_provider" \
-            --conf .github/backlog-burn.conf --layout zai,zai,zai,anthropic,anthropic
+            --conf .github/backlog-burn.conf --layout zai,zai,zai,anthropic,anthropic,openrouter,openrouter
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -408,6 +412,54 @@ jobs:
           claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link5_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
+      - name: Run via OpenRouter (free OSS, chain link 6)6
+        id: ship_openrouter_6
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.openrouter_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+          && steps.ship_zai_3.outcome != 'success'
+          && steps.ship_anthropic_4.outcome != 'success'
+          && steps.ship_anthropic_5.outcome != 'success'
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link6_model }} --effort max
+          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+
+      - name: Run via OpenRouter (free OSS, chain link 7)7
+        id: ship_openrouter_7
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.openrouter_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+          && steps.ship_zai_3.outcome != 'success'
+          && steps.ship_anthropic_4.outcome != 'success'
+          && steps.ship_anthropic_5.outcome != 'success'
+          && steps.ship_openrouter_6.outcome != 'success'
+        timeout-minutes: 20
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link7_model }} --effort max
+          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+
       - name: Withdraw a dead run's SHIP-LOCK
         id: lock_cleanup
         # The agent posts the SHIP-LOCK claim on the selected issue but cannot
@@ -449,7 +501,7 @@ jobs:
           # outcome combination against the chain's link count and pins all
           # three values, with a last-link-only not-run read as its
           # negative control.
-          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
+          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || steps.ship_openrouter_6.outcome == 'success' && 'success' || steps.ship_openrouter_7.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped' && steps.ship_openrouter_6.outcome == 'skipped' && steps.ship_openrouter_7.outcome == 'skipped') && 'not-run' || 'failure' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
@@ -488,7 +540,7 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "::notice::dry run — selected #${ISSUE} but did not invoke /ship-issue"
           else
-            echo "::notice::no key is set for ANY provider in the backlog-burn chain (ZAI_KEY for the zai links, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — selected #${ISSUE} but skipping the unattended /ship-issue run"
+            echo "::notice::no key is set for ANY provider in the backlog-burn chain (ZAI_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY; head provider '${PROVIDER}') — selected #${ISSUE} but skipping the unattended /ship-issue run"
           fi
 
       - name: Explain an empty selection
@@ -517,7 +569,7 @@ jobs:
           # walk expression as AGENT_OUTCOME (byte-identical, diagnostic
           # only): success / not-run / failure. What the run actually DID
           # is the lock cleanup's artifact-derived disposition below.
-          SHIP: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
+          SHIP: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || steps.ship_openrouter_6.outcome == 'success' && 'success' || steps.ship_openrouter_7.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped' && steps.ship_openrouter_6.outcome == 'skipped' && steps.ship_openrouter_7.outcome == 'skipped') && 'not-run' || 'failure' }}
           # Per-link outcomes + the chain the resolve step emitted, so the
           # summary can name WHICH link served and warn when the head
           # provider fell through (a GLM outage must stay visible even though
@@ -527,16 +579,22 @@ jobs:
           L3: ${{ steps.ship_zai_3.outcome }}
           L4: ${{ steps.ship_anthropic_4.outcome }}
           L5: ${{ steps.ship_anthropic_5.outcome }}
+          L7: ${{ steps.ship_openrouter_7.outcome }}
+          L6: ${{ steps.ship_openrouter_6.outcome }}
           M1: ${{ steps.chain.outputs.link1_model }}
           M2: ${{ steps.chain.outputs.link2_model }}
           M3: ${{ steps.chain.outputs.link3_model }}
           M4: ${{ steps.chain.outputs.link4_model }}
           M5: ${{ steps.chain.outputs.link5_model }}
+          M7: ${{ steps.chain.outputs.link7_model }}
+          M6: ${{ steps.chain.outputs.link6_model }}
           P1: ${{ steps.chain.outputs.link1_provider }}
           P2: ${{ steps.chain.outputs.link2_provider }}
           P3: ${{ steps.chain.outputs.link3_provider }}
           P4: ${{ steps.chain.outputs.link4_provider }}
           P5: ${{ steps.chain.outputs.link5_provider }}
+          P7: ${{ steps.chain.outputs.link7_provider }}
+          P6: ${{ steps.chain.outputs.link6_provider }}
           LOCK_WITHDRAWN: ${{ steps.lock_cleanup.outputs.withdrawn }}
           # The artifact-derived disposition (#538) — what the run actually
           # did, as distinct from what the ship links' exit codes said.
@@ -549,7 +607,7 @@ jobs:
         run: |
           # Which link served: the first (only) link whose outcome is success.
           served=""
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3 4 5 6 7; do
             o="L$i"; m="M$i"; p="P$i"
             if [ "${!o}" = "success" ]; then
               served="link $i ${!m} (${!p})"
@@ -613,6 +671,7 @@ jobs:
           chain: backlog-burn
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the backlog-burn routine (issue #${{ steps.select.outputs.issue }})
           escalate: "true"
@@ -641,7 +700,7 @@ jobs:
           # The walk's outcome (#327, #544, #538) — byte-identical to
           # AGENT_OUTCOME in the lock cleanup above (the drift guard pins
           # that). Diagnostic only: the disposition above decides.
-          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
+          AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || steps.ship_openrouter_6.outcome == 'success' && 'success' || steps.ship_openrouter_7.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped' && steps.ship_openrouter_6.outcome == 'skipped' && steps.ship_openrouter_7.outcome == 'skipped') && 'not-run' || 'failure' }}
         run: |
           echo "::error::the /ship-issue run for #${ISSUE} neither delivered nor declined (ship walk: ${AGENT_OUTCOME} — diagnostic only) — its SHIP-LOCK cleanup ran above; failing the job so the death is visible"
           exit 1
