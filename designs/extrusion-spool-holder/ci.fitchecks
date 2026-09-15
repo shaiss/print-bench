@@ -1,0 +1,21 @@
+# Boolean fit checks — never printed or sliced, rendered by gate.sh.
+# Each part name must match a `part == "<name>"` dispatch branch in the
+# entry .scad — that is the branch gate.sh renders.
+#
+# fitcheck-slot: the peg's blade (web + hammer heads) seated in the E2020
+#   slot as installed — neck through the 6.0 mouth with slot_fit_tol per
+#   side, heads hooking the 2.0 lips inside the 12.0 cavity, plate on the
+#   face. Zero facets = the peg slides in clean.
+# fitcheck-slot-ctrl: the same assembly with slot_fit_tol = -0.15, so the
+#   neck (6.3) is wider than the mouth (6.0) — real overlap. The mandatory
+#   negative control: if this ever renders empty, the slot check above is
+#   proving nothing.
+# fitcheck-bore: the spool bore (a tube swept by the bore surface,
+#   max-width 71 mm spool) seated on the shoulder — zero facets = the
+#   spool drops on and spins at bore_clearance.
+# fitcheck-bore-ctrl: the same tube 0.2 undersized — the stub must
+#   overlap it.
+fitcheck-slot       empty
+fitcheck-slot-ctrl  interferes
+fitcheck-bore       empty
+fitcheck-bore-ctrl  interferes
