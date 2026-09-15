@@ -415,6 +415,12 @@ surfaces studies awaiting a read live in
     slicer imports as N parts) from a `ci.plate` manifest, so a two-part
     design isn't handed over as one fused STL; `--check` gates the object
     count, `--selftest` proves it discriminates a fused body
+  - `fusecheck-check.sh` — the `ci.fusecheck` runner gate.sh sources (one
+    parser, not a copy), plus the selftest that proves its `assert` bound
+    grammar still fires: legacy `<min>`, two-sided `<min> <max>`, `=N`, the
+    malformed line, and the exit-4 hard-fail path, over committed fixtures in
+    `scripts/fusecheck-fixtures/` whose body counts are re-measured with
+    fusecheck itself (issue #627)
   - `gate-summary.py` — turns a gate log into the CI results table
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and
