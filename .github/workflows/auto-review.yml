@@ -131,6 +131,8 @@ jobs:
       model4: ${{ steps.chain.outputs.link4_model }}
       model5: ${{ steps.chain.outputs.link5_model }}
       model6: ${{ steps.chain.outputs.link6_model }}
+      model7: ${{ steps.chain.outputs.link7_model }}
+      model8: ${{ steps.chain.outputs.link8_model }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -262,6 +264,7 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -366,10 +369,65 @@ jobs:
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
+
+      - name: /jane-review via OpenRouter (free OSS, chain link 7)7
+        id: p7
+        if: >-
+          env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model7 }}
+          prompt: >-
+            /jane-review ${{ github.event.pull_request.number }}
+
+      - name: /jane-review via OpenRouter (free OSS, chain link 8)8
+        id: p8
+        if: >-
+          env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p7.outcome != 'success'
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model8 }}
+          prompt: >-
+            /jane-review ${{ github.event.pull_request.number }}
+
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true' && env.HAS_OPENROUTER != 'true'
         run: |
-          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /jane-review for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::No provider key is set (ZAI_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY) — skipping /jane-review for PR #${{ github.event.pull_request.number }}"
 
       # The chain failed on every link. Recover WHY (the ship steps hide their
       # provider error) and route it: billing / out-of-tokens / bad key escalate
@@ -380,31 +438,36 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "true"
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
@@ -439,6 +502,7 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -543,10 +607,65 @@ jobs:
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
+
+      - name: /drik-review via OpenRouter (free OSS, chain link 7)7
+        id: p7
+        if: >-
+          env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model7 }}
+          prompt: >-
+            /drik-review ${{ github.event.pull_request.number }}
+
+      - name: /drik-review via OpenRouter (free OSS, chain link 8)8
+        id: p8
+        if: >-
+          env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p7.outcome != 'success'
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model8 }}
+          prompt: >-
+            /drik-review ${{ github.event.pull_request.number }}
+
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true' && env.HAS_OPENROUTER != 'true'
         run: |
-          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::No provider key is set (ZAI_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY) — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
 
       # Classify-only (escalate: 'false'): the Jane review job carries the single
       # escalation for the shared review chain, so a parallel exhaustion here does
@@ -554,31 +673,36 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "false"
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
@@ -629,6 +753,7 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -777,6 +902,61 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
+
+
+      - name: /pm triage via OpenRouter (free OSS, chain link 7)7
+        id: p7
+        if: >-
+          env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model7 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
+
+      - name: /pm triage via OpenRouter (free OSS, chain link 8)8
+        id: p8
+        if: >-
+          env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p7.outcome != 'success'
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model8 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
@@ -788,9 +968,9 @@ jobs:
             repository content.
 
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true' && env.HAS_OPENROUTER != 'true'
         run: |
-          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping the PM triage for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::No provider key is set (ZAI_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY) — skipping the PM triage for PR #${{ github.event.pull_request.number }}"
 
       # Classify-only (escalate: 'false'): the Jane review job owns the single
       # escalation for the shared review chain; this reuses the cause for its
@@ -798,31 +978,36 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "false"
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
@@ -875,6 +1060,7 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -979,10 +1165,65 @@ jobs:
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
+
+      - name: /design-coach via OpenRouter (free OSS, chain link 7)7
+        id: p7
+        if: >-
+          env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model7 }}
+          prompt: >-
+            /design-coach ${{ github.event.pull_request.number }}
+
+      - name: /design-coach via OpenRouter (free OSS, chain link 8)8
+        id: p8
+        if: >-
+          env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
+          && steps.p7.outcome != 'success'
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model8 }}
+          prompt: >-
+            /design-coach ${{ github.event.pull_request.number }}
+
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true' && env.HAS_OPENROUTER != 'true'
         run: |
-          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::No provider key is set (ZAI_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY) — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
 
       # Classify-only (escalate: 'false'): the Jane review job owns the single
       # escalation for the shared review chain; this reuses the cause for its
@@ -990,31 +1231,36 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "false"
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}

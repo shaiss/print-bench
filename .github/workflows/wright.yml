@@ -178,7 +178,9 @@ jobs:
       # their own) plus `key_present` = either one (the any-key gate the
       # triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      HAS_OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # The per-run verdict cap, enforced by signoff_mcp.py.
       SIGNOFF_MAX_VERDICTS: '3'
       # The autopilot switch: 'true' lets an approve verdict arm the brief
@@ -227,12 +229,14 @@ jobs:
           esac
           [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
           [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
-          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
+          [ "$HAS_OPENROUTER_KEY" = "true" ] && openrouter_key=1 || openrouter_key=0
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ] || [ "$openrouter_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "provider=$provider"
             echo "zai_key_present=$zai_key"
             echo "anthropic_key_present=$anthropic_key"
+            echo "openrouter_key_present=$openrouter_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
@@ -270,7 +274,7 @@ jobs:
           conf_provider="$(backlog-burn config --get provider --path .github/wright.conf)"
           # One layout entry per sign-off step below, in file order.
           python3 -m model_registry shape wright-signoff --head "$conf_provider" \
-            --conf .github/wright.conf --layout zai,zai,zai,anthropic,anthropic
+            --conf .github/wright.conf --layout zai,zai,zai,anthropic,anthropic,openrouter,openrouter
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -520,6 +524,7 @@ jobs:
         # The TERMINAL link: no continue-on-error, so the last id dying fails
         # the step (and the job) — the walk is over.
         timeout-minutes: 20
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
@@ -529,6 +534,60 @@ jobs:
           github_token: ${{ github.token }}
           show_full_output: "false"
           claude_args: --model ${{ steps.signoff_chain.outputs.link5_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
+
+      - name: Run via OpenRouter (free OSS, chain link 6)6
+        id: signoff_openrouter_6
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.openrouter_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.signoff_zai_1.outcome != 'success'
+          && steps.signoff_zai_2.outcome != 'success'
+          && steps.signoff_zai_3.outcome != 'success'
+          && steps.signoff_anthropic_4.outcome != 'success'
+          && steps.signoff_anthropic_5.outcome != 'success'
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.signoff_chain.outputs.link6_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
+
+      - name: Run via OpenRouter (free OSS, chain link 7)7
+        id: signoff_openrouter_7
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issues != ''
+          && steps.policy.outputs.openrouter_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.signoff_zai_1.outcome != 'success'
+          && steps.signoff_zai_2.outcome != 'success'
+          && steps.signoff_zai_3.outcome != 'success'
+          && steps.signoff_anthropic_4.outcome != 'success'
+          && steps.signoff_anthropic_5.outcome != 'success'
+          && steps.signoff_openrouter_6.outcome != 'success'
+        timeout-minutes: 20
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.signoff_chain.outputs.link7_model }} --effort high --permission-mode dontAsk --settings .claude/reeve-signoff-settings.json --mcp-config .claude/skills/reeve-signoff/signoff-mcp.json --allowedTools "mcp__reeve_signoff__post_reeve_signoff,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
           prompt: "/reeve-signoff ${{ steps.select.outputs.issues }}"
 
       - name: Explain a skipped agentic run
@@ -545,7 +604,7 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "::notice::dry run — selected pending briefs (${ISSUES}) but did not invoke /reeve-signoff"
           else
-            echo "::notice::no key is set for ANY provider in the wright-signoff chain (ZAI_KEY for the zai links, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — selected (${ISSUES}) but skipping the unattended /reeve-signoff run"
+            echo "::notice::no key is set for ANY provider in the wright-signoff chain (ZAI_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY; head provider '${PROVIDER}') — selected (${ISSUES}) but skipping the unattended /reeve-signoff run"
           fi
 
       - name: Explain an empty selection
@@ -572,12 +631,13 @@ jobs:
           && steps.select.outputs.issues != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome)) != 'success'
+          && (steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || steps.signoff_openrouter_6.outcome == 'success' && 'success' || steps.signoff_openrouter_7.outcome == 'success' && 'success' || (steps.signoff_openrouter_7.outcome == 'skipped' && (steps.signoff_openrouter_6.outcome == 'skipped' && (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome) || steps.signoff_openrouter_6.outcome) || steps.signoff_openrouter_7.outcome)) != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: wright-signoff
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the agent forge's Reeve sign-off routine
           escalate: "true"
@@ -598,7 +658,7 @@ jobs:
           # head failed. The terminal link failing fails the job; the "Turn
           # an exhausted walk red" step below covers a walk exhausted with
           # the tail skipped.
-          RUN: ${{ steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome) }}
+          RUN: ${{ steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || steps.signoff_openrouter_6.outcome == 'success' && 'success' || steps.signoff_openrouter_7.outcome == 'success' && 'success' || (steps.signoff_openrouter_7.outcome == 'skipped' && (steps.signoff_openrouter_6.outcome == 'skipped' && (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome) || steps.signoff_openrouter_6.outcome) || steps.signoff_openrouter_7.outcome) }}
           # Per-link outcomes + the chain the resolve step emitted, so the
           # summary can name WHICH link served and warn when the head
           # provider fell through (a GLM outage must stay visible even though
@@ -608,20 +668,26 @@ jobs:
           L3: ${{ steps.signoff_zai_3.outcome }}
           L4: ${{ steps.signoff_anthropic_4.outcome }}
           L5: ${{ steps.signoff_anthropic_5.outcome }}
+          L7: ${{ steps.signoff_openrouter_7.outcome }}
+          L6: ${{ steps.signoff_openrouter_6.outcome }}
           M1: ${{ steps.signoff_chain.outputs.link1_model }}
           M2: ${{ steps.signoff_chain.outputs.link2_model }}
           M3: ${{ steps.signoff_chain.outputs.link3_model }}
           M4: ${{ steps.signoff_chain.outputs.link4_model }}
           M5: ${{ steps.signoff_chain.outputs.link5_model }}
+          M7: ${{ steps.signoff_chain.outputs.link7_model }}
+          M6: ${{ steps.signoff_chain.outputs.link6_model }}
           P1: ${{ steps.signoff_chain.outputs.link1_provider }}
           P2: ${{ steps.signoff_chain.outputs.link2_provider }}
           P3: ${{ steps.signoff_chain.outputs.link3_provider }}
           P4: ${{ steps.signoff_chain.outputs.link4_provider }}
           P5: ${{ steps.signoff_chain.outputs.link5_provider }}
+          P7: ${{ steps.signoff_chain.outputs.link7_provider }}
+          P6: ${{ steps.signoff_chain.outputs.link6_provider }}
         run: |
           # Which link served: the first (only) link whose outcome is success.
           served=""
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3 4 5 6 7; do
             o="L$i"; m="M$i"; p="P$i"
             if [ "${!o}" = "success" ]; then
               served="link $i ${!m} (${!p})"
@@ -665,10 +731,10 @@ jobs:
           && steps.select.outputs.issues != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome)) != 'success'
+          && (steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || steps.signoff_openrouter_6.outcome == 'success' && 'success' || steps.signoff_openrouter_7.outcome == 'success' && 'success' || (steps.signoff_openrouter_7.outcome == 'skipped' && (steps.signoff_openrouter_6.outcome == 'skipped' && (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome) || steps.signoff_openrouter_6.outcome) || steps.signoff_openrouter_7.outcome)) != 'success'
         env:
           ISSUES: ${{ steps.select.outputs.issues }}
-          RUN: ${{ steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome) }}
+          RUN: ${{ steps.signoff_zai_1.outcome == 'success' && 'success' || steps.signoff_zai_2.outcome == 'success' && 'success' || steps.signoff_zai_3.outcome == 'success' && 'success' || steps.signoff_anthropic_4.outcome == 'success' && 'success' || steps.signoff_anthropic_5.outcome == 'success' && 'success' || steps.signoff_openrouter_6.outcome == 'success' && 'success' || steps.signoff_openrouter_7.outcome == 'success' && 'success' || (steps.signoff_openrouter_7.outcome == 'skipped' && (steps.signoff_openrouter_6.outcome == 'skipped' && (steps.signoff_anthropic_5.outcome == 'skipped' && (steps.signoff_anthropic_4.outcome == 'skipped' && (steps.signoff_zai_3.outcome == 'skipped' && (steps.signoff_zai_2.outcome == 'skipped' && steps.signoff_zai_1.outcome || steps.signoff_zai_2.outcome) || steps.signoff_zai_3.outcome) || steps.signoff_anthropic_4.outcome) || steps.signoff_anthropic_5.outcome) || steps.signoff_openrouter_6.outcome) || steps.signoff_openrouter_7.outcome) }}
         run: |
           echo "::error::the /reeve-signoff agent step for (${ISSUES}) did not succeed on any link of the wright-signoff chain (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
           exit 1
@@ -697,7 +763,9 @@ jobs:
       # `anthropic_key_present` + the any-key `key_present` by the "Read
       # policy" step (see the signoff job's env for why).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
+      HAS_OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # The per-run brief cap, enforced by wright_mcp.py's filing tool. One
       # brief per firing × 4 firings/day keeps the queue reviewable; the
       # pending cap below stops even that when the queue is full.
@@ -735,12 +803,14 @@ jobs:
           esac
           [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
           [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
-          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
+          [ "$HAS_OPENROUTER_KEY" = "true" ] && openrouter_key=1 || openrouter_key=0
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ] || [ "$openrouter_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "provider=$provider"
             echo "zai_key_present=$zai_key"
             echo "anthropic_key_present=$anthropic_key"
+            echo "openrouter_key_present=$openrouter_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
@@ -763,7 +833,7 @@ jobs:
           conf_provider="$(backlog-burn config --get provider --path .github/wright.conf)"
           # One layout entry per propose step below, in file order.
           python3 -m model_registry shape wright --head "$conf_provider" \
-            --conf .github/wright.conf --layout zai,anthropic,anthropic
+            --conf .github/wright.conf --layout zai,anthropic,anthropic,openrouter,openrouter
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -908,6 +978,7 @@ jobs:
         # The TERMINAL link: no continue-on-error, so the last id dying fails
         # the step (and the job) — the walk is over.
         timeout-minutes: 20
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
         uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
@@ -916,6 +987,54 @@ jobs:
           github_token: ${{ github.token }}
           show_full_output: "true"
           claude_args: --model ${{ steps.propose_chain.outputs.link3_model }} --effort medium --permission-mode dontAsk --settings .claude/wright-settings.json --mcp-config .claude/skills/wright/wright-mcp.json --allowedTools "mcp__wright__file_agent_brief,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/wright"
+
+      - name: Run via OpenRouter (free OSS, chain link 4)4
+        id: propose_openrouter_4
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.propose == 'yes'
+          && steps.policy.outputs.openrouter_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.propose_zai_1.outcome != 'success'
+          && steps.propose_anthropic_2.outcome != 'success'
+          && steps.propose_anthropic_3.outcome != 'success'
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.propose_chain.outputs.link4_model }} --effort medium --permission-mode dontAsk --settings .claude/wright-settings.json --mcp-config .claude/skills/wright/wright-mcp.json --allowedTools "mcp__wright__file_agent_brief,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
+          prompt: "/wright"
+
+      - name: Run via OpenRouter (free OSS, chain link 5)5
+        id: propose_openrouter_5
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.propose == 'yes'
+          && steps.policy.outputs.openrouter_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.propose_zai_1.outcome != 'success'
+          && steps.propose_anthropic_2.outcome != 'success'
+          && steps.propose_anthropic_3.outcome != 'success'
+          && steps.propose_openrouter_4.outcome != 'success'
+        timeout-minutes: 20
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          show_full_output: "false"
+          claude_args: --model ${{ steps.propose_chain.outputs.link5_model }} --effort medium --permission-mode dontAsk --settings .claude/wright-settings.json --mcp-config .claude/skills/wright/wright-mcp.json --allowedTools "mcp__wright__file_agent_brief,Bash(.claude/skills/wright/wright-helper.sh:*),Bash(./.claude/skills/wright/wright-helper.sh:*),Read,Grep,Glob"
           prompt: "/wright"
 
       - name: Explain a skipped agentic run
@@ -935,7 +1054,7 @@ jobs:
           elif [ "$PROPOSE" != "yes" ]; then
             echo "::notice::backpressure — ${PENDING} agent briefs already pending or armed-unbuilt (cap ${WRIGHT_MAX_PENDING}); proposing nothing this firing"
           else
-            echo "::notice::no key is set for ANY provider in the wright chain (ZAI_KEY for the zai link, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — skipping the unattended /wright run"
+            echo "::notice::no key is set for ANY provider in the wright chain (ZAI_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY; head provider '${PROVIDER}') — skipping the unattended /wright run"
           fi
 
       # The signoff job's triage step for THIS job's chain (`wright`): recover
@@ -952,12 +1071,13 @@ jobs:
           && steps.select.outputs.propose == 'yes'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome)) != 'success'
+          && (steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || steps.propose_openrouter_4.outcome == 'success' && 'success' || steps.propose_openrouter_5.outcome == 'success' && 'success' || (steps.propose_openrouter_5.outcome == 'skipped' && (steps.propose_openrouter_4.outcome == 'skipped' && (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome) || steps.propose_openrouter_4.outcome) || steps.propose_openrouter_5.outcome)) != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: wright
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the agent forge's Wright propose routine
           escalate: "true"
@@ -978,7 +1098,7 @@ jobs:
           # head failed. The terminal link failing fails the job; the "Turn
           # an exhausted walk red" step below covers a walk exhausted with
           # the tail skipped.
-          RUN: ${{ steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome) }}
+          RUN: ${{ steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || steps.propose_openrouter_4.outcome == 'success' && 'success' || steps.propose_openrouter_5.outcome == 'success' && 'success' || (steps.propose_openrouter_5.outcome == 'skipped' && (steps.propose_openrouter_4.outcome == 'skipped' && (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome) || steps.propose_openrouter_4.outcome) || steps.propose_openrouter_5.outcome) }}
           # Per-link outcomes + the chain the resolve step emitted, so the
           # summary can name WHICH link served and warn when the head
           # provider fell through (a GLM outage must stay visible even though
@@ -986,16 +1106,22 @@ jobs:
           L1: ${{ steps.propose_zai_1.outcome }}
           L2: ${{ steps.propose_anthropic_2.outcome }}
           L3: ${{ steps.propose_anthropic_3.outcome }}
+          L5: ${{ steps.propose_openrouter_5.outcome }}
+          L4: ${{ steps.propose_openrouter_4.outcome }}
           M1: ${{ steps.propose_chain.outputs.link1_model }}
           M2: ${{ steps.propose_chain.outputs.link2_model }}
           M3: ${{ steps.propose_chain.outputs.link3_model }}
+          M5: ${{ steps.propose_chain.outputs.link5_model }}
+          M4: ${{ steps.propose_chain.outputs.link4_model }}
           P1: ${{ steps.propose_chain.outputs.link1_provider }}
           P2: ${{ steps.propose_chain.outputs.link2_provider }}
           P3: ${{ steps.propose_chain.outputs.link3_provider }}
+          P5: ${{ steps.propose_chain.outputs.link5_provider }}
+          P4: ${{ steps.propose_chain.outputs.link4_provider }}
         run: |
           # Which link served: the first (only) link whose outcome is success.
           served=""
-          for i in 1 2 3; do
+          for i in 1 2 3 4 5; do
             o="L$i"; m="M$i"; p="P$i"
             if [ "${!o}" = "success" ]; then
               served="link $i ${!m} (${!p})"
@@ -1036,9 +1162,9 @@ jobs:
           && steps.select.outputs.propose == 'yes'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome)) != 'success'
+          && (steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || steps.propose_openrouter_4.outcome == 'success' && 'success' || steps.propose_openrouter_5.outcome == 'success' && 'success' || (steps.propose_openrouter_5.outcome == 'skipped' && (steps.propose_openrouter_4.outcome == 'skipped' && (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome) || steps.propose_openrouter_4.outcome) || steps.propose_openrouter_5.outcome)) != 'success'
         env:
-          RUN: ${{ steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome) }}
+          RUN: ${{ steps.propose_zai_1.outcome == 'success' && 'success' || steps.propose_anthropic_2.outcome == 'success' && 'success' || steps.propose_anthropic_3.outcome == 'success' && 'success' || steps.propose_openrouter_4.outcome == 'success' && 'success' || steps.propose_openrouter_5.outcome == 'success' && 'success' || (steps.propose_openrouter_5.outcome == 'skipped' && (steps.propose_openrouter_4.outcome == 'skipped' && (steps.propose_anthropic_3.outcome == 'skipped' && (steps.propose_anthropic_2.outcome == 'skipped' && steps.propose_zai_1.outcome || steps.propose_anthropic_2.outcome) || steps.propose_anthropic_3.outcome) || steps.propose_openrouter_4.outcome) || steps.propose_openrouter_5.outcome) }}
         run: |
           echo "::error::the /wright agent step did not succeed on any link of the wright chain (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
           exit 1

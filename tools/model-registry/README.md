@@ -201,6 +201,30 @@ pipeline and on the system Python in CI, so a third-party import would force a p
 step in front of the routine that decides which model runs — the rule
 `tools/lineage`, `tools/ci-gates` and `tools/backlog-burn` all keep.
 
+## OpenRouter (free OSS tail)
+
+Scheduled and review chains that walk `zai → anthropic → …` now end with two
+**OpenRouter** links hosting free-tier OSS models (`google/gemma-4-31b-it:free`,
+then `nvidia/nemotron-3-super-120b-a12b:free`). OpenRouter is wired through the
+same Anthropic-compatible endpoint Claude Code already uses for Z.AI:
+
+- **Provider:** `[provider:openrouter]` with `base_url = https://openrouter.ai/api`
+- **Secret:** `OPENROUTER_API_KEY` (set once per repo; never commit the key)
+
+```bash
+gh secret set OPENROUTER_API_KEY --repo shaiss/print-bench
+```
+
+Each workflow ship step references `secrets.OPENROUTER_API_KEY` literally (the
+Actions constraint). `provider-triage` passes the key into `model_registry
+classify` via `OPENROUTER_API_KEY` in the environment so exhaustion diagnostics
+probe the OpenRouter links too.
+
+Free models are rate-limited and best-effort: they are the **ultimate fallback**
+after Z.AI and Anthropic links exhaust, not a replacement for funded providers.
+Expect throttling during busy periods; a walk that falls through to OpenRouter may
+still fail if every free link is over quota.
+
 ## Tests
 
 ```bash
