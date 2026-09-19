@@ -147,6 +147,17 @@ jobs:
           # (matches design-run.yml and chunker.yml).
           ref: ${{ github.event.repository.default_branch }}
 
+      - name: Pin the commit this job started from
+        # #670: the lock-cleanup step below must run THIS commit's
+        # scripts/routine-lock-cleanup.sh, never whatever the agent's walk
+        # leaves in the working tree — a walk may stack its branch on an
+        # older feature branch whose pre-#538 copy reads 'success' as
+        # delivered and no-ops, leaving a dead run's SHIP-LOCK standing
+        # (#627). Captured here, before any agent step can move HEAD or the
+        # remote-tracking refs.
+        id: start_ref
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -451,7 +462,22 @@ jobs:
           # negative control.
           AGENT_OUTCOME: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # The start commit the checkout step left, captured before any agent
+          # step could move HEAD (#670).
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
         run: |
+          # #670: the tree the walk leaves behind is untrusted for cleanup —
+          # restore the script from the commit this job started on (the
+          # default branch) and run THAT. The walk may have checked out a
+          # stacked feature branch whose older copy predates #538 and no-ops
+          # a dead 'success' (#627). git-show fallback for a tree whose index
+          # a killed agent left locked; a restore that fails entirely fails
+          # this step red — a cleanup that cannot run trusted code must not
+          # fall back to running untrusted code.
+          git checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh \
+            || git show "$START_SHA":scripts/routine-lock-cleanup.sh \
+                 > scripts/routine-lock-cleanup.sh
+          chmod +x scripts/routine-lock-cleanup.sh
           ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
             --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine backlog-burn
 
