@@ -1,0 +1,4 @@
+# Negative control (selftest: must FAIL): the mirrored numeral declared upright.
+stops stop 0,1
+nonempty landing-glyph-mirrored
+nonempty-control landing-glyph-mirrored

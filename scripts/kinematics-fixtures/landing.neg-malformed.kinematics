@@ -1,0 +1,9 @@
+# Structural refusal (selftest: must FAIL before rendering): one of each
+# malformed directive, each of which must be named in its own FAIL line.
+steps 1
+sweep
+stops stop 0,abc
+stops stop 0
+empty
+frobnicate landing-flat
+empty-control landing-flat-rolled

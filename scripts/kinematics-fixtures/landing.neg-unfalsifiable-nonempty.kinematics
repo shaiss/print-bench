@@ -1,0 +1,4 @@
+# Structural refusal (selftest: must FAIL before rendering): a nonempty check
+# with no nonempty-control.
+stops stop 0
+nonempty landing-glyph
