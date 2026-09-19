@@ -21,8 +21,12 @@
 # derived from what exists on GitHub:
 #   delivered  a claude/issue-<N>-* branch or an open closing PR exists
 #   declined   a 🚢 DECLINED / 🚦 DECISION NEEDED comment posted after the
-#              latest claim, or that claim already reading SHIP-LOCK
-#              WITHDRAWN in the agent's own (non-death) wording
+#              latest claim, that claim already reading SHIP-LOCK
+#              WITHDRAWN in the agent's own (non-death) wording, or a
+#              🚢 DEFERRED (re-check-later) stop (#690) — the walk found
+#              the issue's dependencies unlanded and deferred, which it
+#              often does without ever claiming, so that marker is
+#              detected on its own anchor (see deferred_indicated)
 #   dead       anything else — withdrawal posted, death counted, escalation
 #              at the threshold — regardless of the exit code passed in,
 #              which is carried in the withdrawal body as a diagnostic only
@@ -109,6 +113,13 @@ command -v jq >/dev/null 2>&1 || {
 # one.
 DECLINE_MARKER_1='🚢 DECLINED'
 DECLINE_MARKER_2='🚦 DECISION NEEDED'
+# The marker a deferring walk leads with (#690): dependencies not landed,
+# re-check later — a deliberate non-delivery, so decline-class for the
+# red-on-death gate. Kept OUT of decline_indicated() because the deferring
+# walk usually never claims (the #641 shape: a DEFERRED per firing, not one
+# SHIP-LOCK on the thread), leaving that function's "strictly after the
+# latest claim" anchor with nothing to anchor to.
+DEFER_MARKER='🚢 DEFERRED'
 
 # The latest SHIP-LOCK comment (claim or withdrawal form alike), or null.
 # First-of-ties on equal created_at, matching Python max() in the selector
@@ -145,6 +156,29 @@ decline_indicated() {
       else [ .[] | select(.created_at > $l.created_at)
              | select(fl(.body) | startswith($d1) or startswith($d2)) ]
            | length > 0
+      end'
+}
+
+# stdin: NDJSON comments. Prints true/false: a first-line 🚢 DEFERRED comment
+# posted strictly after the latest lock comment (the claimed shape), or — when
+# the thread carries no lock comment at all, the observed claimless shape —
+# the DEFERRED being the thread's LATEST comment, the freshest artifact,
+# which is what a cleanup running moments after the walk sees. That
+# latest-comment bound is what keeps an old DEFERRED from vouching for a
+# dead run: a defer anything newer followed (a human reply, a triage note)
+# is history, not this run's stop.
+deferred_indicated() {
+  jq -rs --arg marker "$LOCK_MARKER" --arg d "$DEFER_MARKER" \
+    "$JQ_FL $JQ_LATEST_LOCK"'
+    latest_lock as $l
+    | if $l == null then
+        if length == 0 then false
+        else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end)) as $last
+             | ($last | fl(.body) | startswith($d))
+        end
+      else
+        [ .[] | select(.created_at > $l.created_at)
+               | select(fl(.body) | startswith($d)) ] | length > 0
       end'
 }
 
@@ -284,6 +318,10 @@ run_live() {
   if [ "$(decline_indicated <<<"$comments")" = "true" ]; then
     echo "::notice::a DECLINED/DECISION NEEDED comment follows the claim on #$ISSUE — a deliberate stop, not a death"
     conclude false true false false "declined (a stop comment follows the claim)"
+  fi
+  if [ "$(deferred_indicated <<<"$comments")" = "true" ]; then
+    echo "::notice::a DEFERRED (re-check when dependencies land) comment is the latest stop on #$ISSUE — a deliberate defer, not a death"
+    conclude false true false false "declined (a DEFERRED comment defers to unlanded dependencies)"
   fi
   state="$(lock_state <<<"$comments")"
   if [ "$state" = "withdrawn" ] && [ "$(death_marked <<<"$comments")" != "true" ]; then
@@ -449,6 +487,50 @@ EOF
     || st_fail "a thread with no lock at all read as death-marked"
   echo "ok    selftest: decline detection (after-claim / before-claim / mid-line / no-claim) + death marking"
 
+  # -- deferred detection (#690): the re-check-later stop marker -----------
+  # Positive: the walk's DEFERRED after the claim, and — the #641 shape — a
+  # claimless thread whose LATEST comment is the DEFERRED. Negative controls:
+  # the defer before a later claim (a previous run's defer never vouches for
+  # this one), the marker mid-line, a stale defer that a newer comment
+  # followed, and a claimless thread whose latest comment is not a defer.
+  cat > "$tmp/defer-after.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z"}
+EOF
+  [ "$(deferred_indicated < "$tmp/defer-after.ndjson")" = "true" ] \
+    || st_fail "a DEFERRED comment after the claim was not read as a defer"
+  cat > "$tmp/defer-before.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED — dependency not landed yet.", "created_at": "2026-09-01T15:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\nclaimed afresh", "created_at": "2026-09-01T15:01:00Z"}
+EOF
+  [ "$(deferred_indicated < "$tmp/defer-before.ndjson")" = "false" ] \
+    || st_fail "a defer posted BEFORE the claim wrongly vouched for this run"
+  cat > "$tmp/defer-midline.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z"}
+{"body": "beware the 🚢 DEFERRED marker mid-line", "created_at": "2026-09-01T15:02:00Z"}
+EOF
+  [ "$(deferred_indicated < "$tmp/defer-midline.ndjson")" = "false" ] \
+    || st_fail "a mid-line defer marker was counted as a stop comment"
+  # The #641 shape exactly (read off the live thread): no lock comment
+  # anywhere, the walk's DEFERRED as the thread's latest artifact.
+  cat > "$tmp/defer-claimless.ndjson" <<'EOF'
+{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-01T05:53:00Z"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z"}
+EOF
+  [ "$(deferred_indicated < "$tmp/defer-claimless.ndjson")" = "true" ] \
+    || st_fail "a claimless thread whose latest comment is a DEFERRED was not read as a defer"
+  cat > "$tmp/defer-stale.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z"}
+{"body": "**Ops stopgap** — parking until deps land.", "created_at": "2026-09-01T06:36:00Z"}
+EOF
+  [ "$(deferred_indicated < "$tmp/defer-stale.ndjson")" = "false" ] \
+    || st_fail "a DEFERRED that a newer comment followed was still read as this run's stop"
+  [ "$(deferred_indicated < "$tmp/nolock.ndjson")" = "false" ] \
+    || st_fail "a claimless thread whose latest comment is not a defer read as deferred"
+  [ "$(deferred_indicated < /dev/null)" = "false" ] \
+    || st_fail "an empty comment thread read as deferred"
+  echo "ok    selftest: deferred detection (after-claim / before-claim / mid-line / claimless-latest / stale / none)"
+
   # -- branch corroboration + the near-miss --------------------------------
   printf 'main\nclaude/issue-281-fix-thing\n' | branch_corroborates 281 \
     || st_fail "claude/issue-281-* did not corroborate issue 281"
@@ -584,6 +666,54 @@ STUB
   grep -qx 'declined=true' "$tmp/selfwd-out" || st_fail "a self-withdrawn claim did not emit declined=true"
   no_posts selfwd
 
+  # Row 4 (#690's exact shape): exit 0, the walk's DEFERRED as the latest
+  # comment on a claimless thread, no branch/PR → declined (a deliberate
+  # defer), nothing posted — so the red gate's delivered/declined condition
+  # reads declined=true and the job stays green instead of false-redding.
+  e2e_fix deferred comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z"},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z"}]'
+  e2e_fix deferred branches '[]'
+  e2e_fix deferred pulls '[]'
+  e2e deferred success
+  grep -qx 'declined=true' "$tmp/deferred-out" || st_fail "exit-0 + claimless DEFERRED did not emit declined=true"
+  grep -qx 'delivered=false' "$tmp/deferred-out" || st_fail "the deferred case did not emit delivered=false"
+  grep -qx 'withdrawn=false' "$tmp/deferred-out" || st_fail "the deferred case did not emit withdrawn=false"
+  no_posts deferred
+
+  # Row 4's negative control (AC1's other direction): the same claimless
+  # fixture WITHOUT the DEFERRED comment stays the all-false no-op — no
+  # branch, no PR, no stop marker of any kind — so delivered=false AND
+  # declined=false reach the red gate and the job fails. A claimless walk
+  # that posted nothing is still a death.
+  e2e_fix nodefer comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z"}]'
+  e2e_fix nodefer branches '[]'
+  e2e_fix nodefer pulls '[]'
+  e2e nodefer success
+  grep -qx 'declined=false' "$tmp/nodefer-out" || st_fail "a claimless walk with no stop marker wrongly emitted declined=true"
+  grep -qx 'delivered=false' "$tmp/nodefer-out" || st_fail "the no-defer control did not emit delivered=false"
+  grep -qx 'withdrawn=false' "$tmp/nodefer-out" || st_fail "the no-defer control did not emit withdrawn=false"
+  no_posts nodefer
+
+  # Row 4b: the claimed shape — the walk claimed, deferred, and left the
+  # lock standing → declined, nothing posted (the lock ages out through the
+  # selector's staleness, the DECLINED row's design).
+  e2e_fix deferlock comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z"},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z"}]'
+  e2e_fix deferlock branches '[]'
+  e2e_fix deferlock pulls '[]'
+  e2e deferlock success
+  grep -qx 'declined=true' "$tmp/deferlock-out" || st_fail "exit-0 + DEFERRED after the claim did not emit declined=true"
+  no_posts deferlock
+
+  # Row 4c: corroboration outranks the defer — a branch exists even though
+  # the thread's latest stop is a DEFERRED → delivered, nothing posted (a
+  # walk that deferred and then landed anyway is a delivery, not a defer).
+  e2e_fix deferbranch comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z"},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z"}]'
+  e2e_fix deferbranch branches '[{"name": "claude/issue-1-the-fix"}]'
+  e2e_fix deferbranch pulls '[]'
+  e2e deferbranch success
+  grep -qx 'delivered=true' "$tmp/deferbranch-out" || st_fail "exit-0 + branch + DEFERRED did not emit delivered=true"
+  grep -qx 'declined=false' "$tmp/deferbranch-out" || st_fail "the branch-plus-DEFERRED case wrongly emitted declined=true"
+  no_posts deferbranch
+
   # Escalation still fires at the threshold under the new disposition: two
   # prior death-withdrawals + this death → withdrawal, label add, decision
   # comment, escalated=true.
@@ -598,7 +728,7 @@ STUB
   grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/esc-postlog" \
     || st_fail "the escalation did not post the decision comment"
 
-  echo "ok    selftest: end-to-end dispositions (dead / delivered / declined / self-withdrawn / escalated)"
+  echo "ok    selftest: end-to-end dispositions (dead / delivered / declined / self-withdrawn / deferred / escalated)"
 
   # -- #670: cleanup runs the start commit's script, not the tree's copy -----
   # The scheduled workflows pin the cleanup script to the commit the job
