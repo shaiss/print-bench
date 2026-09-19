@@ -142,6 +142,12 @@ land_ir   = land_opening_d / 2;                          // land opening  11.0
 // against the 22.0 parameter, the issue #37 formula-vs-mesh drift class. So
 // the cone is aimed past the plane — it crosses land_ir exactly at z_floor
 // and keeps exactly funnel_deg throughout its visible span.
+// Before tan(): 0 or negative still passes the 45 deg ceiling and blows
+// z_floor up (division by tan(funnel_deg)).
+assert(funnel_deg > 0, str(
+    "FUNNEL FLOOR: funnel_deg = ", funnel_deg, " deg is not positive.",
+    " tan(funnel_deg) is used for z_floor; 0 or negative blows the",
+    " interior funnel up. Keep it above 0 (the 45 deg ceiling is separate)."));
 z_floor   = shell_h + (ri - land_ir) / tan(funnel_deg);  // land plane   ~46.0
 z_land    = z_floor + 0.5;  // throat_cavity origin: its bore starts 0.5 low
 cone_top_r = land_ir - 0.5 * tan(funnel_deg);            // cone end, interior
@@ -323,9 +329,10 @@ module bottle_fit_coupon() {
     assert(len(coupon_tols) == 4, str(
         "COUPON: this coupon is laid out 2x2 for four tols, got ",
         len(coupon_tols), "."));
-    assert(strip_x1 <= 250 && 2 * strip_y <= 210, str(
+    assert(strip_x1 <= 250 && max(2 * strip_y, 2 * r_out) <= 210, str(
         "COUPON BED FIT: the strip runs ", strip_x1, " x ", 2 * strip_y,
-        " mm plus the port stub beside it — outside the gate's default",
+        " mm and the port stub is ", 2 * r_out,
+        " mm across — outside the gate's default",
         " build volume."));
     assert([for (t = coupon_tols) if (ridge_land(t) < 0.45) t] == [], str(
         "COUPON RIDGE: a station's ridge land fell under the 0.45 mm coupon",

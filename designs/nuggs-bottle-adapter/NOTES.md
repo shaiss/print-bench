@@ -69,6 +69,8 @@ standard … No caliper numbers will follow; the standard is the spec."
 7. **Interior funnel at 44°, exterior shoulder at ~40°** — both under the
    45° supportless ceiling (issue #34's measured limit), so the part prints
    supportless in the family pose: standing on the port's sector tips.
+   `funnel_deg` is also asserted `> 0` before `tan(funnel_deg)` feeds
+   `z_floor`; the coupon's Y bed-fit is `max(2 * strip_y, 2 * r_out)`.
 8. **Coupon layout.** Two stations on one plate: the library's own
    `nuggs_neck` stub in the family coupon pose, plus four labelled rings
    carrying the production `throat_cavity` verbatim at tol 0.15/0.22/0.30/0.38.
