@@ -35,6 +35,20 @@ owner's own answer are all the same login), "owner activity" cannot be an
 author test — it is a comment whose first line carries no machine marker and
 whose author GitHub does not type as a ``Bot``.
 
+A fourth exclusion, the defer twin of that cooldown (issue #694, the optional
+half of #690): a brief whose *latest* ``🚢 DEFERRED`` comment sits inside the
+same shape of cooldown window is skipped — a defer means the run looked and
+found the brief's *dependencies* unlanded (#690's gap: on #641 the burn
+re-picked the same dependency-blocked issue every firing, the agent
+re-deferred, and the routine spun 20+ times without shipping). Identical
+expiry semantics to a decline: it **expires** (after the window the next
+firing re-checks whether the dependencies landed — never buries), the latest
+defer is the state (a later defer restarts it), and any owner activity
+re-arms it immediately. The marker is the same first-line ``🚢 DEFERRED``
+the red-gate's disposition classification reads
+(``scripts/routine-lock-cleanup.sh``, PR #695), so the selector and the
+cleanup can never disagree about what counts as a defer.
+
 The skill re-verifies all of this before it touches a line of code, so this
 module is a best-effort *pre-filter*. Its only jobs are to never hand the run
 an issue that is plainly already taken, and — the hard cap — to never hand it
@@ -87,10 +101,30 @@ DECLINED_MARKER = "🚢 DECLINED"
 # owner*, never closed. 24 h is the issue's own example value.
 DECLINE_COOLDOWN_HOURS = 24
 
+# A comment whose first line starts with ``🚢 DEFERRED`` is a defer marker —
+# the stop the /ship-issue skill's walk posts when a brief's dependencies
+# have not landed yet (issue #690; the red-gate's disposition classification
+# reads the same first-line marker, PR #695, so the two agree on what a
+# defer is). A *state* like a decline: the cooldown below reads the latest
+# such comment, so a second defer restarts it.
+DEFERRED_MARKER = "🚢 DEFERRED"
+
+# A defer this fresh keeps the brief out of selection (issue #694): the run
+# already looked and found its dependencies unlanded, so re-selecting it
+# inside the window is the spin #690 measured on #641 — the same brief
+# re-picked every firing, re-deferred, 20+ firings shipping nothing. After
+# the window the next firing re-checks whether the dependencies landed —
+# a defer means *waiting on dependencies*, never closed. The same 24 h the
+# issue names beside #530's decline window, deliberately its own constant:
+# a dependency wait and an owner wait are different clocks, free to diverge
+# the day a measurement says they should.
+DEFER_COOLDOWN_HOURS = 24
+
 # First-line prefixes marking a comment as machine-posted by one of this
 # repo's automation routines: the ship family (🚢 SHIP-LOCK / WITHDRAWN /
-# DECLINED / "Draft PR up"), the HITL park (🚦 DECISION NEEDED), the labeler's
-# triage (🏷…) and the chunker's completion marker (🧩). 🏷 is the bare
+# DECLINED / DEFERRED / "Draft PR up"), the HITL park (🚦 DECISION NEEDED),
+# the labeler's triage (🏷…) and the chunker's completion marker (🧩). 🏷 is
+# the bare
 # codepoint on purpose, so it matches both with and without the variation
 # selector the labeler emits. A run comment never re-arms a decline — only
 # owner activity does — and since the routines post through the same PAT
@@ -100,7 +134,7 @@ DECLINE_COOLDOWN_HOURS = 24
 RUN_COMMENT_MARKERS = ("🚢", "🚦", "🏷", "🧩")
 
 # Sort key floor for comments whose createdAt does not parse (see
-# :func:`_decline_cooldown`).
+# :func:`_stop_marker_cooldown`).
 _DATETIME_MIN = datetime.min.replace(tzinfo=timezone.utc)
 
 # GitHub honours these nine keywords, case-insensitively, each optionally
@@ -195,34 +229,41 @@ def _is_run_comment(comment: dict[str, Any]) -> bool:
     return any(first.startswith(marker) for marker in RUN_COMMENT_MARKERS)
 
 
-def _decline_cooldown(
+def _stop_marker_cooldown(
     comments: list[dict[str, Any]],
     now: Optional[datetime],
     cooldown_hours: float,
+    marker: str,
+    noun: str,
+    participle: str,
 ) -> Optional[str]:
-    """Why the issue is in its decline cooldown, or ``None`` if it is not.
+    """Why the issue is in the cooldown of its latest ``marker`` stop, or
+    ``None`` if it is not.
 
-    The rule is issue #530's own: *eligible iff the latest decline is older
-    than the window OR any non-run comment is newer than the latest decline*.
-    The latest decline is the state, so a second decline restarts the window;
-    and a run comment newer than the decline — another withdrawal, a triage
-    label, a park marker — re-arms nothing, because none of it is the owner
-    answering the question the decline is waiting on.
+    One expiry semantics shared by both stop markers — declines (issue #530,
+    waiting on the owner) and defers (issue #694, waiting on dependencies) —
+    so the twin guards in :func:`exclusion_reason` cannot drift:
+    *eligible iff the latest stop is older than the window OR any non-run
+    comment is newer than the latest stop*. The latest stop is the state, so
+    a second one restarts the window; and a run comment newer than the stop —
+    another withdrawal, a triage label, a park marker, even the other stop
+    marker — re-arms nothing, because none of it is the owner answering what
+    the stop is waiting on.
 
-    With ``now`` unknown (or a decline that will not parse) the window cannot
+    With ``now`` unknown (or a stop that will not parse) the window cannot
     be judged, and the safe reading is *in* cooldown — the mirror of
     :func:`_ship_lock_state`'s "never select over a claim we cannot date":
     this module's contract is to never hand the run an issue that is plainly
-    taken, and a decline it cannot date is exactly that.
+    taken, and a stop it cannot date is exactly that.
     """
-    declines = [
+    stops = [
         c for c in (comments or [])
-        if _first_line(c.get("body", "")).startswith(DECLINED_MARKER)
+        if _first_line(c.get("body", "")).startswith(marker)
     ]
-    if not declines:
+    if not stops:
         return None
     latest = max(
-        declines, key=lambda c: _parse_iso(c.get("createdAt", "")) or _DATETIME_MIN
+        stops, key=lambda c: _parse_iso(c.get("createdAt", "")) or _DATETIME_MIN
     )
     latest_dt = _parse_iso(latest.get("createdAt", ""))
     for c in comments or []:
@@ -230,18 +271,20 @@ def _decline_cooldown(
             continue
         dt = _parse_iso(c.get("createdAt", ""))
         if dt is not None and latest_dt is not None and dt > latest_dt:
-            return None  # owner activity newer than the decline re-arms
+            return None  # owner activity newer than the stop re-arms
     if latest_dt is None or now is None:
-        return "recently declined (the decline cannot be dated — conservative)"
+        return (
+            f"recently {participle} (the {noun} cannot be dated — conservative)"
+        )
     if latest_dt.tzinfo is None:
         latest_dt = latest_dt.replace(tzinfo=timezone.utc)
     age = now - latest_dt
     if age > timedelta(hours=cooldown_hours):
-        return None  # expired: a decline must never bury the brief
+        return None  # expired: a stop must never bury the brief
     hours = age.total_seconds() / 3600
     age_h = "<1 h" if hours < 1 else f"{hours:.0f} h"
     return (
-        f"recently declined ({age_h} ago, within the "
+        f"recently {participle} ({age_h} ago, within the "
         f"{cooldown_hours:g} h cooldown — an owner reply re-arms)"
     )
 
@@ -296,6 +339,7 @@ def exclusion_reason(
     stale_after_hours: float = STALE_LOCK_HOURS,
     decision_label: str = DECISION_PENDING_LABEL,
     decline_cooldown_hours: float = DECLINE_COOLDOWN_HOURS,
+    defer_cooldown_hours: float = DEFER_COOLDOWN_HOURS,
 ) -> Optional[str]:
     """Why this issue is *not* eligible, or ``None`` if it is.
 
@@ -310,11 +354,13 @@ def exclusion_reason(
     even after a pausing run's SHIP-LOCK goes stale, so it cannot be gated
     behind the staleness logic.
 
-    The decline cooldown sits *after* every claim guard because it is the
-    weakest exclusion — a mere "a run looked recently and walked away" — so a
-    real claim or a parked decision should be the reported reason when more
-    than one holds. (A declined thread usually carries a withdrawn lock, which
-    is why the lock guard passes it through to here.)
+    The decline and defer cooldowns sit *after* every claim guard because
+    they are the weakest exclusions — a mere "a run looked recently and
+    walked away" — so a real claim or a parked decision should be the
+    reported reason when more than one holds. Of the two stops the decline is
+    reported first: it names the stronger fact (a blocking question, not just
+    unlanded dependencies). (A declined thread usually carries a withdrawn
+    lock, which is why the lock guard passes it through to here.)
     """
     number = issue["number"]
     labels = issue.get("labels", []) or []
@@ -328,9 +374,18 @@ def exclusion_reason(
         return f"an open PR already closes #{number}"
     if _ship_lock_state(issue.get("comments", []), now, stale_after_hours) == "active":
         return "an active 🚢 SHIP-LOCK claim"
-    cooldown = _decline_cooldown(issue.get("comments", []), now, decline_cooldown_hours)
-    if cooldown is not None:
-        return cooldown
+    decline = _stop_marker_cooldown(
+        issue.get("comments", []), now, decline_cooldown_hours,
+        DECLINED_MARKER, "decline", "declined",
+    )
+    if decline is not None:
+        return decline
+    defer = _stop_marker_cooldown(
+        issue.get("comments", []), now, defer_cooldown_hours,
+        DEFERRED_MARKER, "defer", "deferred",
+    )
+    if defer is not None:
+        return defer
     return None
 
 
@@ -347,9 +402,9 @@ def select_issue(
     routine's reasoning without re-deriving it.
 
     ``now`` (a timezone-aware datetime) dates SHIP-LOCK claims for staleness
-    and decline markers for cooldown; the CLI passes the current UTC time.
-    With ``now`` omitted, a claim is never treated as stale and a decline
-    never as expired — the conservative reading.
+    and decline/defer markers for cooldown; the CLI passes the current UTC
+    time. With ``now`` omitted, a claim is never treated as stale and a
+    stop marker never as expired — the conservative reading.
     """
     issues = snapshot.get("issues", []) or []
     open_prs = snapshot.get("openPRs", []) or []
