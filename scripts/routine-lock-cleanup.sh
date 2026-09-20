@@ -602,11 +602,48 @@ STUB
 
   # -- #670: cleanup runs the start commit's script, not the tree's copy -----
   # The scheduled workflows pin the cleanup script to the commit the job
-  # started on (git checkout <sha> -- <script>, with the git-show fallback)
-  # because the agent's walk may stack its branch on an older feature branch
-  # whose pre-#538 copy turns a dead 'success' into a silent no-op (#627).
-  # This fixture reproduces that incident end to end: the tree's own old copy
-  # no-ops; the same tree after the workflow's exact restore withdraws.
+  # started on (git checkout <sha> -- <script>, with a symlink-safe git-show
+  # fallback) because the agent's walk may stack its branch on an older
+  # feature branch whose pre-#538 copy turns a dead 'success' into a silent
+  # no-op (#627). This fixture reproduces that incident end to end: the
+  # tree's own old copy no-ops; the same tree after the workflow's restore
+  # withdraws.
+  #
+  # Mirrors the restore inlined in backlog-burn.yml and design-run.yml. A
+  # redirect onto the script path is not used: the agent can leave that path
+  # as a symlink, and the shell would follow it. The drift guard below pins
+  # the same markers in both workflow files.
+  restore_lock_cleanup() { # <repo> <sha>
+    local repo sha
+    repo="$1"
+    sha="$2"
+    (
+      cd "$repo"
+      if [ -L scripts ]; then
+        echo "refusing to restore lock-cleanup: scripts/ is a symlink" >&2
+        exit 1
+      fi
+      if [ -L scripts/routine-lock-cleanup.sh ]; then
+        rm -f scripts/routine-lock-cleanup.sh
+      fi
+      if ! git checkout "$sha" -- scripts/routine-lock-cleanup.sh; then
+        restore_tmp="$(mktemp)"
+        if ! git show "$sha:scripts/routine-lock-cleanup.sh" > "$restore_tmp"; then
+          rm -f "$restore_tmp"
+          exit 1
+        fi
+        if [ -L scripts/routine-lock-cleanup.sh ]; then
+          rm -f scripts/routine-lock-cleanup.sh
+        fi
+        mv -f "$restore_tmp" scripts/routine-lock-cleanup.sh
+      fi
+      if [ -L scripts/routine-lock-cleanup.sh ] || [ ! -f scripts/routine-lock-cleanup.sh ]; then
+        echo "lock-cleanup restore did not leave a regular file" >&2
+        exit 1
+      fi
+      chmod +x scripts/routine-lock-cleanup.sh
+    )
+  }
   local repo start_sha wf
   repo="$tmp/stacked"
   mkdir -p "$repo/scripts"
@@ -642,12 +679,9 @@ DECOY
   e2e_fix stacked branches '[]'
   e2e_fix stacked pulls '[]'
 
-  # The workflow's exact restore, then the restored copy must withdraw.
-  ( cd "$repo" \
-    && git checkout "$start_sha" -- scripts/routine-lock-cleanup.sh ) \
-    || ( cd "$repo" \
-      && git show "$start_sha":scripts/routine-lock-cleanup.sh \
-           > scripts/routine-lock-cleanup.sh )
+  # The workflow's restore, then the restored copy must withdraw.
+  restore_lock_cleanup "$repo" "$start_sha" \
+    || st_fail "the restore failed on the stacked tree"
   cmp -s "$repo/scripts/routine-lock-cleanup.sh" "$SELF" \
     || st_fail "the restore did not recover the start commit's copy of the script"
   : > "$tmp/stacked-postlog"; : > "$tmp/stacked-out"; : > "$tmp/stacked-log"
@@ -668,14 +702,77 @@ DECOY
   fi
   echo "ok    selftest: #670 — a stacked tree's pre-#538 copy no-ops, the restored start-commit copy withdraws"
 
+  # The agent can leave the script path as a symlink. A redirect onto that
+  # path follows the link (negative control, below). The locked index is the
+  # documented reason checkout fails and the git-show fallback runs — that
+  # fallback must not clobber the link target, and must leave a regular file.
+  victim="$tmp/outside-victim"
+  printf 'do-not-clobber\n' > "$tmp/victim-safe"
+  cp "$tmp/victim-safe" "$victim"
+  rm -f "$repo/scripts/routine-lock-cleanup.sh"
+  ln -s "$victim" "$repo/scripts/routine-lock-cleanup.sh"
+  git -C "$repo" show "$start_sha:scripts/routine-lock-cleanup.sh" \
+    > "$repo/scripts/routine-lock-cleanup.sh"
+  if cmp -s "$victim" "$tmp/victim-safe"; then
+    st_fail "the unsafe redirect did not follow the symlink — the negative control is wrong"
+  fi
+  cp "$tmp/victim-safe" "$victim"
+  rm -f "$repo/scripts/routine-lock-cleanup.sh"
+  ln -s "$victim" "$repo/scripts/routine-lock-cleanup.sh"
+  : > "$repo/.git/index.lock"
+  restore_lock_cleanup "$repo" "$start_sha" \
+    >"$tmp/symlink-restore-out" 2>"$tmp/symlink-restore-err" \
+    || st_fail "symlink-safe restore failed when the index was locked"
+  grep -q 'index.lock' "$tmp/symlink-restore-err" \
+    || st_fail "locked-index fixture did not make checkout fail — the git-show fallback was not exercised"
+  rm -f "$repo/.git/index.lock"
+  [ ! -L "$repo/scripts/routine-lock-cleanup.sh" ] \
+    || st_fail "restore left scripts/routine-lock-cleanup.sh as a symlink"
+  [ -f "$repo/scripts/routine-lock-cleanup.sh" ] \
+    || st_fail "restore did not leave a regular file at scripts/routine-lock-cleanup.sh"
+  cmp -s "$repo/scripts/routine-lock-cleanup.sh" "$SELF" \
+    || st_fail "symlink-safe fallback did not recover the start commit's copy"
+  cmp -s "$victim" "$tmp/victim-safe" \
+    || st_fail "symlink-safe fallback wrote through the symlink and clobbered its target"
+  # Checkout path too: a symlink with an unlocked index is unlinked before
+  # checkout, not followed.
+  printf 'do-not-clobber\n' > "$victim"
+  rm -f "$repo/scripts/routine-lock-cleanup.sh"
+  ln -s "$victim" "$repo/scripts/routine-lock-cleanup.sh"
+  restore_lock_cleanup "$repo" "$start_sha" \
+    || st_fail "symlink-safe restore failed on the checkout path"
+  [ ! -L "$repo/scripts/routine-lock-cleanup.sh" ] \
+    || st_fail "checkout-path restore left scripts/routine-lock-cleanup.sh as a symlink"
+  cmp -s "$victim" "$tmp/victim-safe" \
+    || st_fail "checkout-path restore wrote through the symlink"
+  # A symlink at scripts/ itself must fail closed without writing outside.
+  outside_dir="$tmp/outside-scripts"
+  mkdir -p "$outside_dir"
+  printf 'outside-script\n' > "$outside_dir/routine-lock-cleanup.sh"
+  cp "$outside_dir/routine-lock-cleanup.sh" "$tmp/outside-script-safe"
+  rm -rf "$repo/scripts"
+  ln -s "$outside_dir" "$repo/scripts"
+  if restore_lock_cleanup "$repo" "$start_sha" \
+      >"$tmp/scripts-link-out" 2>"$tmp/scripts-link-err"; then
+    st_fail "restore followed a symlink at scripts/ instead of refusing"
+  fi
+  grep -q 'scripts/ is a symlink' "$tmp/scripts-link-err" \
+    || st_fail "a symlinked scripts/ was refused without the refusal message"
+  cmp -s "$outside_dir/routine-lock-cleanup.sh" "$tmp/outside-script-safe" \
+    || st_fail "refusing a symlinked scripts/ still modified the outside tree"
+  echo "ok    selftest: #670 — restore does not follow a symlink the agent left behind"
+
   # -- #670 drift guard: both workflows restore before they run -------------
   # A workflow whose cleanup step runs the tree's copy would regress #670
   # silently, so pin the mechanism: the lock-cleanup step must restore the
   # script from the job's start commit (START_SHA, bound to
-  # steps.start_ref.outputs.sha) BEFORE invoking it, and the start_ref
-  # capture must precede every agent step (else the walk moves HEAD first).
+  # steps.start_ref.outputs.sha) BEFORE invoking it, the start_ref capture
+  # must precede every agent step (else the walk moves HEAD first), and the
+  # restore must unlink a symlink at the script path before checkout and
+  # install the git-show fallback with mv rather than a redirect onto the
+  # path (that redirect follows a symlink).
   restore_in_block() {  # step-block text on stdin → 0 when the restore pins the script
-    local block restore_ln invoke_ln
+    local block restore_ln invoke_ln unlink_ln
     block="$(cat)"
     restore_ln="$(printf '%s\n' "$block" \
       | grep -n 'git checkout "\$START_SHA" -- scripts/routine-lock-cleanup.sh' \
@@ -683,9 +780,19 @@ DECOY
     invoke_ln="$(printf '%s\n' "$block" \
       | grep -n '\./scripts/routine-lock-cleanup.sh --repo' \
       | head -1 | cut -d: -f1)"
-    [ -n "$restore_ln" ] && [ -n "$invoke_ln" ] && [ "$restore_ln" -lt "$invoke_ln" ] \
+    unlink_ln="$(printf '%s\n' "$block" \
+      | grep -n '\[ -L scripts/routine-lock-cleanup.sh \]' \
+      | head -1 | cut -d: -f1)"
+    [ -n "$restore_ln" ] && [ -n "$invoke_ln" ] && [ -n "$unlink_ln" ] \
+      && [ "$unlink_ln" -lt "$restore_ln" ] && [ "$restore_ln" -lt "$invoke_ln" ] \
       && printf '%s\n' "$block" \
-        | grep -q 'START_SHA: \${{ steps\.start_ref\.outputs\.sha }}'
+        | grep -q 'START_SHA: \${{ steps\.start_ref\.outputs\.sha }}' \
+      && printf '%s\n' "$block" \
+        | grep -q '\[ -L scripts \]' \
+      && printf '%s\n' "$block" \
+        | grep -q 'mv -f "\$restore_tmp" scripts/routine-lock-cleanup.sh' \
+      && ! printf '%s\n' "$block" \
+        | grep -q '> scripts/routine-lock-cleanup.sh'
   }
   capture_precedes_agent() {  # workflow file → 0 when start_sha is captured before the first agent step
     local cap_ln agent_ln
@@ -718,6 +825,26 @@ OLDSTEP
   fi
   if capture_precedes_agent "$tmp/old-step.yml"; then
     st_fail "drift: the start_ref guard accepted a workflow with no capture step — it can never fire"
+  fi
+  # The pre-symlink-fix shape: checkout plus a redirect onto the script path.
+  # That redirect follows a symlink the agent left behind, so the guard must
+  # reject it even though the restore still precedes the invocation.
+  cat > "$tmp/unsafe-restore.yml" <<'UNSAFE'
+      - name: Withdraw a dead run's SHIP-LOCK
+        id: lock_cleanup
+        env:
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
+        run: |
+          git checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh \
+            || git show "$START_SHA":scripts/routine-lock-cleanup.sh \
+                 > scripts/routine-lock-cleanup.sh
+          chmod +x scripts/routine-lock-cleanup.sh
+          ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+            --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine backlog-burn
+UNSAFE
+  if sed -n "/Withdraw a dead run's SHIP-LOCK/,/^      - name:/p" "$tmp/unsafe-restore.yml" \
+      | sed '$d' | restore_in_block; then
+    st_fail "drift: the restore guard accepted a redirect onto the script path — the symlink hole can never fire"
   fi
   echo "ok    selftest: workflow drift guard (restore-before-run in both ship workflows + capture before the agent)"
 

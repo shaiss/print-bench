@@ -516,9 +516,42 @@ jobs:
           # a killed agent left locked; a restore that fails entirely fails
           # this step red — a cleanup that cannot run trusted code must not
           # fall back to running untrusted code.
-          git checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh \
-            || git show "$START_SHA":scripts/routine-lock-cleanup.sh \
-                 > scripts/routine-lock-cleanup.sh
+          #
+          # Symlink-safe: bypassPermissions lets the agent leave
+          # scripts/routine-lock-cleanup.sh (or scripts/ itself) as a
+          # symlink, and the index-lock case makes the checkout below fail.
+          # Never open that path for write — a redirect follows the link and
+          # truncates whatever it points at, and chmod would follow it too.
+          # If scripts/ is a symlink, refuse (checkout and mv would write
+          # outside the workspace). If the script path is a symlink, unlink
+          # the link itself first (rm does not follow it) so checkout cannot
+          # be aimed at the target. The fallback writes the blob to a temp
+          # file outside the tree, unlinks a destination symlink again, then
+          # mv -f replaces the path (mv replaces the directory entry and does
+          # not follow a symlink). The result must be a regular file or this
+          # step fails red.
+          if [ -L scripts ]; then
+            echo "::error::refusing to restore lock-cleanup: scripts/ is a symlink" >&2
+            exit 1
+          fi
+          if [ -L scripts/routine-lock-cleanup.sh ]; then
+            rm -f scripts/routine-lock-cleanup.sh
+          fi
+          if ! git checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh; then
+            restore_tmp="$(mktemp)"
+            if ! git show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$restore_tmp"; then
+              rm -f "$restore_tmp"
+              exit 1
+            fi
+            if [ -L scripts/routine-lock-cleanup.sh ]; then
+              rm -f scripts/routine-lock-cleanup.sh
+            fi
+            mv -f "$restore_tmp" scripts/routine-lock-cleanup.sh
+          fi
+          if [ -L scripts/routine-lock-cleanup.sh ] || [ ! -f scripts/routine-lock-cleanup.sh ]; then
+            echo "::error::lock-cleanup restore did not leave a regular file" >&2
+            exit 1
+          fi
           chmod +x scripts/routine-lock-cleanup.sh
           ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
             --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine design-run
