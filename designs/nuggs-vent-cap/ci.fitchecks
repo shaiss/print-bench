@@ -1,0 +1,7 @@
+# Boolean fit checks (run by gate.sh against the entry .scad's part dispatch).
+#   <part> <verdict>   — verdict is `empty` (must render zero facets) or
+#                        `interferes` (must render non-empty; the mandatory
+#                        negative control proving the check can fail).
+mates empty
+mates-ctrl interferes
+bore-clean empty
