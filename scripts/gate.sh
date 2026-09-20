@@ -83,6 +83,15 @@ read -ra OSC_ARGS <<<"${OPENSCAD_ARGS:-}"
 # shellcheck source=scripts/lineage.sh
 source scripts/lineage.sh
 
+# Sourced for the same reason: the fusecheck runner is
+# scripts/fusecheck-check.sh's fusecheck_gate (called per design below), and
+# that script's --selftest exercises the very function sourced here over
+# committed fixtures — an inline copy would let the seam and its test drift
+# while every check stays green (issue #627). Sourced AFTER lineage.sh, whose
+# lineage_render_binstl the control render needs.
+# shellcheck source=scripts/fusecheck-check.sh
+source scripts/fusecheck-check.sh
+
 fail=0
 
 slice_one() {
@@ -531,172 +540,14 @@ gate_one() {
     fi
   done
 
-  # Deterministic fuse check (designs/<name>/ci.fusecheck). A print-in-place
-  # mechanism that welds shut still exports watertight and — for a living hinge —
-  # as ONE connected body, so printcheck cannot see it; and a hand-written
-  # interference fitcheck only sees the pose its author intersects, which can be
-  # the wrong one (the first sweetheart-hamster shipped a fitcheck that tested
-  # the CLOSED pose while CI sliced the FLAT pose, and missed a 1378-facet weld
-  # at the hinge). fusecheck answers the un-mis-aimable question on the SLICED
-  # STL, never a -D pose: remove the declared thin-flexure zone(s) and count the
-  # separable bodies that remain — a living hinge that joins the halves only
-  # through its flexure splits into 2, a large-area weld stays 1. Manifest lines
-  # (coordinates in printcheck's rested frame — lowest point at z=0):
-  #   flexure X0,Y0,Z0:X1,Y1,Z1     global, repeatable — faces whose centroid is
-  #                                 inside are dropped before counting
-  #   assert  <stl-basename> <min> [<max>]
-  #                                 that sliced STL, minus the flexure zones,
-  #                                 must split into >= <min> bodies — and, when
-  #                                 <max> is given, <= <max> (issue #612 part 2;
-  #                                 the sugar `assert <stl> =N` means min=max=N)
-  #   control <part>         <max>  MANDATORY negative control: the KNOWN-FUSED
-  #                                 pose (-D part="<part>", a real dispatch
-  #                                 branch), same flexure zones, must stay <=<max>
-  # A detected fuse (assert bodies < min) is a STRONG WARN, not a hard fail — the
-  # reviewers (Jane/Drik) must consciously sign it off. An EXTRA body (assert
-  # bodies > max) is the opposite defect and a hard FAIL: a freed counter island
-  # (a stencil "0" whose tether never printed) or a dropped part is not
-  # something a reviewer waves through. The bound's semantics live in
-  # `fusecheck --bound` (tools/printcheck, pytest-pinned), so the gate and a
-  # hand run cannot drift; this block only tokenises the line and words the
-  # verdict. A broken check is a hard FAIL: no assert or no control (issue #37
-  # — a check that cannot fail is worthless), a malformed line (a max below its
-  # min included), a control part with no dispatch branch, an assert STL the
-  # gate never rendered (a fuse check on an unsliced part proves nothing), or a
-  # control that no longer fuses (an over-large flexure AABB that would mask a
-  # real fuse also splits the fused control, and is caught here).
-  local fusef="designs/${name}/ci.fusecheck"
-  if [[ -f "$fusef" ]]; then
-    local uline ukey uarg1 uarg2 urest
-    local fz_args=() n_assert=0 n_control=0
-    # First pass: collect the global flexure zones (an assert may precede the
-    # flexure line that applies to it, so the zones must be gathered up front).
-    while IFS= read -r uline || [[ -n "$uline" ]]; do
-      uline="${uline%%#*}"
-      ukey="" uarg1="" urest=""
-      read -r ukey uarg1 urest <<<"$uline" || true
-      [[ -z "$ukey" ]] && continue
-      if [[ "$ukey" == "flexure" ]]; then
-        if [[ -z "$uarg1" || -n "$urest" ]]; then
-          echo "FAIL  fusecheck ${name}: malformed flexure line \"${uline}\" — expected 'flexure x0,y0,z0:x1,y1,z1'"
-          fail=1
-          continue
-        fi
-        fz_args+=("--ignore-aabb=${uarg1}")
-      fi
-    done < "$fusef"
-    # Second pass: run the asserts and controls, applying the collected zones.
-    while IFS= read -r uline || [[ -n "$uline" ]]; do
-      uline="${uline%%#*}"
-      ukey="" uarg1="" uarg2="" urest=""
-      read -r ukey uarg1 uarg2 urest <<<"$uline" || true
-      [[ -z "$ukey" ]] && continue
-      case "$ukey" in
-        flexure) : ;;   # gathered in the first pass
-        assert)
-          # Tokenise the bound: `<min>` (the legacy one-sided floor), `<min>
-          # <max>` (two-sided) or `=N` (min = max = N). ubound is the spec
-          # handed to `fusecheck --bound`; ulo/uhi/ubtext only word the lines.
-          local ubound="" ulo="" uhi="" ubtext=""
-          if [[ -n "$uarg1" && -n "$uarg2" ]]; then
-            if [[ -z "$urest" && "$uarg2" =~ ^=([0-9]+)$ ]]; then
-              ubound="$uarg2"; ulo="${BASH_REMATCH[1]}"; uhi="$ulo"; ubtext="= ${ulo}"
-            elif [[ -z "$urest" && "$uarg2" =~ ^[0-9]+$ ]]; then
-              ubound="$uarg2"; ulo="$uarg2"; ubtext=">= ${ulo}"
-            elif [[ "$uarg2" =~ ^[0-9]+$ && "$urest" =~ ^[0-9]+$ \
-                    && "$urest" -ge "$uarg2" ]]; then
-              ubound="${uarg2}:${urest}"; ulo="$uarg2"; uhi="$urest"; ubtext="${ulo}..${uhi}"
-            fi
-          fi
-          if [[ -z "$ubound" ]]; then
-            echo "FAIL  fusecheck ${name}: malformed assert line \"${uline}\" — expected 'assert <stl-basename> <min_bodies> [<max_bodies>]' (max >= min) or 'assert <stl-basename> =N'"
-            fail=1
-            continue
-          fi
-          n_assert=$((n_assert + 1))
-          local astl="build/${uarg1}" matched=0 s
-          for s in ${stls[@]+"${stls[@]}"}; do
-            if [[ "$s" == "$astl" ]]; then matched=1; break; fi
-          done
-          if [[ "$matched" -eq 0 ]]; then
-            echo "FAIL  fusecheck ${name}: assert names ${uarg1}, which the gate never rendered — a fuse check on an unsliced STL proves nothing"
-            fail=1
-            continue
-          fi
-          # fusecheck prints the count and carries the verdict in its exit
-          # code: 0 within the bound, 3 below min (the fuse), 4 above max (an
-          # extra body), anything else a measurement error.
-          local ubodies urc=0
-          ubodies="$(python3 -m printcheck.fusecheck "$astl" --bound "$ubound" \
-                     ${fz_args[@]+"${fz_args[@]}"})" || urc=$?
-          case "$urc" in
-            0)
-              if [[ -z "$uhi" ]]; then
-                # One-sided: the line every existing manifest already emits.
-                echo "ok    fusecheck ${name}: ${uarg1} splits into ${ubodies} bodies (>= ${ulo}) once the flexure is removed — the mechanism separates"
-              else
-                echo "ok    fusecheck ${name}: ${uarg1} splits into ${ubodies} bodies (${ubtext}) once the flexure is removed — the mechanism separates and nothing came loose"
-              fi ;;
-            3)
-              echo "warn  fusecheck ${name}: ${uarg1} splits into only ${ubodies} body/bodies (< ${ulo}) once the flexure is removed — likely FUSED; reviewer signoff required" ;;
-            4)
-              echo "FAIL  fusecheck ${name}: ${uarg1} splits into ${ubodies} bodies (> ${uhi}; bound ${ubtext}) once the flexure is removed — extra body = freed island / dropped part; a body nothing holds is a defect, not a signoff"
-              fail=1 ;;
-            *)
-              echo "FAIL  fusecheck ${name}: fusecheck failed on ${astl}"
-              fail=1 ;;
-          esac ;;
-        control)
-          if [[ -z "$uarg1" || -z "$uarg2" || -n "$urest" \
-                || ! "$uarg2" =~ ^[0-9]+$ ]]; then
-            echo "FAIL  fusecheck ${name}: malformed control line \"${uline}\" — expected 'control <part> <max_bodies>'"
-            fail=1
-            continue
-          fi
-          # The part must be a real DISPATCH selector, not merely a quoted
-          # string somewhere in the file — a part with no branch renders empty,
-          # counts 0 bodies, and would satisfy any <max> vacuously.
-          if ! [[ "$uarg1" =~ ^[A-Za-z0-9_-]+$ ]] \
-             || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${uarg1}\"" "$src"; then
-            echo "FAIL  fusecheck ${name}: no 'part == \"${uarg1}\"' dispatch branch in ${src} — a control with no branch renders empty and can never fuse"
-            fail=1
-            continue
-          fi
-          n_control=$((n_control + 1))
-          local cstl="build/${name}-${uarg1}.stl"
-          echo "== ${name} (fusecheck control=${uarg1}): render =="
-          if ! lineage_render_binstl "$src" "$cstl" -D "part=\"${uarg1}\""; then
-            echo "FAIL  fusecheck ${name}: control ${uarg1} render failed"
-            fail=1
-            continue
-          fi
-          local cbodies
-          if ! cbodies="$(python3 -m printcheck.fusecheck "$cstl" \
-                          ${fz_args[@]+"${fz_args[@]}"})"; then
-            echo "FAIL  fusecheck ${name}: fusecheck failed on control ${cstl}"
-            fail=1
-            continue
-          fi
-          if [[ "$cbodies" -le "$uarg2" ]]; then
-            echo "ok    fusecheck ${name}: control ${uarg1} stays ${cbodies} body/bodies (<= ${uarg2}) — the known-fused pose still reads fused, so the check can fire"
-          else
-            echo "FAIL  fusecheck ${name}: control ${uarg1} split into ${cbodies} bodies (> ${uarg2}) — the negative control no longer fuses (flexure AABB too large?); the fuse check is unfalsifiable"
-            fail=1
-          fi ;;
-        *)
-          echo "FAIL  fusecheck ${name}: unknown key \"${ukey}\" in \"${uline}\" — use flexure | assert | control"
-          fail=1 ;;
-      esac
-    done < "$fusef"
-    if [[ "$n_assert" -eq 0 ]]; then
-      echo "FAIL  fusecheck ${name}: ci.fusecheck names no 'assert' — a manifest that never checks a sliced part proves nothing about the fit it exists to gate"
-      fail=1
-    fi
-    if [[ "$n_control" -eq 0 ]]; then
-      echo "FAIL  fusecheck ${name}: ci.fusecheck carries no 'control' negative case — without a known-fused pose the fuse check is unfalsifiable"
-      fail=1
-    fi
-  fi
+  # Deterministic fuse check (designs/<name>/ci.fusecheck). The runner is
+  # scripts/fusecheck-check.sh, sourced at the top of this file — one parser,
+  # shared with the --selftest that drives the same function over committed
+  # fixtures so the seam cannot regress while every check stays green
+  # (issue #627). The manifest format, the exit-3/exit-4 verdict mapping and
+  # the hard-fail cases are documented there.
+  fusecheck_gate "$name" "$src" "designs/${name}/ci.fusecheck" \
+    ${stls[@]+"${stls[@]}"}
 
   # Multi-object 3MF plate (designs/<name>/ci.plate). A design whose parts print
   # SEPARATELY (a wall boss + a screw-on collar) has no single sliceable STL:

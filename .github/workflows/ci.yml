@@ -1003,6 +1003,17 @@ jobs:
           # cache key; bump to pull fresh package versions (e.g. after a
           # runner-image rollover or when apt security updates matter)
           version: "2026-08"
+      # check.sh runs scripts/fusecheck-check.sh --selftest, which measures
+      # geometry through python3 -m printcheck.fusecheck — the same install
+      # render-gate carries. There is deliberately no skip path in the
+      # selftest: a skipped selftest is exactly the silent green issue #627
+      # exists to close, so the environment gets the dependency.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install printcheck
+        run: pip install -e tools/printcheck
       - name: Run check.sh
         env:
           DOCS_CHECK_GALLERY: skip
@@ -1031,6 +1042,14 @@ jobs:
           version: "2026-08"
       - name: Install OpenSCAD nightly (cached)
         uses: ./.github/actions/setup-openscad-nightly
+      # Same reason as scad-check above: check.sh's fusecheck selftest needs
+      # printcheck, and the selftest has no skip path.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install printcheck
+        run: pip install -e tools/printcheck
       - name: Run check.sh (manifold backend)
         env:
           OPENSCAD_BIN: openscad-nightly
