@@ -52,9 +52,23 @@ one** issue, applying, in order:
    (#515: the declines, the withdrawals and the owner's own answer are all
    one login), "machine-posted" cannot be an author test — it is a first-line
    marker test (`🚢`/`🚦`/`🏷`/`🧩` prefixes) plus GitHub's `Bot` author type.
-5. **oldest-first** — among what survives, the oldest issue by creation time
+5. **not freshly deferred** (issue #694, the optional half of #690) —
+   excluded while the thread's *latest* `🚢 DEFERRED` comment is inside a
+   24 h cooldown: a run took the brief, found its dependencies unlanded and
+   deferred — the #641 loop, where the burn re-picked the same blocked issue
+   every firing, the agent re-deferred, and 20+ firings shipped nothing
+   before the spin was parked by hand. The same expiry semantics as the
+   decline cooldown beside it (both run one shared implementation, so the
+   twin guards cannot drift): it **expires** — after the window the next
+   firing re-checks whether the dependencies landed, never buries — the
+   latest defer restarts it, and any owner activity re-arms immediately.
+   The marker is the same first-line `🚢 DEFERRED` the red-gate's
+   disposition classification reads (`scripts/routine-lock-cleanup.sh`,
+   PR #695), so the selector and the cleanup never disagree about what a
+   defer is.
+6. **oldest-first** — among what survives, the oldest issue by creation time
    (tie-broken by number, so the pick is deterministic across runs).
-6. **cap of one** — everything past the first eligible issue is deferred to
+7. **cap of one** — everything past the first eligible issue is deferred to
    the next firing, so a bad night costs one PR, not five.
 
 `select` is a **pure function of the snapshot** — no network — which is what
