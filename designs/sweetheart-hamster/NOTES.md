@@ -127,6 +127,8 @@ canonical `…-coupon.scad` auto-discover slot from the hinge wrapper.
 `gate.sh` discovers `<name>-*-coupon.scad` and gates this wrapper file
 directly (printcheck + test-slice).
 
+**Slice / print estimate (engineering, not a measured FIELD-TEST):** ~16 min / ~3.6 g.
+
 **What this coupon proves (and what it does not):**
 
 | Proves | Does **not** prove |
