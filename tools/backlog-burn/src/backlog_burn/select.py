@@ -133,10 +133,6 @@ DEFER_COOLDOWN_HOURS = 24
 # of "the run" here. Extend the tuple when a new routine posts to threads.
 RUN_COMMENT_MARKERS = ("🚢", "🚦", "🏷", "🧩")
 
-# Sort key floor for comments whose createdAt does not parse (see
-# :func:`_stop_marker_cooldown`).
-_DATETIME_MIN = datetime.min.replace(tzinfo=timezone.utc)
-
 # GitHub honours these nine keywords, case-insensitively, each optionally
 # followed by a colon, to auto-close an issue from a PR body. Grepping only
 # for "Closes #N" misses "Resolved: #38" — so match the full set, exactly as
@@ -243,18 +239,22 @@ def _stop_marker_cooldown(
     One expiry semantics shared by both stop markers — declines (issue #530,
     waiting on the owner) and defers (issue #694, waiting on dependencies) —
     so the twin guards in :func:`exclusion_reason` cannot drift:
-    *eligible iff the latest stop is older than the window OR any non-run
-    comment is newer than the latest stop*. The latest stop is the state, so
-    a second one restarts the window; and a run comment newer than the stop —
-    another withdrawal, a triage label, a park marker, even the other stop
-    marker — re-arms nothing, because none of it is the owner answering what
-    the stop is waiting on.
+    *eligible iff every matching stop has a parseable ``createdAt`` AND (the
+    latest of those is older than the window OR any non-run comment is newer
+    than that latest stop)*. The latest dated stop is the state, so a second
+    one restarts the window; and a run comment newer than the stop — another
+    withdrawal, a triage label, a park marker, even the other stop marker —
+    re-arms nothing, because none of it is the owner answering what the stop
+    is waiting on.
 
-    With ``now`` unknown (or a stop that will not parse) the window cannot
-    be judged, and the safe reading is *in* cooldown — the mirror of
-    :func:`_ship_lock_state`'s "never select over a claim we cannot date":
-    this module's contract is to never hand the run an issue that is plainly
-    taken, and a stop it cannot date is exactly that.
+    A matching stop whose ``createdAt`` is missing or unparseable cannot be
+    ordered against the dated ones. Treating it as the oldest let an expired
+    dated stop hide it and admit the issue, so any such stop excludes on its
+    own — owner re-arm applies only when every matching stop parses, because
+    "newer than the latest stop" is otherwise not well-defined. With ``now``
+    unknown the window likewise cannot be judged, and the safe reading is
+    *in* cooldown — the mirror of :func:`_ship_lock_state`'s "never select
+    over a claim we cannot date".
     """
     stops = [
         c for c in (comments or [])
@@ -262,17 +262,24 @@ def _stop_marker_cooldown(
     ]
     if not stops:
         return None
-    latest = max(
-        stops, key=lambda c: _parse_iso(c.get("createdAt", "")) or _DATETIME_MIN
-    )
-    latest_dt = _parse_iso(latest.get("createdAt", ""))
+    # Any undatable matching stop excludes by itself. Ranking a missing
+    # createdAt as the oldest would let an expired dated stop hide it.
+    parsed: list[datetime] = []
+    for stop in stops:
+        created = _parse_iso(stop.get("createdAt", ""))
+        if created is None:
+            return (
+                f"recently {participle} (the {noun} cannot be dated — conservative)"
+            )
+        parsed.append(created)
+    latest_dt = max(parsed)
     for c in comments or []:
         if _is_run_comment(c):
             continue
         dt = _parse_iso(c.get("createdAt", ""))
         if dt is not None and latest_dt is not None and dt > latest_dt:
             return None  # owner activity newer than the stop re-arms
-    if latest_dt is None or now is None:
+    if now is None:
         return (
             f"recently {participle} (the {noun} cannot be dated — conservative)"
         )

@@ -550,6 +550,75 @@ def test_no_now_treats_defer_as_fresh():
     assert select_issue(snap([undated]))["selected"] is None
 
 
+def _strip_created_at(comment, created_at):
+    """A copy of ``comment`` whose createdAt is missing or unparseable.
+
+    ``created_at is None`` drops the key (missing). Any other value is stored
+    as-is, including ``""`` and a non-timestamp string.
+    """
+    comment = dict(comment)
+    if created_at is None:
+        comment.pop("createdAt", None)
+    else:
+        comment["createdAt"] = created_at
+    return comment
+
+
+@pytest.mark.parametrize(
+    "make_stop, noun, number",
+    [
+        (decline, "decline", 122),
+        (deferred, "defer", 123),
+    ],
+)
+@pytest.mark.parametrize("bad_created_at", [None, "", "not-a-timestamp"])
+def test_undated_stop_excludes_even_beside_a_dated_stop(
+    make_stop, noun, number, bad_created_at,
+):
+    # An expired dated 🚢 DECLINED / 🚢 DEFERRED used to win ``max()`` because
+    # a missing or unparseable createdAt ranked as the oldest instant, so the
+    # selector admitted the brief. Any undatable matching stop excludes on
+    # its own — a dated sibling, fresh or expired, does not hide it — and
+    # owner re-arm applies only when every matching stop parses.
+    expired = make_stop(25)
+    undated = _strip_created_at(make_stop(1), bad_created_at)
+    owner = {
+        "body": "Answered — the blocker is gone, please take this.",
+        "createdAt": _iso(NOW - timedelta(hours=1)),
+    }
+
+    only_expired = issue(number, "2026-08-01T00:00:00Z", comments=[expired])
+    assert select_issue(snap([only_expired]), now=NOW)["selected"] == number
+
+    mixed = issue(number, "2026-08-01T00:00:00Z", comments=[expired, undated])
+    r = select_issue(snap([mixed]), now=NOW)
+    assert r["selected"] is None
+    assert f"the {noun} cannot be dated" in r["excluded"][str(number)]
+
+    # A fresh dated stop would itself exclude, but the reason must still be
+    # the undatable reading — not the dated stop's remaining window.
+    fresh = make_stop(2)
+    fresh_mixed = issue(
+        number, "2026-08-01T00:00:00Z", comments=[fresh, undated],
+    )
+    r = select_issue(snap([fresh_mixed]), now=NOW)
+    assert r["selected"] is None
+    reason = r["excluded"][str(number)]
+    assert f"the {noun} cannot be dated" in reason
+    assert "within the" not in reason
+
+    # Newer owner activity re-arms a fully dated stop, and does not re-arm
+    # while a matching stop still cannot be dated.
+    rearmed = issue(number, "2026-08-01T00:00:00Z", comments=[expired, owner])
+    assert select_issue(snap([rearmed]), now=NOW)["selected"] == number
+    still = issue(
+        number, "2026-08-01T00:00:00Z", comments=[expired, undated, owner],
+    )
+    r = select_issue(snap([still]), now=NOW)
+    assert r["selected"] is None
+    assert f"the {noun} cannot be dated" in r["excluded"][str(number)]
+
+
 # --------------------------------------------------------------------------
 # The outcome record (AC4)
 # --------------------------------------------------------------------------
