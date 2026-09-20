@@ -424,7 +424,7 @@ jobs:
           # a future link 4 that forgets the env fails loudly, never silently
           # uncapped.
           ASSESSOR_CAP_STATE: ${{ runner.temp }}/assessor-dispositions
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -470,7 +470,7 @@ jobs:
           ASSESSOR_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
 
           ASSESSOR_CAP_STATE: ${{ runner.temp }}/assessor-dispositions
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -500,7 +500,7 @@ jobs:
 
           # Same walk-spanning cap state as the earlier links (#569).
           ASSESSOR_CAP_STATE: ${{ runner.temp }}/assessor-dispositions
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
