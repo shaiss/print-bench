@@ -355,7 +355,7 @@ jobs:
           # counts filings from that one shared file.
           GITHUB_TOKEN: ${{ github.token }}
           SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -401,7 +401,7 @@ jobs:
           # advanced is the count this link starts from (#565).
           GITHUB_TOKEN: ${{ github.token }}
           SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -429,7 +429,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           # Same walk-spanning cap state as the earlier links (#565).
           SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}

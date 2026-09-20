@@ -425,7 +425,7 @@ jobs:
           # a link that posts its fill and dies still counts when the next
           # link runs.
           SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -462,7 +462,7 @@ jobs:
           # The SAME walk-spanning cap state as link 1 (#568): the count the
           # earlier link advanced is the count this link starts from.
           SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -494,7 +494,7 @@ jobs:
           # The SAME walk-spanning cap state as link 1 (#568): the count the
           # earlier link advanced is the count this link starts from.
           SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -538,7 +538,7 @@ jobs:
           SIGNOFF_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
 
           SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -569,7 +569,7 @@ jobs:
 
           # Same walk-spanning cap state as the earlier links (#568).
           SIGNOFF_CAP_STATE: ${{ runner.temp }}/signoff-verdicts
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -913,7 +913,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
           WRIGHT_CAP_STATE: ${{ runner.temp }}/wright-briefs
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -956,7 +956,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
           WRIGHT_CAP_STATE: ${{ runner.temp }}/wright-briefs
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -984,7 +984,7 @@ jobs:
 
           # Same walk-spanning cap state as the earlier links (#566).
           WRIGHT_CAP_STATE: ${{ runner.temp }}/wright-briefs
-        uses: anthropics/claude-code-action@0a8d3c9443bbff909ab973b6a17a340b913f229f  # v1
+        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
