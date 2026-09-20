@@ -158,6 +158,14 @@ jobs:
         id: start_ref
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Note the job window start
+        # Stamped before any ship step and passed to routine-lock-cleanup as
+        # --run-started-at. A claimless 🚢 DEFERRED counts as this firing's
+        # decline only when the comment is strictly newer than this instant,
+        # so a later success that posts nothing cannot reuse an older DEFERRED
+        # that is still the thread's latest comment and skip red-on-death.
+        run: echo "JOB_WINDOW_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -511,8 +519,16 @@ jobs:
             exit 1
           fi
           chmod +x scripts/routine-lock-cleanup.sh
+          # JOB_WINDOW_START is stamped by "Note the job window start" into
+          # GITHUB_ENV before any ship step. Do not drop it: without a window
+          # a claimless DEFERRED cannot be attributed to this firing.
+          if [ -z "${JOB_WINDOW_START:-}" ]; then
+            echo "::error::JOB_WINDOW_START is empty — the job-window step did not run"
+            exit 1
+          fi
           ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
-            --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine backlog-burn
+            --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine backlog-burn \
+            --run-started-at "$JOB_WINDOW_START"
 
       - name: Note a checkless draft PR (no CI-triggering PAT)
         # A /ship-issue draft PR opened with the default GITHUB_TOKEN does not
