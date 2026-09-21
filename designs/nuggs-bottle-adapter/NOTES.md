@@ -75,7 +75,9 @@ standard … No caliper numbers will follow; the standard is the spec."
    `nuggs_neck` stub in the family coupon pose, plus four labelled rings
    carrying the production `throat_cavity` verbatim at tol 0.15/0.22/0.30/0.38.
    Two disconnected bodies on purpose (printcheck notes them as INFO) — the
-   coupon is a hand fixture.
+   coupon is a hand fixture. Both bed at `z_tip` (the port's sector tips);
+   the strip is not at `z = 0`. Each ring's land opening pierces through the
+   strip (cut after the union) so air escapes and the seat shows daylight.
 9. **The land opening drifted, and the export caught it.** The §6 audit
    measures the gated STL, not the parameters (issue #37's lesson): the land
    pinch measured **Ø22.96 against the 22.0 parameter**. Cause: the throat's
@@ -87,7 +89,10 @@ standard … No caliper numbers will follow; the standard is the spec."
    `z_floor` (where the bore begins and the lip seats), keeping exactly
    `funnel_deg` over its visible span; `z_land` is the throat origin, 0.5
    above the land plane. Re-measured off the re-gated export: **Ø21.997**.
-   Side effect: rim +0.5 mm (part height 66.43).
+   Side effect: rim +0.5 mm (part height 66.43). The rim lead-in uses the
+   same overlap class: the flare cone grows its far radius by the full cone
+   height (`rim_chamfer + 0.5`), so the visible 45° over `rim_chamfer` is
+   not truncated to ~37° when the shell cuts at the rim plane.
 
 ## Print settings
 

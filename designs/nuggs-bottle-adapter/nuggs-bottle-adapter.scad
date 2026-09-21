@@ -260,8 +260,14 @@ module throat_cavity(tol, h_above_land) {
                         tol = tol, seg = thread_seg);
     // Rim lead-in: flare the bore mouth at exactly 45 deg so the bottle's
     // crest rides into the groove instead of catching the rim's edge.
+    // Cone runs 0.5 mm past the rim plane for CSG overlap (same class as
+    // the funnel's "aim past the plane" fix, key decision 9): grow the far
+    // radius by the FULL cone height so the visible flare — truncated at
+    // the rim — is still exactly 45 deg over length rim_chamfer. Growing
+    // only by rim_chamfer left a ~37 deg / 1.125 mm undershoot.
     translate([0, 0, h_above_land - rim_chamfer])
-        cylinder(r1 = f_minor_r(tol), r2 = f_minor_r(tol) + rim_chamfer,
+        cylinder(r1 = f_minor_r(tol),
+                 r2 = f_minor_r(tol) + rim_chamfer + 0.5,
                  h = rim_chamfer + 0.5);
 }
 
@@ -311,6 +317,7 @@ ring_base_h = 3.0;   // material under the land, so the annulus is not a knife e
 ring_dx     = 40;    // ring spacing along the strip
 ring_col_x  = [r_out + 4 + ring_dx / 2 + 2, r_out + 4 + ring_dx / 2 + 2 + ring_dx];
 ring_row_y  = [-21, 21];
+strip_h     = 2.4;   // strip thickness; beds at z_tip with the port stub
 strip_x1    = ring_col_x[1] + throat_or(max(coupon_tols)) + 6.4;
 strip_y     = 46;    // half-width
 
@@ -318,8 +325,10 @@ module coupon_ring(tol) {
     ring_h = ring_base_h + throat_top;
     difference() {
         cylinder(r = throat_or(tol), h = ring_h);
-        // Land opening through to the strip: air escape when the bottle
-        // screws in, and daylight through the seat for checking contact.
+        // Land opening through the ring body. The matching pierce through
+        // the strip under each ring is cut in bottle_fit_coupon's outer
+        // difference — a pre-union hole in the ring alone cannot open the
+        // solid strip the ring sits on.
         translate([0, 0, -0.5]) cylinder(r = land_ir, h = ring_h + 1.5);
         translate([0, 0, ring_base_h]) throat_cavity(tol, throat_top);
     }
@@ -342,20 +351,31 @@ module bottle_fit_coupon() {
         union() {
             // Station 1: the port stub in the family coupon pose.
             nuggs_neck(cfg, z_top + 8);
-            // Station 2: the strip, rings, and the label bosses.
-            translate([r_out + 4, -strip_y, 0])
-                cube([strip_x1 - r_out - 4, 2 * strip_y, 2.4]);
+            // Station 2: the strip, rings, and the label bosses — all on the
+            // same bed as the port's sector tips (z_tip), not floating at
+            // z = 0. Two disconnected bodies on purpose; both sit on the bed.
+            translate([r_out + 4, -strip_y, z_tip])
+                cube([strip_x1 - r_out - 4, 2 * strip_y, strip_h]);
             for (row = [0, 1])
                 for (col = [0, 1])
-                    translate([ring_col_x[col], ring_row_y[row], 2.4])
+                    translate([ring_col_x[col], ring_row_y[row],
+                               z_tip + strip_h])
                         coupon_ring(coupon_tols[row * 2 + col]);
         }
+        // Land pierces through the strip under each ring: air escape when a
+        // bottle screws in, and daylight through the seat. Cut after the
+        // union so the strip cannot stay a blind well under a holed ring.
+        for (row = [0, 1])
+            for (col = [0, 1])
+                translate([ring_col_x[col], ring_row_y[row], z_tip - 0.5])
+                    cylinder(r = land_ir, h = strip_h + 1.0);
         // Labels, cut 0.5 mm into the strip top outboard of each row: the
         // tol value beside the ring it sizes.
         for (row = [0, 1])
             for (col = [0, 1])
                 translate([ring_col_x[col],
-                           (row ? 1 : -1) * (strip_y - 4.5), 1.9])
+                           (row ? 1 : -1) * (strip_y - 4.5),
+                           z_tip + strip_h - 0.5])
                     linear_extrude(0.6)
                         text(str(coupon_tols[row * 2 + col]), size = 4,
                              halign = "center", valign = "center");
