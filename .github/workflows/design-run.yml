@@ -185,9 +185,11 @@ jobs:
       - name: Note the job window start
         # Stamped before any agent step and passed to routine-lock-cleanup as
         # --run-started-at. A claimless 🚢 DEFERRED counts as this firing's
-        # decline only when the comment is strictly newer than this instant,
-        # so a later success that posts nothing cannot reuse an older DEFERRED
-        # that is still the thread's latest comment and skip red-on-death.
+        # decline only when the comment is strictly newer than this instant
+        # and its author is a GitHub Bot or the repository owner, so a later
+        # success that posts nothing cannot reuse an older DEFERRED that is
+        # still the thread's latest comment, and an outsider who comments
+        # during the window cannot mint a stop and skip red-on-death.
         run: echo "JOB_WINDOW_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v7
