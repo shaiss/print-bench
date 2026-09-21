@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 from shapely.geometry import Point, Polygon
+from shapely.ops import unary_union
 
 
 def rounded_prism(width=40.0, depth=30.0, height=15.0, radius=3.0,
@@ -167,26 +168,40 @@ def pierced_rounded_box(width=40.0, depth=30.0, height=15.0, radius=3.0,
 
 
 def stencil_plate(width=60.0, depth=40.0, height=8.0, chamfer=3.0, web=4.0,
-                  cols=3, rows=2, slot_w=10.0, slot_h=14.0) -> trimesh.Trimesh:
+                  cols=3, rows=2, slot_w=10.0, slot_h=14.0,
+                  slot_chamfer=1.0) -> trimesh.Trimesh:
     """A faceted, cut-through probe: a chamfered plate carrying a grid of
-    rectangular through-slots — the stencil-glyph look, with every number
+    chamfered through-slots — the stencil-glyph look, with every number
     chosen.
 
     The outline corners are cut at 45 degrees (`chamfer` legs), so the part
-    owns decisive facets, and the slots are plain rectangles, so essentially
-    all of its shaped edge length is facet. Slot size, count and the web
-    between them are parameters, which makes the open-area fraction, the
-    largest through-void span and the narrowest bridge arithmetic on the
-    arguments: slots cover `cols*rows*slot_w*slot_h` of the chamfered face,
-    the longest straight line a slot can be threaded by is its space
-    diagonal, and the narrowest material anywhere is `web` (the rim margins
-    are wider). Drop `web` below two extrusion widths and the same probe
-    becomes the negative control for a bridge rule.
+    owns decisive facets, and the slots are rectangles with their corners cut
+    the same way, so essentially all of its shaped edge length is facet.
+
+    The slot chamfers are not cosmetic. Rectangular holes put ring vertices
+    exactly on the horizontal and vertical lines other ring vertices fan
+    across, and mapbox-earcut's multi-ring triangulation then emits long cap
+    edges passing straight through them — a mesh whose Euler characteristic
+    is not the surface's, so a handle count derived from it would be wrong
+    (six slots read as two handles). Chamfering the corners puts every ring
+    vertex in general position and the triangulation conforms: exactly
+    `cols*rows` handles. Real OpenSCAD/CGAL exports share vertices and never
+    hit this; the probe must not either.
+
+    Slot size, count and the web between them are parameters, which makes the
+    open-area fraction, the largest through-void span and the narrowest
+    bridge arithmetic on the arguments: the slots cover
+    `cols*rows*(slot_w*slot_h - 2*slot_c^2)` of the chamfered face (corner
+    cuts `slot_c` on the diagonal), the longest straight line a slot can be
+    threaded by is its space diagonal, and the narrowest material anywhere is
+    `web` (the rim margins are wider). Drop `web` below two extrusion widths
+    and the same probe becomes the negative control for a bridge rule.
     """
     grid_w = cols * slot_w + (cols - 1) * web
     grid_d = rows * slot_h + (rows - 1) * web
     if grid_w > width - 2 * chamfer or grid_d > depth - 2 * chamfer:
         raise ValueError("slot grid does not fit inside the chamfered outline")
+    c = min(slot_chamfer, slot_w / 3, slot_h / 3)
     outline = [
         (chamfer, 0), (width - chamfer, 0), (width, chamfer),
         (width, depth - chamfer), (width - chamfer, depth),
@@ -198,10 +213,50 @@ def stencil_plate(width=60.0, depth=40.0, height=8.0, chamfer=3.0, web=4.0,
         for j in range(rows):
             lx = x0 + i * (slot_w + web)
             ly = y0 + j * (slot_h + web)
-            holes.append([(lx, ly), (lx + slot_w, ly),
-                          (lx + slot_w, ly + slot_h), (lx, ly + slot_h)])
+            holes.append(Polygon([
+                (lx + c, ly), (lx + slot_w - c, ly), (lx + slot_w, ly + c),
+                (lx + slot_w, ly + slot_h - c), (lx + slot_w - c, ly + slot_h),
+                (lx + c, ly + slot_h), (lx, ly + slot_h - c), (lx, ly + c)]))
     return trimesh.creation.extrude_polygon(
-        Polygon(outline, holes=holes), height)
+        Polygon(outline).difference(unary_union(holes)), height)
+
+
+def pocketed_trough(width=40.0, depth=30.0, wall=3.0, floor=3.0,
+                    height=15.0) -> trimesh.Trimesh:
+    """A deep open channel — the hull-concavity control for through-cut
+    topology (#702).
+
+    A U-profile extruded and laid opening-up: two walls joined by a floor,
+    the channel between them running the full length of the part. Hull-
+    referenced openness scores it as airy (lines along the channel clear the
+    part end to end), and yet no material is pierced anywhere — you cannot
+    pass through the part, only into it — so the mesh has genus 0 and the
+    through-cut count must read exactly zero. The counterfactual the chord-
+    threshold gate used to fail on: a span over threshold is not a cut.
+    """
+    profile = [
+        (0, 0), (width, 0), (width, depth), (width - wall, depth),
+        (width - wall, floor), (wall, floor), (wall, depth), (0, depth)]
+    mesh = trimesh.creation.extrude_polygon(Polygon(profile), height)
+    mesh.apply_transform(trimesh.transformations.rotation_matrix(
+        np.pi / 2, [1, 0, 0]))               # opening faces up, flat face down
+    mesh.apply_translation([0, height, 0])
+    return mesh
+
+
+def hollow_shell(size=20.0, inner=8.0) -> trimesh.Trimesh:
+    """A solid with a strictly enclosed cavity — walls all around, no way in.
+
+    The second non-through void: not open to anything, unlike a pocket. The
+    cavity is an inverted box concatenated inside the outer one (no boolean
+    engine), which is watertight as a mesh and unprintable as a part — it
+    exists so the through-cut signal proves it counts neither pockets nor
+    sealed voids: two bodies, zero handles.
+    """
+    outer = trimesh.creation.box(extents=[size, size, size])
+    cavity = trimesh.creation.box(extents=[inner, inner, inner])
+    cavity.invert()
+    return trimesh.util.concatenate([outer, cavity])
 
 
 BUILDERS = {
@@ -214,6 +269,8 @@ BUILDERS = {
     "smooth-ball": smooth_ball,
     "stencil-plate": stencil_plate,
     "pierced-rounded-box": pierced_rounded_box,
+    "pocketed-trough": pocketed_trough,
+    "hollow-shell": hollow_shell,
 }
 
 

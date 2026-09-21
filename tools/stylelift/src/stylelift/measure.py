@@ -924,6 +924,70 @@ def _fibonacci_sphere(n: int) -> np.ndarray:
                      np.cos(phi)], axis=1)
 
 
+def _t_junction_count(mesh: trimesh.Trimesh, tol: float) -> int:
+    """Vertices lying strictly inside another edge — T-junctions.
+
+    A triangulation with T-junctions is not a simplicial complex, so its
+    V - E + F is not the surface's Euler characteristic and any handle count
+    derived from it would be a confident wrong number (mapbox-earcut's
+    multi-ring path emits exactly this for axis-aligned holes: long cap edges
+    passing straight through hole-rim vertices). Counting the incidences is
+    the guard — OpenSCAD/CGAL exports share every vertex and never have them.
+    """
+    from scipy.spatial import cKDTree           # scipy is a declared dep
+
+    m = mesh.copy()
+    m.merge_vertices()
+    verts = np.asarray(m.vertices, dtype=float)
+    tree = cKDTree(verts)
+    count = 0
+    for a, b in m.edges_unique:
+        p, q = verts[a], verts[b]
+        d = q - p
+        length2 = float(d @ d)
+        if length2 <= 0.0:
+            continue
+        # Candidates near the edge first, then the exact point-segment test:
+        # a vertex counts only strictly between the endpoints, on the segment.
+        mid = (p + q) / 2.0
+        for idx in tree.query_ball_point(mid, np.sqrt(length2) / 2 + tol):
+            if idx == a or idx == b:
+                continue
+            w = verts[idx] - p
+            t = float(w @ d) / length2
+            if 1e-9 < t < 1.0 - 1e-9 and float(np.linalg.norm(w - t * d)) <= tol:
+                count += 1
+    return count
+
+
+def _through_cut_topology(mesh: trimesh.Trimesh, tol: float) -> dict:
+    """How many cuts pass through the part, as mesh topology.
+
+    A through-cut is a handle of the surface: a hole that connects one side
+    of the part to the other, which a blind pocket or an enclosed cavity
+    never is. Handles come from the Euler characteristic (H = (2*C - chi)/2
+    for C connected components), which is exact and pose-invariant — no ray
+    sampling decides it. Refuses rather than guesses on a triangulation the
+    count cannot trust (#702).
+    """
+    junctions = _t_junction_count(mesh, tol)
+    if junctions:
+        return {"count": None,
+                "reason": f"{junctions} T-junction edge(s): triangulation "
+                          "is not a simplicial complex, so handle counts "
+                          "from it would not be trustworthy"}
+    m = mesh.copy()
+    m.merge_vertices()
+    chi = len(m.vertices) - len(m.edges_unique) + len(m.faces)
+    bodies = int(m.body_count)
+    slack = 2 * bodies - chi
+    if slack < 0 or slack % 2:
+        return {"count": None,
+                "reason": f"Euler characteristic {chi} on {bodies} body(ies) "
+                          "is not a closed surface's; handle count refused"}
+    return {"count": slack // 2}
+
+
 def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
     """Projected-void-fraction: how much of the form is open, pose-stably.
 
@@ -943,15 +1007,22 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
     is "how airy is the form", and a lattice or a stencil scores high for the
     same reason a solid block scores zero.
 
-    The largest gap a line threads through (`max_void_span_mm`) is the size
-    of the biggest cut-through — for a stencilled part, the glyph — reported
-    as a fraction of the part's bounding-sphere diameter so a rule can demand
-    legible marks (`glyph height >= 0.15 x part diameter`). The denominator is
-    the hull circumdiameter (pose-invariant); an AABB side length would grow
-    toward the space diagonal under rotation and shrink the fraction from
-    export pose alone. DESIGN_SA (#701): the numerator is still a 3-D void
-    *chord* (depth can dominate a narrow deep hole) — aperture-plane glyph
-    extent is a follow-up. The narrowest material span (`min_bridge_mm`)
+    Hull-referenced airiness is not through-cutting, so the through-cut signal
+    is topological, not a chord threshold (#702): `through_cut_count` is the
+    mesh's handle count (a hole that connects one side to the other; a blind
+    pocket, an open channel or an enclosed cavity is never one), and the
+    spans report only chords bounded by material on both sides — a ray that
+    enters material, crosses the cut, and re-enters material — where
+    `max_void_span_mm` also hulls in leading pocket gaps and silhouette
+    slack. The largest such chord (`max_through_span_mm`) is the size of the
+    biggest cut-through — for a stencilled part, the glyph — reported as a
+    fraction of the part's bounding-sphere diameter so a rule can demand
+    legible marks (`glyph height >= 0.15 x part diameter`). The denominator
+    is the hull circumdiameter (pose-invariant); an AABB side length would
+    grow toward the space diagonal under rotation and shrink the fraction
+    from export pose alone. DESIGN_SA (#701): the numerator is still a 3-D
+    void *chord* (depth can dominate a narrow deep hole) — aperture-plane
+    glyph extent is a follow-up. The narrowest material span (`min_bridge_mm`)
     is measured by inward normal rays the way `walls` measures thickness,
     with plate-thickness faces filtered out so a thin plate with a wide web
     reports the web — a bridge under two extrusion widths will not print clean.
@@ -973,8 +1044,10 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
 
     span = 4.0 * radius          # far enough that every line crosses everything
     eps = 1e-6 * radius          # merge numerical double-hits, ignore dust
+    topology = _through_cut_topology(mesh, eps)
     per_view = []
     void_spans: list[float] = []
+    through_spans: list[float] = []
     for w in directions:
         helper = np.array([0.0, 0.0, 1.0]) if abs(w[2]) < 0.9 \
             else np.array([1.0, 0.0, 0.0])
@@ -1016,13 +1089,27 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
                 gap = bounds[k + 1] - bounds[k]
                 if gap > eps:
                     void_spans.append(gap)
+                    # Material-bounded on both sides (both endpoints from
+                    # `merged`, not the hull chord): a chord across a cut that
+                    # passes *through* the part — unlike the leading and
+                    # trailing hull gaps a blind pocket or silhouette slack
+                    # produces. Existence is settled by topology above; these
+                    # chords size the cut.
+                    if 2 <= k and k + 1 <= len(merged):
+                        through_spans.append(gap)
         if votes:
             per_view.append(1.0 - solid_votes / votes)
 
     # Pose-invariant part size: hull circumdiameter, not an AABB side.
     diameter = 2.0 * radius
     thinnest = _thinnest_span(mesh, cfg)
-    return {
+    cut_count = topology["count"]
+    # No handles, or a count that cannot be trusted: no through-cut chords to
+    # report. Interior material-bounded chords on a genus-0 solid belong to
+    # pockets and channels, not to cuts that pass through.
+    max_through = (max(through_spans)
+                   if cut_count and through_spans else 0.0)
+    result = {
         "measured": True,
         "void_fraction": round(float(np.mean(per_view)), 4) if per_view else 0.0,
         "directions": int(cfg.void_dirs),
@@ -1031,8 +1118,15 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
         "max_void_span_mm": round(max(void_spans), 3) if void_spans else 0.0,
         "max_void_span_fraction": (round(max(void_spans) / diameter, 4)
                                    if void_spans and diameter > 0 else 0.0),
+        "through_cut_count": cut_count,
+        "max_through_span_mm": round(max_through, 3) if max_through else 0.0,
+        "max_through_span_fraction": (round(max_through / diameter, 4)
+                                      if max_through and diameter > 0 else 0.0),
         "min_bridge_mm": round(thinnest, 3) if thinnest is not None else None,
     }
+    if cut_count is None:
+        result["through_cut_reason"] = topology["reason"]
+    return result
 
 
 def _distances_by_ray(locations: np.ndarray, index_ray: np.ndarray,

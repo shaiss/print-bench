@@ -428,19 +428,20 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
     # enough to print. Those two are required, not advisory: a stencil that
     # fails them does not merely look off-style, it cannot do its job.
     #
-    # Cut-through is the measurable gap (`max_void_span_mm`), not the open-area
-    # fraction: a plate of tiny glyphs has almost no open area yet is exactly
-    # the part the legibility rule exists for. Advisory openness still keys off
-    # area fraction independently. DESIGN_SA (#702): `max_void_span_mm` today
-    # is a hull-chord proxy and also fires on deep blind pockets — topology-
-    # aware through-cut detection is a follow-up.
+    # Cut-through is the mesh's handle count (`through_cut_count`), not a
+    # hull-chord threshold and not the open-area fraction: a deep blind pocket
+    # or an open channel spans hull-referenced gaps without piercing any
+    # material, while a plate of tiny glyphs has almost no open area yet is
+    # exactly the part the legibility rule exists for. Advisory openness still
+    # keys off area fraction independently (#702).
     openness = measurement.get("openness") or {}
     if openness.get("measured"):
         void = float(openness.get("void_fraction") or 0.0)
         tokens["void_fraction"] = round(void, 3)
         measured_gate = {"metric": "openness.measured", "op": "min", "value": 1}
-        max_span = float(openness.get("max_void_span_mm") or 0.0)
-        cut_through = max_span >= 0.01
+        through = openness.get("through_cut_count")
+        through_gate = {"metric": "openness.through_cut_count",
+                        "op": "min", "value": 1}
         # Area-fraction advisory is independent of the cut-through gate.
         if void >= 0.05:
             rules.append({
@@ -453,18 +454,17 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
                        "is air); a solid part reads as a different family "
                        "entirely",
             })
-        if cut_through:
+        if through is not None and through >= 1:
             rules.append({
                 "id": "legible-glyph",
-                "metric": "openness.max_void_span_fraction",
+                "metric": "openness.max_through_span_fraction",
                 "op": "min", "value": GLYPH_MIN_FRACTION,
                 "severity": "required",
-                # Gated on "a cut-through measurably exists", not on the void
-                # fraction: a plate of tiny glyphs has almost no open area but
-                # is exactly the part the legibility rule exists for. A solid
-                # part spans nothing, so it skips.
-                "when": {"metric": "openness.max_void_span_mm",
-                         "op": "min", "value": 0.01},
+                # Gated on "a cut-through topologically exists", not on the
+                # void fraction: a plate of tiny glyphs has almost no open
+                # area but is exactly the part the legibility rule exists
+                # for. A solid part has no handles, so it skips.
+                "when": through_gate,
                 "why": f"the family's cut-throughs are legible marks: the "
                        f"largest must span at least {GLYPH_MIN_FRACTION:.0%} "
                        "of the part, or it cannot be read at the distance a "
@@ -476,17 +476,18 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
                 "metric": "openness.min_bridge_mm",
                 "op": "min", "value": bridge,
                 "severity": "required",
-                "when": {"metric": "openness.max_void_span_mm",
-                         "op": "min", "value": 0.01},
+                "when": through_gate,
                 "why": f"the webs between cut-throughs must print as the "
                        f"lines the design drew: at least "
                        f"{BRIDGE_MIN_WIDTHS:g} extrusion widths of "
                        f"{LINE_WIDTH_MM:g} mm, i.e. {bridge:g} mm",
             })
-        else:
-            # Closed-form only when no measurable cut-through. Cap aligns with
-            # the openness floor (0.05) so a reference in the old (0.02, 0.05)
-            # dead zone cannot fail the rule derive() just wrote for it.
+        elif through == 0:
+            # Closed-form only when no cut-through exists at all — genus 0,
+            # not merely "no chord over threshold": a family with blind
+            # pockets is closed too. Cap aligns with the openness floor (0.05)
+            # so a reference in the old (0.02, 0.05) dead zone cannot fail the
+            # rule derive() just wrote for it.
             rules.append({
                 "id": "closed-form",
                 "metric": "openness.void_fraction",
@@ -496,6 +497,10 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
                 "why": "the family is solid: cut-throughs would change how "
                        "it reads more than any edge treatment could",
             })
+        # through is None (non-conforming triangulation): neither the pair nor
+        # closed-form — a rule whose gate cannot be evaluated must not be
+        # required, and a mesh whose topology is unknown cannot be called
+        # closed either.
 
     hole = dig(measurement, "features.dominant_hole_d_mm")
     if hole:

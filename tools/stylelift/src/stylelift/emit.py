@@ -171,10 +171,16 @@ def _evidence_table(spec: StyleSpec) -> list[str]:
     if openness.get("measured"):
         rows.append(f"| Void fraction | {openness['void_fraction']:.1%} "
                     f"(solid-angle mean over {openness['directions']} views) |")
-        if openness.get("max_void_span_mm"):
-            rows.append(
-                f"| Largest cut-through | {openness['max_void_span_mm']:.3g} mm "
-                f"({openness['max_void_span_fraction']:.0%} of the part) |")
+        if openness.get("through_cut_count") is not None:
+            rows.append(f"| Cut-throughs | {openness['through_cut_count']} "
+                        "(topological handles — holes that pass through; "
+                        "pockets and channels are not cuts) |")
+            if openness.get("max_through_span_mm"):
+                rows.append(
+                    f"| Largest through-cut | "
+                    f"{openness['max_through_span_mm']:.3g} mm "
+                    f"({openness['max_through_span_fraction']:.0%} of the "
+                    "part) |")
         if openness.get("min_bridge_mm") is not None:
             rows.append(
                 f"| Narrowest bridge | {openness['min_bridge_mm']:.3g} mm "
