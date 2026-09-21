@@ -40,7 +40,14 @@ while [[ $# -gt 0 ]]; do
     --selftest) MODE="selftest" ;;
     --) shift; break ;;
     -*) echo "cog-check.sh: unknown flag $1" >&2; exit 2 ;;
-    *) name="$1" ;;
+    *)
+      if [[ -n "$name" ]]; then
+        echo "cog-check.sh: only one design name allowed, got '$name' and '$1'" >&2
+        echo "usage: cog-check.sh [--selftest] <name>" >&2
+        exit 2
+      fi
+      name="$1"
+      ;;
   esac
   shift
 done
@@ -217,7 +224,7 @@ if [[ "$MODE" == "selftest" ]]; then
 fi
 
 if [[ -z "$name" ]]; then
-  echo "usage: cog-check.sh [--selftest] <name>..." >&2
+  echo "usage: cog-check.sh [--selftest] <name>" >&2
   exit 2
 fi
 

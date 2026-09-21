@@ -15,6 +15,7 @@ write 0 0 0) that trusting it would be measuring the exporter, not the mesh.
 
 from __future__ import annotations
 
+import math
 import struct
 from pathlib import Path
 
@@ -34,7 +35,7 @@ def read_triangles(path: str | Path) -> list[Triangle]:
     """
     data = Path(path).read_bytes()
     if _is_binary(data):
-        return _read_binary(data)
+        return _read_binary(data, path)
     return _read_ascii(data.decode("utf-8", "replace"), path)
 
 
@@ -46,7 +47,7 @@ def _is_binary(data: bytes) -> bool:
     return len(data) == _BINARY_HEADER + _BINARY_COUNT + count * _BINARY_FACET
 
 
-def _read_binary(data: bytes) -> list[Triangle]:
+def _read_binary(data: bytes, path: str | Path = "<stl>") -> list[Triangle]:
     (count,) = struct.unpack_from("<I", data, _BINARY_HEADER)
     triangles: list[Triangle] = []
     off = _BINARY_HEADER + _BINARY_COUNT
@@ -54,6 +55,8 @@ def _read_binary(data: bytes) -> list[Triangle]:
         # 12 floats then the attribute count: skip the 3 normal floats by
         # starting the vertex unpack 12 bytes into the facet.
         values = struct.unpack_from("<9f", data, off + 12)
+        if not all(math.isfinite(v) for v in values):
+            raise ValueError(f"{path}: non-finite vertex coordinate in binary STL")
         triangles.append(
             (
                 (values[0], values[1], values[2]),
@@ -78,9 +81,12 @@ def _read_ascii(text: str, path: str | Path) -> list[Triangle]:
             if len(parts) != 4:
                 raise ValueError(f"{path}: malformed vertex line: {line.strip()!r}")
             try:
-                vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                vertex = (float(parts[1]), float(parts[2]), float(parts[3]))
             except ValueError as e:
                 raise ValueError(f"{path}: non-numeric vertex in {line.strip()!r}") from e
+            if not all(math.isfinite(v) for v in vertex):
+                raise ValueError(f"{path}: non-finite vertex in {line.strip()!r}")
+            vertices.append(vertex)
     if not vertices:
         raise ValueError(f"{path}: no vertices found — not an STL?")
     if len(vertices) % 3 or len(vertices) // 3 != facets:

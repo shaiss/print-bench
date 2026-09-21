@@ -80,13 +80,20 @@ def assemble(
     AssemblyError (wrapping the underlying reason) when a part's STL cannot
     be read or measured, or the assembled object has no mass."""
     stl_dir = Path(stl_dir)
+    stl_root = stl_dir.resolve()
     part_results: list[PartResult] = []
     placed_triangles: list[Triangle] = []
     moment_x = moment_y = moment_z = 0.0
     total_mass = 0.0
 
     for spec in manifest.parts:
-        path = stl_dir / spec.stl
+        # Basename-only names are enforced by conf.py; resolve under stl_dir
+        # so a caller that bypasses the parser still cannot escape the tree.
+        path = (stl_dir / spec.stl).resolve()
+        if path != stl_root and not path.is_relative_to(stl_root):
+            raise AssemblyError(
+                f"part '{spec.stl}' resolves outside stl dir {stl_root}"
+            )
         try:
             triangles = read(path)
         except (OSError, ValueError) as e:

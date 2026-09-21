@@ -109,3 +109,30 @@ def test_incomplete_triangle_refused(tmp_path: Path):
     )
     with pytest.raises(ValueError, match="exactly three"):
         read_triangles(out)
+
+
+def test_ascii_non_finite_vertex_refused(tmp_path: Path):
+    out = tmp_path / "nan.stl"
+    out.write_text(
+        "solid x\n facet normal 0 0 0\n  outer loop\n"
+        "   vertex 0 0 0\n   vertex 1 nan 0\n   vertex 0 1 0\n"
+        "  endloop\n endfacet\nendsolid x\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="non-finite"):
+        read_triangles(out)
+
+
+def test_binary_non_finite_vertex_refused(tmp_path: Path):
+    import math
+    import struct
+
+    out = tmp_path / "nan-bin.stl"
+    blob = bytearray(b"nan fixture".ljust(80, b"\0"))
+    blob += struct.pack("<I", 1)
+    coords = [0.0] * 9
+    coords[4] = math.nan
+    blob += struct.pack("<12fH", 0.0, 0.0, 0.0, *coords, 0)
+    out.write_bytes(bytes(blob))
+    with pytest.raises(ValueError, match="non-finite"):
+        read_triangles(out)

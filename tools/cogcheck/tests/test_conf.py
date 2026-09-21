@@ -116,6 +116,54 @@ def test_duplicate_part_refused():
         )
 
 
+def test_duplicate_part_field_refused():
+    with pytest.raises(ManifestError, match="density.*twice|field 'density'"):
+        parse("part: a.stl | density: 1.24 | density: 20\n")
+
+
+def test_duplicate_mass_field_refused():
+    with pytest.raises(ManifestError, match="grams.*twice|field 'grams'"):
+        parse(
+            "part: a.stl | density: 1.24\n"
+            "mass: stalk | grams: 5 | grams: 10 | at: 0,0,1\n"
+        )
+
+
+def test_non_finite_density_refused():
+    with pytest.raises(ManifestError, match="finite"):
+        parse("part: a.stl | density: nan\n")
+
+
+def test_non_finite_margin_refused():
+    with pytest.raises(ManifestError, match="finite"):
+        parse("margin: inf\npart: a.stl | density: 1.24\n")
+
+
+def test_non_finite_translate_refused():
+    with pytest.raises(ManifestError, match="finite"):
+        parse("part: a.stl | density: 1.24 | translate: 0,nan,0\n")
+
+
+def test_path_traversal_stl_refused():
+    with pytest.raises(ManifestError, match="basename"):
+        parse("part: ../secret.stl | density: 1.24\n")
+
+
+def test_slash_in_stl_refused():
+    with pytest.raises(ManifestError, match="basename"):
+        parse("part: sub/dir.stl | density: 1.24\n")
+
+
+def test_backslash_in_stl_refused():
+    with pytest.raises(ManifestError, match="basename"):
+        parse("part: sub\\dir.stl | density: 1.24\n")
+
+
+def test_dotdot_basename_refused():
+    with pytest.raises(ManifestError, match="basename"):
+        parse("part: .. | density: 1.24\n")
+
+
 def test_duplicate_margin_refused():
     with pytest.raises(ManifestError, match="margin declared twice"):
         parse("margin: 1\nmargin: 2\npart: a.stl | density: 1.24\n")

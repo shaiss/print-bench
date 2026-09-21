@@ -7,10 +7,11 @@ Exit codes carry the verdict so gate wiring never parses prose:
 - 1 — broken input (unreadable STL, malformed manifest, unmeasurable mesh)
 - 2 — usage
 
-The report's final stdout line is always ``VERDICT: <STABLE|TIP-RISK> — …``,
-the one machine-greppable line scripts/cog-check.sh re-emits as the gate's
-``ok``/``warn`` row. ``--json`` emits the whole CheckResult instead, for
-tooling and tests.
+In human mode the report's final stdout line is always
+``VERDICT: <STABLE|TIP-RISK> — …``, the one machine-greppable line
+scripts/cog-check.sh re-emits as the gate's ``ok``/``warn`` row. ``--json``
+emits only the CheckResult JSON document (no trailing VERDICT line) so
+consumers can ``json.loads`` stdout.
 """
 
 from __future__ import annotations
@@ -92,7 +93,6 @@ def main(argv: list[str] | None = None) -> int:
                 indent=2,
             )
         )
-        print(f"VERDICT: {result.verdict} — {result.detail}")
         return 0 if result.verdict == STABLE else EXIT_TIP_RISK
 
     print(f"cogcheck — {args.manifest}")

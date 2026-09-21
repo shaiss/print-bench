@@ -22,6 +22,7 @@ in a stability manifest exist precisely because nobody can eyeball them.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -137,15 +138,21 @@ def _parse_part(value: str, path: str, lineno: int, seen: set[str]) -> PartSpec:
             path,
             lineno,
         )
-    stl = fields[0][1]
+    stl = _require_stl_basename(fields[0][1], path, lineno)
     density: float | None = None
     translate: Vec3 = (0.0, 0.0, 0.0)
     rotate: Vec3 = (0.0, 0.0, 0.0)
+    seen_fields: set[str] = set()
     for name, val, has_colon in fields[1:]:
         if not has_colon:
             raise ManifestError(
                 f"field '{name}' needs a value — 'name: value'", path, lineno
             )
+        if name in seen_fields:
+            raise ManifestError(
+                f"part field '{name}' declared twice", path, lineno
+            )
+        seen_fields.add(name)
         if name == "density":
             density = _number(val, "density", path, lineno)
             if density <= 0:
@@ -188,11 +195,17 @@ def _parse_mass(value: str, path: str, lineno: int, seen: set[str]) -> MassSpec:
     label = fields[0][1]
     grams: float | None = None
     at: Vec3 | None = None
+    seen_fields: set[str] = set()
     for name, val, has_colon in fields[1:]:
         if not has_colon:
             raise ManifestError(
                 f"field '{name}' needs a value — 'name: value'", path, lineno
             )
+        if name in seen_fields:
+            raise ManifestError(
+                f"mass field '{name}' declared twice", path, lineno
+            )
+        seen_fields.add(name)
         if name == "grams":
             grams = _number(val, "grams", path, lineno)
             if grams <= 0:
@@ -217,6 +230,29 @@ def _parse_mass(value: str, path: str, lineno: int, seen: set[str]) -> MassSpec:
     return MassSpec(label=label, grams=grams, at=at)
 
 
+def _require_stl_basename(stl: str, path: str, lineno: int) -> str:
+    """A part STL must be a single basename resolved under --stl-dir.
+
+    Reject path separators and ``.`` / ``..`` so a manifest cannot escape the
+    stl directory (``part: ../../etc/passwd`` would otherwise join onto
+    ``stl_dir`` and open arbitrary files the process can read).
+    """
+    if (
+        not stl
+        or stl in {".", ".."}
+        or "/" in stl
+        or "\\" in stl
+        or stl != Path(stl).name
+    ):
+        raise ManifestError(
+            f"part STL must be a single basename (no '/', '\\\\', or '..'), "
+            f"got {stl!r}",
+            path,
+            lineno,
+        )
+    return stl
+
+
 def _split_fields(value: str, path: str, lineno: int) -> list[tuple[str, str, bool]]:
     """Split 'a.stl | density: 1.24 | …' into (name, value, had-colon)
     triples. The head field (before the first '|') carries no colon."""
@@ -235,9 +271,14 @@ def _split_fields(value: str, path: str, lineno: int) -> list[tuple[str, str, bo
 
 def _number(text: str, what: str, path: str, lineno: int) -> float:
     try:
-        return float(text)
+        value = float(text)
     except ValueError as e:
         raise ManifestError(f"{what} must be a number, got {text!r}", path, lineno) from e
+    if not math.isfinite(value):
+        raise ManifestError(
+            f"{what} must be finite, got {text!r}", path, lineno
+        )
+    return value
 
 
 def _vec3(text: str, what: str, path: str, lineno: int) -> Vec3:
@@ -247,9 +288,14 @@ def _vec3(text: str, what: str, path: str, lineno: int) -> Vec3:
             f"{what} must be 'x,y,z' (three numbers), got {text!r}", path, lineno
         )
     try:
-        x, y, z = (float(p) for p in parts)
+        values = tuple(float(p) for p in parts)
     except ValueError as e:
         raise ManifestError(
             f"{what} must be 'x,y,z' (three numbers), got {text!r}", path, lineno
         ) from e
+    if not all(math.isfinite(v) for v in values):
+        raise ManifestError(
+            f"{what} must be finite 'x,y,z', got {text!r}", path, lineno
+        )
+    x, y, z = values
     return (x, y, z)

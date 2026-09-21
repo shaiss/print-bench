@@ -71,14 +71,15 @@ mass: stalk | grams: 42 | at: 0,0,43
 | Key | Fields | Notes |
 |---|---|---|
 | `margin` | one number, mm | Required CoG clearance inside the footprint. Default `0` (projection strictly inside is enough). Once, not twice. |
-| `part` | `density` (required, g/cm³, > 0), `translate: x,y,z`, `rotate: rx,ry,z` | The STL basename must be one the gate rendered for this design — `gate.sh` enforces that, because a CoG computed on a stale mesh proves nothing. |
+| `part` | `density` (required, g/cm³, > 0), `translate: x,y,z`, `rotate: rx,ry,z` | The STL name must be a **single basename** (no `/`, `\`, or `..`) resolved under `--stl-dir` / `build/`. `gate.sh` additionally requires that basename to be one it rendered for this design — a CoG computed on a stale mesh proves nothing. |
 | `mass` | `grams` (required, > 0), `at: x,y,z` (required) | A non-printed mass with its position in the standing frame. |
 
 Parsing fails loudly, `file:line` in the error: unknown keys and fields,
-missing required fields, malformed vectors, duplicate parts or margins, a
-manifest with no `part:` at all. There is deliberately **no default density**
-— a verdict silently assuming PLA for a brass-stalked lamp would be worse than
-no verdict.
+missing required fields, malformed or non-finite (`nan`/`inf`) numbers,
+duplicate declarations (top-level keys, part/mass field names, part STL
+basenames, mass labels), path-escaping STL names, a manifest with no `part:`
+at all. There is deliberately **no default density** — a verdict silently
+assuming PLA for a brass-stalked lamp would be worse than no verdict.
 
 ## Exit codes and the gate
 
@@ -89,9 +90,10 @@ Exit codes carry the verdict so wiring never parses prose:
 - `1` — broken input (unreadable STL, malformed manifest, open/inverted mesh)
 - `2` — usage
 
-The last stdout line is always `VERDICT: <STABLE|TIP-RISK> — <detail>`;
-`--json` emits the full result (per-part volumes, masses, CoGs, contact
-points, footprint hull, margins) for tooling.
+In human mode the last stdout line is always `VERDICT: <STABLE|TIP-RISK> — <detail>`;
+`--json` emits **only** the full result JSON (per-part volumes, masses, CoGs,
+contact points, footprint hull, margins) so tooling can `json.loads` stdout —
+no trailing VERDICT line.
 
 `scripts/cog-check.sh <name>` re-emits the verdict as gate line shapes:
 

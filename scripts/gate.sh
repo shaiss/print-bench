@@ -712,10 +712,22 @@ gate_one() {
   if [[ -f "designs/${name}/ci.cog" ]]; then
     local cogline cogkey cogval cogbad=0
     while IFS= read -r cogline || [[ -n "$cogline" ]]; do
+      # Same grammar as tools/cogcheck conf.py: strip comments, split on the
+      # first ':', take the field before '|'. IFS whitespace would miss
+      # `part:base.stl` (no space) and `part : base.stl` (space before ':').
       cogline="${cogline%%#*}"
-      cogkey="" cogval=""
-      read -r cogkey cogval _ <<<"$cogline" || true
-      [[ "$cogkey" == "part:" ]] || continue
+      cogline="${cogline#"${cogline%%[![:space:]]*}"}"
+      cogline="${cogline%"${cogline##*[![:space:]]}"}"
+      [[ "$cogline" == *:* ]] || continue
+      cogkey="${cogline%%:*}"
+      cogval="${cogline#*:}"
+      cogkey="${cogkey%"${cogkey##*[![:space:]]}"}"
+      cogkey="${cogkey#"${cogkey%%[![:space:]]*}"}"
+      [[ "$cogkey" == "part" ]] || continue
+      cogval="${cogval%%|*}"
+      cogval="${cogval#"${cogval%%[![:space:]]*}"}"
+      cogval="${cogval%"${cogval##*[![:space:]]}"}"
+      [[ -n "$cogval" ]] || continue
       local cogstl="build/${cogval}" matched=0 s
       for s in ${stls[@]+"${stls[@]}"}; do
         if [[ "$s" == "$cogstl" ]]; then matched=1; break; fi
