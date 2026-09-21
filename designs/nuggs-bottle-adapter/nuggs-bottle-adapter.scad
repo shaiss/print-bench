@@ -112,8 +112,10 @@ land_opening_d = 22.0;
 // extrusion widths at a 0.4 nozzle.
 throat_wall = 3.0;
 // Rim lead-in chamfer, mm — flares the bore mouth at 45 deg so the bottle's
-// crest finds the groove instead of the rim's edge.
-rim_chamfer = 1.5;
+// crest finds the groove instead of the rim's edge. Cap is the tamper
+// clearance from z_floor (lip seat), not from z_land: throat_top + 0.5
+// must leave ≥ 0.5 mm under bottle_tamper_below_lip.
+rim_chamfer = 1.4;
 
 /* [Quality] */
 // Curve resolution. Production 96; drop to 32 while iterating.
@@ -158,8 +160,10 @@ travel    = bottle_engagement_deg / 360 * bottle_thread_pitch
 // kisses the land plane (a coincident surface).
 thread_off  = max(bottle_thread_pitch, bottle_lip_to_thread + 0.5) + 0.3;
 thread_zone = 2 * bottle_thread_pitch * bottle_thread_starts;  // 2 full turns
-throat_top  = thread_off + thread_zone + rim_chamfer;  // rim above land  9.9
-z_rim       = z_land + throat_top;                     // part top     ~55.9
+throat_top  = thread_off + thread_zone + rim_chamfer;  // rim above z_land  9.8
+z_rim       = z_land + throat_top;                     // part top     ~55.8
+// Real rim-above-seat is throat_top + (z_land - z_floor) = throat_top + 0.5,
+// because the lip seats on z_floor, not on the throat origin at z_land.
 
 // Per-tolerance female-thread values. The land outer edge IS the minor bore:
 // engagement between the bottle's crest and that bore is depth - tol.
@@ -227,11 +231,14 @@ assert(throat_wall >= 3 * 0.4, str(
     "THROAT WALL: ", throat_wall, " mm around the groove is under three",
     " perimeters at a 0.4 mm nozzle — the working surface would delaminate",
     " under thread torque."));
-assert(throat_top <= bottle_tamper_below_lip - 0.5, str(
-    "TAMPER CLEARANCE: the rim tops out ", throat_top,
-    " mm above the land, but the bottle's tamper ring reaches down ",
-    bottle_tamper_below_lip, " mm below its lip — the ring would bottom on",
-    " the rim before the thread seats. Cut rim_chamfer or thread_zone."));
+assert(z_rim - z_floor <= bottle_tamper_below_lip - 0.5, str(
+    "TAMPER CLEARANCE: the rim tops out ", z_rim - z_floor,
+    " mm above z_floor (the lip seat — throat_top ", throat_top,
+    " plus the 0.5 land offset to z_land), but the bottle's tamper ring",
+    " reaches down ", bottle_tamper_below_lip, " mm below its lip — only ",
+    bottle_tamper_below_lip - (z_rim - z_floor),
+    " mm of clearance remains (need ≥ 0.5). The ring would bottom on the",
+    " rim before the thread seats. Cut rim_chamfer or thread_zone."));
 assert(z_rim - z_tip <= 199 && 2 * r_out <= 210, str(
     "BED FIT: the part is ", z_rim - z_tip, " mm tall x ", 2 * r_out,
     " mm across — the 199 mm printable height / 210 mm tightest horizontal",

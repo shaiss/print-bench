@@ -62,10 +62,13 @@ standard … No caliper numbers will follow; the standard is the spec."
    already clears the bottle's lip (Ø25.07) by ~0.8 mm/side, so a recessed
    lip seat would be geometry for geometry's sake.
 6. **Rim height capped by the tamper ring.** The bottle's tamper band spans
-   to 10.8 mm below its lip face; the rim tops out 9.9 mm above the land
-   (asserted ≤ 10.3), so the ring clears by ~0.9 mm at full seat. The
-   support ring (Ø33) never reaches the rim during travel — it stays above
-   it throughout.
+   to 10.8 mm below its lip face; the lip seats on `z_floor`, so rim-above-
+   seat is `throat_top + 0.5` (the land offset to `z_land`), not
+   `throat_top` alone. Defaults: `throat_top` 9.8 / rim-above-seat 10.3
+   (asserted ≤ 10.3), so the ring clears by 0.5 mm at full seat.
+   `rim_chamfer` is 1.4 (was 1.5) to hold that margin after the seat-based
+   assert. The support ring (Ø33) never reaches the rim during travel —
+   it stays above it throughout.
 7. **Interior funnel at 44°, exterior shoulder at ~40°** — both under the
    45° supportless ceiling (issue #34's measured limit), so the part prints
    supportless in the family pose: standing on the port's sector tips.
