@@ -715,13 +715,43 @@ def test_glyphs_too_small_to_read_measure_below_the_legibility_bound(tmp_path):
 
     A 2 mm slot on a 60 mm part is a mark nobody reads; its largest open
     channel stays under 15% of the part even though a ray threads the slot's
-    depth. (The span is the longest chord of a void region, so a deep slot
-    measures its depth — the rule bounds read scale, and a pack wanting the
-    aperture too has `min_bridge_mm` beside it.)
+    depth. (DESIGN_SA: the span is still a 3-D void chord — aperture-plane
+    glyph extent is a follow-up; a pack wanting the opening width too has
+    `min_bridge_mm` beside it.)
     """
     r = measure(save(tmp_path, stencil_plate(slot_w=2.0, slot_h=2.0),
                      "tiny.stl"))
     assert r["openness"]["max_void_span_fraction"] < GLYPH_MIN_FRACTION
+
+
+def test_glyph_fraction_uses_a_pose_invariant_denominator(tmp_path):
+    """max_void_span_fraction must not track the AABB.
+
+    The void chord is pose-stable up to lattice sampling; dividing by the
+    longest axis-aligned side is not — rotating the file grows that side
+    toward the space diagonal and shrinks the fraction. The denominator is
+    the hull circumdiameter, so it stays put while the AABB moves.
+    """
+    diams, aabb_maxes, fracs = [], [], []
+    for k, rot in enumerate([(0, 0, 0), (30, 40, 50), (77, 13, 201),
+                             (111, 227, 64), (255, 255, 0)]):
+        mesh = stencil_plate()
+        if any(rot):
+            axis = np.array(rot, float)
+            mesh.apply_transform(trimesh.transformations.rotation_matrix(
+                math.radians(float(np.linalg.norm(axis))),
+                axis / np.linalg.norm(axis)))
+        open_ = measure(save(tmp_path, mesh, f"glyph-rot{k}.stl"))["openness"]
+        span = open_["max_void_span_mm"]
+        frac = open_["max_void_span_fraction"]
+        assert span > 0 and frac > 0
+        diams.append(span / frac)
+        aabb_maxes.append(float(np.max(mesh.extents)))
+        fracs.append(frac)
+    assert max(diams) - min(diams) <= 0.05
+    assert max(aabb_maxes) - min(aabb_maxes) > 5.0
+    # And the fraction itself only moves with chord sampling, not with AABB.
+    assert max(fracs) - min(fracs) <= 0.06
 
 
 def test_a_web_too_thin_to_print_measures_as_one(tmp_path):
@@ -729,6 +759,20 @@ def test_a_web_too_thin_to_print_measures_as_one(tmp_path):
     plate with the web dropped below two extrusion lines."""
     r = measure(save(tmp_path, stencil_plate(web=0.5), "thin.stl"))
     assert r["openness"]["min_bridge_mm"] == pytest.approx(0.5, abs=0.02)
+
+
+def test_a_thin_plate_with_a_wide_web_reports_the_web_not_stock_thickness(
+        tmp_path):
+    """Bridge width is the web between cut-outs, not plate thickness.
+
+    A 0.6 mm plate with a 4 mm web would false-fail `bridge-width` (0.8 mm)
+    if inward rays from the top/bottom faces were kept: those measure stock
+    thickness. The plate-normal filter drops them so the web remains.
+    """
+    r = measure(save(tmp_path, stencil_plate(height=0.6, web=4.0),
+                     "thin-plate-wide-web.stl"))
+    assert r["openness"]["min_bridge_mm"] == pytest.approx(4.0, abs=0.05)
+    assert r["openness"]["min_bridge_mm"] > BRIDGE_MIN_WIDTHS * LINE_WIDTH_MM
 
 
 def test_openness_declares_itself_unmeasured_on_a_leaky_mesh(tmp_path):
@@ -770,6 +814,26 @@ def test_a_cut_through_reference_proposes_the_legibility_pair(tmp_path):
         r["openness"]["void_fraction"], abs=5e-4)
 
 
+def test_a_narrow_cut_through_proposes_legibility_even_when_barely_open(
+        tmp_path):
+    """derive() keys the required pair on max_void_span_mm, not void_fraction.
+
+    A single narrow slot can sit well under the 5% open-area advisory floor
+    while still being a real cut-through the legibility rule exists for. The
+    old void>=0.05 branch dropped the pair and emitted closed-form instead.
+    """
+    r = measure(save(tmp_path,
+                     stencil_plate(cols=1, rows=1, slot_w=2.0, slot_h=14.0),
+                     "narrow.stl"))
+    assert r["openness"]["void_fraction"] < 0.05
+    assert r["openness"]["max_void_span_mm"] >= 0.01
+    ids = {rule["id"] for rule in derive(r, "narrow-test")[1]}
+    assert "legible-glyph" in ids and "bridge-width" in ids
+    assert "closed-form" not in ids
+    # Advisory openness stays on the area-fraction floor independently.
+    assert "openness" not in ids
+
+
 def test_a_solid_reference_proposes_no_legibility_rules(tmp_path):
     """A smooth solid family gets the mirrored proposals — a facet ceiling and
     a closed form — and never rules about glyphs it does not have."""
@@ -779,6 +843,8 @@ def test_a_solid_reference_proposes_no_legibility_rules(tmp_path):
     assert "legible-glyph" not in ids
     assert "bridge-width" not in ids
     assert "closed-form" in ids
+    assert next(rule for rule in rules
+                if rule["id"] == "closed-form")["value"] == 0.05
     assert "no-design-facets" in ids
     # and the mirrored family holds its own reference to it — though only
     # advisory and when-gated rules apply, so the verdict is honestly "there

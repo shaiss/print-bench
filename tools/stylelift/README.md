@@ -172,36 +172,36 @@ nothing — the pose stability is in the construction, not the sampling luck.
 The convex hull is the reference silhouette, so deep concavities count as
 openness alongside true cut-throughs: the honest reading of the number is "how
 airy is the form". Alongside the fraction it reports the largest gap any line
-threads (`max_void_span_mm`, as `max_void_span_fraction` of the part's largest
-dimension — the glyph) and the narrowest material span (`min_bridge_mm`,
-measured by inward normal rays the way `walls` measures — the web between two
-cut-outs). Non-watertight meshes report `openness.measured: false` with the
-reason, and every rule over these metrics skips rather than fails.
+threads (`max_void_span_mm`, as `max_void_span_fraction` of the part's
+bounding-sphere diameter — the glyph; AABB side length would be pose-dependent)
+and the narrowest material span (`min_bridge_mm`, measured by inward normal
+rays with plate-thickness faces filtered — the web between two cut-outs).
+Non-watertight meshes report `openness.measured: false` with the reason, and
+every rule over these metrics skips rather than fails.
 
-When a reference really is cut through, `stylelift lift` proposes the
-legibility pair as **required** rules, and a hand-written pack copies the same
-shape (constants `GLYPH_MIN_FRACTION`, `BRIDGE_MIN_WIDTHS`, `LINE_WIDTH_MM` in
-`spec.py`):
+When a reference really is cut through (`max_void_span_mm ≥ 0.01`),
+`stylelift lift` proposes the legibility pair as **required** rules, and a
+hand-written pack copies the same shape (constants `GLYPH_MIN_FRACTION`,
+`BRIDGE_MIN_WIDTHS`, `LINE_WIDTH_MM` in `spec.py`). Advisory openness still
+keys off the area fraction independently:
 
 ```json
 {"id": "legible-glyph", "metric": "openness.max_void_span_fraction",
  "op": "min", "value": 0.15, "severity": "required",
  "when": {"metric": "openness.max_void_span_mm", "op": "min", "value": 0.01},
- "why": "the largest cut-through must span at least 15% of the part, or it
-         cannot be read at the distance a mark is read from"}
+ "why": "the largest cut-through must span at least 15% of the part, or it cannot be read at the distance a mark is read from"}
 
 {"id": "bridge-width", "metric": "openness.min_bridge_mm",
  "op": "min", "value": 0.8, "severity": "required",
  "when": {"metric": "openness.max_void_span_mm", "op": "min", "value": 0.01},
- "why": "webs between cut-throughs print as lines: 2 extrusion widths of
-         0.4 mm"}
+ "why": "webs between cut-throughs print as lines: 2 extrusion widths of 0.4 mm"}
 ```
 
 The `when` gate is what keeps the pair honest, in both directions: a solid part
 spans nothing, so the rules skip instead of failing it — while a plate of tiny
 glyphs has almost no open area yet is exactly the part the legibility rule
-exists for, so the gate is the *existence of a cut-through* (the largest span),
-not the open-area fraction.
+exists for, so `derive()` emits the pair from the *existence of a cut-through*
+(the largest span), not the open-area fraction.
 
 ## Conformance
 

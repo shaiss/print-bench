@@ -945,12 +945,16 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
 
     The largest gap a line threads through (`max_void_span_mm`) is the size
     of the biggest cut-through — for a stencilled part, the glyph — reported
-    as a fraction of the part's largest dimension so a rule can demand
-    legible marks (`glyph height >= 0.15 x part diameter`). The narrowest
-    material span (`min_bridge_mm`) is measured the way `walls` measures
-    thickness — inward normal rays from area-weighted surface samples, fixed
-    seed — because a thin web between two cut-outs is the thinnest wall the
-    part has, and a bridge under two extrusion widths will not print clean.
+    as a fraction of the part's bounding-sphere diameter so a rule can demand
+    legible marks (`glyph height >= 0.15 x part diameter`). The denominator is
+    the hull circumdiameter (pose-invariant); an AABB side length would grow
+    toward the space diagonal under rotation and shrink the fraction from
+    export pose alone. DESIGN_SA: the numerator is still a 3-D void *chord*
+    (depth can dominate a narrow deep hole) — aperture-plane glyph extent is
+    a follow-up (see PR #640 CR). The narrowest material span (`min_bridge_mm`)
+    is measured by inward normal rays the way `walls` measures thickness,
+    with plate-thickness faces filtered out so a thin plate with a wide web
+    reports the web — a bridge under two extrusion widths will not print clean.
     """
     if not mesh.is_watertight or len(mesh.faces) == 0:
         return {"measured": False, "reason": "mesh is not watertight"}
@@ -1015,7 +1019,8 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
         if votes:
             per_view.append(1.0 - solid_votes / votes)
 
-    longest = float(np.max(mesh.extents))
+    # Pose-invariant part size: hull circumdiameter, not an AABB side.
+    diameter = 2.0 * radius
     thinnest = _thinnest_span(mesh, cfg)
     return {
         "measured": True,
@@ -1024,8 +1029,8 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
         "rays_per_direction": int(cfg.void_rays_per_dir),
         "views_with_void": int(sum(1 for v in per_view if v > 0)),
         "max_void_span_mm": round(max(void_spans), 3) if void_spans else 0.0,
-        "max_void_span_fraction": (round(max(void_spans) / longest, 4)
-                                   if void_spans and longest > 0 else 0.0),
+        "max_void_span_fraction": (round(max(void_spans) / diameter, 4)
+                                   if void_spans and diameter > 0 else 0.0),
         "min_bridge_mm": round(thinnest, 3) if thinnest is not None else None,
     }
 
@@ -1052,15 +1057,38 @@ def _thinnest_span(mesh: trimesh.Trimesh, cfg: Config) -> float | None:
     about printing clean needs. Faces carry area, so — unlike chord sampling
     — no grazing near a cut-out's corner can mint a sliver-thickness that
     exists nowhere on the part.
+
+    Plate-thickness faces (the large top/bottom of a stencil plate) are
+    filtered out when one normal axis dominates the surface area: sampling
+    them would report stock thickness instead of the web, false-failing a
+    thin plate with a wide valid bridge. DESIGN_SA: this is a cheap normal-
+    axis filter, not a full "opposing cut-out wall" topology walk.
     """
     areas = np.asarray(mesh.area_faces, dtype=float)
     total = float(areas.sum())
     if total <= 0:
         return None
-    n = min(cfg.thickness_samples, int((areas > 0).sum()))
+    weights = areas.copy()
+    normals = np.asarray(mesh.face_normals, dtype=float)
+    # Second-moment of face normals: the axis most surface area faces along
+    # (and against) is the plate normal on a flat stencil. When it clearly
+    # dominates, drop those faces so rays measure webs, not stock thickness.
+    moment = (normals * areas[:, None]).T @ normals
+    evals, evecs = np.linalg.eigh(moment)
+    if evals[-1] > 2.0 * max(evals[-2], 1e-18):
+        plate_axis = evecs[:, -1]
+        plate_faces = np.abs(normals @ plate_axis) >= 0.85
+        weights[plate_faces] = 0.0
+    wsum = float(weights.sum())
+    if wsum <= 0:
+        weights = areas
+        wsum = total
+    n = min(cfg.thickness_samples, int((weights > 0).sum()))
+    if n <= 0:
+        return None
     rng = np.random.default_rng(0)                      # fixed: results repeat
-    idx = rng.choice(len(mesh.faces), size=n, replace=False, p=areas / total)
-    directions = -np.asarray(mesh.face_normals)[idx]
+    idx = rng.choice(len(mesh.faces), size=n, replace=False, p=weights / wsum)
+    directions = -normals[idx]
     origins = np.asarray(mesh.triangles_center)[idx] + directions * 1e-4
     hits, ray_idx, _ = mesh.ray.intersects_location(origins, directions,
                                                     multiple_hits=False)

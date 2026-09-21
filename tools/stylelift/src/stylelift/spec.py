@@ -427,11 +427,21 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
     # through — the legibility pair: a glyph big enough to read and webs wide
     # enough to print. Those two are required, not advisory: a stencil that
     # fails them does not merely look off-style, it cannot do its job.
+    #
+    # Cut-through is the measurable gap (`max_void_span_mm`), not the open-area
+    # fraction: a plate of tiny glyphs has almost no open area yet is exactly
+    # the part the legibility rule exists for. Advisory openness still keys off
+    # area fraction independently. DESIGN_SA: `max_void_span_mm` today is a
+    # hull-chord proxy and also fires on deep blind pockets — topology-aware
+    # through-cut detection is a follow-up (see PR #640 CR).
     openness = measurement.get("openness") or {}
     if openness.get("measured"):
         void = float(openness.get("void_fraction") or 0.0)
         tokens["void_fraction"] = round(void, 3)
         measured_gate = {"metric": "openness.measured", "op": "min", "value": 1}
+        max_span = float(openness.get("max_void_span_mm") or 0.0)
+        cut_through = max_span >= 0.01
+        # Area-fraction advisory is independent of the cut-through gate.
         if void >= 0.05:
             rules.append({
                 "id": "openness",
@@ -439,10 +449,11 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
                 "op": "min", "value": round(void * 0.6, 3),
                 "severity": "advisory",
                 "when": measured_gate,
-                "why": f"the reference is cut through ({void:.0%} of its "
-                       "silhouette is open); a solid part reads as a "
-                       "different family entirely",
+                "why": f"the reference is open ({void:.0%} of its silhouette "
+                       "is air); a solid part reads as a different family "
+                       "entirely",
             })
+        if cut_through:
             rules.append({
                 "id": "legible-glyph",
                 "metric": "openness.max_void_span_fraction",
@@ -473,10 +484,13 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
                        f"{LINE_WIDTH_MM:g} mm, i.e. {bridge:g} mm",
             })
         else:
+            # Closed-form only when no measurable cut-through. Cap aligns with
+            # the openness floor (0.05) so a reference in the old (0.02, 0.05)
+            # dead zone cannot fail the rule derive() just wrote for it.
             rules.append({
                 "id": "closed-form",
                 "metric": "openness.void_fraction",
-                "op": "max", "value": 0.02,
+                "op": "max", "value": 0.05,
                 "severity": "advisory",
                 "when": measured_gate,
                 "why": "the family is solid: cut-throughs would change how "
