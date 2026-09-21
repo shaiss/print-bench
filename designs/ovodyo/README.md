@@ -81,6 +81,9 @@ gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
   truss segments bottom-chord-down (as modeled); mock drive flat; the seam
   coupon as rendered; core keel flat-bottom-down; plug head-down.
 - **Vitamins for the base:** Ø2 mm steel shot for the core's ballast pockets
+  (≈ 55 g, filled and plugged before the core goes in — the amount is a starting
+  assumption, see NOTES.md), and four Ø5 mm × 1.5 mm hemispherical stick-on
+  silicone bumpers for the foot recesses.
 
 ## Parameters
 
