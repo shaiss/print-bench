@@ -13,6 +13,9 @@
 #      lifestyle disclosure guards still refuse an undisclosed AI shot or clip
 #   7. shot-spec selftest (scripts/shot-spec.sh --selftest): the shot-manifest
 #      freeze guard and field validators still refuse a bad line
+#   8. fusecheck selftest (scripts/fusecheck-check.sh --selftest): the
+#      ci.fusecheck bound grammar — legacy, MIN MAX, =N, malformed, exit-4 —
+#      every negative row asserted to fire on committed fixtures (issue #627)
 # Run before committing. For full STL+PNG output use scripts/render.sh.
 set -euo pipefail
 
@@ -196,6 +199,22 @@ fi
 # one that cannot see one. ~1–2 min of coarse CGAL on the fixtures.
 echo "-- kinematics selftest: scripts/kinematics-check.sh --selftest"
 if ! ./scripts/kinematics-check.sh --selftest; then
+  fail=1
+fi
+
+# And this proves the fusecheck gate's own seam — the `assert <stl> <min>
+# [<max>]` / `=N` tokenisation and the exit-3/exit-4 verdict mapping in
+# scripts/fusecheck-check.sh, the runner gate.sh sources — still discriminates:
+# every pass row passes, the too-few row WARNs without failing the run, the
+# too-many row hard-FAILs, the malformed lines fail the parse. The fixtures'
+# body counts are re-measured with fusecheck itself before any row is trusted,
+# so a drifted fixture fails loudly instead of gating on a stale expectation
+# (issue #627). Needs printcheck (the gate's own dependency) and openscad for
+# the two fixture renders; no skip path — a skipped selftest is exactly the
+# silent green this exists to close, so CI installs printcheck in every job
+# that runs check.sh.
+echo "-- fusecheck selftest: scripts/fusecheck-check.sh --selftest"
+if ! ./scripts/fusecheck-check.sh --selftest; then
   fail=1
 fi
 

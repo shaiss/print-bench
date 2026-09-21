@@ -261,6 +261,8 @@ surfaces studies awaiting a read live in
   archived sushi-battleship),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
+  `stencil-glyphs.scad` (clean-room 2D stencil digits 0-9 with bridged
+  counters, no `text()`/TTF, for numerals cut through a shell),
   each with a `*-demo.scad` regression render, plus vendored
   [BOSL2](https://github.com/BelfrySCAD/BOSL2)
 - `build/` — generated STL/PNG outputs (gitignored)
@@ -419,6 +421,12 @@ surfaces studies awaiting a read live in
     proven flat and upright at every landing stop, with mandatory negative
     controls; `--selftest` proves it on the fixtures under
     `scripts/kinematics-fixtures/`
+  - `fusecheck-check.sh` — the `ci.fusecheck` runner gate.sh sources (one
+    parser, not a copy), plus the selftest that proves its `assert` bound
+    grammar still fires: legacy `<min>`, two-sided `<min> <max>`, `=N`, the
+    malformed line, and the exit-4 hard-fail path, over committed fixtures in
+    `scripts/fusecheck-fixtures/` whose body counts are re-measured with
+    fusecheck itself (issue #627)
   - `gate-summary.py` — turns a gate log into the CI results table
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and

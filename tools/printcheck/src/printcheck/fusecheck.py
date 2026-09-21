@@ -12,10 +12,20 @@ sliced — `build/<name>.stl` / `build/<name>-<part>.stl`, no ``-D`` override �
 removes the declared thin-flexure zone(s), and counts how many separate bodies
 remain. A living hinge that joins the two halves *only* through its flexure
 splits into 2 once the flexure is removed; a large-area weld stays connected
-(1). It reports the count and nothing else; ``scripts/gate.sh`` applies the
-per-design thresholds and the mandatory-negative-control discipline, exactly as
-it does for ``ci.fitchecks`` — so this tool stays a pure measurement like
-``lineage facet-count``.
+(1). It reports the count and nothing else on stdout; ``scripts/gate.sh``
+applies the per-design thresholds and the mandatory-negative-control
+discipline, exactly as it does for ``ci.fitchecks`` — so this tool stays a pure
+measurement like ``lineage facet-count``.
+
+The threshold itself is a **two-sided bound** (issue #612 part 2), owned here so
+the gate and a hand run cannot drift: ``--bound MIN`` (the legacy one-sided
+floor), ``--bound MIN:MAX`` or ``--bound =N`` (min = max = N). Too FEW bodies is
+the fuse — a STRONG WARN a reviewer must consciously sign off (exit 3). Too MANY
+bodies is a different defect entirely: an extra body is a freed counter island
+(a stencil "0" whose tether never printed) or a dropped part, something no
+reviewer should wave through, so it is a hard FAIL (exit 4). The count still
+prints exactly as before; only the exit code carries the verdict, so a caller
+that never passes ``--bound`` sees byte-identical output.
 
 Frame: the mesh is rested so its lowest point is z=0 (printcheck's convention),
 so ``--ignore-aabb`` coordinates are in printcheck's rested frame — the same
@@ -45,6 +55,77 @@ def parse_aabb(spec: str):
             f"--ignore-aabb wants three numbers each side, got {spec!r}")
     return (tuple(min(a, b) for a, b in zip(lo, hi)),
             tuple(max(a, b) for a, b in zip(lo, hi)))
+
+
+# Verdicts of ``verdict()`` and the exit codes ``main()`` maps them to. The
+# fuse (too few bodies) is a WARN the reviewers sign off; an extra body (too
+# many) is a FAIL nobody may wave through — the asymmetry is the whole point.
+VERDICT_OK = "ok"
+VERDICT_WARN = "warn"      # bodies < min: likely FUSED
+VERDICT_FAIL = "FAIL"      # bodies > max: freed island / dropped part
+EXIT_BELOW_MIN = 3
+EXIT_ABOVE_MAX = 4
+
+
+def parse_bound(spec: str):
+    """Parse a body-count bound into ``(lo, hi)``; ``hi`` is None when open.
+
+    Accepted shapes — the same three ``ci.fusecheck``'s ``assert`` line takes:
+
+    - ``"3"``      → (3, None)   legacy one-sided floor: >= 3 bodies
+    - ``"3:5"``    → (3, 5)      two-sided: 3 <= bodies <= 5
+    - ``"=2"``     → (2, 2)      sugar for exactly N
+
+    Anything else — a non-integer, a negative, an empty side, or a max below
+    the min — is malformed and raises ValueError naming the spec, so a typo'd
+    bound fails loudly instead of silently gating nothing.
+    """
+    text = spec.strip()
+    if text.startswith("="):
+        n = _bound_int(text[1:], spec)
+        return n, n
+    if ":" in text:
+        lo_s, hi_s = text.split(":", 1)
+        lo, hi = _bound_int(lo_s, spec), _bound_int(hi_s, spec)
+        if hi < lo:
+            raise ValueError(
+                f"bound wants MIN <= MAX, got {spec!r} (max {hi} < min {lo})")
+        return lo, hi
+    return _bound_int(text, spec), None
+
+
+def _bound_int(text: str, spec: str) -> int:
+    text = text.strip()
+    if not text.isdigit():
+        raise ValueError(
+            f"bound wants MIN, MIN:MAX or =N with non-negative integers, "
+            f"got {spec!r}")
+    return int(text)
+
+
+def verdict(bodies: int, lo: int, hi=None) -> str:
+    """Apply a bound to a body count: ``ok`` / ``warn`` (fused) / ``FAIL``.
+
+    ``bodies < lo`` is the fuse case and stays what it always was — a STRONG
+    WARN needing reviewer signoff. ``bodies > hi`` (only when a max is set) is
+    a hard FAIL: the extra body is a freed island or a dropped part. With
+    ``hi`` None the bound is one-sided and can never FAIL, which is exactly the
+    legacy behaviour every existing manifest relies on.
+    """
+    if bodies < lo:
+        return VERDICT_WARN
+    if hi is not None and bodies > hi:
+        return VERDICT_FAIL
+    return VERDICT_OK
+
+
+def format_bound(lo: int, hi=None) -> str:
+    """Human form of a bound: ``>= 3``, ``= 2`` or ``3..5``."""
+    if hi is None:
+        return f">= {lo}"
+    if hi == lo:
+        return f"= {lo}"
+    return f"{lo}..{hi}"
 
 
 def separable_bodies(mesh, aabbs):
@@ -145,8 +226,15 @@ def main(argv=None) -> int:
                     help="x0,y0,z0:x1,y1,z1 flexure zone to drop before "
                          "counting (repeatable); coords in printcheck's rested "
                          "frame (lowest point at z=0)")
+    ap.add_argument("--bound", metavar="MIN[:MAX]|=N", default=None,
+                    help="judge the count: MIN (>= MIN, legacy), MIN:MAX or =N. "
+                         "Output is unchanged; the exit code carries the "
+                         "verdict — 0 within, 3 below MIN (likely FUSED: a "
+                         "warn for reviewer signoff), 4 above MAX (extra body "
+                         "= freed island / dropped part: a hard FAIL)")
     ap.add_argument("--json", action="store_true",
-                    help="emit {stl, bodies, dropped_faces, aabbs} as JSON")
+                    help="emit {stl, bodies, dropped_faces, aabbs} as JSON "
+                         "(plus bound and verdict when --bound is given)")
     ap.add_argument("--selftest", action="store_true",
                     help="run the built-in positive+negative fixtures and exit")
     args = ap.parse_args(argv)
@@ -158,6 +246,7 @@ def main(argv=None) -> int:
 
     try:
         aabbs = [parse_aabb(s) for s in args.ignore_aabb]
+        bound = parse_bound(args.bound) if args.bound is not None else None
     except ValueError as e:
         print(f"fusecheck: {e}", file=sys.stderr)
         return 2
@@ -167,12 +256,20 @@ def main(argv=None) -> int:
         print(f"fusecheck: {args.stl}: {e}", file=sys.stderr)
         return 2
 
+    result = VERDICT_OK if bound is None else verdict(bodies, *bound)
     if args.json:
-        print(json.dumps({"stl": args.stl, "bodies": bodies,
-                          "dropped_faces": dropped,
-                          "aabbs": [list(lo) + list(hi) for lo, hi in aabbs]}))
+        out = {"stl": args.stl, "bodies": bodies, "dropped_faces": dropped,
+               "aabbs": [list(lo) + list(hi) for lo, hi in aabbs]}
+        if bound is not None:
+            out["bound"] = list(bound)
+            out["verdict"] = result
+        print(json.dumps(out))
     else:
         print(bodies)
+    if result == VERDICT_WARN:
+        return EXIT_BELOW_MIN
+    if result == VERDICT_FAIL:
+        return EXIT_ABOVE_MAX
     return 0
 
 

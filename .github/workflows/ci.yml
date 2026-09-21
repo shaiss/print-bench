@@ -588,6 +588,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Install OpenSCAD (cached)
+        # tests/test_stencil_demo.py renders lib/stencil-glyphs-demo.scad and
+        # counts its bodies with fusecheck (the counter-tether proof, #612).
+        # It skips itself where openscad/xvfb-run are absent, so this step is
+        # what makes that proof actually run in CI — the classifier forces
+        # this job on any lib/ change. Same cached, postinst-free package set
+        # as scad-check (docs-check.sh enforces the allowlist).
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9  # v1.6.3
+        with:
+          packages: openscad openscad-mcad xvfb
+          version: "2026-08"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -992,6 +1003,17 @@ jobs:
           # cache key; bump to pull fresh package versions (e.g. after a
           # runner-image rollover or when apt security updates matter)
           version: "2026-08"
+      # check.sh runs scripts/fusecheck-check.sh --selftest, which measures
+      # geometry through python3 -m printcheck.fusecheck — the same install
+      # render-gate carries. There is deliberately no skip path in the
+      # selftest: a skipped selftest is exactly the silent green issue #627
+      # exists to close, so the environment gets the dependency.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install printcheck
+        run: pip install -e tools/printcheck
       - name: Run check.sh
         env:
           DOCS_CHECK_GALLERY: skip
@@ -1020,6 +1042,14 @@ jobs:
           version: "2026-08"
       - name: Install OpenSCAD nightly (cached)
         uses: ./.github/actions/setup-openscad-nightly
+      # Same reason as scad-check above: check.sh's fusecheck selftest needs
+      # printcheck, and the selftest has no skip path.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install printcheck
+        run: pip install -e tools/printcheck
       - name: Run check.sh (manifold backend)
         env:
           OPENSCAD_BIN: openscad-nightly

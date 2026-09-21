@@ -127,17 +127,41 @@ fusecheck build/locket.stl --ignore-aabb=-4,-9,-0.1:4,9,1.0
 
 fusecheck build/locket.stl --ignore-aabb=... --json   # {stl, bodies, dropped_faces, aabbs}
 fusecheck --selftest                                  # in-memory positive+negative fixtures
+
+# judge the count against a bound (the verdict is the EXIT CODE; stdout stays
+# the bare count, so output without --bound is byte-identical):
+fusecheck build/locket.stl --ignore-aabb=... --bound 2     # >= 2 (legacy floor)
+fusecheck build/stencil-plate.stl --bound =1               # exactly 1
+fusecheck build/gripper.stl --ignore-aabb=... --bound 3:4  # 3 <= bodies <= 4
+# exit 0 within the bound | 3 below MIN (likely FUSED — a warn a reviewer must
+# sign off) | 4 above MAX (an extra body = a freed island / a dropped part — a
+# hard FAIL) | 2 unreadable STL or a malformed --ignore-aabb / --bound
 ```
 
 It prints the body count and nothing else — a pure measurement, like
 `lineage facet-count`. Pass `--ignore-aabb=` with the leading `=` so a
 negative first coordinate isn't parsed as a flag. `dropped_faces` in `--json`
-is the calibration signal: a zero-drop means the flexure AABB missed the web.
-Reuses the same loader and `body_count` as the analyzer above, so a fused
-export reads identically to printcheck's `bodies`.
+is the calibration signal: a zero-drop means the flexure AABB missed the web
+(with `--bound`, the JSON also carries `bound` and `verdict`). Reuses the same
+loader and `body_count` as the analyzer above, so a fused export reads
+identically to printcheck's `bodies`.
+
+The bound is **two-sided on purpose** (print-bench issue #612 part 2), and the
+two sides mean different things. Too *few* bodies is the fuse: a STRONG WARN,
+because a print-in-place mechanism that welded shut is a judgement call a
+reviewer signs off. Too *many* bodies is a freed **counter island** (a stencil
+"0" or "8" whose tether never printed — the disc drops out as its own body) or
+a **dropped part**, and no reviewer should wave that through, so it is a hard
+FAIL. A one-sided `MIN` can never FAIL, whatever the count — the legacy
+behaviour every existing manifest relies on; `MIN:MAX` with `MAX < MIN` is
+malformed and refused. `parse_bound()` / `verdict()` are the one
+implementation of that rule, pytest-pinned with a stencil-plate fixture
+(tethered → 1 body passes `=1`, bridge removed → 2 bodies fails it), so the
+gate and a hand run cannot drift.
 
 In print-bench, `scripts/gate.sh` drives it from a `designs/<name>/ci.fusecheck`
-manifest and applies the per-design thresholds, including a **mandatory
+manifest — `assert <stl> <min> [<max>]`, or the sugar `assert <stl> =N` — and
+applies the per-design thresholds through `--bound`, including a **mandatory
 negative control** (a known-fused pose that must still read fused, so the check
 can never become unfalsifiable) — the same issue-#37 discipline as
 `ci.fitchecks`.
