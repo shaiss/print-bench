@@ -715,9 +715,9 @@ def test_glyphs_too_small_to_read_measure_below_the_legibility_bound(tmp_path):
 
     A 2 mm slot on a 60 mm part is a mark nobody reads; its largest open
     channel stays under 15% of the part even though a ray threads the slot's
-    depth. (DESIGN_SA: the span is still a 3-D void chord — aperture-plane
-    glyph extent is a follow-up; a pack wanting the opening width too has
-    `min_bridge_mm` beside it.)
+    depth. (DESIGN_SA #701: the span is still a 3-D void chord — aperture-
+    plane glyph extent is a follow-up; a pack wanting the opening width too
+    has `min_bridge_mm` beside it.)
     """
     r = measure(save(tmp_path, stencil_plate(slot_w=2.0, slot_h=2.0),
                      "tiny.stl"))

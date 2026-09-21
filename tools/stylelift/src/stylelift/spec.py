@@ -431,9 +431,9 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
     # Cut-through is the measurable gap (`max_void_span_mm`), not the open-area
     # fraction: a plate of tiny glyphs has almost no open area yet is exactly
     # the part the legibility rule exists for. Advisory openness still keys off
-    # area fraction independently. DESIGN_SA: `max_void_span_mm` today is a
-    # hull-chord proxy and also fires on deep blind pockets — topology-aware
-    # through-cut detection is a follow-up (see PR #640 CR).
+    # area fraction independently. DESIGN_SA (#702): `max_void_span_mm` today
+    # is a hull-chord proxy and also fires on deep blind pockets — topology-
+    # aware through-cut detection is a follow-up.
     openness = measurement.get("openness") or {}
     if openness.get("measured"):
         void = float(openness.get("void_fraction") or 0.0)

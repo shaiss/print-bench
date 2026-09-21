@@ -949,9 +949,9 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
     legible marks (`glyph height >= 0.15 x part diameter`). The denominator is
     the hull circumdiameter (pose-invariant); an AABB side length would grow
     toward the space diagonal under rotation and shrink the fraction from
-    export pose alone. DESIGN_SA: the numerator is still a 3-D void *chord*
-    (depth can dominate a narrow deep hole) — aperture-plane glyph extent is
-    a follow-up (see PR #640 CR). The narrowest material span (`min_bridge_mm`)
+    export pose alone. DESIGN_SA (#701): the numerator is still a 3-D void
+    *chord* (depth can dominate a narrow deep hole) — aperture-plane glyph
+    extent is a follow-up. The narrowest material span (`min_bridge_mm`)
     is measured by inward normal rays the way `walls` measures thickness,
     with plate-thickness faces filtered out so a thin plate with a wide web
     reports the web — a bridge under two extrusion widths will not print clean.
