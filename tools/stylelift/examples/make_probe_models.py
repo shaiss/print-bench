@@ -125,6 +125,85 @@ def rounded_slab(**kw) -> trimesh.Trimesh:
                             "radius": 3.0, **kw})
 
 
+def smooth_ball(radius=10.0, count=(32, 16)) -> trimesh.Trimesh:
+    """A solid with no decided edge anywhere: every fold is one segment of the
+    sphere's own tessellation, and every join is tangent so not one corner
+    exists.
+
+    The smooth-and-solid half of the faceted/open pair — the counterfactual a
+    sharpness or openness metric has to score zero on. count=(32, 16) draws it
+    the way OpenSCAD's `sphere($fn=32)` does, so the coarsest folds (the
+    equator) turn 360/32 = 11.25 degrees — steep, but tessellation all the
+    same, which is the whole point: the sharpness metric must read the
+    mesh's own resolution, not the fold angle.
+    """
+    return trimesh.creation.uv_sphere(radius=radius, count=list(count))
+
+
+def pierced_rounded_box(width=40.0, depth=30.0, height=15.0, radius=3.0,
+                        quarter_segments=2, bore_d=8.0, bore_segments=64
+                        ) -> trimesh.Trimesh:
+    """A coarse-$fn rounded box carrying one fine cylindrical bore.
+
+    The $fn-normalization control. With `quarter_segments=2` the corner arcs
+    are 45-degree folds — the same turn the stencil plate's chamfers make —
+    but here they are segments of 8-sided curves, so the sharpness metric
+    must treat them as tessellation: the mesh's finest curve is the 8-sided
+    corner, and it explains every 45-degree fold it has. Pierce it with a
+    $fn=64 bore and nothing else moves, yet the finest curve is now the bore,
+    the threshold drops below 45 degrees, and those same folds are design
+    facets. One mesh, one extra hole, opposite verdicts — that is the proof
+    the metric separates on declared resolution rather than on a lucky
+    shallow-angle cutoff.
+    """
+    core = Polygon([(radius, radius), (width - radius, radius),
+                    (width - radius, depth - radius), (radius, depth - radius)])
+    shape = core.buffer(radius, quad_segs=quarter_segments, join_style=1)
+    if bore_d > 0:
+        shape = shape.difference(
+            Point(width / 2, depth / 2).buffer(
+                bore_d / 2, quad_segs=max(4, bore_segments // 4)))
+    return trimesh.creation.extrude_polygon(shape, height)
+
+
+def stencil_plate(width=60.0, depth=40.0, height=8.0, chamfer=3.0, web=4.0,
+                  cols=3, rows=2, slot_w=10.0, slot_h=14.0) -> trimesh.Trimesh:
+    """A faceted, cut-through probe: a chamfered plate carrying a grid of
+    rectangular through-slots — the stencil-glyph look, with every number
+    chosen.
+
+    The outline corners are cut at 45 degrees (`chamfer` legs), so the part
+    owns decisive facets, and the slots are plain rectangles, so essentially
+    all of its shaped edge length is facet. Slot size, count and the web
+    between them are parameters, which makes the open-area fraction, the
+    largest through-void span and the narrowest bridge arithmetic on the
+    arguments: slots cover `cols*rows*slot_w*slot_h` of the chamfered face,
+    the longest straight line a slot can be threaded by is its space
+    diagonal, and the narrowest material anywhere is `web` (the rim margins
+    are wider). Drop `web` below two extrusion widths and the same probe
+    becomes the negative control for a bridge rule.
+    """
+    grid_w = cols * slot_w + (cols - 1) * web
+    grid_d = rows * slot_h + (rows - 1) * web
+    if grid_w > width - 2 * chamfer or grid_d > depth - 2 * chamfer:
+        raise ValueError("slot grid does not fit inside the chamfered outline")
+    outline = [
+        (chamfer, 0), (width - chamfer, 0), (width, chamfer),
+        (width, depth - chamfer), (width - chamfer, depth),
+        (chamfer, depth), (0, depth - chamfer), (0, chamfer)]
+    holes = []
+    x0 = (width - grid_w) / 2
+    y0 = (depth - grid_d) / 2
+    for i in range(cols):
+        for j in range(rows):
+            lx = x0 + i * (slot_w + web)
+            ly = y0 + j * (slot_h + web)
+            holes.append([(lx, ly), (lx + slot_w, ly),
+                          (lx + slot_w, ly + slot_h), (lx, ly + slot_h)])
+    return trimesh.creation.extrude_polygon(
+        Polygon(outline, holes=holes), height)
+
+
 BUILDERS = {
     "sharp-box": sharp_prism,
     "rounded-box": rounded_prism,
@@ -132,6 +211,9 @@ BUILDERS = {
     "chamfered-box": chamfered_prism,
     "drilled-plate": drilled_plate,
     "shelled-tube": shelled_tube,
+    "smooth-ball": smooth_ball,
+    "stencil-plate": stencil_plate,
+    "pierced-rounded-box": pierced_rounded_box,
 }
 
 

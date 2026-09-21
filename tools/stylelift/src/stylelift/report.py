@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .spec import Result, Status, StyleSpec, verdict
+from .spec import LINE_WIDTH_MM, Result, Status, StyleSpec, verdict
 
 _MARK = {Status.PASS: "ok  ", Status.FAIL: "FAIL", Status.WARN: "warn",
          Status.SKIP: "skip"}
@@ -81,6 +81,54 @@ def measurement_text(m: dict) -> str:
             lines.append(f"    {f['count']:>3} x {f['kind']:<4} "
                          f"d = {f['d_mm']:g} mm, axis {f['axis']}, "
                          f"~{f['implied_fn']:g} segments/turn")
+
+    facet = edges.get("facetedness") or {}
+    if facet.get("tessellation_turn_deg") is not None:
+        lines += ["", "  FACETEDNESS"]
+        if facet.get("fn_curve"):
+            basis = (f"the mesh's finest curve draws ~{facet['fn_curve']:g} "
+                     "segments/turn")
+        else:
+            fallback = int(m.get("config", {}).get("fn_curve_fallback", 48))
+            basis = (f"no curve declared; the smooth-curve convention "
+                     f"($fn={fallback}) stands in")
+        lines.append(f"    sharpness: {facet['sharpness']:.2f} of shaped edge "
+                     "length is design facet (0.0 = all tessellation)")
+        lines.append(f"    tessellation: folds up to "
+                     f"{facet['tessellation_turn_deg']:g} deg are curve "
+                     f"segments — {basis}")
+        bins = facet.get("histogram") or []
+        if bins:
+            cells = [f"{b['lo_deg']:g}-{b['hi_deg']:g}:{b['share']:.0%}"
+                     + ("*" if b["facet"] else "")
+                     for b in bins]
+            lines.append("    histogram (share of shaped edge length, "
+                         "* = mostly facet):")
+            lines.append("      " + "  ".join(cells))
+
+    openness = m.get("openness") or {}
+    if openness and not openness.get("measured"):
+        reason = openness.get("reason") or "mesh is not watertight"
+        lines += ["", "  OPENNESS", f"    not measurable: {reason}"]
+    elif openness.get("measured"):
+        lines += ["", "  OPENNESS (solid-angle integral, "
+                  f"{openness['directions']} views x "
+                  f"{openness['rays_per_direction']} lines)"]
+        lines.append(f"    void fraction: {openness['void_fraction']:.1%} of "
+                     f"the silhouette is open "
+                     f"({openness['views_with_void']} of "
+                     f"{openness['directions']} views see void)")
+        if openness.get("max_void_span_mm"):
+            lines.append(f"    largest cut-through: "
+                         f"{openness['max_void_span_mm']:g} mm "
+                         f"({openness['max_void_span_fraction']:.0%} of the "
+                         "part)")
+        if openness.get("min_bridge_mm") is not None:
+            widths = openness["min_bridge_mm"] / LINE_WIDTH_MM
+            lines.append(f"    narrowest bridge: "
+                         f"{openness['min_bridge_mm']:g} mm "
+                         f"({widths:g} extrusion lines at "
+                         f"{LINE_WIDTH_MM:g} mm)")
 
     lines += ["", "  MASSING"]
     aspect = massing["aspect"]
