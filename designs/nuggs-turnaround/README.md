@@ -132,7 +132,7 @@ Override on the command line with, e.g., `-D 'port_tol=0.35'`. Every dimension
 above is enforced by an `assert` in the `.scad`, so an out-of-range value
 fails the render. That seals the *dimensions*, not the whole part — the #499
 roof gap scored 84/100, watertight, with every assert green — so the gates
-and the previews, not the asserts alone, are what shippable rests on.
+and the previews, not the asserts alone, are what make it shippable.
 
 ## Assembly & use
 
@@ -169,9 +169,9 @@ and the previews, not the asserts alone, are what shippable rests on.
    of that cleaning, check it is empty: tap and listen, then a flashlight
    through two vents — sound is one-directional, and a sleeping hamster is
    silent in an opaque drum. Clean it hand-wash only, lukewarm (≤ 50 °C),
-   never the dishwasher: heat deforms PLA, and a
-   deformed tube is a *narrowed* tube — the material failure mode is the
-   injury failure mode (family charter N7).
+   never the dishwasher: heat deforms PLA, and a deformed tube is a
+   *narrowed* tube — the material failure mode is the injury failure mode
+   (family charter N7).
 
 One stated trade, so it isn't an omission: the chamber is opaque, and **you
 will never see the turn** — you'll hear her cross before you see her (six

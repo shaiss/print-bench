@@ -186,7 +186,8 @@ stub. The fit being tuned is the *coupling's*, owned by the standard.
    deburr the node after the print instead).
    Caliper the bore while you're at it: under 79.0 mm means the printer is
    shrinking.
-4. Only then commit the full module (~195 mm tall, 1 d 0 h 12 m / 349.52 g at 0.2 mm — check the spool).
+4. Only then commit the full module (~195 mm tall, 1 d 0 h 12 m /
+   349.52 g at 0.2 mm — check the spool).
 
 ## Print settings
 
