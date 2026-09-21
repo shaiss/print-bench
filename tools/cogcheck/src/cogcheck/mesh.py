@@ -10,14 +10,17 @@ cases the test suite pins (a unit cube lands on its centre; a two-body
 composite lands on the mass-weighted mean of the bodies).
 
 That exactness is why a broken mesh fails loudly instead of judging anyway:
-a (near-)zero total volume means the mesh is not closed (or is degenerate),
-a negative one means the normals point inward, and either makes every
-downstream number fiction — the tool refuses rather than emits it.
+the mesh must be closed and manifold (every undirected edge appears exactly
+twice with opposite winding) before the tetrahedron sum is trusted; a
+(near-)zero total volume means the mesh is degenerate, a negative one means
+the normals point inward, and either makes every downstream number fiction —
+the tool refuses rather than emits it.
 """
 
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from typing import Iterable, Sequence
 
 from cogcheck.stl import Triangle
@@ -41,12 +44,42 @@ class MeshError(Exception):
     """The mesh cannot be measured: not closed, inverted, or empty."""
 
 
+def _require_closed(triangles: Sequence[Triangle]) -> None:
+    """Every undirected edge must appear exactly twice with opposite winding.
+
+    A nonzero signed tetrahedron sum is not enough: a box with one face
+    removed can still report a plausible residual volume. Reject open,
+    non-manifold, or inconsistently oriented shells before using that sum.
+    """
+    # Canonical undirected edge -> net oriented count (+1 / -1 per appearance).
+    oriented: dict[tuple[Vec3, Vec3], int] = defaultdict(int)
+    appearances: dict[tuple[Vec3, Vec3], int] = defaultdict(int)
+    for v1, v2, v3 in triangles:
+        for a, b in ((v1, v2), (v2, v3), (v3, v1)):
+            if a == b:
+                raise MeshError(
+                    "mesh has a degenerate edge (repeated vertex) — not a "
+                    "closed surface"
+                )
+            key = (a, b) if a <= b else (b, a)
+            appearances[key] += 1
+            oriented[key] += 1 if a <= b else -1
+    for key, count in appearances.items():
+        if count != 2 or oriented[key] != 0:
+            raise MeshError(
+                "mesh is not a closed watertight surface (an edge does not "
+                "appear exactly twice with opposite winding) — open or "
+                "non-manifold shells have no trustworthy centre of gravity"
+            )
+
+
 def mass_properties(triangles: Sequence[Triangle]) -> tuple[float, Vec3]:
     """Return ``(volume_mm3, centroid_mm)`` by signed tetrahedron
     decomposition. Raises MeshError on a mesh the decomposition cannot trust
-    (empty, near-zero volume, or inward normals)."""
+    (empty, open/non-manifold, near-zero volume, or inward normals)."""
     if not triangles:
         raise MeshError("mesh has no triangles")
+    _require_closed(triangles)
     volume6 = 0.0
     cx = cy = cz = 0.0
     for (x1, y1, z1), (x2, y2, z2), (x3, y3, z3) in triangles:

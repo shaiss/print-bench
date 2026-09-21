@@ -69,31 +69,97 @@ def _read_binary(data: bytes, path: str | Path = "<stl>") -> list[Triangle]:
 
 
 def _read_ascii(text: str, path: str | Path) -> list[Triangle]:
-    vertices: list[tuple[float, float, float]] = []
-    facets = 0
-    for line in text.splitlines():
-        parts = line.split()
+    """Parse ASCII STL with a facet state machine.
+
+    Each facet must be ``facet`` → ``outer loop`` → exactly three ``vertex``
+    lines → ``endloop`` → ``endfacet``. Counting facets and vertices globally
+    would accept empty facets with stray vertices elsewhere.
+    """
+    triangles: list[Triangle] = []
+    # ready | in_facet | in_loop | after_loop
+    state = "ready"
+    loop_vertices: list[tuple[float, float, float]] = []
+    saw_solid = False
+
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        parts = raw.split()
         if not parts:
             continue
-        if parts[0] == "facet":
-            facets += 1
-        elif parts[0] == "vertex":
-            if len(parts) != 4:
-                raise ValueError(f"{path}: malformed vertex line: {line.strip()!r}")
-            try:
-                vertex = (float(parts[1]), float(parts[2]), float(parts[3]))
-            except ValueError as e:
-                raise ValueError(f"{path}: non-numeric vertex in {line.strip()!r}") from e
-            if not all(math.isfinite(v) for v in vertex):
-                raise ValueError(f"{path}: non-finite vertex in {line.strip()!r}")
-            vertices.append(vertex)
-    if not vertices:
-        raise ValueError(f"{path}: no vertices found — not an STL?")
-    if len(vertices) % 3 or len(vertices) // 3 != facets:
+        tok = parts[0]
+
+        if state == "ready":
+            if tok == "solid":
+                if saw_solid:
+                    raise ValueError(f"{path}:{lineno}: unexpected second 'solid'")
+                saw_solid = True
+                continue
+            if tok == "endsolid":
+                break
+            if tok == "facet":
+                state = "in_facet"
+                continue
+            raise ValueError(
+                f"{path}:{lineno}: expected 'facet' or 'endsolid', got {raw.strip()!r}"
+            )
+
+        if state == "in_facet":
+            if tok == "outer" and len(parts) >= 2 and parts[1] == "loop":
+                state = "in_loop"
+                loop_vertices = []
+                continue
+            raise ValueError(
+                f"{path}:{lineno}: expected 'outer loop' after facet, got {raw.strip()!r}"
+            )
+
+        if state == "in_loop":
+            if tok == "vertex":
+                if len(parts) != 4:
+                    raise ValueError(
+                        f"{path}: malformed vertex line: {raw.strip()!r}"
+                    )
+                try:
+                    vertex = (float(parts[1]), float(parts[2]), float(parts[3]))
+                except ValueError as e:
+                    raise ValueError(
+                        f"{path}: non-numeric vertex in {raw.strip()!r}"
+                    ) from e
+                if not all(math.isfinite(v) for v in vertex):
+                    raise ValueError(
+                        f"{path}: non-finite vertex in {raw.strip()!r}"
+                    )
+                loop_vertices.append(vertex)
+                if len(loop_vertices) > 3:
+                    raise ValueError(
+                        f"{path}:{lineno}: facet has more than three vertices"
+                    )
+                continue
+            if tok == "endloop":
+                if len(loop_vertices) != 3:
+                    raise ValueError(
+                        f"{path}:{lineno}: a facet must carry exactly three "
+                        f"vertices, got {len(loop_vertices)}"
+                    )
+                state = "after_loop"
+                continue
+            raise ValueError(
+                f"{path}:{lineno}: expected 'vertex' or 'endloop', got {raw.strip()!r}"
+            )
+
+        if state == "after_loop":
+            if tok == "endfacet":
+                triangles.append(
+                    (loop_vertices[0], loop_vertices[1], loop_vertices[2])
+                )
+                state = "ready"
+                continue
+            raise ValueError(
+                f"{path}:{lineno}: expected 'endfacet' after endloop, got {raw.strip()!r}"
+            )
+
+    if state != "ready":
         raise ValueError(
-            f"{path}: {facets} facet(s) but {len(vertices)} vertex(ies) — "
-            "a facet must carry exactly three vertices"
+            f"{path}: truncated ASCII STL — unfinished facet (state={state})"
         )
-    return [
-        (vertices[i], vertices[i + 1], vertices[i + 2]) for i in range(0, len(vertices), 3)
-    ]
+    if not triangles:
+        raise ValueError(f"{path}: no facets found — not an STL?")
+    return triangles

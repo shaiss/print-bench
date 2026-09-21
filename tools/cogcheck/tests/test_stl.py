@@ -72,7 +72,7 @@ def test_missing_file_raises(tmp_path: Path):
 def test_garbage_text_refused(tmp_path: Path):
     out = tmp_path / "garbage.stl"
     out.write_text("this is not an stl at all\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="no vertices"):
+    with pytest.raises(ValueError, match="expected 'facet'|no facets"):
         read_triangles(out)
 
 
@@ -135,4 +135,42 @@ def test_binary_non_finite_vertex_refused(tmp_path: Path):
     blob += struct.pack("<12fH", 0.0, 0.0, 0.0, *coords, 0)
     out.write_bytes(bytes(blob))
     with pytest.raises(ValueError, match="non-finite"):
+        read_triangles(out)
+
+
+def test_ascii_vertices_outside_loop_refused(tmp_path: Path):
+    """Empty facet plus stray vertices must not cancel out under a global count."""
+    out = tmp_path / "stray.stl"
+    out.write_text(
+        "solid x\n"
+        " facet normal 0 0 0\n  outer loop\n  endloop\n endfacet\n"
+        " vertex 0 0 0\n vertex 1 0 0\n vertex 0 1 0\n"
+        "endsolid x\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="exactly three|expected"):
+        read_triangles(out)
+
+
+def test_ascii_missing_endfacet_refused(tmp_path: Path):
+    out = tmp_path / "trunc.stl"
+    out.write_text(
+        "solid x\n facet normal 0 0 0\n  outer loop\n"
+        "   vertex 0 0 0\n   vertex 1 0 0\n   vertex 0 1 0\n"
+        "  endloop\nendsolid x\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="endfacet|truncated|unfinished"):
+        read_triangles(out)
+
+
+def test_ascii_vertex_before_outer_loop_refused(tmp_path: Path):
+    out = tmp_path / "order.stl"
+    out.write_text(
+        "solid x\n facet normal 0 0 0\n"
+        "   vertex 0 0 0\n   vertex 1 0 0\n   vertex 0 1 0\n"
+        "  endloop\n endfacet\nendsolid x\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="outer loop"):
         read_triangles(out)

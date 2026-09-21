@@ -31,10 +31,11 @@ produces:
 
 - **Per-part mass, from the mesh.** Each `part:` names an STL the gate
   rendered. A signed tetrahedron decomposition (every facet plus the origin)
-  gives the part's volume and centroid exactly for a closed polyhedron — no
-  tessellation-density error, because the decomposition is exact, not a
-  Monte-Carlo or voxel approximation. Density comes from the manifest, so
-  mass = density · volume.
+  gives the part's volume and centroid exactly for a **closed, manifold**
+  polyhedron — every undirected edge must appear twice with opposite winding
+  before the sum is trusted (an open shell such as a box missing a face fails
+  even when the residual volume is nonzero). Density comes from the manifest,
+  so mass = density · volume.
 - **Non-printed masses, from the manifest.** Brass stalks, steel ballast, a
   PCB: `mass:` entries with grams and a position. These are usually what tips
   a design — plastic is ~1.24 g/cm³ and brass is ~8.5, so the hardware
@@ -132,8 +133,10 @@ issue #37's rule that a check which cannot fail is worthless.
 
 ```
 src/cogcheck/
-  stl.py       ASCII/binary STL reader (normals read, then discarded)
-  mesh.py      signed-tetrahedron mass properties, transforms, ground contact
+  stl.py       ASCII/binary STL reader (ASCII facet state machine; normals
+               read, then discarded; non-finite coords refused)
+  mesh.py      closed-mesh check, signed-tetrahedron mass properties,
+               transforms, ground contact
   conf.py      the ci.cog manifest parser (fail-loud, file:line)
   hull.py      2-D convex hull + inside/distance/degeneracy predicates
   verdict.py   assembly, footprint, margin, the verdict and its detail

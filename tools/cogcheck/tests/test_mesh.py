@@ -52,10 +52,21 @@ def test_empty_mesh_refused():
 
 
 def test_open_shell_refused():
-    """A single triangle is not a closed surface: effectively-zero volume,
-    refused rather than a fiction of a centroid."""
-    with pytest.raises(MeshError, match="effectively zero"):
+    """A single triangle is not a closed surface: refused before any
+    residual volume can invent a centroid."""
+    with pytest.raises(MeshError, match="closed|watertight"):
         mass_properties([((0, 0, 0), (10, 0, 0), (0, 10, 0))])
+
+
+def test_box_minus_face_refused():
+    """An open shell with a nonzero residual tetrahedron sum must still
+    fail — volume alone is not proof of closure (the review fixture)."""
+    tris = box_triangles(0, 0, 0, 10, 10, 10)
+    # Drop the +x face (last two triangles in box_triangles).
+    open_box = tris[:-2]
+    assert len(open_box) == 10
+    with pytest.raises(MeshError, match="closed|watertight"):
+        mass_properties(open_box)
 
 
 def test_rotation_follows_openscad_convention():
