@@ -14,7 +14,8 @@ import shapely
 import trimesh
 
 from make_probe_models import (chamfered_prism, chamfered_slab, drilled_plate,
-                               pierced_rounded_box, rounded_prism, rounded_slab,
+                               hollow_shell, pierced_rounded_box,
+                               pocketed_trough, rounded_prism, rounded_slab,
                                sharp_prism, shelled_tube, smooth_ball,
                                stencil_plate, tapered_boss_plate)
 from stylelift import measure
@@ -633,6 +634,9 @@ def test_the_smooth_solid_fixture_earns_no_facet_and_no_void(tmp_path):
     assert open_["void_fraction"] == pytest.approx(0.0, abs=1e-6)
     assert open_["views_with_void"] == 0
     assert open_["max_void_span_mm"] == pytest.approx(0.0, abs=1e-6)
+    # and no cut passes through a ball: topology says zero handles
+    assert open_["through_cut_count"] == 0
+    assert open_["max_through_span_mm"] == 0.0
 
 
 def test_the_stencil_plate_is_all_facet_and_open(tmp_path):
@@ -651,6 +655,9 @@ def test_the_stencil_plate_is_all_facet_and_open(tmp_path):
     assert open_["void_fraction"] > 0.05
     assert open_["views_with_void"] > 0
     assert open_["min_bridge_mm"] == pytest.approx(4.0, abs=0.05)
+    # the cuts are real: one handle per slot, exactly cols*rows
+    assert open_["through_cut_count"] == 3 * 2
+    assert open_["max_through_span_mm"] > 0
 
 
 def test_sharpness_normalizes_against_the_meshs_own_fn(tmp_path):
@@ -713,15 +720,17 @@ def test_void_fraction_is_pose_stable_and_the_estimate_knows_it(tmp_path):
 def test_glyphs_too_small_to_read_measure_below_the_legibility_bound(tmp_path):
     """The glyph half of the legibility rule, as a measurement.
 
-    A 2 mm slot on a 60 mm part is a mark nobody reads; its largest open
-    channel stays under 15% of the part even though a ray threads the slot's
-    depth. (DESIGN_SA #701: the span is still a 3-D void chord — aperture-
-    plane glyph extent is a follow-up; a pack wanting the opening width too
-    has `min_bridge_mm` beside it.)
+    A 2 mm slot on a 60 mm part is a mark nobody reads; its largest
+    through-cut chord stays under 15% of the part even though the cuts are
+    topologically real (six handles) and a ray threads the slot's depth.
+    (DESIGN_SA #701: the span is still a 3-D void chord — aperture-plane
+    glyph extent is a follow-up; a pack wanting the opening width too has
+    `min_bridge_mm` beside it.)
     """
     r = measure(save(tmp_path, stencil_plate(slot_w=2.0, slot_h=2.0),
                      "tiny.stl"))
-    assert r["openness"]["max_void_span_fraction"] < GLYPH_MIN_FRACTION
+    assert r["openness"]["through_cut_count"] == 3 * 2
+    assert r["openness"]["max_through_span_fraction"] < GLYPH_MIN_FRACTION
 
 
 def test_glyph_fraction_uses_a_pose_invariant_denominator(tmp_path):
@@ -800,15 +809,17 @@ def test_a_cut_through_reference_proposes_the_legibility_pair(tmp_path):
     by_id = {rule["id"]: rule for rule in rules}
 
     glyph = by_id["legible-glyph"]
-    assert glyph["metric"] == "openness.max_void_span_fraction"
+    assert glyph["metric"] == "openness.max_through_span_fraction"
     assert glyph["value"] == GLYPH_MIN_FRACTION
     assert glyph["severity"] == "required"
-    assert glyph["when"] == {"metric": "openness.max_void_span_mm",
-                             "op": "min", "value": 0.01}
+    assert glyph["when"] == {"metric": "openness.through_cut_count",
+                             "op": "min", "value": 1}
     bridge = by_id["bridge-width"]
     assert bridge["metric"] == "openness.min_bridge_mm"
     assert bridge["value"] == pytest.approx(BRIDGE_MIN_WIDTHS * LINE_WIDTH_MM)
     assert bridge["severity"] == "required"
+    assert bridge["when"] == {"metric": "openness.through_cut_count",
+                              "op": "min", "value": 1}
     assert by_id["facet-sharpness"]["metric"] == "edges.facetedness.sharpness"
     assert tokens["void_fraction"] == pytest.approx(
         r["openness"]["void_fraction"], abs=5e-4)
@@ -816,22 +827,95 @@ def test_a_cut_through_reference_proposes_the_legibility_pair(tmp_path):
 
 def test_a_narrow_cut_through_proposes_legibility_even_when_barely_open(
         tmp_path):
-    """derive() keys the required pair on max_void_span_mm, not void_fraction.
+    """derive() keys the required pair on the through-cut topology, not on
+    void_fraction (#702, AC4).
 
     A single narrow slot can sit well under the 5% open-area advisory floor
-    while still being a real cut-through the legibility rule exists for. The
-    old void>=0.05 branch dropped the pair and emitted closed-form instead.
+    while still being a real cut-through — one handle — the legibility rule
+    exists for. Neither the old void>=0.05 branch nor a chord threshold is
+    the gate; the mesh's handle count is.
     """
     r = measure(save(tmp_path,
                      stencil_plate(cols=1, rows=1, slot_w=2.0, slot_h=14.0),
                      "narrow.stl"))
     assert r["openness"]["void_fraction"] < 0.05
-    assert r["openness"]["max_void_span_mm"] >= 0.01
+    assert r["openness"]["through_cut_count"] == 1
     ids = {rule["id"] for rule in derive(r, "narrow-test")[1]}
     assert "legible-glyph" in ids and "bridge-width" in ids
     assert "closed-form" not in ids
     # Advisory openness stays on the area-fraction floor independently.
     assert "openness" not in ids
+
+
+def test_through_cut_count_reads_topology_not_hull_gaps(tmp_path):
+    """#702 AC1: the through-cut signal is explicit, and distinct from
+    hull-gap and blind-pocket chords.
+
+    A deep open channel (the trough) is airy by hull reference — lines along
+    it clear the part end to end, so `max_void_span_mm` is large — yet no
+    material is pierced anywhere and the handle count must read zero. A
+    sealed cavity is the other non-through void: rays cross it
+    material-to-material, but it opens onto nothing. Holes, slots and a
+    tube's bore are handles, exactly one each.
+    """
+    trough = measure(save(tmp_path, pocketed_trough(), "trough.stl"))["openness"]
+    assert trough["through_cut_count"] == 0
+    assert trough["max_void_span_mm"] > 5.0        # airy by hull reference
+    assert trough["max_through_span_mm"] == 0.0    # yet nothing passes through
+
+    shell = measure(save(tmp_path, hollow_shell(), "shell.stl"))["openness"]
+    assert shell["through_cut_count"] == 0
+    assert shell["max_void_span_mm"] > 0.0         # the cavity crosses rays
+    assert shell["max_through_span_mm"] == 0.0     # sealed: not a cut either
+
+    drilled = measure(save(tmp_path, drilled_plate(), "drilled.stl"))["openness"]
+    assert drilled["through_cut_count"] == 4       # one handle per hole
+    tube = measure(save(tmp_path, shelled_tube(), "tube.stl"))["openness"]
+    assert tube["through_cut_count"] == 1          # the bore
+    stencil = measure(save(tmp_path, stencil_plate(), "stencil.stl"))["openness"]
+    assert stencil["through_cut_count"] == 3 * 2   # one handle per slot
+
+
+def test_a_topology_the_mesh_cannot_trust_is_refused_not_guessed(tmp_path):
+    """The negative control for the count itself (#702 AC1).
+
+    mapbox-earcut's multi-ring path triangulates axis-aligned rectangular
+    holes with T-junction cap edges — watertight, exact volume, and an Euler
+    characteristic that is not the surface's (six slots would read as two
+    handles, a confident wrong number). On such a mesh the count must be
+    None with a reason, and derive() must emit neither the legibility pair
+    nor closed-form: a rule whose gate cannot be evaluated must not be
+    required, and unknown topology is not "closed". Real OpenSCAD/CGAL
+    exports share vertices and never hit this; the chamfered probe exists so
+    the tool's own fixtures do not either.
+    """
+    from shapely.geometry import Polygon
+    # plain rectangular holes — exactly what the chamfered fixture avoids.
+    # Six is where earcut's fans degenerate (verified: chi reads 0 on six,
+    # though the surface's is -10; one and two holes happen to conform).
+    holes = [[(2 + 4 * i, 2.0), (4 + 4 * i, 2.0), (4 + 4 * i, 4.0),
+              (2 + 4 * i, 4.0)] for i in range(6)]
+    mesh = trimesh.creation.extrude_polygon(
+        Polygon([(0, 0), (30, 0), (30, 20), (0, 20)], holes=holes), 2.0)
+    assert mesh.is_watertight        # the trap: it looks fine to every check
+    r = measure(save(tmp_path, mesh, "tjunction.stl"))
+    assert r["openness"]["through_cut_count"] is None
+    assert "T-junction" in r["openness"]["through_cut_reason"]
+    ids = {rule["id"] for rule in derive(r, "tj-test")[1]}
+    assert "legible-glyph" not in ids and "bridge-width" not in ids
+    assert "closed-form" not in ids
+
+
+def test_a_pocketed_concavity_reference_proposes_no_legibility_rules(tmp_path):
+    """#702 AC3: a watertight concave solid — deep channel, blind at the
+    floor, no through-cut — does not carry the required pair, however large
+    its hull-referenced spans measure. It is a closed form: a pocket is not
+    a cut."""
+    r = measure(save(tmp_path, pocketed_trough(), "trough.stl"))
+    assert r["openness"]["max_void_span_mm"] > 5.0
+    ids = {rule["id"] for rule in derive(r, "trough-test")[1]}
+    assert "legible-glyph" not in ids and "bridge-width" not in ids
+    assert "closed-form" in ids
 
 
 def test_a_solid_reference_proposes_no_legibility_rules(tmp_path):
@@ -889,6 +973,20 @@ def test_check_separates_the_fixtures_by_the_new_rules(tmp_path, capsys):
     broken = {r["rule"] for r in payload["results"] if r["status"] == "fail"}
     assert broken == {"bridge-width"}
 
+    # the concavity control (#702 AC3, enforce side): a deep channel with no
+    # through-cut is not judged by the legibility pair at all — the rules
+    # skip on genus 0 instead of failing the part — while hull-referenced
+    # openness alone would have made every rule here apply. With the family's
+    # whole required identity gated on cuts the trough has none of, the
+    # verdict is the honest "not comparable", not a failure.
+    trough = save(tmp_path, pocketed_trough(), "trough.stl")
+    assert main(["check", trough, "--style", str(pack), "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert "NOT COMPARABLE" in payload["verdict"]
+    statuses = {r["rule"]: r["status"] for r in payload["results"]}
+    assert statuses["legible-glyph"] == "skip"
+    assert statuses["bridge-width"] == "skip"
+
 
 def test_the_new_metrics_reach_the_report_and_pack_surfaces(tmp_path):
     """measure + report + emit are the surfaces the issue names: the numbers
@@ -897,6 +995,7 @@ def test_the_new_metrics_reach_the_report_and_pack_surfaces(tmp_path):
     text = measurement_text(measure(path))
     assert "FACETEDNESS" in text and "sharpness" in text
     assert "OPENNESS" in text and "void fraction" in text
+    assert "cut-throughs" in text and "largest through-cut chord" in text
     assert "narrowest bridge" in text
 
     pack = tmp_path / "pack"
@@ -904,6 +1003,7 @@ def test_the_new_metrics_reach_the_report_and_pack_surfaces(tmp_path):
     markdown = render_style_md(spec)
     assert "Facet sharpness" in markdown
     assert "Void fraction" in markdown
+    assert "Cut-throughs" in markdown and "Largest through-cut" in markdown
     assert "Narrowest bridge" in markdown
     # both are targets the checker compares against, not numbers to build with
     assert "style_sharpness" not in render_tokens(spec)

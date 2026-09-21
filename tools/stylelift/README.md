@@ -102,6 +102,7 @@ Two guards make it trustworthy on real meshes:
 | Curve resolution | segments per full turn, snapped to a value a design would write | `implied_fn` |
 | Facetedness (dihedral sharpness) | share of shaped edge length turning more than the mesh's own tessellation — normalized against the finest `$fn` the mesh declares, so a tessellated-smooth curve earns no credit for its tessellation edges | `edges.facetedness.*` with `sharpness`, `fn_curve`, `tessellation_turn_deg` and the `histogram` |
 | Openness (projected void fraction) | open share of the silhouette, integrated over the sphere as a fan of parallel lines per view direction — pose-stable by construction, no favored projection | `openness.void_fraction`, `max_void_span_mm`, `min_bridge_mm` |
+| Through-cuts | topological handle count — holes that pass through the part; a blind pocket, an open channel or a sealed cavity is never one — plus the largest material-bounded chord across a cut | `openness.through_cut_count`, `max_through_span_mm` |
 | Material thickness | inward ray casts from area-weighted samples; solid parts say so | `walls.*` with `shelled` |
 | Massing | bbox fill, convexity, proportion | `massing.*` |
 | Surface direction | area shares up / down / vertical / sloped, with dominant slopes (measured from the build direction, not the bed) | `orientation.*` |
@@ -179,29 +180,44 @@ rays with plate-thickness faces filtered — the web between two cut-outs).
 Non-watertight meshes report `openness.measured: false` with the reason, and
 every rule over these metrics skips rather than fails.
 
-When a reference really is cut through (`max_void_span_mm ≥ 0.01`),
+Airiness is not through-cutting, and a chord threshold cannot tell them apart:
+a deep open channel threads lines end to end (a huge `max_void_span_mm`)
+without piercing any material, and a sealed cavity even shows up as a
+material-void-material chord. So the through-cut signal is topological (#702):
+`through_cut_count` is the mesh's handle count — a hole that connects one side
+of the part to the other, which a blind pocket, an open channel and an enclosed
+cavity never are — computed from the Euler characteristic (exact,
+pose-invariant, no sampling), and `max_through_span_mm` sizes the largest cut
+from the only chords that describe one: gaps bounded by material on both
+sides. Both are zeroed when the count is zero. A triangulation the count
+cannot trust — T-junction edges, which some earcut multi-ring output has and
+OpenSCAD/CGAL exports never do — reports `through_cut_count: null` with the
+reason instead of a wrong integer.
+
+When a reference really is cut through (`through_cut_count ≥ 1`),
 `stylelift lift` proposes the legibility pair as **required** rules, and a
 hand-written pack copies the same shape (constants `GLYPH_MIN_FRACTION`,
 `BRIDGE_MIN_WIDTHS`, `LINE_WIDTH_MM` in `spec.py`). Advisory openness still
 keys off the area fraction independently:
 
 ```json
-{"id": "legible-glyph", "metric": "openness.max_void_span_fraction",
+{"id": "legible-glyph", "metric": "openness.max_through_span_fraction",
  "op": "min", "value": 0.15, "severity": "required",
- "when": {"metric": "openness.max_void_span_mm", "op": "min", "value": 0.01},
- "why": "the largest cut-through must span at least 15% of the part, or it cannot be read at the distance a mark is read from"}
+ "when": {"metric": "openness.through_cut_count", "op": "min", "value": 1},
+ "why": "the family's cut-throughs are legible marks: the largest must span at least 15% of the part, or it cannot be read at the distance a mark is read from"}
 
 {"id": "bridge-width", "metric": "openness.min_bridge_mm",
  "op": "min", "value": 0.8, "severity": "required",
- "when": {"metric": "openness.max_void_span_mm", "op": "min", "value": 0.01},
+ "when": {"metric": "openness.through_cut_count", "op": "min", "value": 1},
  "why": "webs between cut-throughs print as lines: 2 extrusion widths of 0.4 mm"}
 ```
 
-The `when` gate is what keeps the pair honest, in both directions: a solid part
-spans nothing, so the rules skip instead of failing it — while a plate of tiny
-glyphs has almost no open area yet is exactly the part the legibility rule
-exists for, so `derive()` emits the pair from the *existence of a cut-through*
-(the largest span), not the open-area fraction.
+The `when` gate is what keeps the pair honest, in both directions: a solid or
+merely pocketed part has no handles, so the rules skip instead of failing it —
+however airy its hull-referenced spans measure — while a plate of tiny glyphs
+has almost no open area yet is exactly the part the legibility rule exists
+for, so `derive()` emits the pair from the *existence of a cut-through* (the
+handle count), not the open-area fraction.
 
 ## Conformance
 
