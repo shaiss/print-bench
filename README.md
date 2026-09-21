@@ -419,6 +419,14 @@ surfaces studies awaiting a read live in
     proven flat and upright at every landing stop, with mandatory negative
     controls; `--selftest` proves it on the fixtures under
     `scripts/kinematics-fixtures/`
+  - `cog-check.sh` — proves the assembled object STANDS (issue #623), the
+    thing no per-part gate can: reads a `ci.cog` manifest (per-part densities,
+    non-printed hardware masses, assembly transforms, a stability margin) and
+    the gate's rendered STLs, and checks the mass-weighted CoG's ground
+    projection against the convex hull of the contact geometry. TIP-RISK is a
+    WARN-tier advisory; a broken manifest or unrendered manifest part fails;
+    `--selftest` proves a stable configuration passes and an out-of-footprint
+    one is flagged
   - `gate-summary.py` — turns a gate log into the CI results table
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and
@@ -513,6 +521,12 @@ surfaces studies awaiting a read live in
 - `tools/lineage/` — the lineage resolver: reads each design's
   `derives.conf` and its include lines, and answers who derives from whom —
   see its [README](tools/lineage/README.md)
+- `tools/cogcheck/` — the CoG / tip-over stability analyzer behind
+  `cog-check.sh` (issue #623): every other gate proves a part prints, this
+  one proves the assembled object stands — mesh-derived per-part mass,
+  non-printed hardware masses and a support-footprint hull from a `ci.cog`
+  manifest, with a WARN-tier advisory verdict — see its
+  [README](tools/cogcheck/README.md)
 - `tools/backlog-burn/` — the selection engine behind the scheduled backlog
   burn (`.github/workflows/backlog-burn.yml`): picks one unclaimed,
   `autonomy-ok`-labelled issue for a nightly unattended `/ship-issue` run —
