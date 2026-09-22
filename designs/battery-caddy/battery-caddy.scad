@@ -390,9 +390,13 @@ module cell_proxies(grow) {
 // back face sits at back_t - 0.01, the same plane the pocket is cut from, so
 // an intersection unclipped in y reports the shared boundary face as phantom
 // interference (measured: 224 zero-volume facets, all within 0.01 mm of the
-// wall — no real collision anywhere).
+// wall — no real collision anywhere). The z clip sits 0.05 above the foot,
+// not on it: the pocket floor is cut at exactly floor_t + foot_h, and a clip
+// coplanar with it reports 32 phantom facets under the Manifold nightly
+// backend (CI's render gate) while CGAL 2021.01 resolves it to zero — the
+// same coincidence, resurfacing one boolean downstream on the other kernel.
 module above_root() {
-    translate([-1, back_t + 0.01, floor_t + foot_h])
+    translate([-1, back_t + 0.01, floor_t + foot_h + 0.05])
         cube([body_w() + 2, bore_d(aa_cell_d) + 2, body_h()]);
 }
 

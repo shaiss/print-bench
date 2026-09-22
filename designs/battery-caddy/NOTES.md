@@ -99,6 +99,14 @@ the full body; every number below is a parameter.
   never let a cube face coincide with a rotate_extruded/extruded-union
   face; `lane_floors()` now overlaps 0.01 mm into each flanking wall
   (measured: 0 non-manifold edges, printcheck 100/100).
+- Boolean kernels disagree about coincident faces, so a fitcheck green on
+  one backend is not green on the other: `finger_relief`'s clip plane sat
+  exactly on the pocket floor (both `floor_t + foot_h`) — CGAL 2021.01
+  resolved the shared boundary to zero (local gate green), the Manifold
+  nightly backend (CI's render gate) reported 32 phantom facets of
+  interference. `above_root()` now clips 0.05 above the foot; the checked
+  span is still the whole working finger, and the negative control still
+  fires.
 
 ## Print orientation
 

@@ -34,7 +34,11 @@ a box of rolling cells.
 - **Supports:** none — every feature prints support-free (the springs are
   vertical fins in the bed plane)
 - **Orientation:** as rendered — back plate flat on the bed
-- **Brim:** recommended; the walls are long and only 18 mm tall
+- **Brim:** not needed — the back plate is ~340 cm² of bed contact; add one
+  only if your first layer is dodgy (and skip it on a 220-class bed, where
+  brim + footprint clips the printable width)
+- **Seam:** Back (or scarf) — the default Aligned seam draws a stripe down
+  the long outer faces
 
 Print the coupon first and tune `finger_t` before committing 178 g to the
 full body (see the coupon section below).
