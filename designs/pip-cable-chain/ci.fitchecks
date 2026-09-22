@@ -1,0 +1,17 @@
+# Print-in-place fit proofs for the chain run. The `fitcheck` family guards
+# the print pose: every adjacent link pair must overlap NOWHERE (zero facets)
+# — the pin stubs ride their bores, lugs clear ears, plates clear lugs.
+# `fitcheck_neg` proves the check can fail: an oversized stub in link 0 MUST
+# overlap link 1's ears (a welded stub is exactly what a 100/100 watertight
+# score cannot see). The `pose_*`/`stop_*` pairs prove the articulation and
+# the end stops at BOTH sweep limits: 1° short of the ±45° stop must clear
+# (EMPTY) — the joint really articulates through its range — and 2° past must
+# interfere (NON-EMPTY) — the printed plate stops are what block it, at the
+# angle the derivation claims. All eight are rendered straight from the
+# production link(); none is posed by hand.
+fitcheck      empty
+fitcheck_neg  interferes
+pose_up44     empty
+pose_dn44     empty
+stop_up47     interferes
+stop_dn47     interferes

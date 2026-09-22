@@ -1,0 +1,13 @@
+# Deterministic fuse check for the print-in-place chain. Like the piano
+# hinge, there is no flexure web to excuse: the 11 links are joined only
+# through clearances, so a healthy run is ELEVEN disjoint shells in the
+# sliced STL and no flexure zone needs dropping — count them directly. A
+# stub welded into its bore (clear_xy lost) or a lug welded to an ear
+# (side_gap lost) reads as fewer bodies: a STRONG WARN for reviewer signoff.
+assert pip-cable-chain.stl 11
+
+# Mandatory negative control: part="fused" drives oversized stubs through
+# every bore, welding the run into one solid. It must STAY one body —
+# proving the check can fire (and that no over-generous zone is masking a
+# real fuse by splitting the control too).
+control fused 1
