@@ -431,9 +431,13 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
     # Cut-through is the measurable gap (`max_void_span_mm`), not the open-area
     # fraction: a plate of tiny glyphs has almost no open area yet is exactly
     # the part the legibility rule exists for. Advisory openness still keys off
-    # area fraction independently. DESIGN_SA (#702): `max_void_span_mm` today
-    # is a hull-chord proxy and also fires on deep blind pockets — topology-
-    # aware through-cut detection is a follow-up.
+    # area fraction independently. Glyph *size* is the aperture
+    # (`max_glyph_aperture_mm`, #701): the chord measures depth along the
+    # sampling ray, so a narrow hole drilled deep read "legible" to a rule
+    # keyed on it, while the visible mark was too small to read. DESIGN_SA
+    # (#702): `max_void_span_mm` is still the cut-through *gate* and is a
+    # hull-chord proxy that also fires on deep blind pockets — topology-aware
+    # through-cut detection is a follow-up.
     openness = measurement.get("openness") or {}
     if openness.get("measured"):
         void = float(openness.get("void_fraction") or 0.0)
@@ -456,19 +460,24 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
         if cut_through:
             rules.append({
                 "id": "legible-glyph",
-                "metric": "openness.max_void_span_fraction",
+                "metric": "openness.max_glyph_aperture_fraction",
                 "op": "min", "value": GLYPH_MIN_FRACTION,
                 "severity": "required",
-                # Gated on "a cut-through measurably exists", not on the void
-                # fraction: a plate of tiny glyphs has almost no open area but
-                # is exactly the part the legibility rule exists for. A solid
-                # part spans nothing, so it skips.
+                # The glyph's size is its aperture — the extent of the
+                # connected opening in its own plane (#701) — not the chord a
+                # sampling ray threads: a narrow hole drilled deep has a long
+                # chord and an unreadable mouth. Gated on "a cut-through
+                # measurably exists", never on the void fraction: a plate of
+                # tiny glyphs has almost no open area but is exactly the part
+                # the legibility rule exists for. A solid part spans nothing,
+                # so it skips.
                 "when": {"metric": "openness.max_void_span_mm",
                          "op": "min", "value": 0.01},
                 "why": f"the family's cut-throughs are legible marks: the "
-                       f"largest must span at least {GLYPH_MIN_FRACTION:.0%} "
-                       "of the part, or it cannot be read at the distance a "
-                       "mark is read from",
+                       f"widest opening must measure at least "
+                       f"{GLYPH_MIN_FRACTION:.0%} of the part across its own "
+                       "mouth, or it cannot be read at the distance a mark is "
+                       "read from",
             })
             bridge = _mm(BRIDGE_MIN_WIDTHS * LINE_WIDTH_MM)
             rules.append({
