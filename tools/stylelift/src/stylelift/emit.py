@@ -175,6 +175,12 @@ def _evidence_table(spec: StyleSpec) -> list[str]:
             rows.append(
                 f"| Largest cut-through | {openness['max_void_span_mm']:.3g} mm "
                 f"({openness['max_void_span_fraction']:.0%} of the part) |")
+        if openness.get("max_glyph_aperture_mm"):
+            rows.append(
+                f"| Widest visible opening | "
+                f"{openness['max_glyph_aperture_mm']:.3g} mm across its own "
+                f"mouth ({openness['max_glyph_aperture_fraction']:.0%} of the "
+                "part) |")
         if openness.get("min_bridge_mm") is not None:
             rows.append(
                 f"| Narrowest bridge | {openness['min_bridge_mm']:.3g} mm "

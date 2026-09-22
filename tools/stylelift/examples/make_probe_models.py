@@ -182,6 +182,13 @@ def stencil_plate(width=60.0, depth=40.0, height=8.0, chamfer=3.0, web=4.0,
     diagonal, and the narrowest material anywhere is `web` (the rim margins
     are wider). Drop `web` below two extrusion widths and the same probe
     becomes the negative control for a bridge rule.
+
+    Built with `extrude_polygon`, whose earcut triangulation of a face
+    riddled with holes leaves bridging walls between them: watertight and
+    exactly the right volume, but with interior membranes along the slot
+    rows that no edge- or path-based reading can untangle. Metrics that
+    need the mesh's own topology to be faithful use `slotted_plate`, the
+    same part built face by face.
     """
     grid_w = cols * slot_w + (cols - 1) * web
     grid_d = rows * slot_h + (rows - 1) * web
@@ -204,6 +211,84 @@ def stencil_plate(width=60.0, depth=40.0, height=8.0, chamfer=3.0, web=4.0,
         Polygon(outline, holes=holes), height)
 
 
+def slotted_plate(width=60.0, depth=40.0, height=8.0, web=4.0,
+                  cols=3, rows=2, slot_w=10.0, slot_h=14.0) -> trimesh.Trimesh:
+    """The stencil probe built face by face — the same slot grid as
+    `stencil_plate` minus the chamfer, with caps triangulated by exact grid
+    decomposition instead of an earcut, so the mesh is the true boundary:
+    one wall per slot edge, no bridging membranes, euler number 2-2*slots.
+
+    Every slot edge coordinate slices the face into axis-aligned cells; a
+    cell is material unless it lies inside a slot; material cells become
+    two cap triangles top and bottom, and every cell edge between material
+    and void (or material and outside) becomes one wall quad. All the
+    arithmetic that holds for `stencil_plate` holds here with a sharp
+    outline: the widest visible opening is a slot's diagonal
+    sqrt(slot_w^2 + slot_h^2), and the hull circumdiameter is
+    sqrt(width^2 + depth^2 + height^2).
+    """
+    grid_w = cols * slot_w + (cols - 1) * web
+    grid_d = rows * slot_h + (rows - 1) * web
+    if grid_w > width or grid_d > depth:
+        raise ValueError("slot grid does not fit inside the outline")
+    x0 = (width - grid_w) / 2
+    y0 = (depth - grid_d) / 2
+    slots = [(x0 + i * (slot_w + web), y0 + j * (slot_h + web))
+             for i in range(cols) for j in range(rows)]
+
+    def void_cell(cx0, cx1, cy0, cy1) -> bool:
+        return any(sx < cx1 and cx0 < sx + slot_w and sy < cy1 and cy0 < sy + slot_h
+                   for sx, sy in slots)
+
+    xs = sorted({0.0, width} | {sx for sx, _ in slots} | {sx + slot_w for sx, _ in slots})
+    ys = sorted({0.0, depth} | {sy for _, sy in slots} | {sy + slot_h for _, sy in slots})
+    verts: dict[tuple[float, float, float], int] = {}
+
+    def vid(x, y, z):
+        key = (x, y, z)
+        if key not in verts:
+            verts[key] = len(verts)
+        return verts[key]
+
+    faces: list[list[int]] = []
+    material = [[not void_cell(xs[i], xs[i + 1], ys[j], ys[j + 1])
+                 for j in range(len(ys) - 1)] for i in range(len(xs) - 1)]
+    for i in range(len(xs) - 1):
+        for j in range(len(ys) - 1):
+            if not material[i][j]:
+                continue
+            a, b, c, d = (vid(xs[i], ys[j], height), vid(xs[i + 1], ys[j], height),
+                          vid(xs[i + 1], ys[j + 1], height), vid(xs[i], ys[j + 1], height))
+            faces += [[a, b, c], [a, c, d]]                      # top, CCW from +z
+            a, b, c, d = (vid(xs[i], ys[j], 0.0), vid(xs[i + 1], ys[j], 0.0),
+                          vid(xs[i + 1], ys[j + 1], 0.0), vid(xs[i], ys[j + 1], 0.0))
+            faces += [[a, c, b], [a, d, c]]                      # bottom, CW from +z
+    for i in range(len(xs) - 1):
+        for j in range(len(ys) - 1):
+            here = material[i][j]
+            for dx, dy, nx_out in ((1, 0, 1), (-1, 0, -1), (0, 1, 1), (0, -1, -1)):
+                i2, j2 = i + dx, j + dy
+                outside = not (0 <= i2 < len(xs) - 1 and 0 <= j2 < len(ys) - 1)
+                if here and (outside or not material[i2][j2]):
+                    # wall on this cell edge, winding outward for +x/-x/+y/-y
+                    if dy == 0:
+                        xe = xs[i + 1] if dx > 0 else xs[i]
+                        p = [vid(xe, ys[j], 0.0), vid(xe, ys[j + 1], 0.0),
+                             vid(xe, ys[j + 1], height), vid(xe, ys[j], height)]
+                        faces += ([[p[0], p[1], p[2]], [p[0], p[2], p[3]]] if nx_out > 0
+                                  else [[p[0], p[2], p[1]], [p[0], p[3], p[2]]])
+                    else:
+                        ye = ys[j + 1] if dy > 0 else ys[j]
+                        p = [vid(xs[i], ye, 0.0), vid(xs[i + 1], ye, 0.0),
+                             vid(xs[i + 1], ye, height), vid(xs[i], ye, height)]
+                        faces += ([[p[0], p[2], p[1]], [p[0], p[3], p[2]]] if nx_out > 0
+                                  else [[p[0], p[1], p[2]], [p[0], p[2], p[3]]])
+    vertices = np.zeros((len(verts), 3))
+    for (x, y, z), k in verts.items():
+        vertices[k] = (x, y, z)
+    return trimesh.Trimesh(vertices=vertices, faces=np.array(faces), process=False)
+
+
 BUILDERS = {
     "sharp-box": sharp_prism,
     "rounded-box": rounded_prism,
@@ -213,6 +298,7 @@ BUILDERS = {
     "shelled-tube": shelled_tube,
     "smooth-ball": smooth_ball,
     "stencil-plate": stencil_plate,
+    "slotted-plate": slotted_plate,
     "pierced-rounded-box": pierced_rounded_box,
 }
 
