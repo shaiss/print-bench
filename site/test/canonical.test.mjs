@@ -12,6 +12,8 @@ test("layout emits no canonical/og:url until an origin is configured", () => {
   const html = layout({ title: "T", body: "<p>b</p>", canonicalPath: "/styles/" });
   assert.doesNotMatch(html, /rel="canonical"/, "no canonical without an origin");
   assert.doesNotMatch(html, /og:url/, "no og:url without an origin");
+  assert.doesNotMatch(html, /og:image/, "no og:image without an origin");
+  assert.doesNotMatch(html, /twitter:card/, "no twitter card without an origin");
 });
 
 test("layout emits absolute canonical + og:url from the configured origin", () => {
@@ -32,6 +34,16 @@ test("layout emits absolute canonical + og:url from the configured origin", () =
     const home = layout({ title: "T", body: "", canonicalPath: "/" });
     assert.match(home, /<link rel="canonical" href="https:\/\/printbench\.xyz\/">/);
     assert.doesNotMatch(home, /printbench\.xyz\/\//, "no doubled slash at the origin");
+    assert.match(
+      inner,
+      /<meta property="og:image" content="https:\/\/printbench\.xyz\/assets\/favicon\.svg">/
+    );
+    assert.match(inner, /<meta name="twitter:card" content="summary">/);
+    assert.match(
+      inner,
+      /<a href="https:\/\/github\.com\/shaiss\/print-bench\/stargazers"[^>]*>Star ↗<\/a>/
+    );
+    assert.match(inner, /<a href="\/docs\/contributing\/README\.md">Contribute<\/a>/);
   } finally {
     // Reset the shared module state so later tests stay origin-free.
     setSiteUrl("");
