@@ -41,7 +41,7 @@ test("layout emits absolute canonical + og:url from the configured origin", () =
     assert.match(inner, /<meta name="twitter:card" content="summary">/);
     assert.match(
       inner,
-      /<a href="https:\/\/github\.com\/shaiss\/print-bench\/stargazers"[^>]*>Star ↗<\/a>/
+      /<a href="https:\/\/github\.com\/shaiss\/print-bench"[^>]*>Star ↗<\/a>/
     );
     assert.match(inner, /<a href="\/docs\/contributing\/README\.md">Contribute<\/a>/);
   } finally {

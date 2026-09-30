@@ -79,7 +79,7 @@ ${thumbs}
 const SITE_NAME = "print-bench";
 const TAGLINE = "Parametric 3D-printable designs, gated before they ship.";
 const GITHUB_REPO = "https://github.com/shaiss/print-bench";
-const GITHUB_STAR = `${GITHUB_REPO}/stargazers`;
+const GITHUB_STAR = GITHUB_REPO;
 const SITE_CONTRIBUTE = "/docs/contributing/README.md";
 const LICENSE_URL = "https://creativecommons.org/licenses/by-sa/4.0/";
 const OG_IMAGE_PATH = "/assets/favicon.svg";
