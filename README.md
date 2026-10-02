@@ -499,6 +499,12 @@ surfaces studies awaiting a read live in
     `autonomy` (default, the roadmap board, issue #148, see
     [docs/roadmap-board.md](docs/roadmap-board.md)) and `growth` (the Lark
     approval board, see [docs/growth.md](docs/growth.md))
+  - `growth-board-sync.sh` — the driver half of `growth-board-sync.yml`
+    (issue #748): reads the growth board's current card stages in one call and
+    writes only the cards whose derived Stage differs, so a steady-state run
+    costs one read and zero writes, and a run stopped by a GraphQL rate limit
+    degrades (warning + green exit, resuming at the remainder next run) instead
+    of hard-failing — `--selftest` (stub `gh`) proves it, run by `check.sh`
   - `vercel-ignore-build.sh` — the Vercel *Ignored Build Step* gate: from a
     PR's changed-file list it skips a preview deployment when every changed
     path is one the served site never reads (CI, tooling, scripts, most docs),

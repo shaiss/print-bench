@@ -15,8 +15,21 @@ name: Sync the growth queue onto the approval board
 # `approved-to-post` label (now doable from the board card's side panel, where a
 # human sees every pending post at once) — the very label Lark's posting tool
 # reads. Dragging a card changes only the board's own Stage field, NOT that
-# label, so the sync always re-derives and re-sets Stage (never set-if-new): the
-# derived state is the truth. See docs/growth.md.
+# label, so the sync always re-derives Stage and re-sets every card whose Stage
+# no longer matches (never set-if-new): the derived state is the truth. See
+# docs/growth.md.
+#
+# The reconcile itself lives in scripts/growth-board-sync.sh (moved out of this
+# file's inline YAML by issue #748, whose every scheduled fire hard-failed on a
+# GraphQL rate limit): the old inline loop re-SET every card's Stage on every
+# run, ~6 Projects GraphQL calls per card against a budget PROJECT_TOKEN shares
+# with the roadmap board, so the scheduled reconciles exhausted it mid-loop and
+# `set -euo pipefail` turned that red. The driver reads the board's current
+# stages in ONE call and writes only the cards whose Stage differs — a
+# steady-state run costs one read and zero writes, and a run stopped by a rate
+# limit resumes at the remainder on the next fire — and on a rate limit it
+# DEGRADES (::warning:: + exit 0) instead of failing, while any other error
+# stays red. Its --selftest (run by check.sh) proves all of that with a stub gh.
 #
 # GATED, off by default: GitHub Projects v2 needs a token with the `project`
 # scope, which neither GITHUB_TOKEN nor the repo's REGEN_TOKEN/GH_TOKEN carries.
@@ -116,67 +129,14 @@ jobs:
       - name: Reflect each growth-queue issue's stage onto the board
         if: steps.guard.outputs.act == 'true'
         env:
-          # Reads (issue list + comments) use the ambient token; the board write
-          # overrides GH_TOKEN with PROJECT_TOKEN per-invocation below.
+          # Reads (issue list + comments) use the ambient token; the board
+          # read/write overrides GH_TOKEN with PROJECT_TOKEN inside the driver.
           GH_TOKEN: ${{ github.token }}
           PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          # 1. Working set: every growth-queue issue, most-recently-updated
-          #    first (so a just-closed Posted item is always in the window; old
-          #    settled cards already sit on the board and never change).
-          #    `--state all` is REQUIRED: gh keeps its default `--state open`
-          #    filter even alongside `--search`, so without it every closed
-          #    growth-queue issue — i.e. every Posted item — is silently omitted
-          #    and never reaches the board. The stage policy still drops
-          #    closed-and-never-posted items, so rejected issues don't clutter it.
-          gh issue list --repo "$REPO" --state all \
-            --search 'label:growth-queue sort:updated-desc' --limit 300 \
-            --json number,url,state,labels > set.json
-
-          # 2. Enrich each with its concatenated comment bodies, so the stage
-          #    policy can read the dry-run / posted markers. growth.board owns
-          #    the marker strings (tests pin them to the posting tool); this
-          #    workflow passes raw comment text and hardcodes no marker itself.
-          : > snapshot.ndjson
-          while read -r n; do
-            [ -n "$n" ] || continue
-            # A FAILED comment fetch must not misclassify the issue: empty
-            # comments would read as "no markers" and drop a Posted/Drafted card
-            # back to Queued. So on a fetch error skip this issue for this run —
-            # its card keeps the stage a prior run set, and self-heals on the
-            # next reconcile — and surface the miss. An issue with genuinely no
-            # comments succeeds with an empty string, which is the correct
-            # Queued input; only a real API failure takes the skip branch.
-            if ! bodies="$(gh api "repos/$REPO/issues/$n/comments" --paginate \
-              --jq '[.[].body] | join("\n")' 2>/dev/null)"; then
-              echo "::warning::growth-board-sync: could not read comments for #${n}; leaving its board card unchanged this run"
-              continue
-            fi
-            jq -c --argjson n "$n" --arg comments "$bodies" \
-              '.[] | select(.number==$n)
-                   | {number, url, state, labels: [.labels[].name], comments: $comments}' \
-              set.json >> snapshot.ndjson
-          done < <(jq -r '.[].number' set.json)
-          jq -s '.' snapshot.ndjson > snapshot.json
-
-          # 3. Derive each item's Stage from the committed policy (the single
-          #    source, tested in tools/growth/tests/test_board.py).
-          PYTHONPATH=tools/growth/src python3 -m growth board-stage \
-            --snapshot snapshot.json > stages.tsv
-
-          # 4. Reflect each derived Stage onto the board. Always --stage (never
-          #    --stage-if-new): a lens board's Stage is the derived truth, not a
-          #    human-dragged position, so a reconcile re-sets it. The board write
-          #    is the one step that needs PROJECT_TOKEN's `project` scope.
-          count=0
-          tab="$(printf '\t')"
-          while IFS="$tab" read -r url stage; do
-            [ -n "$url" ] || continue
-            scripts/gh-project.sh --board growth add-item "$url" --stage "$stage" \
-              | GH_TOKEN="$PROJECT_TOKEN" bash
-            count=$((count + 1))
-          done < stages.tsv
-          echo "::notice::growth-board sync reflected ${count} item(s) onto the board."
+        # The whole reconcile — queue snapshot, stage derivation, board read,
+        # diff-only writes, rate-limit backoff/degrade — lives in the driver so
+        # its behavior is provable by --selftest (run by scripts/check.sh),
+        # which inline YAML never was. The script enforces set -euo pipefail
+        # itself; anything it cannot classify as a rate limit exits non-zero.
+        run: scripts/growth-board-sync.sh

@@ -125,7 +125,8 @@ declines design requests). The queue is the contract between the seats:
   rejection — has no Stage and is left off the board). Its schema lives in git
   (`scripts/gh-project.sh --board growth`), the Stage policy in
   `tools/growth` (`growth.board.stage_of`), and `growth-board-sync.yml`
-  reflects each issue's state onto it. Detailed below; a LENS, not a control
+  (driven by `scripts/growth-board-sync.sh`) reflects each issue's state onto
+  it. Detailed below; a LENS, not a control
   surface — approving is still applying `approved-to-post`.
 
 ## The arming ladder — three human rungs, no agent on any of them
@@ -348,7 +349,8 @@ Stage field, not the label, and the next reconcile re-derives Stage from the
 real state anyway. This is the deliberate difference from the roadmap board,
 whose Stage is human-owned (a card a person drags, so its sync sets Stage
 only when the item is first added). The growth board's Stage is a reflection,
-so its sync always re-sets it.
+so its sync always re-derives it and re-sets every card that no longer
+matches — never set-if-new.
 
 **Provisioning + wiring.**
 
@@ -362,7 +364,16 @@ so its sync always re-sets it.
   once-daily dry-run as a Drafted card). It is **gated on the same
   `PROJECT_TOKEN`** the roadmap board uses — one Projects-scoped PAT covers
   every board under this owner — and is a no-op until that secret is set, so
-  merging the desk provisions nothing on its own.
+  merging the desk provisions nothing on its own. The reconcile itself lives
+  in `scripts/growth-board-sync.sh` (issue #748: the workflow's old inline
+  loop re-SET every card on every run and exhausted that shared PAT's GraphQL
+  budget mid-loop, reddening every scheduled fire): it reads the board's
+  current stages in one call, writes **only the cards whose Stage differs**
+  (steady state costs one read and zero writes; a run stopped by a rate limit
+  resumes at the remainder next fire), and on a rate limit **degrades** — a
+  `::warning::` and a green exit, self-healing on the next reconcile — while
+  any other error stays red. Its `--selftest` (run by `check.sh`) proves all
+  of that with a stub `gh`.
 
 The board adds **no new write to any issue**: the sync only reads the queue
 (labels + comment markers) and writes the Project. The posting tool still

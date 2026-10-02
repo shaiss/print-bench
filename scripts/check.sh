@@ -768,6 +768,21 @@ if ! ./scripts/gh-project.sh --selftest; then
   fail=1
 fi
 
+# growth-board-sync.sh is the driver half of growth-board-sync.yml (issue
+# #748: its inline loop hard-failed on a GraphQL rate limit on every scheduled
+# fire). Its --selftest runs the real reconcile end to end against a stub gh
+# serving fixture queue/board state — no network, no real board — and proves
+# the behaviors the move out of YAML exists to prove: a steady-state run
+# writes nothing, a differing/lens-violating Stage is written, a new item is
+# added+set, a rate-limited write backs off then either succeeds or degrades
+# green (warning + exit 0) while the un-attempted remainder resumes next run,
+# and a non-rate-limit failure stays red. The stub-gh failure injection is the
+# only falsifiable form these can take.
+echo "-- growth-board-sync selftest: scripts/growth-board-sync.sh --selftest"
+if ! ./scripts/growth-board-sync.sh --selftest; then
+  fail=1
+fi
+
 # assembly.sh is the generator half of the assembly-instructions feature (#98,
 # stage 2 — issue #156). Its --selftest proves the manifest parser captures
 # every declared part/vitamin/step in the right order, comments are stripped,
