@@ -520,14 +520,21 @@ if ! ./scripts/reeve-perms-check.sh; then
   fail=1
 fi
 
-	echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
-	if ! ./scripts/reviewer-perms-check.sh --selftest; then
-	  fail=1
-	fi
-	echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
-	if ! ./scripts/reviewer-perms-check.sh; then
-	  fail=1
-	fi
+# Reviewer permission drift (issue #323): the auto-review sessions (Jane,
+# Drik, PM triage, the coach) load .claude/settings.json additively via
+# settingSources=project, so their backstops (.claude/reviewer-settings.json,
+# .claude/design-coach-settings.json) must deny every Bash allow outside the
+# review surface, always deny the render toolchain, and never deny gh/git or
+# the read tools (the coach also keeps Write/Edit). --selftest proves each
+# rule can pass AND fail.
+echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
+if ! ./scripts/reviewer-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
+if ! ./scripts/reviewer-perms-check.sh; then
+  fail=1
+fi
 
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the

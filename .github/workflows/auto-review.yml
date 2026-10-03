@@ -33,7 +33,12 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     Caveat: claude-code-action runs the agent with its output hidden, so a
 #     log grep proves the job scaffolding clean, not the session — the wall
 #     time and the review comments are the behavioral evidence. Enforcement
-#     (a deny backstop) is sibling issue #451, not this comment.
+#     is the deny backstop every ship step passes under --permission-mode
+#     dontAsk (.claude/reviewer-settings.json for Jane/Drik/PM triage,
+#     .claude/design-coach-settings.json for the coach; issue #451):
+#     scripts/reviewer-perms-check.sh holds what they deny, and
+#     tools/model-registry/tests/test_reviewer_backstop_wiring.py holds
+#     every ship step here to its backstop.
 #
 # Scope guard (prevents spurious runs on backend/infra-only PRs):
 #   * The `design-changes` job checks whether the PR diff contains any file
