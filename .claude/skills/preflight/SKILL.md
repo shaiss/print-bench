@@ -49,6 +49,7 @@ drifts. Read the outputs and run §2 accordingly:
 | `ci_gates_tests` | `pytest tools/ci-gates/tests` |
 | `growth_tests` | `pytest tools/growth/tests` |
 | `andon_tests` | `pytest tools/andon/tests` |
+| `agent_memory_tests` | `pytest tools/agent-memory/tests` |
 
 The classifier already applies everything this section used to spell out by
 hand — the geo/soft-infra split, blast radius (a changed design drags in its
@@ -91,6 +92,7 @@ python -m pytest tools/telemetry/tests -q            # if telemetry_tests=true
 python -m pytest tools/ci-gates/tests -q             # if ci_gates_tests=true
 python -m pytest tools/growth/tests -q               # if growth_tests=true
 python -m pytest tools/andon/tests -q                # if andon_tests=true
+python -m pytest tools/agent-memory/tests -q         # if agent_memory_tests=true
 ```
 
 The `if <output>=true` conditions above are exactly §1's table — read them off
