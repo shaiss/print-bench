@@ -211,7 +211,10 @@ scad_directives() {
 resolve_directive() { # <target> <including-file>
   local p="$1" from="$2" cand
   for cand in "$(dirname "$from")/$p" "${ROOT%/}/lib/$p" "${ROOT%/}/$p"; do
-    [[ -f "$cand" ]] && { printf '%s\n' "$cand"; return 0; }
+    # Lexically normalized (`..` folded, symlinks kept), so the walk's visited
+    # set keys one spelling per file — without it a cyclic include re-enters as
+    # an ever-longer `a/../b/../a/...` path and only stops at PATH_MAX.
+    [[ -f "$cand" ]] && { realpath -s "$cand"; return 0; }
   done
   return 0
 }
@@ -237,6 +240,11 @@ resolve_directive() { # <target> <including-file>
 includes_coupling() {
   local entry="${DESIGNS_DIR}/$1/$1.scad"
   [[ -f "$entry" ]] || return 1
+  # Canonical spellings throughout (see resolve_directive), root included, so
+  # the first-party prefix tests below compare like with like.
+  local root
+  root="$(realpath -s "$ROOT")"
+  entry="$(realpath -s "$entry")"
   local -a queue=("$entry")
   local -A seen=()
   local f p resolved
@@ -252,14 +260,14 @@ includes_coupling() {
       resolved="$(resolve_directive "$p" "$f")"
       [[ -n "$resolved" ]] || continue
       case "$resolved" in
-        "${ROOT%/}/designs/"* | "${ROOT%/}/styles/"*)
+        "${root%/}/designs/"* | "${root%/}/styles/"*)
           [[ -z "${seen[$resolved]:-}" ]] && queue+=("$resolved")
           ;;
-        "${ROOT%/}/lib/"*)
+        "${root%/}/lib/"*)
           # First-party libs sit DIRECTLY in lib/ as .scad; a subdirectory of
           # lib/ is a vendored tree, which the walk treats as a leaf.
           case "$resolved" in
-            "${ROOT%/}/lib/"*"/"* ) ;; # deeper than one level: vendored, a leaf
+            "${root%/}/lib/"*"/"* ) ;; # deeper than one level: vendored, a leaf
             *.scad) [[ -z "${seen[$resolved]:-}" ]] && queue+=("$resolved") ;;
           esac
           ;;
