@@ -123,6 +123,12 @@ def measurement_text(m: dict) -> str:
                          f"{openness['max_void_span_mm']:g} mm "
                          f"({openness['max_void_span_fraction']:.0%} of the "
                          "part)")
+        if openness.get("max_glyph_aperture_mm"):
+            lines.append(f"    widest visible opening: "
+                         f"{openness['max_glyph_aperture_mm']:g} mm across "
+                         f"its own mouth "
+                         f"({openness['max_glyph_aperture_fraction']:.0%} of "
+                         "the part)")
         if openness.get("min_bridge_mm") is not None:
             widths = openness["min_bridge_mm"] / LINE_WIDTH_MM
             lines.append(f"    narrowest bridge: "
