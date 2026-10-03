@@ -113,11 +113,23 @@ $fn = 96;  // production; drop to 32 while iterating
 // z_spring is where the outer line meets the wall OD: below z_top, so the
 // dome's seating ring buries INSIDE the wall band and fuses to it instead of
 // kissing its top face.
+//
+// ONE WATERTIGHT BODY. The dome is unioned onto the library's neck, which
+// tessellates its circles at its OWN pinned $fa/$fs; the dome uses $fn. Two
+// circles of the same radius at different tessellations never coincide — they
+// cross, leaving sub-micron slivers that weld into duplicate/degenerate faces
+// and stray bodies once the mesh is exported (the CI manifold render scored the
+// lattice 51/100, non-watertight, 10 bodies). So no dome surface is allowed to
+// land ON a neck surface: the underside clears the bore's top edge outward by
+// seat_clear (the passage still never narrows), and the seating ring stops
+// seat_clear inside the tube OD instead of meeting it. Every joint is a real
+// overlap or a real gap, never a contact.
 // ---------------------------------------------------------------------------
+seat_clear  = 0.1;                               // mm; no-contact margin
 ri          = nuggs_ri(cfg_d());
 ro          = nuggs_ro(cfg_d());
 z_top       = nuggs_z_top(cfg_d());
-dome_c_in   = ri + z_top;                        // underside: r + z = 53
+dome_c_in   = ri + z_top + seat_clear;           // underside: r + z = 53.1
 dome_c_out  = dome_c_in + strand_w * sqrt(2);    // outer face, 45 deg offset
 z_spring    = dome_c_out - ro;                   // seating ring's underside
 dome_top_z  = z_top + dome_rise;                 // the dome tip = the cap length
@@ -129,9 +141,13 @@ r_crown_in  = dome_c_in - dome_top_z;            // the crown hole the disc brid
 slope_pitch = aperture_max + strand_w;
 pitch_v     = aperture_max / sqrt(2) + strand_w;
 // Rib count: tangential openings are worst at the widest circumference the
-// grid crosses — the spring rim's outer face
-r_lattice_max = ri + strand_w * sqrt(2);
+// grid crosses — the spring rim, which reaches the tube OD ro. Counted there
+// (not at the exposed face near z_top) so the welfare ceiling holds at the
+// worst case for ANY wall, and asserted below on the built chord.
+r_lattice_max = ro;
 n_rib       = ceil(2 * PI * r_lattice_max / slope_pitch);
+// Widest tangential opening the ribs leave: chord between slab faces at ro
+rib_gap_max = 2 * r_lattice_max * sin(180 / n_rib) - strand_w;
 // Crown grid: radial spokes every chord <= aperture_max at the rim
 n_web       = ceil(180 / asin(min(0.999, aperture_max / (2 * r_crown_out))));
 
@@ -170,6 +186,11 @@ assert(dome_rise < ri, str(
     "VENT CAP RISE: dome_rise = ", dome_rise, " mm reaches the dome axis — the",
     " cone closes to a point and the crown disc has no hole to fill. It would",
     " render, but the cap length claim and the crown geometry both lie."));
+assert(rib_gap_max <= aperture_max, str(
+    "VENT CAP APERTURE: the widest rib gap, at the spring rim (r = ",
+    r_lattice_max, " mm), is ", rib_gap_max, " mm — over aperture_max = ",
+    aperture_max, " mm. The rib count must be derived at the outer radius;",
+    " an opening over the welfare ceiling is an escape route."));
 assert(aperture_max * aperture_max / (slope_pitch * slope_pitch) >= open_area_min,
     str(
     "VENT CAP OPEN AREA: the derived on-slope cell fraction is ",
@@ -193,17 +214,26 @@ function cfg_d() =
 // exactly at (ri, z_top).
 module dome_shell() {
     difference() {
+        rotate_extrude() dome_outer_profile();
         rotate_extrude()
-            polygon([[0, z_spring], [ro, z_spring],
-                     [r_crown_out, dome_top_z], [0, dome_top_z]]);
-        rotate_extrude()
-            polygon([[0, z_spring], [dome_c_in - z_spring, z_spring],
-                     [r_crown_in, dome_top_z], [0, dome_top_z]]);
+            polygon([[0, z_spring - 1], [dome_c_in - z_spring, z_spring - 1],
+                     [dome_c_in - z_spring, z_spring],
+                     [r_crown_in - 1, dome_top_z + 1], [0, dome_top_z + 1]]);
     }
 }
 // (the cut solid's bottom edge is r = dome_c_in - z_spring, in from the
-// outer line's ro, so the difference leaves a solid annulus at z_spring and
-// never rides a zero-thickness bottom face)
+// outer line's ro, so the difference leaves a solid annulus at z_spring; the
+// cutter runs 1 mm past the shell's bottom and top planes so no face of the
+// difference is coplanar with the cutter)
+
+// The outer 45 deg line, with its foot pulled seat_clear inside the tube OD:
+// a short vertical step at ro - seat_clear rejoins the r + z line, so the
+// seating ring is buried in the wall band and never meets the neck's ro face.
+module dome_outer_profile() {
+    polygon([[0, z_spring], [ro - seat_clear, z_spring],
+             [ro - seat_clear, z_spring + seat_clear],
+             [r_crown_out, dome_top_z], [0, dome_top_z]]);
+}
 
 // The dome's meridian slabs (vertical planes through the axis, strand_w wide)
 // and latitude bands (horizontal slabs, pitch_v apart so the on-slope opening
@@ -215,8 +245,10 @@ module dome_grid() {
             rotate([0, 0, i * 360 / n_rib])
                 translate([-strand_w / 2, -(ro + 2), z_spring - 1])
                     cube([strand_w, 2 * (ro + 2), dome_top_z - z_spring + 2]);
+        // bands start half a strand below z_spring so band 0 straddles the
+        // shell's bottom plane instead of sharing it (same pitch above)
         for (k = [0 : floor((dome_top_z - z_spring) / pitch_v)])
-            translate([-ro - 2, -ro - 2, z_spring + k * pitch_v])
+            translate([-ro - 2, -ro - 2, z_spring - strand_w / 2 + k * pitch_v])
                 cube([2 * ro + 4, 2 * ro + 4, strand_w]);
     }
 }
@@ -226,17 +258,25 @@ module dome_grid() {
 // aperture_max, concentric bands every slope_pitch. Its strand undersides are
 // the same 1.2 mm bridgeable strips; its longest unsupported run is a radial
 // spoke from the rim band to the natural hub where the spokes cross.
+// The disc sits crown_lift proud of the shell's top plane and stops
+// seat_clear inside the shell's top outer edge, so its rim and top never
+// coincide with the shell's (same-$fn circles at the same radius share exact
+// vertices — a contact, not an overlap). It still overlaps the rib tops by
+// ~0.5 mm radially on its first layer, the same anchoring as before.
+crown_lift = 0.2;
 module crown_disc() {
+    r_disc = r_crown_out - seat_clear;
+    z_disc = dome_top_z + crown_lift - strand_w;
     intersection() {
-        translate([0, 0, dome_top_z - strand_w])
-            cylinder(r = r_crown_out, h = strand_w);
+        translate([0, 0, z_disc])
+            cylinder(r = r_disc, h = strand_w);
         union() {
             for (i = [0 : n_web - 1])
                 rotate([0, 0, i * 360 / n_web])
-                    translate([-strand_w / 2, -r_crown_out - 1, dome_top_z - strand_w - 1])
+                    translate([-strand_w / 2, -r_crown_out - 1, z_disc - 1])
                         cube([strand_w, 2 * r_crown_out + 2, strand_w + 2]);
             for (j = [0 : floor((r_crown_out - strand_w / 2) / slope_pitch)])
-                translate([0, 0, dome_top_z - strand_w / 2])
+                translate([0, 0, z_disc + strand_w / 2])
                     difference() {
                         cylinder(r = r_crown_out - j * slope_pitch + strand_w / 2,
                                  h = strand_w + 2, center = true);
@@ -265,7 +305,8 @@ module vent_cap(lattice_on = lattice) {
             // axis. Support-free like the lattice shell — more blocked, no
             // crown bridge — and taller, because rise >= radius (see header).
             rotate_extrude()
-                polygon([[0, z_spring], [ro, z_spring],
+                polygon([[0, z_spring], [ro - seat_clear, z_spring],
+                         [ro - seat_clear, z_spring + seat_clear],
                          [0, z_spring + ro]]);
         }
     }

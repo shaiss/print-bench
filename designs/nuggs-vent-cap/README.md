@@ -25,7 +25,7 @@ The cap is one printed part. Its port face is every `nuggs_cfg()` default, so
 it mates with the straight, the elbow, the den, the turnaround — any module on
 the standard.
 
-![The lattice from above: crown disc, 15 spokes, 37 ribs](previews/lattice-top.png)
+![The lattice from above: crown disc, 15 spokes, 38 ribs](previews/lattice-top.png)
 
 ## Print settings
 

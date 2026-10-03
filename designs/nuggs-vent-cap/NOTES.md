@@ -23,7 +23,7 @@ animal cannot), so under the run-length rule it is still an end.
 | Lattice aperture | ≤ 6.0 mm | **assumed** — the 1/4″ hardware-cloth convention; one parameter (`aperture_max`, dwarf keepers: 5.0) |
 | Lattice strand width | ≥ 1.2 mm | given — repo wall floor (3 perimeters at 0.4 mm) |
 | Open area | ≥ 30 % of the cap face | **assumed** — flow target; asserted on the derived cell geometry |
-| Cap length | ≈ 40 mm port face → dome tip | **assumed** — the build comes out at 41.0; the dome's rise knob is the trade |
+| Cap length | ≈ 40 mm port face → dome tip | **assumed** — the build comes out at 41.2 (dome tip 41.0 + the crown disc's 0.2 lift); the dome's rise knob is the trade |
 | Filtration (dust) | out of scope | brief — this is a vent, not a filter |
 | Condensation | README care line only | brief — no geometry, a husbandry note |
 | Solid variant | same design, `lattice=false` | brief — "cheap either way"; costs one boolean and nothing else |
@@ -61,13 +61,14 @@ cap) cannot quietly push the bridge past precedent.
 
 Both dome surfaces are lines of constant `r + z` — 45° in the r–z plane:
 
-- **Underside**: `r + z = ri + z_top` (53). It passes **exactly** through the
-  bore's top edge, so the passage is exactly the bore at the lip — the dome
-  never narrows the throat.
+- **Underside**: `r + z = ri + z_top + seat_clear` (53.1). It clears the
+  bore's top edge outward by `seat_clear` = 0.1 mm, so the dome never narrows
+  the throat — and never lands ON the neck's bore edge (see "One watertight
+  body" below).
 - **Outer face**: the same line pushed out by the perpendicular shell
-  thickness, `r + z = 53 + strand_w·√2` (54.697).
-- **Seating** `z_spring = c_out − ro = 12.297`: where the outer line meets the
-  wall OD. It lands **below** `z_top`, so the dome's seating ring
+  thickness, `r + z = 53.1 + strand_w·√2` (54.797).
+- **Seating** `z_spring = c_out − ro = 12.397`: where the outer line meets the
+  wall OD (the profile's foot is pulled `seat_clear` inside it, below). It lands **below** `z_top`, so the dome's seating ring
   (`r ∈ [40.70, 42.4]`) buries inside the wall band and fuses to the tube
   instead of kissing its top face — the same discipline as the y-splitter's
   buried caps. An assert pins `wall > strand_w·√2`: a strand thicker than the
@@ -77,12 +78,30 @@ Both dome surfaces are lines of constant `r + z` — 45° in the r–z plane:
   `aperture_max/√2 + strand_w` (5.44) and the tangential rib pitch is
   `aperture_max + strand_w` (7.2) — both measured so the **on-surface opening**
   is ≤ `aperture_max` in both grid directions, calipered as a cell *side*
-  (hardware-cloth convention, not a diagonal). `n_rib = 37` ribs from the
-  widest circumference the grid crosses (the spring rim's outer face);
+  (hardware-cloth convention, not a diagonal). `n_rib = 38` ribs counted at the
+  widest radius the grid reaches — the tube OD `ro` at the spring rim, the
+  worst case for any `wall` — and an assert holds the built chord there
+  (`rib_gap_max` = 5.80 mm) under `aperture_max`;
   `n_web = 15` crown spokes from the chord bound at the rim.
 - **Open area**: the on-slope cell fraction is
   `(aperture/ (aperture+strand))² = 0.694` — well over the 30 % floor, and
   asserted so a knob pairing that chokes the vent fails loudly.
+
+### One watertight body (the manifold render's 51/100)
+
+CI's manifold render scored the first lattice 51/100 — non-watertight, edges
+shared by more than two triangles, duplicate/degenerate faces, 10 bodies (the
+solid variant too). Cause: dome surfaces landing exactly ON neck surfaces. The
+library pins its own `$fa`/`$fs`, the dome uses `$fn`, so two circles of one
+radius cross instead of coinciding and leave sub-micron slivers that weld into
+garbage once exported. Fix, no contact anywhere: the underside clears the bore
+edge by `seat_clear`; the outer profile's foot steps in to `ro − seat_clear`
+so the seating ring is buried in the wall band, never on its OD; the shell's
+cutter overshoots the shell's bottom and top planes by 1 mm; latitude band 0
+straddles the shell's bottom plane instead of sharing it; and the crown disc
+stops `seat_clear` inside the shell's top outer edge and sits `crown_lift` =
+0.2 mm proud of its top plane (it still overlaps the rib tops ~0.5 mm on its
+first layer, the original anchoring).
 
 ### Port — the library's neck at minimum length, standing on the sector tips
 
