@@ -322,6 +322,11 @@ def canonical_bytes(note: Mapping[str, Any]) -> bytes:
 # --- reading --------------------------------------------------------------------
 
 
+def _exact(value: object) -> str:
+    """A value's JSON text — equal only when value **and** JSON type agree."""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
 def _event_of(note: Mapping[str, Any]) -> dict:
     sal, prov = note["salience"], note["provenance"]
     return {
@@ -385,8 +390,15 @@ def parse_note(obj: object) -> dict:
     if obj["depth"] == "gist" and obj["detail"] is not None:
         raise NoteError("a gist note carries no detail — detail is kept only for rich notes")
     for key in sorted(NOTE_KEYS - {"id"}):
-        if obj[key] != rebuilt[key]:
-            raise NoteError(f"{key} is not in its canonical encoded form")
+        # Compare the JSON text, not the Python values: ``40 == 40.0 == True``
+        # in Python, so a ``!=`` here would let a type-only edit (an importance
+        # stored as 40.0, a schema of 1.0 or true) through with the id still
+        # matching. The JSON text tells them apart, and it is what is stored.
+        if _exact(obj[key]) != _exact(rebuilt[key]):
+            raise NoteError(
+                f"{key} is not in its canonical encoded form — its value or its JSON "
+                "type differs from what the note's own inputs encode to"
+            )
     if obj["id"] != rebuilt["id"]:
         raise NoteError(
             f"id {obj['id']} is not the content hash {rebuilt['id']} — the note was edited "

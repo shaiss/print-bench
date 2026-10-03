@@ -101,6 +101,11 @@ def test_check_passes_a_clean_store(store):
         (lambda o: o.update(retrieval_strength=0.5), "retrieval_strength"),
         (lambda o: o.update(schema=2), "unknown note shape"),
         (lambda o: o.update(extra="field"), "extra"),
+        # Type-only edits: Python's 40 == 40.0 == True would let a `!=` pass
+        # them with the id still matching, so the comparison must be JSON-exact.
+        (lambda o: o.update(importance=float(o["importance"])), "importance is not in its canonical"),
+        (lambda o: o.update(schema=1.0), "schema is not in its canonical"),
+        (lambda o: o.update(schema=True), "schema is not in its canonical"),
     ],
 )
 def test_negative_control_check_flags_a_hand_edit(store, mutate, match):
