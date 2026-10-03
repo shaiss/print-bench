@@ -137,8 +137,21 @@ _DOMAIN_EPS = 1e-9;
 // (PETG ≈ 2000, the datum every harvest site uses); the result is in N.
 // ---------------------------------------------------------------------------
 
+// The functions' own sign checks. A module reaches them only through
+// _bistable_arch_guards, which already refuses these inputs, but a design that
+// calls a function directly would otherwise get a NaN or ±inf back as if it
+// were a number: span = 0 passes bistable_arch_y's domain check vacuously at
+// x = 0 (both bounds are 0) and evaluates cos(0/0); span = 0 in the force
+// divides by zero; a negative rise in the inverse solve takes the cube root
+// of a negative, and rise = 0 solves to a zero span. Checked BEFORE the domain
+// check, so a negative span is named as what it is rather than as an x off
+// the span.
+
 // Fixed–fixed first-mode centreline at LOCAL x (0 at the first clamp face).
 function bistable_arch_y(x, span, rise) =
+    assert(span > 0, str("bistable_arch_y: arch span must be positive (got ", span, ")"))
+    assert(rise > 0, str("bistable_arch_y: arch rise must be positive (got ", rise,
+                         ") — mirror([0, 1]) the arch to bow the other way"))
     assert(x >= -_DOMAIN_EPS * span && x <= span * (1 + _DOMAIN_EPS),
            str("bistable_arch_y: x = ", x, " is outside the arch's local span [0, ", span,
                "] — pass LOCAL x (0 at the first clamp face) and translate the arch, never a",
@@ -147,17 +160,24 @@ function bistable_arch_y(x, span, rise) =
 
 // Predicted switch (snap-through) force, N.
 function bistable_arch_fs(span, rise, t, width, E = 2000) =
+    assert(span > 0, str("bistable_arch_fs: arch span must be positive (got ", span, ")"))
+    assert(rise > 0, str("bistable_arch_fs: arch rise must be positive (got ", rise, ")"))
     _ARCH_FS_CONST * E * (width * pow(t, 3) / 12) * rise / pow(span, 3);
 
 // Predicted centre travel between the two stable states, mm.
-function bistable_arch_travel(rise) = _ARCH_TRAVEL_CONST * rise;
+function bistable_arch_travel(rise) =
+    assert(rise > 0, str("bistable_arch_travel: arch rise must be positive (got ", rise, ")"))
+    _ARCH_TRAVEL_CONST * rise;
 
 // Inverse: the rise that gives a target centre travel.
-function bistable_arch_rise_for(travel) = travel / _ARCH_TRAVEL_CONST;
+function bistable_arch_rise_for(travel) =
+    assert(travel > 0, str("bistable_arch_rise_for: target travel must be positive (got ", travel, " mm)"))
+    travel / _ARCH_TRAVEL_CONST;
 
 // Inverse: the free span that gives a target switch force at this rise/t/width.
 function bistable_arch_span_for(fs, rise, t, width, E = 2000) =
     assert(fs > 0, str("target switch force must be positive (got ", fs, " N)"))
+    assert(rise > 0, str("bistable_arch_span_for: arch rise must be positive (got ", rise, ")"))
     pow(_ARCH_FS_CONST * E * (width * pow(t, 3) / 12) * rise / fs, 1 / 3);
 
 // ---------------------------------------------------------------------------
