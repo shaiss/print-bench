@@ -147,11 +147,8 @@ CPU kernels (SSE4.2 or AVX2) by what the host supports, and their
 floating-point rounding differs — on the order of 0.3–0.6% of pixels. Output is
 stable on a given machine and across thread counts, but two different machines
 produce a near-identical, not byte-identical, image. Compare renders from
-different hardware perceptually (RMSE/SSIM), not byte-wise. CI's regen job
-now compares them non-byte-wise too: `scripts/preview-diff.sh` (issue #470)
-counts the pixels that differ beyond a small colour fuzz between each
-regenerated shot and the committed one, and calls the change noise only within
-a band (default 1% of pixels) sized for this wobble.
+different hardware perceptually (RMSE/SSIM), not byte-wise. This matters if a
+CI regeneration gate is ever added.
 
 ## Colors in `shots.conf`
 
