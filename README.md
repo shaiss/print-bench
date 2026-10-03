@@ -66,6 +66,7 @@ _These parts come off the bed ready to move — free each one as its card says, 
 | <a href="designs/perspective-coin/"><img src="designs/perspective-coin/previews/contact-sheet.png" width="320" alt="perspective-coin previews"></a> | **[perspective-coin](designs/perspective-coin/)** — John Cena carries a watch engraved on two sides: *"comparison is the thief of joy"* on the back (for when he doesn't feel enough) and *"memento mori"* on the other (for when his head gets too big) — "a keeper of perspective, not time" (as he tells it in an [interview clip shared on Reddit](https://www.reddit.com/r/MotivationalThoughts/s/q9BbhOayrd)). This design turns those two engravings into a two-sided pocket coin, plus a print-in-place **flipper charm**: the coin captured in a keyring gimbal so you physically flip it to the reminder you need. Tier reference: `docs/advanced-techniques.md` Domain 3 (print-in-place kinematics). |
 | <a href="designs/pip-piano-hinge/"><img src="designs/pip-piano-hinge/previews/contact-sheet.png" width="320" alt="pip-piano-hinge previews"></a> | **[pip-piano-hinge](designs/pip-piano-hinge/)** — A multi-knuckle hinge that comes off the plate assembled and swinging — the Domain-3 pin-in-bore joint tiled into a real piano hinge, plus the two piano-hinge-specific defenses (xy≠z clearance, per-knuckle axial play). |
 | <a href="designs/pip-planetary/"><img src="designs/pip-planetary/previews/contact-sheet.png" width="320" alt="pip-planetary previews"></a> | **[pip-planetary](designs/pip-planetary/)** — A print-in-place planetary (epicyclic) gear set — sun, three planets, internal ring — printed as ONE assembled part, per brief #307: the catalog's first toothed-gear design (Domain 3 "Gears & rotary" in `docs/advanced-techniques.md`). Turn the sun's crank; the carrier walks round at **5:1**. |
+| <a href="designs/pip-ratchet/"><img src="designs/pip-ratchet/previews/contact-sheet.png" width="320" alt="pip-ratchet previews"></a> | **[pip-ratchet](designs/pip-ratchet/)** — A print-in-place ratchet demonstrator (brief #668): one captive wheel that **freewheels with a click one way (CCW) and locks solid the other (CW)**, printed as ONE piece — wheel, two compliant pawls and frame in a single print, no supports, no assembly. The reference shape for a ratchet/freewheel family: tune the coupon, print the wheel. |
 | <a href="designs/pop-fidget-card/"><img src="designs/pop-fidget-card/previews/contact-sheet.png" width="320" alt="pop-fidget-card previews"></a> | **[pop-fidget-card](designs/pop-fidget-card/)** — A print-in-place 1st-birthday keepsake card (brief: issue #342) themed on a bubble/"POP" party motif — built for the **parents**, who keep fidgeting with it after the party. Flat landscape card, displays on a shelf via a punched easel flap, with four working fidgets printed in place on its face. Hard constraint: test-slice under 2 h; target 60 min on a fast modern printer. |
 | <a href="designs/sushi-battleship/"><img src="designs/sushi-battleship/previews/contact-sheet.png" width="320" alt="sushi-battleship previews"></a> | **[sushi-battleship](designs/sushi-battleship/)** — Battleship played with real sushi. |
 | <a href="designs/sushi-battleship-tracker/"><img src="designs/sushi-battleship-tracker/previews/contact-sheet.png" width="320" alt="sushi-battleship-tracker previews"></a> | ↳ **[sushi-battleship-tracker](designs/sushi-battleship-tracker/)** — The parent tracks hits structurally (an opened door is an eaten cell) but leaves **misses** to memory, and "did we already call B3?" is the real failure mode of a leisurely dinner game. The refit adds a shallow spherical **miss-marker seat** to the top face of every print-in-place shutter door: park any small round marker (dried soybean, 6 mm airsoft BB, peppercorn) on a called cell and nobody re-calls it. The product charter lives in PM.md beside this file.<br>_derived from [sushi-battleship](designs/sushi-battleship/)_ |
@@ -268,6 +269,10 @@ surfaces studies awaiting a read live in
   archived sushi-battleship),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
+  `stencil-glyphs.scad` (clean-room 2D stencil digits 0-9 with bridged
+  counters, no `text()`/TTF, for numerals cut through a shell),
+  `helical-window.scad` (the ovodyo signature slot as a cut-through or
+  debossed brand-mark cutter, with a sever guard),
   `bevel.scad` (FDM bevel and spur gear pairs from one generator and one
   clearance, on BOSL2's gears),
   each with a `*-demo.scad` regression render, plus vendored
@@ -428,6 +433,12 @@ surfaces studies awaiting a read live in
     proven flat and upright at every landing stop, with mandatory negative
     controls; `--selftest` proves it on the fixtures under
     `scripts/kinematics-fixtures/`
+  - `fusecheck-check.sh` — the `ci.fusecheck` runner gate.sh sources (one
+    parser, not a copy), plus the selftest that proves its `assert` bound
+    grammar still fires: legacy `<min>`, two-sided `<min> <max>`, `=N`, the
+    malformed line, and the exit-4 hard-fail path, over committed fixtures in
+    `scripts/fusecheck-fixtures/` whose body counts are re-measured with
+    fusecheck itself (issue #627)
   - `cog-check.sh` — proves the assembled object STANDS (issue #623), the
     thing no per-part gate can: reads a `ci.cog` manifest (per-part densities,
     non-printed hardware masses, assembly transforms, a stability margin) and
@@ -583,6 +594,16 @@ surfaces studies awaiting a read live in
   scan (it writes only local scratch the workflow consumes); the workflow's
   one `github-script` step is the GitHub write — see its
   [README](tools/andon/README.md)
+- `tools/agent-memory/` — per-agent episodic memory for the autonomy
+  routines (agentic memory Slice 1a, issue #429 — see
+  [docs/agentic-memory.md](docs/agentic-memory.md)): one content-hashed JSON
+  note per episode under `tools/agent-memory/store/<agent>/`, written by a
+  deterministic, LLM-free record path that scores importance (prediction
+  error + unfinished business + consequences), encodes salient episodes
+  rich and routine ones as a gist, marks a note `source-confirmed` when it
+  cites a source (cited, not yet resolved — the inputs are the caller's word
+  until Slice 1d decides who supplies them), and never rewrites a note — not
+  yet wired into any routine — see its [README](tools/agent-memory/README.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log
   into the report — see its [README](tools/telemetry/README.md)

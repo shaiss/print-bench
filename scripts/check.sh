@@ -13,6 +13,9 @@
 #      lifestyle disclosure guards still refuse an undisclosed AI shot or clip
 #   7. shot-spec selftest (scripts/shot-spec.sh --selftest): the shot-manifest
 #      freeze guard and field validators still refuse a bad line
+#   8. fusecheck selftest (scripts/fusecheck-check.sh --selftest): the
+#      ci.fusecheck bound grammar — legacy, MIN MAX, =N, malformed, exit-4 —
+#      every negative row asserted to fire on committed fixtures (issue #627)
 # Run before committing. For full STL+PNG output use scripts/render.sh.
 set -euo pipefail
 
@@ -199,6 +202,22 @@ if ! ./scripts/kinematics-check.sh --selftest; then
   fail=1
 fi
 
+# And this proves the fusecheck gate's own seam — the `assert <stl> <min>
+# [<max>]` / `=N` tokenisation and the exit-3/exit-4 verdict mapping in
+# scripts/fusecheck-check.sh, the runner gate.sh sources — still discriminates:
+# every pass row passes, the too-few row WARNs without failing the run, the
+# too-many row hard-FAILs, the malformed lines fail the parse. The fixtures'
+# body counts are re-measured with fusecheck itself before any row is trusted,
+# so a drifted fixture fails loudly instead of gating on a stale expectation
+# (issue #627). Needs printcheck (the gate's own dependency) and openscad for
+# the two fixture renders; no skip path — a skipped selftest is exactly the
+# silent green this exists to close, so CI installs printcheck in every job
+# that runs check.sh.
+echo "-- fusecheck selftest: scripts/fusecheck-check.sh --selftest"
+if ! ./scripts/fusecheck-check.sh --selftest; then
+  fail=1
+fi
+
 # And this proves the CoG stability verdict still discriminates: a stable
 # configuration passes, one whose CoG falls outside its support footprint is
 # flagged TIP-RISK, and a malformed manifest is refused loudly (tools/cogcheck,
@@ -208,6 +227,28 @@ fi
 # OpenSCAD, no slicer, so it runs everywhere check.sh does, unconditionally.
 echo "-- cog-check selftest: scripts/cog-check.sh --selftest"
 if ! ./scripts/cog-check.sh --selftest; then
+  fail=1
+fi
+
+# And this proves the agentic-memory write path (tools/agent-memory, issue
+# #429 — Slice 1a of docs/agentic-memory.md) still enforces its four rules:
+# importance scored by prediction error + Zeigarnik, depth set by salience,
+# provenance `source-confirmed` only when a source is cited (cited, not
+# resolved: in 1a the ref is shape-checked only, and the salience inputs are
+# the caller's word — see the tool's README), and immutable notes — each with
+# its negative control, offline, in a throwaway temp dir. Then `check`
+# re-derives every committed note under tools/agent-memory/store/ (empty until
+# Slice 1d wires a routine), so a note edited by hand after it was written —
+# a promoted importance, a hand-flipped `verified` field, a reformatted file —
+# fails here rather than poisoning a routine's recall. Pure stdlib, imported
+# from its src/ tree (the cog-check pattern), so it runs unconditionally.
+echo "-- agent-memory selftest + store check: python3 -m agent_memory"
+if ! env PYTHONPATH="$PWD/tools/agent-memory/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m agent_memory --selftest; then
+  fail=1
+fi
+if ! env PYTHONPATH="$PWD/tools/agent-memory/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m agent_memory check --store tools/agent-memory/store; then
   fail=1
 fi
 
