@@ -147,6 +147,7 @@ def test_an_episode_names_an_issue_or_a_design():
         ({"action": "   "}, "empty"),
         ({"outcome": 42}, "string"),
         ({"choice": "a\x00b"}, "control character"),
+        ({"outcome": "a\ud800b"}, "unpaired surrogate"),   # no UTF-8 encoding
         ({"detail": "x" * 9000, "status": "failed"}, "limit"),
         ({"tags": ["has space"]}, "tag"),
         ({"tags": "nuggs"}, "list"),

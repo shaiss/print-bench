@@ -46,10 +46,18 @@ def test_expected_and_actual_come_as_a_pair():
         encode(make_event(actual=0.0))
 
 
-@pytest.mark.parametrize("bad", [-0.1, 1.5, True, "0.5", float("nan")])
+@pytest.mark.parametrize(
+    "bad",
+    # 10**1000 is a valid JSON integer that float() cannot hold (OverflowError,
+    # not ValueError), so it must be refused as a RuleError, never escape.
+    [-0.1, 1.5, True, "0.5", float("nan"), float("inf"), float("-inf"),
+     pytest.param(10**1000, id="10**1000"), pytest.param(-(10**1000), id="-10**1000")],
+)
 def test_prediction_inputs_must_be_unit_interval_numbers(bad):
     with pytest.raises(NoteError, match=r"\[0, 1\]"):
         encode(make_event(expected=bad, actual=0.0))
+    with pytest.raises(RuleError, match=r"\[0, 1\]"):
+        rules.prediction_error(0.0, bad)
 
 
 def test_integer_and_float_inputs_encode_identically():

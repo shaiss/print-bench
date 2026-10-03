@@ -33,7 +33,14 @@ DEFAULT_STORE = "tools/agent-memory/store"
 
 
 def _read_event(spec: str) -> object:
-    text = sys.stdin.read() if spec == "-" else Path(spec).read_text(encoding="utf-8")
+    # Every way the read can fail is a bad event (exit 2), never a traceback.
+    source = "stdin" if spec == "-" else spec
+    try:
+        text = sys.stdin.read() if spec == "-" else Path(spec).read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise NoteError(f"cannot read the event from {source}: not UTF-8 ({e})") from None
+    except OSError as e:
+        raise NoteError(f"cannot read the event from {source}: {e}") from None
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:

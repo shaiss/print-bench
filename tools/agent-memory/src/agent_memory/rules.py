@@ -82,8 +82,15 @@ def _unit(name: str, value: object) -> float:
     # bool is an int subclass in Python; True would otherwise score as 1.0.
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise RuleError(f"{name} must be a number in [0, 1], got {value!r}")
-    v = float(value)
-    if math.isnan(v) or not 0.0 <= v <= 1.0:
+    try:
+        v = float(value)
+    except OverflowError:
+        # A valid JSON integer (10**1000) that no float can hold. Not echoed:
+        # the repr alone would be a thousand digits of error message.
+        raise RuleError(
+            f"{name} must be a number in [0, 1], got an integer too large for a float"
+        ) from None
+    if not math.isfinite(v) or not 0.0 <= v <= 1.0:
         raise RuleError(f"{name} must be a number in [0, 1], got {value!r}")
     return v
 

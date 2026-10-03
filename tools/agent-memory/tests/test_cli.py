@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -47,6 +48,47 @@ def test_not_json_exits_2(tmp_path, store, capsys):
     bad.write_text("{", encoding="utf-8")
     assert cli.main(["record", "--event", str(bad), "--store", str(store)]) == 2
     assert "not valid JSON" in capsys.readouterr().err
+
+
+# Each is a malformed event that once escaped as a traceback instead of exit 2.
+_LATIN1 = json.dumps(make_event(action="café"), ensure_ascii=False).encode("latin-1")  # not UTF-8
+
+
+@pytest.mark.parametrize(
+    "stdin, raw, match",
+    [
+        (None, _LATIN1, "UTF-8"),                                    # event file
+        ("strict", _LATIN1, "UTF-8"),                                # stdin, strict locale
+        ("surrogateescape", _LATIN1, "surrogate"),                   # stdin, C/POSIX locale
+        (None, json.dumps(make_event(action="a\ud800b")).encode(), "surrogate"),  # "\ud800" escape
+        (None, json.dumps(make_event(expected=0, actual=0)).replace(
+            '"expected": 0', '"expected": 1' + "0" * 1000).encode(), r"\[0, 1\]"),  # float() overflows
+    ],
+    ids=["file-not-utf8", "stdin-not-utf8", "stdin-surrogateescape", "json-lone-surrogate",
+         "int-overflows-float"],
+)
+def test_negative_control_a_malformed_event_exits_2_not_a_traceback(
+        tmp_path, store, capsys, monkeypatch, stdin, raw, match):
+    if stdin is None:
+        spec = tmp_path / "bad.json"
+        spec.write_bytes(raw)
+    else:
+        spec = "-"
+        monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8", errors=stdin))
+    for cmd in (["record", "--store", str(store)], ["score"]):
+        assert cli.main([*cmd, "--event", str(spec)]) == 2
+        err = capsys.readouterr().err
+        assert err.startswith("error: ") and "Traceback" not in err
+        assert re.search(match, err), err
+        assert len(err) < 500  # a 1001-digit number is not echoed back
+        if stdin is not None:
+            break  # stdin is consumed by the first read
+    assert not store.exists()
+
+
+def test_an_unreadable_event_path_exits_2(tmp_path, store, capsys):
+    assert cli.main(["record", "--event", str(tmp_path), "--store", str(store)]) == 2
+    assert "cannot read the event" in capsys.readouterr().err
 
 
 def test_overwrite_refusal_exits_2(tmp_path, store, capsys):

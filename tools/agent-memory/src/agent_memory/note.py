@@ -106,6 +106,11 @@ def _text(name: str, value: object, limit: int) -> str:
     for ch in text:
         if ch not in "\n\t" and unicodedata.category(ch) == "Cc":
             raise NoteError(f"{name} carries a control character {ch!r}")
+        if unicodedata.category(ch) == "Cs":
+            # A lone surrogate (a JSON "\ud800" escape, or undecodable stdin
+            # under surrogateescape) has no UTF-8 encoding: refuse it here, not
+            # as a UnicodeEncodeError when the note is serialized.
+            raise NoteError(f"{name} carries an unpaired surrogate {ch!r}, which has no UTF-8 encoding")
     if len(text) > limit:
         raise NoteError(f"{name} is {len(text)} characters; the limit is {limit}")
     return text

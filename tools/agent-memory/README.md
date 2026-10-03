@@ -241,8 +241,9 @@ A positive case and a negative control per rule:
   surface, and `check` catching each kind of edit;
 - `test_store.py` — the diffable artifact, read-cold loading, determinism
   (input order, line endings, Unicode composition), and the strict schema;
-- `test_cli.py` — exit codes and output shapes, plus the **live control**:
-  the committed store passes `check`;
+- `test_cli.py` — exit codes and output shapes (a malformed event — not
+  UTF-8, a lone surrogate, a number too large for a float — exits 2, never a
+  traceback), plus the **live control**: the committed store passes `check`;
 - `test_purity.py` — no network import anywhere, no clock or random source
   in the write path, `rules`/`note` free of I/O, only `store` (and the
   selftest's temp dir) writing — each AST scanner with a planted violation
