@@ -1,0 +1,7 @@
+# Render fault (selftest: must FAIL): broken-assert aborts on an assert, so
+# its render fails — and the gate must report that in the
+# `FAIL  <label> (kinematics <part> at <param>=<v>): render failed` shape
+# gate-summary.py's "failed before printcheck ran" list collects.
+stops stop 0
+empty broken-assert
+empty-control broken-solid

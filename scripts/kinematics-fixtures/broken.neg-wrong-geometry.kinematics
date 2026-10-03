@@ -1,0 +1,8 @@
+# Wrong-geometry warning (selftest: must FAIL): broken-unknown-module calls a
+# module that does not exist. OpenSCAD only WARNs, skips the call and renders
+# EMPTY — exactly what the `empty` check below asks for, over a mesh that is
+# not the design's. The gate reads the render log and fails on the WARNING
+# instead of measuring the nothing it left behind.
+stops stop 0
+empty broken-unknown-module
+empty-control broken-solid
