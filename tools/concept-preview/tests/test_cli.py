@@ -154,3 +154,41 @@ def test_wrapper_selftest_and_vocab():
                                   ("--check",), ("a", "b")])
 def test_wrapper_refuses_bad_invocations_with_exit_2(args):
     assert _sh(*args).returncode == 2
+
+
+def _scratch_repo(tmp_path):
+    """A throwaway repo root holding the real wrapper and tool, so a wrapper
+    test can create design directories without touching the real designs/."""
+    root = tmp_path / "repo"
+    (root / "scripts").mkdir(parents=True)
+    shutil.copy2(REPO / "scripts" / "concept-preview.sh", root / "scripts")
+    (root / "tools").mkdir()
+    (root / "tools" / "concept-preview").symlink_to(REPO / "tools" / "concept-preview")
+    return root
+
+
+def _sh_in(root, *args):
+    return subprocess.run([str(root / "scripts" / "concept-preview.sh"), *args],
+                          capture_output=True, text=True, cwd=root, check=False)
+
+
+def test_wrapper_draws_an_early_brief_with_no_model_yet(tmp_path):
+    # The skill's pre-model workflow: a design directory carrying only its
+    # spec (no entry .scad) is concept-approved before anything is modelled.
+    root = _scratch_repo(tmp_path)
+    design = root / "designs" / "early-brief"
+    design.mkdir(parents=True)
+    (design / "preview-spec.conf").write_text(BASE, encoding="utf-8")
+    r = _sh_in(root, "early-brief")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert sorted(p.name for p in (design / "previews").iterdir()) == SHEETS
+    assert _sh_in(root, "--check", "early-brief").returncode == 0
+
+
+def test_wrapper_still_refuses_a_design_without_a_spec(tmp_path):
+    root = _scratch_repo(tmp_path)
+    (root / "designs" / "no-spec").mkdir(parents=True)
+    (root / "designs" / "no-spec" / "no-spec.scad").write_text("cube(1);\n", encoding="utf-8")
+    r = _sh_in(root, "no-spec")
+    assert r.returncode == 2
+    assert "preview-spec.conf not found" in r.stderr

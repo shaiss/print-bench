@@ -58,8 +58,11 @@ design_spec() {  # <name> — validates the name, prints the spec path
     echo "concept-preview.sh: '$name' is not a design name (kebab-case)" >&2
     exit 2
   fi
-  if [[ ! -f "designs/$name/$name.scad" ]]; then
-    echo "concept-preview.sh: no design '$name' (designs/$name/$name.scad not found)" >&2
+  # The directory, not the entry .scad: the sheets are drawn from the spec
+  # alone, and an early brief is concept-approved before anything is
+  # modelled (the /concept-preview skill's pre-model workflow).
+  if [[ ! -d "designs/$name" ]]; then
+    echo "concept-preview.sh: no design '$name' (designs/$name/ not found)" >&2
     exit 2
   fi
   if [[ ! -f "designs/$name/preview-spec.conf" ]]; then
