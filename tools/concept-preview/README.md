@@ -115,9 +115,9 @@ primitive's footprint equal to the checker's measurement):
 | Rule | Proves |
 |---|---|
 | `xml` | the sheet parses as XML |
-| `contract` | the sheet stays in the vocabulary the checker can measure — every drawable element inside a `cp-<kind>` group naming its spec line, ground/header/**title block** present exactly once, only absolute `M L H V Z` paths, no transform but a text quarter-turn. Anything else is refused, never skipped. |
+| `contract` | the sheet stays in the vocabulary the checker can measure — every drawable element inside a `cp-<kind>` group naming its spec line, ground/header/**title block** present exactly once, only absolute `M L H V Z` paths, no transform but a text quarter-turn, the palette's stylesheet byte for byte (no inline `style=`, no presentation attribute on a container — root, group, `<defs>`, `<marker>` — to inherit down), markers only at the ends of an open outline. Anything else is refused, never skipped. |
 | `external` | no external reference of any kind |
-| `bounds` | every element lies inside the sheet's viewBox |
+| `bounds` | everything an element *paints* lies inside the sheet's viewBox — half its stroke width past the outline, each miter tip, and each marker (a leader's dot, a dimension's arrowheads) as the sheet's own `<marker>` draws it |
 | `collision` | no two labels overlap, and no label or shape intrudes on the furniture |
 
 Labels are measured with a deterministic monospace model: every face in the

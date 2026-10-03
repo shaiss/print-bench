@@ -41,6 +41,9 @@ class BBox:
         return (min(self.x1, other.x1) - max(self.x0, other.x0) > EPS
                 and min(self.y1, other.y1) - max(self.y0, other.y0) > EPS)
 
+    def grown(self, d: float) -> "BBox":
+        return BBox(self.x0 - d, self.y0 - d, self.x1 + d, self.y1 + d)
+
     def inside(self, w: float, h: float) -> bool:
         return (self.x0 >= -EPS and self.y0 >= -EPS
                 and self.x1 <= w + EPS and self.y1 <= h + EPS)

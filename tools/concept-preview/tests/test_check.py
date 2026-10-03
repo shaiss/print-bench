@@ -6,8 +6,9 @@ proven against the shape the emitter actually produces."""
 from __future__ import annotations
 
 import pytest
-from conftest import BASE
+from conftest import BASE, with_lines
 
+from concept_preview.build import build_text
 from concept_preview.check import check_svg
 from concept_preview.emit import render_all
 from concept_preview.geom import text_box
@@ -53,9 +54,27 @@ def test_not_well_formed_is_an_xml_finding():
     lambda s: inject(s, '<g class="cp-hex"><g><rect x="1" y="1" width="2" height="2"/></g></g>'),       # nested group
     lambda s: inject(s, '<g class="cp-hex"></g>'),                                    # draws nothing
     lambda s: inject(s, '<g class="cp-hex"><rect x="1" y="1" width="w" height="2"/></g>'),
+    # strokes and markers are measured from the palette and the sheet's own
+    # <marker>s, so nothing may restyle or re-mark where the checker can't see
+    lambda s: s.replace("stroke-width:1.6", "stroke-width:40", 1),
+    lambda s: inject(s, '<g class="cp-hex"><rect class="metal" x="300" y="300" width="2" height="2" style="stroke-width:40"/></g>'),
+    lambda s: inject(s, '<g class="cp-hex" stroke-width="40"><rect class="metal" x="300" y="300" width="2" height="2"/></g>'),
+    lambda s: s.replace('data-sheet="exterior"', 'data-sheet="exterior" stroke-width="40"'),
+    lambda s: s.replace("<defs>\n", '<defs stroke-width="40">\n', 1),
+    lambda s: s.replace('<marker id="dot"', '<marker id="dot" stroke-width="40"'),
+    lambda s: inject(s, '<g class="cp-hex"><path class="ln" d="L300,300 L310,310"/></g>'),
+    lambda s: inject(s, '<g class="cp-hex"><path class="ln" stroke-linejoin="arcs" d="M300,300 L310,300 L300,310"/></g>'),
+    lambda s: inject(s, '<g class="cp-leader"><path class="lead" d="M300,300 L310,300 L320,310" marker-mid="url(#dot)"/></g>'),
+    lambda s: inject(s, '<g class="cp-leader"><path class="lead" d="M300,300 L310,300" marker-end="url(#nope)"/></g>'),
+    lambda s: inject(s, '<g class="cp-leader"><path class="lead" d="M300,300 L310,300 L310,310 Z" marker-end="url(#dot)"/></g>'),
+    lambda s: s.replace('<marker id="dot"', '<marker id="dot" viewBox="0 0 9 9"'),
 ], ids=["viewbox-origin", "viewbox-short", "width-mismatch", "loose-element", "unknown-kind",
         "relative-path", "arc-path", "shape-transform", "tspan", "foreign-text-class",
-        "odd-rotation", "nested-group", "empty-group", "non-numeric"])
+        "odd-rotation", "nested-group", "empty-group", "non-numeric",
+        "restyled-stylesheet", "inline-style", "group-presentation-attr", "root-presentation-attr",
+        "defs-presentation-attr", "marker-presentation-attr",
+        "path-without-moveto", "unmodelled-linejoin", "marker-mid", "unknown-marker",
+        "marker-on-closed-outline", "marker-viewbox"])
 def test_contract_refuses_what_it_cannot_measure(mutate):
     assert "contract" in rules(mutate(EXTERIOR))
 
@@ -107,9 +126,35 @@ def test_an_element_leaving_the_sheet_is_a_bounds_finding(rect):
     assert "spec line 99" in found[0].message
 
 
-def test_flush_with_the_edge_is_in_bounds():
-    flush = '<g class="cp-hatch"><rect class="cut" x="600" y="300" width="20" height="20"/></g>'
-    assert rules(inject(EXTERIOR, flush)) == set()
+def test_paint_flush_with_the_edge_is_in_bounds_and_geometry_flush_is_not():
+    # .cut strokes 1.5 px: geometry flush with the edge paints 0.75 px off it.
+    paint_flush = '<g class="cp-hatch"><rect class="cut" x="599.25" y="300" width="20" height="20"/></g>'
+    geometry_flush = '<g class="cp-hatch"><rect class="cut" x="600" y="300" width="20" height="20"/></g>'
+    assert rules(inject(EXTERIOR, paint_flush)) == set()
+    assert rules(inject(EXTERIOR, geometry_flush)) == {"bounds"}
+
+
+@pytest.mark.parametrize("d, out", [
+    ("M590,300 L619,310 L590,320", True),    # half-stroke reaches 619.8, the miter tip 621.45
+    ("M587,300 L616,310 L587,320", False),   # the same join inset 3 px
+    ("M560,300 L619,305 L560,310", False),   # sharper than miterlimit 4: SVG bevels it
+])
+def test_a_sharp_join_is_measured_to_its_miter_tip(d, out):
+    frag = f'<g class="cp-hex"><path class="ln" d="{d}"/></g>'
+    assert rules(inject(EXTERIOR, frag)) == ({"bounds"} if out else set())
+
+
+@pytest.mark.parametrize("row, out", [
+    # the leader's dot is a 2.3 px disc centred on the target
+    ("leader: exterior | at=60,560 | to=1,560 | text=EDGE", True),
+    ("leader: exterior | at=60,560 | to=2.3,560 | text=EDGE", False),
+    # the dimension arrowhead's miter tip runs 1.31 px past the line's end
+    ("dim: section | from=400,620 | to=679,620 | text=X | ext=600", True),
+    ("dim: section | from=400,620 | to=678.6,620 | text=X | ext=600", False),
+], ids=["dot-off", "dot-flush", "arrow-off", "arrow-in"])
+def test_an_edge_marker_is_measured_by_what_it_paints(row, out):
+    found = build_text(with_lines(row), "valid.conf").findings
+    assert {f.rule for f in found} == ({"bounds"} if out else set()), found
 
 
 # ── collision ─────────────────────────────────────────────────────────────

@@ -10,14 +10,21 @@ Rules (each finding carries its rule name, which the selftest keys on):
                drawable element inside a ``cp-<kind>`` group of a known
                kind; the ground, header and title block present exactly
                once; only absolute ``M L H V Z`` path commands; no transform
-               but a text quarter-turn. Anything else is refused, never
-               skipped — an element the checker cannot measure is an
-               element it could not have checked.
+               but a text quarter-turn; the palette's stylesheet byte for
+               byte, with no inline ``style=`` and no presentation attribute
+               on a container — root, group, defs, marker (the rulers are the
+               palette's); markers only at the ends of an open outline.
+               Anything else is refused, never skipped — an element the
+               checker cannot measure is an element it could not have
+               checked.
 ``external``   no external reference of any kind: no ``href``/``url()`` that
                is not a ``#fragment``, no ``@import``, no script, image or
                foreign object, no event-handler attribute. A served sheet
                must be self-contained (issue #474's no-CDN rule).
-``bounds``     every group's footprint lies inside the viewBox.
+``bounds``     everything each group *paints* lies inside the viewBox: the
+               geometry grown by half its stroke width, every miter tip, and
+               every marker (a leader's dot, a dimension's arrowheads) as its
+               own ``<marker>`` draws it at the vertex.
 ``collision``  no two labels overlap — leader and dimension text and
                balloons, measured with the deterministic monospace model in
                :mod:`concept_preview.geom` — and neither a label nor a drawn
@@ -27,12 +34,13 @@ Rules (each finding carries its rule name, which the selftest keys on):
 
 from __future__ import annotations
 
+import math
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 from . import palette as P
-from .geom import BBox, text_box, union_all
+from .geom import EPS, BBox, text_box, union_all
 
 SHAPE_KINDS = ("hatch", "shank", "hex")
 LABEL_KINDS = ("dim", "balloon", "leader")
@@ -47,6 +55,16 @@ DESCRIBE = {
     "balloon": "balloon", "leader": "leader label",
 }
 
+# The attributes each container may carry. Properties inherit, so anything
+# else on a container (a stroke-width on a group, the root, <defs> or a
+# <marker>) would restyle what it holds where the checker does not look.
+CONTAINER_ATTRS = {
+    "svg": {"width", "height", "viewBox", "data-sheet"},
+    "g": {"class", "data-src"},
+    "defs": set(),
+    "marker": {"id", "markerWidth", "markerHeight", "refX", "refY", "orient",
+               "markerUnits", "viewBox", "overflow"},
+}
 ALLOWED_TAGS = {"svg", "title", "desc", "style", "defs", "pattern", "marker", "g",
                 "path", "line", "rect", "circle", "ellipse", "polygon", "polyline", "text"}
 MEASURED_TAGS = {"path", "line", "rect", "circle", "ellipse", "polygon", "polyline", "text"}
@@ -85,31 +103,45 @@ def _num(el: ET.Element, attr: str, default: float | None = None) -> float:
     return float(raw)
 
 
-def _path_box(d: str) -> BBox:
-    pts: list = []
-    cur = (0.0, 0.0)
+def _path_subpaths(d: str) -> list:
+    """The polylines a path draws, one ``[points, closed]`` per subpath."""
+    subs: list = []
+    cur = None
     cmd = None
     nums: list = []
+
+    def extend(points):
+        nonlocal cur
+        if cur is None:
+            raise _Refuse("path data does not start with a moveto (M)")
+        if subs[-1][1]:                       # drawing on after Z starts a new subpath
+            subs.append([[cur], False])
+        for p in points:
+            cur = p
+            subs[-1][0].append(p)
 
     def flush():
         nonlocal cur
         if cmd in ("M", "L"):
             if len(nums) % 2 or not nums:
                 raise _Refuse(f"path {cmd} needs coordinate pairs")
-            for i in range(0, len(nums), 2):
-                cur = (nums[i], nums[i + 1])
-                pts.append(cur)
+            pairs = [(nums[i], nums[i + 1]) for i in range(0, len(nums), 2)]
+            if cmd == "M":
+                cur = pairs[0]
+                subs.append([[cur], False])
+                pairs = pairs[1:]             # further pairs are an implicit L
+            extend(pairs)
         elif cmd == "H":
-            for v in nums:
-                cur = (v, cur[1])
-                pts.append(cur)
+            extend([(v, cur[1] if cur else 0.0) for v in nums])
         elif cmd == "V":
-            for v in nums:
-                cur = (cur[0], v)
-                pts.append(cur)
+            extend([(cur[0] if cur else 0.0, v) for v in nums])
         elif cmd == "Z":
             if nums:
                 raise _Refuse("path Z takes no coordinates")
+            if not subs:
+                raise _Refuse("path data does not start with a moveto (M)")
+            subs[-1][1] = True
+            cur = subs[-1][0][0]
 
     for m in _PATH_TOKEN.finditer(d):
         letter, number = m.group(1), m.group(2)
@@ -123,16 +155,24 @@ def _path_box(d: str) -> BBox:
                 raise _Refuse("path data does not start with a command")
             nums.append(float(number))
     flush()
-    if not pts:
+    if not subs:
         raise _Refuse("path draws nothing")
-    return BBox.of_points(pts)
+    return subs
 
 
-def _points_box(raw: str) -> BBox:
+def _path_box(d: str) -> BBox:
+    return BBox.of_points(p for points, _closed in _path_subpaths(d) for p in points)
+
+
+def _points(raw: str) -> list:
     vals = [float(v) for v in re.findall(_NUM, raw or "")]
     if len(vals) < 2 or len(vals) % 2:
         raise _Refuse("points= needs coordinate pairs")
-    return BBox.of_points(zip(vals[0::2], vals[1::2]))
+    return list(zip(vals[0::2], vals[1::2]))
+
+
+def _points_box(raw: str) -> BBox:
+    return BBox.of_points(_points(raw))
 
 
 def _text_box(el: ET.Element) -> BBox:
@@ -180,6 +220,184 @@ def _element_box(el: ET.Element) -> BBox:
     if tag == "text":
         return _text_box(el)
     raise _Refuse(f"<{tag}> is outside the measurable set")
+
+
+# ── painted extent: what the bounds check holds inside the sheet ──────────
+# An element's geometry is not what it paints: a stroke reaches half its
+# width past the outline (further at a sharp miter join), and a marker draws
+# its own shape at a vertex — a leader's dot is a 2.3 px disc centred on the
+# target, so a target on the sheet edge paints off it. The bounds check
+# measures all of it; the collision checks keep the geometry (a label's
+# legibility is not a matter of a hairline's half-width).
+MARKABLE_TAGS = {"path", "line", "polyline", "polygon"}
+_MARKER_REF = re.compile(r"^\s*url\(\s*#([^)\s]+)\s*\)\s*$")
+
+
+def _prop(el: ET.Element, name: str, default: str | None = None) -> str | None:
+    """A presentation property as the sheet paints it: a palette class rule
+    wins over the element's own attribute (CSS outranks presentation
+    attributes), the attribute over the SVG initial value. The stylesheet is
+    held to the palette's byte for byte, so the palette is the ruler."""
+    classes = el.get("class", "").split()
+    found = None
+    for cls, decls in P.SHAPE_CLASSES.items():      # stylesheet order: a later rule wins
+        if cls in classes:
+            for decl in decls.split(";"):
+                key, _, val = decl.partition(":")
+                if key.strip() == name:
+                    found = val.strip()
+    return found if found is not None else el.get(name, default)
+
+
+def _prop_num(el: ET.Element, name: str, default: str) -> float:
+    raw = _prop(el, name, default)
+    if not re.fullmatch(_NUM, raw.strip()):
+        raise _Refuse(f"<{_local(el.tag)}> {name} {raw!r} is not a plain number")
+    return float(raw)
+
+
+def _polylines(el: ET.Element) -> list:
+    """The ``[points, closed]`` outlines a stroke follows, for the elements
+    whose joins can miter and which carry markers."""
+    tag = _local(el.tag)
+    if tag == "path":
+        return _path_subpaths(el.get("d", ""))
+    if tag == "line":
+        return [[[(_num(el, "x1", 0.0), _num(el, "y1", 0.0)),
+                  (_num(el, "x2", 0.0), _num(el, "y2", 0.0))], False]]
+    if tag in ("polyline", "polygon"):
+        return [[_points(el.get("points", "")), tag == "polygon"]]
+    if tag == "rect":
+        b = _element_box(el)
+        return [[[(b.x0, b.y0), (b.x1, b.y0), (b.x1, b.y1), (b.x0, b.y1)], True]]
+    return []
+
+
+def _distinct(points: list, closed: bool) -> list:
+    out = [p for i, p in enumerate(points) if i == 0 or p != points[i - 1]]
+    if closed and len(out) > 1 and out[-1] == out[0]:
+        out.pop()
+    return out
+
+
+def _unit(a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    d = math.hypot(dx, dy)
+    return (dx / d, dy / d)
+
+
+def _miter_tips(points: list, closed: bool, half: float, limit: float) -> list:
+    """Every miter tip a stroke of half-width ``half`` paints past the
+    outline: at each join, ``half / sin(θ/2)`` along the outer bisector —
+    unless that ratio exceeds the miter limit, where SVG bevels the join
+    (and a bevel stays inside the half-width box). Round and bevel joins
+    paint less than the miter, so measuring the miter is conservative."""
+    pts = _distinct(points, closed)
+    n = len(pts)
+    if n < 3 and not (closed and n == 2):
+        return []
+    tips = []
+    for i in (range(n) if closed else range(1, n - 1)):
+        prev, v, nxt = pts[i - 1], pts[i], pts[(i + 1) % n]
+        u1, u2 = _unit(prev, v), _unit(v, nxt)
+        s = math.sqrt(max(0.0, (1 + (u1[0] * u2[0] + u1[1] * u2[1])) / 2))   # sin(θ/2)
+        bx, by = u1[0] - u2[0], u1[1] - u2[1]
+        bl = math.hypot(bx, by)
+        if s < EPS or 1 / s > limit or bl < EPS:
+            continue
+        reach = half / s
+        tips.append((v[0] + bx / bl * reach, v[1] + by / bl * reach))
+    return tips
+
+
+def _ends(el: ET.Element):
+    """((start vertex, direction°), (end vertex, direction°)) of a markable
+    element — where marker-start and marker-end sit, and which way an
+    ``orient=auto`` marker turns."""
+    lines = _polylines(el)
+    if any(closed for _points, closed in lines):
+        raise _Refuse(f"<{_local(el.tag)}> a marker on a closed outline is outside the measurable set")
+    first, last = _distinct(lines[0][0], False), _distinct(lines[-1][0], False)
+
+    def angle(a, b):
+        return math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+
+    start = (first[0], angle(first[0], first[1]) if len(first) > 1 else 0.0)
+    end = (last[-1], angle(last[-2], last[-1]) if len(last) > 1 else 0.0)
+    return start, end
+
+
+def _marker_box(marker: ET.Element, stroke_w: float, at, angle: float) -> BBox | None:
+    """What one marker paints at vertex ``at``: its content's painted box,
+    clipped to the marker viewport (``overflow`` is hidden for a marker),
+    shifted so (refX, refY) lands on the vertex, scaled by the stroke width
+    (``markerUnits=strokeWidth``, the default) and turned by ``angle``."""
+    if marker.get("viewBox") is not None:
+        raise _Refuse("a <marker> viewBox is outside the measurable set")
+    units = marker.get("markerUnits", "strokeWidth")
+    if units not in ("strokeWidth", "userSpaceOnUse"):
+        raise _Refuse(f"<marker> markerUnits={units!r}")
+    scale = stroke_w if units == "strokeWidth" else 1.0
+    mw, mh = _num(marker, "markerWidth", 3.0), _num(marker, "markerHeight", 3.0)
+    rx, ry = _num(marker, "refX", 0.0), _num(marker, "refY", 0.0)
+    content = [_painted_box(child, None) for child in _measured(marker)]
+    if not content:
+        return None
+    box = union_all(content)
+    if marker.get("overflow", "hidden") not in ("visible", "auto"):
+        box = BBox(max(box.x0, 0.0), max(box.y0, 0.0), min(box.x1, mw), min(box.y1, mh))
+        if box.x0 > box.x1 or box.y0 > box.y1:
+            return None
+    c, s = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+    corners = [((x - rx) * scale, (y - ry) * scale) for x in (box.x0, box.x1) for y in (box.y0, box.y1)]
+    return BBox.of_points((at[0] + x * c - y * s, at[1] + x * s + y * c) for x, y in corners)
+
+
+def _painted_box(el: ET.Element, markers: dict | None) -> BBox:
+    """The element's geometry grown by everything it paints past it: half
+    the stroke width all round, each miter tip, and each marker. ``markers``
+    maps the sheet's marker ids to their elements; ``None`` inside a marker,
+    where a further marker is refused."""
+    box = _element_box(el)
+    tag = _local(el.tag)
+    if _prop(el, "stroke", "none").strip() != "none":
+        half = _prop_num(el, "stroke-width", "1") / 2
+        join = _prop(el, "stroke-linejoin", "miter").strip()
+        if join not in ("miter", "round", "bevel"):
+            raise _Refuse(f"<{tag}> stroke-linejoin {join!r} is outside the measurable set")
+        limit = _prop_num(el, "stroke-miterlimit", "4")
+        box = box.grown(half)
+        for points, closed in _polylines(el):
+            for tip in _miter_tips(points, closed, half, limit):
+                box = box.union(BBox(tip[0], tip[1], tip[0], tip[1]))
+    if _prop(el, "marker-mid", "none").strip() != "none":
+        raise _Refuse(f"<{tag}> marker-mid is outside the measurable set")
+    refs = [(which, _prop(el, f"marker-{which}", "none").strip()) for which in ("start", "end")]
+    refs = [(which, ref) for which, ref in refs if ref != "none"]
+    if refs and tag in MARKABLE_TAGS:
+        if markers is None:
+            raise _Refuse("a marker inside a <marker> is outside the measurable set")
+        stroke_w = _prop_num(el, "stroke-width", "1")
+        ends = dict(zip(("start", "end"), _ends(el)))
+        for which, ref in refs:
+            m = _MARKER_REF.match(ref)
+            if not m or m.group(1) not in markers:
+                raise _Refuse(f"<{tag}> marker-{which}={ref!r} names no marker this sheet defines")
+            marker = markers[m.group(1)]
+            at, direction = ends[which]
+            orient = marker.get("orient", "0").strip()
+            if orient == "auto":
+                angle = direction
+            elif orient == "auto-start-reverse":
+                angle = direction + (180.0 if which == "start" else 0.0)
+            elif re.fullmatch(_NUM, orient):
+                angle = float(orient)
+            else:
+                raise _Refuse(f"<marker> orient={orient!r} is outside the measurable set")
+            painted = _marker_box(marker, stroke_w, at, angle)
+            if painted is not None:
+                box = box.union(painted)
+    return box
 
 
 def _measured(group: ET.Element):
@@ -266,6 +484,25 @@ def check_svg(text: str, name: str = "<svg>") -> list:
                 raise ValueError
         except ValueError:
             findings.append(Finding("contract", f"{name}: {attr}= does not match the viewBox"))
+    # Stroke widths and text metrics are read from the palette, so the sheet
+    # must paint with exactly the palette's stylesheet — and nothing may
+    # restyle an element where the checker does not look: no inline style=,
+    # and no presentation attribute on a container to inherit down.
+    styles = [el for el in root.iter() if _local(el.tag) == "style"]
+    if len(styles) != 1 or (styles[0].text or "").strip("\n") != P.stylesheet():
+        findings.append(Finding("contract", f"{name}: the stylesheet is not the palette's, byte for "
+                                "byte (strokes and text are measured with the palette)"))
+    for el in root.iter():
+        tag = _local(el.tag)
+        if "style" in el.attrib:
+            findings.append(Finding("contract", f"{name}: <{tag}> carries an inline "
+                                    "style= the checker does not model"))
+        extra = sorted(set(el.attrib) - CONTAINER_ATTRS.get(tag, set(el.attrib)) - {"style"})
+        if extra:
+            findings.append(Finding("contract", f"{name}: <{tag} class={el.get('class', '')!r}> carries "
+                                    f"{' '.join(a + '=' for a in extra)} (it would inherit into "
+                                    "what it holds)"))
+    markers = {el.get("id"): el for el in root.iter() if _local(el.tag) == "marker"}
 
     groups = []
     counts: dict = {}
@@ -294,6 +531,7 @@ def check_svg(text: str, name: str = "<svg>") -> list:
         try:
             elements = list(_measured(group))
             boxes = [_element_box(el) for el in elements]
+            painted = [_painted_box(el, markers) for el in elements]
         except _Refuse as e:
             findings.append(Finding("contract", f"{name}: {desc}: {e}"))
             continue
@@ -304,9 +542,10 @@ def check_svg(text: str, name: str = "<svg>") -> list:
             findings.append(Finding("contract", f"{name}: {desc} draws nothing"))
             continue
         bbox = union_all(boxes)
-        if not bbox.inside(W, H):
-            findings.append(Finding("bounds", f"{name}: {desc} {bbox} leaves the "
-                                    f"{int(W)}x{int(H)} sheet"))
+        paint = union_all(painted)
+        if not paint.inside(W, H):
+            findings.append(Finding("bounds", f"{name}: {desc} paints {paint} (stroke and markers "
+                                    f"included), leaving the {int(W)}x{int(H)} sheet"))
         if kind in FURNITURE_KINDS:
             furniture.append((bbox, DESCRIBE[kind]))
         elif kind in SHAPE_KINDS:
