@@ -250,8 +250,13 @@ jobs:
       # GROWTHQ_DEDUP_CONTEXT on every link step. FAIL CLOSED: a failed read
       # still writes both files marked UNAVAILABLE, the tool then refuses every
       # filing, and this step only warns — a skipped day costs nothing, a
-      # re-proposal costs a human's cull. Runs only when the routine will
-      # actually invoke the agent — gated on the any-key `key_present`. This
+      # re-proposal costs a human's cull. Every copy of this step removes the
+      # previous pair FIRST (`rm -f`, and the helper does the same before it
+      # writes): a refresh that dies before writing must leave the next link
+      # NO dedup.json — which the tool refuses — never an earlier link's
+      # stale-but-complete one, which it would accept. Runs only when the
+      # routine will actually invoke the agent — gated on the any-key
+      # `key_present`. This
       # copy serves the HEAD link; each tail link re-assembles its own
       # immediately before it runs (the "Refresh the dedup context" steps
       # below), because a head link that queued items and THEN failed leaves
@@ -266,9 +271,10 @@ jobs:
           PYTHONPATH: tools/growth/src
         run: |
           set -euo pipefail
+          rm -f .reeve-growth-context/dedup.json .reeve-growth-context/dedup.md
           if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
               --out-dir .reeve-growth-context; then
-            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE, so the queue tool refuses every filing on this link (fail closed; the next run retries)"
+            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE (or left absent), so the queue tool refuses every filing on this link (fail closed; the next run retries)"
           fi
           cat .reeve-growth-context/dedup.md || true
 
@@ -386,9 +392,10 @@ jobs:
           PYTHONPATH: tools/growth/src
         run: |
           set -euo pipefail
+          rm -f .reeve-growth-context/dedup.json .reeve-growth-context/dedup.md
           if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
               --out-dir .reeve-growth-context; then
-            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE, so the queue tool refuses every filing on this link (fail closed; the next run retries)"
+            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE (or left absent), so the queue tool refuses every filing on this link (fail closed; the next run retries)"
           fi
           cat .reeve-growth-context/dedup.md || true
 
@@ -446,9 +453,10 @@ jobs:
           PYTHONPATH: tools/growth/src
         run: |
           set -euo pipefail
+          rm -f .reeve-growth-context/dedup.json .reeve-growth-context/dedup.md
           if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
               --out-dir .reeve-growth-context; then
-            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE, so the queue tool refuses every filing on this link (fail closed; the next run retries)"
+            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE (or left absent), so the queue tool refuses every filing on this link (fail closed; the next run retries)"
           fi
           cat .reeve-growth-context/dedup.md || true
 

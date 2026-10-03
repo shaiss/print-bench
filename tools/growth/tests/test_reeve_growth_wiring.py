@@ -8,6 +8,10 @@ Pins, read off the workflow text (stdlib only, like the drift guard's parser):
 * each link step names that context's JSON file in the env var the queue
   server reads (``queue_mcp.DEDUP_ENV``) — the backstop is fail-closed when
   unattended, so a link without it could file nothing at all;
+* each dedup step removes the previous ``dedup.json`` BEFORE it assembles —
+  a refresh that dies before writing must leave the next link no context
+  (the queue server refuses) rather than an earlier link's stale-but-complete
+  one (which it would accept);
 * the invocation parses and runs under the real CLI, writing where the env
   var and the agent's markdown path say it does;
 * no inline ``gh issue list`` assembly survives (the open-queue-only list that
@@ -98,7 +102,19 @@ def wiring_errors(text: str, env_name: str) -> list[str]:
             errors.append(f"link {n}: env does not carry `{want}`")
         if f"{out_dir}/{dedup.MD_NAME}" not in before:
             errors.append(f"link {n}: the dedup step does not surface {out_dir}/{dedup.MD_NAME}")
+        if not _invalidates_first(before, f"{out_dir}/{dedup.JSON_NAME}"):
+            errors.append(f"link {n}: the dedup step does not `rm -f {out_dir}/{dedup.JSON_NAME}` "
+                          "before assembling — a refresh that dies leaves the stale context")
     return errors
+
+
+def _invalidates_first(step: str, json_path: str) -> bool:
+    """An ``rm -f`` line naming ``json_path`` sits before the invocation."""
+    m = _INVOKE_RE.search(step)
+    return m is not None and any(
+        line.split()[:2] == ["rm", "-f"] and json_path in line.split()[2:]
+        for line in step[: m.start()].splitlines()
+    )
 
 
 def test_every_link_gets_a_fresh_tested_dedup_context():
@@ -151,6 +167,29 @@ def test_a_tail_link_without_its_refresh_is_caught():
     text = text[:start] + "      - name: Unrelated\n        run: echo hi\n\n" + text[end:]
     errors = wiring_errors(text, _dedup_env())
     assert any(e.startswith("link 2:") and "dedup-context" in e for e in errors), errors
+
+
+def test_a_refresh_that_does_not_invalidate_first_is_caught():
+    # Drop the `rm -f` from the link-3 refresh only: a dying refresh there
+    # would hand link 3 link 2's stale-but-complete dedup.json.
+    text = WORKFLOW.read_text(encoding="utf-8")
+    rm = "          rm -f .reeve-growth-context/dedup.json .reeve-growth-context/dedup.md\n"
+    head, sep, tail = text.rpartition(rm)
+    assert sep, "rm -f line not found"
+    errors = wiring_errors(head + tail, _dedup_env())
+    rm_errors = [e for e in errors if "rm -f" in e]
+    assert len(rm_errors) == 1 and rm_errors[0].startswith("link 3:"), errors
+
+
+def test_an_rm_after_the_invocation_does_not_count():
+    # Invalidating AFTER the helper ran would delete the fresh context, not
+    # the stale one — the pin is about order, not mere presence.
+    text = WORKFLOW.read_text(encoding="utf-8")
+    rm = "          rm -f .reeve-growth-context/dedup.json .reeve-growth-context/dedup.md\n"
+    cat = "          cat .reeve-growth-context/dedup.md || true\n"
+    text = text.replace(rm, "").replace(cat, rm + cat)
+    errors = wiring_errors(text, _dedup_env())
+    assert len([e for e in errors if "rm -f" in e]) == 3, errors
 
 
 def test_an_inline_gh_listing_is_caught():

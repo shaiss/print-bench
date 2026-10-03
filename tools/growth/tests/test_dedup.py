@@ -272,6 +272,75 @@ def test_cli_fails_closed_when_the_read_fails(tmp_path, monkeypatch, capsys):
     assert "UNAVAILABLE" in (tmp_path / dedup.MD_NAME).read_text()
 
 
+def _stale_complete_context(out):
+    """What an earlier link's assembly left behind: a COMPLETE pair that knows
+    nothing of what that link queued afterwards."""
+    out.mkdir(parents=True, exist_ok=True)
+    stale = dedup.build([], NOW, dedup.DEFAULT_WINDOW_DAYS)
+    (out / dedup.JSON_NAME).write_text(dedup.render_json(stale))
+    (out / dedup.MD_NAME).write_text(dedup.render_markdown(stale))
+
+
+def _break_md(out, monkeypatch, how):
+    """Make writing dedup.md fail the two ways a real refresh can: the path
+    cannot be opened (a directory squats there), or the bytes never land (a
+    full disk mid-write). Injected at the filesystem and at the shared
+    renderer, so the check holds whatever the writer's internals look like."""
+    if how == "unopenable":
+        (out / dedup.MD_NAME).unlink()
+        (out / dedup.MD_NAME).mkdir()
+    else:
+        def full_disk(ctx):
+            raise OSError(28, "No space left on device")
+        monkeypatch.setattr(dedup, "render_markdown", full_disk)
+
+
+@pytest.mark.parametrize("how", ["unopenable", "write-fails"])
+@pytest.mark.parametrize("source", ["good", "bad"])
+def test_a_refresh_whose_md_write_fails_leaves_no_stale_json(tmp_path, monkeypatch,
+                                                             source, how):
+    # The tail-link refresh rewrites the context in place. If that write
+    # fails -- on the success path or the fail-closed unavailable path -- the
+    # earlier link's complete dedup.json must NOT survive: the queue tool
+    # would accept it and re-queue what that link already filed. No JSON at
+    # all is the safe outcome (the tool refuses a missing file).
+    out = tmp_path / "ctx"
+    _stale_complete_context(out)
+    snap = tmp_path / "snap.json"
+    snap.write_text(json.dumps(SNAPSHOT) if source == "good" else '{"not": "a list"}')
+    _break_md(out, monkeypatch, how)
+    assert main(["dedup-context", "--snapshot", str(snap), "--out-dir", str(out),
+                 "--now", "2026-10-03T18:00:00Z"]) == 1
+    assert not (out / dedup.JSON_NAME).exists(), "a stale dedup.json survived the failed refresh"
+    assert not (out / dedup.MD_NAME).is_file()
+    assert not list(out.glob(".*.tmp")), "a temp file was left behind"
+
+
+def test_an_interrupted_write_leaves_the_target_untouched_and_no_temp(tmp_path):
+    # Atomicity of each file: a write that dies part-way (here, bytes UTF-8
+    # cannot encode) neither truncates the target nor leaves its temp file.
+    from growth.cli import _write_atomic
+
+    target = tmp_path / dedup.JSON_NAME
+    target.write_text("previous\n")
+    with pytest.raises(UnicodeEncodeError):
+        _write_atomic(str(target), "half a file \udcff")
+    assert target.read_text() == "previous\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [dedup.JSON_NAME]
+
+
+def test_a_successful_refresh_replaces_the_stale_pair(tmp_path):
+    out = tmp_path / "ctx"
+    _stale_complete_context(out)
+    snap = tmp_path / "snap.json"
+    snap.write_text(json.dumps(SNAPSHOT))
+    assert main(["dedup-context", "--snapshot", str(snap), "--out-dir", str(out),
+                 "--now", "2026-10-03T18:00:00Z"]) == 0
+    assert numbers(json.loads((out / dedup.JSON_NAME).read_text()), dedup.SECTION_QUEUED) == [720, 753]
+    assert "#753" in (out / dedup.MD_NAME).read_text()
+    assert sorted(p.name for p in out.iterdir()) == sorted([dedup.JSON_NAME, dedup.MD_NAME])
+
+
 def test_cli_fails_closed_on_a_bad_snapshot(tmp_path):
     snap = tmp_path / "snap.json"
     snap.write_text('{"not": "a list"}')

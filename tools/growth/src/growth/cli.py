@@ -31,7 +31,8 @@ Subcommands, each a thin shell over one module:
   (:mod:`growth.github`); ``--snapshot`` reads a JSON list of issues. FAIL
   CLOSED: when assembly fails it still writes both files, marked
   unavailable, and exits 1 — so the queue tool refuses rather than trusting
-  an empty list.
+  an empty list; and the previous pair is removed before anything is
+  written, so a write that itself fails leaves no context, never a stale one.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 
 from . import board as board_mod
@@ -207,12 +209,42 @@ def main(argv: list[str] | None = None) -> int:
     return 2  # pragma: no cover — argparse enforces the subcommand set
 
 
+def _write_atomic(path: str, text: str) -> None:
+    """Write ``text`` to ``path`` via a sibling temp file + ``os.replace``, so
+    a reader sees the whole new file or none of it — never a truncated one."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".",
+                               prefix=f".{os.path.basename(path)}.", suffix=".tmp")
+    try:
+        with open(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _write_context(out_dir: str, ctx: dict) -> None:
+    """Replace the context pair, invalidating the previous one FIRST.
+
+    The workflow refreshes the context in place before each tail link, so the
+    out-dir can already hold an earlier link's COMPLETE ``dedup.json``. If
+    this write then failed part-way, that stale file would survive and the
+    queue tool would accept it, blind to whatever the earlier link queued. So
+    both old files are removed before anything is written, the markdown lands
+    first and the JSON last, each atomically: a failure at any point leaves
+    no JSON at all, which the queue tool refuses — never a stale or
+    half-written one."""
     os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, dedup_mod.MD_NAME), "w", encoding="utf-8") as fh:
-        fh.write(dedup_mod.render_markdown(ctx))
-    with open(os.path.join(out_dir, dedup_mod.JSON_NAME), "w", encoding="utf-8") as fh:
-        fh.write(dedup_mod.render_json(ctx))
+    for name in (dedup_mod.JSON_NAME, dedup_mod.MD_NAME):
+        try:
+            os.unlink(os.path.join(out_dir, name))
+        except FileNotFoundError:
+            pass
+    _write_atomic(os.path.join(out_dir, dedup_mod.MD_NAME), dedup_mod.render_markdown(ctx))
+    _write_atomic(os.path.join(out_dir, dedup_mod.JSON_NAME), dedup_mod.render_json(ctx))
 
 
 def _dedup_context(args) -> int:
