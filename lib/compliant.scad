@@ -167,7 +167,7 @@ function bistable_arch_span_for(fs, rise, t, width, E = 2000) =
 // The flexure-root fillet rule, shared by every module that places one:
 // docs/advanced-techniques.md "Fatigue & material reality" — fillet the
 // flexure root at r ≥ 0.5·t. Enforced inline today by
-// snap-cantilever-clip.scad:100-101 and let-folding-panel.scad:131; the zero
+// snap-cantilever-clip.scad:100-101 and let-folding-panel.scad:136; the zero
 // case is named on its own because issue #202 lists it as its own refusal (a
 // sharp root is the crack starter the whole rule exists for).
 module _root_fillet_guards(r, t) {
@@ -216,7 +216,7 @@ module _bistable_arch_guards(span, rise, t, root_fillet, ov, ns, allow_monostabl
     assert(ov >= 0, str("clamp overlap ov must not be negative (got ", ov, ")"));
     if (!is_undef(root_fillet)) {
         _root_fillet_guards(root_fillet, t);
-        // let-folding-panel.scad:133 — the fillets must leave free flexure
+        // let-folding-panel.scad:138 — the fillets must leave free flexure
         // between them.
         assert(root_fillet < span / 2,
                str("root fillet ", root_fillet, " leaves no free arch between the roots (span ", span, ")"));
@@ -242,11 +242,14 @@ module _arch_band_2d(span, rise, t, ns) {
 //   rise          mid-span rise of the centreline, h (mm); > 0
 //   t             band thickness in the bending direction (mm); ≥ 0.8
 //   root_fillet   undef (default) = bare band: the caller fillets the roots
-//                 (every harvest site does, outside its generator). A number
-//                 = all four roots filleted at that radius, ≥ 0.5·t, with
-//                 root_fillet_2d corner pieces (see _arch_root_pair_2d for
-//                 the placement). Both faces of both roots: the band sweeps
-//                 to −rise on the snap, so the concave side flips
+//                 (bistable-toggle and czs-slider do, outside their
+//                 generators; over-center-toggle-clamp's closing is inside
+//                 its generator, :321, and rounds nothing — see above;
+//                 compliant-gripper places no in-plane root fillet). A
+//                 number = all four roots filleted at that radius, ≥ 0.5·t,
+//                 with root_fillet_2d corner pieces (see _arch_root_pair_2d
+//                 for the placement). Both faces of both roots: the band
+//                 sweeps to −rise on the snap, so the concave side flips
 //                 (czs-slider.scad:262-266).
 //   ov            flat extension of the band past each clamp face (mm), for
 //                 a caller that unions the arch with its clamps in 3D: a
@@ -361,12 +364,12 @@ module root_fillet_2d(r, t, bite = 0) {
 
 // Fillet EVERY concave corner of the children at radius r — the
 // morphological closing of let-folding-panel.scad:72-76, verbatim. Straight
-// edges and convex corners come back as they were; a fillet follows a curved
-// face, which the corner piece above cannot. The cost: the two offsets
-// re-sample any polygonal curve they pass over (measured on
-// over-center-toggle-clamp's arch band: vertices up to 3.3 µm off along it,
-// its convex end corners cut by up to 15.6 µm) — which is why
-// bistable_arch_2d places corner pieces instead of closing its band.
+// edges and convex corners come back nominally as they were (see the cost
+// below); a fillet follows a curved face, which the corner piece above
+// cannot. The cost: the two offsets re-sample any polygonal curve they pass
+// over (measured on over-center-toggle-clamp's arch band: vertices up to
+// 3.3 µm off along it, its convex end corners cut by up to 15.6 µm) — which
+// is why bistable_arch_2d places corner pieces instead of closing its band.
 //
 // WELD HAZARD — read before wrapping a silhouette in this: a closing also
 // FILLS every gap or slot narrower than 2·r. Wrap only the flexure's own
