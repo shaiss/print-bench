@@ -428,6 +428,12 @@ surfaces studies awaiting a read live in
     proven flat and upright at every landing stop, with mandatory negative
     controls; `--selftest` proves it on the fixtures under
     `scripts/kinematics-fixtures/`
+  - `fusecheck-check.sh` — the `ci.fusecheck` runner gate.sh sources (one
+    parser, not a copy), plus the selftest that proves its `assert` bound
+    grammar still fires: legacy `<min>`, two-sided `<min> <max>`, `=N`, the
+    malformed line, and the exit-4 hard-fail path, over committed fixtures in
+    `scripts/fusecheck-fixtures/` whose body counts are re-measured with
+    fusecheck itself (issue #627)
   - `cog-check.sh` — proves the assembled object STANDS (issue #623), the
     thing no per-part gate can: reads a `ci.cog` manifest (per-part densities,
     non-printed hardware masses, assembly transforms, a stability margin) and
@@ -436,12 +442,6 @@ surfaces studies awaiting a read live in
     WARN-tier advisory; a broken manifest or unrendered manifest part fails;
     `--selftest` proves a stable configuration passes and an out-of-footprint
     one is flagged
-  - `fusecheck-check.sh` — the `ci.fusecheck` runner gate.sh sources (one
-    parser, not a copy), plus the selftest that proves its `assert` bound
-    grammar still fires: legacy `<min>`, two-sided `<min> <max>`, `=N`, the
-    malformed line, and the exit-4 hard-fail path, over committed fixtures in
-    `scripts/fusecheck-fixtures/` whose body counts are re-measured with
-    fusecheck itself (issue #627)
   - `gate-summary.py` — turns a gate log into the CI results table
   - `ci-classify.sh` — the single source of truth for which gates CI runs and
     over which designs; `ci.yml`'s `changes` job pipes its diff to it and
