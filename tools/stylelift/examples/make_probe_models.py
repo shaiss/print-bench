@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 from shapely.geometry import Point, Polygon
+from shapely.ops import unary_union
 
 
 def rounded_prism(width=40.0, depth=30.0, height=15.0, radius=3.0,
@@ -167,26 +168,47 @@ def pierced_rounded_box(width=40.0, depth=30.0, height=15.0, radius=3.0,
 
 
 def stencil_plate(width=60.0, depth=40.0, height=8.0, chamfer=3.0, web=4.0,
-                  cols=3, rows=2, slot_w=10.0, slot_h=14.0) -> trimesh.Trimesh:
+                  cols=3, rows=2, slot_w=10.0, slot_h=14.0,
+                  slot_chamfer=1.0) -> trimesh.Trimesh:
     """A faceted, cut-through probe: a chamfered plate carrying a grid of
-    rectangular through-slots — the stencil-glyph look, with every number
+    chamfered through-slots — the stencil-glyph look, with every number
     chosen.
 
     The outline corners are cut at 45 degrees (`chamfer` legs), so the part
-    owns decisive facets, and the slots are plain rectangles, so essentially
-    all of its shaped edge length is facet. Slot size, count and the web
-    between them are parameters, which makes the open-area fraction, the
-    largest through-void span and the narrowest bridge arithmetic on the
-    arguments: slots cover `cols*rows*slot_w*slot_h` of the chamfered face,
-    the longest straight line a slot can be threaded by is its space
-    diagonal, and the narrowest material anywhere is `web` (the rim margins
-    are wider). Drop `web` below two extrusion widths and the same probe
-    becomes the negative control for a bridge rule.
+    owns decisive facets, and the slots are rectangles with their corners cut
+    the same way, so essentially all of its shaped edge length is facet.
+
+    The slot chamfers are not cosmetic. Rectangular holes put ring vertices
+    exactly on the horizontal and vertical lines other ring vertices fan
+    across, and mapbox-earcut's multi-ring triangulation then emits long cap
+    edges passing straight through them — a mesh whose Euler characteristic
+    is not the surface's, so a handle count derived from it would be wrong
+    (six slots read as two handles). Chamfering the corners puts every ring
+    vertex in general position and the triangulation conforms: exactly
+    `cols*rows` handles. Real OpenSCAD/CGAL exports share vertices and never
+    hit this; the probe must not either.
+
+    Slot size, count and the web between them are parameters, which makes the
+    open-area fraction, the largest through-void span and the narrowest
+    bridge arithmetic on the arguments: the slots cover
+    `cols*rows*(slot_w*slot_h - 2*slot_c^2)` of the chamfered face (corner
+    cuts `slot_c` on the diagonal), the longest straight line a slot can be
+    threaded by is its space diagonal, and the narrowest material anywhere is
+    `web` (the rim margins are wider). Drop `web` below two extrusion widths
+    and the same probe becomes the negative control for a bridge rule.
+
+    Built with `extrude_polygon`, whose earcut triangulation of a face
+    riddled with holes can still leave bridging walls between them along the
+    slot rows — conforming once the slot corners are chamfered, so the handle
+    count is right, but not a mesh whose planar sections every edge- or
+    path-based reading can untangle. Metrics that need each section to be the
+    true boundary use `slotted_plate`, the same part built face by face.
     """
     grid_w = cols * slot_w + (cols - 1) * web
     grid_d = rows * slot_h + (rows - 1) * web
     if grid_w > width - 2 * chamfer or grid_d > depth - 2 * chamfer:
         raise ValueError("slot grid does not fit inside the chamfered outline")
+    c = min(slot_chamfer, slot_w / 3, slot_h / 3)
     outline = [
         (chamfer, 0), (width - chamfer, 0), (width, chamfer),
         (width, depth - chamfer), (width - chamfer, depth),
@@ -198,10 +220,128 @@ def stencil_plate(width=60.0, depth=40.0, height=8.0, chamfer=3.0, web=4.0,
         for j in range(rows):
             lx = x0 + i * (slot_w + web)
             ly = y0 + j * (slot_h + web)
-            holes.append([(lx, ly), (lx + slot_w, ly),
-                          (lx + slot_w, ly + slot_h), (lx, ly + slot_h)])
+            holes.append(Polygon([
+                (lx + c, ly), (lx + slot_w - c, ly), (lx + slot_w, ly + c),
+                (lx + slot_w, ly + slot_h - c), (lx + slot_w - c, ly + slot_h),
+                (lx + c, ly + slot_h), (lx, ly + slot_h - c), (lx, ly + c)]))
     return trimesh.creation.extrude_polygon(
-        Polygon(outline, holes=holes), height)
+        Polygon(outline).difference(unary_union(holes)), height)
+
+
+def pocketed_trough(width=40.0, depth=30.0, wall=3.0, floor=3.0,
+                    height=15.0) -> trimesh.Trimesh:
+    """A deep open channel — the hull-concavity control for through-cut
+    topology (#702).
+
+    A U-profile extruded and laid opening-up: two walls joined by a floor,
+    the channel between them running the full length of the part. Hull-
+    referenced openness scores it as airy (lines along the channel clear the
+    part end to end), and yet no material is pierced anywhere — you cannot
+    pass through the part, only into it — so the mesh has genus 0 and the
+    through-cut count must read exactly zero. The counterfactual the chord-
+    threshold gate used to fail on: a span over threshold is not a cut.
+    """
+    profile = [
+        (0, 0), (width, 0), (width, depth), (width - wall, depth),
+        (width - wall, floor), (wall, floor), (wall, depth), (0, depth)]
+    mesh = trimesh.creation.extrude_polygon(Polygon(profile), height)
+    mesh.apply_transform(trimesh.transformations.rotation_matrix(
+        np.pi / 2, [1, 0, 0]))               # opening faces up, flat face down
+    mesh.apply_translation([0, height, 0])
+    return mesh
+
+
+def hollow_shell(size=20.0, inner=8.0) -> trimesh.Trimesh:
+    """A solid with a strictly enclosed cavity — walls all around, no way in.
+
+    The second non-through void: not open to anything, unlike a pocket. The
+    cavity is an inverted box concatenated inside the outer one (no boolean
+    engine), which is watertight as a mesh and unprintable as a part — it
+    exists so the through-cut signal proves it counts neither pockets nor
+    sealed voids: two bodies, zero handles.
+    """
+    outer = trimesh.creation.box(extents=[size, size, size])
+    cavity = trimesh.creation.box(extents=[inner, inner, inner])
+    cavity.invert()
+    return trimesh.util.concatenate([outer, cavity])
+
+
+def slotted_plate(width=60.0, depth=40.0, height=8.0, web=4.0,
+                  cols=3, rows=2, slot_w=10.0, slot_h=14.0) -> trimesh.Trimesh:
+    """The stencil probe built face by face — the same slot grid as
+    `stencil_plate` minus the chamfer, with caps triangulated by exact grid
+    decomposition instead of an earcut, so the mesh is the true boundary:
+    one wall per slot edge, no bridging membranes, euler number 2-2*slots.
+
+    Every slot edge coordinate slices the face into axis-aligned cells; a
+    cell is material unless it lies inside a slot; material cells become
+    two cap triangles top and bottom, and every cell edge between material
+    and void (or material and outside) becomes one wall quad. All the
+    arithmetic that holds for `stencil_plate` holds here with a sharp
+    outline: the widest visible opening is a slot's diagonal
+    sqrt(slot_w^2 + slot_h^2), and the hull circumdiameter is
+    sqrt(width^2 + depth^2 + height^2).
+    """
+    grid_w = cols * slot_w + (cols - 1) * web
+    grid_d = rows * slot_h + (rows - 1) * web
+    if grid_w > width or grid_d > depth:
+        raise ValueError("slot grid does not fit inside the outline")
+    x0 = (width - grid_w) / 2
+    y0 = (depth - grid_d) / 2
+    slots = [(x0 + i * (slot_w + web), y0 + j * (slot_h + web))
+             for i in range(cols) for j in range(rows)]
+
+    def void_cell(cx0, cx1, cy0, cy1) -> bool:
+        return any(sx < cx1 and cx0 < sx + slot_w and sy < cy1 and cy0 < sy + slot_h
+                   for sx, sy in slots)
+
+    xs = sorted({0.0, width} | {sx for sx, _ in slots} | {sx + slot_w for sx, _ in slots})
+    ys = sorted({0.0, depth} | {sy for _, sy in slots} | {sy + slot_h for _, sy in slots})
+    verts: dict[tuple[float, float, float], int] = {}
+
+    def vid(x, y, z):
+        key = (x, y, z)
+        if key not in verts:
+            verts[key] = len(verts)
+        return verts[key]
+
+    faces: list[list[int]] = []
+    material = [[not void_cell(xs[i], xs[i + 1], ys[j], ys[j + 1])
+                 for j in range(len(ys) - 1)] for i in range(len(xs) - 1)]
+    for i in range(len(xs) - 1):
+        for j in range(len(ys) - 1):
+            if not material[i][j]:
+                continue
+            a, b, c, d = (vid(xs[i], ys[j], height), vid(xs[i + 1], ys[j], height),
+                          vid(xs[i + 1], ys[j + 1], height), vid(xs[i], ys[j + 1], height))
+            faces += [[a, b, c], [a, c, d]]                      # top, CCW from +z
+            a, b, c, d = (vid(xs[i], ys[j], 0.0), vid(xs[i + 1], ys[j], 0.0),
+                          vid(xs[i + 1], ys[j + 1], 0.0), vid(xs[i], ys[j + 1], 0.0))
+            faces += [[a, c, b], [a, d, c]]                      # bottom, CW from +z
+    for i in range(len(xs) - 1):
+        for j in range(len(ys) - 1):
+            here = material[i][j]
+            for dx, dy, nx_out in ((1, 0, 1), (-1, 0, -1), (0, 1, 1), (0, -1, -1)):
+                i2, j2 = i + dx, j + dy
+                outside = not (0 <= i2 < len(xs) - 1 and 0 <= j2 < len(ys) - 1)
+                if here and (outside or not material[i2][j2]):
+                    # wall on this cell edge, winding outward for +x/-x/+y/-y
+                    if dy == 0:
+                        xe = xs[i + 1] if dx > 0 else xs[i]
+                        p = [vid(xe, ys[j], 0.0), vid(xe, ys[j + 1], 0.0),
+                             vid(xe, ys[j + 1], height), vid(xe, ys[j], height)]
+                        faces += ([[p[0], p[1], p[2]], [p[0], p[2], p[3]]] if nx_out > 0
+                                  else [[p[0], p[2], p[1]], [p[0], p[3], p[2]]])
+                    else:
+                        ye = ys[j + 1] if dy > 0 else ys[j]
+                        p = [vid(xs[i], ye, 0.0), vid(xs[i + 1], ye, 0.0),
+                             vid(xs[i + 1], ye, height), vid(xs[i], ye, height)]
+                        faces += ([[p[0], p[2], p[1]], [p[0], p[3], p[2]]] if nx_out > 0
+                                  else [[p[0], p[1], p[2]], [p[0], p[2], p[3]]])
+    vertices = np.zeros((len(verts), 3))
+    for (x, y, z), k in verts.items():
+        vertices[k] = (x, y, z)
+    return trimesh.Trimesh(vertices=vertices, faces=np.array(faces), process=False)
 
 
 BUILDERS = {
@@ -213,7 +353,10 @@ BUILDERS = {
     "shelled-tube": shelled_tube,
     "smooth-ball": smooth_ball,
     "stencil-plate": stencil_plate,
+    "slotted-plate": slotted_plate,
     "pierced-rounded-box": pierced_rounded_box,
+    "pocketed-trough": pocketed_trough,
+    "hollow-shell": hollow_shell,
 }
 
 
