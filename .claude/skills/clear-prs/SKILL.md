@@ -157,7 +157,10 @@ posted as a PR comment too, so the state survives the session.
   regardless — poll their check runs directly.
 - `reviewer-signoff` goes stale by design-tree currency: a push that
   touches the design tree needs Jane/Drik to re-sign (auto-review runs on
-  push, ~30 min a round). Distinguish its two reds before acting: a
+  push, ~30 min a round) — except a regen commit-back that touches only
+  preview images and `.regen-stamp` files and carries `Preview-Diff:
+  all-noise`, which neither opens a round nor stales the sign-offs (#470).
+  Distinguish its two reds before acting: a
   **verdict** (`Jane blocked (verdict=block)`) is content — fix what the
   review says, through PM triage; a **dead review chain** (every provider
   failing in ~300 ms at $0 — the #298 signature) is infra, and the
