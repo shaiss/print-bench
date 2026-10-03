@@ -118,8 +118,8 @@ def measurement_text(m: dict) -> str:
                      f"the silhouette is open "
                      f"({openness['views_with_void']} of "
                      f"{openness['directions']} views see void)")
-        # Topology first, chords second: the count is what says a cut passes
-        # through at all; the chord sizes it.
+        # Topology first, sizes second: the count is what says a cut passes
+        # through at all; the chord and the aperture size it.
         if openness.get("through_cut_count") is not None:
             lines.append(f"    cut-throughs: {openness['through_cut_count']} "
                          "(topological handles)")
@@ -131,6 +131,12 @@ def measurement_text(m: dict) -> str:
         else:
             lines.append("    cut-throughs: not measurable — "
                          f"{openness.get('through_cut_reason', 'unknown')}")
+        if openness.get("max_glyph_aperture_mm"):
+            lines.append(f"    widest visible opening: "
+                         f"{openness['max_glyph_aperture_mm']:g} mm across "
+                         f"its own mouth "
+                         f"({openness['max_glyph_aperture_fraction']:.0%} of "
+                         "the part)")
         if openness.get("min_bridge_mm") is not None:
             widths = openness["min_bridge_mm"] / LINE_WIDTH_MM
             lines.append(f"    narrowest bridge: "

@@ -433,7 +433,12 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
     # or an open channel spans hull-referenced gaps without piercing any
     # material, while a plate of tiny glyphs has almost no open area yet is
     # exactly the part the legibility rule exists for. Advisory openness still
-    # keys off area fraction independently (#702).
+    # keys off area fraction independently (#702). Glyph *size* is the
+    # aperture (`max_glyph_aperture_mm`, #701), not a chord: the chord
+    # measures depth along the sampling ray, so a narrow hole drilled deep
+    # read "legible" to a rule keyed on it while the visible mark was too
+    # small to read. Topology decides whether the pair applies; the aperture
+    # decides whether the glyph passes.
     openness = measurement.get("openness") or {}
     if openness.get("measured"):
         void = float(openness.get("void_fraction") or 0.0)
@@ -457,18 +462,24 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
         if through is not None and through >= 1:
             rules.append({
                 "id": "legible-glyph",
-                "metric": "openness.max_through_span_fraction",
+                "metric": "openness.max_glyph_aperture_fraction",
                 "op": "min", "value": GLYPH_MIN_FRACTION,
                 "severity": "required",
-                # Gated on "a cut-through topologically exists", not on the
-                # void fraction: a plate of tiny glyphs has almost no open
+                # The glyph's size is its aperture — the extent of the
+                # connected opening in its own plane (#701) — not the chord a
+                # sampling ray threads: a narrow hole drilled deep has a long
+                # chord and an unreadable mouth. Gated on "a cut-through
+                # topologically exists" (#702), never on the void fraction or
+                # a chord threshold: a plate of tiny glyphs has almost no open
                 # area but is exactly the part the legibility rule exists
-                # for. A solid part has no handles, so it skips.
+                # for, and a blind pocket spans a chord without passing
+                # through. A solid part has no handles, so it skips.
                 "when": through_gate,
                 "why": f"the family's cut-throughs are legible marks: the "
-                       f"largest must span at least {GLYPH_MIN_FRACTION:.0%} "
-                       "of the part, or it cannot be read at the distance a "
-                       "mark is read from",
+                       f"widest opening must measure at least "
+                       f"{GLYPH_MIN_FRACTION:.0%} of the part across its own "
+                       "mouth, or it cannot be read at the distance a mark is "
+                       "read from",
             })
             bridge = _mm(BRIDGE_MIN_WIDTHS * LINE_WIDTH_MM)
             rules.append({

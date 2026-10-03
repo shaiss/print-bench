@@ -25,6 +25,7 @@ from pathlib import Path
 
 import numpy as np
 import trimesh
+from shapely.ops import unary_union
 
 
 @dataclass
@@ -100,6 +101,11 @@ class Config:
     # randomness anywhere.
     void_dirs: int = 48
     void_rays_per_dir: int = 32
+    # The glyph aperture gets a second, finer fan seeded by the coarse one:
+    # target fine spacing as a share of the circumradius, capped per view so
+    # an airy part — open from every direction — cannot make the pass explode.
+    glyph_spacing_frac: float = 0.02
+    glyph_rays_max: int = 1024
 
 
 def load_mesh(path: str | Path) -> trimesh.Trimesh:
@@ -1007,25 +1013,35 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
     is "how airy is the form", and a lattice or a stencil scores high for the
     same reason a solid block scores zero.
 
-    Hull-referenced airiness is not through-cutting, so the through-cut signal
-    is topological, not a chord threshold (#702): `through_cut_count` is the
-    mesh's handle count (a hole that connects one side to the other; a blind
-    pocket, an open channel or an enclosed cavity is never one), and the
-    spans report only chords bounded by material on both sides — a ray that
-    enters material, crosses the cut, and re-enters material — where
-    `max_void_span_mm` also hulls in leading pocket gaps and silhouette
-    slack. The largest such chord (`max_through_span_mm`) is the size of the
-    biggest cut-through — for a stencilled part, the glyph — reported as a
-    fraction of the part's bounding-sphere diameter so a rule can demand
-    legible marks (`glyph height >= 0.15 x part diameter`). The denominator
-    is the hull circumdiameter (pose-invariant); an AABB side length would
-    grow toward the space diagonal under rotation and shrink the fraction
-    from export pose alone. DESIGN_SA (#701): the numerator is still a 3-D
-    void *chord* (depth can dominate a narrow deep hole) — aperture-plane
-    glyph extent is a follow-up. The narrowest material span (`min_bridge_mm`)
-    is measured by inward normal rays the way `walls` measures thickness,
-    with plate-thickness faces filtered out so a thin plate with a wide web
-    reports the web — a bridge under two extrusion widths will not print clean.
+    Two questions are kept apart: does a cut pass *through* the part at all,
+    and how big is its visible mark. Hull-referenced airiness is not
+    through-cutting, so existence is topological, not a chord threshold
+    (#702): `through_cut_count` is the mesh's handle count (a hole that
+    connects one side to the other; a blind pocket, an open channel or an
+    enclosed cavity is never one). The largest gap a line threads
+    (`max_void_span_mm`) is kept as the hull-referenced chord it is — it also
+    hulls in leading pocket gaps and silhouette slack — and
+    `max_through_span_mm` reports only chords bounded by material on both
+    sides (a ray that enters material, crosses the cut, and re-enters
+    material), never one that ends on an enclosed cavity's wall.
+
+    Neither chord is the glyph's size (#701): a chord measures depth along
+    the ray, so a hole as narrow as a nozzle tip but drilled deep reads
+    "legible" to a rule keyed on it. The glyph's size is its aperture — the
+    extent of the connected opening in its own plane — measured here
+    (`max_glyph_aperture_mm`, as `max_glyph_aperture_fraction` of the part)
+    from planar sections just inside each hull plane
+    (`_sectioned_aperture`): exact and pose-invariant, with a projected
+    fallback (`_projected_aperture`) for a mouth small enough to hide
+    between hull planes. A narrow-deep hole slices to the same small
+    mouth however deep its bore runs; a wide opening measures its own
+    width. The denominator is the hull circumdiameter (pose-invariant); an
+    AABB side length would grow toward the space diagonal under rotation and
+    shrink the fraction from export pose alone. The narrowest material span
+    (`min_bridge_mm`) is measured by inward normal rays the way `walls`
+    measures thickness, with plate-thickness faces filtered out so a thin
+    plate with a wide web reports the web — a bridge under two extrusion
+    widths will not print clean.
     """
     if not mesh.is_watertight or len(mesh.faces) == 0:
         return {"measured": False, "reason": "mesh is not watertight"}
@@ -1045,9 +1061,17 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
     span = 4.0 * radius          # far enough that every line crosses everything
     eps = 1e-6 * radius          # merge numerical double-hits, ignore dust
     topology = _through_cut_topology(mesh, eps)
+    cavity = _cavity_faces(mesh)
+    # Air in front must reach this depth before a ray is said to look *into*
+    # the part (1% of the diameter, floored at half a tenth of a millimetre):
+    # without it, the wedge of draft or export tolerance where a surface
+    # recedes from the hull at a silhouette edge would pose as an opening.
+    gap_floor = max(0.05, 0.02 * radius)
+    coarse_spacing = radius * np.sqrt(np.pi / cfg.void_rays_per_dir)
     per_view = []
     void_spans: list[float] = []
     through_spans: list[float] = []
+    seeded: list[tuple] = []
     for w in directions:
         helper = np.array([0.0, 0.0, 1.0]) if abs(w[2]) < 0.9 \
             else np.array([1.0, 0.0, 0.0])
@@ -1057,13 +1081,17 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
         origins = (centre + offsets[:, 0, None] * u + offsets[:, 1, None] * v
                    - w * span / 2)
         ray_dirs = np.tile(w, (len(origins), 1))
-        solid, solid_ray, _ = mesh.ray.intersects_location(
+        solid, solid_ray, solid_tri = mesh.ray.intersects_location(
             origins, ray_dirs, multiple_hits=True)
         outline, outline_ray, _ = hull.ray.intersects_location(
             origins, ray_dirs, multiple_hits=True)
         solid_d = _distances_by_ray(solid, solid_ray, origins)
         hull_d = _distances_by_ray(outline, outline_ray, origins)
+        on_cavity = cavity[solid_tri] if len(solid_tri) else solid_tri
+        cavity_d = _distances_by_ray(solid[on_cavity], solid_ray[on_cavity],
+                                     origins)
         votes = solid_votes = 0
+        open_front: list[int] = []
         for ray, chord in hull_d.items():
             # A convex body gives exactly an entry and an exit; a ray with
             # less is a numerical grazing and costs only itself.
@@ -1076,6 +1104,13 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
                 if h0 - eps <= d <= h1 + eps:
                     if not merged or d - merged[-1] > eps:
                         merged.append(d)
+            # Front air: how far the ray travels inside the hull before it
+            # first meets material. Past the floor the ray looks into an
+            # opening (a mouth, a groove, a slot), and its offset becomes a
+            # seed for the aperture measurement below.
+            front = (h1 - h0) if not merged else (merged[0] - h0)
+            if front >= gap_floor:
+                open_front.append(ray)
             if not merged:
                 gap = h1 - h0            # threads the form without meeting it
                 if gap > eps:
@@ -1094,9 +1129,15 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
                     # passes *through* the part — unlike the leading and
                     # trailing hull gaps a blind pocket or silhouette slack
                     # produces. Existence is settled by topology above; these
-                    # chords size the cut.
-                    if 2 <= k and k + 1 <= len(merged):
+                    # chords size the cut. A chord that ends on an enclosed
+                    # cavity's wall crosses sealed air, not a cut, even when
+                    # the part has a handle elsewhere.
+                    if (2 <= k and k + 1 <= len(merged)
+                            and not _ends_on(cavity_d.get(ray, []),
+                                             bounds[k], bounds[k + 1], eps)):
                         through_spans.append(gap)
+        if open_front:
+            seeded.append((w, u, v, offsets[open_front]))
         if votes:
             per_view.append(1.0 - solid_votes / votes)
 
@@ -1109,6 +1150,13 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
     # pockets and channels, not to cuts that pass through.
     max_through = (max(through_spans)
                    if cut_count and through_spans else 0.0)
+    aperture = _sectioned_aperture(mesh, hull, radius)
+    if aperture <= 0 and seeded:
+        # Soft mouths only: no fold rings the opening, so project it.
+        aperture = max(_projected_aperture(
+            mesh, hull, centre, w, u, v, seeds, radius, cfg,
+            gap_floor, coarse_spacing, eps, span)
+            for w, u, v, seeds in seeded)
     result = {
         "measured": True,
         "void_fraction": round(float(np.mean(per_view)), 4) if per_view else 0.0,
@@ -1122,11 +1170,222 @@ def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
         "max_through_span_mm": round(max_through, 3) if max_through else 0.0,
         "max_through_span_fraction": (round(max_through / diameter, 4)
                                       if max_through and diameter > 0 else 0.0),
+        "max_glyph_aperture_mm": round(aperture, 3),
+        "max_glyph_aperture_fraction": (round(aperture / diameter, 4)
+                                        if diameter > 0 else 0.0),
         "min_bridge_mm": round(thinnest, 3) if thinnest is not None else None,
     }
     if cut_count is None:
         result["through_cut_reason"] = topology["reason"]
     return result
+
+
+def _groups(n: int, pairs: np.ndarray) -> list[list[int]]:
+    """Connected components of `n` items joined by the (k, 2) pair list."""
+    parent = list(range(n))
+
+    def find(a: int) -> int:
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for a, b in pairs:
+        ra, rb = find(int(a)), find(int(b))
+        if ra != rb:
+            parent[rb] = ra
+    out: dict[int, list[int]] = {}
+    for a in range(n):
+        out.setdefault(find(a), []).append(a)
+    return list(out.values())
+
+
+def _sectioned_aperture(mesh: trimesh.Trimesh, hull: trimesh.Trimesh,
+                        radius: float) -> float:
+    """The widest opening mouth, read off planar sections of the part — exactly.
+
+    A mouth is where void meets the outer envelope, and the envelope's
+    faces are the hull's. So: slice the mesh a hair inside each hull
+    plane, take the slice's own convex hull, and read the difference —
+    every connected piece of it is an opening at that plane, a hole or a
+    bay, and the widest pair of points on one piece is its aperture: the
+    extent of the connected opening in its own plane, which is what a
+    legibility rule has to compare against the part. A narrow-deep hole
+    slices to the same small mouth at both ends however deep its bore
+    runs between them; a drafted flank's top edge, which folds like a
+    mouth over air *outside* the silhouette, slices to solid disk and
+    reads nothing. Because each slice's hull is the slice's own, the
+    reading self-normalizes: a chamfered slab's shrunken bottom section
+    is its own hull, not a giant false opening. No rays and no chosen
+    view — the number is exact and rotation-proof.
+
+    What this cannot see: a mouth small enough to hide between hull
+    planes — facing a hull edge rather than a face, so no inward slice
+    crosses it. Those fall back to projection in `_openness`.
+
+    The difference carries two kinds of degenerate piece that are not
+    openings at all: zero-area slivers where the slice boundary runs
+    along its own hull (a flat side plane), and tessellation-thin
+    crescents between a curved slice and its hull (a smooth ball). A
+    piece counts only if it survives eroding the same visibility floor
+    the projection fallback uses — an opening thinner than that is
+    below the floor everywhere, and reporting it would give a closed
+    part a phantom aperture.
+    """
+    normals = hull.face_normals
+    planes = np.einsum("ij,ij->i", normals, hull.triangles_center)
+    # One slice per distinct hull plane; a quad's two triangles agree.
+    _, first = np.unique(np.round(np.column_stack((normals, planes)), 6),
+                         axis=0, return_index=True)
+    inset = 1e-3 * radius
+    floor = max(0.05, 0.02 * radius)
+    widest = 0.0
+    for i in first:
+        origin = hull.triangles_center[i] - normals[i] * inset
+        section = mesh.section(plane_origin=origin, plane_normal=normals[i])
+        if section is None:
+            continue
+        planar, _ = section.to_2D()
+        polys = planar.polygons_full
+        if not polys:
+            continue
+        region = unary_union(polys)
+        if region.is_empty:
+            continue
+        for void in _polygons(region.convex_hull.difference(region)):
+            core = void.buffer(-floor)
+            if core.is_empty or core.area <= 0:
+                continue
+            pts = np.asarray(void.exterior.coords)
+            widest = max(widest, float(np.linalg.norm(
+                pts[:, None, :] - pts[None, :, :], axis=-1).max()))
+    return widest
+
+
+def _polygons(geom) -> list:
+    """The Polygon pieces of a shapely geometry (itself if it is one)."""
+    if geom.is_empty:
+        return []
+    return ([geom] if geom.geom_type == "Polygon"
+            else [g for g in geom.geoms if g.geom_type == "Polygon"])
+
+
+def _projected_aperture(mesh: trimesh.Trimesh, hull: trimesh.Trimesh,
+                        centre: np.ndarray, w: np.ndarray, u: np.ndarray,
+                        v: np.ndarray, seeds: np.ndarray, radius: float,
+                        cfg: Config, gap_floor: float, coarse_spacing: float,
+                        eps: float, span: float) -> float:
+    """The widest connected visible opening in this one view, in mm.
+
+    The fallback path for openings whose mouths carry no measurable fold
+    (a filleted rim, a smoothly curving window): the section reading cannot
+    see them, so they are measured in projection instead. Seeded by the coarse
+    fan's front-open rays, a fine golden-spiral fan is cast over the seeds'
+    bounding box, padded by one coarse spacing so the true boundary of a
+    region whose edge fell between coarse samples cannot sit outside the
+    window. Each fine ray is classified by the same front-air rule as the
+    coarse pass — a real hull ray cast for entry and exit, because the fan
+    is a disc and overshoots the window — and the open points are grouped into
+    connected openings by union-find, and the widest group's extent is the
+    aperture. One realized spacing is added back at the end: point samples
+    land half a spacing short of the region's edge on each side.
+
+    The linkage distance is what keeps neighbouring *distinct* openings
+    apart: it must bridge the fan's own gaps (1.5 spacings) while staying
+    below the webs that separate glyphs — which is also this path's known
+    limit, since a view foreshortens a web exactly as it shrinks the mouths,
+    and at a steep enough angle the projected web drops under the linkage
+    and merges its neighbours. That is why this is the fallback and the
+    fold-ringed rim is the primary: the rim reads the opening in its own
+    plane, where nothing is foreshortened.
+    """
+    lo = seeds.min(axis=0) - coarse_spacing
+    hi = seeds.max(axis=0) + coarse_spacing
+    mid = (lo + hi) / 2.0
+    win_r = float(np.linalg.norm(hi - lo) / 2.0)
+    if win_r <= 0:
+        return 0.0
+    spacing = cfg.glyph_spacing_frac * radius
+    n = int(min(cfg.glyph_rays_max,
+                max(64.0, np.pi * win_r ** 2 / spacing ** 2)))
+    j = np.arange(n) + 0.5
+    discs = win_r * np.sqrt(j / n)
+    angles = j * np.pi * (3 - 5 ** 0.5)
+    fine = np.stack([discs * np.cos(angles), discs * np.sin(angles)], axis=1)
+    origins = (centre
+               + (mid[0] + fine[:, 0])[:, None] * u
+               + (mid[1] + fine[:, 1])[:, None] * v
+               - w * span / 2)
+    ray_dirs = np.tile(w, (n, 1))
+
+    # Hull entry and exit from a real ray cast, not from the hull's face
+    # planes: the fan is a disc around the seeds and overshoots their padded
+    # bounding box, and a ray outside the silhouette has no plane pair to
+    # stop it — the infinite planes would hand it a full-height "chord" and
+    # a ring of phantom openings around the part.
+    outline, outline_ray, _ = hull.ray.intersects_location(
+        origins, ray_dirs, multiple_hits=True)
+    hull_d = _distances_by_ray(outline, outline_ray, origins)
+    solid, solid_ray, _ = mesh.ray.intersects_location(
+        origins, ray_dirs, multiple_hits=True)
+    solid_d = _distances_by_ray(solid, solid_ray, origins)
+    pts = []
+    for ray in range(n):
+        chord = hull_d.get(ray, [])
+        if len(chord) < 2:
+            continue        # misses the hull: outside the silhouette
+        h0, h1 = chord[0], chord[-1]
+        # A chord shorter than the floor is a miss or a grazing sliver; no
+        # visible opening can live on it.
+        if h1 - h0 <= gap_floor:
+            continue
+        merged: list[float] = []
+        for d in solid_d.get(ray, []):
+            if h0 - eps <= d <= h1 + eps:
+                if not merged or d - merged[-1] > eps:
+                    merged.append(d)
+        gap = (h1 - h0) if not merged else (merged[0] - h0)
+        if gap >= gap_floor:
+            pts.append(fine[ray])
+    if len(pts) < 2:
+        return 0.0
+
+    pts = np.asarray(pts)
+    dist2 = ((pts[:, None, :] - pts[None, :, :]) ** 2).sum(-1)
+    realized = win_r * np.sqrt(np.pi / n)
+    link = 1.5 * realized
+    joined = np.argwhere(np.triu(dist2 <= link * link, 1))
+    widest = 0.0
+    for members in _groups(len(pts), joined):
+        if len(members) > 1:
+            widest = max(widest,
+                         float(np.sqrt(dist2[np.ix_(members, members)].max())))
+    return widest + realized
+
+
+def _cavity_faces(mesh: trimesh.Trimesh) -> np.ndarray:
+    """Boolean mask of the faces bounding an enclosed cavity.
+
+    A watertight, consistently wound mesh bounds each sealed cavity with its
+    own inward-facing shell: a connected face component whose signed volume
+    is negative. Chords that end on one cross sealed air, not a cut.
+    """
+    mask = np.zeros(len(mesh.faces), dtype=bool)
+    labels = trimesh.graph.connected_component_labels(
+        mesh.face_adjacency, node_count=len(mesh.faces))
+    tri = mesh.triangles
+    signed = np.einsum("ij,ij->i", tri[:, 0],
+                       np.cross(tri[:, 1], tri[:, 2])) / 6.0
+    for label in np.unique(labels):
+        faces = labels == label
+        if signed[faces].sum() < 0:
+            mask[faces] = True
+    return mask
+
+
+def _ends_on(hits: list[float], a: float, b: float, eps: float) -> bool:
+    """Whether either chord endpoint `a`, `b` is one of the given hits."""
+    return any(abs(h - a) <= eps or abs(h - b) <= eps for h in hits)
 
 
 def _distances_by_ray(locations: np.ndarray, index_ray: np.ndarray,
