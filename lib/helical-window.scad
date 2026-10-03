@@ -109,6 +109,11 @@ module helical_window(pitch, sweep, width, starts, d, wall, depth = undef,
         "(pitch - width = ", pitch - width, ") closes, the window stops being ",
         "a helix and becomes a continuous band that cuts the shell into two ",
         "bodies. Raise pitch or narrow width."));
+    // `seg` is a divisor twice over (the chord error's 180/seg and the sample
+    // count N below): seg = 0 is a division by zero, and a fractional seg
+    // below 1 is not a polygon at all. Refused before either use.
+    assert(seg >= 1, str("helical_window seg must be at least 1: seg = ", seg,
+        " samples the helix with no segments (and divides by zero)."));
     // `seg` samples the helix as a polygon, so the cut edge lands inside the
     // helix it is meant to trace — the silent shrink of issue #58, bounded
     // here exactly as threads-fdm bounds it: as a chord tolerance in mm, with
