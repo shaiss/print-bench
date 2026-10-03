@@ -71,6 +71,7 @@ jobs:
       brief_sources_tests: ${{ steps.filter.outputs.brief_sources_tests }}
       growth_tests: ${{ steps.filter.outputs.growth_tests }}
       andon_tests: ${{ steps.filter.outputs.andon_tests }}
+      agent_memory_tests: ${{ steps.filter.outputs.agent_memory_tests }}
       styles: ${{ steps.filter.outputs.styles }}
       gate: ${{ steps.filter.outputs.gate }}
       gate_designs: ${{ steps.filter.outputs.gate_designs }}
@@ -857,6 +858,29 @@ jobs:
         # Pins the reconciler workflow's shape (job/cron/marker parity with
         # the tool), so andon.yml and ci.yml edits re-run these too.
         run: python -m pytest tools/andon/tests -q
+
+  agent-memory-tests:
+    name: agent-memory unit tests
+    needs: changes
+    if: needs.changes.outputs.agent_memory_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install agent-memory
+        # Agentic memory, Slice 1a (issue #429): the per-agent store and its
+        # deterministic write path. Stdlib-only like its siblings — the [test]
+        # extra is just pytest; check.sh runs its --selftest and store check
+        # straight from the checkout. No routine calls it yet (Slice 1d).
+        run: pip install -e 'tools/agent-memory[test]'
+      - name: Run tests
+        # Includes the live control: `check` over the committed store.
+        run: python -m pytest tools/agent-memory/tests -q
 
   model-registry-tests:
     name: model-registry unit tests
@@ -1833,6 +1857,7 @@ jobs:
       - brief-sources-tests
       - growth-tests
       - andon-tests
+      - agent-memory-tests
       - telemetry-tests
       - ci-gates-tests
       - docs-standards

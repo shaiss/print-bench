@@ -597,6 +597,16 @@ surfaces studies awaiting a read live in
   scan (it writes only local scratch the workflow consumes); the workflow's
   one `github-script` step is the GitHub write — see its
   [README](tools/andon/README.md)
+- `tools/agent-memory/` — per-agent episodic memory for the autonomy
+  routines (agentic memory Slice 1a, issue #429 — see
+  [docs/agentic-memory.md](docs/agentic-memory.md)): one content-hashed JSON
+  note per episode under `tools/agent-memory/store/<agent>/`, written by a
+  deterministic, LLM-free record path that scores importance (prediction
+  error + unfinished business + consequences), encodes salient episodes
+  rich and routine ones as a gist, marks a note `source-confirmed` when it
+  cites a source (cited, not yet resolved — the inputs are the caller's word
+  until Slice 1d decides who supplies them), and never rewrites a note — not
+  yet wired into any routine — see its [README](tools/agent-memory/README.md)
 - `tools/telemetry/` — the capture/report engine behind `telemetry.sh`:
   parses a gate log into a telemetry record and renders the committed log
   into the report — see its [README](tools/telemetry/README.md)
