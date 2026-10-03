@@ -268,6 +268,13 @@ def adoption_study(studies: list[dict]) -> list[dict]:
     return findings
 
 
+# Labels that take an open agent-brief out of the forge's queue without a
+# flagged state: armed for the burn, or resolved through decide.yml. Mirrors
+# the resolved half of wright.yml's sign-off Select search (which also
+# excludes needs-decision / wright-declined — those are flagged states here).
+RESOLVED_BRIEF_LABELS = ("autonomy-ok", "decision-approved", "decision-rejected")
+
+
 def agent_brief_queue(briefs: list[dict]) -> list[dict]:
     """Open ``agent-brief`` issues by forge state — the queue, not a verdict.
 
@@ -284,7 +291,15 @@ def agent_brief_queue(briefs: list[dict]) -> list[dict]:
       because a pile of declined briefs is itself backlog signal);
     - ``autonomy-ok`` → not flagged (approved and armed — the backlog burn's
       queue now, not the forge's);
+    - ``decision-approved`` / ``decision-rejected`` → not flagged (resolved
+      through the decision gate: a human ruled via /decide, which replaces
+      ``needs-decision``, and a decided brief is never re-judged);
     - none of them → ``pending`` (filed, no verdict yet).
+
+    The not-flagged set is exactly the resolved set ``wright.yml``'s sign-off
+    Select excludes from its pending candidates (``RESOLVED_BRIEF_LABELS``),
+    so the report's "pending" can never disagree with what the forge will
+    actually judge.
     """
     findings: list[dict] = []
     for brief in briefs:
@@ -293,8 +308,8 @@ def agent_brief_queue(briefs: list[dict]) -> list[dict]:
             state = "needs-decision"
         elif "wright-declined" in labels:
             state = "wright-declined"
-        elif "autonomy-ok" in labels:
-            continue  # armed — handed to the burn, out of the forge's queue
+        elif any(lbl in RESOLVED_BRIEF_LABELS for lbl in labels):
+            continue  # armed or decided — out of the forge's queue
         else:
             state = "pending"
         findings.append(

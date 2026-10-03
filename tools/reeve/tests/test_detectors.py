@@ -277,6 +277,35 @@ def test_agent_brief_queue_silent_on_armed_briefs():         # negative control
         [brief(745, labels=["agent-brief", "autonomy-ok", "points-2"])]) == []
 
 
+def test_agent_brief_queue_silent_on_briefs_decided_via_decide():  # negative control
+    # /decide replaces needs-decision with decision-approved/-rejected; a
+    # decided brief is resolved (wright.yml's Select never re-judges it), so
+    # it must not be reported as pending.
+    assert detectors.agent_brief_queue([
+        brief(750, labels=["agent-brief", "decision-approved"]),
+        brief(751, labels=["agent-brief", "decision-rejected"]),
+    ]) == []
+
+
+def test_agent_brief_queue_still_pending_beside_unrelated_decision_labels():
+    # Positive control: only the exact resolved labels drop a brief — an
+    # unrelated label that merely looks decision-ish stays pending.
+    found = detectors.agent_brief_queue(
+        [brief(752, labels=["agent-brief", "decision-pending", "points-2"])])
+    assert [(f["number"], f["state"]) for f in found] == [(752, "pending")]
+
+
+def test_resolved_brief_labels_match_wright_signoff_select():
+    # Drift guard: the detector's resolved set is exactly the labels
+    # wright.yml's sign-off Select excludes beyond the two flagged states.
+    import pathlib
+    import re
+    wf = pathlib.Path(__file__).resolve().parents[3] / ".github/workflows/wright.yml"
+    excluded = set(re.findall(r"-label:([A-Za-z0-9:_-]+)", wf.read_text()))
+    assert excluded - {"needs-decision", "wright-declined"} == set(
+        detectors.RESOLVED_BRIEF_LABELS)
+
+
 def test_agent_brief_queue_needs_decision_outranks_a_co_present_decline():
     # A brief both declined and parked is still parked — the actionable state.
     found = detectors.agent_brief_queue(
