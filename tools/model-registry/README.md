@@ -243,3 +243,11 @@ literal by AST, and requires the step's own env to set it to a
 launches that server — and requires every launched server to declare one at
 all (an explicit, empty `UNCAPPED_SERVERS` is the only way out). Derived from
 the live tree, never a table of env names, with a negative control per rule.
+
+`tests/test_workflow_yaml_truncation.py` pins the quoting behind escalation
+#637. An unquoted `context: … (issue #${{ … }})` is cut at the ` #` (YAML reads
+it as a comment), so the escalation never named the issue whose run exhausted
+the chain. The test holds every provider-triage `context:` to its raw source
+text. It also scans every workflow's `with:`/`env:` values for one an unquoted
+` #` cut short, with inline negative controls for both checks. Its tiny stdlib
+scalar reader is cross-checked against PyYAML wherever PyYAML is importable.
