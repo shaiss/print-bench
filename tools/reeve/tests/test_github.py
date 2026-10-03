@@ -16,6 +16,7 @@ import re
 import pytest
 
 from reeve import github
+from reeve import greenlight
 
 REPO = "o/r"
 
@@ -56,6 +57,10 @@ def _responses():
         # under adoptionStudies.
         {"number": 4, "title": "PR wearing the adoption-study label", "comments": 0,
          "pull_request": {"url": "..."}, "labels": [{"name": "adoption-study"}]},
+        # A PR wearing the agent-brief label — same guard, same drop, must NOT
+        # appear under agentBriefs.
+        {"number": 5, "title": "PR wearing the agent-brief label", "comments": 0,
+         "pull_request": {"url": "..."}, "labels": [{"name": "agent-brief"}]},
         # Zero comments — the comments endpoint must never be fetched for it.
         {"number": 3, "title": "Quiet issue", "comments": 0},
         # An active lock (the #312 ghost).
@@ -74,6 +79,18 @@ def _responses():
          "html_url": "https://github.com/o/r/issues/305"},
         # An unlabeled issue — the control; must NOT appear under adoptionStudies.
         {"number": 306, "title": "Unlabeled issue", "comments": 0, "labels": []},
+        # An agent brief pending a verdict (#745). Zero comments, still
+        # collected — the label scan precedes the comments skip here too.
+        {"number": 741, "title": "Agent brief: detect stale style packs", "comments": 0,
+         "labels": [{"name": "agent-brief"}, {"name": "points-2"}],
+         "created_at": "2026-08-12T05:00:00Z", "updated_at": "2026-08-13T05:00:00Z",
+         "html_url": "https://github.com/o/r/issues/741"},
+        # An agent brief parked at the HITL gate — comments on the thread (no
+        # lock among them), and still gathered by its labels alone.
+        {"number": 743, "title": "Agent brief: dedupe greenlight precedents", "comments": 1,
+         "labels": [{"name": "agent-brief"}, {"name": "needs-decision"}],
+         "created_at": "2026-08-11T05:00:00Z", "updated_at": "2026-08-14T05:00:00Z",
+         "html_url": "https://github.com/o/r/issues/743"},
     ]
     responses[f"{github.API_ROOT}/repos/{REPO}/issues?state=open&per_page=100"] = (
         issues_page1, '<https://next.example/issues2>; rel="next"')
@@ -91,6 +108,9 @@ def _responses():
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/290/comments?per_page=100"] = ([
         {"body": "just a comment", "created_at": "2026-08-10T05:23:00Z"},
+    ], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/743/comments?per_page=100"] = ([
+        _lock("🚦 DECISION NEEDED — parked for the lead", "2026-08-14T05:23:00Z"),
     ], "")
 
     responses[f"{github.API_ROOT}/repos/{REPO}/pulls?state=open&per_page=100"] = ([
@@ -185,6 +205,47 @@ def test_gather_collects_adoption_studies_and_drops_pr(monkeypatch):
     assert not any("/issues/305/comments" in url for url in calls)
 
 
+def test_gather_collects_agent_briefs_and_drops_pr(monkeypatch):
+    calls: list[str] = []
+    fake_get(monkeypatch, calls)
+    health = github.gather_run_health(REPO, "tok")
+    # Both open briefs are collected with their labels + timestamps (the
+    # #745 agent-brief-queue detector reads state from those labels); the
+    # PR wearing the label (#5) is dropped as a PR, and an armed brief needs
+    # no special-casing here — the gather is label-blind beyond the filter.
+    assert health["agentBriefs"] == [
+        {"number": 741, "title": "Agent brief: detect stale style packs",
+         "labels": ["agent-brief", "points-2"],
+         "createdAt": "2026-08-12T05:00:00Z", "updatedAt": "2026-08-13T05:00:00Z",
+         "url": "https://github.com/o/r/issues/741"},
+        {"number": 743, "title": "Agent brief: dedupe greenlight precedents",
+         "labels": ["agent-brief", "needs-decision"],
+         "createdAt": "2026-08-11T05:00:00Z", "updatedAt": "2026-08-14T05:00:00Z",
+         "url": "https://github.com/o/r/issues/743"},
+    ]
+    # The zero-comment brief is gathered without ever fetching its comments;
+    # the parked one's thread IS read (the lock scan), and its DECISION NEEDED
+    # comment is not a SHIP-LOCK, so it never reaches `issues`.
+    assert not any("/issues/741/comments" in url for url in calls)
+    assert health["issues"] == [
+        {"number": 281, "title": "Design brief: NUGGS desiccant tower",
+         "lockCreatedAt": "2026-08-14T05:23:00Z"},
+    ]
+
+
+def test_routine_workflows_pin_the_745_additions():
+    # The watch list is data, and data drifts: every gather test builds its
+    # responses FROM the tuple, so a refactor that drops a workflow leaves
+    # those green while the report silently stops watching it — exactly the
+    # off-report death-streak #745 was filed on. The two additions are pinned
+    # by name so removing either from ROUTINE_WORKFLOWS fails here first.
+    for added in ("wright.yml", "growth-board-sync.yml"):
+        assert added in github.ROUTINE_WORKFLOWS, (
+            f"{added} left ROUTINE_WORKFLOWS — its death-streak is red in "
+            "Actions but invisible to the bench-health report (#745)"
+        )
+
+
 def test_missing_workflow_runs_key_raises(monkeypatch):
     # An error payload has no workflow_runs list — fail loud at the seam.
     monkeypatch.setattr(github, "_get", lambda url, token: ({"message": "Not Found"}, ""))
@@ -256,12 +317,19 @@ def _gl_responses():
         {"number": 230, "title": "Decision: platform X", "html_url": "u/230"},
         # Parked, comments but no marker — queued.
         {"number": 265, "title": "Decision: platform Y", "html_url": "u/265"},
-        # Parked and already greenlighted — NOT queued (the loop posts only
-        # where no marker exists, any verdict, any version).
+        # Parked and already greenlighted BY THE LOOP'S OWN BOT LOGIN — NOT
+        # queued (trusted by identity, so no permission read is spent).
         {"number": 267, "title": "Decision: platform Z", "html_url": "u/267"},
         # Parked, marker NOT on the comment's first line — a greenlight always
         # opens with the marker, so this is ordinary text; queued.
         {"number": 269, "title": "Decision: quoted marker mid-body", "html_url": "u/269"},
+        # Parked, a marker-looking comment by a READ-ONLY drive-by (#546) —
+        # an untrusted author's marker is not a marker, so this stays queued
+        # (the permission read below vouches only for `shaiss`).
+        {"number": 273, "title": "Decision: pasted marker", "html_url": "u/273"},
+        # Parked and greenlighted BY A TRUSTED HUMAN — not queued, through the
+        # collaborator-permission read (the path the bot-authored #267 skips).
+        {"number": 274, "title": "Decision: owner-attended", "html_url": "u/274"},
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/230/comments?per_page=100"] = ([], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/265/comments?per_page=100"] = ([
@@ -269,12 +337,29 @@ def _gl_responses():
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/267/comments?per_page=100"] = ([
         {"body": "some discussion", "created_at": "2026-08-20T05:00:00Z"},
-        {"body": "<!-- reeve-greenlight v1 issue=267 verdict=no -->\nGREENLIGHT: NO\nreasoning"},
-        {"body": "<!-- reeve-greenlight v2 issue=267 verdict=route -->\nGREENLIGHT: ROUTE"},
+        {"body": "<!-- reeve-greenlight v1 issue=267 verdict=no -->\nGREENLIGHT: NO\nreasoning",
+         "user": {"login": "github-actions[bot]"}},
+        {"body": "<!-- reeve-greenlight v2 issue=267 verdict=route -->\nGREENLIGHT: ROUTE",
+         "user": {"login": "github-actions[bot]"}},
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/269/comments?per_page=100"] = ([
         {"body": "\n\n  an ordinary comment quoting \"<!-- reeve-greenlight v1 ...\" mid-body\n"},
     ], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/273/comments?per_page=100"] = ([
+        {"body": "<!-- reeve-greenlight v1 issue=273 verdict=yes -->\nGREENLIGHT: YES",
+         "user": {"login": "driveby"}},
+    ], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/274/comments?per_page=100"] = ([
+        {"body": "<!-- reeve-greenlight v1 issue=274 verdict=yes -->\nGREENLIGHT: YES",
+         "user": {"login": "shaiss"}},
+    ], "")
+    # The marker-author trust reads (#546): the drive-by has no write-level
+    # permission, the trusted human does. Only the authors the queue actually
+    # consults are declared — an undeclared URL would KeyError loudly.
+    responses[f"{github.API_ROOT}/repos/{REPO}/collaborators/driveby/permission"] = (
+        {"permission": "read"}, "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/collaborators/shaiss/permission"] = (
+        {"permission": "write"}, "")
     return responses
 
 
@@ -284,11 +369,27 @@ def _gl_fake(monkeypatch, responses):
     monkeypatch.setattr(github, "_get", _fake)
 
 
+def _marker_trusted():
+    """The marker-author trust rule over the monkeypatched ``_get`` seam —
+    the same wiring ``cli greenlight-select`` (and ``pushthrough.run_poll``)
+    build: the workflow's own bot login by identity, any other login through
+    ``permission_of`` against ``AUTHORIZED_PERMISSIONS``, memoized per author."""
+    perms: dict[str, str] = {}
+
+    def _authorized(login: str) -> bool:
+        if login not in perms:
+            perms[login] = github.permission_of(REPO, "tok", login)
+        return perms[login] in greenlight.AUTHORIZED_PERMISSIONS
+
+    return lambda login: greenlight.marker_author_trusted(login, _authorized)
+
+
 def test_greenlight_queue_lists_unmarked_parked_issues(monkeypatch):
     _gl_fake(monkeypatch, _gl_responses())
-    out = github.gather_greenlight_queue(REPO, "tok")
-    assert [i["number"] for i in out["queue"]] == [230, 265, 269]  # oldest first
-    assert [i["number"] for i in out["parked"]] == [230, 265, 267, 269]  # PR dropped
+    out = github.gather_greenlight_queue(REPO, "tok", _marker_trusted())
+    # #273's marker is by a read-only drive-by (#546) — untrusted, so queued.
+    assert [i["number"] for i in out["queue"]] == [230, 265, 269, 273]  # oldest first
+    assert [i["number"] for i in out["parked"]] == [230, 265, 267, 269, 273, 274]  # PR dropped
 
 
 def test_greenlight_queue_never_reads_a_pr_thread(monkeypatch):
@@ -300,8 +401,43 @@ def test_greenlight_queue_never_reads_a_pr_thread(monkeypatch):
         return responses[url]
 
     monkeypatch.setattr(github, "_get", _fake)
-    github.gather_greenlight_queue(REPO, "tok")
+    github.gather_greenlight_queue(REPO, "tok", _marker_trusted())
     assert not any("/issues/12/" in url for url in calls)
+
+
+def test_greenlight_queue_keeps_an_untrusted_marker_issue(monkeypatch):
+    # #546: a marker-looking comment by a read-only drive-by must NOT drop
+    # the issue from the drafter's queue — the same author test the approval
+    # poll applies (#518), so pasting a marker is not a denial of service on
+    # the queue (it is on no verdict, which is why the poll was fixed first).
+    calls: list[str] = []
+    responses = _gl_responses()
+
+    def _fake(url, token):
+        calls.append(url)
+        return responses[url]
+
+    monkeypatch.setattr(github, "_get", _fake)
+    out = github.gather_greenlight_queue(REPO, "tok", _marker_trusted())
+    assert 273 in [i["number"] for i in out["queue"]]
+    # The trusted-human marker still drops its issue (the negative control)
+    # — through the collaborator-permission read the bot-authored #267 skips.
+    assert 274 not in [i["number"] for i in out["queue"]]
+    assert "/collaborators/shaiss/permission" in "".join(calls)
+    # Memoized: one read per distinct author, not one per marker comment.
+    assert sum(1 for c in calls if c.endswith("/collaborators/driveby/permission")) == 1
+
+
+def test_greenlight_queue_drop_is_the_author_not_the_wording(monkeypatch):
+    # NEGATIVE CONTROL: flip only the drive-by's permission to write — the
+    # same marker text, the same thread — and the issue leaves the queue, so
+    # the drop is the author test, never the marker's wording.
+    responses = _gl_responses()
+    responses[f"{github.API_ROOT}/repos/{REPO}/collaborators/driveby/permission"] = (
+        {"permission": "write"}, "")
+    _gl_fake(monkeypatch, responses)
+    out = github.gather_greenlight_queue(REPO, "tok", _marker_trusted())
+    assert 273 not in [i["number"] for i in out["queue"]]
 
 
 # A provider-triage escalation (issue #544: every converted walk can raise
@@ -340,9 +476,9 @@ def test_greenlight_queue_skips_a_provider_escalation(monkeypatch):
         return responses[url]
 
     monkeypatch.setattr(github, "_get", _fake)
-    out = github.gather_greenlight_queue(REPO, "tok")
+    out = github.gather_greenlight_queue(REPO, "tok", _marker_trusted())
     # Not draftable: the queue is exactly what it was without #271 ...
-    assert [i["number"] for i in out["queue"]] == [230, 265, 269]
+    assert [i["number"] for i in out["queue"]] == [230, 265, 269, 273]
     # ... though it IS at the gate, so the inventory keeps it, flagged ...
     flagged = next(i for i in out["parked"] if i["number"] == 271)
     assert flagged["providerEscalation"] is True
@@ -355,8 +491,8 @@ def test_greenlight_queue_selects_the_same_issue_without_the_marker(monkeypatch)
     # same remediation prose, same label — and it is selected like any other
     # parked decision, so the skip is the marker, not the wording.
     _gl_fake(monkeypatch, _gl_with_escalation(marker=False))
-    out = github.gather_greenlight_queue(REPO, "tok")
-    assert [i["number"] for i in out["queue"]] == [230, 265, 269, 271]
+    out = github.gather_greenlight_queue(REPO, "tok", _marker_trusted())
+    assert [i["number"] for i in out["queue"]] == [230, 265, 269, 271, 273]
     assert next(i for i in out["parked"] if i["number"] == 271)["providerEscalation"] is False
 
 
@@ -379,7 +515,50 @@ def test_is_provider_escalation_matches_the_body_marker(body, expected):
     ("", False),
 ])
 def test_carries_greenlight_matches_the_marker_first_line(body, expected):
-    assert github.carries_greenlight([{"body": body}]) is expected
+    assert github.carries_greenlight(
+        [{"body": body, "user": {"login": "shaiss"}}], lambda login: True
+    ) is expected
+
+
+def test_carries_greenlight_ignores_an_untrusted_authors_marker():
+    # #546: the same author test the poll applies — a marker-looking comment
+    # by an author the trust rule rejects carries no greenlight, so anyone
+    # who can comment cannot park a decision out of the drafter's queue.
+    marker = "<!-- reeve-greenlight v1 issue=5 verdict=yes -->\nGREENLIGHT: YES"
+    assert github.carries_greenlight(
+        [{"body": marker, "user": {"login": "driveby"}}], lambda login: False
+    ) is False
+    # ... and the identical marker by a trusted author still counts (the
+    # negative control: the drop is the author, not the text).
+    assert github.carries_greenlight(
+        [{"body": marker, "user": {"login": "shaiss"}}], lambda login: login == "shaiss"
+    ) is True
+    # An authorless comment (a deleted user) is never trusted — the rule's
+    # own empty-login guard, which the driver's wiring routes every login
+    # through (carries_greenlight itself stays shape-only, like
+    # find_current_greenlight: the author test is always the injected rule).
+    assert github.carries_greenlight(
+        [{"body": marker}],
+        lambda login: greenlight.marker_author_trusted(login, lambda _: True),
+    ) is False
+
+
+def test_carries_greenlight_consults_trust_only_for_marker_comments():
+    # The trust test costs a permission read, so it is consulted ONLY for a
+    # comment that IS a marker — never for ordinary comments (the same
+    # no-lookup-spent ordering find_current_greenlight documents).
+    consulted: list[str] = []
+    marker = "<!-- reeve-greenlight v1 issue=5 verdict=yes -->"
+    carries = github.carries_greenlight(
+        [
+            {"body": "ordinary comment", "user": {"login": "alice"}},
+            {"body": "another ordinary one", "user": {}},
+            {"body": marker, "user": {"login": "driveby"}},
+        ],
+        lambda login: consulted.append(login) is None and login == "shaiss",
+    )
+    assert carries is False
+    assert consulted == ["driveby"]
 
 
 # ---------------------------------------------------------------------------

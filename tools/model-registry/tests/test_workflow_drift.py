@@ -32,6 +32,7 @@ at the YAML that must change with the registry.
 
 from __future__ import annotations
 
+import functools
 import pathlib
 import re
 from typing import NamedTuple
@@ -583,6 +584,13 @@ def test_oracle_drift_guard_catches_a_dropped_backstop():
 #   expression still reading only one provider's links after the tail
 #   crossed would send a healthy tail run red and (via
 #   routine-lock-cleanup) withdraw a live run's SHIP-LOCK.
+# * the SHIP-LOCK routines' gates key on the DISPOSITION, not the walk
+#   (#538): claude-code-action exits 0 whenever the agent ends its turn
+#   without an API error, so the walk's 'success' is not evidence the run
+#   delivered. Their red and triage gates read the lock cleanup's
+#   `delivered`/`declined` outputs and must carry NO walk-outcome clause —
+#   a re-added `(walk) != 'success'` would score an exit-0 run that claimed
+#   but pushed nothing as healthy.
 #
 # Every pin has a negative control below (a tampered copy the pin must
 # reject) — the repo's standing rule that a check which cannot fail proves
@@ -612,10 +620,15 @@ class Routine(NamedTuple):
                 step's `--layout` literal must say
     gates       the exhaustion gates: every step whose `if:` must fire
                 exactly when NO link succeeded (the routine's red step and
-                its provider-triage step), by step name
+                its provider-triage step), by step name — for ship_lock rows
+                read that as "unless the lock cleanup derived delivered or
+                declined" (_assert_ship_lock_gate_follows_disposition)
     ship_lock   True for the SHIP-LOCK routines (the burn, the design run):
                 AGENT_OUTCOME is then assigned twice — the lock cleanup and
-                the red-on-death gate — and both copies must agree
+                the red-on-death gate — and both copies must agree; the walk
+                expression is three-valued (success / not-run / failure) and
+                the gates key on the lock cleanup's disposition outputs
+                instead of the walk (#538)
     permission_mode, backstop, mcp_config, allowed
                 the agent SURFACE every ship step must carry verbatim on its
                 `claude_args:` line — read off the routine's head link when
@@ -813,10 +826,20 @@ NON_ROUTINE_CONSUMERS = {
 }
 
 
+_WORKFLOW_GLOBS = ("*.yml", "*.yaml")
+
+
+def _workflow_paths(workflows_dir: pathlib.Path) -> list[pathlib.Path]:
+    """Every workflow file GitHub would run: it accepts BOTH extensions, so
+    the search space globs both — a `.yaml` file must never be invisible to
+    the pins (the hygiene test below still refuses one in the live tree)."""
+    return sorted(p for pattern in _WORKFLOW_GLOBS for p in workflows_dir.glob(pattern))
+
+
 def _all_workflow_texts() -> dict[str, str]:
     """Every workflow file, by name — the coverage pin's whole search space."""
     return {p.name: p.read_text(encoding="utf-8")
-            for p in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))}
+            for p in _workflow_paths(REPO_ROOT / ".github" / "workflows")}
 
 
 def _registry_consumers(texts: dict[str, str]) -> set[tuple[str, str]]:
@@ -873,6 +896,651 @@ def test_row_coverage_guard_rejects_a_row_no_workflow_resolves():
     texts[victim.workflow] = texts[victim.workflow].replace(line, "model_registry resolve-nothing", 1)
     with pytest.raises(AssertionError, match="outlived its walk"):
         _assert_every_consumer_has_a_row(_registry_consumers(texts), ROUTINES)
+
+
+# ── AI andon cord coverage (docs/andon-cord.md) ──────────────────────────────
+#
+# ONE repo variable, AI_ANDON_CORD: set to 'pulled' it must bypass EVERY
+# AI-consuming job in .github/workflows/ — grey/skipped, never red, no
+# provider call, no escalation — with exactly one ::notice:: explaining the
+# bypass, while every deterministic job keeps running. The pins below hold
+# that property over the WORKFLOWS rather than over a hand-kept list: a job is
+# AI-consuming iff its block spends a provider key or runs an agent action,
+# so a future AI-consuming job is enrolled the moment it references a key, and
+# cannot land uncorded (the same enumerate-the-tree discipline as the
+# ROUTINES row-coverage pin above — a list would let a new job slip past).
+
+# The job-level gate leg every AI-consuming job's `if:` must carry as a
+# TOP-LEVEL CONJUNCT — the whole condition, or joined to the rest by a
+# top-level `&&`, with no top-level `||` anywhere in the condition (`&&`
+# binds tighter than `||` in GitHub expressions, so `leg && A || B` runs the
+# job on B with the cord pulled). Position is NOT enforced: the arming
+# variable stays the first line by convention, the leg usually last, but the
+# pin reads the folded expression, not the line order. The explain leg is
+# what the visible-no-op sibling / step keys on. The comparison is GitHub's:
+# case-insensitive on the exact word `pulled`, never trimmed — a value of
+# `pulled ` (trailing space) is the RELEASED state to every gate here, and
+# the tools (tools/andon, tools/reeve) must read it identically.
+ANDON_JOB_LEG = "vars.AI_ANDON_CORD != 'pulled'"
+ANDON_EXPLAIN_LEG = "vars.AI_ANDON_CORD == 'pulled'"
+
+# A provider-key SPEND: `anthropic_api_key: ${{ secrets.X }}`, `zai-key:
+# ${{ secrets.X }}`, `ZAI_KEY: ${{ secrets.X }}`. The negative lookahead
+# excludes the presence probes deterministic jobs carry (`HAS_ZAI: ${{
+# secrets.ZAI_KEY != '' }}`) so they are not flagged. The alternation is
+# DERIVED, not hand-kept: every `secret` a `[provider:…]` stanza of the
+# committed registry declares, UNION the literal floor below, UNION every
+# `registry-secret-alias: X=Y` marker a workflow carries (design-run's
+# Anthropic tail wires CLAUDE_KEY, a historical alias — without it that tail
+# would be invisible). So a NEW registry provider's secret enrols its
+# spenders the moment the stanza lands, with no edit here.
+_LITERAL_PROVIDER_SECRETS = frozenset({"ANTHROPIC_API_KEY", "ZAI_KEY", "CLAUDE_KEY"})
+_ALIAS_MARKER_RE = re.compile(r"registry-secret-alias:\s*(\w+)=(\w+)")
+
+
+def _registry_provider_secrets() -> set[str]:
+    """Every provider secret name the committed registry declares."""
+    return {p.secret for p in Registry.load(str(REGISTRY)).providers.values()}
+
+
+def _alias_secret_names(texts: dict[str, str]) -> set[str]:
+    """Both sides of every `registry-secret-alias: X=Y` marker in the
+    workflows (the marker lives in a comment, so this reads the RAW text)."""
+    names: set[str] = set()
+    for text in texts.values():
+        for alias, canonical in _ALIAS_MARKER_RE.findall(text):
+            names.add(alias)
+            names.add(canonical)
+    return names
+
+
+def _provider_secret_names(texts: dict[str, str] | None = None) -> frozenset[str]:
+    """The full spend alternation: literal floor ∪ registry ∪ aliases."""
+    if texts is None:
+        texts = _all_workflow_texts()
+    return frozenset(_LITERAL_PROVIDER_SECRETS | _registry_provider_secrets()
+                     | _alias_secret_names(texts))
+
+
+def _ai_spend_regex(names: frozenset[str] | set[str]) -> re.Pattern[str]:
+    """The spend regex over a given secret-name set (the presence-probe
+    lookahead kept), so the negative controls can build one for a provider
+    the registry does not declare yet — exactly what a new stanza would do."""
+    assert names, "an empty alternation would match nothing — no spend could ever be seen"
+    alternation = "|".join(re.escape(n) for n in sorted(names))
+    return re.compile(r"secrets\.(" + alternation + r")\b(?!\s*!=\s*'')")
+
+
+@functools.lru_cache(maxsize=None)
+def _ai_spend() -> re.Pattern[str]:
+    """The live spend regex, derived once per session."""
+    return _ai_spend_regex(_provider_secret_names())
+# The agent action and the exhaustion-triage action: a job carrying either
+# reaches a provider even when the key is wired through a composite input.
+_AI_ACTIONS = ("anthropics/claude-code-action", "./.github/actions/provider-triage")
+
+# Deterministic jobs with ONE AI step each: the job must keep running (CI's
+# regen still renders previews; the groomer still writes its report) so the
+# cord lives on the AI STEP's own `if:` instead of the job header. Every step
+# in such a job that spends a key must carry the leg.
+ANDON_STEP_GATED = {("ci.yml", "regen"), ("backlog-groomer.yml", "groom")}
+
+# The roster the enumerator finds on the live tree, by hand — so a reader sees
+# what the cord covers, and a silent shrink (a job whose key reference moved
+# into a shape the regex no longer sees) or grow (a new AI-consuming job) is
+# caught here and reconciled deliberately, not absorbed.
+ANDON_AI_JOBS = {
+    ("adoption-assessor.yml", "assess"),
+    ("auto-review.yml", "jane-review"),
+    ("auto-review.yml", "drik-review"),
+    ("auto-review.yml", "pm-triage"),
+    ("auto-review.yml", "design-coach"),
+    ("backlog-burn.yml", "burn"),
+    ("backlog-groomer.yml", "groom"),
+    ("chunker.yml", "chunk"),
+    ("ci.yml", "regen"),
+    ("design-run.yml", "run"),
+    ("growth-twitter.yml", "drain"),
+    ("labeler.yml", "label"),
+    ("lifestyle-clip.yml", "generate"),
+    ("lifestyle-shot.yml", "generate"),
+    ("model-smoke.yml", "smoke"),
+    ("oracle.yml", "oracle"),
+    ("product-scout.yml", "scout"),
+    ("product-still.yml", "generate"),
+    ("reeve-growth.yml", "reeve-growth"),
+    ("reeve.yml", "greenlight"),
+    ("spike-converter.yml", "convert"),
+    ("wright.yml", "propose"),
+    ("wright.yml", "signoff"),
+}
+
+# The consumers outside the ROUTINES table the enumerator must never lose:
+# the four reviewers, the Oracle, the smoke probe and the three image/clip
+# generators. With the table's rows, this is the floor the enumerated set
+# must cover — so the regex can never quietly shrink below the known roster.
+_ANDON_NON_ROUTINE_AI_JOBS = {
+    ("auto-review.yml", "jane-review"),
+    ("auto-review.yml", "drik-review"),
+    ("auto-review.yml", "pm-triage"),
+    ("auto-review.yml", "design-coach"),
+    ("oracle.yml", "oracle"),
+    ("model-smoke.yml", "smoke"),
+    ("lifestyle-shot.yml", "generate"),
+    ("product-still.yml", "generate"),
+    ("lifestyle-clip.yml", "generate"),
+}
+
+_ANDON_JOB_IF = re.compile(r"^    if:", re.MULTILINE)
+
+
+def _without_comments(block: str) -> str:
+    """The block with its comment lines dropped: a comment quoting the leg or
+    a secret must neither enrol a job nor satisfy a pin on its behalf."""
+    return "\n".join(l for l in block.splitlines() if not l.lstrip().startswith("#"))
+
+
+def _job_header(block: str) -> str:
+    """The job's text above its first step — where the job-level `if:` lives
+    (`_step_condition` folds it exactly as it folds a step's)."""
+    return re.split(r"\n      - ", block)[0]
+
+
+def _job_steps(block: str) -> list[str]:
+    """The job's step chunks, in order (the 6-space `- ` list the workflows
+    here all use)."""
+    return re.split(r"\n      - ", block)[1:]
+
+
+def _workflow_header(text: str) -> str:
+    """The workflow text ABOVE `jobs:` — `name:`, `on:`, `permissions:`,
+    `concurrency:` and a top-level `env:` — where a hoisted secret would
+    live out of every job block's sight."""
+    jobs_at = re.search(r"^jobs:[ \t]*$", text, re.MULTILINE)
+    assert jobs_at, "workflow has no `jobs:` section"
+    return text[:jobs_at.start()]
+
+
+def _is_ai_consuming(block: str, spend: re.Pattern[str] | None = None) -> tuple[bool, str]:
+    """Whether a job block reaches a provider, and the first reference that
+    says so (for the failure message). `spend` defaults to the live derived
+    regex; the negative controls pass one built for a not-yet-declared
+    provider."""
+    body = _without_comments(block)
+    for action in _AI_ACTIONS:
+        if action in body:
+            return True, action
+    m = (spend or _ai_spend()).search(body)
+    if m:
+        return True, m.group(0)
+    return False, ""
+
+
+def _ai_consuming_jobs(texts: dict[str, str],
+                       spend: re.Pattern[str] | None = None) -> dict[tuple[str, str], str]:
+    """Every (workflow, job) that reaches a provider, with its block. The
+    block includes the job header, so a spend wired as a job-level `env:`
+    key (no step ever names the secret) enrols the job too."""
+    found: dict[tuple[str, str], str] = {}
+    for workflow, text in texts.items():
+        for job, block in _job_blocks(text).items():
+            consuming, _why = _is_ai_consuming(block, spend)
+            if consuming:
+                found[(workflow, job)] = block
+    return found
+
+
+def _strip_paren_groups(cond: str) -> str:
+    """The condition with every balanced parenthesised group removed,
+    innermost first — what is left is the expression's TOP LEVEL."""
+    prev = None
+    while prev != cond:
+        prev = cond
+        cond = re.sub(r"\([^()]*\)", " ", cond)
+    return cond
+
+
+def _cord_is_top_level_conjunct(cond: str) -> bool:
+    """True iff the gate leg governs the whole condition: after the balanced
+    parenthesised groups are removed there is NO top-level `||`, and the leg
+    is one bare `&&`-conjunct (or the whole condition). `&&` binds tighter
+    than `||` in GitHub expressions, so `leg && A || B` still runs on B with
+    the cord pulled — a substring test would bless it; this refuses it. A
+    leg that only appears INSIDE a group (`(leg && A) || B`) is not the
+    gate either."""
+    top = _strip_paren_groups(cond)
+    if "||" in top:
+        return False
+    conjuncts = [re.sub(r"\s+", " ", c).strip() for c in top.split("&&")]
+    return ANDON_JOB_LEG in conjuncts
+
+
+def _job_level_cord_gated(block: str) -> bool:
+    """True when the job's own `if:` carries the gate leg as a top-level
+    conjunct (the shape that actually skips the job)."""
+    header = _without_comments(_job_header(block))
+    if not _ANDON_JOB_IF.search(header):
+        return False
+    return _cord_is_top_level_conjunct(_step_condition(header))
+
+
+_HOISTED_KEY_MSG = ("provider keys must be wired at job/step level so the cord "
+                    "pin can see them")
+
+
+def _assert_no_workflow_level_provider_env(texts: dict[str, str],
+                                           spend: re.Pattern[str] | None = None) -> None:
+    """A provider secret hoisted into a workflow's top-level `env:` reaches
+    every job through inheritance while living in NO job block — the
+    enumerator would see nothing to cord. Refused outright: wire keys at
+    job/step level (the simplest rule, and the one the pin can check)."""
+    for workflow, text in sorted(texts.items()):
+        m = (spend or _ai_spend()).search(_without_comments(_workflow_header(text)))
+        assert not m, (
+            f"{workflow}: {m.group(0) if m else ''} is referenced in the workflow "
+            f"header (above `jobs:`) — {_HOISTED_KEY_MSG}; every job would inherit "
+            "the key and none of them would enumerate as AI-consuming")
+
+
+def _assert_every_ai_job_gates_on_the_cord(texts: dict[str, str],
+                                           spend: re.Pattern[str] | None = None) -> None:
+    """Every AI-consuming job is gated on the cord — at the job level, or for
+    the allow-listed deterministic jobs, on every key-spending step — and in
+    both places the leg must be a TOP-LEVEL CONJUNCT of the `if:`."""
+    _assert_no_workflow_level_provider_env(texts, spend)
+    jobs = _ai_consuming_jobs(texts, spend)
+    floor = {(row.workflow, row.job) for row in ROUTINES.values()} | _ANDON_NON_ROUTINE_AI_JOBS
+    lost = floor - set(jobs)
+    assert not lost, (
+        f"known AI-consuming job(s) the enumerator no longer sees: {sorted(lost)} "
+        "— the key/action reference moved into a shape the spend regex / "
+        "_AI_ACTIONS do not match, so the cord pin would silently stop covering them")
+    for (workflow, job), block in sorted(jobs.items()):
+        _consuming, why = _is_ai_consuming(block, spend)
+        if (workflow, job) in ANDON_STEP_GATED:
+            header_spend, header_why = _is_ai_consuming(_job_header(block), spend)
+            assert not header_spend, (
+                f"{workflow} [{job}]: allow-listed as step-gated but its job "
+                f"header references {header_why} (a job-level env key reaches "
+                "every step, gated or not) — move the key onto the AI step")
+            spending = [chunk for chunk in _job_steps(block)
+                        if _is_ai_consuming(chunk, spend)[0]]
+            assert spending, (
+                f"{workflow} [{job}]: allow-listed as step-gated but no step "
+                "references a provider — drop it from ANDON_STEP_GATED")
+            for chunk in spending:
+                name = re.search(r"^\s*name:\s*(.+)$", chunk, re.MULTILINE)
+                step = name.group(1).strip() if name else chunk.splitlines()[0].strip()
+                _consuming, why = _is_ai_consuming(chunk, spend)
+                body = _without_comments(chunk)
+                has_if = re.search(r"^\s*if:", body, re.MULTILINE)
+                cond = _step_condition(body) if has_if else ""
+                assert has_if and _cord_is_top_level_conjunct(cond), (
+                    f"{workflow} [{job}]: step '{step}' references {why} but "
+                    f"{ANDON_JOB_LEG} is not a top-level conjunct of its `if:` "
+                    f"({cond!r}) — pulling the cord would not stop it (the job "
+                    "is deterministic and stays running, so its AI step must "
+                    "carry the leg itself, joined by top-level && only)")
+            continue
+        header = _without_comments(_job_header(block))
+        has_if = _ANDON_JOB_IF.search(header)
+        cond = _step_condition(header) if has_if else ""
+        assert has_if and _cord_is_top_level_conjunct(cond), (
+            f"{workflow} [{job}]: AI-consuming job (references {why}) — "
+            f"{ANDON_JOB_LEG} is not a top-level conjunct of its `if:` "
+            f"({cond!r}); pulling the cord would not stop it (a top-level || "
+            "lets the other branch run, and a leg inside parentheses is not "
+            "the gate)")
+
+
+def _assert_every_corded_workflow_explains_the_pull(texts: dict[str, str]) -> None:
+    """A skipped job is mute, so every workflow the cord gates must say why
+    nothing ran: some job that is NOT itself job-level cord-gated keys a
+    ::notice:: on the explain leg — a disarmed-notice / andon-notice /
+    oracle-andon sibling, auto-review's review-stamp env + notice, ci.yml's
+    regen notice step, the groomer's notice step."""
+    jobs = _ai_consuming_jobs(texts)
+    for workflow in sorted({workflow for workflow, _job in jobs}):
+        explained = False
+        for _job, block in _job_blocks(texts[workflow]).items():
+            if _job_level_cord_gated(block):
+                continue  # skipped with the cord — cannot be the explainer
+            body = _without_comments(block)
+            if ANDON_EXPLAIN_LEG in body and "::notice::" in body:
+                explained = True
+                break
+        assert explained, (
+            f"{workflow}: the cord gates its AI job(s) but no ungated job keys "
+            f"a ::notice:: on {ANDON_EXPLAIN_LEG} — a pulled cord would leave "
+            "the run mute (grey, with nothing saying why); add the "
+            "disarmed-notice-style sibling, or a notice step in a job that "
+            "keeps running")
+
+
+def test_every_ai_consuming_job_gates_on_the_andon_cord():
+    _assert_every_ai_job_gates_on_the_cord(_all_workflow_texts())
+
+
+def test_every_corded_workflow_explains_the_pull():
+    _assert_every_corded_workflow_explains_the_pull(_all_workflow_texts())
+
+
+def test_andon_ai_job_roster_is_the_expected_set():
+    # The roster pin: the enumerated set equals the hand-derived one, so a
+    # shrink or a grow is reconciled on purpose (a new AI-consuming job joins
+    # ANDON_AI_JOBS in the same PR that cords it).
+    found = set(_ai_consuming_jobs(_all_workflow_texts()))
+    assert found == ANDON_AI_JOBS, (
+        f"AI-consuming roster drifted — new: {sorted(found - ANDON_AI_JOBS)}, "
+        f"gone: {sorted(ANDON_AI_JOBS - found)}")
+
+
+def test_andon_reconciler_itself_is_not_corded():
+    # SANITY: andon.yml (the status-issue reconciler) reads the variable but
+    # spends no key and runs no agent — so it is outside the AI set, and its
+    # reconcile job must NOT gate on the cord: it has to run WHILE the cord is
+    # pulled to open the status issue, and after release to close it.
+    texts = _all_workflow_texts()
+    assert "andon.yml" in texts, "andon.yml is missing from .github/workflows/"
+    assert not any(workflow == "andon.yml" for workflow, _job in _ai_consuming_jobs(texts)), (
+        "andon.yml enumerated as AI-consuming — it must spend no provider key")
+    blocks = _job_blocks(texts["andon.yml"])
+    assert "reconcile" in blocks, "andon.yml has no `reconcile` job"
+    # Absence of the LEG ANYWHERE in the job header, stricter than "not
+    # gated as a top-level conjunct": a leg buried in a || branch would
+    # still be a mistake here.
+    assert ANDON_JOB_LEG not in _without_comments(_job_header(blocks["reconcile"])), (
+        "andon.yml [reconcile] carries the gate leg — it could never open or "
+        "close the status issue")
+    assert not _job_level_cord_gated(blocks["reconcile"])
+
+
+def test_andon_guard_rejects_a_job_that_shed_its_leg():
+    # NEGATIVE CONTROL A (in-memory): the labeler's `label` job without its
+    # folded leg line must fail naming that job — derived from the live text.
+    texts = _all_workflow_texts()
+    victim = "labeler.yml"
+    leg = f"\n      && {ANDON_JOB_LEG}"
+    assert leg in texts[victim], "tamper target not found — the fixture is stale"
+    texts[victim] = texts[victim].replace(leg, "", 1)
+    with pytest.raises(AssertionError, match=r"labeler\.yml \[label\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+_ROGUE_JOB = """\
+  rogue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+"""
+
+
+def test_andon_guard_rejects_a_future_uncorded_ai_job(tmp_path):
+    # NEGATIVE CONTROL B (tmp_path): a NEW agent job with no `if:` at all,
+    # appended to a copy of the tree, must fail naming it — the property the
+    # pin exists for: a future AI-consuming job cannot land uncorded.
+    import shutil
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    for path in _workflow_paths(REPO_ROOT / ".github" / "workflows"):
+        shutil.copy(path, workflows_dir)
+    victim = workflows_dir / "labeler.yml"
+    text = victim.read_text(encoding="utf-8")
+    assert "  rogue:" not in text, "tamper target collides — the fixture is stale"
+    victim.write_text(text.rstrip("\n") + "\n\n" + _ROGUE_JOB, encoding="utf-8")
+    texts = {p.name: p.read_text(encoding="utf-8")
+             for p in _workflow_paths(workflows_dir)}
+    assert ("labeler.yml", "rogue") in _ai_consuming_jobs(texts), (
+        "the rogue job was not enumerated — the enumerator, not the gate, is broken")
+    with pytest.raises(AssertionError, match=r"labeler\.yml \[rogue\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+# ── Hardening pins: conjunct shape, hoisted keys, derived secrets, globs ─────
+
+_DESIGN_COACH_SHAPE = (
+    "always() && needs.design-changes.outputs.designs_changed == 'true' "
+    "&& needs.jane-review.result == 'success' "
+    f"&& {ANDON_JOB_LEG} "
+    "&& (github.event.action == 'opened' || github.event.action == 'reopened')")
+_MODEL_SMOKE_SHAPE = (
+    f"{ANDON_JOB_LEG} && (github.event_name == 'workflow_dispatch' || "
+    "github.event.pull_request.head.repo.full_name == github.repository)")
+
+
+@pytest.mark.parametrize("cond", [
+    ANDON_JOB_LEG,                                   # the whole condition
+    f"vars.X_ENABLED == 'true' && {ANDON_JOB_LEG}",  # last conjunct (the routines)
+    f"{ANDON_JOB_LEG} && vars.X_ENABLED == 'true'",  # first conjunct — position is free
+    f"always()   &&   {ANDON_JOB_LEG}",              # whitespace-insensitive join
+    _DESIGN_COACH_SHAPE,                             # leg mid-way, || group AFTER it
+    _MODEL_SMOKE_SHAPE,                              # leg && (A || B)
+    "!contains(github.event.pull_request.labels.*.name, 'no-oracle-review') "
+    f"&& {ANDON_JOB_LEG}",                           # a call's parens are not a group of ||
+])
+def test_cord_conjunct_helper_accepts_a_governing_leg(cond):
+    assert _cord_is_top_level_conjunct(cond), cond
+
+
+@pytest.mark.parametrize("cond", [
+    "",                                              # no condition at all
+    "vars.X_ENABLED == 'true'",                      # no leg
+    ANDON_EXPLAIN_LEG,                               # the OTHER leg (== 'pulled')
+    f"{ANDON_JOB_LEG} && github.event_name == 'workflow_dispatch' "
+    "|| github.event.pull_request.head.repo.full_name == github.repository",  # leg && A || B
+    f"vars.X_ENABLED == 'true' || {ANDON_JOB_LEG}",  # A || leg
+    f"({ANDON_JOB_LEG} && vars.X_ENABLED == 'true') || always()",  # leg only inside a group
+    f"!({ANDON_JOB_LEG})",                           # negated group
+    "vars.AI_ANDON_CORD != \"pulled\"",              # not the exact leg text
+    f"{ANDON_JOB_LEG}x",                             # the leg as a prefix of something else
+])
+def test_cord_conjunct_helper_rejects_a_non_governing_leg(cond):
+    assert not _cord_is_top_level_conjunct(cond), cond
+
+
+def test_andon_guard_rejects_a_leg_that_is_not_a_top_level_conjunct():
+    # NEGATIVE CONTROL E (in-memory): model-smoke's `leg && (A || B)` with its
+    # parentheses dropped reads `leg && A || B` — GitHub runs the job on B
+    # with the cord pulled. A substring pin would bless it; the guard must
+    # fail naming the job and the shape.
+    texts = _all_workflow_texts()
+    victim = "model-smoke.yml"
+    folded = (
+        f"      {ANDON_JOB_LEG} &&\n"
+        "      (github.event_name == 'workflow_dispatch' ||\n"
+        "       github.event.pull_request.head.repo.full_name == github.repository)\n")
+    flat = (
+        f"      {ANDON_JOB_LEG} &&\n"
+        "      github.event_name == 'workflow_dispatch' ||\n"
+        "      github.event.pull_request.head.repo.full_name == github.repository\n")
+    assert texts[victim].count(folded) == 1, "tamper target not found — the fixture is stale"
+    texts[victim] = texts[victim].replace(folded, flat, 1)
+    with pytest.raises(AssertionError,
+                       match=r"model-smoke\.yml \[smoke\].*not a top-level conjunct"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+def test_andon_guard_rejects_a_provider_key_hoisted_into_workflow_env():
+    # NEGATIVE CONTROL F (in-memory): a provider secret in a workflow's
+    # top-level `env:` reaches every job by inheritance while living in no
+    # job block — the enumerator would see nothing to cord. The guard must
+    # refuse the hoist outright, naming the workflow.
+    texts = _all_workflow_texts()
+    victim = "labeler.yml"
+    hoist = "env:\n  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}\n\njobs:\n"
+    assert texts[victim].count("\njobs:\n") == 1, "tamper target not found — the fixture is stale"
+    texts[victim] = texts[victim].replace("\njobs:\n", "\n" + hoist, 1)
+    assert _ai_spend().search(_workflow_header(texts[victim])), "the hoist did not land"
+    with pytest.raises(AssertionError, match=r"labeler\.yml.*" + re.escape(_HOISTED_KEY_MSG)):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+    # Positive control: the presence probe shape is NOT a hoisted spend.
+    probe = texts[victim].replace("${{ secrets.ANTHROPIC_API_KEY }}",
+                                  "${{ secrets.ANTHROPIC_API_KEY != '' }}", 1)
+    _assert_no_workflow_level_provider_env({victim: probe})
+
+
+def test_live_workflows_hoist_no_provider_key_into_workflow_env():
+    _assert_no_workflow_level_provider_env(_all_workflow_texts())
+
+
+_ENV_ONLY_ROGUE_JOB = """\
+  rogue:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - run: python3 -m some_agent --spend
+"""
+
+
+def test_andon_guard_rejects_a_job_whose_only_spend_is_a_job_level_env_key():
+    # NEGATIVE CONTROL G (in-memory): a job that names the secret ONLY in its
+    # job-level `env:` (no action, no step references it) must still be
+    # enumerated — the block includes the header — and fail the gate.
+    texts = _all_workflow_texts()
+    victim = "labeler.yml"
+    assert "  rogue:" not in texts[victim], "tamper target collides — the fixture is stale"
+    texts[victim] = texts[victim].rstrip("\n") + "\n\n" + _ENV_ONLY_ROGUE_JOB
+    jobs = _ai_consuming_jobs(texts)
+    assert ("labeler.yml", "rogue") in jobs, (
+        "a job-level env spend was not enumerated — the job header is out of the enumerator's sight")
+    assert not any(_is_ai_consuming(c)[0] for c in _job_steps(jobs[("labeler.yml", "rogue")])), (
+        "the control is wrong: a STEP references the key, so it is not env-only")
+    with pytest.raises(AssertionError, match=r"labeler\.yml \[rogue\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+def test_andon_guard_rejects_a_step_gated_job_with_a_job_level_env_key():
+    # NEGATIVE CONTROL H (in-memory): ci.yml's regen is step-gated, so a key
+    # wired in its JOB header would reach every step, gated or not — the
+    # per-step scan cannot see it. The guard must refuse the header spend.
+    texts = _all_workflow_texts()
+    victim = "ci.yml"
+    block = _job_blocks(texts[victim])["regen"]
+    header = _job_header(block)
+    assert not _is_ai_consuming(header)[0], "the fixture is stale: regen's header already spends"
+    runs_on = re.search(r"^    runs-on:.*$", header, re.MULTILINE)
+    assert runs_on, "regen has no runs-on line to anchor the tamper on"
+    tampered = header.replace(
+        runs_on.group(0),
+        runs_on.group(0) + "\n    env:\n      ZAI_KEY: ${{ secrets.ZAI_KEY }}", 1)
+    texts[victim] = texts[victim].replace(block, block.replace(header, tampered, 1), 1)
+    with pytest.raises(AssertionError, match=r"ci\.yml \[regen\].*job header references"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
+
+def test_spend_alternation_covers_every_registry_provider_secret():
+    # Positive pin for the derivation: every `secret` a registry provider
+    # declares is matched as a spend (and its presence probe is not), plus
+    # the literal floor and both sides of every alias marker.
+    registry_secrets = _registry_provider_secrets()
+    assert registry_secrets, "the registry declares no providers"
+    aliases = _alias_secret_names(_all_workflow_texts())
+    assert ("CLAUDE_KEY", "ANTHROPIC_API_KEY") in [
+        tuple(m) for text in _all_workflow_texts().values()
+        for m in _ALIAS_MARKER_RE.findall(text)], (
+        "design-run's registry-secret-alias marker is gone — the fixture is stale")
+    spend = _ai_spend()
+    for name in sorted(registry_secrets | _LITERAL_PROVIDER_SECRETS | aliases):
+        assert spend.search(f"key: ${{{{ secrets.{name} }}}}"), f"{name} is not a spend"
+        assert not spend.search(f"HAS: ${{{{ secrets.{name} != '' }}}}"), (
+            f"{name}'s presence probe is flagged as a spend")
+    assert not spend.search("key: ${{ secrets.REGEN_TOKEN }}"), (
+        "a non-provider secret is in the alternation")
+
+
+_OPENAI_ROGUE_JOB = """\
+  rogue:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python3 -m some_agent
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+"""
+
+
+def test_andon_guard_enrols_a_new_registry_providers_spender():
+    # NEGATIVE CONTROL I (in-memory): the alternation built the way a NEW
+    # `[provider:openai]` stanza would build it (its secret added to the
+    # set) must enumerate a rogue job spending that key and fail the gate —
+    # while today's alternation, without the stanza, does not see it (which
+    # is exactly why the set is derived from the registry, not hand-kept).
+    texts = _all_workflow_texts()
+    victim = "labeler.yml"
+    assert "  rogue:" not in texts[victim], "tamper target collides — the fixture is stale"
+    texts[victim] = texts[victim].rstrip("\n") + "\n\n" + _OPENAI_ROGUE_JOB
+    assert ("labeler.yml", "rogue") not in _ai_consuming_jobs(texts), (
+        "OPENAI_API_KEY is already in the live alternation — pick another name for the control")
+    widened = _ai_spend_regex(_provider_secret_names(texts) | {"OPENAI_API_KEY"})
+    assert ("labeler.yml", "rogue") in _ai_consuming_jobs(texts, widened), (
+        "the widened alternation did not enumerate the rogue spender")
+    with pytest.raises(AssertionError, match=r"labeler\.yml \[rogue\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts, widened)
+    # The widening changes nothing about the live tree: every real job still
+    # passes under it (a new provider must not fail existing workflows).
+    _assert_every_ai_job_gates_on_the_cord(_all_workflow_texts(), widened)
+
+
+def _assert_no_yaml_extension(workflows_dir: pathlib.Path) -> None:
+    """GitHub runs `.yaml` workflows as readily as `.yml`; the enumerator
+    globs both, but the house convention is one extension so every grep,
+    roster and script in the repo sees the same set."""
+    stray = sorted(p.name for p in workflows_dir.glob("*.yaml"))
+    assert not stray, (
+        f"workflow file(s) with a .yaml extension: {stray} — rename to .yml "
+        "(GitHub runs both, and every other tool here globs *.yml)")
+
+
+def test_workflows_dir_has_no_yaml_extension():
+    _assert_no_yaml_extension(REPO_ROOT / ".github" / "workflows")
+
+
+def test_yaml_extension_guard_fires_and_the_enumerator_still_globs_it(tmp_path):
+    # NEGATIVE CONTROL J: a `.yaml` copy of an AI workflow must (1) trip the
+    # hygiene pin with the rename message and (2) still be enumerated by the
+    # glob, so a stray extension can never hide an AI job from the cord pin.
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    (workflows_dir / "stray.yaml").write_text(
+        (REPO_ROOT / ".github" / "workflows" / "labeler.yml").read_text(encoding="utf-8"),
+        encoding="utf-8")
+    with pytest.raises(AssertionError, match=r"stray\.yaml.*rename to \.yml"):
+        _assert_no_yaml_extension(workflows_dir)
+    texts = {p.name: p.read_text(encoding="utf-8") for p in _workflow_paths(workflows_dir)}
+    assert ("stray.yaml", "label") in _ai_consuming_jobs(texts), (
+        "a .yaml workflow is invisible to the enumerator")
+
+
+def test_andon_guard_rejects_a_workflow_that_stopped_explaining():
+    # NEGATIVE CONTROL C (in-memory): lifestyle-shot.yml's andon-notice job
+    # with its explain leg removed leaves the workflow mute — the explain
+    # pin must fail naming the workflow.
+    texts = _all_workflow_texts()
+    victim = "lifestyle-shot.yml"
+    block = _job_blocks(texts[victim])["andon-notice"]
+    assert ANDON_EXPLAIN_LEG in block, "tamper target not found — the fixture is stale"
+    muted = block.replace(ANDON_EXPLAIN_LEG, "false")
+    texts[victim] = texts[victim].replace(block, muted, 1)
+    _assert_every_ai_job_gates_on_the_cord(texts)  # the gate side is intact
+    with pytest.raises(AssertionError, match=r"lifestyle-shot\.yml"):
+        _assert_every_corded_workflow_explains_the_pull(texts)
+
+
+def test_andon_guard_rejects_a_step_gated_job_that_shed_its_leg():
+    # NEGATIVE CONTROL D (in-memory): ci.yml's regen is a deterministic job
+    # whose ONE AI step (product-page drafting) carries the cord — strip the
+    # leg from that step's inline `if:` and the pin must fail naming the job.
+    texts = _all_workflow_texts()
+    victim = "ci.yml"
+    leg = f" && {ANDON_JOB_LEG}"
+    block = _job_blocks(texts[victim])["regen"]
+    assert block.count(leg) == 1, "tamper target not found — the fixture is stale"
+    texts[victim] = texts[victim].replace(block, block.replace(leg, "", 1), 1)
+    with pytest.raises(AssertionError, match=r"ci\.yml \[regen\]"):
+        _assert_every_ai_job_gates_on_the_cord(texts)
+
 
 
 # An explicit in-workflow marker naming a step's secret as an alias for a
@@ -1869,13 +2537,22 @@ def _assert_routine_walk_outcome_covers_every_link(
     Resolve the chain, take the walk's step ids in link order, and evaluate
     each AGENT_OUTCOME / RUN / SHIP expression under every outcome
     combination of those steps. Any state where a link succeeded must yield
-    'success' — and the all-dead states must not. The all-dead states must
-    further yield the outcome of the LAST LINK THAT ACTUALLY RAN (the last
-    non-'skipped' link), and 'skipped' only when EVERY link was skipped:
-    routine-lock-cleanup.sh reads 'skipped' as "the agent never ran, nothing
-    to release", so a walk that reported 'skipped' after the GLM links FAILED
-    and the keyless Anthropic tail was skipped left a dead run's SHIP-LOCK
-    standing (the bare `|| steps.<link5>.outcome` tail did exactly that).
+    'success' — and the all-dead states must not.
+
+    The all-dead value is routine-shaped (#538):
+
+    - SHIP-LOCK routines (backlog-burn, design-run) carry the three-valued
+      walk: 'not-run' ONLY when every link was skipped, 'failure' otherwise.
+      The value is diagnostic input to routine-lock-cleanup.sh, which no-ops
+      on 'not-run' — an expression reporting 'not-run' after a link ran
+      makes the cleanup skip a dead run and leave its SHIP-LOCK standing.
+      ('failure' — not the raw last-ran outcome — because claude-code-action
+      exits 0 without delivering, so the walk's 'success' is not evidence of
+      anything; the DISPOSITION lives in the lock cleanup's artifact read.)
+    - Every other routine keeps the last-ran rule: the all-dead states yield
+      the outcome of the LAST LINK THAT ACTUALLY RAN (the last non-'skipped'
+      link), and 'skipped' only when EVERY link was skipped.
+
     Factored out so the negative controls can run it against tampered text.
     """
     global _PROVIDER_UNDER_TEST
@@ -1901,6 +2578,17 @@ def _assert_routine_walk_outcome_covers_every_link(
                         f"outcomes {outcomes} — a link succeeded but the "
                         "walk's outcome is not success; the expression does "
                         "not cover every link of the walk")
+                elif row.ship_lock:
+                    want = "not-run" if all(
+                        o == "skipped" for o in state) else "failure"
+                    assert got == want, (
+                        f"{where}: {var} read {got!r} with link outcomes "
+                        f"{outcomes} — expected {want!r}: the three-valued "
+                        "SHIP-LOCK walk must read 'not-run' only when EVERY "
+                        "link was skipped and 'failure' otherwise; a "
+                        "'not-run' (or a stray raw outcome) after a link ran "
+                        "tells routine-lock-cleanup the agent never ran and "
+                        "leaves a dead run's SHIP-LOCK standing")
                 else:
                     assert got != "success", (
                         f"{where}: {var} read {got!r} with no link having "
@@ -2064,7 +2752,83 @@ def test_routine_exhaustion_gates_fire_on_whole_chain_failure():
             "step among its exhaustion gates — its `if:` would go unsimulated")
         text = _routine_text(row.workflow)
         for step_name in row.gates:
-            _assert_gate_fires_on_whole_walk_failure(reg, row, text, step_name)
+            if row.ship_lock:
+                _assert_ship_lock_gate_follows_disposition(
+                    reg, row, text, step_name)
+            else:
+                _assert_gate_fires_on_whole_walk_failure(
+                    reg, row, text, step_name)
+
+
+# The SHIP-LOCK routines' counterpart of _assert_gate_fires_on_whole_walk_
+# failure, keyed on the #538 lesson: a ship link's exit code is not evidence.
+# claude-code-action exits 0 whenever the agent ends its turn without an API
+# error — pushed a branch, opened a PR, posted a decline, or silently stopped
+# after claiming; the walk expression cannot tell those apart (that is why it
+# folds every ran-but-not-success outcome into 'failure' and stays
+# diagnostic). So the red-on-death and provider-triage gates must key on the
+# ONE thing that can tell them apart: routine-lock-cleanup.sh's
+# artifact-derived disposition outputs, read from the `lock_cleanup` step.
+_DISPOSITION_TAIL = ("steps.lock_cleanup.outputs.delivered != 'true' "
+                     "&& steps.lock_cleanup.outputs.declined != 'true'")
+
+
+def _assert_ship_lock_gate_follows_disposition(
+        reg: Registry, row: Routine, text: str, step_name: str) -> None:
+    """The named gate's `if` must fire unless the run delivered or declined.
+
+    Structural, not simulated — the disposition lives in GitHub state (does a
+    corroborating branch exist? a closing PR? a stop comment?), which no walk
+    outcome combination can represent. What CAN be pinned is that the gate
+    reads it: the delivered/declined legs present, the key/arming legs
+    present (the degraded paths must not go red), and NO walk-step outcome
+    read anywhere in the condition — a re-added `(walk) != 'success'` clause
+    is the exact #538 regression, scoring an exit-0 run that claimed but
+    pushed nothing as healthy.
+    """
+    workflow = row.workflow
+    where = f"{row.workflow} [{row.job}]"
+    job = _routine_job_text(text, row)
+    walk_ids = _routine_walk_ids(reg, row, job)
+    cond = _gate_condition(job, step_name, where)
+    # The legs the walk gates require for the same reasons: the keyless
+    # degraded path (every link skipped, the pinned ::notice:: skip) must
+    # not go red, and a paused-in-git routine must not fire its gates.
+    assert re.search(r"steps\.policy\.outputs\.key_present\s*==\s*'1'", cond), (
+        f"{where}: the '{step_name}' gate carries no "
+        "steps.policy.outputs.key_present == '1' leg — with no key set for any "
+        "provider the walk is all-skipped and this gate would turn the "
+        "pinned ::notice:: skip into a red run (or a live triage probe)")
+    assert re.search(r"steps\.policy\.outputs\.(enabled|armed)\s*==\s*'true'", cond), (
+        f"{where}: the '{step_name}' gate carries no arming leg "
+        "(steps.policy.outputs.enabled == 'true') — it would fire with the "
+        "routine paused in git")
+    for leg in ("delivered", "declined"):
+        assert re.search(
+            rf"steps\.lock_cleanup\.outputs\.{leg}\s*!=\s*'true'", cond), (
+            f"{where}: the '{step_name}' gate carries no "
+            f"steps.lock_cleanup.outputs.{leg} != 'true' leg — without it an "
+            f"artifact-{leg} run is scored dead: the gate would fail the job "
+            "(or run a live triage probe) over work the cleanup just proved "
+            "exists")
+    # The load-bearing #538 rule: no walk-outcome read in the gate. Checked
+    # before the exact-tail match so the re-added-walk-clause negative
+    # control reports the cause, not the symptom.
+    for sid in walk_ids:
+        assert f"steps.{sid}.outcome" not in cond, (
+            f"{where}: the '{step_name}' gate reads steps.{sid}.outcome — a "
+            "SHIP-LOCK gate must key on the lock cleanup's artifact-derived "
+            "disposition, never the walk's outcome string: claude-code-action "
+            "exits 0 whenever the agent ends its turn without an API error, "
+            "so a walk-success clause scores an exit-0 run that claimed but "
+            "pushed nothing as healthy (#538)")
+    # After stripping the legs the simulation fixes green, the surviving
+    # clause is exactly the two disposition legs — nothing else sneaks in.
+    sim_cond = _strip_fixed_green_legs(cond)
+    assert sim_cond.strip() == _DISPOSITION_TAIL, (
+        f"{where}: the '{step_name}' condition does not reduce to the "
+        f"disposition tail ({_DISPOSITION_TAIL!r}) after stripping the "
+        f"fixed-green legs: {sim_cond!r}")
 
 
 def _gate_chunk(job_text: str, step_name: str) -> str:
@@ -2109,27 +2873,112 @@ def test_gate_guard_rejects_a_red_step_without_its_arming_leg():
         _assert_gate_fires_on_whole_walk_failure(reg, row, tampered, EXHAUSTED_RED_STEP)
 
 
-def test_burn_checkless_pr_notice_fires_only_on_a_successful_walk():
-    # The burn's "Note a checkless draft PR" notice reads the walk too — the
-    # positive form `(walk) == 'success'`: it must fire for ANY link's
-    # success (a PR was opened, by whichever provider) and never otherwise.
+def _assert_burn_checkless_notice_follows_delivery(
+        reg: Registry, row: Routine, text: str) -> None:
+    """The burn's checkless-PR notice must fire on the lock cleanup's
+    `delivered` output (#538) — the artifact-derived fact that a branch or
+    closing PR exists — never on the walk's success: an exit-0 ship link
+    that pushed nothing would otherwise produce a notice about a draft PR
+    that does not exist. Factored out for the negative control."""
+    workflow = row.workflow
+    where = f"{row.workflow} [{row.job}]"
+    job = _routine_job_text(text, row)
+    walk_ids = _routine_walk_ids(reg, row, job)
+    cond = _gate_condition(job, "Note a checkless draft PR (no CI-triggering PAT)", where)
+    assert re.search(
+        r"steps\.lock_cleanup\.outputs\.delivered\s*==\s*'true'", cond), (
+        f"{where}: the checkless-PR notice no longer fires on "
+        "steps.lock_cleanup.outputs.delivered == 'true' — it must key on the "
+        "artifact-derived disposition, not the walk")
+    assert re.search(r"steps\.policy\.outputs\.key_present\s*==\s*'1'", cond), (
+        f"{where}: the checkless-PR notice lost its key_present leg")
+    assert re.search(r"steps\.policy\.outputs\.enabled\s*==\s*'true'", cond), (
+        f"{where}: the checkless-PR notice lost its arming leg")
+    for sid in walk_ids:
+        assert f"steps.{sid}.outcome" not in cond, (
+            f"{where}: the checkless-PR notice reads steps.{sid}.outcome — "
+            "it must key on the delivered disposition, not the walk's "
+            "exit-code success (#538)")
+
+
+def test_burn_checkless_pr_notice_follows_the_delivered_disposition():
+    reg = Registry.load(str(REGISTRY))
+    row = ROUTINES["backlog-burn"]
+    _assert_burn_checkless_notice_follows_delivery(
+        reg, row, _routine_text(row.workflow))
+
+
+def test_burn_checkless_notice_guard_rejects_a_walk_clause():
+    # NEGATIVE CONTROL: swap the notice's delivered leg back to the pre-#538
+    # `(walk) == 'success'` clause — an exit-0 run that delivered nothing
+    # would then trigger a notice about a draft PR that does not exist. The
+    # no-walk-read rule must reject it.
     reg = Registry.load(str(REGISTRY))
     row = ROUTINES["backlog-burn"]
     workflow = row.workflow
-    job = _routine_job_text(_routine_text(workflow), row)
-    global _PROVIDER_UNDER_TEST
-    _PROVIDER_UNDER_TEST = _routine_provider(row.conf)
-    walk_ids = _routine_walk_ids(reg, row, job)
-    cond = _gate_condition(job, "Note a checkless draft PR (no CI-triggering PAT)", workflow)
-    sim = _strip_fixed_green_legs(cond)
-    sim = re.sub(r"env\.HAS_GH_TOKEN\s*!=\s*'true'\s*&&\s*", "", sim)
-    mm = re.match(r"^\((.+)\)\s*==\s*'success'\s*$", sim.strip())
-    assert mm, f"{workflow}: the checkless-PR notice clause changed shape: {sim!r}"
-    for state in _walk_states(len(walk_ids)):
-        walk = _eval_github_expression(mm.group(1), dict(zip(walk_ids, state)))
-        assert isinstance(walk, str)
-        assert (walk == "success") == ("success" in state), (
-            f"{workflow}: the checkless-PR notice misreads walk state {state}")
+    text = _routine_text(workflow)
+    job = _routine_job_text(text, row)
+    chunk = _gate_chunk(job, "Note a checkless draft PR (no CI-triggering PAT)")
+    live = _live_walk_expression(job, workflow)
+    tampered_chunk = re.sub(
+        r"&& steps\.lock_cleanup\.outputs\.delivered == 'true'",
+        f"&& ({live}) == 'success'", chunk, count=1)
+    assert tampered_chunk != chunk, (
+        "tamper did not land — the notice's delivered leg moved shape")
+    tampered = text.replace(chunk, tampered_chunk, 1)
+    # The delivered-leg presence rule fires first (the swap removed the
+    # leg); both it and the no-walk-read rule name the same cause.
+    with pytest.raises(AssertionError, match="artifact-derived disposition"):
+        _assert_burn_checkless_notice_follows_delivery(reg, row, tampered)
+
+
+def test_ship_lock_gate_guard_rejects_a_dropped_disposition_leg():
+    # NEGATIVE CONTROL, both SHIP-LOCK routines, both their gates: a gate
+    # that dropped its delivered leg would fail the job (and run a live
+    # triage probe) over work the cleanup just proved exists — a run that
+    # pushed its branch a minute before a link timed out.
+    reg = Registry.load(str(REGISTRY))
+    lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
+    assert lock_rows, "no SHIP-LOCK routine in the ROUTINES table"
+    for row in lock_rows:
+        for step_name in row.gates:
+            tampered = _gate_without_leg(
+                row, step_name,
+                r"steps\.lock_cleanup\.outputs\.delivered != 'true'")
+            with pytest.raises(
+                    AssertionError,
+                    match="no steps.lock_cleanup.outputs.delivered"):
+                _assert_ship_lock_gate_follows_disposition(
+                    reg, row, tampered, step_name)
+
+
+def test_ship_lock_gate_guard_rejects_a_walk_clause():
+    # NEGATIVE CONTROL for #538 itself, both SHIP-LOCK routines: re-adding
+    # `(walk) != 'success'` to the red gate — on top of the disposition
+    # legs, exactly how the regression would land — makes an exit-0 run
+    # that claimed but pushed nothing green again (the walk reads 'success',
+    # the gate goes quiet). The no-walk-read rule must reject it.
+    reg = Registry.load(str(REGISTRY))
+    lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
+    assert lock_rows, "no SHIP-LOCK routine in the ROUTINES table"
+    for row in lock_rows:
+        step_name = "Turn a dead agentic run red"
+        workflow = row.workflow
+        text = _routine_text(workflow)
+        job = _routine_job_text(text, row)
+        chunk = _gate_chunk(job, step_name)
+        live = _live_walk_expression(job, workflow)
+        leg = "&& steps.lock_cleanup.outputs.declined != 'true'\n"
+        assert leg in chunk, (
+            f"{workflow}: the red gate's declined leg moved shape — the "
+            "tamper target is stale")
+        tampered_chunk = chunk.replace(
+            leg, leg + f"          && ({live}) != 'success'\n", 1)
+        tampered = text.replace(chunk, tampered_chunk, 1)
+        assert tampered != text, "tamper did not land — the fixture is stale"
+        with pytest.raises(AssertionError, match="artifact-derived"):
+            _assert_ship_lock_gate_follows_disposition(
+                reg, row, tampered, step_name)
 
 
 def _live_walk_expression(job_text: str, workflow: str) -> str:
@@ -2182,13 +3031,19 @@ def test_walk_outcome_guard_fires_on_a_stale_link1_expression():
 
 
 def test_exhaustion_gate_guards_fire_on_a_stale_link1_gate():
-    """Negative control for every exhaustion-gate simulation, every
-    routine: a gate still pinned to link 1 would fire (fail the job, or run
-    a live triage probe) after a healthy link-2 or tail run. Derive the
-    mutation from each workflow's live expression and require each gate's
-    simulation to fail."""
+    """Negative control for every walk-reading exhaustion gate: a gate still
+    pinned to link 1 would fire (fail the job, or run a live triage probe)
+    after a healthy link-2 or tail run. Derive the mutation from each
+    workflow's live expression and require each gate's simulation to fail.
+    The SHIP-LOCK routines are excluded — their gates key on the lock
+    cleanup's disposition and carry no walk clause to go stale (#538); the
+    stale link-1 mutation on them is caught by
+    test_walk_outcome_guard_fires_on_a_stale_link1_expression, and their
+    gates carry their own negative controls below."""
     reg = Registry.load(str(REGISTRY))
-    for row in ROUTINES.values():
+    walk_gated = [r for r in ROUTINES.values() if not r.ship_lock]
+    assert walk_gated, "no walk-gated routine left in the ROUTINES table"
+    for row in walk_gated:
         tampered = _stale_link1_copy(row)
         for step_name in row.gates:
             with pytest.raises(AssertionError, match="does not cover the whole chain"):
@@ -2214,15 +3069,18 @@ def test_walk_outcome_guard_fires_on_a_single_provider_expression():
     tampered = text.replace(live, head_only)
     with pytest.raises(AssertionError, match="does not cover every link"):
         _assert_routine_walk_outcome_covers_every_link(reg, row, tampered)
-    with pytest.raises(AssertionError, match="does not cover the whole chain"):
-        _assert_gate_fires_on_whole_walk_failure(reg, row, tampered, TRIAGE_STEP)
+    # No gate half here since #538: the burn's gates key on the lock
+    # cleanup's disposition and carry no walk clause, so this mutation is
+    # invisible to them BY DESIGN — their own negative controls
+    # (_a_dropped_disposition_leg / _a_walk_clause) prove they can fail.
 
 
 def _bare_tail_copy(row: Routine) -> str:
     """A copy of the workflow whose EVERY walk-outcome expression is reverted
     to the bare-last-link tail (`… || steps.<last link>.outcome`, the
     original #544 form): derived from the live expression by stripping the
-    nested last-ran fallback, never from a hand-copied literal."""
+    nested last-ran fallback, never from a hand-copied literal. Only the
+    walk-gated (non-ship_lock) routines carry that form since #538."""
     workflow = row.workflow
     text = _routine_text(workflow)
     live = _live_walk_expression(_routine_job_text(text, row), workflow)
@@ -2232,7 +3090,9 @@ def _bare_tail_copy(row: Routine) -> str:
         r" || steps.\1.outcome", live)
     assert bare != live, (
         f"{workflow}: the live walk expression carries no nested last-ran "
-        "fallback to strip — the negative-control derivation is stale")
+        "fallback to strip — the negative-control derivation is stale (a "
+        "ship_lock row reached the walk-gated derivation: route it to "
+        "_last_link_not_run_copy instead)")
     assert text.count(live) >= 2
     return text.replace(live, bare)
 
@@ -2240,14 +3100,64 @@ def _bare_tail_copy(row: Routine) -> str:
 def test_walk_outcome_guard_fires_on_a_bare_tail_expression():
     """Negative control for the last-ran rule: the bare-tail form reads
     'skipped' whenever the tail was skipped for want of its key — even after
-    the head links FAILED — so routine-lock-cleanup would no-op on a dead run
-    and leave its SHIP-LOCK standing. The simulation must reject it, for every
-    routine, on exactly that rule (the any-success half still passes: the bare
-    tail does cover every link's success)."""
+    the head links FAILED — so the walk reports 'skipped' over a walk where a
+    link ran and died. The simulation must reject it, for every walk-gated
+    routine, on exactly that rule (the any-success half still passes: the
+    bare tail does cover every link's success)."""
     reg = Registry.load(str(REGISTRY))
-    for row in ROUTINES.values():
+    walk_gated = [r for r in ROUTINES.values() if not r.ship_lock]
+    assert walk_gated, "no walk-gated routine left in the ROUTINES table"
+    for row in walk_gated:
         tampered = _bare_tail_copy(row)
         with pytest.raises(AssertionError, match="last link that actually ran"):
+            _assert_routine_walk_outcome_covers_every_link(reg, row, tampered)
+
+
+def _last_link_not_run_copy(row: Routine) -> str:
+    """A copy of the workflow whose EVERY walk-outcome expression has its
+    all-skipped conjunction collapsed to a LAST-LINK-ONLY read — the #538
+    regression shape for the three-valued walk: `… || steps.<last
+    link>.outcome == 'skipped' && 'not-run' || 'failure'` reports 'not-run'
+    whenever only the keyless tail was skipped, even after the head links
+    FAILED, and routine-lock-cleanup.sh no-ops on 'not-run'. Derived from the
+    live expression, never a hand-copied literal."""
+    workflow = row.workflow
+    text = _routine_text(workflow)
+    live = _live_walk_expression(_routine_job_text(text, row), workflow)
+    m = re.search(
+        r"\(steps\.\w+\.outcome == 'skipped' && [^()]*\)"
+        r" && 'not-run' \|\| 'failure'$", live)
+    assert m, (
+        f"{workflow}: the live walk expression carries no all-skipped "
+        "not-run conjunction to collapse — the negative-control derivation "
+        "is stale (a walk-gated row reached the ship_lock derivation: route "
+        "it to _bare_tail_copy instead)")
+    tail_ids = re.findall(r"steps\.(\w+)\.outcome", m.group(0))
+    collapsed = (f"steps.{tail_ids[-1]}.outcome == 'skipped'"
+                 " && 'not-run' || 'failure'")
+    tampered_expr = live[:m.start()] + collapsed
+    assert tampered_expr != live, "tamper did not land — the fixture is stale"
+    assert text.count(live) >= 2, (
+        f"{workflow}: the live walk expression appears {text.count(live)} "
+        "time(s) — the negative-control mutation would not represent the "
+        "regression; update the derivation")
+    return text.replace(live, tampered_expr)
+
+
+def test_walk_outcome_guard_fires_on_a_last_link_only_not_run_expression():
+    """Negative control for the #538 three-valued rule, every SHIP-LOCK
+    routine: an expression that decides 'not-run' from the LAST link alone
+    reports 'not-run' after the head links failed and only the keyless tail
+    was skipped — the cleanup then no-ops on a dead run and leaves its
+    SHIP-LOCK standing. The simulation must reject it on exactly that rule
+    (the any-success half still passes: the success branches cover every
+    link)."""
+    reg = Registry.load(str(REGISTRY))
+    lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
+    assert lock_rows, "no SHIP-LOCK routine in the ROUTINES table"
+    for row in lock_rows:
+        tampered = _last_link_not_run_copy(row)
+        with pytest.raises(AssertionError, match="leaves a dead run's SHIP-LOCK standing"):
             _assert_routine_walk_outcome_covers_every_link(reg, row, tampered)
 
 
@@ -2503,6 +3413,90 @@ def test_triage_wiring_guard_discriminates_a_wrong_chain():
     assert not all(c == "labeler" for c in chains), (
         "the triage-chain check did not react to a swapped chain — it has been "
         "weakened into a restatement")
+
+
+# ── The escalation dedup rule: reason-keyed, shared by BOTH surfaces ─────────
+#
+# Issue #550: the escalation used to be deduped PER CHAIN (marker
+# `provider-escalation:<chain>`, decision id `provider-<chain>`), so the one
+# event that fans out — a dual-provider outage, the only way a #544 chain
+# exhausts — opened up to fifteen needs-decision issues, one per chain, each
+# needing its own /decide. The rule is now reason-keyed and lives in ONE
+# tested place, model_registry.escalation, and BOTH escalation surfaces call
+# it: the provider-triage composite action and oracle.yml's own exhaustion leg
+# (which had a private `oracle-provider-escalation:<chain>` family). The pins
+# below hold each surface to the shared rule call and to no per-chain marker
+# or decision id surviving anywhere in it — a surface that quietly regrew its
+# own inline escalation is the drift that reopens #550.
+
+ORACLE_ESCALATION_LEG = "Escalate a human-fixable provider failure (HITL needs-decision)"
+
+
+def test_provider_triage_escalates_through_the_shared_reason_keyed_rule():
+    action = TRIAGE_ACTION.read_text(encoding="utf-8")
+    # The escalation runs the one shared, tested rule…
+    assert "model_registry escalate" in action, (
+        "provider-triage no longer runs `model_registry escalate` — its "
+        "escalation left the shared, reason-keyed rule (issue #550) and went "
+        "back to inline, untested JavaScript")
+    # …and carries no per-chain marker or decision id of its own: the dedup
+    # key is the reason, so a `${chain}` interpolation into a marker/id is
+    # the old rule regrown.
+    assert "provider-escalation:${" not in action, (
+        "provider-triage interpolates the chain into a provider-escalation "
+        "marker/id — the per-chain dedup key is back (issue #550)")
+    assert "provider-${" not in action and "decisionId" not in action, (
+        "provider-triage builds a decision id inline — the id is "
+        "model_registry.escalation's to derive (provider-<reason>)")
+
+
+def test_oracle_escalates_through_the_shared_reason_keyed_rule():
+    text = _oracle_text()
+    # The Oracle's own exhaustion leg calls the SAME command the composite
+    # action does — one rule, one marker family, so its escalations join the
+    # same per-reason issue a routine's would.
+    assert "model_registry escalate" in text, (
+        "oracle.yml no longer runs `model_registry escalate` — its exhaustion "
+        "leg left the shared, reason-keyed rule (issue #550)")
+    assert "oracle-provider-escalation" not in text, (
+        "oracle.yml still carries its private oracle-provider-escalation "
+        "marker family — the Oracle's escalations no longer share an issue "
+        "with the routines' (issue #550)")
+    assert "provider-escalation:${" not in text and "provider-${" not in text, (
+        "oracle.yml interpolates a chain into a provider-escalation marker/id "
+        "— the per-chain dedup key is back (issue #550)")
+    # The step's checkout is the BASE branch (#333's blindness posture) while
+    # its text comes from the PR head, so it must probe for the subcommand
+    # and degrade to a warning in the window where a PR changes this call
+    # before the module reaches main — a red advisory job is the #347 noise
+    # this leg exists to avoid.
+    assert "escalate --help" in text, (
+        "oracle.yml's escalate step no longer probes for the subcommand — "
+        "on a PR that changes this call the base-branch checkout lacks it "
+        "and the step would argparse-red instead of warning")
+
+
+def test_escalation_rule_guard_discriminates_a_shed_shared_call():
+    # NEGATIVE CONTROL: strip the shared call from the action and the pin
+    # must fail — otherwise it proves nothing.
+    action = TRIAGE_ACTION.read_text(encoding="utf-8")
+    tampered = action.replace("model_registry escalate", "model_registry classify", 1)
+    assert tampered != action, "tamper target not found — the fixture is stale"
+    assert "model_registry escalate" not in tampered
+
+
+def test_escalation_rule_guard_discriminates_a_regrown_per_chain_marker():
+    # NEGATIVE CONTROL: reintroduce a per-chain marker interpolation into
+    # either surface and the pin must fail. Replaces every occurrence — the
+    # step also probes for the subcommand (the base-branch bootstrap window),
+    # so a first-occurrence-only tamper could land on the probe and miss the
+    # real call.
+    text = _oracle_text()
+    tampered = text.replace(
+        "python3 -m model_registry escalate",
+        "MARKER=`provider-escalation:${CHAIN}`; python3 -m model_registry escalate")
+    assert tampered != text, "tamper target not found — the fixture is stale"
+    assert "provider-escalation:${" in tampered
 
 
 # ── The agent forge (Wright + Reeve's sign-off, docs/agent-forge.md) ─────────

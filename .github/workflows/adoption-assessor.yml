@@ -50,16 +50,25 @@ name: Adoption-study assessor (scheduled advisory verdicts)
 # Safety properties (same as the siblings, plus the assessor's own bounds):
 #   * TWO keys must agree to run: committed `enabled: true` AND
 #     ADOPTION_ASSESSOR_ENABLED == 'true'. Either off → inert.
+#   * AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set
+#     to 'pulled' bypasses this workflow's AI job with a single ::notice:: —
+#     grey, never red, no provider call, no escalation. Orthogonal to the
+#     arming variable: it overrides an armed routine without touching it.
 #   * Advisory-only + bounded: the run's write surface is the MCP tool
 #     post_adoption_disposition, which hardcodes the advisory framing, requires
 #     the `adoption-study` label, applies NO label, and caps dispositions per
-#     run. The agent is handed only the trusted Select step's bounded issue set.
+#     run — counted in the shared ASSESSOR_CAP_STATE file, so the cap spans the
+#     whole chain walk and not one link (#569). The agent is handed only the
+#     trusted Select step's bounded issue set.
 #   * The assessor's deny backstop (.claude/adoption-assessor-settings.json, via
 #     --settings) neutralizes the additive settings.json allows (chunk-helper,
 #     label-helper AND scout-helper — none is the assessor's surface), kept
 #     honest by scripts/adoption-assessor-perms-check.sh.
 #   * Every link of the walk carries the SAME surface, backstop, bounded issue
-#     set and prompt — only the model, secret and endpoint differ per step.
+#     set and prompt, and counts against ONE per-walk disposition cap (the
+#     shared ASSESSOR_CAP_STATE file every link step names — a link that posts
+#     its fill and dies still counts when the next link runs, #569) — only the
+#     model, secret and endpoint differ per step.
 
 on:
   schedule:
@@ -113,9 +122,12 @@ jobs:
     # dispatch against a PR branch must not run that branch's skill code with the
     # secret. On schedule github.ref_name is already the default branch, so this
     # only ever blocks a hand-dispatch against a non-default ref.
+    # Plus the AI andon cord (docs/andon-cord.md): AI_ANDON_CORD == 'pulled'
+    # skips this job grey — the disarmed-notice sibling explains the pull.
     if: >-
       vars.ADOPTION_ASSESSOR_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # Job budget 60 = head-step timeout (30) + one tail-step timeout (25)
     # + 5 min headroom. The GLM head keeps main's WHOLE pre-#544 job budget
@@ -398,7 +410,21 @@ jobs:
           # The trusted Select step's bounded issue set, bound into the agent's
           # environment so the MCP write tool can refuse any issue not in it.
           ASSESSOR_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+
+          # ASSESSOR_CAP_STATE is what spans the disposition cap across the
+          # walk (#569): each link is its own claude-code-action step spawning
+          # a fresh MCP server process, so an in-process counter reset to 0 per
+          # link and a walk could post cap-per-link. Every link step counts
+          # postings from that one shared runner.temp file (fresh per job, so
+          # the count is run-scoped and never persists) — the reeve.yml
+          # REEVE_GREENLIGHT_STATE pattern, lifted from the scout's #565
+          # reference implementation. Step-level env because the runner
+          # context is unavailable in job env, and the SAME path on every link
+          # step below; the server refuses to post if a link step lacks it, so
+          # a future link 4 that forgets the env fails loudly, never silently
+          # uncapped.
+          ASSESSOR_CAP_STATE: ${{ runner.temp }}/assessor-dispositions
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -420,8 +446,10 @@ jobs:
       # for an unattended bot — no OAuth token / subscription seat. The same
       # pin, permission, github_token, effort, bounded issue set, MCP write
       # tool, wrapper read verbs, backstop, transcript posture and prompt as
-      # the GLM link — only the model, secret and endpoint differ. Which model
-      # runs is the registry's call.
+      # the GLM link, and the same walk-spanning disposition cap — the shared
+      # ASSESSOR_CAP_STATE file these steps name, so the count the GLM link
+      # advanced is the count this link starts from (#569) — only the model,
+      # secret and endpoint differ. Which model runs is the registry's call.
       - name: Run via Anthropic (Claude, chain link 2)
         id: run_anthropic_2
         if: >-
@@ -435,10 +463,14 @@ jobs:
         env:
           # Same reason as the Z.AI step: the MCP write tool inherits this env
           # and authenticates with it, and refuses any issue outside the
-          # trusted Select step's set.
+          # trusted Select step's set — plus the SAME ASSESSOR_CAP_STATE path,
+          # so the count the GLM link advanced is the count this link starts
+          # from (#569).
           GITHUB_TOKEN: ${{ github.token }}
           ASSESSOR_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+
+          ASSESSOR_CAP_STATE: ${{ runner.temp }}/assessor-dispositions
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -465,7 +497,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ASSESSOR_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+
+          # Same walk-spanning cap state as the earlier links (#569).
+          ASSESSOR_CAP_STATE: ${{ runner.temp }}/assessor-dispositions
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -611,9 +646,13 @@ jobs:
     # The `assess` job is gated at job level, so an unset arming variable (the
     # default clone/fork state) or a dispatch against a non-default ref skips it
     # silently. This sibling makes that legible. No secrets, no write perms.
+    # A pulled AI andon cord (docs/andon-cord.md) skips the gated job the same
+    # way, so this sibling explains that too — checked first, since the cord
+    # overrides an armed routine.
     if: >-
       vars.ADOPTION_ASSESSOR_ENABLED != 'true'
       || github.ref_name != github.event.repository.default_branch
+      || vars.AI_ANDON_CORD == 'pulled'
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -622,8 +661,11 @@ jobs:
           ARMED: ${{ vars.ADOPTION_ASSESSOR_ENABLED }}
           REF: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ANDON: ${{ vars.AI_ANDON_CORD == 'pulled' }}
         run: |
-          if [ "${ARMED:-}" != "true" ]; then
+          if [ "${ANDON:-}" = "true" ]; then
+            echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — the adoption-study assessor did not run; no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume — see docs/andon-cord.md."
+          elif [ "${ARMED:-}" != "true" ]; then
             echo "::notice::the adoption-study assessor is disarmed — set the ADOPTION_ASSESSOR_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/adoption-assessor.conf; both must agree before it runs."
           else
             echo "::notice::the adoption-study assessor only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."

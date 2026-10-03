@@ -40,6 +40,11 @@ name: Product still (tier-1.5, AI)
 # the still is supplemental, so its absence must not redden every design change.
 # A manual dispatch still fails loudly: someone pressed the button and is owed
 # a reason. Dispatch from the default branch so the generated branch forks cleanly.
+# AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set to
+# 'pulled' bypasses the generate job (this workflow's one AI call) with a
+# single ::notice:: — grey, never red, no provider call, even on a manual
+# dispatch. Orthogonal to .github/ai-lifestyle.conf's off switch: it overrides
+# an enabled tier without touching the conf.
 
 on:
   # Auto: writing or editing a design's product-still.conf IS the request for a
@@ -186,7 +191,11 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    if: needs.detect.outputs.designs != '[]'
+    # AI andon cord (docs/andon-cord.md): a pulled cord bypasses every
+    # AI-consuming job — this is the one that spends a ZAI_KEY call — with no
+    # red; the sibling andon-notice job says so. Keep the '[]' guard: an empty
+    # fromJSON matrix FAILS the job instead of skipping it.
+    if: needs.detect.outputs.designs != '[]' && vars.AI_ANDON_CORD != 'pulled'
     strategy:
       # One PR per design, and one failure does not cancel the others.
       fail-fast: false
@@ -372,3 +381,18 @@ jobs:
           if [ "$HAVE_PAT" != "true" ]; then
             echo "::warning::REGEN_TOKEN is not set, so this PR was created with GITHUB_TOKEN and CI will not auto-run on it. Push any commit (or set REGEN_TOKEN — a fine-grained PAT with contents + pull-requests write) to trigger the required checks."
           fi
+
+  andon-notice:
+    # The visible no-op: a skipped gated job is mute, so a sibling with no
+    # permissions and no secrets says why nothing ran (the disarmed-notice
+    # pattern every scheduled routine uses).
+    # Only when detect resolved something to generate: with '[]' (the conf off,
+    # or no manifest moved) nothing was bypassed, so there is nothing to explain.
+    needs: detect
+    if: needs.detect.outputs.designs != '[]' && vars.AI_ANDON_CORD == 'pulled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain why nothing ran
+        run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — the tier-1.5 AI product still was not generated; no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume — see docs/andon-cord.md."

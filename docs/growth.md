@@ -19,28 +19,31 @@ arming ladder below, the "posts" are review comments on the queue issues and
 committed accelerated-timeline reports under `growth/` — the feed you can
 read before it exists.
 
-## Voice — building in public
+## Voice — garage builder at the bench
 
-The account has one voice, and it is deliberate: **a maker at the bench who
-shows their work** — sentence-case, first person, plain and a little dry, the
-register of someone talking to fellow makers as equals rather than a brand
-addressing an audience. print-bench is built in the open (human + AI, every
-claim gated in CI), and the account grows the same way: by being useful and
-honest post by post, never by hype. Two genres do the work — *here's how it
-works* (a technique, a measured number, a mechanism) and *here's what we got
-wrong* (the print that came out welded, the hinge that fused, and the gate
-each failure became). The failure genre is the stronger one; being wrong in
-public and fixing it in the open is the credibility, which is why the bench
-gates its own claims at all.
+The account has one voice, and it is deliberate: **a garage builder who shows
+their work** — sentence-case, first person, plain, blunt, dry. Not a brand
+addressing an audience, not cozy workshop language ("fellow makers",
+"unhurried"), not product-brochure explainers. print-bench is built in the
+open (human + AI, every claim gated in CI), and the account grows the same
+way: by being useful and honest post by post, never by hype. Two genres do the
+work — *here's how it works* (a technique, a measured number, a mechanism) and
+*here's what broke* (the print that came out welded, the hinge that fused, and
+the gate each failure became). The failure genre is the stronger one; being
+wrong in public and fixing it in the open is the credibility, which is why the
+bench gates its own claims at all. Explicit anti-patterns — announcer voice,
+hype words, engagement bait, brochure copy, whimsical tweet-body emoji — are
+banned in Lark's skill.
 
 This posture is **Reeve's** as the platform PM (`PM.md`): the growth desk is
-how the bench humbly grows a community around open code, so a PM queues the
-honest, technical, lesson-bearing stories and leaves hype off the queue. The
-register itself lives where Lark reads it — the *Voice* and *Channel craft*
-sections of `.claude/skills/growth-twitter/SKILL.md`, with a before/after
-calibration example — and the fact-budget rule keeps it honest by
-construction: a build-in-public voice with no source for a claim is still
-refused, so "sound human" never becomes "make something up".
+how the bench grows a community around open code without softening the
+register, so a PM queues the honest, technical, lesson-bearing stories and
+leaves hype off the queue. The register itself lives where Lark reads it —
+the *Voice* and *Channel craft* sections of
+`.claude/skills/growth-twitter/SKILL.md`, with a before/after calibration
+example — and the fact-budget rule keeps it honest by construction: a
+garage-builder voice with no source for a claim is still refused, so "sound
+human" never becomes "make something up".
 
 ## Why a queue, and why the agent is per-channel
 
@@ -285,7 +288,7 @@ cadence parity is `cadence-sync-check.sh`-covered.
 | The labeler sweeps a queue item (parking it `needs-decision`, or arming it `autonomy-ok` for the burn) | `growth-queue` is in the labeler's `NON_TRIAGE_LABELS` (label-helper.sh) — the sweep never selects a queue item, the agent-brief precedent |
 | The routine silently stops (or silently starts) | Two-key arming + the `disarmed-notice` job; a disabled conf logs; an empty queue logs; Reeve's `routine-dead` detector reads run conclusions once armed |
 | A dead model id kills the sweep | The chain walks past it since #544: a dead GLM head falls through to the Anthropic tail (`claude-sonnet-5` → `claude-haiku-4-5`), and total exhaustion runs `provider-triage` → `classify`, escalating a human-fixable cause (billing, a bad key) once through the `needs-decision` gate instead of a silent red; `model-registry smoke growth-twitter` proves every link before arming |
-| A hijacked run floods the channel | `GROWTH_MAX_POSTS` (default 1) per run, in-process, unreachable by the agent; live posts additionally need per-item labels no agent can apply |
+| A hijacked run floods the channel | `GROWTH_MAX_POSTS` (default 1) per run, counted in a `GROWTH_CAP_STATE` file every link step of the chain walk hands the server (#570) — walk-spanning, unreachable by the agent; live posts additionally need per-item labels no agent can apply |
 | The feed reads robotic (every post at the same clock minute) | The post time is whatever hour GitHub delivers the day's first firing — heavily and variably delayed by GitHub's own scheduler (observed 21:55 / 19:31 / 00:39 on consecutive days), so it walks widely on its own (above) |
 | More posts than the cap land on the same day (GitHub delivers 2+ firings, or a re-run) | The per-UTC-day cap: `daycap` (tested) counts today's live `posted` markers and holds the drain once the count reaches `max_posts_per_day`; runs serialize via the `concurrency` group, and each marker is written claim-first, so a later same-day run always sees the earlier ones (and the scan fails closed — a transient API error holds the drain rather than posting again). The count matches the poster across the bot's REST/GraphQL login spellings (`[bot]`-suffix normalization), so it recognizes its own markers. `max_posts_per_run` still caps each run |
 | GitHub drops all of a day's firings | 0 posts that day; the queue is durable, so it drains next day. The five slots are delivery redundancy precisely to make this rare |

@@ -7,9 +7,10 @@ call. The marker is the first line of the body so the upsert step can find
 the one report issue it owns with a ``startsWith`` match.
 
 Most of what Reeve renders — file paths, design names — comes from the tree
-and the telemetry log, both controlled. The lock-leak findings (issue #313)
-are the exception: their issue titles are untrusted GitHub text, so they go
-through ``_clean_title`` — the groomer's defusal — before rendering.
+and the telemetry log, both controlled. The run-health findings (issue #313:
+lock-leak, adoption-study; #745: agent-brief-queue) are the exception: their
+issue titles are untrusted GitHub text, so they go through ``_clean_title`` —
+the groomer's defusal — before rendering.
 """
 
 from __future__ import annotations
@@ -19,6 +20,19 @@ from typing import Any
 
 # First line of the report issue's body; the workflow's upsert keys on it.
 MARKER = "<!-- reeve-bench-health -->"
+
+# The one banner line the report carries while the AI andon cord is pulled
+# (docs/andon-cord.md): the AI_ANDON_CORD repo variable set to 'pulled'
+# bypasses every AI-consuming workflow job with a notice, and this report —
+# deterministic, keyless — is where a reader learns the many skipped AI runs
+# are intentional, not a dead routine. Inserted once, directly under the H1,
+# only when the cord is pulled; the released rendering is unchanged.
+ANDON_BANNER = (
+    "🛑 AI andon cord: pulled — every AI-consuming workflow is bypassed with a "
+    "notice; deterministic jobs (this report included) continue. Release: delete "
+    "the AI_ANDON_CORD repo variable, or set it to anything but 'pulled' "
+    "(docs/andon-cord.md)."
+)
 
 
 def _clean_title(title: str) -> str:
@@ -40,6 +54,11 @@ def _line_gate_failing(f: dict) -> str:
 def _line_routine_dead(f: dict) -> str:
     conclusions = ", ".join(str(c) for c in f["conclusions"])
     return f"- `{f['workflow']}` — {conclusions} — [latest run]({f['url']})"
+
+
+def _line_agent_brief(f: dict) -> str:
+    # The title is untrusted GitHub text, so it goes through _clean_title.
+    return f"- #{f['number']} {_clean_title(f['title'])} — {f['state']}"
 
 
 def _line_lock_leak(f: dict) -> str:
@@ -78,8 +97,13 @@ def _line_drift(f: dict) -> str:
     return f"- {f['detail']}"
 
 
-def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any) -> str:
-    """The full report body, marker first, byte-deterministic."""
+def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any,
+           andon_pulled: bool = False) -> str:
+    """The full report body, marker first, byte-deterministic.
+
+    ``andon_pulled`` adds exactly one line — ``ANDON_BANNER`` and its blank —
+    under the H1; with it False (the default) the bytes are the golden's.
+    """
     findings = result["findings"]
     not_evaluated = result["not_evaluated"]
     generated = snapshot["generatedAt"]
@@ -91,6 +115,9 @@ def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any) -> str:
         ("routine-dead",
          f"Routine dead — no success in a routine's last {cfg.routine_dead_runs} completed runs",
          _line_routine_dead),
+        ("agent-brief-queue",
+         "Agent brief queue — open forge briefs pending / parked / declined",
+         _line_agent_brief),
         ("lock-leak",
          f"Ship-lock leak — an uncorroborated 🚢 SHIP-LOCK older than {cfg.lock_leak_hours:g}h",
          _line_lock_leak),
@@ -114,6 +141,11 @@ def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any) -> str:
         MARKER,
         "# 🩺 Bench health report",
         "",
+    ]
+    if andon_pulled:
+        # The cord is the first thing a reader sees; MARKER stays line 1.
+        out += [ANDON_BANNER, ""]
+    out += [
         "Advisory only — this report is Reeve's sole output; nothing else was changed.",
         f"Pulse: {result['record_count']} gate-run record(s) "
         f"({result['all_count']} full-catalog), {result['preview_count']} committed previews, "

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "andon"
+version = "0.1.0"
+description = "Reconciler for print-bench's AI andon cord status issue (opened once on pull, closed once on release; advisory, GET-only)"
+license = "CC-BY-SA-4.0"
+requires-python = ">=3.10"
+# Stdlib-only on purpose: the hourly andon workflow runs this on the system
+# Python straight from the checkout (PYTHONPATH=tools/andon/src, no pip step
+# in front of it) — the same rule tools/lineage, tools/backlog-groomer,
+# tools/reeve and tools/growth keep.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=9.1.1"]
+
+[project.scripts]
+andon = "andon.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

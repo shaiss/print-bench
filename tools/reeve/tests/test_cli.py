@@ -8,7 +8,7 @@ import json
 import pathlib
 
 from reeve.cli import main
-from reeve.report import MARKER
+from reeve.report import ANDON_BANNER, MARKER
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -48,6 +48,102 @@ def test_run_over_a_temp_repo(tmp_path, capsys):
     out = capsys.readouterr().out
     assert out.startswith(MARKER)
     assert "0 gate-run record(s)" in out   # empty repo → no history
+
+
+def test_report_andon_flag_is_case_insensitive_like_github(monkeypatch, capsys):
+    # `vars.AI_ANDON_CORD == 'pulled'` compares case-insensitively in Actions,
+    # so a variable set to 'Pulled' bypasses every AI job — the tool must agree
+    # and banner the report, never red it (a choices= usage error would).
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    rc = main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", "Pulled"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert out.startswith(MARKER)
+    assert out.count(ANDON_BANNER) == 1
+    assert out == (FIXTURES / "report.andon-pulled.golden.md").read_text(encoding="utf-8")
+
+
+def test_report_andon_trailing_whitespace_is_released_like_github(monkeypatch, capsys):
+    # GitHub's `vars.AI_ANDON_CORD == 'pulled'` casefolds but does NOT trim, so
+    # a variable set to 'pulled ' (trailing space) is RELEASED by every workflow
+    # gate — the AI jobs keep running. The tool must read it the same way: a
+    # banner here would claim a bypass the gates never made (a split brain).
+    # Released renders today's golden byte-for-byte.
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    for value in ("pulled ", " pulled", "pulled\n", "\tpulled\t"):
+        assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", value]) == 0
+        out = capsys.readouterr().out
+        assert ANDON_BANNER not in out, repr(value)
+        assert out == golden, repr(value)
+
+
+def test_report_andon_upper_case_banners_like_github(monkeypatch, capsys):
+    # The other half of GitHub's rule: case IS folded, so 'PULLED' pulls the
+    # cord in every gate and must banner here too — the pulled golden exactly.
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    rc = main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", "PULLED"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert out.count(ANDON_BANNER) == 1
+    assert out == (FIXTURES / "report.andon-pulled.golden.md").read_text(encoding="utf-8")
+
+
+def test_report_andon_env_trailing_whitespace_is_released(monkeypatch, capsys):
+    # The same no-trim rule on the env path (the workflow's default source).
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    monkeypatch.setenv("AI_ANDON_CORD", "pulled ")
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json")]) == 0
+    assert capsys.readouterr().out == golden
+
+
+def test_report_andon_dash_leading_value_is_a_value_not_an_option(monkeypatch, capsys):
+    # reeve.yml passes `--andon="$AI_ANDON_CORD"` (the = form) so a value that
+    # happens to start with a dash is still read as the value, never as an
+    # option — which would exit 2 and red the keyless daily report.
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon=-pulled"]) == 0
+    assert capsys.readouterr().out == golden
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon=PULLED"]) == 0
+    assert capsys.readouterr().out.count(ANDON_BANNER) == 1
+
+
+def test_report_andon_env_is_the_default_source(monkeypatch, capsys):
+    # No flag: the cord is read from $AI_ANDON_CORD (the workflow's env path).
+    monkeypatch.setenv("AI_ANDON_CORD", "pulled")
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json")]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(MARKER)
+    assert out.count(ANDON_BANNER) == 1
+
+
+def test_report_andon_released_renders_the_golden_bytes(monkeypatch, capsys):
+    # Negative control: any value but 'pulled' — and an unset variable — is
+    # released, and released is byte-for-byte today's golden.
+    golden = (FIXTURES / "report.golden.md").read_text(encoding="utf-8")
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", "released"]) == 0
+    assert capsys.readouterr().out == golden
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json"), "--andon", ""]) == 0
+    assert capsys.readouterr().out == golden
+    assert main(["report", "--input", str(FIXTURES / "snapshot.json")]) == 0
+    assert capsys.readouterr().out == golden
+
+
+def test_run_andon_pulled_banners_the_workflow_verb(tmp_path, monkeypatch, capsys):
+    # `run` is the verb reeve.yml invokes (`reeve run ... --andon "$AI_ANDON_CORD"`).
+    monkeypatch.delenv("AI_ANDON_CORD", raising=False)
+    (tmp_path / "telemetry").mkdir()
+    rc = main(["run", "--root", str(tmp_path), "--andon", "pulled"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == MARKER
+    assert out.count(ANDON_BANNER) == 1
+    assert "0 gate-run record(s)" in out   # the report itself still renders
+    # And released over the same tree carries no banner.
+    assert main(["run", "--root", str(tmp_path), "--andon", ""]) == 0
+    assert ANDON_BANNER not in capsys.readouterr().out
 
 
 def test_run_without_repo_is_offline_and_not_evaluated(tmp_path, capsys):
@@ -119,7 +215,7 @@ def _queue(*nums):
 def test_greenlight_select_prints_numbers_and_appends_output(tmp_path, monkeypatch, capsys):
     gh_out = tmp_path / "gh_output"
     monkeypatch.setattr("reeve.github.gather_greenlight_queue",
-                        lambda repo, token: _queue(230, 265, 267))
+                        lambda repo, token, trusted: _queue(230, 265, 267))
     monkeypatch.setenv("GH_TOKEN", "tok")
     rc = main(["greenlight-select", "--repo", "o/r", "--gh-output", str(gh_out)])
     assert rc == 0
@@ -133,7 +229,7 @@ def test_greenlight_select_bounds_the_queue_to_the_conf_cap(tmp_path, monkeypatc
     conf = tmp_path / "reeve.conf"
     conf.write_text("greenlight_cap: 2\n", encoding="utf-8")
     monkeypatch.setattr("reeve.github.gather_greenlight_queue",
-                        lambda repo, token: _queue(230, 265, 267, 269))
+                        lambda repo, token, trusted: _queue(230, 265, 267, 269))
     rc = main(["greenlight-select", "--repo", "o/r", "--conf", str(conf)])
     assert rc == 0
     assert capsys.readouterr().out == "230 265\n"
@@ -141,7 +237,7 @@ def test_greenlight_select_bounds_the_queue_to_the_conf_cap(tmp_path, monkeypatc
 
 def test_greenlight_select_empty_queue_is_a_clean_empty_line(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("reeve.github.gather_greenlight_queue",
-                        lambda repo, token: {"parked": [], "queue": []})
+                        lambda repo, token, trusted: {"parked": [], "queue": []})
     rc = main(["greenlight-select", "--repo", "o/r"])
     assert rc == 0
     assert capsys.readouterr().out == "\n"
@@ -153,6 +249,38 @@ def test_greenlight_select_requires_repo():
     import pytest
     with pytest.raises(SystemExit):
         main(["greenlight-select"])
+
+
+def test_greenlight_select_wires_the_marker_author_trust_rule(tmp_path, monkeypatch, capsys):
+    # #546: the other select tests monkeypatch gather_greenlight_queue away, so
+    # they cannot see WHICH trust rule the command wires. This captures the
+    # callable the command hands the gather and proves it is the real one —
+    # marker_author_trusted over permission_of: the bot login trusted by
+    # identity with no lookup, a write-level collaborator trusted through one
+    # memoized read, a read-only login refused.
+    captured = {}
+
+    def _gather(repo, token, trusted):
+        captured["trusted"] = trusted
+        return {"parked": [], "queue": []}
+
+    reads: list[str] = []
+
+    def _permission_of(repo, token, username):
+        reads.append(username)
+        return {"shaiss": "write", "driveby": "read"}[username]
+
+    monkeypatch.setattr("reeve.github.gather_greenlight_queue", _gather)
+    monkeypatch.setattr("reeve.github.permission_of", _permission_of)
+    monkeypatch.setenv("GH_TOKEN", "tok")
+    rc = main(["greenlight-select", "--repo", "o/r"])
+    assert rc == 0
+    trusted = captured["trusted"]
+    assert trusted("github-actions[bot]") is True   # by identity — no lookup
+    assert trusted("driveby") is False              # read-only author's marker
+    assert trusted("shaiss") is True                # write-level collaborator
+    assert trusted("") is False                     # authorless is never trusted
+    assert reads == ["driveby", "shaiss"]           # one memoized read each; none for the bot
 
 
 # greenlight-poll (issue #444): the loop's authority half. run_poll is

@@ -40,7 +40,13 @@ name: Oracle review (cross-vendor, reasoning-blind)
 # PR lifecycle event (opened / reopened / ready_for_review, never on every
 # push). Re-roll a review by closing and reopening the PR. A human-PR mode is
 # a possible extension, not this. The `no-oracle-review` label is the human
-# escape hatch for a PR that should not be reviewed.
+# escape hatch for a PR that should not be reviewed; the repo-wide hatch is
+# the AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set
+# to 'pulled' bypasses the oracle job with a single ::notice:: from the
+# keyless `oracle-andon` sibling — grey, never red, no provider call, no
+# needs-decision escalation. Orthogonal to the label: it overrides an
+# unlabeled PR without touching it. Release the cord and close-and-reopen
+# the PR to re-roll the review.
 #
 # Registry-driven (issue #206): NO model id is hardcoded here. Both role
 # chains — oracle-anthropic (Anthropic-first) and oracle-glm (GLM-first) —
@@ -88,6 +94,7 @@ jobs:
       startsWith(github.event.pull_request.head.ref, 'claude/')
       && github.event.pull_request.head.repo.full_name == github.repository
       && !contains(github.event.pull_request.labels.*.name, 'no-oracle-review')
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # A hung review must not hold a runner (and a key) for the 6-hour default.
     # Sized against the per-request API_TIMEOUT_MS (600000 ms = 10 min) so the
@@ -321,7 +328,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -340,7 +347,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -360,7 +367,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -381,7 +388,7 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -403,7 +410,7 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -426,7 +433,7 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -450,7 +457,7 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -502,87 +509,37 @@ jobs:
           python3 -m model_registry classify "$CHAIN" --gh-output "$GITHUB_OUTPUT"
 
       # needs-human: the account is out of funds, or the key is invalid/missing —
-      # a person must fund or rotate it, which CI cannot. Raise it ONCE through
-      # the decision gate (a single deduped needs-decision tracking issue keyed by
-      # a per-chain marker) instead of reddening every PR; the Oracle is advisory,
-      # so this warns rather than fails. Trusted base-branch github-script, no PR
-      # head code (the workflow's standing posture); issues:write is already held.
+      # a person must fund or rotate it, which CI cannot. Raise it through the
+      # decision gate as ONE shared, reason-keyed needs-decision issue (issue
+      # #550) instead of reddening every PR: the same `model_registry escalate`
+      # rule provider-triage runs (previously this workflow's own private
+      # per-chain copy), so the Oracle's exhaustion joins the same per-reason
+      # issue a routine's would and one /decide resolves the set. The Oracle is
+      # advisory, so the outcomes warn rather than fail. Trusted base-branch
+      # Python from the checkout, no PR-head code (the workflow's standing
+      # posture); issues:write is already held. That posture has one bootstrap
+      # consequence: this workflow's TEXT comes from the PR head, while the
+      # checkout is the base — so a PR that changes this call runs against a
+      # base that may not carry the subcommand yet. The run block probes for
+      # it and degrades to a loud warning (never a red run) in that window.
       - name: Escalate a human-fixable provider failure (HITL needs-decision)
         id: escalate
         if: steps.ready.outputs.ready == 'true' && steps.classify.outputs.class == 'needs-human'
-        uses: actions/github-script@v9
         env:
-          ORACLE_CHAIN: ${{ steps.vendor.outputs.oracle_chain }}
-          ORACLE_CLASS: ${{ steps.classify.outputs.class }}
-        with:
-          script: |
-            const chain = process.env.ORACLE_CHAIN;
-            const klass = process.env.ORACLE_CLASS;
-            const marker = `<!-- oracle-provider-escalation:${chain} -->`;
-            const decisionId = `oracle-provider-${chain}`;
-            const label = 'needs-decision';
-
-            // Ensure the decision-gate label exists (create-on-demand, tolerate a
-            // race with a sibling run) — docs/decision-gate.md's ensure-label idiom.
-            try {
-              await github.rest.issues.getLabel({ ...context.repo, name: label });
-            } catch (e) {
-              if (e.status !== 404) throw e;
-              try {
-                await github.rest.issues.createLabel({
-                  ...context.repo, name: label, color: 'D93F0B',
-                  description: 'A human decision is required before an agentic run can proceed',
-                });
-              } catch (_) { /* raced: another run created it first */ }
-            }
-
-            // One escalation per chain: reuse the OPEN needs-decision issue whose
-            // body carries this chain's marker rather than filing a duplicate on
-            // every PR. When a human resolves it (/decide clears the label, or the
-            // issue is closed) the next exhaustion is free to re-escalate.
-            const open = await github.paginate(github.rest.issues.listForRepo, {
-              ...context.repo, state: 'open', labels: label, per_page: 100,
-            });
-            const existing = open.find((i) => (i.body || '').includes(marker));
-            if (existing) {
-              core.warning(
-                `Oracle: ${chain} still unusable (${klass}). Open escalation: ` +
-                `${existing.html_url} — not filing a duplicate.`);
-              return;
-            }
-
-            const body = [
-              marker,
-              `🚦 DECISION NEEDED — \`${decisionId}\``,
-              ``,
-              `The Oracle's opposite-vendor chain \`${chain}\` failed on **every** link, and the ` +
-              `model-registry classifier read the cause as **${klass}** — an account/config problem ` +
-              `CI cannot fix (out of credit, or an invalid/missing key), not a transient outage or a ` +
-              `bad model id.`,
-              ``,
-              `Until it is resolved the cross-vendor Oracle review is skipped on every autonomy PR. ` +
-              `The Oracle is advisory, so nothing is blocked — but the independent second opinion is off.`,
-              ``,
-              `**yes** → the key is funded / rotated and working. Confirm by dispatching ` +
-              `\`model-smoke.yml\` with input \`${chain}\`, then resolve.`,
-              `**no**  → accept the Oracle staying dark on this vendor for now; this closes the ` +
-              `escalation without a code change.`,
-              ``,
-              `**Context:** classifier verdict \`${klass}\` on chain \`${chain}\`. Fund or rotate the ` +
-              `provider secret (\`ANTHROPIC_API_KEY\` for \`oracle-anthropic\`, \`ZAI_KEY\` for ` +
-              `\`oracle-glm\`). This is behaviour from issue #347; the registry itself is correct.`,
-              ``,
-              `Resolve with \`/decide yes ${decisionId}\` or \`/decide no ${decisionId}\`.`,
-            ].join('\n');
-
-            const created = await github.rest.issues.create({
-              ...context.repo,
-              title: `🚦 Oracle provider unusable: ${chain} (${klass})`,
-              body,
-              labels: [label],
-            });
-            core.warning(
-              `Oracle: filed HITL escalation for ${chain} (${klass}): ${created.data.html_url}`);
+          PYTHONPATH: tools/model-registry/src
+          ESCALATION_TOKEN: ${{ github.token }}
+          CHAIN: ${{ steps.vendor.outputs.oracle_chain }}
+          REASON: ${{ steps.classify.outputs.reason }}
+          CONTEXT: the Oracle's opposite-vendor review chain (its reviews skip, not red, while it is dark)
+        run: |
+          set -uo pipefail
+          if ! python3 -m model_registry escalate --help >/dev/null 2>&1; then
+            echo "::warning::the base branch's model-registry does not carry 'escalate' yet (this PR adds it) — the Oracle's $REASON escalation cannot be filed from this run. Once the PR merges, later exhaustions file normally; until then raise it by hand if unseen (docs/decision-gate.md)."
+            exit 0
+          fi
+          python3 -m model_registry escalate "$CHAIN" \
+            --reason "$REASON" --context "$CONTEXT" \
+            --repo "${{ github.repository }}" --token-env ESCALATION_TOKEN
 
       # dead: a model id the key genuinely cannot serve (#298). This IS fixable
       # in-repo (edit .github/models/registry.conf), so keep reddening loudly.
@@ -602,3 +559,20 @@ jobs:
               || steps.classify.outputs.class == 'servable')
         run: |
           echo "::warning::the Oracle review failed but the ${{ steps.vendor.outputs.oracle_chain }} chain is not the proven cause (classifier: ${{ steps.classify.outputs.class }}) — advisory only, retries on the next PR. See the ship-step logs above."
+
+  oracle-andon:
+    name: Oracle review bypassed (AI andon cord pulled)
+    # The visible no-op (the routines' disarmed-notice pattern): a skipped
+    # gated job is mute, so a sibling with no permissions and no secrets says
+    # why nothing ran. Same PR scoping as the oracle job, plus the cord.
+    if: >-
+      startsWith(github.event.pull_request.head.ref, 'claude/')
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && !contains(github.event.pull_request.labels.*.name, 'no-oracle-review')
+      && vars.AI_ANDON_CORD == 'pulled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain why nothing ran
+        run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — the Oracle review was bypassed; no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') and close-and-reopen the PR to re-roll the review — see docs/andon-cord.md."

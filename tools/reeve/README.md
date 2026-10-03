@@ -37,12 +37,18 @@ The primary pulse is entirely file-read from the committed tree:
 Plus one opt-in, GET-only live read (`src/reeve/github.py`, the groomer's
 pattern; issue #313) — only when `--repo` is passed:
 
-- **Workflow-run conclusions** for the scheduled routines (`design-run.yml`,
-  `backlog-burn.yml`, `chunker.yml`, `labeler.yml`) — the ten newest completed
-  runs each.
+- **Workflow-run conclusions** for the scheduled workflows on the watch list
+  (`ROUTINE_WORKFLOWS`, the single source of truth: `design-run.yml`,
+  `backlog-burn.yml`, `chunker.yml`, `labeler.yml`, `growth-twitter.yml`,
+  `wright.yml`, `growth-board-sync.yml` — the forge and the growth-board lens
+  joined at #745, when the board's sync had hard-failed on rate-limit for days
+  without ever reaching this report) — the ten newest completed runs each.
 - **Open issues carrying an active 🚢 SHIP-LOCK** claim, and the open PRs and
   `claude/issue-<N>-*` branches that would corroborate one (the selector's
   lock semantics, mirrored from `tools/backlog-burn`, not imported).
+- **Open `adoption-study` and `agent-brief` issues** with their labels (the
+  same listing, no extra request) — the inputs of the `adoption-study` and
+  `agent-brief-queue` detectors.
 
 The same `github.py` serves the greenlight loop's trusted Select step (issue
 #443): `gather_greenlight_queue` lists the open `needs-decision` issues and
@@ -59,14 +65,16 @@ live in `pushthrough.py`, never here.
 
 ## The detectors
 
-Eight pure functions of one snapshot, deterministic order, byte-stable report:
+Ten pure functions of one snapshot, deterministic order, byte-stable report:
 
 | Detector | Fires when |
 |---|---|
 | `budget-tightening` | a committed preview's size headroom is under `low_headroom_pct` (or over budget) |
 | `gate-failing` | the latest run has pre-fails, a part with no score / criticals / a failed slice, or a false derivative override |
-| `routine-dead` | none of a routine's last `routine_dead_runs` completed runs succeeded and at least one hard-failed (a pure-cancelled streak is queue noise) |
+| `routine-dead` | none of a watched workflow's last `routine_dead_runs` completed runs succeeded and at least one hard-failed (a pure-cancelled streak is queue noise) |
+| `agent-brief-queue` | an open forge brief is pending / parked `needs-decision` / `wright-declined` — the queue state beside `routine-dead`, so a forge death-streak shows as a backlog that stopped moving (#745; an armed brief is not flagged) |
 | `lock-leak` | an active 🚢 SHIP-LOCK is older than `lock_leak_hours` with no corroborating branch or closing PR — a killed run's ghost claim (issue #312) |
+| `adoption-study` | an open study submission has no `disposition:*` label yet, or is flagged `disposition:worth-raising` |
 | `score-regression` | a part is below `score_floor`, or down ≥ `score_drop` vs the prior full-catalog run |
 | `walltime-regression` | a design's gate wall time rose ≥ `walltime_ratio`× (and past `walltime_min_seconds`) |
 | `archived-creep` | a design newly dropped out of gating vs the prior full-catalog run |
@@ -75,7 +83,7 @@ Eight pure functions of one snapshot, deterministic order, byte-stable report:
 Comparisons only use full-catalog (`designs=ALL`) runs — a scoped run gates
 fewer parts. A detector whose input is absent is reported **not evaluated** with
 a reason, never silently empty (the groomer's honesty rule); an offline run
-(no `--repo`) reports both run-health detectors that way.
+(no `--repo`) reports every run-health detector that way.
 
 ## Advisory-only, checkable
 
@@ -117,7 +125,8 @@ the keyless report and:
   the open `needs-decision` issues carrying no greenlight marker, oldest first,
   bounded by the `greenlight_cap` conf key — skipping any that is a
   `provider-triage` escalation (its body carries the `<!--
-  provider-escalation:<chain> -->` marker; #544): an account/key ask with a
+  provider-escalation:<reason> -->` marker — one shared issue per cause since
+  #550, which also covers the Oracle's escalations): an account/key ask with a
   fixed remedy is not a decision a charter verdict can rule on;
 - runs the drafter (`/reeve-greenlight`, `.claude/skills/reeve-greenlight/`)
   with `--permission-mode dontAsk` over the #442 wrapper — its only shell
@@ -236,6 +245,7 @@ reeve report --input snapshot.json          # snapshot JSON -> markdown report
 reeve gather --root .                        # committed files -> snapshot JSON
 reeve run --root . --conf .github/reeve.conf # gather then report (the workflow)
 reeve run --root . --repo owner/name         # + the GET-only run-health read
+reeve run --root . --andon="$AI_ANDON_CORD"  # 'pulled' adds the 🛑 andon banner line
 reeve config --get enabled                   # read the committed policy
 reeve armed --variable "$REEVE_ENABLED" --conf-enabled "$enabled"
 reeve greenlight-select --repo owner/name    # the draftable parked-decision queue
@@ -249,6 +259,19 @@ reeve greenlight-append --repo owner/name    # records for newly-resolved rounds
 from `GH_TOKEN`/`GITHUB_TOKEN`. Without it the run is fully offline and the
 run-health detectors read "not evaluated".
 
+`--andon` (on `report` and `run`, default `$AI_ANDON_CORD`) is the value of the
+AI andon cord repo variable (docs/andon-cord.md): only the exact word `pulled`
+— case-insensitive, **no** surrounding-whitespace trimming, exactly the comparison
+GitHub's `vars.AI_ANDON_CORD == 'pulled'` expression makes (and deliberately not
+`armed`'s normalization, which strips: a value of `pulled ` is released by every
+workflow gate, so it must be released here too, or the report would banner a
+bypass the gates never made) — inserts the one `🛑` banner line under the H1,
+so a reader of the sticky report learns the skipped AI runs are intentional
+rather than a dead routine; anything else renders today's bytes. The workflow
+passes it as `--andon="$AI_ANDON_CORD"` (the `=` form) so a dash-leading value
+is a value, never an option. The cord is live repo state: never a conf key,
+never in the snapshot.
+
 ## Tests
 
 Stdlib-only; the `[test]` extra is just pytest.
@@ -258,7 +281,10 @@ pip install -e 'tools/reeve[test]'
 python -m pytest tools/reeve/tests -q
 ```
 
-The golden-file test (`tests/fixtures/report.golden.md`) pins the report bytes;
+The golden-file test (`tests/fixtures/report.golden.md`) pins the report bytes,
+and its pair `report.andon-pulled.golden.md` pins the pulled rendering — the same
+bytes with exactly the banner line and its blank inserted once (released is
+asserted equal to the golden as the negative control);
 each detector has a positive case and a negative control, the precedent log has
 a golden round-trip against the committed seed, and `tests/test_learning_wiring.py`
 pins the workflow wiring (context channel, three-file branch parity, keyless

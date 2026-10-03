@@ -109,8 +109,9 @@ Each names the standing decision or issue behind it.
   non-negotiables become refusals.
 - **A second policy source outside git** for any platform decision (N4) — no
   console-only policy, no state a clone doesn't carry. (Live arming/kill switches
-  like `REEVE_ENABLED` are controls, not policy: they only enable or disable what
-  the committed conf already declares.)
+  like `REEVE_ENABLED`, and the repo-wide `AI_ANDON_CORD` andon cord, are
+  controls, not policy: they only enable or disable what the committed conf and
+  workflows already declare.)
 
 ## What "working" looks like
 
@@ -137,6 +138,11 @@ Not a one-time definition of done — the health invariants a stranger can check
       unremarked — Reeve's report is current. (A
       broader coverage-drop detector — a part silently un-gated *without* being
       archived — is a backlog enhancement, not a v1 claim.)
+- [ ] AI spend has one brake a human can pull in seconds: `AI_ANDON_CORD=pulled`
+      greys every AI-consuming job (no red, no escalation, one notice), the
+      deterministic bench keeps running, and the pull is on record — an
+      `andon-cord` status issue and a 🛑 line in Reeve's report
+      (`docs/andon-cord.md`).
 
 ## Backlog, ranked by platform value
 
@@ -176,3 +182,4 @@ Append-only. A later session must be able to tell a considered choice from an ac
 | 2026-08-30 | Set the growth account's voice: a **maker building in public** (sentence-case workshop register, first person) that shares the tech and the lessons-learned — failure stories included — and never hype. Reeve backs this as the platform's community-growth posture: queue the honest, technical, lesson-bearing stories, leave hype off the queue. Encoded in Lark's skill (Voice + Channel craft + a before/after calibration example), `people/lark.md`, and `docs/growth.md` | Issue #456: the first dry-run read a touch announcer-y. A build-in-public voice is how an OSS bench humbly grows a community, and it doubles as an honesty guarantee — the fact-budget rule refuses a sourceless claim, so "sound human" can never become "make something up" |
 | 2026-08-31 | Ship the greenlight loop (#296 stage 2, #443) as a **separate job** after the keyless report: the drafter reads the workflow-selected parked `needs-decision` issues and posts ONE advisory comment through the #442 wrapper — a YES/NO verdict on system-level calls (citing the charter line) or a ROUTE note handing design taste to its design PM — never a label, never a resolved gate, advisory until a human 👍. Keyed on the conf's provider secret (absent ⇒ `::notice::` skip), capped by `greenlight_cap`, model from the registry's `reeve-greenlight` chain, and shipped **unlit** (`greenlight: false` in the conf) | A parked decision asks a human to reconstruct a whole thread before ruling; the drafter does that reconstruction so the human's job shrinks to a reaction. The narrowest shipped hand, per the leash: advisory comments only, and the reporter's keylessness is structural (the drift guard pins it) |
 | 2026-08-31 | Ship the loop's authority half (#444): the next scheduled run **polls its own prior greenlights' reactions** — counting only write/maintain/admin accounts, the same permission check `/decide` makes — and applies an approval through decide.yml's own sequence **via the API, never a posted `/decide` comment** (stage 1 proved the comment tooling's footer silently neutralizes a bot-posted command). Fail-closed label order, `arm=1`-gated `autonomy-ok` (the drafter marks it, the wrapper discloses it in the footer, the human's 👍 grants it), the ledger row committed with `REGEN_TOKEN`, and a `resolution=` reply that spends the greenlight. An authorized `/decide` always outranks a reaction; a route's reactions approve nothing; a contested greenlight fails closed to overrule | The reaction is the whole point of drafting: shrinking a human's ruling to one click is worthless if nothing then reads the click. The push is deterministic code in the package's one confined write seam, so the authority stays with the human who reacted, never with the model that drafted |
+| 2026-09-05 | Adopt the **AI andon cord** (`docs/andon-cord.md`): one repo variable, `AI_ANDON_CORD=pulled`, that bypasses every AI-consuming workflow job at info level — grey/skipped, never red, no provider call, no `needs-decision` escalation, one `::notice::` per run — while every deterministic job keeps running; a keyless hourly reconciler (`andon.yml`, `tools/andon`) opens one `andon-cord` status issue on pull and closes it with the timespan on release, and Reeve's report carries a 🛑 banner. A control, not policy (N4): it overrides an armed routine without touching its variable or conf. The fail-closed `reviewer-signoff` blocks a design PR lacking two current sign-offs until release | 2026-09-04: both providers ran out of quota and the bench, working as designed, produced days of red runs, hourly failure mail and seven per-chain escalation issues restating one fact. Twelve arming variables halt twelve routines and none touch the reviewers, CI drafting, the image tiers or the smoke; the cord is the one control above all of it, and a variable is the right speed when the account is empty at 01:00 |

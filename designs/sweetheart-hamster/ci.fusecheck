@@ -14,7 +14,7 @@ flexure -7,-9,-0.1:7,9,1.2
 
 # The sliced part, minus the web, must split into 2 separable bodies — the two
 # halves connect ONLY through the hinge.
-assert  sweetheart-hamster.stl 2
+assert  sweetheart-hamster-hamster.stl 2
 
 # Mandatory negative control: `part="fused"` reproduces the v0.1 weld (fold axis
 # dropped below the ear-top) as one solid. With the SAME web zone removed it must

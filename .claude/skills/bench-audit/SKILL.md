@@ -70,7 +70,11 @@ issues (both upserted daily by `github-actions[bot]`, keyed by a label):
   report-drift, routine-dead, lock-leak. Read the latest body; record each
   detector's reading. Note the pulse line's gate-run record count — if it is
   **0**, four gate-side detectors are "not evaluated" (the self-measurement
-  is half-dark; see dimension 5, telemetry commit-back).
+  is half-dark; see dimension 5, telemetry commit-back). A 🛑 **AI andon cord**
+  banner at the top of the report (or an open `andon-cord` status issue) means
+  every AI-consuming job is *intentionally* bypassed (`docs/andon-cord.md`):
+  read skipped routine runs as expected, not dead, and put "release the
+  cord?" in the HITL menu.
 - **Groomer** — the backlog-health report (label `groomer-report`;
   `tools/backlog-groomer`, ~05:41 UTC). Detectors: stale, armed-stuck,
   unsized-armed, decision-resolved-parked, unchunked-oversized,
@@ -159,7 +163,11 @@ issue can be *stale* (it claimed full-chain failure at 06:04 but the GLM head
 has served every run since) — verify against live runs, don't trust the
 issue's timestamp. Watch for **duplicate** escalations (a single classify
 pass double-filing the same `needs-decision` id seconds apart) — flag the
-dedup gap and recommend closing the copy.
+dedup gap and recommend closing the copy. If the 🛑 andon banner is on Reeve's
+report (or an `andon-cord` issue is open), the chains are deliberately not
+being exercised — no run since the pull tells you anything about provider
+health, the open escalations are not being refreshed, and "release the cord?"
+belongs in the HITL menu beside the funding question.
 
 ## 5. Locks, main CI, and the commit-back path
 

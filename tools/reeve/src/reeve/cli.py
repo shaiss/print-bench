@@ -19,7 +19,7 @@ unit-tested.
 ``gather`` and ``run`` take an optional ``--repo owner/name`` (issue #313):
 when set, the GET-only run-health read (``github.gather_run_health``) is
 attached to the snapshot as ``runHealth``. Without it the run stays entirely
-offline and the two run-health detectors read "not evaluated".
+offline and the run-health detectors read "not evaluated".
 
 ``greenlight-select`` (issue #443) is the greenlight loop's trusted Select
 step: it lists the open ``needs-decision`` issues that carry no greenlight
@@ -57,6 +57,7 @@ import sys
 from typing import Any, Optional
 
 from . import config as config_mod
+from . import greenlight
 from . import greenlights
 from .detectors import evaluate
 from .report import render
@@ -96,9 +97,28 @@ def _gather(args: argparse.Namespace) -> dict[str, Any]:
     return snapshot
 
 
+def _andon_pulled(args: argparse.Namespace) -> bool:
+    """Is the AI andon cord pulled? ``--andon`` wins, else ``$AI_ANDON_CORD``.
+
+    Only the exact word ``pulled`` pulls it: case-insensitive, NO whitespace
+    trimming — exactly GitHub's ``vars.AI_ANDON_CORD == 'pulled'`` expression
+    compare, which every workflow gate uses (it casefolds but never strips).
+    Deliberately NOT ``config.armed``'s normalization (that one strips): a
+    value of 'pulled ' reads as released by every gate, so the AI jobs keep
+    running, and this tool must read it the same way — a banner here for a
+    cord the gates ignore would be a split brain. So 'Pulled'/'PULLED'
+    banner, 'pulled ' does not. The cord is live repo state, never a conf
+    key and never in the snapshot.
+    """
+    raw = (args.andon if args.andon is not None
+           else os.environ.get("AI_ANDON_CORD", ""))
+    return raw.casefold() == "pulled"
+
+
 def _emit_report(snapshot: dict[str, Any], args: argparse.Namespace) -> int:
     cfg = _load_config(args.conf)
-    body = render(evaluate(snapshot, cfg), snapshot, cfg)
+    body = render(evaluate(snapshot, cfg), snapshot, cfg,
+                  andon_pulled=_andon_pulled(args))
     sys.stdout.write(body)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
@@ -150,20 +170,40 @@ def cmd_greenlight_select(args: argparse.Namespace) -> int:
     """`greenlight-select`: print the draftable parked-decision queue.
 
     One line of space-separated issue numbers — the open ``needs-decision``
-    issues with no greenlight marker yet (and not a provider-triage
-    escalation, which the gather skips), oldest first, bounded by the conf's
-    ``greenlight_cap`` (so every issue the drafter is handed is postable
-    within the same run's cap). The same string is appended to
-    ``$GITHUB_OUTPUT`` as ``issues=`` (the ``armed`` precedent), so the
-    workflow needs no stdout scraping. An empty queue prints an empty line
-    and writes ``issues=`` — a legitimate state, not a failure.
+    issues with no greenlight marker yet by a trusted author (issue #546: the
+    workflow's own bot login or a write-level collaborator, the same rule the
+    poll applies — an untrusted commenter's pasted marker leaves the issue
+    queued) and not a provider-triage escalation, which the gather skips —
+    oldest first, bounded by the conf's ``greenlight_cap`` (so every issue
+    the drafter is handed is postable within the same run's cap). The same
+    string is appended to ``$GITHUB_OUTPUT`` as ``issues=`` (the ``armed``
+    precedent), so the workflow needs no stdout scraping. An empty queue
+    prints an empty line and writes ``issues=`` — a legitimate state, not a
+    failure.
     """
     # Lazy for the same reason as in _gather: github.py is the one
     # network-capable module, and cli.py stays on the purity test's list.
-    from .github import gather_greenlight_queue
+    from .github import gather_greenlight_queue, permission_of
 
     cfg = _load_config(args.conf)
-    queue = gather_greenlight_queue(args.repo, _token())["queue"]
+
+    # The marker-author trust rule, wired exactly as the poll's driver wires
+    # it (pushthrough.run_poll): greenlight.marker_author_trusted over a
+    # memoized permission_of, so each distinct marker author costs at most
+    # one GET. Injected into the gather rather than imported there — the seam
+    # stays a seam, the rule stays greenlight.py's, and github.py never has
+    # to learn who is allowed to write a marker.
+    permissions: dict[str, str] = {}
+
+    def _authorized(login: str) -> bool:
+        if login not in permissions:
+            permissions[login] = permission_of(args.repo, _token(), login)
+        return permissions[login] in greenlight.AUTHORIZED_PERMISSIONS
+
+    def _trusted(login: str) -> bool:
+        return greenlight.marker_author_trusted(login, _authorized)
+
+    queue = gather_greenlight_queue(args.repo, _token(), _trusted)["queue"]
     nums = " ".join(str(issue["number"]) for issue in queue[: cfg.greenlight_cap])
     sys.stdout.write(nums + "\n")
     gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
@@ -317,6 +357,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--input", help="snapshot JSON file (default: stdin)")
     p_report.add_argument("--conf", help="policy file (default: built-in defaults)")
     p_report.add_argument("--out", help="also write the report to this file")
+    # Free-form on purpose (no choices=): an argparse usage error exits 2
+    # around main()'s error handler, so a 'Pulled' value would red the job.
+    p_report.add_argument("--andon", default=None,
+                          help="the AI_ANDON_CORD repo variable's value (default: "
+                               "$AI_ANDON_CORD); exactly the word 'pulled' — "
+                               "case-insensitive, no whitespace trimming, GitHub's "
+                               "expression compare — adds the cord banner line")
     p_report.set_defaults(func=cmd_report)
 
     p_gather = sub.add_parser("gather", help="read the snapshot from committed files")
@@ -331,6 +378,11 @@ def build_parser() -> argparse.ArgumentParser:
                        help="owner/name — also gather GitHub run health (GET-only)")
     p_run.add_argument("--conf", help="policy file (default: built-in defaults)")
     p_run.add_argument("--out", help="also write the report to this file")
+    p_run.add_argument("--andon", default=None,
+                       help="the AI_ANDON_CORD repo variable's value (default: "
+                            "$AI_ANDON_CORD); exactly the word 'pulled' — "
+                            "case-insensitive, no whitespace trimming, GitHub's "
+                            "expression compare — adds the cord banner line")
     p_run.set_defaults(func=cmd_run)
 
     p_config = sub.add_parser("config", help="read the committed policy file")

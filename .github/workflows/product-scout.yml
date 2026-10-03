@@ -35,16 +35,26 @@ name: Product scout (scheduled design-brief proposals)
 # Safety properties (same as the siblings, plus the scout's own bounds):
 #   * TWO keys must agree to run: committed `enabled: true` AND
 #     PRODUCT_SCOUT_ENABLED == 'true'. Either off → inert.
+#   * AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set
+#     to 'pulled' bypasses this workflow's AI job with a single ::notice:: —
+#     grey, never red, no provider call, no escalation. Orthogonal to the
+#     arming variable: it overrides an armed routine without touching it.
 #   * Advisory-only + bounded: the run's ONLY shell surface is
-#     .claude/skills/product-scout/scout-helper.sh, whose file-brief verb
+#     .claude/skills/product-scout/scout-helper.sh, and its only write is the
+#     MCP filing tool (mcp__scout__file_design_brief, scout_mcp.py), which
 #     hardcodes the `design-brief` label (never `autonomy-ok` &c.) and caps
-#     briefs per run at SCOUT_MAX_BRIEFS. A prompt-injected run can at worst file
-#     a bounded number of design-brief proposals — noise a human closes.
+#     briefs per run at SCOUT_MAX_BRIEFS — counted in the shared SCOUT_CAP_STATE
+#     file, so the cap spans the whole chain walk and not one link (#565). A
+#     prompt-injected run can at worst file a bounded number of design-brief
+#     proposals — noise a human closes.
 #   * The scout's deny backstop (.claude/scout-settings.json, via --settings)
 #     neutralizes the additive settings.json allows (chunk-helper AND
 #     label-helper included), kept honest by scripts/scout-perms-check.sh.
-#   * Every link of the walk carries the SAME surface, backstop, cap and
-#     prompt — only the model, secret and endpoint differ per step.
+#   * Every link of the walk carries the SAME surface, backstop and prompt,
+#     and counts against ONE per-walk brief cap (the shared SCOUT_CAP_STATE
+#     file every link step names — a link that files its fill and dies still
+#     counts when the next link runs, #565) — only the model, secret and
+#     endpoint differ per step.
 
 on:
   schedule:
@@ -95,9 +105,12 @@ jobs:
     # a secret, and workflow_dispatch can target any in-repo branch — so a
     # dispatch against a PR branch must not run that branch's skill code with the
     # secret. On schedule github.ref_name is already the default branch.
+    # Plus the AI andon cord (docs/andon-cord.md): AI_ANDON_CORD == 'pulled'
+    # skips this job grey — the disarmed-notice sibling explains the pull.
     if: >-
       vars.PRODUCT_SCOUT_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
+      && vars.AI_ANDON_CORD != 'pulled'
     runs-on: ubuntu-latest
     # Job budget 65 = head-step timeout (40) + one tail-step timeout (20)
     # + 5 min headroom. The GLM head keeps main's WHOLE pre-#544 job budget
@@ -127,8 +140,19 @@ jobs:
       # triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
-      # The per-run brief cap, enforced by scout-helper.sh's file-brief verb. Bump
-      # it to let one run seed more of the backlog; the human still culls.
+      # The per-run brief cap, enforced by the scout MCP filing server
+      # (scout_mcp.py — the unattended run's filing path; the wrapper's
+      # file-brief verb is the attended leftover). Bump it to let one run seed
+      # more of the backlog; the human still culls. What makes the cap span
+      # the chain WALK — not one link — is SCOUT_CAP_STATE, set on every link
+      # step below (issue #565): each link is its own claude-code-action step
+      # spawning a fresh MCP server process, so an in-process counter reset to
+      # 0 per link and a walk could file cap-per-link. Every link step counts
+      # filings from that one shared runner.temp file (fresh per job, so the
+      # count is run-scoped and never persists) — the reeve.yml
+      # REEVE_GREENLIGHT_STATE pattern. The server refuses to file if a link
+      # step lacks it, so a future link 4 that forgets the env fails loudly,
+      # never silently uncapped.
       SCOUT_MAX_BRIEFS: '3'
     steps:
       - uses: actions/checkout@v7
@@ -298,9 +322,13 @@ jobs:
           # authenticates to the GitHub REST API with this token (issues:write is
           # all the job grants), so it must be exported here — GITHUB_REPOSITORY /
           # GITHUB_RUN_ID are set by Actions automatically, SCOUT_MAX_BRIEFS from
-          # the job env.
+          # the job env. SCOUT_CAP_STATE is what spans the cap across the walk
+          # (#565): step-level env because the runner context is unavailable in
+          # job env, the SAME runner.temp path on every link step, and the
+          # server counts filings from that one shared file.
           GITHUB_TOKEN: ${{ github.token }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -333,10 +361,12 @@ jobs:
       # ZAI_KEY) and gated on the Anthropic key's own presence. Claude via
       # api.anthropic.com: a plain API key (pay-per-token) is the right fit
       # for an unattended bot — no OAuth token / subscription seat. The same
-      # pin, permission, github_token, effort, cap, MCP filing tool, wrapper
-      # read verbs, backstop, transcript posture and prompt as the GLM link —
-      # only the model, secret and endpoint differ. Which model runs is the
-      # registry's call (the cheap Anthropic tier).
+      # pin, permission, github_token, effort, MCP filing tool, wrapper
+      # read verbs, backstop, transcript posture and prompt as the GLM link,
+      # and the same walk-spanning brief cap — the shared SCOUT_CAP_STATE file
+      # these steps name, so the count the GLM link advanced is the count this
+      # link starts from (#565) — only the model, secret and endpoint differ.
+      # Which model runs is the registry's call (the cheap Anthropic tier).
       - name: Run via Anthropic (Claude, chain link 2)
         id: run_anthropic_2
         if: >-
@@ -348,9 +378,12 @@ jobs:
         continue-on-error: true
         env:
           # Same reason as the Z.AI step: the MCP filing tool inherits this env
-          # and authenticates with it.
+          # and authenticates with it — plus the SAME SCOUT_CAP_STATE path, so
+          # the count the GLM link advanced is the count this link starts from
+          # (#565).
           GITHUB_TOKEN: ${{ github.token }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -374,7 +407,9 @@ jobs:
         timeout-minutes: 20
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        uses: anthropics/claude-code-action@e8c2d7c16c018cf1e694711c1c07a5f5db2b5eb1  # v1
+          # Same walk-spanning cap state as the earlier links (#565).
+          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -505,9 +540,13 @@ jobs:
     # The `scout` job is gated at job level, so an unset arming variable (the
     # default clone/fork state) or a dispatch against a non-default ref skips it
     # silently. This sibling makes that legible. No secrets, no write perms.
+    # A pulled AI andon cord (docs/andon-cord.md) skips the gated job the same
+    # way, so this sibling explains that too — checked first, since the cord
+    # overrides an armed routine.
     if: >-
       vars.PRODUCT_SCOUT_ENABLED != 'true'
       || github.ref_name != github.event.repository.default_branch
+      || vars.AI_ANDON_CORD == 'pulled'
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -516,8 +555,11 @@ jobs:
           ARMED: ${{ vars.PRODUCT_SCOUT_ENABLED }}
           REF: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ANDON: ${{ vars.AI_ANDON_CORD == 'pulled' }}
         run: |
-          if [ "${ARMED:-}" != "true" ]; then
+          if [ "${ANDON:-}" = "true" ]; then
+            echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — the product scout did not run; no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume — see docs/andon-cord.md."
+          elif [ "${ARMED:-}" != "true" ]; then
             echo "::notice::the product scout is disarmed — set the PRODUCT_SCOUT_ENABLED repo variable to 'true' to arm it (Settings → Secrets and variables → Actions → Variables). It also needs 'enabled: true' in .github/product-scout.conf; both must agree before it runs."
           else
             echo "::notice::the product scout only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."

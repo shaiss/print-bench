@@ -14,8 +14,6 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .select import SHIP_LOCK_MARKER, _first_line
-
 _API = "https://api.github.com"
 
 
@@ -81,12 +79,26 @@ def _next_link(link_header: str) -> str:
     return ""
 
 
-def _ship_lock_comments(repo: str, number: int, token: str) -> list[dict[str, str]]:
+def _issue_comments(repo: str, number: int, token: str) -> list[dict[str, str]]:
+    """The whole comment thread, normalised to what the policy reads.
+
+    No marker filtering here on purpose: which first-line prefixes mean a
+    lock, a decline or a machine-posted comment is *policy*, and policy
+    belongs in :mod:`backlog_burn.select` behind its negative-control tests.
+    This layer only normalises — body, createdAt, and the author's GitHub
+    type (``User``/``Bot``), the leg of the run-vs-owner test that does not
+    depend on markers. A deleted author types as ``""``, which the policy
+    reads as a human: the conservative direction, since treating an owner
+    reply as machine noise would wrongly hold the cooldown.
+    """
     comments = _paginate(f"/repos/{repo}/issues/{number}/comments", token)
     return [
-        {"body": c.get("body", ""), "createdAt": c.get("created_at", "")}
+        {
+            "body": c.get("body", ""),
+            "createdAt": c.get("created_at", ""),
+            "authorType": (c.get("user") or {}).get("type", ""),
+        }
         for c in comments
-        if _first_line(c.get("body", "")).startswith(SHIP_LOCK_MARKER)
     ]
 
 
@@ -94,10 +106,10 @@ def gather_snapshot(repo: str, token: str) -> dict[str, Any]:
     """Build the snapshot for ``repo`` (``owner/name``) via the REST API.
 
     An issue's comment thread is fetched only when the list payload reports it
-    has any comments (``comments > 0``); that thread is then filtered down to
-    its SHIP-LOCK comments. So a commented-but-unlocked issue still costs one
-    extra request — the SHIP-LOCK filter is applied after the fetch, not before
-    it — while a fresh, comment-free issue is read from the list call alone.
+    has any comments (``comments > 0``); the thread is kept whole (see
+    :func:`_issue_comments`). So a commented-but-unlocked issue still costs
+    one extra request — while a fresh, comment-free issue is read from the
+    list call alone.
     """
     raw_issues = _paginate(f"/repos/{repo}/issues?state=open", token)
     issues: list[dict[str, Any]] = []
@@ -108,16 +120,16 @@ def gather_snapshot(repo: str, token: str) -> dict[str, Any]:
             continue
         number = it["number"]
         # `comments` is a count on the list payload; fetch the thread only
-        # when there is one, and keep just the SHIP-LOCK comments.
-        lock_comments: list[dict[str, str]] = []
+        # when there is one, keeping it whole for the policy to read.
+        thread: list[dict[str, str]] = []
         if it.get("comments", 0):
-            lock_comments = _ship_lock_comments(repo, number, token)
+            thread = _issue_comments(repo, number, token)
         issues.append({
             "number": number,
             "title": it.get("title", ""),
             "createdAt": it.get("created_at", ""),
             "labels": [lbl.get("name", "") for lbl in it.get("labels", [])],
-            "shipLockComments": lock_comments,
+            "comments": thread,
         })
 
     raw_prs = _paginate(f"/repos/{repo}/pulls?state=open", token)
