@@ -465,6 +465,12 @@ surfaces studies awaiting a read live in
   - `shot-spec.sh` — authors `shots.conf`/`lifestyle.conf` from a PM's
     art-direction brief (named views/colors, freeze and disclosure enforced);
     the mechanics behind the `/art-direction` skill
+  - `concept-preview.sh` — a design's four blueprint-style concept sheets
+    (exterior, cutaway, top section, exploded + bill of parts) as checked
+    SVGs from its `preview-spec.conf`, in one house drafting style; nothing
+    is written unless every sheet parses, stays self-contained and in bounds,
+    and has no overlapping labels — the mechanics behind the
+    `/concept-preview` skill
   - `lifestyle-clip.sh` — tier-2 AI motion clips from `motion.conf` via the
     Z.AI Vidu 2 image-to-video API, transcoded to a budgeted GIF (cosmetic,
     geometry-approximate, motion illustrative, disclosed)
@@ -530,6 +536,12 @@ surfaces studies awaiting a read live in
   `product-shot.sh`, which turns a design's own STL export into the
   photographed-looking hero image on its product page — see its
   [README](tools/photoshot/README.md)
+- `tools/concept-preview/` — the blueprint concept-sheet emitter behind
+  `concept-preview.sh`: one drafting system defined once (lifted from the
+  approved pre-roll elevator canvas, with local fonts so no served byte
+  reaches the network), six pure drafting primitives, a fail-loud spec
+  parser, and an independent checker for XML, bounds and label collisions —
+  see its [README](tools/concept-preview/README.md)
 - `tools/lineage/` — the lineage resolver: reads each design's
   `derives.conf` and its include lines, and answers who derives from whom —
   see its [README](tools/lineage/README.md)
