@@ -217,14 +217,15 @@ classification reads the two deterministic signals it has, **asymmetrically**:
   `issues: write`. `docs-only` is deliberately not the generic
   `documentation` label, which has been applied to issues whose fix shipped a
   check script.
-- **untrusted text only tightens.** The title and body can place an issue in
-  `gates` (it names a `*-check.sh`, a perms-check, `gate.sh`, `ci.yml`, a
-  `*-settings.json` backstop or the shared `.claude/settings.json` — the
-  owner's list), as can the `gate-machinery` label from anyone; neither can
-  ever vouch for an `auto` category. Text cannot tell "touches" from
-  "mentions", so an issue that names `gate.sh` only as its verification step
-  is denied too — Reeve stays silent and a human rules, the recoverable
-  direction.
+- **untrusted text only tightens — to ask.** The title and body can place an
+  issue in `gates` (it names a `*-check.sh`, a perms-check, `gate.sh`,
+  `ci.yml`, a `*-settings.json` backstop or the shared `.claude/settings.json`
+  — the owner's list), and a `gates` text hit **blocks auto**: the thread asks,
+  so gate items never resolve without a human. But text alone **never
+  denies**: it cannot tell "touches" from "mentions", and an earlier cut that
+  let it deny silenced Reeve on ~18 of 51 parked issues (owner ruling,
+  2026-10-03). A full **deny takes the category's label** — `gate-machinery`,
+  from anyone, since tightening needs no vouching.
 
 Most restrictive wins — deny > ask > auto — and a mix of an auto category with
 anything else asks. What each mode does:

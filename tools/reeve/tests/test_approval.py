@@ -97,20 +97,34 @@ def test_mixed_categories_ask():
 # Tightening: text and labels may always reach deny; deny beats auto
 # ---------------------------------------------------------------------------
 
-def test_docs_label_plus_gate_text_denies():
+def test_docs_label_plus_gate_text_asks():
     # Tighten wins: a verified docs-only label cannot launder a body that
-    # names gate machinery.
+    # names gate machinery — the text blocks auto (owner ruling 2026-10-03:
+    # text tightens to ask, never to deny on its own).
     mode_, cats = approval.mode_for(
         approval.classify([DOCS_LABEL], "Docs follow-up",
                           "Also tweak .github/workflows/ci.yml", [DOCS_LABEL]),
         OWNER_RULES,
     )
-    assert mode_ == approval.MODE_DENY
-    assert cats == {"gates"}
+    assert mode_ == approval.MODE_ASK
+    assert cats == {"docs", "gates"}
+    # NEGATIVE CONTROL: the same verified label without the gate text → auto.
+    assert approval.mode_for(
+        approval.classify([DOCS_LABEL], "Docs follow-up", "Reword docs/growth.md", [DOCS_LABEL]),
+        OWNER_RULES,
+    )[0] == approval.MODE_AUTO
 
 
 def test_gate_label_denies_whoever_applied_it():
     assert mode(labels=[GATES_LABEL]) == approval.MODE_DENY
+
+
+def test_gate_text_alone_never_denies():
+    # Owner ruling 2026-10-03: issue text cannot tell "edits gate.sh" from
+    # "names gate.sh as its check", so text alone may only block auto. A
+    # full deny takes the gate label (pinned both ways).
+    assert mode(body="Done when: gate.sh --slice green") == approval.MODE_ASK
+    assert mode(labels=[GATES_LABEL], body="Done when: gate.sh --slice green") == approval.MODE_DENY
 
 
 @pytest.mark.parametrize("text", [
@@ -122,27 +136,34 @@ def test_gate_label_denies_whoever_applied_it():
     "widen .claude/reeve-settings.json",
     "the shared .claude/settings.json allow list",
 ])
-def test_each_gate_pattern_denies(text):
-    assert mode(body=text) == approval.MODE_DENY
+def test_each_gate_pattern_blocks_auto(text):
+    # Each pattern classifies as gates, so a verified docs-only label can no
+    # longer auto-approve — the thread asks. Text alone never denies.
+    assert mode(labels=[DOCS_LABEL], verified=[DOCS_LABEL], body=text) == approval.MODE_ASK
+    assert mode(body=text) == approval.MODE_ASK
+    assert "gates" in approval.classify([], "", text).untrusted
 
 
 def test_plain_check_sh_is_not_a_gate_pattern():
     # Deliberate (approval.GATE_TEXT_PATTERNS): `./scripts/check.sh green` is
     # near-universal Done-when boilerplate; the owner's list names the
-    # *-check.sh family, not the runner.
-    assert mode(body="Done when: ./scripts/check.sh green") == approval.MODE_ASK
+    # *-check.sh family, not the runner — so it does not block auto.
+    assert mode(labels=[DOCS_LABEL], verified=[DOCS_LABEL],
+                body="Done when: ./scripts/check.sh green") == approval.MODE_AUTO
 
 
-def test_gate_text_with_no_deny_rule_only_asks():
-    # NEGATIVE CONTROL: the deny comes from the rule, not from the text.
-    assert mode(body="bump .github/workflows/ci.yml",
+def test_gate_label_with_no_deny_rule_only_asks():
+    # NEGATIVE CONTROL: the deny comes from the rule, not from the label.
+    assert mode(labels=[GATES_LABEL],
                 rules=approval.Rules(auto=frozenset({"docs"}))) == approval.MODE_ASK
 
 
 def test_normalization_defeats_case_and_zero_width_smuggling():
-    assert mode(body="bump .GITHUB/WORKFLOWS/CI.YML") == approval.MODE_DENY
-    assert mode(body="bump c​i.yml") == approval.MODE_DENY        # zero-width space
-    assert mode(body="bump ｃｉ.yml") == approval.MODE_DENY              # fullwidth (NFKC)
+    # A smuggled gate path must still block a verified docs label's auto.
+    docs = dict(labels=[DOCS_LABEL], verified=[DOCS_LABEL])
+    assert mode(body="bump .GITHUB/WORKFLOWS/CI.YML", **docs) == approval.MODE_ASK
+    assert mode(body="bump c​i.yml", **docs) == approval.MODE_ASK        # zero-width space
+    assert mode(body="bump ｃｉ.yml", **docs) == approval.MODE_ASK              # fullwidth (NFKC)
 
 
 def test_live_tree_gate_machinery_all_classifies_as_gates():

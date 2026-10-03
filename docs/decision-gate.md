@@ -318,9 +318,11 @@ deterministic, and the job's first step):
   The classification is deliberately one-way: **only a trusted signal
   loosens** — the category's label (`docs-only`), and only when the issue's
   label history shows a human with write permission applied it (never a bot)
-  — while **the issue's own text can only tighten** (naming gate machinery —
-  a `*-check.sh`, `ci.yml`, `gate.sh`, a `*-settings.json` backstop — denies;
-  naming only docs vouches for nothing). The shipped set is the owner's
+  — while **the issue's own text can only tighten, to ask** (naming gate
+  machinery — a `*-check.sh`, `ci.yml`, `gate.sh`, a `*-settings.json`
+  backstop — blocks auto-approval; naming only docs vouches for nothing). A
+  full deny takes the `gate-machinery` label: text alone cannot tell "edits
+  gate.sh" from "names gate.sh as its check" (owner ruling, 2026-10-03). The shipped set is the owner's
   2026-08-30 ruling: auto-approve doc-only follow-ups, deny gate machinery,
   everything else asks. Details: `tools/reeve/README.md`.
 

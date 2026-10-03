@@ -8,7 +8,9 @@ per-category rules** on top — the session-permission-mode analogue #296 named:
   👎 grace window has passed (the owner's 2026-08-30 ruling: doc-only
   follow-ups);
 * ``deny`` — the category is human-only: Reeve drafts no greenlight on it and
-  the poll never resolves it, not even on a 👍 (gate machinery);
+  the poll never resolves it, not even on a 👍 (gate machinery). Deny is set
+  by the category's **label** only (any applier — tightening needs no
+  vouching); text naming the category can only block ``auto``;
 * ``ask`` — everything else, and the default: #444's behaviour, unchanged.
 
 The rules live in ``.github/reeve.conf`` (``approve_auto:`` / ``approve_deny:``,
@@ -28,12 +30,16 @@ property this module exists to hold:
   token's ``github-actions[bot]``, or any ``[bot]`` App) never loosens: an
   agentic routine reading untrusted issue text may hold ``issues: write``, and
   a label it applied must not become standing approval authority.
-* **Untrusted text can only tighten.** The issue's title and body are written
-  by whoever filed it — often a routine — and can be edited later, so they can
-  place an issue in a category (:data:`TEXT_PATTERNS`, today only ``gates``)
-  but never vouch for one: a category that only text (or an unverified label)
-  names forces ``ask`` even when the conf lists it under ``approve_auto``, and
-  can always reach ``deny``.
+* **Untrusted text can only tighten — to ``ask``.** The issue's title and body
+  are written by whoever filed it — often a routine — and can be edited later,
+  so they can place an issue in a category (:data:`TEXT_PATTERNS`, today only
+  ``gates``) but never vouch for one: a category that only text (or an
+  unverified label) names forces ``ask`` even when the conf lists it under
+  ``approve_auto``. Text never reaches ``deny`` on its own (owner ruling,
+  2026-10-03): it cannot tell "edits gate.sh" from "names gate.sh as its
+  check", and a text deny silenced Reeve on ~18 of 51 parked issues. A text
+  hit on a deny category still blocks ``auto`` — so gate items never resolve
+  without a human — while a full deny takes the category's label.
 
 Most restrictive wins — deny > ask > auto — and an unclassified issue asks.
 A parked decision is an *issue*, not a PR, so there are no changed paths to
@@ -74,7 +80,8 @@ CATEGORY_LABELS = {
 
 # Untrusted-text patterns, matched as substrings of the normalized title+body
 # (:func:`normalize`). TIGHTEN-ONLY by construction: a text hit makes its
-# category untrusted, which can deny or force ask but can never reach auto.
+# category untrusted, which forces ask (blocking auto) but never reaches deny
+# on its own — deny takes the category's label.
 # There is deliberately no `docs` entry — text naming only docs paths is
 # exactly what an attacker would write, and it may never loosen anything.
 #
@@ -83,8 +90,8 @@ CATEGORY_LABELS = {
 # backstops and the *-perms-check.sh guards — plus the shared
 # .claude/settings.json every backstop is defined against. Text cannot tell
 # "touches" from "mentions", so an issue that merely names gate.sh as its
-# verification step classifies too; that over-reach lands on deny (Reeve
-# stays silent, a human rules) — the recoverable direction. `check.sh` alone
+# verification step classifies too; that over-reach lands on ask (Reeve still
+# drafts, a human still rules) — the recoverable direction. `check.sh` alone
 # is deliberately NOT a pattern: `./scripts/check.sh green` is near-universal
 # Done-when boilerplate, and the owner's list names the *-check.sh family.
 GATE_TEXT_PATTERNS = (
@@ -147,12 +154,16 @@ class Classification:
     ``trusted`` — categories named by a label whose applier was verified;
     ``untrusted`` — categories named only by text or by an unverified label.
     A category can sit in both (a verified label plus matching text).
+    ``labeled`` — categories named by a present label, verified or not: the
+    only signal that may reach ``deny`` (tightening needs no vouching, but
+    text alone cannot tell touching a path from mentioning it).
     ``evidence`` is the human-readable why, for the poll's log and reply.
     """
 
     trusted: frozenset
     untrusted: frozenset
     evidence: tuple = ()
+    labeled: frozenset = frozenset()
 
     @property
     def categories(self) -> frozenset:
@@ -211,10 +222,12 @@ def classify(
     verified = present & {_label_key(label) for label in verified_labels or ()}
     trusted: set[str] = set()
     untrusted: set[str] = set()
+    labeled: set[str] = set()
     evidence: list[str] = []
     for category, label in CATEGORY_LABELS.items():
         if _label_key(label) not in present:
             continue
+        labeled.add(category)
         if _label_key(label) in verified:
             trusted.add(category)
             evidence.append(f"`{category}`: label `{label}` (applied by a write-permission human)")
@@ -224,8 +237,8 @@ def classify(
     for category, patterns in text_hits(title, body).items():
         untrusted.add(category)
         named = ", ".join(f"`{p}`" for p in patterns)
-        evidence.append(f"`{category}`: the issue text names {named} (untrusted — can only tighten)")
-    return Classification(frozenset(trusted), frozenset(untrusted), tuple(evidence))
+        evidence.append(f"`{category}`: the issue text names {named} (untrusted — blocks auto, cannot deny)")
+    return Classification(frozenset(trusted), frozenset(untrusted), tuple(evidence), frozenset(labeled))
 
 
 def mode_for(classification: Classification, rules: Rules) -> tuple[str, frozenset]:
@@ -233,8 +246,8 @@ def mode_for(classification: Classification, rules: Rules) -> tuple[str, frozens
 
     Most restrictive wins:
 
-    1. **deny** when ANY category — trusted or not — is a deny category (text
-       may always tighten);
+    1. **deny** when a category named by a LABEL — verified or not — is a
+       deny category (a label may always tighten; text alone never denies);
     2. **auto** only when there is at least one category, EVERY category is
        an auto-approve category, and EVERY category is vouched for by a
        trusted signal — so a text-only or unverified-label category, or a
@@ -246,7 +259,7 @@ def mode_for(classification: Classification, rules: Rules) -> tuple[str, frozens
     ``ask``.
     """
     cats = classification.categories
-    denied = cats & rules.deny
+    denied = classification.labeled & rules.deny
     if denied:
         return MODE_DENY, frozenset(denied)
     if cats and cats <= rules.auto and cats <= classification.trusted:
