@@ -5,12 +5,13 @@
 # TWO BOARDS, one emitter (pass `--board <name>` before the subcommand;
 # default `autonomy`):
 #   * autonomy — the roadmap board (issue #148): the autonomy loop's backlog,
-#     with a human-owned Stage and Story points. docs/roadmap-board.md.
+#     with a human-owned Stage, Story points, and a Maturity lens (product
+#     maturity; source of truth is maturity:* on Product health). docs/roadmap-board.md.
 #   * growth   — the Lark approval board (docs/growth.md): where each queued
 #     Twitter/X post sits, so a human can see and approve them. Its Stage is a
 #     pure LENS the growth-board-sync workflow derives from each queue issue's
 #     state + labels + markers (growth.board.stage_of), so it has no Story
-#     points and its Stage is always set, never set-if-new.
+#     points, no Maturity, and its Stage is always set, never set-if-new.
 #
 # WHY a recipe you run, not an API call the automation makes: this session's
 # tooling cannot create or populate a Projects v2 board (the board/field/item
@@ -29,6 +30,10 @@
 #                                       # board and sets its Stage / Story points; pipe to bash to run.
 #                                       # --stage always sets the Stage; --stage-if-new sets it only when
 #                                       # the item is first added (so a re-add never clobbers a human's move)
+#   scripts/gh-project.sh [--board <name>] sync-stages <stages.tsv>
+#                                       # print a batch recipe that reflects many URL/stage rows onto the
+#                                       # board in one pass (one project lookup, one item-list, retries on
+#                                       # GraphQL rate limit). Used by growth-board-sync.yml.
 #   scripts/gh-project.sh --selftest    # prove the emitted recipes are valid, well-formed bash (run by check.sh)
 #
 # AUTH: `gh project` requires the `project` token scope, which login does NOT
@@ -58,11 +63,16 @@ DEFAULT_BOARD="autonomy"
 # (Todo/In Progress/Done) the CLI cannot reshape, so we add "Stage" and group
 # the board by it in the UI (view config is UI-only). Options are ordered; names
 # only (the CLI can't set colours). POINTS_FIELD is a NUMBER field, or empty for
-# a board that does not estimate.
+# a board that does not estimate. MATURITY_FIELD is a SINGLE_SELECT lens on the
+# autonomy board only (empty on growth) — product maturity, not workflow Stage;
+# the git-native maturity:* label on the pinned Product health issue is the
+# source of truth (see docs/roadmap-board.md).
 PROJECT_TITLE=""
 STAGE_FIELD=""
 STAGE_OPTIONS=""
 POINTS_FIELD=""
+MATURITY_FIELD=""
+MATURITY_OPTIONS=""
 
 select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
   BOARD="$1"
@@ -74,6 +84,12 @@ select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
       # Story points, Fibonacci 1/2/3/5/8 by convention: a chunked one-PR
       # sub-issue is 1-3; a bigger estimate is a hint it should be re-chunked.
       POINTS_FIELD="Story points"
+      # Maturity lens (not Stage): ideation → prototype → hitl → rc → mvp.
+      # Board field only — do not confuse with Stage; source of truth is
+      # maturity:* on the Product health issue. `rc` = early-user / release
+      # candidate (v0.1 shared set with Atlas/Shai).
+      MATURITY_FIELD="Maturity"
+      MATURITY_OPTIONS="ideation,prototype,hitl,rc,mvp"
       ;;
     growth)
       PROJECT_TITLE="print-bench growth"
@@ -86,8 +102,11 @@ select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
       # Approved (a human's approved-to-post label) -> Posted; Parked is
       # needs-decision, Attention is a live claim that never closed.
       STAGE_OPTIONS="Queued,Drafted,Approved,Posted,Parked,Attention"
-      # Growth posts are not estimated: no Story points field.
+      # Growth posts are not estimated: no Story points field. Maturity is
+      # autonomy-only (product-health lens), not a growth-desk concept.
       POINTS_FIELD=""
+      MATURITY_FIELD=""
+      MATURITY_OPTIONS=""
       ;;
     *)
       die "unknown board '$1' (known: autonomy, growth)"
@@ -95,11 +114,10 @@ select_board() {  # $1 = board name; sets the spec globals (and BOARD) or dies
   esac
 }
 
-# Emit the provisioning recipe from the spec above. Deterministic and
-# side-effect-free: it only prints. The spec values are substituted into a
-# header (unquoted heredoc); the body is literal (quoted heredoc) and reads them
-# as its own runtime variables, so the recipe is the single source and this
-# emitter needs no `gh` itself.
+# Emit the provisioning recipe for the active board spec. The recipe creates
+# missing fields but cannot reconcile options on an existing SINGLE_SELECT;
+# those require a separate UI or GraphQL update. This function is deterministic
+# and side-effect-free: it only prints and does not invoke `gh` itself.
 emit_recipe() {
   cat <<EOF
 #!/usr/bin/env bash
@@ -113,6 +131,8 @@ TITLE="$PROJECT_TITLE"
 STAGE_FIELD="$STAGE_FIELD"
 STAGE_OPTIONS="$STAGE_OPTIONS"
 POINTS_FIELD="$POINTS_FIELD"
+MATURITY_FIELD="$MATURITY_FIELD"
+MATURITY_OPTIONS="$MATURITY_OPTIONS"
 EOF
   # Part A — steps 0-1 and the field_absent helper (every board has these).
   cat <<'EOF'
@@ -195,6 +215,52 @@ else
   echo "field exists: $STAGE_FIELD"
 fi
 EOF
+
+  # Part D — the "Maturity" (SINGLE_SELECT) lens, emitted ONLY for a board
+  # whose spec carries one (autonomy). Distinct from Stage: workflow position
+  # vs product maturity. A board without Maturity (growth) gets no Maturity
+  # bash in its recipe at all.
+  if [ -n "$MATURITY_FIELD" ]; then
+    cat <<'EOF'
+
+# 4. "Maturity" (SINGLE_SELECT) — create if absent. A lens only: the
+#    git-native maturity:* label on the pinned Product health issue is the
+#    source of truth (same asymmetry as points-<n> vs Story points). Do not
+#    reuse or reshape Stage for this.
+#    If the field already exists, validate it is SINGLE_SELECT with options
+#    exactly equal to MATURITY_OPTIONS (order + set). Compatible → "field
+#    exists"; incompatible → fail listing live vs expected. gh cannot add
+#    options to an existing SINGLE_SELECT via field-create — fix mismatches
+#    once in the Project UI (or GraphQL), then re-run.
+if field_absent "$MATURITY_FIELD"; then
+  gh project field-create "$NUM" --owner "$OWNER" --name "$MATURITY_FIELD" \
+    --data-type SINGLE_SELECT --single-select-options "$MATURITY_OPTIONS"
+  echo "created field: $MATURITY_FIELD (SINGLE_SELECT: $MATURITY_OPTIONS)"
+else
+  # Accept either GraphQL typename or dataType (gh versions differ).
+  _mat_type=$(gh project field-list "$NUM" --owner "$OWNER" -L 200 --format json \
+    --jq ".fields[] | select(.name==\"$MATURITY_FIELD\") | (.dataType // .type // \"\")")
+  case "$_mat_type" in
+    SINGLE_SELECT|ProjectV2SingleSelectField) ;;
+    *)
+      echo "Maturity field exists but is not SINGLE_SELECT (got: ${_mat_type:-unknown})" >&2
+      echo "  expected: SINGLE_SELECT with options exactly: $MATURITY_OPTIONS" >&2
+      exit 1
+      ;;
+  esac
+  _mat_opts=$(gh project field-list "$NUM" --owner "$OWNER" -L 200 --format json \
+    --jq ".fields[] | select(.name==\"$MATURITY_FIELD\") | [(.options // [])[].name] | join(\",\")")
+  if [ "$_mat_opts" != "$MATURITY_OPTIONS" ]; then
+    echo "Maturity field options mismatch (must match exactly):" >&2
+    echo "  live:     ${_mat_opts:-<none>}" >&2
+    echo "  expected: $MATURITY_OPTIONS" >&2
+    echo "  gh cannot grow/reorder a SINGLE_SELECT via field-create — add or fix options in the Project UI, then re-run." >&2
+    exit 1
+  fi
+  echo "field exists: $MATURITY_FIELD (SINGLE_SELECT: $MATURITY_OPTIONS)"
+fi
+EOF
+  fi
 
   # The closing add-item hint, matched to the board (points for autonomy, the
   # first Stage option as the entry stage for a lens board like growth).
@@ -341,6 +407,172 @@ add_item_cli() {
   emit_add_item "$url" "$stage" "$points" "$stage_if_new"
 }
 
+# Emit a batch recipe that applies many derived Stage rows in one GraphQL pass.
+# growth-board-sync.yml used to pipe one add-item recipe per queue item; each
+# recipe re-listed the whole project and every board item, so a full reconcile
+# burned the authenticated user's GraphQL budget and hard-failed on rate limit.
+# Args: path to a TSV of <issue-or-pr-url><tab><stage> (no header).
+emit_sync_stages() {
+  local stages_file="$1"
+  cat <<EOF
+#!/usr/bin/env bash
+# Reflect every row in $stages_file onto the "$PROJECT_TITLE" board Stage field.
+# GENERATED by scripts/gh-project.sh sync-stages. Needs gh + jq.
+set -euo pipefail
+
+OWNER="$PROJECT_OWNER"
+TITLE="$PROJECT_TITLE"
+STAGES_FILE="$stages_file"
+STAGE_FIELD="$STAGE_FIELD"
+EOF
+  cat <<'EOF'
+
+# Same env-var-token guard as the other recipes.
+if [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; then
+  echo "auth: using a token from the environment — ensure it carries the 'project' scope" >&2
+elif gh auth status 2>&1 | grep -q "'project'"; then
+  echo "auth: your gh login already carries the 'project' scope" >&2
+elif [ -e /dev/tty ]; then
+  echo "auth: granting gh the 'project' scope (interactive) …" >&2
+  gh auth refresh -s project < /dev/tty
+else
+  echo "auth: gh is missing the 'project' scope and no terminal is available to" >&2
+  echo "      grant it. Run this once in your shell, then re-run the recipe:" >&2
+  echo "        gh auth refresh -s project" >&2
+  exit 1
+fi
+
+# Retry transient GraphQL rate limits instead of failing the whole reconcile.
+# Returns 0 on success, 2 when rate limit persists after all attempts, else $rc.
+gh_retry() {
+  local attempt=1 max=6 delay=30 out rc
+  while true; do
+    set +e
+    out=$("$@" 2>&1)
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+      printf '%s\n' "$out"
+      return 0
+    fi
+    if [[ "$out" == *"rate limit"* ]] || [[ "$out" == *"rate_limit"* ]]; then
+      if [ "$attempt" -ge "$max" ]; then
+        echo "$out" >&2
+        return 2
+      fi
+      echo "::warning::gh-project sync-stages: GraphQL rate limit on '$*'; sleeping ${delay}s (attempt ${attempt}/${max})" >&2
+      sleep "$delay"
+      if [ "$delay" -lt 120 ]; then delay=$((delay * 2)); fi
+      attempt=$((attempt + 1))
+      continue
+    fi
+    echo "$out" >&2
+    return "$rc"
+  done
+}
+
+rate_limit_exit() {
+  echo "::warning::growth-board-sync: GraphQL rate limit during board setup; no cards updated this run"
+  exit 0
+}
+
+[ -f "$STAGES_FILE" ] || { echo "sync-stages: file not found: $STAGES_FILE" >&2; exit 1; }
+
+set +e
+NUM=$(gh_retry gh project list --owner "$OWNER" -L 200 --format json \
+  --jq ".projects[] | select(.title==\"$TITLE\") | .number")
+num_rc=$?
+set -e
+[ "$num_rc" -eq 2 ] && rate_limit_exit
+[ "$num_rc" -eq 0 ] || exit "$num_rc"
+[ -n "$NUM" ] || { echo "board '$TITLE' not found — run: scripts/gh-project.sh setup | bash" >&2; exit 1; }
+
+set +e
+PID=$(gh_retry gh project list --owner "$OWNER" -L 200 --format json \
+  --jq ".projects[] | select(.title==\"$TITLE\") | .id")
+pid_rc=$?
+set -e
+[ "$pid_rc" -eq 2 ] && rate_limit_exit
+[ "$pid_rc" -eq 0 ] || exit "$pid_rc"
+
+set +e
+SF=$(gh_retry gh project field-list "$NUM" --owner "$OWNER" -L 200 --format json \
+  --jq ".fields[] | select(.name==\"$STAGE_FIELD\") | .id")
+sf_rc=$?
+set -e
+[ "$sf_rc" -eq 2 ] && rate_limit_exit
+[ "$sf_rc" -eq 0 ] || exit "$sf_rc"
+[ -n "$SF" ] || { echo "field '$STAGE_FIELD' not found on board '$TITLE'" >&2; exit 1; }
+
+set +e
+FIELD_JSON=$(gh_retry gh project field-list "$NUM" --owner "$OWNER" -L 200 --format json)
+field_rc=$?
+set -e
+[ "$field_rc" -eq 2 ] && rate_limit_exit
+[ "$field_rc" -eq 0 ] || exit "$field_rc"
+
+set +e
+ITEMS_JSON=$(gh_retry gh project item-list "$NUM" --owner "$OWNER" -L 500 --format json)
+items_rc=$?
+set -e
+[ "$items_rc" -eq 2 ] && rate_limit_exit
+[ "$items_rc" -eq 0 ] || exit "$items_rc"
+
+count=0
+rate_limited=0
+tab="$(printf '\t')"
+while IFS="$tab" read -r url stage; do
+  [ -n "$url" ] || continue
+  [ -n "$stage" ] || continue
+  OPT=$(jq -r --arg f "$STAGE_FIELD" --arg s "$stage" \
+    '.fields[] | select(.name==$f) | .options[] | select(.name==$s) | .id' <<<"$FIELD_JSON")
+  [ -n "$OPT" ] || { echo "stage '$stage' is not an option of '$STAGE_FIELD'" >&2; exit 1; }
+  ITEM=$(jq -r --arg u "$url" '.items[] | select(.content.url==$u) | .id' <<<"$ITEMS_JSON" | head -n 1)
+  if [ -z "$ITEM" ]; then
+    set +e
+    add_out=$(gh_retry gh project item-add "$NUM" --owner "$OWNER" --url "$url" --format json --jq '.id')
+    add_rc=$?
+    set -e
+    if [ "$add_rc" -eq 2 ]; then
+      rate_limited=1
+      break
+    fi
+    [ "$add_rc" -eq 0 ] || { echo "$add_out" >&2; exit "$add_rc"; }
+    ITEM="$add_out"
+    ITEMS_JSON=$(jq --arg u "$url" --arg id "$ITEM" \
+      '.items += [{"id":$id,"content":{"url":$u}}]' <<<"$ITEMS_JSON")
+  fi
+  set +e
+  edit_out=$(gh_retry gh project item-edit --id "$ITEM" --project-id "$PID" \
+    --field-id "$SF" --single-select-option-id "$OPT")
+  edit_rc=$?
+  set -e
+  if [ "$edit_rc" -eq 2 ]; then
+    rate_limited=1
+    break
+  fi
+  [ "$edit_rc" -eq 0 ] || { echo "$edit_out" >&2; exit "$edit_rc"; }
+  echo "set $STAGE_FIELD = $stage  ($url)"
+  count=$((count + 1))
+done < "$STAGES_FILE"
+
+if [ "$rate_limited" = "1" ]; then
+  echo "::warning::growth-board-sync: GraphQL rate limit after ${count} item(s); partial sync — next reconcile continues"
+  echo "::notice::growth-board sync reflected ${count} item(s) onto the board (partial — rate limited)."
+  exit 0
+fi
+echo "::notice::growth-board sync reflected ${count} item(s) onto the board."
+EOF
+}
+
+sync_stages_cli() {
+  local file="${1:-}"
+  [ -n "$file" ] || die "sync-stages: a TSV file path is required"
+  emit_sync_stages "$file"
+}
+
+# Verify setup and add-item recipe generation, including validation failures,
+# against both supported board specs. Terminates on the first failed assertion.
 selftest() {
   local out
   out="$(emit_recipe)"
@@ -357,6 +589,25 @@ selftest() {
   grep -qFe '--data-type SINGLE_SELECT' <<<"$out" || die "selftest: Stage single-select field missing"
   grep -qF 'Backlog,Ready,In progress,In review,Done' <<<"$out" \
     || die "selftest: stage options missing"
+  # Maturity lens (autonomy only): distinct SINGLE_SELECT, exact option list.
+  grep -qF 'MATURITY_FIELD="Maturity"' <<<"$out" || die "selftest: Maturity field name not substituted"
+  grep -qF 'ideation,prototype,hitl,rc,mvp' <<<"$out" \
+    || die "selftest: Maturity options missing"
+  # The recipe must emit the real field-create / SINGLE_SELECT command path
+  # (not only header MATURITY_* assignments).
+  grep -qF 'gh project field-create "$NUM" --owner "$OWNER" --name "$MATURITY_FIELD"' <<<"$out" \
+    || die "selftest: Maturity field-create command path missing from autonomy recipe"
+  # Patterns that start with -- must use grep -e/-- so grep does not treat them as flags.
+  grep -qFe '--data-type SINGLE_SELECT --single-select-options "$MATURITY_OPTIONS"' <<<"$out" \
+    || die "selftest: Maturity SINGLE_SELECT create flags missing from autonomy recipe"
+  # Existing-field path must validate type + exact options (fail on mismatch).
+  grep -qF 'Maturity field options mismatch' <<<"$out" \
+    || die "selftest: Maturity existing-field options mismatch guard missing"
+  grep -qE 'SINGLE_SELECT\|ProjectV2SingleSelectField' <<<"$out" \
+    || die "selftest: Maturity existing-field SINGLE_SELECT type check missing"
+  # Stage options must remain the workflow pipeline — Maturity must not replace them.
+  grep -qF 'STAGE_OPTIONS="Backlog,Ready,In progress,In review,Done"' <<<"$out" \
+    || die "selftest: Stage options were altered (Maturity must not reuse Stage)"
   grep -qF 'gh auth refresh -s project' <<<"$out" || die "selftest: project-scope refresh missing"
   # The refresh must be guarded so an env-var token (CI/automation) doesn't abort
   # the recipe under set -e (Vercel agent review on #164).
@@ -419,6 +670,11 @@ selftest() {
   grep -qFe '--data-type NUMBER' <<<"$grec" \
     && die "selftest: growth board must not emit a Story points NUMBER field" || true
   grep -qFe '--data-type SINGLE_SELECT' <<<"$grec" || die "selftest: growth Stage single-select field missing"
+  # Growth must not carry the autonomy Maturity lens.
+  grep -qF 'MATURITY_FIELD="Maturity"' <<<"$grec" \
+    && die "selftest: growth board must not emit a Maturity field" || true
+  grep -qF 'ideation,prototype,hitl,rc,mvp' <<<"$grec" \
+    && die "selftest: growth board must not emit Maturity options" || true
   # add-item on the growth board: a growth Stage is accepted and substituted.
   local gadd
   gadd="$("$SELF" --board growth add-item "https://github.com/shaiss/print-bench/issues/1" --stage Approved)"
@@ -433,6 +689,21 @@ selftest() {
     && die "selftest: growth add-item accepted --points on a board with no Story points field" || true
   "$SELF" --board nope setup >/dev/null 2>&1 \
     && die "selftest: accepted an unknown board name" || true
+
+  # ---- sync-stages: batch growth-board reconcile (issue #748) ---------------
+  local sync
+  sync="$("$SELF" --board growth sync-stages /tmp/stages.tsv)"
+  bash -n <(printf '%s\n' "$sync") || die "selftest: sync-stages recipe is not valid bash"
+  grep -qF 'STAGES_FILE="/tmp/stages.tsv"' <<<"$sync" \
+    || die "selftest: sync-stages path not substituted"
+  grep -qF 'gh_retry()' <<<"$sync" || die "selftest: sync-stages gh_retry missing"
+  grep -qF 'growth-board-sync: GraphQL rate limit' <<<"$sync" \
+    || die "selftest: sync-stages rate-limit warning missing"
+  # One item-list for the whole batch — not one per row (the old per-item add-item loop).
+  test "$(grep -cF 'gh project item-list' <<<"$sync")" -eq 1 \
+    || die "selftest: sync-stages must list board items exactly once"
+  "$SELF" sync-stages >/dev/null 2>&1 \
+    && die "selftest: sync-stages accepted no file path" || true
 
   echo "ok    gh-project.sh selftest passed"
 }
@@ -451,11 +722,12 @@ select_board "$BOARD"
 case "${1:-}" in
   setup)         emit_recipe ;;
   add-item)      shift; add_item_cli "$@" ;;
+  sync-stages)   shift; sync_stages_cli "$@" ;;
   # The whole suite starts from the autonomy board (its first assertions are the
   # autonomy recipe), then switches to growth itself — so reset here in case a
   # caller passed `--board growth --selftest`, which would otherwise fail those
   # opening assertions before reaching the growth checks.
   --selftest)    select_board autonomy; selftest ;;
   -h|--help|"")  grep '^#' "$SELF" | sed 's/^# \{0,1\}//' ;;
-  *)             die "unknown argument: '$1' (try: [--board <name>] setup | add-item | --selftest | --help)" ;;
+  *)             die "unknown argument: '$1' (try: [--board <name>] setup | add-item | sync-stages | --selftest | --help)" ;;
 esac
