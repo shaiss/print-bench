@@ -54,6 +54,11 @@ The OAuth 1.0a mechanics live in the tested tools/growth package
 checkout (a committed repo path added to sys.path; not a pip install, so the
 stdlib-only rule for the unattended run holds: dry-run touches none of it).
 Logs go to stderr so stdout carries nothing but JSON-RPC.
+
+To reply under an *existing* parent tweet (not a thread this tool composed),
+use the human-triggered ``growth-twitter-reply.yml`` workflow_dispatch
+(``.github/workflows/growth-twitter-reply.yml``) — it calls the same
+``growth.poster.post_tweet`` seam with ``reply_to`` set.
 """
 
 import json
