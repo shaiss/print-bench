@@ -271,6 +271,8 @@ surfaces studies awaiting a read live in
   two-tone exports),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
+  `bevel.scad` (FDM bevel and spur gear pairs from one generator and one
+  clearance, on BOSL2's gears),
   each with a `*-demo.scad` regression render, plus vendored
   [BOSL2](https://github.com/BelfrySCAD/BOSL2)
 - `build/` — generated STL/PNG outputs (gitignored)
