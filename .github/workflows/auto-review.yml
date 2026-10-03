@@ -220,7 +220,7 @@ jobs:
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           ACTION: ${{ github.event.action }}
-          STAMP_SHA: ${{ steps.stamp.outputs.sha }}
+          LAST_REVIEWED: ${{ steps.stamp.outputs.sha }}
         run: |
           set -euo pipefail
           # opened / ready_for_review / reopened → always a new round
@@ -230,7 +230,7 @@ jobs:
           fi
           # synchronize → new round only when design files changed since the
           # last stamp (read, token-side, by the step above).
-          stamp_sha="$STAMP_SHA"
+          stamp_sha="$LAST_REVIEWED"
           if ! [[ "$stamp_sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "is_new_round=true" >> "$GITHUB_OUTPUT"
             exit 0
