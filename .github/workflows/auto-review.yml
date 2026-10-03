@@ -194,15 +194,33 @@ jobs:
       # We track rounds with a sticky comment whose body starts with
       # AUTO_REVIEW_STAMP followed by the last-reviewed HEAD SHA.  If that SHA
       # matches HEAD we skip the round (already reviewed this commit).
-      - name: Check whether this is a new round
-        id: round
+      # Split in two so repo code never runs beside a token: this step holds
+      # GH_TOKEN and only reads the stamp comment through gh; the next step,
+      # which runs scripts/reviewer-signoff.sh from the checkout, holds none.
+      - name: Read the last review stamp
+        id: stamp
         if: steps.check.outputs.designs_changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Find the stamp comment and extract the stamped SHA (40 hex or
+          # nothing — the grep is the only thing that reaches the output).
+          stamp_sha="$(gh api \
+            "/repos/$GITHUB_REPOSITORY/issues/${PR_NUMBER}/comments" \
+            --jq '[.[] | select(.body | startswith("<!-- AUTO_REVIEW_STAMP"))] | last | .body' \
+            2>/dev/null \
+            | grep -oP '(?<=sha=)[0-9a-f]{40}' || true)"
+          echo "sha=$stamp_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this is a new round
+        id: round
+        if: steps.check.outputs.designs_changed == 'true'
+        env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          EVENT: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
+          STAMP_SHA: ${{ steps.stamp.outputs.sha }}
         run: |
           set -euo pipefail
           # opened / ready_for_review / reopened → always a new round
@@ -211,13 +229,9 @@ jobs:
             exit 0
           fi
           # synchronize → new round only when design files changed since the
-          # last stamp.  Find the stamp comment and extract the stamped SHA.
-          stamp_sha="$(gh api \
-            "/repos/$GITHUB_REPOSITORY/issues/${PR_NUMBER}/comments" \
-            --jq '[.[] | select(.body | startswith("<!-- AUTO_REVIEW_STAMP"))] | last | .body' \
-            2>/dev/null \
-            | grep -oP '(?<=sha=)[0-9a-f]{40}' || true)"
-          if [ -z "$stamp_sha" ]; then
+          # last stamp (read, token-side, by the step above).
+          stamp_sha="$STAMP_SHA"
+          if ! [[ "$stamp_sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "is_new_round=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -1208,7 +1222,7 @@ jobs:
           persist-credentials: false
           # Full history: older head shas must resolve, and the currency key
           # walks the head's first-parent line. The default (merge) ref, not
-          # head.sha: its parent IS the head, and it carries the
+          # head.sha: the head is one of its parents, and it carries the
           # reviewer-signoff.sh this workflow was written against — a branch
           # that predates the `key` verb would otherwise compute no keys and
           # stale every sign-off the round guard just carried forward.
