@@ -270,6 +270,8 @@ surfaces studies awaiting a read live in
   its tuned-fit tolerances),
   `stencil-glyphs.scad` (clean-room 2D stencil digits 0-9 with bridged
   counters, no `text()`/TTF, for numerals cut through a shell),
+  `helical-window.scad` (the ovodyo signature slot as a cut-through or
+  debossed brand-mark cutter, with a sever guard),
   `bevel.scad` (FDM bevel and spur gear pairs from one generator and one
   clearance, on BOSL2's gears),
   each with a `*-demo.scad` regression render, plus vendored
