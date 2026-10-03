@@ -699,6 +699,20 @@ if ! ./scripts/shot-spec.sh --selftest; then
   fail=1
 fi
 
+# preview-diff.sh is the regen-faithfulness check (issue #470): the regen
+# commit step runs it to class each regenerated preview against the committed
+# bytes. It is advisory, so a weakened classifier (always "noise") would leave
+# every run green — the selftest is the only thing that proves the band and the
+# source cross-check still fire. Run unconditionally rather than gated on
+# ImageMagick the way the plate selftest is gated on prusa-slicer: the pure
+# classifier rows need nothing and must run everywhere, and the script skips
+# its own end-to-end half with a notice where ImageMagick is absent (the
+# scad-check jobs, whose cached apt cannot carry it — issue #85).
+echo "-- preview-diff selftest: scripts/preview-diff.sh --selftest"
+if ! ./scripts/preview-diff.sh --selftest; then
+  fail=1
+fi
+
 # field-test.sh is the tested core of the "Log a print result" Action
 # (issue #101): its --selftest proves the FIELD-TEST entry formatting, the
 # section-creation, and the design-name/required-field refusals still hold.

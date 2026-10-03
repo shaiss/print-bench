@@ -480,6 +480,12 @@ surfaces studies awaiting a read live in
   - `regen-stamp.sh` — a design's regeneration input fingerprint; CI skips
     re-rendering previews/GIFs/product shots when it matches the committed
     stamp
+  - `preview-diff.sh` — the regen-faithfulness check (issue #470): classes
+    each regenerated preview against the committed bytes it replaces (noise /
+    content / resized / new / removed, a pixel-count band sized for
+    cross-runner render wobble) and warns when a design's previews changed
+    though its own sources did not. Advisory — run by CI's regen commit step,
+    with a `--selftest`
   - `field-test.sh` — appends a FIELD-TEST entry (one real print's result) to
     a design's NOTES.md; the tested core of the "Log a print result" Action
     (issue #101)
