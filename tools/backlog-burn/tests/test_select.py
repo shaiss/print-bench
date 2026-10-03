@@ -24,13 +24,33 @@ def _iso(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def issue(number, created, *, labels=(LABEL,), locks=()):
+def issue(number, created, *, labels=(LABEL,), comments=()):
     return {
         "number": number,
         "title": f"issue {number}",
         "createdAt": created,
         "labels": list(labels),
-        "shipLockComments": list(locks),
+        "comments": list(comments),
+    }
+
+
+def decline(hours_ago, **extra):
+    """A 🚢 DECLINED marker comment `hours_ago` before NOW."""
+    return {
+        "body": "🚢 DECLINED — needs a decision (blocking question unanswered).",
+        "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
+        **extra,
+    }
+
+
+def deferred(hours_ago, **extra):
+    """A 🚢 DEFERRED marker comment `hours_ago` before NOW — the stop shape
+    the /ship-issue walk posts when a brief's dependencies are unlanded (the
+    exact first line observed on #641)."""
+    return {
+        "body": "🚢 DEFERRED (re-check) — dependencies still not landed.",
+        "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
+        **extra,
     }
 
 
@@ -104,7 +124,7 @@ def test_custom_label():
 # --------------------------------------------------------------------------
 
 def test_active_ship_lock_excludes():
-    locked = issue(40, "2026-08-01T00:00:00Z", locks=[
+    locked = issue(40, "2026-08-01T00:00:00Z", comments=[
         {"body": "🚢 SHIP-LOCK — shipping this as one PR.", "createdAt": "2026-08-02T00:00:00Z"},
     ])
     assert select_issue(snap([locked]))["selected"] is None
@@ -113,7 +133,7 @@ def test_active_ship_lock_excludes():
 
 def test_withdrawn_lock_is_re_eligible():
     # Newest lock comment is a withdrawal -> the issue is claimable again.
-    issue_ = issue(41, "2026-08-01T00:00:00Z", locks=[
+    issue_ = issue(41, "2026-08-01T00:00:00Z", comments=[
         {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": "2026-08-02T00:00:00Z"},
         {"body": "🚢 SHIP-LOCK WITHDRAWN — yielding.", "createdAt": "2026-08-03T00:00:00Z"},
     ])
@@ -122,7 +142,7 @@ def test_withdrawn_lock_is_re_eligible():
 
 def test_latest_lock_wins_even_if_reclaimed():
     # withdrawn, then re-claimed by another run: newest is active -> excluded.
-    issue_ = issue(42, "2026-08-01T00:00:00Z", locks=[
+    issue_ = issue(42, "2026-08-01T00:00:00Z", comments=[
         {"body": "🚢 SHIP-LOCK — a.", "createdAt": "2026-08-02T00:00:00Z"},
         {"body": "🚢 SHIP-LOCK WITHDRAWN — a yields.", "createdAt": "2026-08-03T00:00:00Z"},
         {"body": "🚢 SHIP-LOCK — b.", "createdAt": "2026-08-04T00:00:00Z"},
@@ -134,12 +154,12 @@ def test_stale_lock_with_no_branch_or_pr_is_takeable():
     # An un-withdrawn claim older than the staleness window, with nothing
     # backing it (no branch, no closing PR), is the skill's takeover case:
     # the burn must not be frozen out of it.
-    stale = issue(44, "2026-08-01T00:00:00Z", locks=[
+    stale = issue(44, "2026-08-01T00:00:00Z", comments=[
         {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": _iso(NOW - timedelta(hours=9))},
     ])
     assert select_issue(snap([stale]), now=NOW)["selected"] == 44
     # Negative control: the SAME lock, only an hour old, still blocks.
-    fresh = issue(44, "2026-08-01T00:00:00Z", locks=[
+    fresh = issue(44, "2026-08-01T00:00:00Z", comments=[
         {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": _iso(NOW - timedelta(hours=1))},
     ])
     assert select_issue(snap([fresh]), now=NOW)["selected"] is None
@@ -148,7 +168,7 @@ def test_stale_lock_with_no_branch_or_pr_is_takeable():
 def test_stale_lock_still_blocked_when_a_branch_backs_it():
     # Old lock, but a claude/issue-<N>-* branch exists -> the run is alive /
     # real; the branch guard fires first and it stays excluded.
-    stale = issue(45, "2026-08-01T00:00:00Z", locks=[
+    stale = issue(45, "2026-08-01T00:00:00Z", comments=[
         {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": _iso(NOW - timedelta(hours=9))},
     ])
     assert select_issue(
@@ -157,7 +177,7 @@ def test_stale_lock_still_blocked_when_a_branch_backs_it():
 
 
 def test_stale_lock_still_blocked_when_a_pr_backs_it():
-    stale = issue(46, "2026-08-01T00:00:00Z", locks=[
+    stale = issue(46, "2026-08-01T00:00:00Z", comments=[
         {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": _iso(NOW - timedelta(hours=9))},
     ])
     assert select_issue(
@@ -169,19 +189,17 @@ def test_stale_lock_still_blocked_when_a_pr_backs_it():
 def test_no_now_treats_undated_lock_as_active():
     # Without a reference time, staleness cannot be judged; a claim is never
     # selected over (the conservative reading).
-    old = issue(47, "2026-08-01T00:00:00Z", locks=[
+    old = issue(47, "2026-08-01T00:00:00Z", comments=[
         {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": "2000-01-01T00:00:00Z"},
     ])
     assert select_issue(snap([old]))["selected"] is None
 
 
 def test_non_ship_lock_comment_does_not_lock():
-    issue_ = issue(43, "2026-08-01T00:00:00Z", locks=[])
-    issue_["shipLockComments"] = []
     # A comment that merely mentions ship-lock but isn't the marker line.
-    issue_["shipLockComments"] = [
+    issue_ = issue(43, "2026-08-01T00:00:00Z", comments=[
         {"body": "discussion about 🚢 SHIP-LOCK semantics", "createdAt": "2026-08-02T00:00:00Z"},
-    ]
+    ])
     # First line does not START with the marker -> not a claim.
     assert select_issue(snap([issue_]))["selected"] == 43
 
@@ -284,7 +302,7 @@ def test_needs_decision_blocks_even_when_lock_is_stale():
     # lock check is what this proves.
     stale_locked = issue(
         91, "2026-08-01T00:00:00Z", labels=[LABEL, "needs-decision"],
-        locks=[{"body": "🚢 SHIP-LOCK — shipping.",
+        comments=[{"body": "🚢 SHIP-LOCK — shipping.",
                 "createdAt": _iso(NOW - timedelta(hours=9))}],
     )
     assert select_issue(snap([stale_locked]), now=NOW)["selected"] is None
@@ -292,10 +310,313 @@ def test_needs_decision_blocks_even_when_lock_is_stale():
     # so it is the decision label — not the lock — doing the exclusion above.
     stale_only = issue(
         91, "2026-08-01T00:00:00Z", labels=[LABEL],
-        locks=[{"body": "🚢 SHIP-LOCK — shipping.",
+        comments=[{"body": "🚢 SHIP-LOCK — shipping.",
                 "createdAt": _iso(NOW - timedelta(hours=9))}],
     )
     assert select_issue(snap([stale_only]), now=NOW)["selected"] == 91
+
+
+# --------------------------------------------------------------------------
+# Guard: a recent decline parks the brief until the owner replies (issue #530)
+# --------------------------------------------------------------------------
+
+def test_recent_decline_skips_for_the_next_brief():
+    # The #515 shape: the oldest brief sits freshly declined, so the hourly
+    # firing must move past it to the runnable brief behind, instead of
+    # re-picking it, re-declining it and starving that one.
+    blocked = issue(100, "2026-08-01T00:00:00Z", comments=[decline(3)])
+    runnable = issue(101, "2026-08-02T00:00:00Z")
+    r = select_issue(snap([blocked, runnable]), now=NOW)
+    assert r["selected"] == 101
+    assert "declin" in r["excluded"]["100"]
+
+
+def test_decline_cooldown_expires():
+    # A decline must never bury: only the decline timestamp varies, and past
+    # the 24 h window the brief is eligible again.
+    fresh = issue(102, "2026-08-01T00:00:00Z", comments=[decline(23)])
+    assert select_issue(snap([fresh]), now=NOW)["selected"] is None
+    expired = issue(102, "2026-08-01T00:00:00Z", comments=[decline(25)])
+    assert select_issue(snap([expired]), now=NOW)["selected"] == 102
+
+
+def test_owner_reply_re_arms_regardless_of_window():
+    # A human comment newer than the latest decline re-arms immediately —
+    # the owner answering the blocking question is exactly when the next
+    # firing should take the brief (the #515 "Bottle answer" shape).
+    answered = issue(103, "2026-08-01T00:00:00Z", comments=[
+        decline(2),
+        {"body": "**Bottle answer — the blocking question is closed: PCO-1881.**",
+         "createdAt": _iso(NOW - timedelta(hours=1))},
+    ])
+    assert select_issue(snap([answered]), now=NOW)["selected"] == 103
+
+
+def test_latest_decline_wins_and_restarts_the_window():
+    # An old decline a run has since re-declined is fresh again: the marker
+    # is a state read from the *latest* comment, exactly like a SHIP-LOCK.
+    redeclined = issue(104, "2026-08-01T00:00:00Z", comments=[
+        decline(30),
+        decline(2),
+    ])
+    assert select_issue(snap([redeclined]), now=NOW)["selected"] is None
+
+
+def test_run_comment_newer_than_the_decline_does_not_re_arm():
+    # Withdrawals, parks, triage labels and chunk markers are machine posts
+    # through the same PAT identity as the owner (#515: the declines, the
+    # withdrawals and the owner's answer are all one login), so none of them
+    # may re-arm the cooldown — only owner activity does.
+    for body in (
+        "🚢 SHIP-LOCK WITHDRAWN — yielding.",
+        "🚦 DECISION NEEDED — `which-bottle`",
+        "🏷️ Triaged: `autonomy-ok` — selector fix.",   # labeler emits the
+        "🏷 Triaged: bare marker, no selector.",        # selector both ways
+        "🧩 CHUNKED — sub-issues filed.",
+    ):
+        chattered = issue(105, "2026-08-01T00:00:00Z", comments=[
+            decline(2),
+            {"body": body, "createdAt": _iso(NOW - timedelta(hours=1))},
+        ])
+        assert select_issue(snap([chattered]), now=NOW)["selected"] is None, body
+
+
+def test_bot_authored_comment_does_not_re_arm():
+    # The marker-free leg of the run test: anything GitHub types as a Bot is
+    # machine-posted whatever it wrote.
+    botnoise = issue(106, "2026-08-01T00:00:00Z", comments=[
+        decline(2),
+        {"body": "workflow notification", "createdAt": _iso(NOW - timedelta(hours=1)),
+         "authorType": "Bot"},
+    ])
+    assert select_issue(snap([botnoise]), now=NOW)["selected"] is None
+
+
+def test_decline_marker_requires_the_first_line():
+    # Prose that merely mentions a decline is not a decline — the same
+    # first-line rule the SHIP-LOCK marker follows.
+    mention = issue(107, "2026-08-01T00:00:00Z", comments=[
+        {"body": "the last run posted a 🚢 DECLINED here, but that was answered",
+         "createdAt": _iso(NOW - timedelta(hours=1))},
+    ])
+    assert select_issue(snap([mention]), now=NOW)["selected"] == 107
+
+
+def test_withdrawn_lock_comment_is_not_a_decline():
+    # 🚢 SHIP-LOCK WITHDRAWN shares the 🚢 prefix with DECLINED but is a
+    # release, not a decline; dated and read by the decline guard it must
+    # not trip it (test_withdrawn_lock_is_re_eligible covers the undated
+    # path).
+    withdrawn = issue(108, "2026-08-01T00:00:00Z", comments=[
+        {"body": "🚢 SHIP-LOCK WITHDRAWN — yielding.",
+         "createdAt": _iso(NOW - timedelta(hours=1))},
+    ])
+    assert select_issue(snap([withdrawn]), now=NOW)["selected"] == 108
+
+
+def test_no_now_treats_decline_as_fresh():
+    # Without a reference time the window cannot be judged; the conservative
+    # reading keeps the brief out (mirrors the lock's undated-claim rule).
+    undated = issue(109, "2026-08-01T00:00:00Z", comments=[decline(48)])
+    assert select_issue(snap([undated]))["selected"] is None
+
+
+# --------------------------------------------------------------------------
+# Guard: a recent defer parks the brief until its dependencies land or the
+# owner replies (issue #694, the optional half of #690)
+# --------------------------------------------------------------------------
+
+def test_recent_defer_skips_for_the_next_brief():
+    # The #641 shape: the oldest brief sits freshly deferred (its
+    # dependencies unlanded), so the hourly firing must move past it to the
+    # runnable brief behind instead of re-picking, re-deferring and spinning
+    # — 20+ firings shipped nothing before Reeve parked it by hand.
+    blocked = issue(110, "2026-08-01T00:00:00Z", comments=[deferred(3)])
+    runnable = issue(111, "2026-08-02T00:00:00Z")
+    r = select_issue(snap([blocked, runnable]), now=NOW)
+    assert r["selected"] == 111
+    assert "defer" in r["excluded"]["110"]
+    # Negative control: the SAME deferred brief, defer aged past the window,
+    # is the oldest eligible again — the defer was doing the excluding.
+    aged = issue(110, "2026-08-01T00:00:00Z", comments=[deferred(25)])
+    assert select_issue(snap([aged, runnable]), now=NOW)["selected"] == 110
+
+
+def test_defer_cooldown_expires():
+    # A defer must never bury: only the defer timestamp varies, and past the
+    # 24 h window the brief is re-checked (the dependencies may have landed).
+    fresh = issue(112, "2026-08-01T00:00:00Z", comments=[deferred(23)])
+    assert select_issue(snap([fresh]), now=NOW)["selected"] is None
+    expired = issue(112, "2026-08-01T00:00:00Z", comments=[deferred(25)])
+    assert select_issue(snap([expired]), now=NOW)["selected"] == 112
+
+
+def test_owner_reply_re_arms_a_defer_regardless_of_window():
+    # A human comment newer than the latest defer re-arms immediately — the
+    # owner saying "the dependency landed, go" is exactly when the next
+    # firing should take the brief, not after the window.
+    answered = issue(113, "2026-08-01T00:00:00Z", comments=[
+        deferred(2),
+        {"body": "The dependency landed in #700 — please re-check.",
+         "createdAt": _iso(NOW - timedelta(hours=1))},
+    ])
+    assert select_issue(snap([answered]), now=NOW)["selected"] == 113
+
+
+def test_latest_defer_wins_and_restarts_the_window():
+    # An old defer a run has since re-deferred is fresh again: the marker is
+    # a state read from the *latest* comment, exactly like a decline and a
+    # SHIP-LOCK.
+    redeferred = issue(114, "2026-08-01T00:00:00Z", comments=[
+        deferred(30),
+        deferred(2),
+    ])
+    assert select_issue(snap([redeferred]), now=NOW)["selected"] is None
+
+
+def test_run_comment_newer_than_the_defer_does_not_re_arm():
+    # Machine posts newer than the defer re-arm nothing — the same
+    # PAT-identity discipline the decline guard follows (#515): a later
+    # DEFERRED is the state restarting the window, not the owner answering.
+    for body in (
+        "🚢 SHIP-LOCK WITHDRAWN — yielding.",
+        "🚢 DECLINED — needs a decision.",
+        "🚦 DECISION NEEDED — `which-bottle`",
+        "🏷️ Triaged: `autonomy-ok` — still blocked.",
+        "🧩 CHUNKED — sub-issues filed.",
+    ):
+        chattered = issue(115, "2026-08-01T00:00:00Z", comments=[
+            deferred(2),
+            {"body": body, "createdAt": _iso(NOW - timedelta(hours=1))},
+        ])
+        assert select_issue(snap([chattered]), now=NOW)["selected"] is None, body
+
+
+def test_bot_authored_comment_does_not_re_arm_a_defer():
+    # The marker-free leg of the run test: anything GitHub types as a Bot is
+    # machine-posted whatever it wrote.
+    botnoise = issue(116, "2026-08-01T00:00:00Z", comments=[
+        deferred(2),
+        {"body": "workflow notification", "createdAt": _iso(NOW - timedelta(hours=1)),
+         "authorType": "Bot"},
+    ])
+    assert select_issue(snap([botnoise]), now=NOW)["selected"] is None
+
+
+def test_defer_marker_requires_the_first_line():
+    # Prose that merely mentions a defer is not a defer — the same
+    # first-line rule every marker here follows.
+    mention = issue(117, "2026-08-01T00:00:00Z", comments=[
+        {"body": "the last run posted a 🚢 DEFERRED here, but the dependency landed",
+         "createdAt": _iso(NOW - timedelta(hours=1))},
+    ])
+    assert select_issue(snap([mention]), now=NOW)["selected"] == 117
+
+
+def test_declined_comment_is_not_a_defer_and_vice_versa():
+    # The two stop markers share the 🚢 prefix but are different states: a
+    # DECLINED trips the decline guard (not the defer guard), and a DEFERRED
+    # trips the defer guard (not the decline guard) — each reported as
+    # itself, so a reader of the outcome log can tell which stop is parked.
+    declined_thread = issue(118, "2026-08-01T00:00:00Z", comments=[decline(2)])
+    r = select_issue(snap([declined_thread]), now=NOW)
+    assert r["selected"] is None
+    assert "declin" in r["excluded"]["118"]
+    assert "defer" not in r["excluded"]["118"]
+    deferred_thread = issue(119, "2026-08-01T00:00:00Z", comments=[deferred(2)])
+    r = select_issue(snap([deferred_thread]), now=NOW)
+    assert r["selected"] is None
+    assert "defer" in r["excluded"]["119"]
+    assert "declin" not in r["excluded"]["119"]
+
+
+def test_fresh_decline_outranks_a_stale_defer_for_the_reason():
+    # Both stops present: the decline names the stronger fact (a blocking
+    # question) so it is the reported reason — the guard order is part of
+    # the policy, not an accident.
+    both = issue(120, "2026-08-01T00:00:00Z", comments=[
+        deferred(30),
+        decline(2),
+    ])
+    r = select_issue(snap([both]), now=NOW)
+    assert r["selected"] is None
+    assert "declin" in r["excluded"]["120"]
+
+
+def test_no_now_treats_defer_as_fresh():
+    # Without a reference time the window cannot be judged; the conservative
+    # reading keeps the brief out (mirrors the lock's undated-claim rule).
+    undated = issue(121, "2026-08-01T00:00:00Z", comments=[deferred(48)])
+    assert select_issue(snap([undated]))["selected"] is None
+
+
+def _strip_created_at(comment, created_at):
+    """A copy of ``comment`` whose createdAt is missing or unparseable.
+
+    ``created_at is None`` drops the key (missing). Any other value is stored
+    as-is, including ``""`` and a non-timestamp string.
+    """
+    comment = dict(comment)
+    if created_at is None:
+        comment.pop("createdAt", None)
+    else:
+        comment["createdAt"] = created_at
+    return comment
+
+
+@pytest.mark.parametrize(
+    "make_stop, noun, number",
+    [
+        (decline, "decline", 122),
+        (deferred, "defer", 123),
+    ],
+)
+@pytest.mark.parametrize("bad_created_at", [None, "", "not-a-timestamp"])
+def test_undated_stop_excludes_even_beside_a_dated_stop(
+    make_stop, noun, number, bad_created_at,
+):
+    # An expired dated 🚢 DECLINED / 🚢 DEFERRED used to win ``max()`` because
+    # a missing or unparseable createdAt ranked as the oldest instant, so the
+    # selector admitted the brief. Any undatable matching stop excludes on
+    # its own — a dated sibling, fresh or expired, does not hide it — and
+    # owner re-arm applies only when every matching stop parses.
+    expired = make_stop(25)
+    undated = _strip_created_at(make_stop(1), bad_created_at)
+    owner = {
+        "body": "Answered — the blocker is gone, please take this.",
+        "createdAt": _iso(NOW - timedelta(hours=1)),
+    }
+
+    only_expired = issue(number, "2026-08-01T00:00:00Z", comments=[expired])
+    assert select_issue(snap([only_expired]), now=NOW)["selected"] == number
+
+    mixed = issue(number, "2026-08-01T00:00:00Z", comments=[expired, undated])
+    r = select_issue(snap([mixed]), now=NOW)
+    assert r["selected"] is None
+    assert f"the {noun} cannot be dated" in r["excluded"][str(number)]
+
+    # A fresh dated stop would itself exclude, but the reason must still be
+    # the undatable reading — not the dated stop's remaining window.
+    fresh = make_stop(2)
+    fresh_mixed = issue(
+        number, "2026-08-01T00:00:00Z", comments=[fresh, undated],
+    )
+    r = select_issue(snap([fresh_mixed]), now=NOW)
+    assert r["selected"] is None
+    reason = r["excluded"][str(number)]
+    assert f"the {noun} cannot be dated" in reason
+    assert "within the" not in reason
+
+    # Newer owner activity re-arms a fully dated stop, and does not re-arm
+    # while a matching stop still cannot be dated.
+    rearmed = issue(number, "2026-08-01T00:00:00Z", comments=[expired, owner])
+    assert select_issue(snap([rearmed]), now=NOW)["selected"] == number
+    still = issue(
+        number, "2026-08-01T00:00:00Z", comments=[expired, undated, owner],
+    )
+    r = select_issue(snap([still]), now=NOW)
+    assert r["selected"] is None
+    assert f"the {noun} cannot be dated" in r["excluded"][str(number)]
 
 
 # --------------------------------------------------------------------------

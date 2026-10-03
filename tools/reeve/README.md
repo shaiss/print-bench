@@ -117,7 +117,8 @@ the keyless report and:
   the open `needs-decision` issues carrying no greenlight marker, oldest first,
   bounded by the `greenlight_cap` conf key — skipping any that is a
   `provider-triage` escalation (its body carries the `<!--
-  provider-escalation:<chain> -->` marker; #544): an account/key ask with a
+  provider-escalation:<reason> -->` marker — one shared issue per cause since
+  #550, which also covers the Oracle's escalations): an account/key ask with a
   fixed remedy is not a decision a charter verdict can rule on;
 - runs the drafter (`/reeve-greenlight`, `.claude/skills/reeve-greenlight/`)
   with `--permission-mode dontAsk` over the #442 wrapper — its only shell

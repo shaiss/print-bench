@@ -20,12 +20,35 @@
 #   designs/<name>/<name>-coupon.scad  "print this first" coupon wrapper;
 #                                  rendered as build/<name>-coupon.stl and
 #                                  gated like any other part
+#   designs/<name>/<name>-*-coupon.scad  additional coupon wrappers (e.g.
+#                                  <name>-nest-coupon.scad, <name>-bore-coupon.scad);
+#                                  each rendered as build/<basename>.stl and
+#                                  gated the same way — so a second print-this-
+#                                  first file cannot ship broken while only a
+#                                  ci.parts -D path stays green
 #   designs/<name>/ci.fitchecks    boolean fit checks between the design's
 #                                  parts: `<part> empty` must render zero
 #                                  facets, `<part> interferes` is the
 #                                  mandatory negative control that must not
 #                                  (proves the check can fail). Never
 #                                  printchecked or sliced
+#   designs/<name>/ci.kinematics   SWEPT fit checks (issue #607): the same
+#                                  boolean parts rendered at every step of a
+#                                  parameter sweep or at every declared
+#                                  landing stop — `empty`/`nonempty` must
+#                                  hold at every step, `empty-control`/
+#                                  `nonempty-control` must break at some
+#                                  step. Format and selftest:
+#                                  scripts/kinematics-check.sh
+#   designs/<name>/ci.cog          CoG / tip-over stability manifest (format:
+#                                  tools/cogcheck): per-part densities,
+#                                  non-printed masses, assembly transforms and
+#                                  a required stability margin, checked
+#                                  against the gate's rendered STLs. A TIP
+#                                  RISK is a WARN (fusecheck precedent); a
+#                                  broken manifest, an unmeasurable mesh, or a
+#                                  manifest part this run never rendered is a
+#                                  FAIL
 #   designs/<name>/derives.conf    lineage of a derivative design: the
 #                                  parent(s) it includes, the parent parts it
 #                                  claims to replace, and any diamond-ok:
@@ -358,13 +381,17 @@ gate_one() {
     fi
   fi
 
-  # "Print this first" coupon wrapper (repo convention, see CLAUDE.md): a
-  # ≤10-line include-and-override wrapper on the production modules. It is
-  # the first STL a user prints, so it gets the same printcheck + test-slice
-  # treatment as the parts it stands in for.
-  local coupon="designs/${name}/${name}-coupon.scad"
+  # "Print this first" coupon wrappers (repo convention, see CLAUDE.md): a
+  # ≤10-line include-and-override on the production modules. The canonical
+  # <name>-coupon.scad is the hinge/fit tuner; additional <name>-*-coupon.scad
+  # files (nest seat, bore slip, …) are first-class print-this-first wrappers
+  # too and must be gated as files — a ci.parts -D path alone would leave a
+  # broken wrapper shipping green. Each wrapper is the first STL a user opens
+  # for that fit, so it gets the same printcheck + test-slice treatment.
+  local coupon coupon_stl coupon_base already
+  coupon="designs/${name}/${name}-coupon.scad"
   if [[ -f "$coupon" ]]; then
-    local coupon_stl="build/${name}-coupon.stl"
+    coupon_stl="build/${name}-coupon.stl"
     echo "== ${name} (coupon): render =="
     if ! xvfb-run -a "$OPENSCAD_BIN" ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
         -o "$coupon_stl" "$coupon"; then
@@ -374,6 +401,32 @@ gate_one() {
       stls+=("$coupon_stl")
     fi
   fi
+  # Secondary coupons: <name>-<role>-coupon.scad (does not match the canonical
+  # <name>-coupon.scad above). Basename is the STL stem so nest-coupon and
+  # bore-coupon land next to their ci.parts peers when both exist; if ci.parts
+  # already queued the same path, re-render from the WRAPPER (overwrites) and
+  # do not double-enqueue — printcheck then judges the file the user opens.
+  shopt -s nullglob
+  for coupon in designs/${name}/${name}-*-coupon.scad; do
+    shopt -u nullglob
+    coupon_base="$(basename "$coupon" .scad)"
+    coupon_stl="build/${coupon_base}.stl"
+    echo "== ${name} (coupon ${coupon_base}): render =="
+    if ! xvfb-run -a "$OPENSCAD_BIN" ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
+        -o "$coupon_stl" "$coupon"; then
+      echo "FAIL  ${name} (coupon ${coupon_base}): render failed"
+      fail=1
+      continue
+    fi
+    already=0
+    for s in ${stls[@]+"${stls[@]}"}; do
+      if [[ "$s" == "$coupon_stl" ]]; then already=1; break; fi
+    done
+    if [[ "$already" -eq 0 ]]; then
+      stls+=("$coupon_stl")
+    fi
+  done
+  shopt -u nullglob
 
   # Boolean fit checks (designs/<name>/ci.fitchecks): each line names a part
   # value that renders a boolean between the design's other parts, plus the
@@ -447,6 +500,24 @@ gate_one() {
     fi
     if [[ "$n_empty" -eq 0 ]]; then
       echo "FAIL  fitcheck ${name}: ci.fitchecks carries no \"empty\" check — a manifest of controls alone proves nothing about the fit it exists to gate"
+      fail=1
+    fi
+  fi
+
+  # Swept kinematics checks (designs/<name>/ci.kinematics, issue #607): the
+  # fitcheck idea over a parameter sweep. A gear pair that clears at one phase
+  # can jam at another, and an indexed shell that lands flat at stop 0 can
+  # roll at stop 3, so each boolean part is rendered at every step of a sweep
+  # (`sweep <param>` over [0,1)) or at every declared landing stop (`stops
+  # <param> <v1,...>`): `empty`/`nonempty` must hold at EVERY step, and the
+  # mandatory `empty-control`/`nonempty-control` must break at SOME step, or
+  # the checks are unfalsifiable. Parser, sweep and the fixture-backed
+  # --selftest live in scripts/kinematics-check.sh (run by check.sh); this
+  # block only hands it the design's source and manifest. Never printchecked
+  # or sliced, like fitchecks. A design without the manifest is untouched.
+  if [[ -f "designs/${name}/ci.kinematics" ]]; then
+    echo "== ${name}: kinematics (designs/${name}/ci.kinematics) =="
+    if ! ./scripts/kinematics-check.sh "$src" "designs/${name}/ci.kinematics" "$name"; then
       fail=1
     fi
   fi
@@ -621,6 +692,56 @@ gate_one() {
       fi
     else
       echo "WARN  ${name}: ci.plate present but prusa-slicer not on PATH — plate 3MF check skipped"
+    fi
+  fi
+
+  # CoG / tip-over stability (designs/<name>/ci.cog, issue #623). Every gate
+  # above proves the part PRINTS; none of them proves the assembled object
+  # STANDS — two heavy spheres cantilevered high on thin stalks over a low
+  # airy truss slice beautifully, score 100/100, and tip over on a desk bump.
+  # tools/cogcheck measures the assembled object (per-part mass from the
+  # rendered mesh × the manifest's density, non-printed hardware as point
+  # masses, transforms into the standing frame) and compares the CoG's ground
+  # projection against the convex hull of the contact geometry. A TIP-RISK
+  # verdict is a WARN, not a fail — the fusecheck precedent: a tip risk is a
+  # design call to look at, not a gate failure. A broken manifest or
+  # unmeasurable mesh IS a fail (a check that cannot run is not a check), and
+  # so is a manifest naming an STL this run never rendered: a stale build/
+  # artifact from an earlier gate would put a CoG on geometry that did not
+  # ship, which is worse than no CoG at all.
+  if [[ -f "designs/${name}/ci.cog" ]]; then
+    local cogline cogkey cogval cogbad=0
+    while IFS= read -r cogline || [[ -n "$cogline" ]]; do
+      # Same grammar as tools/cogcheck conf.py: strip comments, split on the
+      # first ':', take the field before '|'. IFS whitespace would miss
+      # `part:base.stl` (no space) and `part : base.stl` (space before ':').
+      cogline="${cogline%%#*}"
+      cogline="${cogline#"${cogline%%[![:space:]]*}"}"
+      cogline="${cogline%"${cogline##*[![:space:]]}"}"
+      [[ "$cogline" == *:* ]] || continue
+      cogkey="${cogline%%:*}"
+      cogval="${cogline#*:}"
+      cogkey="${cogkey%"${cogkey##*[![:space:]]}"}"
+      cogkey="${cogkey#"${cogkey%%[![:space:]]*}"}"
+      [[ "$cogkey" == "part" ]] || continue
+      cogval="${cogval%%|*}"
+      cogval="${cogval#"${cogval%%[![:space:]]*}"}"
+      cogval="${cogval%"${cogval##*[![:space:]]}"}"
+      [[ -n "$cogval" ]] || continue
+      local cogstl="build/${cogval}" matched=0 s
+      for s in ${stls[@]+"${stls[@]}"}; do
+        if [[ "$s" == "$cogstl" ]]; then matched=1; break; fi
+      done
+      if [[ "$matched" -eq 0 ]]; then
+        echo "FAIL  cogcheck ${name}: manifest names ${cogval}, which the gate never rendered — a CoG on a stale mesh proves nothing"
+        fail=1
+        cogbad=1
+      fi
+    done < "designs/${name}/ci.cog"
+    if [[ "$cogbad" -eq 0 ]]; then
+      if ! "$(dirname "$0")/cog-check.sh" "$name"; then
+        fail=1
+      fi
     fi
   fi
 

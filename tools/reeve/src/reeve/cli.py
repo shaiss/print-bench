@@ -57,6 +57,7 @@ import sys
 from typing import Any, Optional
 
 from . import config as config_mod
+from . import greenlight
 from . import greenlights
 from .detectors import evaluate
 from .report import render
@@ -169,20 +170,40 @@ def cmd_greenlight_select(args: argparse.Namespace) -> int:
     """`greenlight-select`: print the draftable parked-decision queue.
 
     One line of space-separated issue numbers — the open ``needs-decision``
-    issues with no greenlight marker yet (and not a provider-triage
-    escalation, which the gather skips), oldest first, bounded by the conf's
-    ``greenlight_cap`` (so every issue the drafter is handed is postable
-    within the same run's cap). The same string is appended to
-    ``$GITHUB_OUTPUT`` as ``issues=`` (the ``armed`` precedent), so the
-    workflow needs no stdout scraping. An empty queue prints an empty line
-    and writes ``issues=`` — a legitimate state, not a failure.
+    issues with no greenlight marker yet by a trusted author (issue #546: the
+    workflow's own bot login or a write-level collaborator, the same rule the
+    poll applies — an untrusted commenter's pasted marker leaves the issue
+    queued) and not a provider-triage escalation, which the gather skips —
+    oldest first, bounded by the conf's ``greenlight_cap`` (so every issue
+    the drafter is handed is postable within the same run's cap). The same
+    string is appended to ``$GITHUB_OUTPUT`` as ``issues=`` (the ``armed``
+    precedent), so the workflow needs no stdout scraping. An empty queue
+    prints an empty line and writes ``issues=`` — a legitimate state, not a
+    failure.
     """
     # Lazy for the same reason as in _gather: github.py is the one
     # network-capable module, and cli.py stays on the purity test's list.
-    from .github import gather_greenlight_queue
+    from .github import gather_greenlight_queue, permission_of
 
     cfg = _load_config(args.conf)
-    queue = gather_greenlight_queue(args.repo, _token())["queue"]
+
+    # The marker-author trust rule, wired exactly as the poll's driver wires
+    # it (pushthrough.run_poll): greenlight.marker_author_trusted over a
+    # memoized permission_of, so each distinct marker author costs at most
+    # one GET. Injected into the gather rather than imported there — the seam
+    # stays a seam, the rule stays greenlight.py's, and github.py never has
+    # to learn who is allowed to write a marker.
+    permissions: dict[str, str] = {}
+
+    def _authorized(login: str) -> bool:
+        if login not in permissions:
+            permissions[login] = permission_of(args.repo, _token(), login)
+        return permissions[login] in greenlight.AUTHORIZED_PERMISSIONS
+
+    def _trusted(login: str) -> bool:
+        return greenlight.marker_author_trusted(login, _authorized)
+
+    queue = gather_greenlight_queue(args.repo, _token(), _trusted)["queue"]
     nums = " ".join(str(issue["number"]) for issue in queue[: cfg.greenlight_cap])
     sys.stdout.write(nums + "\n")
     gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")

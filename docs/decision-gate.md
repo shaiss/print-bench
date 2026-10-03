@@ -205,36 +205,45 @@ a mergeable PR are documented in [`actions-security.md`](actions-security.md)
 
 ## Automated raisers
 
-The first automated consumer that **raises** a decision through this gate is the
+The first automated consumer that **raises** decisions through this gate is the
 Oracle (issue #347). When its opposite-vendor model chain is exhausted by a
 human-fixable cause — the account out of credit, or an invalid/missing key
-(`model-registry classify` verdict `needs-human`) — `oracle.yml` files a single
-deduped `needs-decision` tracking issue keyed by a `<!--
-oracle-provider-escalation:<chain> -->` marker, carrying the `🚦 DECISION NEEDED`
-body a maintainer resolves with `/decide`. It follows every rule above: the
-label is created on demand, the escalation is deduped so repeated PRs never spam
-new issues, and it runs as trusted base-branch `github-script` (no PR head code).
-It is a workflow raiser, not one of the agent skills below — those stay
-follow-ups.
+(`model-registry classify` verdict `needs-human`) — `oracle.yml` escalates
+through the HITL gate (below). It follows every rule here: the label is created
+on demand, the escalation is deduped so repeated PRs never spam new issues, and
+it runs as trusted base-branch code from the checkout (no PR head code). It is
+a workflow raiser, not one of the agent skills below — those stay follow-ups.
 
 The same mechanism now covers **every** chain-walking workflow, factored into one
-shared composite action, `.github/actions/provider-triage`. When the design-review
-chain (`auto-review.yml`) or any scheduled routine's walk — the twelve of them
-since #544 Part B: `backlog-burn`, `design-run`, `chunker`, `labeler`,
-`product-scout`, `spike-converter`, both of `wright.yml`'s jobs,
-`adoption-assessor`, `growth-twitter`, `reeve-growth` and `reeve.yml`'s
-greenlight job — fails on every link, the action runs
-`model-registry classify` and, on a `needs-human` verdict, files a single deduped
-`needs-decision` issue keyed by a `<!-- provider-escalation:<chain> -->` marker
-(one per registry chain, so no two routines collide, and distinct from the
-Oracle's `oracle-provider-escalation:<chain>`). The body's remediation is tailored
-to the classifier's finer **reason** — `billing` says *fund the account*, `quota`
-says *out of tokens, raise the cap or wait*, `auth` says *rotate the key*,
-`no-key` says *set the secret* — so the maintainer sees which button to push, not
-just "provider down". A `dead` id (an unservable model — a registry defect) still
+shared rule. When the design-review chain (`auto-review.yml`) or any scheduled
+routine's walk — the twelve of them since #544 Part B: `backlog-burn`,
+`design-run`, `chunker`, `labeler`, `product-scout`, `spike-converter`, both of
+`wright.yml`'s jobs, `adoption-assessor`, `growth-twitter`, `reeve-growth` and
+`reeve.yml`'s greenlight job — fails on every link, the shared
+`.github/actions/provider-triage` composite action runs
+`model-registry classify` and, on a `needs-human` verdict, escalates via
+`model_registry escalate` — the same tested unit `oracle.yml`'s own exhaustion
+leg calls, so the two surfaces cannot drift apart.
+
+The dedup key is the classifier's finer **reason**, not the chain (issue #550):
+the issue's body carries a `<!-- provider-escalation:<reason> -->` marker and
+the decision id `provider-<reason>`, and every chain that exhausts with that
+reason — routine or Oracle — **joins** the one open issue for it (a per-chain
+detail line accumulates in the body: what it was, which registry chain, what it
+walked) instead of filing a duplicate, so a dual-provider outage opens ONE
+escalation and one `/decide` resolves the whole set. Before #550 the key was
+the chain, and that one event — the only way a #544 cross-provider chain
+exhausts — opened up to fifteen issues, each with its own decision id; the
+2026-09-04 quota day filed seven in seventeen hours. When a human resolves the
+issue (/decide clears the label, or the issue is closed), the next exhaustion
+of the same reason is free to file a fresh one. The body's remediation is
+tailored to the reason — `billing` says *fund the account*, `quota` says *out
+of tokens, raise the cap or wait*, `auth` says *rotate the key*, `no-key` says
+*set the secret* — so the maintainer sees which button to push, not just
+"provider down". A `dead` id (an unservable model — a registry defect) still
 reds its workflow; a `rate-limit`/`outage` just retries next run. Same rules as
-the Oracle raiser: label created on demand, deduped per chain, trusted
-base-branch `github-script`, advisory (it never fails the job on its own).
+the Oracle raiser: label created on demand, deduped (per reason), trusted
+base-branch code, advisory (it never fails the job on a decided outcome).
 
 ## The advisory greenlight loop (drafted verdicts, reaction-resolved)
 
