@@ -342,7 +342,7 @@ max error ≤ 3°, every face presented once, and monotone stops.
 
 ## Print orientation & gate status
 
-- Ball halves: cut-face-down (flat ring on the bed); the faceted dome has
+- Ball halves: pole-down (flat pole pentagon on the bed, seam ring up); the faceted dome has
   overhangs and the sharp facet edges sample as thin walls (both inherent v0
   caveats of splitting a faceted ball at the equator, the #602 seam/orientation
   work). Truss segments: bottom-chord-down (as modelled). Mock-drive gear: flat.

@@ -805,8 +805,8 @@ module assembled() {
 // ---- dispatch --------------------------------------------------------------
 
 if      (part == "assembled")    assembled();
-else if (part == "hours-top")    ball_half(hours = true,  top = true);   // even numbers + 12
-else if (part == "hours-bottom") ball_half(hours = true,  top = false);  // odd numbers
+else if (part == "hours-top")    ball_half(hours = true,  top = true);   // top half: 2/7/5/9/11/3
+else if (part == "hours-bottom") ball_half(hours = true,  top = false);  // bottom half: 6/1/8/4/12/10
 else if (part == "minutes-top")  ball_half(hours = false, top = true);
 else if (part == "minutes-bottom") ball_half(hours = false, top = false);
 else if (part == "hours-ball")   { hours_ball();   ball_core(gb_hours()); }    // preview (two-tone)
@@ -833,4 +833,4 @@ else if (part == "core-seat")      core_seat_check();               // fitcheck:
 else if (part == "core-seat-ctrl") core_seat_check(shift = base_L / n_bays / 2);  // control: half a bay off → interferes
 else if (part == "pocket-clear")   core_pocket_check();             // fitcheck: cavity ∩ 1.2 mm shell = empty
 else if (part == "pocket-ctrl")    core_pocket_check(overfill = true);  // control: cavity through the roof → interferes
-else assembled();
+else assert(false, str("unknown part: ", part));
