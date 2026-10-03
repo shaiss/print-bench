@@ -304,6 +304,25 @@ deterministic, and the job's first step):
 - **An overrule** — one reply recording it, the gate stays parked, and the
   thread's marker means no new greenlight is drafted on it; the next move is a
   human's.
+- **Standing approval modes (#446).** The owner can delegate per category, in
+  reviewed git, like a session's permission modes: `.github/reeve.conf`'s
+  `approve_auto:` / `approve_deny:` lists over a closed vocabulary (`docs`,
+  `gates`; everything unlisted **asks**, the behaviour above, and both default
+  to empty). A **YES** greenlight in an `approve_auto` category resolves with
+  **no reaction** once a 20-hour 👎 grace window from its post has passed —
+  the same sequence as a 👍, arming included, recorded in the ledger as
+  `standing-rule:<category>` rather than a person; a 👍 still resolves at once,
+  a 👎 still overrules, a `/decide` still outranks, and a NO still asks. An
+  `approve_deny` category is human-only: Reeve drafts no greenlight on it and
+  the poll never writes to it, not even on a 👍 — only `/decide` resolves it.
+  The classification is deliberately one-way: **only a trusted signal
+  loosens** — the category's label (`docs-only`), and only when the issue's
+  label history shows a human with write permission applied it (never a bot)
+  — while **the issue's own text can only tighten** (naming gate machinery —
+  a `*-check.sh`, `ci.yml`, `gate.sh`, a `*-settings.json` backstop — denies;
+  naming only docs vouches for nothing). The shipped set is the owner's
+  2026-08-30 ruling: auto-approve doc-only follow-ups, deny gate machinery,
+  everything else asks. Details: `tools/reeve/README.md`.
 
 ## Follow-ups (not in this slice)
 

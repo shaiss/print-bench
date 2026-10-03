@@ -79,6 +79,16 @@ the workflow-selected issues.
   verdict — arming a rejection is meaningless and a routing note sets no
   verdict — so don't reach for it there.
 
+  **Standing rules (issue #446).** The owner can pre-approve a category in
+  `.github/reeve.conf` (`approve_auto`, `approve_deny`). A **YES** you post on
+  a decision carrying the `docs-only` label may resolve with **no reaction**
+  once its 👎 grace window passes — so on such an issue, write the YES as if it
+  were the final word, and if the thread shows the yes-branch reaching beyond
+  documentation despite the label, say so plainly in the reasoning so the
+  human sees it inside the window. You are never handed a decision in an
+  `approve_deny` category (gate machinery is human-only); the Select step
+  drops it. Nothing about the verdict or the wrapper call changes.
+
 ## What to do, per issue
 
 The workflow's Select step (`reeve greenlight-select`, GET-only) hands you the
