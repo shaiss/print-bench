@@ -239,6 +239,15 @@ classify() {
         .github/reeve-growth.conf|.github/wright.conf|.github/reeve.conf) mrtests=true ;;
       esac
       case "$f" in
+        # The cap-state wiring drift guard (tools/model-registry's
+        # test_cap_state_wiring.py, the #549 class) reads each MCP write
+        # server's CAP_STATE_ENV literal and the --mcp-config JSON that
+        # launches it, so a server- or config-only edit (a renamed env var)
+        # must re-run it — the reason the growth posting server re-runs
+        # tools/growth's parity test below.
+        .claude/skills/*_mcp.py|.claude/skills/*-mcp.json) mrtests=true ;;
+      esac
+      case "$f" in
         tools/telemetry/*|.github/workflows/ci.yml) tmtests=true ;;
       esac
       case "$f" in
@@ -672,6 +681,15 @@ selftest() {
   # tests, so a server-only edit must re-run them.
   out="$(run ".claude/skills/growth-twitter/growth_mcp.py")"
   check "growth-server-parity-drift" "$out" "growth_tests=true"
+  # The cap-state wiring guard reads every MCP write server's CAP_STATE_ENV
+  # literal and the --mcp-config JSON naming it, so a server- or config-only
+  # edit re-runs the model-registry suite — and a skill's prose does not.
+  out="$(run ".claude/skills/oracle-review/oracle_mcp.py")"
+  check "mcp-server-cap-wiring-drift" "$out" "model_registry_tests=true"
+  out="$(run ".claude/skills/product-scout/scout-mcp.json")"
+  check "mcp-config-cap-wiring-drift" "$out" "model_registry_tests=true"
+  out="$(run ".claude/skills/oracle-review/SKILL.md")"
+  check "skill-prose-is-not-cap-wiring" "$out" "model_registry_tests=false"
   # 4h. The AI andon cord (docs/andon-cord.md) is soft-infra the same way: the
   #     reconciler tool moves no mesh, but a tools/andon-only PR must still RUN
   #     the required contexts. Its tests pin the reconciler workflow, so an
