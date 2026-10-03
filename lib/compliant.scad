@@ -261,16 +261,19 @@ module _arch_band_2d(span, rise, t, ns) {
 //   span          free length between the clamp faces (mm)
 //   rise          mid-span rise of the centreline, h (mm); > 0
 //   t             band thickness in the bending direction (mm); ≥ 0.8
-//   root_fillet   undef (default) = bare band: the caller fillets the roots
-//                 (bistable-toggle and czs-slider do, outside their
-//                 generators; over-center-toggle-clamp's closing is inside
-//                 its generator, :321, and rounds nothing — see above;
-//                 compliant-gripper places no in-plane root fillet). A
-//                 number = all four roots filleted at that radius, ≥ 0.5·t,
-//                 with root_fillet_2d corner pieces (see _arch_root_pair_2d
-//                 for the placement). Both faces of both roots: the band
-//                 sweeps to −rise on the snap, so the concave side flips
-//                 (czs-slider.scad:262-266).
+//   root_fillet   undef (default) = bare band, its roots SHARP: omitting it
+//                 hands the r ≥ 0.5·t root fillet to the caller, who then
+//                 owns it (0 is refused; undef is not). The default is the
+//                 bare band for parity with the harvest sites — an owner
+//                 decision on PR #758: bistable-toggle and czs-slider fillet
+//                 outside their generators; over-center-toggle-clamp's
+//                 closing is inside its generator, :321, and rounds nothing
+//                 — see above; compliant-gripper places no in-plane root
+//                 fillet. A number = all four roots filleted at that radius,
+//                 ≥ 0.5·t, with root_fillet_2d corner pieces (see
+//                 _arch_root_pair_2d for the placement). Both faces of both
+//                 roots: the band sweeps to −rise on the snap, so the
+//                 concave side flips (czs-slider.scad:262-266).
 //   ov            flat extension of the band past each clamp face (mm), for
 //                 a caller that unions the arch with its clamps in 3D: a
 //                 face-to-face kiss is fused by CGAL but exported by Manifold
@@ -332,7 +335,9 @@ module _arch_root_pair_2d(t, r, yr) {
 // flat-printed arch, which is the #1 flexure rule: the band bends in the
 // layer plane, across the roads, never across a layer bond). Echoes the
 // predicted switch force and travel — predictions for a coupon to verify,
-// never a guarantee. E in MPa (PETG ≈ 2000 is the datum).
+// never a guarantee. E in MPa (PETG ≈ 2000 is the datum). The other
+// parameters are bistable_arch_2d's — including its root_fillet default: left
+// undef, the roots come out SHARP and filleting them is the caller's job.
 module bistable_arch(span, rise, t, width, E = 2000, root_fillet = undef, ov = 0,
                      ns = 60, allow_monostable = false) {
     _bistable_arch_guards(span, rise, t, root_fillet, ov, ns, allow_monostable);
