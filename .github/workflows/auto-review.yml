@@ -52,6 +52,14 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     since the last reviewed commit; pure fixup pushes that touch only docs or
 #     CI config are ignored.  The "last reviewed commit" is tracked by a sticky
 #     comment the first round leaves on the PR (see `review-stamp` step).
+#   * A regen commit-back opens no round when it touches only preview images
+#     and .regen-stamp files AND carries `Preview-Diff: all-noise` (CI's
+#     preview-diff rated every changed image noise) AND the last reviewed
+#     round is current at its parent — the owner's option C on decision
+#     regen-commitback-review-retrigger (issue #470). Any content diff still
+#     opens one. `scripts/reviewer-signoff.sh round` decides it, and the
+#     sign-off currency below reads back past exactly those commits, so a
+#     skipped round never leaves the sign-offs stale.
 #   * `/design-coach` uses its own COACH-LOCK comment marker (documented in the
 #     skill) to prevent a second coach session on the same PR regardless of how
 #     many times this workflow fires.
@@ -228,7 +236,21 @@ jobs:
           fi
           # Compare design files between stamp_sha and HEAD
           if git diff --name-only "${stamp_sha}..HEAD" | grep -q '^designs/'; then
-            echo "is_new_round=true" >> "$GITHUB_OUTPUT"
+            # Designs moved — unless every move since the stamp is a regen
+            # commit-back the owner ruled needs no new round (issue #470,
+            # decision regen-commitback-review-retrigger, option C): previews
+            # and .regen-stamp only, `Preview-Diff: all-noise`, and the stamp
+            # current at its parent. The rule and its selftest live in
+            # reviewer-signoff.sh, beside the currency key the sign-off status
+            # computes, so the two cannot disagree. Any non-zero exit (ROUND,
+            # or an error) opens the round: fail-closed.
+            if guard="$(scripts/reviewer-signoff.sh round --head "$HEAD_SHA" --stamp "$stamp_sha")"; then
+              echo "is_new_round=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::${guard#SKIP }"
+            else
+              echo "is_new_round=true" >> "$GITHUB_OUTPUT"
+              echo "regen review guard: ${guard:-no verdict}"
+            fi
           else
             echo "is_new_round=false" >> "$GITHUB_OUTPUT"
             echo "::notice::no design files changed since last review round — skipping"
@@ -1161,8 +1183,11 @@ jobs:
   #    check.sh) — so the fail-closed policy is proven, not asserted in YAML.
   #
   #    Runs on EVERY PR event (always(), needs the reviewer jobs only so the
-  #    sign-off markers are already posted when we read them). It never checks
-  #    out or runs untrusted PR code beyond `git rev-parse` on tree objects.
+  #    sign-off markers are already posted when we read them). The only repo
+  #    code it runs is reviewer-signoff.sh (`key`, which reads commits and
+  #    trees with git, and `decide`), from the same merge-ref checkout this
+  #    workflow file and the design-changes job's round guard come from — so
+  #    the skip and the currency are always one version of one rule.
   #
   #    ARMING (the one manual step): this status only *blocks* a merge once an
   #    admin adds `reviewer-signoff` to the branch's required status checks.
@@ -1181,8 +1206,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          fetch-depth: 0                       # older head shas must resolve
-          ref: ${{ github.event.pull_request.head.sha }}
+          # Full history: older head shas must resolve, and the currency key
+          # walks the head's first-parent line. The default (merge) ref, not
+          # head.sha: its parent IS the head, and it carries the
+          # reviewer-signoff.sh this workflow was written against — a branch
+          # that predates the `key` verb would otherwise compute no keys and
+          # stale every sign-off the round guard just carried forward.
+          fetch-depth: 0
       - name: Compute and post the reviewer-signoff status
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1230,13 +1260,16 @@ jobs:
             fuse_warn=true
           fi
 
-          # Design tree at the current head, and at each reviewer's sha, so a
-          # sign-off survives a push that changed no designs/ file (currency).
-          tree_current="$(git rev-parse "${HEAD_SHA}:designs" 2>/dev/null || true)"
-          tree_of() {   # echo the designs tree object at a marker's sha, or empty
+          # Currency key at the current head, and at each reviewer's sha, so a
+          # sign-off survives a push that changed no designs/ file — or a
+          # previews-only, all-noise regen commit-back (issue #470). Both sides
+          # come from reviewer-signoff.sh's one `key`, never a rev-parse here,
+          # so the posting and checking sides cannot drift. Empty = stale.
+          tree_current="$(scripts/reviewer-signoff.sh key "$HEAD_SHA" 2>/dev/null || true)"
+          tree_of() {   # echo the currency key at a marker's sha, or empty
             local sha; sha="$(grep -oiE 'sha=[0-9a-f]+' <<<"$1" | head -1 | cut -d= -f2)"
             if [[ -n "$sha" ]]; then
-              git rev-parse "${sha}:designs" 2>/dev/null || true
+              scripts/reviewer-signoff.sh key "$sha" 2>/dev/null || true
             fi
           }
           jane_tree="$(tree_of "$jane")"
