@@ -189,6 +189,25 @@ def test_docs_has_no_text_pattern():
     assert "docs" not in approval.TEXT_PATTERNS
 
 
+def test_label_names_match_case_insensitively_like_github():
+    # GitHub label names are case-insensitive: a repo label created as
+    # `Gate-Machinery` must still deny, and a verified `Docs-Only` must still
+    # reach auto — or the rule silently stops firing.
+    assert mode(labels=["Gate-Machinery"]) == approval.MODE_DENY
+    assert mode(labels=["DOCS-ONLY"], verified=["docs-only"]) == approval.MODE_AUTO
+    assert approval.loosening_labels(["Docs-Only"], OWNER_RULES) == [DOCS_LABEL]
+    # Negative control: a different name is still not the label.
+    assert mode(labels=["gate-machinery-ish"]) == approval.MODE_ASK
+    assert mode(labels=["docs"], verified=["docs"]) == approval.MODE_ASK
+
+
+def test_label_applier_matches_the_label_case_insensitively():
+    events = [_ev("labeled", "Docs-Only", "shaiss", "2026-09-03T00:00:00Z")]
+    assert approval.label_applier(events, DOCS_LABEL) == "shaiss"
+    # Negative control: another label's event never names the applier.
+    assert approval.label_applier([_ev("labeled", "docs", "shaiss", "x")], DOCS_LABEL) == ""
+
+
 def test_loosening_labels_are_only_the_auto_categories():
     labels = [DOCS_LABEL, GATES_LABEL, "enhancement"]
     assert approval.loosening_labels(labels, OWNER_RULES) == [DOCS_LABEL]
@@ -270,7 +289,7 @@ def test_grace_reads_a_naive_clock_as_utc():
 
 
 def test_grace_window_is_under_the_daily_cadence():
-    # The next scheduled run (~24h later) must always qualify.
+    # An on-time next scheduled run (~24h later) must qualify.
     assert approval.AUTO_APPROVE_GRACE < timedelta(hours=24)
     assert approval.grace_ends(POSTED) == "2026-09-02T02:00:00Z"
 

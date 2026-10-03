@@ -236,8 +236,9 @@ anything else asks. What each mode does:
   human `/decide` resolves it.
 - **auto** — a **YES** greenlight with no 👎 resolves once the
   `AUTO_APPROVE_GRACE` window (20h from its post — under the daily cadence, so
-  the next scheduled run always qualifies and a same-day `workflow_dispatch`
-  never does) has passed: decide.yml's sequence exactly as for a 👍, `arm=1`
+  an on-time next scheduled run qualifies and a same-day `workflow_dispatch`
+  never does; a heavily delayed scheduled post only waits one more day) has
+  passed: decide.yml's sequence exactly as for a 👍, `arm=1`
   arming included, with the ledger row and the reply naming the rule
   (`standing-rule:docs`), never a person. A 👍 still resolves at once, a 👎
   still overrules, a `/decide` still outranks, and a **NO** still asks.

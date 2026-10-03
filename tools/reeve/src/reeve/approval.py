@@ -112,8 +112,10 @@ STANDING_RULE_PREFIX = "standing-rule:"
 # own post. The poll runs before the drafter in the same job, so a greenlight
 # is never polled in the run that posted it — but a manual workflow_dispatch
 # minutes later would be, so the window is enforced here rather than left to
-# the cadence. Just under the daily cadence on purpose: the next scheduled run
-# (~24h later) always qualifies, a same-day dispatch never does.
+# the cadence. Just under the daily cadence on purpose: an on-time next
+# scheduled run (~24h later) qualifies and a same-day dispatch never does. A
+# heavily delayed scheduled post can make the next run fall short, which only
+# waits one more day — the fail-safe direction.
 AUTO_APPROVE_GRACE = timedelta(hours=20)
 
 
@@ -171,6 +173,11 @@ def normalize(text: str) -> str:
     return "".join(ch for ch in folded if unicodedata.category(ch) != "Cf").casefold()
 
 
+def _label_key(name: str) -> str:
+    """A label name as GitHub compares it: case-insensitively."""
+    return (name or "").casefold()
+
+
 def text_hits(title: str, body: str) -> dict:
     """``{category: (pattern, ...)}`` for every text pattern in title+body."""
     haystack = normalize(f"{title}\n{body}")
@@ -196,15 +203,19 @@ def classify(
     ``deny``, and nothing may loosen there. A verified label that is not
     actually present counts for nothing.
     """
-    present = set(labels or ())
-    verified = present & set(verified_labels or ())
+    # GitHub label names are case-insensitive, so `Docs-Only` is the same
+    # label as `docs-only`: compare casefolded, or a differently-cased label
+    # would silently loosen nothing and (worse) a differently-cased
+    # `gate-machinery` would silently deny nothing.
+    present = {_label_key(label) for label in labels or ()}
+    verified = present & {_label_key(label) for label in verified_labels or ()}
     trusted: set[str] = set()
     untrusted: set[str] = set()
     evidence: list[str] = []
     for category, label in CATEGORY_LABELS.items():
-        if label not in present:
+        if _label_key(label) not in present:
             continue
-        if label in verified:
+        if _label_key(label) in verified:
             trusted.add(category)
             evidence.append(f"`{category}`: label `{label}` (applied by a write-permission human)")
         else:
@@ -251,10 +262,10 @@ def standing_rule_login(categories: Iterable[str]) -> str:
 def loosening_labels(labels: Iterable[str], rules: Rules) -> list[str]:
     """The present labels whose category could loosen — the only ones worth
     the label-events read (a deny or ask category's applier changes nothing)."""
-    present = set(labels or ())
+    present = {_label_key(label) for label in labels or ()}
     return sorted(
         label for category, label in CATEGORY_LABELS.items()
-        if category in rules.auto and label in present
+        if category in rules.auto and _label_key(label) in present
     )
 
 
@@ -269,7 +280,7 @@ def label_applier(events: Iterable[dict[str, Any]], label: str) -> str:
     """
     newest: Optional[dict[str, Any]] = None
     for event in events or ():
-        if event.get("event") != "labeled" or event.get("label") != label:
+        if event.get("event") != "labeled" or _label_key(event.get("label") or "") != _label_key(label):
             continue
         if newest is None or str(event.get("created_at", "")) >= str(newest.get("created_at", "")):
             newest = event
