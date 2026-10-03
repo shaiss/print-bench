@@ -95,6 +95,14 @@ REGEN_TRAILER="Preview-Diff"
 # Commit-backs cannot chain (the loop guard allows one per push), so a real
 # line meets one or two; past the cap the key is the raw tree (conservative).
 KEY_WALK_MAX=50
+# Whether a regen commit-back may be trusted at all on this PR. The subject,
+# bot author email and Preview-Diff trailer are plain commit text, so they
+# prove nothing by themselves; what makes them trustworthy on a same-repo PR is
+# that only trusted pushers can write there (docs/actions-security.md). On a
+# fork PR no regen job can push (CI cannot write a fork), so a commit that
+# looks like a commit-back can only be forged: auto-review.yml sets this to 0
+# for a fork head, and then key is the raw tree and round always opens.
+SIGNOFF_TRUST_REGEN="${SIGNOFF_TRUST_REGEN:-1}"
 
 # --- field extraction (pure string ops; no git, no network) -----------------
 # Echo the value of `<key>=<value>` inside a marker string, or empty. Values are
@@ -270,6 +278,9 @@ _commit_problem() {
 key() {
   local c="${1:-}" list x
   git rev-parse --verify --quiet "${c}^{commit}" >/dev/null || return 1
+  if [[ "$SIGNOFF_TRUST_REGEN" != 1 ]]; then
+    git rev-parse --verify --quiet "${c}:designs"; return
+  fi
   # --first-parent with a pathspec compares each commit to its FIRST parent
   # only, so a merge that brought designs/ changes in is listed (and, having two
   # parents, is an anchor) while one that brought none is not.
@@ -296,6 +307,10 @@ round() {
     esac
   done
   [[ -n "$head" ]] || { echo "reviewer-signoff: round needs --head" >&2; return 2; }
+  if [[ "$SIGNOFF_TRUST_REGEN" != 1 ]]; then
+    echo "ROUND regen commit-backs are not trusted on this PR (fork head: no regen job can push there, so a qualifying commit can only be forged)"
+    return 1
+  fi
   local ts="" th="" ks="" kh="" out rc=0
   if [[ -n "$stamp" ]]; then
     ts="$(git rev-parse --verify --quiet "${stamp}:designs" 2>/dev/null)" || ts=""
@@ -616,6 +631,13 @@ NEGCTL-commit-back-touching-the-root-readme|Rreadme|stale
 NEGCTL-merge-bringing-a-design-change|Rmdesign|stale
 NEGCTL-the-base-before-the-signed-commit|base|stale
 ROWS
+  # A fork head trusts no commit-back: R (current above) must go stale.
+  got=stale; [[ "$( (cd "$r" && SIGNOFF_TRUST_REGEN=0 key "$(git rev-parse R)") )" == "$kA" ]] && got=current
+  if [[ "$got" == stale ]]; then
+    echo "selftest ok    key NEGCTL-fork-head-trusts-no-commit-back (stale)"
+  else
+    echo "SELFTEST FAIL  key NEGCTL-fork-head-trusts-no-commit-back: wanted stale, got current"; pass=0
+  fi
   local kbad
   kbad="$( (cd "$r" && key no-such-ref) 2>/dev/null)" && kbad="resolved:$kbad" || kbad=""
   if [[ -z "$kbad" ]]; then
@@ -645,6 +667,13 @@ NEGCTL-no-stamp|R|~|ROUND
 NEGCTL-stamp-before-the-design-change|R|base|ROUND
 NEGCTL-head-designs-unchanged-since-the-stamp|A|A|ROUND
 ROWS
+  # The same all-noise commit-back on a fork head opens a round.
+  got="$( (cd "$r" && SIGNOFF_TRUST_REGEN=0 round --head "$(git rev-parse R)" --stamp "$(git rev-parse A)") )" || true
+  if [[ "${got%% *}" == ROUND ]]; then
+    echo "selftest ok    round-git NEGCTL-fork-head-all-noise-commit-back (ROUND)"
+  else
+    echo "SELFTEST FAIL  round-git NEGCTL-fork-head-all-noise-commit-back: wanted ROUND, got '${got}'"; pass=0
+  fi
 
   # decide, fed the keys the way auto-review.yml feeds them: Jane and Drik
   # signed A; the head has moved on to <tag>.

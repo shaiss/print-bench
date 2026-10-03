@@ -221,6 +221,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           ACTION: ${{ github.event.action }}
           LAST_REVIEWED: ${{ steps.stamp.outputs.sha }}
+          SIGNOFF_TRUST_REGEN: ${{ github.event.pull_request.head.repo.full_name == github.repository && '1' || '0' }}
         run: |
           set -euo pipefail
           # opened / ready_for_review / reopened → always a new round
@@ -1237,6 +1238,7 @@ jobs:
           DESIGNS_CHANGED: ${{ needs.design-changes.outputs.designs_changed }}
           NO_AUTO_REVIEW: ${{ contains(github.event.pull_request.labels.*.name, 'no-auto-review') }}
           OVERRIDE: ${{ contains(github.event.pull_request.labels.*.name, 'signoff-override') }}
+          SIGNOFF_TRUST_REGEN: ${{ github.event.pull_request.head.repo.full_name == github.repository && '1' || '0' }}
           ANDON: ${{ vars.AI_ANDON_CORD == 'pulled' }}
         run: |
           set -euo pipefail
