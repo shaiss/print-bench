@@ -279,9 +279,15 @@ classify() {
         # The growth desk (docs/growth.md): tools/growth's own tests. The
         # posting server is here because test_server_parity.py pins its
         # weighted-length copy to growth.tweetlen — a server-only edit that
-        # skipped these tests could drift the two rules apart unchecked.
+        # skipped these tests could drift the two rules apart unchecked. The
+        # queue server and reeve-growth.yml are here for the same reason:
+        # test_queue_dedup_parity.py pins the queue server's near-duplicate
+        # rule and context reader to growth.dedup, and
+        # test_reeve_growth_wiring.py pins the workflow's dedup-context wiring.
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
         .claude/skills/growth-twitter/growth_mcp.py|\
+        .claude/skills/growth-queue/queue_mcp.py|\
+        .github/workflows/reeve-growth.yml|\
         .github/workflows/ci.yml) gwtests=true ;;
       esac
       case "$f" in
@@ -690,6 +696,12 @@ selftest() {
   check "mcp-config-cap-wiring-drift" "$out" "model_registry_tests=true"
   out="$(run ".claude/skills/oracle-review/SKILL.md")"
   check "skill-prose-is-not-cap-wiring" "$out" "model_registry_tests=false"
+  # Likewise the queue server's dedup backstop (parity-pinned) and the
+  # reeve-growth workflow's dedup-context wiring (pinned by the tool's tests).
+  out="$(run ".claude/skills/growth-queue/queue_mcp.py")"
+  check "growth-queue-server-parity-drift" "$out" "growth_tests=true"
+  out="$(run ".github/workflows/reeve-growth.yml")"
+  check "reeve-growth-dedup-wiring-drift" "$out" "growth_tests=true"
   # 4h. The AI andon cord (docs/andon-cord.md) is soft-infra the same way: the
   #     reconciler tool moves no mesh, but a tools/andon-only PR must still RUN
   #     the required contexts. Its tests pin the reconciler workflow, so an

@@ -19,7 +19,9 @@ name: Reeve growth (scheduled growth-post queueing)
 # queue-filing MCP tool (mcp__growth_queue__queue_growth_post, the SAME server
 # /growth-queue mounts) — "wiring the queue server into a scheduled sibling",
 # the exact path docs/growth.md's Future work named — and its reads are the
-# file tools over the checkout plus a workflow-assembled dedup context.
+# file tools over the checkout plus a workflow-assembled dedup context (the
+# open queue AND what a human already declined, parked or closed — written by
+# the tested `growth dedup-context`, and read by the queue tool too).
 #
 # DRY-RUN-FIRST BY CONSTRUCTION: this routine can never reach a channel. Its
 # backstop (.claude/reeve-growth-settings.json) DENIES the poster
@@ -234,15 +236,26 @@ jobs:
         if: steps.policy.outputs.enabled != 'true'
         run: echo "::notice::.github/reeve-growth.conf has enabled != true — the routine is armed (repo variable) but paused in git; nothing to do"
 
-      # Assemble the dedup context in TRUSTED workflow bash (not exposed to the
-      # agent): the currently-open growth-queue items, so /reeve-growth never
-      # re-queues one already open. The agent reads this file with Read/Grep/Glob;
-      # it holds no `gh` of its own (the .oracle-context / .growth-context
-      # pattern). Runs only when the routine will actually invoke the agent —
-      # gated on the any-key `key_present`. This copy serves the HEAD link;
-      # each tail link re-assembles its own immediately before it runs (the
-      # "Refresh the dedup context" steps below), because a head link that
-      # queued items and THEN failed leaves this list stale.
+      # Assemble the dedup context in TRUSTED workflow code (not exposed to the
+      # agent) with the tested, GET-only `growth dedup-context` (tools/growth):
+      # every OPEN issue carrying a `channel:*` label plus every one CLOSED in
+      # the window, split into "queued" and "already covered or declined" —
+      # because once a human rules on an item it usually stops carrying
+      # `growth-queue` (a declined post keeps only `channel:*` +
+      # `disposition:declined`), and a list of the open queue alone let a
+      # declined post straight back in under a new title (#597 → #754). It
+      # writes dedup.md, which the agent reads with Read/Grep/Glob (it holds no
+      # `gh` of its own — the .oracle-context / .growth-context pattern), and
+      # dedup.json, which the queue tool's near-duplicate backstop reads via
+      # GROWTHQ_DEDUP_CONTEXT on every link step. FAIL CLOSED: a failed read
+      # still writes both files marked UNAVAILABLE, the tool then refuses every
+      # filing, and this step only warns — a skipped day costs nothing, a
+      # re-proposal costs a human's cull. Runs only when the routine will
+      # actually invoke the agent — gated on the any-key `key_present`. This
+      # copy serves the HEAD link; each tail link re-assembles its own
+      # immediately before it runs (the "Refresh the dedup context" steps
+      # below), because a head link that queued items and THEN failed leaves
+      # this list stale.
       - name: Assemble the dedup context
         if: >-
           steps.policy.outputs.enabled == 'true'
@@ -250,20 +263,14 @@ jobs:
           && github.event.inputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: tools/growth/src
         run: |
           set -euo pipefail
-          mkdir -p .reeve-growth-context
-          {
-            echo "# Currently-open growth-queue items (dedup — do not re-propose these)"
-            echo
-            gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-              --label growth-queue --limit 100 \
-              --json number,title,labels \
-              --jq 'sort_by(.number) | .[] | "- #\(.number) \(.title)  [\(.labels | map(.name) | join(", "))]"' \
-              || echo "(could not list open growth-queue items)"
-          } > .reeve-growth-context/queued.md
-          echo "assembled .reeve-growth-context/queued.md:"
-          cat .reeve-growth-context/queued.md
+          if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
+              --out-dir .reeve-growth-context; then
+            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE, so the queue tool refuses every filing on this link (fail closed; the next run retries)"
+          fi
+          cat .reeve-growth-context/dedup.md || true
 
       # One explicit run step per CHAIN LINK, walked in file order ACROSS
       # providers (issue #544 Part B): link 1 is the Z.AI GLM step, links 2-3
@@ -339,9 +346,13 @@ jobs:
           # what spans the queue cap across the walk (#567): step-level env
           # because the runner context is unavailable in job env, the SAME
           # runner.temp path on every link step below, and the server counts
-          # filings from that one shared file.
+          # filings from that one shared file. GROWTHQ_DEDUP_CONTEXT is the
+          # dedup.json the step before this link wrote: the server refuses a
+          # near-duplicate title of anything in it, and refuses everything if
+          # it is missing or marked unavailable — or, unattended, unset.
           GITHUB_TOKEN: ${{ github.token }}
           GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
+          GROWTHQ_DEDUP_CONTEXT: ${{ github.workspace }}/.reeve-growth-context/dedup.json
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -353,13 +364,15 @@ jobs:
       # Refresh the dedup context immediately before EACH tail link (#544 Part
       # B review fix): a head link can queue items and THEN fail (a filing
       # landed, the run died after it), so by the time a tail link runs the
-      # list the first assembly wrote is stale — and queue_mcp.py has no
-      # write-time dedup, so a tail trusting that list would re-queue the
-      # head's own items as duplicates. A tail must not trust a list the head
-      # may have changed; it re-reads the live queue itself. Gated EXACTLY
-      # like the link it precedes (the same fixed legs, that link's own key,
-      # every earlier link NOT having succeeded), so it runs when — and only
-      # when — that link will. Not a ship step and not a gate: the drift
+      # list the first assembly wrote is stale — and both the agent's dedup and
+      # queue_mcp.py's near-duplicate backstop read THAT list, so a tail
+      # trusting it would re-queue the head's own items as duplicates. A tail
+      # must not trust a list the head may have changed; it re-reads the live
+      # desk itself (the same tested helper, so the three copies cannot
+      # diverge in what they list). Gated EXACTLY like the link it precedes
+      # (the same fixed legs, that link's own key, every earlier link NOT
+      # having succeeded), so it runs when — and only when — that link will.
+      # Not a ship step and not a gate: the drift
       # guard's walk pins read only the claude-code-action steps.
       - name: Refresh the dedup context for chain link 2
         id: dedup_context_2
@@ -370,20 +383,14 @@ jobs:
           && steps.run_zai_1.outcome != 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: tools/growth/src
         run: |
           set -euo pipefail
-          mkdir -p .reeve-growth-context
-          {
-            echo "# Currently-open growth-queue items (dedup — do not re-propose these)"
-            echo
-            gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-              --label growth-queue --limit 100 \
-              --json number,title,labels \
-              --jq 'sort_by(.number) | .[] | "- #\(.number) \(.title)  [\(.labels | map(.name) | join(", "))]"' \
-              || echo "(could not list open growth-queue items)"
-          } > .reeve-growth-context/queued.md
-          echo "assembled .reeve-growth-context/queued.md:"
-          cat .reeve-growth-context/queued.md
+          if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
+              --out-dir .reeve-growth-context; then
+            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE, so the queue tool refuses every filing on this link (fail closed; the next run retries)"
+          fi
+          cat .reeve-growth-context/dedup.md || true
 
       # The cross-provider tail (issue #544 Part B): links 2 and 3 of the
       # registry's `reeve-growth` chain on Anthropic's native endpoint, reached
@@ -410,9 +417,10 @@ jobs:
           # Same reason as the Z.AI step: the queue MCP tool inherits this env
           # and authenticates with it — plus the SAME GROWTHQ_CAP_STATE path,
           # so the count the GLM link advanced is the count this link starts
-          # from (#567).
+          # from (#567), and the dedup.json the refresh step above re-wrote.
           GITHUB_TOKEN: ${{ github.token }}
           GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
+          GROWTHQ_DEDUP_CONTEXT: ${{ github.workspace }}/.reeve-growth-context/dedup.json
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -435,20 +443,14 @@ jobs:
           && steps.run_anthropic_2.outcome != 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: tools/growth/src
         run: |
           set -euo pipefail
-          mkdir -p .reeve-growth-context
-          {
-            echo "# Currently-open growth-queue items (dedup — do not re-propose these)"
-            echo
-            gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-              --label growth-queue --limit 100 \
-              --json number,title,labels \
-              --jq 'sort_by(.number) | .[] | "- #\(.number) \(.title)  [\(.labels | map(.name) | join(", "))]"' \
-              || echo "(could not list open growth-queue items)"
-          } > .reeve-growth-context/queued.md
-          echo "assembled .reeve-growth-context/queued.md:"
-          cat .reeve-growth-context/queued.md
+          if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
+              --out-dir .reeve-growth-context; then
+            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE, so the queue tool refuses every filing on this link (fail closed; the next run retries)"
+          fi
+          cat .reeve-growth-context/dedup.md || true
 
       - name: Run via Anthropic (Claude, chain link 3)
         id: run_anthropic_3
@@ -464,9 +466,11 @@ jobs:
         env:
           # Same as links 1 and 2: the queue MCP tool's token plus the SAME
           # GROWTHQ_CAP_STATE path, so a walk that reached here still counts
-          # everything earlier links queued (#567).
+          # everything earlier links queued (#567), and the dedup.json the
+          # refresh step above re-wrote.
           GITHUB_TOKEN: ${{ github.token }}
           GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
+          GROWTHQ_DEDUP_CONTEXT: ${{ github.workspace }}/.reeve-growth-context/dedup.json
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
