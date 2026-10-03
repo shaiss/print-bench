@@ -311,7 +311,8 @@ module ball_half_seated(hours = true, top = true) {
 
 // One printable HEMISPHERE, POLE-DOWN on the bed: the flat pole pentagon is the
 // first layer, the seam ring is the top of the print. `top` selects the +z half
-// (even numbers, female thread) or the -z half (odd numbers, male ring). Print
+// (numerals 2/7/5/9/11/3, female thread) or the -z half (6/1/8/4/12/10, male
+// ring; the split follows the tumble stop table, not an even/odd rule). Print
 // two halves per ball — a top AND a bottom — to get all 12 numbers. Pole-down
 // is forced by the seam (a ring standing on the seam face cannot print
 // seam-face-down) and is also the overhang-free orientation for a hollow
