@@ -22,18 +22,31 @@ Subcommands, each a thin shell over one module:
   reads a JSON list of item snapshots (file or stdin) and prints one
   ``<url>\\t<stage>`` line per item that belongs on the board. The
   growth-board-sync workflow's single source for where each post sits.
+* ``growth dedup-context (--repo <owner/name> | --snapshot <json>) --out-dir
+  <dir> [--now <iso>] [--window-days <n>]`` — the queuer's dedup context
+  (:mod:`growth.dedup`): every open, or recently-closed, ``channel:*`` issue,
+  split into "queued" and "already covered or declined", written as
+  ``<dir>/dedup.md`` (for the agent) and ``<dir>/dedup.json`` (for the queue
+  tool's near-duplicate backstop). ``--repo`` reads GitHub live, GET-only
+  (:mod:`growth.github`); ``--snapshot`` reads a JSON list of issues. FAIL
+  CLOSED: when assembly fails it still writes both files, marked
+  unavailable, and exits 1 — so the queue tool refuses rather than trusting
+  an empty list.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import board as board_mod
 from . import config as config_mod
 from . import daycap as daycap_mod
+from . import dedup as dedup_mod
+from . import github as github_mod
 from . import simulate as simulate_mod
 from .tweetlen import tweet_weight
 
@@ -79,6 +92,23 @@ def main(argv: list[str] | None = None) -> int:
     p_board.add_argument(
         "--snapshot",
         help="JSON file: a list of queue-item snapshots (default: read stdin)")
+
+    p_dd = sub.add_parser(
+        "dedup-context",
+        help="write the queuer's dedup context (queued + already covered/declined)")
+    p_dd_src = p_dd.add_mutually_exclusive_group(required=True)
+    p_dd_src.add_argument(
+        "--repo", help="owner/name: list the live channel:* issues (GET-only; "
+                       "token from GITHUB_TOKEN or GH_TOKEN)")
+    p_dd_src.add_argument(
+        "--snapshot", help="JSON file: a list of issue objects (offline)")
+    p_dd.add_argument("--out-dir", required=True,
+                      help=f"directory for {dedup_mod.MD_NAME} and {dedup_mod.JSON_NAME}")
+    p_dd.add_argument("--now", default="",
+                      help="ISO timestamp the window is measured from (default: now UTC)")
+    p_dd.add_argument("--window-days", type=int, default=dedup_mod.DEFAULT_WINDOW_DAYS,
+                      help="keep closed items closed within this many days "
+                           f"(default {dedup_mod.DEFAULT_WINDOW_DAYS})")
 
     args = parser.parse_args(argv)
 
@@ -171,7 +201,59 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{url}\t{stage}")
         return 0
 
+    if args.cmd == "dedup-context":
+        return _dedup_context(args)
+
     return 2  # pragma: no cover — argparse enforces the subcommand set
+
+
+def _write_context(out_dir: str, ctx: dict) -> None:
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, dedup_mod.MD_NAME), "w", encoding="utf-8") as fh:
+        fh.write(dedup_mod.render_markdown(ctx))
+    with open(os.path.join(out_dir, dedup_mod.JSON_NAME), "w", encoding="utf-8") as fh:
+        fh.write(dedup_mod.render_json(ctx))
+
+
+def _dedup_context(args) -> int:
+    """Assemble and write the dedup context; on ANY failure write the
+    unavailable form instead and exit 1 (fail closed — see the module doc)."""
+    try:
+        now = (datetime.fromisoformat(args.now.replace("Z", "+00:00"))
+               if args.now else datetime.now(timezone.utc))
+        if now.tzinfo is None:
+            raise ValueError(f"--now must carry a UTC offset (got {args.now!r})")
+        if args.window_days < 1:
+            raise ValueError(f"--window-days must be a positive integer (got {args.window_days})")
+        if args.snapshot:
+            with open(args.snapshot, encoding="utf-8") as fh:
+                snapshot = json.load(fh)
+            if not isinstance(snapshot, list):
+                raise ValueError("--snapshot must hold a JSON list of issues")
+        else:
+            token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
+            cutoff = now - timedelta(days=args.window_days)
+            snapshot = github_mod.channel_issues(args.repo, token, cutoff)
+        ctx = dedup_mod.build(snapshot, now, args.window_days)
+    except Exception as e:  # noqa: BLE001 — every failure takes the fail-closed path
+        error = f"{type(e).__name__}: {e}"
+        print(f"growth dedup-context: {error}", file=sys.stderr)
+        try:
+            _write_context(args.out_dir,
+                           dedup_mod.unavailable(error, datetime.now(timezone.utc)))
+        except OSError as w:
+            print(f"growth dedup-context: could not write the unavailable "
+                  f"context either: {w}", file=sys.stderr)
+        return 1
+    try:
+        _write_context(args.out_dir, ctx)
+    except OSError as e:
+        print(f"growth dedup-context: {e}", file=sys.stderr)
+        return 1
+    print(f"growth dedup-context: {len(ctx[dedup_mod.SECTION_QUEUED])} queued, "
+          f"{len(ctx[dedup_mod.SECTION_COVERED])} already covered or declined "
+          f"-> {args.out_dir}")
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
