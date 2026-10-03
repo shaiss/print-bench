@@ -263,6 +263,15 @@ pre code { background: none; padding: 0; }
   margin-bottom: 2rem;
 }
 
+.hero-cta {
+  margin-top: 1.25rem;
+  font-size: 0.95rem;
+}
+
+.hero-cta a { font-weight: 600; }
+
+.site-foot-links a { white-space: nowrap; }
+
 .hero h1 {
   font-size: clamp(2rem, 5.5vw, 3.2rem);
   line-height: 1.06;
