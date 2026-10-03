@@ -9,13 +9,13 @@
 # time the classifier moved. Now the workflow and the local mirror share this
 # implementation — they cannot disagree.
 #
-#   Emits, one `key=value` per line on STDOUT (the 20 outputs ci.yml's
+#   Emits, one `key=value` per line on STDOUT (the 21 outputs ci.yml's
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests, cogcheck_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
 #     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests,
-#     growth_tests, andon_tests, styles, gate, gate_designs, regen,
-#     regen_designs, docs_standards
+#     growth_tests, andon_tests, concept_preview_tests, styles, gate,
+#     gate_designs, regen, regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
 # Usage:
@@ -45,12 +45,12 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 
 # --- classify: the shared decision -------------------------------------------
 # Reads the changed-file list from stdin (one path per line), reads the working
-# tree for existence/ARCHIVED/style.conf facts, and prints the 20 outputs.
+# tree for existence/ARCHIVED/style.conf facts, and prints the 21 outputs.
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
   local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false gwtests=false docs_standards=false
-  local bstests=false adtests=false cogtests=false
+  local bstests=false adtests=false cogtests=false cptests=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -59,7 +59,7 @@ classify() {
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
     bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; gwtests=true; docs_standards=true
-    bstests=true; adtests=true; cogtests=true
+    bstests=true; adtests=true; cogtests=true; cptests=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -133,6 +133,7 @@ classify() {
         tools/brief-sources/*|\
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
         tools/andon/*|\
+        tools/concept-preview/*|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
           soft_infra=true ;;
@@ -282,6 +283,16 @@ classify() {
         tools/andon/*|.github/workflows/andon.yml|.github/workflows/ci.yml) adtests=true ;;
       esac
       case "$f" in
+        # The concept-preview emitter (issue #472): tools/concept-preview's own
+        # tests. scripts/concept-preview.sh is here because the suite drives the
+        # wrapper (selftest + usage refusals) — a wrapper-only edit must re-run
+        # the tests that pin it. The emitted sheets themselves are design files
+        # (designs/<name>/previews/), scoped by the designs/*/ case like any
+        # other committed preview.
+        tools/concept-preview/*|scripts/concept-preview.sh|\
+        .github/workflows/ci.yml) cptests=true ;;
+      esac
+      case "$f" in
         # The smart-ci selector's own unit tests. The registry is data the
         # selector reads, so a registry edit re-runs them too.
         tools/ci-gates/*|.github/ci-gates/*|\
@@ -314,6 +325,7 @@ classify() {
         tools/brief-sources/*|\
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
         tools/andon/*|\
+        tools/concept-preview/*|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
           scad=true ;;
@@ -414,6 +426,7 @@ classify() {
   echo "brief_sources_tests=$bstests"
   echo "growth_tests=$gwtests"
   echo "andon_tests=$adtests"
+  echo "concept_preview_tests=$cptests"
   echo "styles=$styles"
   echo "gate=$gate"
   echo "gate_designs=$designs"
@@ -680,11 +693,28 @@ selftest() {
   out="$(run "tools/andon/src/andon/cli.py")"
   check "andon-only" "$out" \
     "andon_tests=true" "gate=true" "gate_designs=" \
-    "printcheck_tests=true" "scad=true" "regen=false" "growth_tests=false"
+    "printcheck_tests=true" "scad=true" "regen=false" "growth_tests=false" \
+    "concept_preview_tests=false"
   out="$(run ".github/workflows/andon.yml")"
   check "andon-workflow-drift" "$out" "andon_tests=true" "model_registry_tests=true"
   out="$(run ".github/workflows/lifestyle-shot.yml")"
   check "any-workflow-reruns-the-drift-guard" "$out" "model_registry_tests=true"
+  # 4i. The concept-preview emitter (issue #472) is soft-infra like its tool
+  #     siblings: its own tests run and the required contexts RUN with an empty
+  #     design list — it draws SVG from a spec, moving no mesh and no gated
+  #     pixels. The wrapper script re-runs the suite (the tests drive it) and,
+  #     as a scripts/ file, is soft-infra too; the authoring skill alone runs
+  #     nothing (skills-only matches no gate).
+  out="$(run "tools/concept-preview/src/concept_preview/primitives.py")"
+  check "concept-preview-only" "$out" \
+    "concept_preview_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "andon_tests=false"
+  out="$(run "scripts/concept-preview.sh")"
+  check "concept-preview-wrapper" "$out" \
+    "concept_preview_tests=true" "gate=true" "gate_designs=" "scad=true"
+  out="$(run ".claude/skills/concept-preview/SKILL.md")"
+  check "concept-preview-skill-only" "$out" \
+    "concept_preview_tests=false" "scad=false" "gate=false"
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must
