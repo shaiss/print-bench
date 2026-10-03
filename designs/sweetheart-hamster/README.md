@@ -23,8 +23,11 @@ folds shut.
 
 - `sweetheart-hamster` — the hamster locket, **~53 × 61 × 60 mm** assembled;
   ring nest ~22 mm across. Prints flat/open, ~126 mm wide on the bed.
-- `sweetheart-hamster-coupon` — a smaller "print this first" copy to dial in the
-  hinge flex and seam fit before committing to the full print.
+- `sweetheart-hamster-coupon` — smaller "print this first" copy to dial in the
+  hinge flex and seam fit (`nest_on` off on purpose).
+- `sweetheart-hamster-nest-coupon` — thick heart pad with the **production**
+  closed nest (`nest_w` / `nest_depth` as shipped); drop a ring in to prove
+  the ring seats before the full print.
 
 ## Print settings
 
@@ -64,8 +67,9 @@ folds shut.
   reveal with PETG on **smooth** PEI without a glue-stick release — it welds to the
   plate and you'll chip the reveal face lifting the print. Textured PEI is the safe
   choice.
-- **Print this first:** the coupon, to dial in the hinge flex and seam
-  clearance for your printer before committing to the full print.
+- **Print this first:** the hinge/seam coupon to dial flex and parting gap, then
+  the nest coupon to seat a real ring in the production pocket, before the full
+  print.
 
 ## Parameters
 

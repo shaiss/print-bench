@@ -25,6 +25,7 @@ From the brief's *Must fit / hold* table:
 | Rod barrel Ø | 40.0 mm | **given** (verify with calipers — blocking before printing) | `rod_d` |
 | Socket bore Ø | 40.6 mm (rod + 0.6) | assumed slip default | `bore_d = rod_d + rod_clearance` |
 | Rod engagement depth | 28 mm | assumed (deep side of the deep+shallow install pair) | `engagement_depth` |
+| Shallow engagement depth | 12 mm | given (far side of deep+shallow; gated as `collar-shallow`) | `shallow_engagement_depth` |
 | Wall thickness | 3.2 mm | assumed structural (≥ 3 mm brief floor) | `wall` |
 | Thread major Ø | ≈ 50 mm per brief, built **47.0** = bore + 2·wall exactly | assumed+derived | `thread_major` — see decision D2 |
 | Mounting screw | M5, recessed head | assumed | `screw_size`, `screw_count` |
@@ -42,7 +43,9 @@ multi-object 3MF plate (`build/alcove-rod-socket-plate.3mf`), not the assembled
 render and not a single STL — a single STL of both imports as one fused body
 (D11). `ci.plate` lists the two production parts; `gate.sh` builds the plate and
 `--check`s that it imports as exactly 2 objects. The coupons and the assembled
-preview are not plate parts.
+preview are not plate parts. `collar-shallow` (D12) is gated via `ci.parts` and
+ships in the Release, but is **not** on the plate — the plate stays the
+default-depth holder pair.
 
 ## Key decisions
 
@@ -136,6 +139,19 @@ preview are not plate parts.
   the *spaghetti*, so two separate objects re-stacked *vertically* would still
   spaghetti (never do that). A brim is recommended for the collar (README) as
   first-layer insurance, kept a slicer setting rather than baked geometry.
+- **D12 — (B3 / #631) Shallow collar is a named gated part, not a dual-`-D`
+  hand-render.** The deep+shallow install needs the far collar at
+  `engagement_depth=12`. `ci.parts` only accepts `-D part="…"`, so a raw
+  `engagement_depth=12` line is impossible — and telling strangers to pass
+  both `-D 'part="collar"'` and `-D 'engagement_depth=12'` is the foot-gun
+  the deliverable rules exist to stop (file defaults to `part="assembly"`).
+  Fix: `collar` / `collar_use` take an optional `depth` (default =
+  `engagement_depth`); `part="collar-shallow"` calls
+  `collar(shallow_engagement_depth)` with `shallow_engagement_depth=12`.
+  Listed in `ci.parts` so gate/Release carry it; **not** in `ci.plate` (plate
+  stays boss + default collar). No new coupon — thread/bore coupons already
+  cover the fits. Default `engagement_depth`, deep geometry, fitchecks, and
+  style claim unchanged.
 
 ## Print settings
 

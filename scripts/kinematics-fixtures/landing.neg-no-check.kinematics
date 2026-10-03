@@ -1,0 +1,5 @@
+# Structural refusal (selftest: must FAIL before rendering): controls only,
+# nothing checked.
+stops stop 0
+empty-control landing-flat-rolled
+nonempty-control landing-glyph-mirrored

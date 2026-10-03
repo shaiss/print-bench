@@ -1,0 +1,4 @@
+# Negative control (selftest: must FAIL): the mis-landed shell declared flat.
+stops stop 0,1,2,3,4
+empty landing-flat-rolled
+empty-control landing-flat-rolled

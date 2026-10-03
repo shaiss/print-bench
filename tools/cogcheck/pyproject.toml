@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cogcheck"
+version = "0.1.0"
+description = "CoG / tip-over stability check: mesh-derived centre of gravity, per-part density manifest, support-footprint verdict"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "CC-BY-SA-4.0" }
+# Deliberately empty, and it must stay that way: the check runs inside
+# gate.sh (via scripts/cog-check.sh) wherever the gate runs, with no install
+# step of its own — the same stdlib-only rule tools/lineage and
+# tools/telemetry keep.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+cogcheck = "cogcheck.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
