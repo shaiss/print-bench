@@ -753,6 +753,16 @@ selftest() {
   check "categories-conf" "$out" \
     "regen=true" "regen_designs=ALL" "gate=false" "gate_designs=" "scad=true"
 
+  # 4c'''. preview-diff.sh (issue #470) JUDGES the regenerated previews in the
+  #        regen job; it generates none. So it is plain soft-infra (run,
+  #        gate nothing) and must NOT join regen_all: listing it there would
+  #        re-render the whole catalog to measure a classifier edit. Negative
+  #        control for that — regen stays false. (It is not a regen-stamp.sh
+  #        input either, for the same reason.)
+  out="$(run "scripts/preview-diff.sh")"
+  check "preview-diff-judges-not-generates" "$out" \
+    "regen=false" "regen_designs=" "gate=true" "gate_designs=" "scad=true"
+
   # 5. A design path whose entry point does not exist is dropped — the guard
   #    against gating a deleted/renamed design under the wrong name.
   out="$(run "designs/__nonexistent__/__nonexistent__.scad")"
