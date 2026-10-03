@@ -85,82 +85,82 @@ module rsq_plate(size, r, z) {
     translate([0, 0, z]) linear_extrude(0.01) rsq2d(size, r);
 }
 
-// One cell's boss: 35.6 (r 0.8) -> 37.2 (r 1.6) -> 41.5 (r 3.75), 4.75 tall
-module gf_boss_cell() {
+// ---- Bin solids as single sweeps -------------------------------------
+// Every bin surface is a rounded rectangle whose corner arcs share one
+// centre (r = gf_top_r - inset), so a whole profile — the boss's three
+// stages, the bin body, the cavity + stacking-lip V — is ONE closed
+// polyhedron lofted through rings, never a union of stacked hulls and
+// extrusions. Stacked pieces that only touch face-to-face (wall on bridge,
+// cutter on cutter) are what Manifold exports as edges shared by more than
+// two triangles plus zero-area slivers; a single sweep has no such seam.
+
+function gf_cum(v, i) = i == 0 ? 0 : gf_cum(v, i - 1) + v[i - 1];
+
+// Closed loft of rounded rectangles of outer size `size` centred at `c`;
+// prof = [[inset, z], ...] bottom to top (z strictly increasing). An inset
+// of gf_top_r gives sharp corners (r = 0), collapsed to one vertex each.
+module gf_sweep(size, prof, c = [0, 0]) {
+    n = max(1, ceil($fn / 4));  // segments per corner arc
+    L = len(prof);
+    M = 4 * (n + 1);
+    cx = size[0] / 2 - gf_top_r;
+    cy = size[1] / 2 - gf_top_r;
+    sg = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
+    sharp = [for (p = prof) gf_top_r - p[0] <= 1e-6];
+    cnt = [for (sh = sharp) sh ? 4 : M];
+    base = [for (i = [0 : L - 1]) gf_cum(cnt, i)];
+    pts = [for (i = [0 : L - 1])
+              let(r = gf_top_r - prof[i][0], z = prof[i][1])
+              each (sharp[i]
+                  ? [for (q = [0 : 3]) [c[0] + sg[q][0] * cx, c[1] + sg[q][1] * cy, z]]
+                  : [for (q = [0 : 3], k = [0 : n])
+                        let(a = q * 90 + k * 90 / n)
+                        [c[0] + sg[q][0] * cx + r * cos(a),
+                         c[1] + sg[q][1] * cy + r * sin(a), z]])];
+    E = [for (q = [0 : 3], k = [0 : n]) [q, k]];
+    function id(i, e) = base[i] + (sharp[i] ? e[0] : e[0] * (n + 1) + e[1]);
+    side = [for (i = [0 : L - 2], j = [0 : M - 1])
+               let(a0 = id(i, E[j]), a1 = id(i, E[(j + 1) % M]),
+                   b0 = id(i + 1, E[j]), b1 = id(i + 1, E[(j + 1) % M]))
+               each (a0 == a1 && b0 == b1 ? []
+                   : a0 == a1 ? [[a0, b0, b1]]
+                   : b0 == b1 ? [[a0, b0, a1]]
+                   : [[a0, b0, b1], [a0, b1, a1]])];
+    bot = [for (k = [0 : cnt[0] - 1]) base[0] + k];
+    top = [for (k = [cnt[L - 1] - 1 : -1 : 0]) base[L - 1] + k];
+    polyhedron(points = pts, faces = concat([bot], side, [top]));
+}
+
+// One cell's boss: 35.6 (r 0.8) -> 37.2 (r 1.6) -> 41.5 (r 3.75), 4.75
+// tall, plus `ov` straight up into the bin body so the joint is a real
+// overlap (the outer rings match the body's vertex for vertex).
+module gf_boss_cell(c, ov) {
     top = gf_pitch - gf_gap;
-    lo = gf_boss[1][0];   // 0.8 — lower chamfer run and rise
-    mid_h = gf_boss[2][1];  // 2.6 — top of the vertical section
-    hi = gf_boss[3][0];   // 2.95 — total horizontal run
-    hi_h = gf_boss[3][1]; // 4.75 — profile height
-    mid = top - 2 * (hi - lo);  // 37.2 at the vertical section
-    hull() {
-        rsq_plate(top - 2 * hi, gf_top_r - hi, 0);
-        rsq_plate(mid, gf_top_r - hi + lo, lo);
-    }
-    translate([0, 0, lo]) linear_extrude(mid_h - lo) rsq2d(mid, gf_top_r - hi + lo);
-    hull() {
-        rsq_plate(mid, gf_top_r - hi + lo, mid_h);
-        rsq_plate(top, gf_top_r, hi_h);
-    }
+    gf_sweep([top, top],
+             concat([for (p = gf_boss) [gf_boss[3][0] - p[0], p[1]]],
+                    [[0, gf_boss[3][1] + ov]]), c);
 }
 
-// Bin base block: per-cell bosses + one merged bridge up to z = 7 (1U)
-module gf_base(grid) {
+// Bin base block bosses, one per cell, placed absolutely (no translate:
+// the body's and the bosses' shared outer vertices must be bit-identical)
+module gf_bosses(grid, ov) {
     for (ix = [0 : grid[0] - 1], iy = [0 : grid[1] - 1])
-        translate([(ix - (grid[0] - 1) / 2) * gf_pitch,
-                   (iy - (grid[1] - 1) / 2) * gf_pitch, 0])
-            gf_boss_cell();
-    translate([0, 0, gf_boss[3][1]])
-        linear_extrude(gf_base_h - gf_boss[3][1]) rsq2d(gf_foot(grid), gf_top_r);
+        gf_boss_cell([(ix - (grid[0] - 1) / 2) * gf_pitch,
+                      (iy - (grid[1] - 1) / 2) * gf_pitch], ov);
 }
 
-// Bin wall from the bridge top (z = 7) to the bin top
-module gf_wall(grid, h_top) {
-    foot = gf_foot(grid);
-    translate([0, 0, gf_base_h]) linear_extrude(h_top - gf_base_h)
-        difference() {
-            rsq2d(foot, gf_top_r);
-            rsq2d(foot - [2 * wall, 2 * wall], gf_top_r - wall);
-        }
-}
-
-// Stacking lip on the bin top: outer face flush with the wall, inner V is
+// Stacking lip + cavity profile above z_lip (the bin top): the inner V is
 // the socket profile so the next bin's boss drops in and seats on the V
-// floor. Below the V floor the material chamfers back to the wall at 45
-// deg so the inward lip prints support-free (opening-down orientation).
-module gf_lip(grid, h_top) {
-    foot = gf_foot(grid);
-    lip_d = 2.6;  // lip depth incl. wall thickness
-    v_mid = 1.9;  // V wall inset (lip line: 0.7 out / 1.8 up / 1.9 out)
-    translate([0, 0, h_top]) difference() {
-        union() {
-            translate([0, 0, -(lip_d - wall)]) linear_extrude((lip_d - wall) + gf_lip_h)
-                rsq2d(foot, gf_top_r);
-            if (label_tab) gf_label(foot);
-        }
-        union() {
-            // support chamfer: wall inner face up to the V floor opening
-            hull() {
-                rsq_plate(foot - [2 * wall, 2 * wall], gf_top_r - wall,
-                          -(lip_d - wall) - 0.01);
-                rsq_plate(foot - [2 * lip_d, 2 * lip_d], gf_top_r - lip_d, 0);
-            }
-            // V lower chamfer
-            hull() {
-                rsq_plate(foot - [2 * lip_d, 2 * lip_d], gf_top_r - lip_d, -0.01);
-                rsq_plate(foot - [2 * v_mid, 2 * v_mid], gf_top_r - v_mid, 0.7);
-            }
-            // V vertical band
-            translate([0, 0, 0.7]) linear_extrude(1.8)
-                rsq2d(foot - [2 * v_mid, 2 * v_mid], gf_top_r - v_mid);
-            // top slope back to a 0.3 flat rim (spec: knife edge at inset 0)
-            hull() {
-                rsq_plate(foot - [2 * v_mid, 2 * v_mid], gf_top_r - v_mid, 2.5);
-                rsq_plate(foot - [0.6, 0.6], gf_top_r - 0.3, gf_lip_h);
-            }
-        }
-    }
-}
+// floor; the 0.3 flat rim replaces the spec's knife edge at inset 0.
+// Returned as [inset, z] rings for the cavity sweep in gf_bin.
+function gf_lip_prof(z_lip, ov) =
+    let(lip_d = 2.6,   // lip depth incl. wall thickness (the V floor ridge)
+        v_mid = 1.9)   // V wall inset (lip line: 0.7 out / 1.8 up / 1.9 out)
+    [[lip_d, z_lip],
+     [v_mid, z_lip + 0.7],
+     [v_mid, z_lip + 2.5],
+     [0.3, z_lip + gf_lip_h],
+     [0.3, z_lip + gf_lip_h + ov]];
 
 // Flat label plate replacing the front lip slope: the slope is capped at
 // dy 3.2 over inset 0..1.3 — inside the stacking envelope (a stacked bin's
@@ -169,23 +169,11 @@ module gf_label(foot) {
     w = 26;
     translate([0, -(foot[1] / 2 - 0.65), 1.5]) cube([w, 1.3, 3.4], center = true);
     if (label_text != "")
-        translate([0, -foot[1] / 2 - 0.01, 1.5]) rotate([90, 0, 0])
-            linear_extrude(0.31)
+        // starts 0.05 inside the face so the text fuses to the bin rather
+        // than floating 0.01 off it as a separate shell
+        translate([0, -foot[1] / 2 + 0.05, 1.5]) rotate([90, 0, 0])
+            linear_extrude(0.31 + 0.05)
                 text(label_text, size = 2.6, halign = "center", valign = "center");
-}
-
-// 1U tray recess CUTTER (differenced in gf_bin): 36.3 opening drafted down
-// to a 1.2 floor so the walls left around it stay >= 1.2 mm at the boss
-// waist. Called as a solid it buries harmlessly inside the base block and
-// ships a tray that holds nothing — the cavity measurement in NOTES.md
-// "Gate evidence" is the proof it actually cuts.
-module gf_tray_recess(grid) {
-    foot = gf_foot(grid);
-    open = foot - [2 * 2.6, 2 * 2.6];
-    hull() {
-        rsq_plate(open, gf_top_r - 2.6, gf_base_h - 0.01);
-        rsq_plate(open - [2.3, 2.3], gf_top_r - 2.6 - 1.15, recess_floor);
-    }
 }
 
 // Interior divider walls: wall-thick slabs evenly spaced across the bin
@@ -203,10 +191,18 @@ module gf_dividers(in, z0, h_top, div_x, div_y) {
     in_y = in[1];
     bury_z = 0.4;
     bury_end = 0.3;
-    assert(div_x == 0 || in_x / (div_x + 1) >= 8,
-           "dividers along X would leave compartments under 8 mm");
-    assert(div_y == 0 || in_y / (div_y + 1) >= 8,
-           "dividers along Y would leave compartments under 8 mm");
+    // counts must be whole and non-negative: the loops below iterate
+    // [1 : div], so a fractional count would draw floor(div) walls while
+    // spacing them for div — the guard and the geometry must agree
+    assert(is_num(div_x) && div_x >= 0 && div_x == floor(div_x),
+           "dividers_x must be a whole number >= 0");
+    assert(is_num(div_y) && div_y >= 0 && div_y == floor(div_y),
+           "dividers_y must be a whole number >= 0");
+    // CLEAR compartment width: each divider consumes `wall` of the span
+    assert(div_x == 0 || (in_x - div_x * wall) / (div_x + 1) >= 8,
+           "dividers along X would leave compartments under 8 mm clear");
+    assert(div_y == 0 || (in_y - div_y * wall) / (div_y + 1) >= 8,
+           "dividers along Y would leave compartments under 8 mm clear");
     // guarded loops: an unguarded [1:0] range renders empty but warns
     if (div_x > 0)
         for (i = [1 : div_x])
@@ -220,34 +216,39 @@ module gf_dividers(in, z0, h_top, div_x, div_y) {
                 cube([in_x + bury_end, wall, h_top - z0 + bury_z]);
 }
 
-// A bin: base block + wall + stacking lip, with the 1U tray's recess cut
-// from the base block and optional interior dividers. units is the total
-// height in 7 mm U (3U => bin top at 21).
+// A bin: per-cell bosses + one body sweep (bridge, wall and lip outer face
+// in a single loft), minus ONE cavity sweep — the 1U tray's drafted recess
+// or the bin's wall interior + support chamfer, continuing into the lip V.
+// units is the total height in 7 mm U (3U => bin top at 21).
 module gf_bin(grid, units, div_x = 0, div_y = 0) {
     h_top = units * gf_base_h;
-    if (h_top == gf_base_h)
-        // 1U tray: the recess is a CUTTER into the base block — cut bosses
-        // and bridge together, leaving the z < recess_floor plate, the
-        // boss-profile outer shell (seating + socket faces intact) and a
-        // drafted wall >= 1.2 mm at the boss waist.
-        difference() {
-            gf_base(grid);
-            gf_tray_recess(grid);
+    foot = gf_foot(grid);
+    ov = 0.1;  // overrun of every joint/cutter past the surface it meets
+    tray = h_top == gf_base_h;
+    // 1U tray: a recess CUTTER through bosses and bridge together — 36.3
+    // opening drafted down to a sharp-cornered 34.0 at recess_floor, so
+    // the walls left around it stay >= 1.2 mm at the boss waist; its
+    // mouth is the lip's V-floor ridge. Bins: the wall interior up to the
+    // support chamfer, which rises 45 deg from the wall's inner face to
+    // the V-floor ridge so the inward lip prints support-free.
+    cavity = concat(
+        tray ? [[gf_top_r, recess_floor]]
+             : [[wall, gf_base_h], [wall, h_top - (2.6 - wall) - 0.01]],
+        gf_lip_prof(h_top, ov));
+    difference() {
+        union() {
+            gf_bosses(grid, ov);
+            gf_sweep(foot, [[0, gf_boss[3][1]], [0, h_top + gf_lip_h]]);
+            if (label_tab) translate([0, 0, h_top]) gf_label(foot);
         }
-    else {
-        gf_base(grid);
-        gf_wall(grid, h_top);
+        gf_sweep(foot, cavity);
     }
-    if (div_x > 0 || div_y > 0) {
-        // tray dividers live in the recess mouth (36.3, drafted below);
-        // bin dividers inside the side walls (foot - 2*wall)
-        foot = gf_foot(grid);
-        in = h_top == gf_base_h ? foot - [2 * 2.6, 2 * 2.6]
-                                : foot - [2 * wall, 2 * wall];
-        gf_dividers(in, h_top == gf_base_h ? recess_floor : gf_base_h,
-                    h_top, div_x, div_y);
-    }
-    gf_lip(grid, h_top);
+    // called unconditionally so its count guards also refuse a negative
+    // count (its loops draw nothing at 0). Tray dividers live in the
+    // recess mouth (36.3, drafted below); bin dividers inside the side
+    // walls (foot - 2*wall).
+    in = tray ? foot - [2 * 2.6, 2 * 2.6] : foot - [2 * wall, 2 * wall];
+    gf_dividers(in, tray ? recess_floor : gf_base_h, h_top, div_x, div_y);
 }
 
 // Plate socket cutter, z = 0 at the socket floor: the bin boss grown

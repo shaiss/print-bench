@@ -98,6 +98,24 @@ Assumed (brief, stated defaults):
   the recess mouth. **The recess is a cutter, differenced from the base
   block in `gf_bin`** — see the defect note in the iteration-5 gate
   evidence for why that sentence is load-bearing.
+- **Bin solids are single sweeps** (`gf_sweep`, PR #738 CI fix). The
+  render gate runs OpenSCAD nightly with `--backend=manifold`, and there
+  every bin part failed printcheck at 51/100: edges shared by more than
+  two triangles plus 48–80 zero-area triangles. The cause was solids that
+  only *touched* face-to-face: the wall stacked on the bridge at z = 7, and
+  the lip cutters meeting on zero-volume waists (support chamfer on the V
+  chamfer at the ridge, V band on the top slope at 2.5). CGAL unions those
+  cleanly. Manifold does not. Every rounded-rectangle surface here shares
+  one corner centre (r = gf_top_r − inset), so each profile is now one
+  closed polyhedron lofted through `[inset, z]` rings. That covers the
+  boss's three stages, the body (bridge + wall + lip outer face) and the
+  cavity (wall interior or the tray's drafted recess, support chamfer and
+  lip V). The bin is bosses ∪ body − cavity, and each boss runs 0.1 mm into
+  the body with bit-identical outer rings. Reproduced and verified offline
+  by re-evaluating the exported CSG tree with manifold3d booleans. The old
+  geometry reproduced CI exactly: tray 51/100, 80 zero-area. The new
+  geometry is watertight with no degenerate faces on all four bins and the
+  coupon. The mesh moves by under 3 mm³ (sub-0.01 mm plate-step drift).
 - **Parts are exported print-oriented** (bins opening-down, plate
   grid-down, per the brief) — the STL is what CI slices.
 - **`ci.plate`** ships the four production parts as one multi-object 3MF
@@ -109,8 +127,9 @@ Assumed (brief, stated defaults):
   wall-thick (1.2) slabs evenly spaced across the bin interior, floor to
   bin top (flush with the wall tops). Even spacing puts the first divider
   of a multi-cell bin exactly on the cell boundary — pitch-aligned with
-  community bins; higher counts subdivide cells (assert refuses
-  compartments under 8 mm). Interior = inside the side walls for bins, the
+  community bins; higher counts subdivide cells (asserts refuse a
+  fractional or negative count, and any compartment under 8 mm *clear* —
+  the span minus the dividers' own thickness, not the centre spacing). Interior = inside the side walls for bins, the
   recess **mouth** (36.3) for the 1U tray, whose drafted walls a
   wall-based span would poke through. Divider ends and floor are buried
   0.3/0.4 mm into the neighbouring solid — a slab that merely *touches*
