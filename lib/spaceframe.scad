@@ -34,7 +34,12 @@
 //    it across the concave midspan half, up to ~1 mm above it mid-bay in the
 //    convex tip half (curvature x bay^2 / 8). The parameters are exact AT
 //    the knots: the end nodes sit on the curve, so the measured needle depth
-//    IS end_depth, never an extrapolation.
+//    IS end_depth, never an extrapolation. `depth` is realised only where a
+//    knot sits at midspan — an EVEN bay count. With an odd count the two
+//    central knots straddle midspan and the built frame peaks below `depth`
+//    (the demo's 5-bay main frame: ~16.5 mm at its central knots against
+//    depth = 18), so use an even bay count when the midspan depth must be
+//    realised.
 //
 // 3. SLENDERNESS TOKEN. strut_floor_mult states the strut section as a
 //    multiple of the printable floor (0.8 mm, the repo's thin-feature
@@ -81,7 +86,8 @@
 // transversally, so the union is clean at any member count — the classic
 // ball-joint look of a real space frame. Top nodes are sunk by the bead
 // excess so the bead's crown, not its centreline offset, defines the
-// envelope: the outer z extent at a station is frame_depth_at(x) exactly.
+// envelope: the outer z extent at every PANEL POINT is frame_depth_at(x)
+// exactly (between panel points the chord approximation under TAPER applies).
 //
 // Members meet ONLY at shared node spheres: an endpoint of one member
 // coincides with an endpoint (or a node placed on) another, and each part
@@ -295,7 +301,9 @@ module _sf_web(pts_bl, pts_br, pts_t, r, rn, topology, x_depth, panel_nodes) {
 
 // length — span along x (mm); the frame occupies x = [0, length]
 // width   — bottom chord separation along y (mm); top chord at y = 0
-// depth   — outer z extent at midspan (mm)
+// depth   — the taper curve's outer z extent at midspan (mm); the built
+//           frame reaches it only when a panel point sits at midspan, i.e.
+//           an even bay count (see TAPER)
 // bays    — panel count along the span (whole number >= 1)
 // topology     — "warren" | "pratt" (diagonals descending toward midspan) |
 //                "vierendeel"
@@ -323,7 +331,10 @@ module space_frame(length, width, depth, bays,
     assert(end_depth > 0,
         str("space_frame: degenerate taper — end_depth must be positive, got ",
             end_depth));
-    assert(end_depth >= s,
+    // The 1e-9 slack absorbs the section's floating-point product
+    // (3.5 x 0.8 = 2.8000000000000003), so an end_depth stated as exactly
+    // the section passes instead of being refused as "2.8 thinner than 2.8".
+    assert(end_depth >= s - 1e-9,
         str("space_frame: end_depth ", end_depth,
             " is thinner than the strut section ", s,
             " — a needle cannot be thinner than its own members; raise end_depth ",
@@ -362,9 +373,15 @@ module space_frame(length, width, depth, bays,
 
     // Clip everything below the bed plane. Applied to frame, core and web
     // alike, so the volume identity holds on the parts exactly as shipped.
+    // The clip's footprint is sized from the beads, not from the span: every
+    // bead and member lies within rn of [0, length] x [-width/2, width/2],
+    // so a margin of rn + 1 covers a frame of any width — a footprint scaled
+    // from `width` alone let the bottom beads' undersides escape the clip on
+    // frames narrower than two bead radii.
+    m = rn + 1;
     difference() {
         body();
-        translate([-length, -width, -s - 1])
-            cube([3 * length, 3 * width, s + 1]);
+        translate([-m, -width / 2 - m, -s - 1])
+            cube([length + 2 * m, width + 2 * m, s + 1]);
     }
 }
