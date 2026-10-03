@@ -1,0 +1,4 @@
+# Printable parts of nuggs-sand-bath (gate.sh renders each as
+# build/nuggs-sand-bath-<part>.stl). The coupon wrapper is discovered and
+# gated separately by its own file, so it is not listed here.
+body
