@@ -14,7 +14,7 @@
 #     scad, printcheck_tests, stylelift_tests, lineage_tests, cogcheck_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
 #     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests,
-#     growth_tests, andon_tests, concept_preview_tests, styles, gate,
+#     growth_tests, andon_tests, concept_preview_tests, agent_memory_tests, styles, gate,
 #     gate_designs, regen, regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
@@ -50,7 +50,7 @@ classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
   local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false gwtests=false docs_standards=false
-  local bstests=false adtests=false cogtests=false cptests=false
+  local bstests=false adtests=false cogtests=false cptests=false amtests=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -59,7 +59,7 @@ classify() {
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
     bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; gwtests=true; docs_standards=true
-    bstests=true; adtests=true; cogtests=true; cptests=true
+    bstests=true; adtests=true; cogtests=true; cptests=true; amtests=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -134,6 +134,7 @@ classify() {
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
         tools/andon/*|\
         tools/concept-preview/*|\
+        tools/agent-memory/*|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
           soft_infra=true ;;
@@ -293,6 +294,15 @@ classify() {
         .github/workflows/ci.yml) cptests=true ;;
       esac
       case "$f" in
+        # Agentic memory, Slice 1a (issue #429): tools/agent-memory's own
+        # tests. The store lives inside the tool (tools/agent-memory/store/,
+        # the #428 backend), so a committed note re-runs the suite too — its
+        # live control runs `check` over the real store. check.sh runs the
+        # tool's --selftest and `check` as well, which is why the path is also
+        # in the scad list below.
+        tools/agent-memory/*|.github/workflows/ci.yml) amtests=true ;;
+      esac
+      case "$f" in
         # The smart-ci selector's own unit tests. The registry is data the
         # selector reads, so a registry edit re-runs them too.
         tools/ci-gates/*|.github/ci-gates/*|\
@@ -326,6 +336,7 @@ classify() {
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
         tools/andon/*|\
         tools/concept-preview/*|\
+        tools/agent-memory/*|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
           scad=true ;;
@@ -427,6 +438,7 @@ classify() {
   echo "growth_tests=$gwtests"
   echo "andon_tests=$adtests"
   echo "concept_preview_tests=$cptests"
+  echo "agent_memory_tests=$amtests"
   echo "styles=$styles"
   echo "gate=$gate"
   echo "gate_designs=$designs"
@@ -694,7 +706,7 @@ selftest() {
   check "andon-only" "$out" \
     "andon_tests=true" "gate=true" "gate_designs=" \
     "printcheck_tests=true" "scad=true" "regen=false" "growth_tests=false" \
-    "concept_preview_tests=false"
+    "concept_preview_tests=false" "agent_memory_tests=false"
   out="$(run ".github/workflows/andon.yml")"
   check "andon-workflow-drift" "$out" "andon_tests=true" "model_registry_tests=true"
   out="$(run ".github/workflows/lifestyle-shot.yml")"
@@ -715,6 +727,22 @@ selftest() {
   out="$(run ".claude/skills/concept-preview/SKILL.md")"
   check "concept-preview-skill-only" "$out" \
     "concept_preview_tests=false" "scad=false" "gate=false"
+  # 4j. Agentic memory, Slice 1a (issue #429) is soft-infra the same way: the
+  #     store and its write path move no mesh and no pixels, but a
+  #     tools/agent-memory-only PR must still RUN the required contexts, and
+  #     check.sh (scad=true) runs the tool's --selftest and store check. A
+  #     committed note under the store re-runs the suite (its live control
+  #     checks the real store); a sibling tool's change does not.
+  local zero_id="0000000000000000000000000000000000000000000000000000000000000000"
+  out="$(run "tools/agent-memory/src/agent_memory/rules.py")"
+  check "agent-memory-only" "$out" \
+    "agent_memory_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "andon_tests=false"
+  out="$(run "tools/agent-memory/store/design-run/${zero_id}.json")"
+  check "agent-memory-note" "$out" \
+    "agent_memory_tests=true" "gate=true" "gate_designs=" "regen=false"
+  out="$(run ".github/workflows/ci.yml")"
+  check "ci-workflow-reruns-agent-memory" "$out" "agent_memory_tests=true"
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must
