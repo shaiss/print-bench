@@ -60,8 +60,8 @@ The printable deliverable is the **multi-object plate**, `build/ovodyo-plate.3mf
 parts as eight separate objects a slicer imports as parts — duplicate `base-end`
 and `base-plug` in the slicer to print two of each.
 - `mock-drive` — a single representative reduction gear, kept as a gated
-  printability sample of the (otherwise preview-only) drivetrain, not a placed
-  assembly part.
+  printability sample of the (otherwise preview-only) drivetrain. It is not a
+  placed assembly part and is not included on the production plate.
 
 The base drivetrain (gear-trains, steppers, bevels, PCB) and the balls' red
 interior are **preview-only** — colours are ignored on STL export, so they are
@@ -110,7 +110,7 @@ Customizer sections; override with `-D 'name=value'`):
 | `tip_d` | 5.6 mm | round nose at each wing tip (2 × `strut_d`) |
 | `foot_recess_d` | 4.9 mm | foot-pad recess, sized to a Ø5 mm stick-on bumper |
 
-The ball's faceting is `_GB_TRI_K` in `geodesic-ball.scad` (default 1.05):
+The ball's faceting is `facet` in `ovodyo.scad` (default 1.05):
 1.0 gives the biggest triangular corner facets (≈ an icosidodecahedron), ≥1.12
 a plain dodecahedron with clean corners.
 

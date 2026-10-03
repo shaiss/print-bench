@@ -284,6 +284,12 @@ def read_baked(path):
 
 def main(argv):
     d = derive()
+    # Validate the derivation BEFORE --write can splice it into tumble.scad, so a
+    # derivation that breaks tolerance never lands a bad table in the file.
+    assert d["max_err"] <= TOL_DEG, f"max landing error {d['max_err']:.4f} deg exceeds tol {TOL_DEG}"
+    assert max(d["up_err"]) <= TOL_DEG, f"numeral-up error {max(d['up_err']):.4f} deg exceeds tol {TOL_DEG}"
+    assert sorted(d["face_order"]) == list(range(12)), "every face must be presented exactly once"
+    assert all(b > a for a, b in zip(d["stops"], d["stops"][1:], strict=False)), "stops must be monotone in yoke angle"
     block = baked_block(d)
     rep = report(d)
     if "--write" in argv:
@@ -307,10 +313,6 @@ def main(argv):
     else:
         sys.stdout.write(rep)
         sys.stdout.write(block)
-    assert d["max_err"] <= TOL_DEG, f"max landing error {d['max_err']:.4f} deg exceeds tol {TOL_DEG}"
-    assert max(d["up_err"]) <= TOL_DEG, f"numeral-up error {max(d['up_err']):.4f} deg exceeds tol {TOL_DEG}"
-    assert sorted(d["face_order"]) == list(range(12)), "every face must be presented exactly once"
-    assert all(b > a for a, b in zip(d["stops"], d["stops"][1:])), "stops must be monotone in yoke angle"
 
 
 if __name__ == "__main__":

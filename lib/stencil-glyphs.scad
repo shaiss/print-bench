@@ -105,7 +105,7 @@ module stencil_digit(n, h, stroke = undef, bridge = 0.8, bridge_min = 0.8,
     st = is_undef(stroke) ? _sg_stroke_default(h) : stroke;
     _sg_check("stencil_digit", h, st, bridge, bridge_min, bridged)
         translate([-_sg_w() * h / 2, -h / 2]) scale(h)
-            _sg_glyph(str(n), st / h, bridge / h, bridged);
+            _sg_glyph(str(n), st / h, bridge / h, bridged, 0.8 / h);
 }
 
 module stencil_colon(h, stroke = undef) {
@@ -175,9 +175,9 @@ function _sg_x(s, i, h, sp) =
 // Geometry, in UNIT space: cap height 1, glyph box [0, _sg_w()] x [0, 1],
 // stroke s and bridge b as fractions of h. stencil_digit scales by h.
 // ---------------------------------------------------------------------------
-module _sg_glyph(c, s, b, bridged) {
+module _sg_glyph(c, s, b, bridged, min_s = 0) {
     difference() {
-        _sg_stroke(c, s);
+        _sg_stroke(c, s, min_s);
         if (bridged) _sg_bridges(c, s, b);
     }
 }
@@ -197,14 +197,14 @@ module _sg_bridges(c, s, b) {
     for (y = ys) translate([-1, y - b / 2]) square([_sg_w() + 2, b]);
 }
 
-module _sg_stroke(c, s) {
+module _sg_stroke(c, s, min_s = 0) {
     w = _sg_w(); cx = w / 2; ym = _sg_ym(); k = _sg_diag(); hs = s / 2;
     if (c == "0") {
         _sg_bowl(0, 0, w, 1, s);
     } else if (c == "1") {
         _sg_seg([cx, hs], [cx, 1 - hs], s);                 // stem
         _sg_seg([cx - 0.22, hs], [cx + 0.22, hs], s);       // foot
-        _sg_seg([cx, 1 - hs], [cx - 0.22, 0.70], s * k);    // flag
+        _sg_seg([cx, 1 - hs], [cx - 0.22, 0.70], max(s * k, min_s)); // flag
     } else if (c == "2") {
         // Top bowl kept from its left equator over the top and down the
         // right side to the point where a straight diagonal to the
@@ -223,7 +223,7 @@ module _sg_stroke(c, s) {
             }
         }
         translate([hs, yct]) circle(d = s);                 // top-left terminal
-        _sg_seg(P, Q, s * k);                               // diagonal
+        _sg_seg(P, Q, max(s * k, min_s));                   // diagonal
         _sg_seg(Q, [w - hs, hs], s);                        // base bar
     } else if (c == "3") {
         y0 = ym - hs; y1 = ym + hs; yct = (y0 + 1) / 2; ycb = y1 / 2;
@@ -252,7 +252,7 @@ module _sg_stroke(c, s) {
         _sg_seg([xs, hs], [xs, 1 - hs], s);                 // stem
         _sg_seg([hs, yc], [w - hs, yc], s);                 // crossbar
         _sg_seg([hs, yc], [hs, yk], s);                     // left arm
-        _sg_seg([hs, yk], [xs, 1 - hs], s * 0.85);          // diagonal, lighter still
+        _sg_seg([hs, yk], [xs, 1 - hs], max(s * 0.85, min_s)); // diagonal, lighter still
     } else if (c == "5") {
         yb = 0.55; y1 = yb + hs; rc = min(w, y1) / 2; ye = rc;
         CL = [rc, ye]; rm = rc - hs; ta = 210;
@@ -280,12 +280,12 @@ module _sg_stroke(c, s) {
         translate(C + rm * [cos(te), sin(te)]) circle(d = s);
     } else if (c == "7") {
         _sg_seg([hs, 1 - hs], [w - hs, 1 - hs], s);         // top bar
-        _sg_seg([w - hs, 1 - hs], [0.25, hs], s * k);       // diagonal
+        _sg_seg([w - hs, 1 - hs], [0.25, hs], max(s * k, min_s)); // diagonal
     } else if (c == "8") {
         _sg_bowl(0, ym - hs, w, 1, s);
         _sg_bowl(0, 0, w, ym + hs, s);
     } else if (c == "9") {
-        translate([w, 1]) rotate(180) _sg_stroke("6", s);   // the 6, turned
+        translate([w, 1]) rotate(180) _sg_stroke("6", s, min_s); // the 6, turned
     }
 }
 

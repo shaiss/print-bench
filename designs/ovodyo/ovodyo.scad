@@ -58,7 +58,7 @@ slot_turns = 0.5;
 /* [Ball seam] */
 // The ball prints in two halves. It is tilted POLE-UP (a pentagon face to each
 // pole) so the equatorial cut runs through the triangle band and bisects NO
-// number face — even numbers land on the top half, odd on the bottom. The two
+// number face — the tumble stop table, not number parity, sets the split. The two
 // halves join on a CAPTIVE THREADED SEAM (#602, lib/threads-fdm.scad): the
 // bottom half grows a short male ring up from its flat seam face just inside
 // the shell, the top half carries the matching female thread cut into an
