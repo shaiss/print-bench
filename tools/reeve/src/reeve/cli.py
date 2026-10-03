@@ -19,7 +19,7 @@ unit-tested.
 ``gather`` and ``run`` take an optional ``--repo owner/name`` (issue #313):
 when set, the GET-only run-health read (``github.gather_run_health``) is
 attached to the snapshot as ``runHealth``. Without it the run stays entirely
-offline and the two run-health detectors read "not evaluated".
+offline and the run-health detectors read "not evaluated".
 
 ``greenlight-select`` (issue #443) is the greenlight loop's trusted Select
 step: it lists the open ``needs-decision`` issues that carry no greenlight
