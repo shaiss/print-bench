@@ -107,7 +107,7 @@ fit over weeks — that is the standing field-test question.
 `extrusion-spool-holder-coupon.scad` (auto-gated, 100/100, ~2 h / 26 g):
 
 1. Slide the lug strip into your real rail. Drags → `slot_fit_tol` +0.05;
-   rocks → −0.05. Steps of 0.05.
+   rocks → −0.05. Steps of 0.05; floor 0.05 (the design asserts below it).
 2. Drop each embossed ring (0.3 / 0.6 / 0.9) into your real spool bore;
    pick the loosest that doesn't wobble and set `bore_clearance` to it.
 3. Print the peg with those two values — nothing else changes.

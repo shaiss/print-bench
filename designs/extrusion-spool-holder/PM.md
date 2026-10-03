@@ -26,7 +26,7 @@ or by the BOM being empty (N5) — the render fails before a reviewer has to.
 ## Out of scope
 
 **Deferred** — backlog below: 608ZZ bearing sleeve, studio product shot,
-multi-speg rail plate, Bambu-bore preset.
+multi-peg rail plate, Bambu-bore preset.
 
 **Never** — telescoping/adjustable axle (clamp creep + complexity against
 a cantilever); other slot families (3030, 4040) without a measured brief;

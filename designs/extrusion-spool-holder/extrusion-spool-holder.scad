@@ -243,11 +243,16 @@ module extrusion_metal() {
         // mouth slit: through the lips, mouth wide
         translate([lug_x0 - 20, -slot_mouth / 2, z_plate - slot_lip_t])
             cube([lug_span + 40, slot_mouth, slot_lip_t + 0.1]);
-        // cavity: behind the lips, cavity wide
+        // cavity: behind the lips, cavity wide. Its roof sits 0.02 above
+        // the lip underside for the same reason as the top face: the
+        // hammer heads hook the lips with zero clearance (the family's
+        // clamp — head top at exactly z_plate - slot_lip_t), and that
+        // coplanar contact otherwise emits zero-volume facets under the
+        // Manifold backend that read as false interference
         translate([lug_x0 - 20, -slot_cavity_w / 2,
                    z_plate - slot_depth - 0.1])
             cube([lug_span + 40, slot_cavity_w,
-                  slot_depth - slot_lip_t + 0.1]);
+                  slot_depth - slot_lip_t + 0.1 + 0.02]);
     }
 }
 
@@ -263,8 +268,10 @@ module bore_tube(id) {
 }
 
 module main() {
-    assert(lug_neck_w < slot_mouth - 0.2,
-           "lug neck must slide through the slot mouth — lower slot_fit_tol");
+    // Floor matches the coupon's tuning advice (0.05 steps down from
+    // 0.15): 0.10 and 0.05 are legal tunes; 0 would be a press fit.
+    assert(slot_fit_tol >= 0.05 - 1e-6,
+           "lug neck must slide through the slot mouth — raise slot_fit_tol (floor 0.05)");
     assert(lug_head_w > slot_mouth + 0.5,
            "lug head must be wider than the mouth to hook the lips");
     assert(lug_head_w < slot_cavity_w - 2 * cavity_tol,
@@ -293,7 +300,10 @@ module main() {
         // bore tighter than the stub by 0.2 (a real bore 0.8 under
         // nominal at the default clearance): must interfere
         intersection() { peg(); bore_tube(axle_d - 0.2); }
-    else peg();
+    else {
+        assert(part == "peg", str("unknown part \"", part, "\""));
+        peg();
+    }
 }
 
 main();
