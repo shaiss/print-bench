@@ -140,21 +140,40 @@ one rides light).
 
 ## The store
 
-`tools/agent-memory/`, a **committed, file-based** store, **one per routine**
-(e.g. `.claude/memory/<routine>.*`), written with the non-re-triggering
-`GITHUB_TOKEN` commit pattern telemetry already uses. Backend is an open
-build-time decision (evaluate file-based options — NDJSON/JSON, SQLite +
-`.dump` textconv, TinyDB, DuckDB, LMDB, or an embedded graph — against
-git-diffable, light-dependency, embeddable, safe-committed criteria).
-
-Note shape (A-MEM-flavored, append-only):
+[`tools/agent-memory/`](../tools/agent-memory/README.md), a **committed,
+file-based** store, **one directory per routine**. The backend was the Slice 0
+decision ([#428](https://github.com/shaiss/print-bench/issues/428)):
+**per-memory-files** — one content-hashed JSON file per note,
 
 ```text
-ts, run_id, issue|design, action, choice, outcome,
-importance, depth[gist|rich], retrieval_strength,
-provenance{model, human|agent, verified: source-confirmed|model-asserted},
+tools/agent-memory/store/<agent>/<id>.json    # <id> = SHA-256 of the note's canonical content
+```
+
+chosen over a shared NDJSON log, TinyDB, SQLite (+ `.dump` textconv), DuckDB,
+LMDB or an embedded graph because it is the only candidate that removes
+concurrent-write contention **by construction**: two routines recording in
+overlapping windows write two different paths, which git merges with nothing
+to conflict on, and the same episode recorded twice lands on the same path (an
+idempotent write). Stdlib `json` only, read cold with a glob, no index to warm.
+The runner-up — a manifest index over the same per-note blobs — is a pure
+superset, added later without a migration *iff* cold-glob latency ever shows
+up in telemetry. How the notes get committed (the telemetry `GITHUB_TOKEN`
+data-branch pattern, or the routine's own reviewed PR) is the wiring slice's
+call.
+
+Note shape (A-MEM-flavored, append-only — the full field reference is the
+tool's README):
+
+```text
+schema, id, agent, ts, run_id, issue|design, action, choice, outcome, detail,
+salience{status, expected, actual, signals}, importance, depth[gist|rich],
+retrieval_strength,
+provenance{author: human|agent, model, verified: source-confirmed|model-asserted, sources[]},
 tags[], links[]
 ```
+
+Slice 1a (#429) ships the store and the deterministic record path; the
+importance, depth and provenance rules above are code with tests there.
 
 ## Trust boundary (non-negotiable)
 

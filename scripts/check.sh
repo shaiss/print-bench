@@ -211,6 +211,26 @@ if ! ./scripts/cog-check.sh --selftest; then
   fail=1
 fi
 
+# And this proves the agentic-memory write path (tools/agent-memory, issue
+# #429 — Slice 1a of docs/agentic-memory.md) still enforces its four rules:
+# importance scored by prediction error + Zeigarnik, depth set by salience,
+# provenance confirmed only by a cited source, and immutable notes — each with
+# its negative control, offline, in a throwaway temp dir. Then `check`
+# re-derives every committed note under tools/agent-memory/store/ (empty until
+# Slice 1d wires a routine), so a note edited by hand after it was written —
+# a promoted importance, a self-certified `verified`, a reformatted file —
+# fails here rather than poisoning a routine's recall. Pure stdlib, imported
+# from its src/ tree (the cog-check pattern), so it runs unconditionally.
+echo "-- agent-memory selftest + store check: python3 -m agent_memory"
+if ! env PYTHONPATH="$PWD/tools/agent-memory/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m agent_memory --selftest; then
+  fail=1
+fi
+if ! env PYTHONPATH="$PWD/tools/agent-memory/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m agent_memory check --store tools/agent-memory/store; then
+  fail=1
+fi
+
 # And this proves the `render` camera opt still works on the installed
 # OpenSCAD build (issue #400): --render is value-taking on some builds
 # (2021.01, the 2026.08 nightly) and a bare trailing flag makes the parser
