@@ -1,0 +1,16 @@
+# Fused-solid proof (issue #630 brief): the pivot's rigid bodies — frame arc
+# + spine, stage arc + handle — must meet ONLY through the flexure beams.
+# `fitcheck` renders their overlap at rest plus pocket probes through the
+# part (the four open pockets flanking the welded crossing) and must be
+# EMPTY: it is the check that catches a stop face extended into the other
+# body, or a pocket accidentally filled — a mechanism that prints as one
+# rigid block and never pivots. `fitcheck_neg` drives the stage 5 deg PAST
+# the hard stops and MUST overlap — proving the stops bite over-travel and
+# that this check can fail. `fitcheck_stop_lo`/`fitcheck_stop_hi` measure the
+# ROM itself off the export: half a degree inside the ±40 deg stop must still
+# clear, half a degree past it must overlap — so the brief's ROM ±40 deg row
+# is a measured bound (40 ± 0.5 deg), not an echo of the parameter.
+fitcheck        empty
+fitcheck_neg    interferes
+fitcheck_stop_lo    empty
+fitcheck_stop_hi    interferes
