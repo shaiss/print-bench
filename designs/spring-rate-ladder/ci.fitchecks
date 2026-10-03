@@ -1,0 +1,11 @@
+# Boolean fit gates (scripts/gate.sh): "<part> empty" must render zero
+# facets, "<part> interferes" is the mandatory negative control.
+#
+# fitcheck      — the seated cap (skirt over the spring OD at clearance,
+#                 centre hole riding the guide post at clearance)
+#                 intersected with spring ∪ post. Must be empty.
+# fitcheck_neg  — the same pose with both bores undersized
+#                 (fit_neg_delta = -1.6 overruns both clearances). Must
+#                 interfere, proving the empty check can fail.
+fitcheck      empty
+fitcheck_neg  interferes

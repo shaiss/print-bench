@@ -1,0 +1,5 @@
+# Printable parts (scripts/gate.sh renders each as build/<name>-<part>.stl,
+# printcheck + test-slice). The coupon renders separately through the
+# spring-rate-ladder-coupon.scad wrapper, which gate.sh discovers itself.
+ladder
+cap
