@@ -44,6 +44,26 @@ class BBox:
     def grown(self, d: float) -> "BBox":
         return BBox(self.x0 - d, self.y0 - d, self.x1 + d, self.y1 + d)
 
+    def crossed_by(self, a, b) -> bool:
+        """The segment a→b runs through this box's interior for a positive
+        length (Liang–Barsky against the open box). A segment that only
+        touches an edge or a corner does not cross — the flush rule
+        :meth:`overlaps` uses."""
+        x0, y0, x1, y1 = self.x0 + EPS, self.y0 + EPS, self.x1 - EPS, self.y1 - EPS
+        if x0 >= x1 or y0 >= y1:
+            return False
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        t0, t1 = 0.0, 1.0
+        for p, q in ((-dx, a[0] - x0), (dx, x1 - a[0]), (-dy, a[1] - y0), (dy, y1 - a[1])):
+            if p == 0:
+                if q <= 0:
+                    return False
+            elif p < 0:
+                t0 = max(t0, q / p)
+            else:
+                t1 = min(t1, q / p)
+        return (t1 - t0) * (dx * dx + dy * dy) ** 0.5 > EPS
+
     def inside(self, w: float, h: float) -> bool:
         return (self.x0 >= -EPS and self.y0 >= -EPS
                 and self.x1 <= w + EPS and self.y1 <= h + EPS)

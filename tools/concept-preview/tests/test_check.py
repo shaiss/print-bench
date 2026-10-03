@@ -187,6 +187,35 @@ def test_a_shape_intruding_on_the_furniture_collides():
     assert rules(inject(EXTERIOR, into_note)) == {"collision"}
 
 
+@pytest.mark.parametrize("row, crosses", [
+    # a leader run down through the title block (and its text)
+    ("leader: exterior | at=450,750 | to=450,900 | text=TARGET | anchor=middle", "title block"),
+    ("leader: exterior | at=450,750 | to=450,820 | text=TARGET | anchor=middle", None),
+    # a leader struck through another leader's label
+    ("leader: section | at=100,450 | to=100,300 | text=PROBE | anchor=middle", "'body wall 2.0'"),
+    ("leader: section | at=100,450 | to=100,345 | text=PROBE | anchor=middle", None),
+    # a balloon's leader run through the bill of parts
+    ("balloon: exploded | at=700,700 | n=4 | to=600,150", "bill of parts"),
+    ("balloon: exploded | at=700,700 | n=4 | to=600,400", None),
+    # a dimension line struck through the exterior's leader labels
+    ("dim: exterior | from=90,400 | to=90,700 | text=300", "'THREADED BODY'"),
+    ("dim: exterior | from=20,400 | to=20,700 | text=300", None),
+    # a diagonal balloon leader starts on its own rim — not a crossing
+    ("balloon: section | at=560,470 | n=3 | to=500,530", None),
+], ids=["leader-titleblock", "leader-short", "leader-label", "leader-clear",
+        "balloon-bom", "balloon-clear", "dim-labels", "dim-clear", "balloon-own-rim"])
+def test_a_connecting_line_may_not_cross_a_label_or_the_furniture(row, crosses):
+    # Each crossing case passed before segments were checked: the line's own
+    # label and target are clear, only the line itself strikes through.
+    found = build_text(with_lines(row), "valid.conf").findings
+    if crosses is None:
+        assert found == []
+    else:
+        assert {f.rule for f in found} == {"collision"}, found
+        assert any(" line " in f.message and " crosses " in f.message and crosses in f.message
+                   for f in found), found
+
+
 def test_a_label_over_a_shape_is_allowed():
     # A balloon sitting on the part it names is a drafting convention (the
     # reference canvas does it); only label-on-label and furniture count.

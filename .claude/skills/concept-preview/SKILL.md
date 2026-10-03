@@ -69,8 +69,9 @@ The six primitives: `hatch` (hatched section — rect or ring), `shank`
 
 Every write is preceded by every check, on every sheet: valid XML, no external
 reference, **every element inside its sheet** (strokes and the leader dots and
-arrowheads included), **no two labels overlapping**, nothing on the title
-block or header — and nothing is written unless all four pass. A refusal names the spec line
+arrowheads included), **no two labels overlapping**, **no leader or dimension
+line struck through a label**, nothing on the title block or header — and
+nothing is written unless all four pass. A refusal names the spec line
 (`preview-spec.conf:31: …`); that is your feedback loop.
 
 ## 3. The loop

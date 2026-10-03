@@ -27,9 +27,12 @@ Rules (each finding carries its rule name, which the selftest keys on):
                own ``<marker>`` draws it at the vertex.
 ``collision``  no two labels overlap — leader and dimension text and
                balloons, measured with the deterministic monospace model in
-               :mod:`concept_preview.geom` — and neither a label nor a drawn
+               :mod:`concept_preview.geom` — neither a label nor a drawn
                shape intrudes on the sheet furniture (header band, title
-               block, note, bill of parts).
+               block, note, bill of parts), and no connecting line (a
+               leader, a balloon's leader, a dimension or extension line)
+               runs through a label or the furniture, measured segment by
+               segment.
 """
 
 from __future__ import annotations
@@ -40,7 +43,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 from . import palette as P
-from .geom import EPS, BBox, text_box, union_all
+from .geom import EPS, BBox, fmt, text_box, union_all
 
 SHAPE_KINDS = ("hatch", "shank", "hex")
 LABEL_KINDS = ("dim", "balloon", "leader")
@@ -400,6 +403,18 @@ def _painted_box(el: ET.Element, markers: dict | None) -> BBox:
     return box
 
 
+def _segments(el: ET.Element) -> list:
+    """The straight runs a connecting line draws — what a leader, a
+    balloon's leader or a dimension can strike through a label with."""
+    if _local(el.tag) not in MARKABLE_TAGS:
+        return []
+    out = []
+    for points, closed in _polylines(el):
+        pts = points + points[:1] if closed else points
+        out.extend((a, b) for a, b in zip(pts, pts[1:]) if a != b)
+    return out
+
+
 def _measured(group: ET.Element):
     """Every measurable descendant of a group, skipping <defs> subtrees
     (patterns are paint, not placement). A nested <g> or any other
@@ -523,15 +538,18 @@ def check_svg(text: str, name: str = "<svg>") -> list:
             findings.append(Finding("contract", f"{name}: expected exactly one {DESCRIBE[kind]} "
                                     f"(cp-{kind}), found {counts.get(kind, 0)}"))
 
-    labels = []      # (box, description)
+    labels = []      # (box, description, owning group)
     shapes = []      # (box, description)
-    furniture = []   # (box, description)
-    for kind, group in groups:
+    furniture = []   # (box, description, None)
+    lines = []       # (a, b, description, owning group, kind) — connecting lines
+    for gi, (kind, group) in enumerate(groups):
         desc = DESCRIBE[kind] + _src(group)
         try:
             elements = list(_measured(group))
             boxes = [_element_box(el) for el in elements]
             painted = [_painted_box(el, markers) for el in elements]
+            if kind in LABEL_KINDS:
+                lines += [(a, b, desc, gi, kind) for el in elements for a, b in _segments(el)]
         except _Refuse as e:
             findings.append(Finding("contract", f"{name}: {desc}: {e}"))
             continue
@@ -547,18 +565,18 @@ def check_svg(text: str, name: str = "<svg>") -> list:
             findings.append(Finding("bounds", f"{name}: {desc} paints {paint} (stroke and markers "
                                     f"included), leaving the {int(W)}x{int(H)} sheet"))
         if kind in FURNITURE_KINDS:
-            furniture.append((bbox, DESCRIBE[kind]))
+            furniture.append((bbox, DESCRIBE[kind], None))
         elif kind in SHAPE_KINDS:
             shapes.append((bbox, desc))
         elif kind == "balloon":
             number = next((el.text or "" for el in elements if _local(el.tag) == "text"), "")
             for el, b in zip(elements, boxes):
                 if _local(el.tag) == "circle":
-                    labels.append((b, f"{desc} {number.strip()!r}"))
+                    labels.append((b, f"{desc} {number.strip()!r}", gi))
         elif kind in ("leader", "dim"):
             for el, b in zip(elements, boxes):
                 if _local(el.tag) == "text":
-                    labels.append((b, f"{desc} {el.text!r}"))
+                    labels.append((b, f"{desc} {el.text!r}", gi))
 
     # Every pair, including two lines of the same leader: nothing in a sheet
     # is allowed to print over a label, whoever drew it.
@@ -569,7 +587,21 @@ def check_svg(text: str, name: str = "<svg>") -> list:
             if a[0].overlaps(b[0]):
                 findings.append(Finding("collision", f"{name}: {a[1]} {a[0]} overlaps {b[1]} {b[0]}"))
     for box, desc in shapes:
-        for fbox, fdesc in furniture:
+        for fbox, fdesc, _owner in furniture:
             if box.overlaps(fbox):
                 findings.append(Finding("collision", f"{name}: {desc} {box} intrudes on the {fdesc} {fbox}"))
+    # A connecting line — a leader, a balloon's leader, a dimension line or
+    # its extension lines — struck through a label is as illegible as two
+    # labels on top of each other, and may not cross the furniture either.
+    # Measured as the segment itself, never the annotation's bounding box
+    # (which would refuse every leader that merely angles past a label).
+    # A balloon's leader starts on its own rim, so it is not held against
+    # its own circle; every other line is held against its own text too.
+    for a, b, desc, owner, kind in lines:
+        for box, bdesc, bowner in every_label:
+            if bowner == owner and kind == "balloon":
+                continue
+            if box.crossed_by(a, b):
+                findings.append(Finding("collision", f"{name}: {desc} line {fmt(a[0])},{fmt(a[1])} → "
+                                        f"{fmt(b[0])},{fmt(b[1])} crosses {bdesc} {box}"))
     return findings

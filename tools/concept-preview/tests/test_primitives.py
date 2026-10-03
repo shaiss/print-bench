@@ -210,3 +210,19 @@ def test_bbox_overlap_is_positive_area_only():
     assert a.overlaps(BBox(9, 9, 20, 20))
     assert not a.overlaps(BBox(10, 0, 20, 10))     # flush edges do not collide
     assert not a.overlaps(BBox(11, 0, 20, 10))
+
+
+@pytest.mark.parametrize("a, b, crosses", [
+    ((-5, 5), (15, 5), True),       # straight through
+    ((-5, -5), (15, 15), True),     # through on the diagonal
+    ((2, 2), (8, 8), True),         # wholly inside
+    ((5, 5), (5, 20), True),        # starts inside, leaves
+    ((-5, 0), (15, 0), False),      # runs along an edge (flush)
+    ((10, -5), (10, 15), False),
+    ((-5, 5), (5, 15), False),      # touches only the corner at (0,10)
+    ((-5, 5), (0, 5), False),       # ends on an edge
+    ((20, 0), (30, 30), False),     # elsewhere entirely
+    ((5, 5), (5, 5), False),        # a point is not a crossing
+])
+def test_bbox_is_crossed_only_by_a_segment_through_its_interior(a, b, crosses):
+    assert BBox(0, 0, 10, 10).crossed_by(a, b) is crosses
