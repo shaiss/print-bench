@@ -9,9 +9,9 @@
 # time the classifier moved. Now the workflow and the local mirror share this
 # implementation — they cannot disagree.
 #
-#   Emits, one `key=value` per line on STDOUT (the 19 outputs ci.yml's
+#   Emits, one `key=value` per line on STDOUT (the 20 outputs ci.yml's
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
-#     scad, printcheck_tests, stylelift_tests, lineage_tests,
+#     scad, printcheck_tests, stylelift_tests, lineage_tests, cogcheck_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
 #     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests,
 #     growth_tests, andon_tests, styles, gate, gate_designs, regen,
@@ -45,12 +45,12 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 
 # --- classify: the shared decision -------------------------------------------
 # Reads the changed-file list from stdin (one path per line), reads the working
-# tree for existence/ARCHIVED/style.conf facts, and prints the 19 outputs.
+# tree for existence/ARCHIVED/style.conf facts, and prints the 20 outputs.
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
   local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false gwtests=false docs_standards=false
-  local bstests=false adtests=false
+  local bstests=false adtests=false cogtests=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -59,7 +59,7 @@ classify() {
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
     bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; gwtests=true; docs_standards=true
-    bstests=true; adtests=true
+    bstests=true; adtests=true; cogtests=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -94,7 +94,9 @@ classify() {
     #   logic was extracted here), printcheck (the analyzer that judges every
     #   STL), tools/lineage (the resolver that decides which designs a change
     #   reaches at all — edit it and every blast radius can move, including the
-    #   one this step computes), this workflow, and .github/actions (the
+    #   one this step computes), tools/cogcheck (the analyzer that can change a
+    #   gate verdict for a ci.cog design — verdict-shaped output, the printcheck
+    #   precedent), this workflow, and .github/actions (the
     #   composite action selecting the OpenSCAD build five jobs render with).
     #
     #   soft_infra — everything else under scripts/, plus site/ and
@@ -118,7 +120,7 @@ classify() {
     for f in "${files[@]}"; do
       case "$f" in
         lib/*|scripts/gate.sh|scripts/lineage.sh|scripts/ci-classify.sh|\
-        tools/printcheck/*|tools/lineage/*|\
+        tools/printcheck/*|tools/lineage/*|tools/cogcheck/*|\
         .github/workflows/ci.yml|.github/actions/*)
           # This alternation is matched before the scripts/* soft-infra case
           # below, so ci-classify.sh lands here (gate ALL), not there.
@@ -187,6 +189,15 @@ classify() {
       esac
       case "$f" in
         tools/lineage/*|.github/workflows/ci.yml) ltests=true ;;
+      esac
+      case "$f" in
+        # The CoG / tip-over stability analyzer (tools/cogcheck, issue #623).
+        # NOT forced by geo_infra above the way printcheck's tests are: a
+        # geo-infra change runs every design THROUGH printcheck, while
+        # cogcheck only sees the (opt-in) designs shipping a ci.cog — so its
+        # tests run when the tool or this workflow moves, not as a rider on
+        # every geo-infra PR.
+        tools/cogcheck/*|.github/workflows/ci.yml) cogtests=true ;;
       esac
       case "$f" in
         tools/backlog-burn/*|.github/backlog-burn.conf|\
@@ -393,6 +404,7 @@ classify() {
   echo "printcheck_tests=$ptests"
   echo "stylelift_tests=$stests"
   echo "lineage_tests=$ltests"
+  echo "cogcheck_tests=$cogtests"
   echo "backlog_burn_tests=$bbtests"
   echo "backlog_groomer_tests=$bgtests"
   echo "telemetry_tests=$tmtests"
@@ -492,6 +504,15 @@ selftest() {
   check "printcheck-only" "$out" \
     "printcheck_tests=true" "gate=true" "gate_designs=ALL" "scad=false" \
     "regen=false" "stylelift_tests=false" "docs_standards=false"
+
+  # 2a. cogcheck is geo-infra the same way (it can change a gate verdict for a
+  #     ci.cog design), so a cogcheck change gates ALL designs — but unlike
+  #     printcheck its tests are NOT forced by that: they run on the direct
+  #     tool/workflow path only (its verdicts are opt-in, advisory WARNs).
+  out="$(run "tools/cogcheck/src/cogcheck/verdict.py")"
+  check "cogcheck-only" "$out" \
+    "cogcheck_tests=true" "gate=true" "gate_designs=ALL" "scad=false" \
+    "regen=false" "printcheck_tests=true" "lineage_tests=false"
 
   # 3. geo-infra (a lib change) — gates ALL, forces printcheck tests, is
   #    regen-ALL and a style-gate trigger.
