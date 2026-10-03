@@ -91,7 +91,7 @@ def _case_provenance(_store: Path) -> str | None:
     if confirmed["provenance"]["verified"] != rules.VERIFIED_CONFIRMED:
         return "a note citing a gate result was not source-confirmed"
     if not _refuses(lambda: note_mod.encode(_ev(verified="source-confirmed"))):
-        return "a caller self-certified source-confirmed"
+        return "a caller-supplied verified was accepted"
     return None
 
 

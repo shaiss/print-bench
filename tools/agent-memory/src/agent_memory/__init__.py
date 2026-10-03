@@ -6,8 +6,9 @@ issue #429). A routine hands ``record`` an event — what it did, chose and got,
 plus the salience facts it already knows — and the package encodes it into an
 immutable note: importance scored by prediction error, Zeigarnik and
 consequence signals; depth set by salience (rich vs gist); provenance classed
-``source-confirmed`` only when a source of truth is cited; everything derived
-at write time, **no LLM in the write path**.
+``source-confirmed`` when a source is cited (cited, not resolved, in this
+slice); everything derived at write time, **no LLM in the write path**. The
+event's inputs are the caller's word; who supplies them is Slice 1d's call.
 
 The backend is the Slice 0 decision (#428): one content-hashed JSON file per
 note under ``tools/agent-memory/store/<agent>/<id>.json``. Recall (1b),

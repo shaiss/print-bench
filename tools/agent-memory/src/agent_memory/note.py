@@ -1,17 +1,21 @@
 """The note: event validation, encoding, canonical bytes and the content id.
 
 A routine hands ``encode`` an **event** — what it did, chose and got, the
-salience facts it already knows, who wrote it and what vouches for it. Encoding
+salience facts it already knows, who wrote it and what source it cites. Encoding
 validates every field strictly (fail-loud: an unknown key, a missing key, a
 malformed value all raise), derives everything derivable — importance, depth,
 the provenance class, the id — and returns the **note**, the one shape that is
 ever stored.
 
-The derived fields are never accepted from the caller. A model writing its own
-episode cannot raise its own importance, promote itself to a rich note, or
-certify itself ``source-confirmed``: those are computed here, from inputs a
-reviewer can read in the note itself, and ``parse_note`` recomputes them on
-every read so a hand edit is caught too.
+The derived fields are never accepted from the caller: importance, depth and
+the provenance class are computed here, from inputs a reviewer can read in
+the note itself, and ``parse_note`` recomputes them on every read so a hand
+edit is caught too. That guarantees consistency, not truth. The inputs
+(``status``, ``expected``/``actual``, ``signals``, ``sources``) are the
+caller's assertion, and a source's ``ref`` is shape-checked, never resolved,
+so a caller that controls the event can reach any importance and the
+``source-confirmed`` class through them. Who fills those inputs is Slice
+1d's decision (the README's "Open for later slices").
 
 Pure: no I/O, no clock, no randomness — the purity tests hold it.
 """
@@ -346,7 +350,7 @@ def parse_note(obj: object) -> dict:
 
     Re-derives every derived field from the note's own inputs and refuses any
     disagreement, so a hand edit — a promoted importance, a gist note given
-    detail, a self-certified ``verified`` — fails here, by name.
+    detail, a hand-flipped ``verified`` — fails here, by name.
     """
     if not isinstance(obj, dict):
         raise NoteError(f"a note is a JSON object, got {type(obj).__name__}")

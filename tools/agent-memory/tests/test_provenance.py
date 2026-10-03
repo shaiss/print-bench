@@ -1,10 +1,15 @@
 """Rule 3 — provenance tagging (#429 AC: source-confirmed vs model-asserted).
 
-A note is ``source-confirmed`` only when it cites a source of truth (a gate
-result, a field test, a render, a CI run); otherwise it is ``model-asserted``.
-The class is derived from the cited sources and never accepted from the
-caller — the false-memory defense #426 names: untrusted text can seed an
-asserted memory, never a verified one.
+A note is ``source-confirmed`` only when it cites a source in one of the
+four source kinds (a gate result, a field test, a render, a CI run);
+otherwise it is ``model-asserted``. The class is derived from the cited
+sources, and a caller can never type it directly.
+
+What it is *not* in Slice 1a: proof that the source exists. A ``ref`` is
+shape-checked and never resolved, so whoever fills ``sources`` decides the
+class. ``test_slice_1a_checks_a_ref_for_shape_but_never_resolves_it`` pins
+that, so the slice that adds resolution (or moves ``sources`` into trusted
+workflow code — the open 1d decision in the README) changes it on purpose.
 """
 
 from __future__ import annotations
@@ -43,8 +48,21 @@ def test_negative_control_a_human_without_a_source_is_still_unconfirmed():
                                "verified": rules.VERIFIED_ASSERTED, "sources": []}
 
 
+def test_slice_1a_checks_a_ref_for_shape_but_never_resolves_it():
+    # The documented 1a limit, pinned so the docs and the code cannot drift
+    # apart again. Every input here is the caller's word: a made-up CI ref,
+    # a self-reported failure and two signals reach the confirmed class and
+    # the maximum importance. Changing this is 1d's decision (README, "Open
+    # for later slices"), not an accident.
+    n = encode(make_event(sources=[{"kind": "ci", "ref": "made up"}], status="failed",
+                          expected=1.0, actual=0.0, signals=["escalation", "fuse-strong-warn"]))
+    assert n["provenance"]["verified"] == rules.VERIFIED_CONFIRMED
+    assert n["importance"] == rules.IMPORTANCE_MAX
+    assert n["depth"] == "rich"
+
+
 @pytest.mark.parametrize("field", ["verified", "provenance"])
-def test_negative_control_a_caller_cannot_self_certify(field):
+def test_negative_control_a_caller_cannot_type_the_class_directly(field):
     value = rules.VERIFIED_CONFIRMED if field == "verified" else {"verified": rules.VERIFIED_CONFIRMED}
     with pytest.raises(NoteError, match="derived at write time"):
         encode(make_event(**{field: value}))

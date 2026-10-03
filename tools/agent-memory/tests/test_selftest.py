@@ -28,7 +28,7 @@ def test_selftest_passes_on_the_real_rules():
         (rules, "ZEIGARNIK", dict.fromkeys(rules.ZEIGARNIK, 0), "Zeigarnik"),
         # depth decoupled from salience: everything rich
         (rules, "depth_for", lambda score: "rich", "depth"),
-        # provenance self-certified: everything confirmed
+        # provenance broken: every note confirmed, sourced or not
         (rules, "verified_for", lambda sources: rules.VERIFIED_CONFIRMED, "provenance"),
     ],
 )

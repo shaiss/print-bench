@@ -173,7 +173,15 @@ tags[], links[]
 ```
 
 Slice 1a (#429) ships the store and the deterministic record path; the
-importance, depth and provenance rules above are code with tests there.
+importance, depth and provenance rules above are code with tests there. In 1a
+`source-confirmed` means a source is **cited**: a source's `ref` is
+shape-checked, not resolved, and the salience inputs are the caller's word.
+The provenance weighting in the trust boundary below therefore holds only once
+Slice 1d makes those inputs trustworthy: either trusted workflow code fills
+`sources` and the salience fields instead of the agent, or a `ref` must
+resolve (a real CI run, a gate log) before a note counts as confirmed. Until
+then an agent recording through a JSON-argument tool could cite its way into
+the confirmed class.
 
 ## Trust boundary (non-negotiable)
 

@@ -67,7 +67,9 @@ GIST_ELLIPSIS = "…"
 
 VERIFIED_CONFIRMED = "source-confirmed"
 VERIFIED_ASSERTED = "model-asserted"
-#: What may vouch for a note: a source of truth the routine can point at.
+#: The kinds of source a note may cite: sources of truth a routine can point
+#: at. A closed set, but only the *kind* is checked; the ``ref`` is not
+#: resolved in Slice 1a (see ``verified_for``).
 SOURCE_KINDS = ("ci", "field-test", "gate", "render")
 AUTHORS = ("agent", "human")
 
@@ -143,10 +145,13 @@ def gist_line(text: str) -> str:
 
 
 def verified_for(sources) -> str:
-    """Provenance class: confirmed only when a source of truth vouches for it.
+    """Provenance class: ``source-confirmed`` when at least one source is cited.
 
     A note with no source is ``model-asserted`` whoever wrote it — the class
-    recall must re-ground before acting on. A caller can never *claim*
-    confirmation; it can only cite a source.
+    recall must re-ground before acting on. A caller cannot type the class
+    directly; it can only cite a source. In Slice 1a that is all
+    "confirmed" means: a source is *cited* (shape-checked by ``note``), not
+    *resolved*. Nothing looks the ``ref`` up, so the class is only as
+    trustworthy as whoever fills ``sources``, which is Slice 1d's decision.
     """
     return VERIFIED_CONFIRMED if sources else VERIFIED_ASSERTED
