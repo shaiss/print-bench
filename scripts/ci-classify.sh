@@ -724,7 +724,7 @@ selftest() {
     "regen=true" "regen_designs=ALL" "gate=false" "gate_designs=" "scad=true"
 
   # 4c'''. preview-diff.sh (issue #470) JUDGES the regenerated previews in the
-  #        regen commit step; it generates none. So it is plain soft-infra (run,
+  #        regen job; it generates none. So it is plain soft-infra (run,
   #        gate nothing) and must NOT join regen_all: listing it there would
   #        re-render the whole catalog to measure a classifier edit. Negative
   #        control for that — regen stays false. (It is not a regen-stamp.sh

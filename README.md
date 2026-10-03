@@ -484,8 +484,8 @@ surfaces studies awaiting a read live in
     each regenerated preview against the committed bytes it replaces (noise /
     content / resized / new / removed, a pixel-count band sized for
     cross-runner render wobble) and warns when a design's previews changed
-    though its own sources did not. Advisory — run by CI's regen commit step,
-    with a `--selftest`
+    though its own sources did not. Advisory — run by CI's regen job just
+    before it commits, with a `--selftest`
   - `field-test.sh` — appends a FIELD-TEST entry (one real print's result) to
     a design's NOTES.md; the tested core of the "Log a print result" Action
     (issue #101)

@@ -27,8 +27,9 @@
 #                 count, since the strip height is frames x canvas height
 #   new           added; there is nothing to compare it against
 #   removed       deleted
-#   not-compared  ImageMagick is absent, or could not decode one side. Listed,
-#                 never dropped: every staged preview gets exactly one line.
+#   not-compared  ImageMagick is absent, or could not decode one side as the
+#                 format its extension names. Listed, never dropped: every
+#                 staged preview gets exactly one line.
 #
 # Cross-check (--source-base <ref>): a content or resized diff on a design
 # whose OWN sources did not change since <ref> raises a ::warning:: — it is an
@@ -52,8 +53,9 @@
 #
 # --base defaults to HEAD, so what is staged is compared against the last
 # commit — exactly the commit CI's regen step is about to make
-# (.github/workflows/ci.yml calls this right after its `git add`). Stage first;
-# the script only reads, it never touches the index or the working tree.
+# (.github/workflows/ci.yml stages what its commit step will, then calls this
+# in a step of its own that holds no token). Stage first; the script only
+# reads, it never touches the index or the working tree.
 # --repo <dir> reads another repository (the selftest's throwaway one).
 #
 # Output: one machine line per staged preview on stdout,
@@ -124,17 +126,34 @@ have_im() {
   command -v "$IM_CONVERT" >/dev/null 2>&1 && command -v "$IM_COMPARE" >/dev/null 2>&1
 }
 
+# coder_of FILE — the ImageMagick coder for a preview's extension: png | gif,
+# anything else refused (returns 1).
+coder_of() {
+  case "${1##*.}" in
+    png) echo png ;;
+    gif) echo gif ;;
+    *) return 1 ;;
+  esac
+}
+
 # measure OLD NEW SCRATCH — prints "W0 H0 W1 H1 DIFFPX", or returns 1 when
 # ImageMagick cannot decode either side. Different strip sizes skip compare
 # (IM6 would run a sub-image search rather than refuse) and report DIFFPX 0;
 # classify() calls that resized before it looks at the count.
+#
+# Every read names its coder (`png:FILE`, `gif:FILE`). Unprefixed, ImageMagick
+# picks a decoder by sniffing the bytes before it looks at the name, so a
+# branch-committed "x.png" that is really SVG, MVG or MSL — the ImageTragick
+# shape — would reach a far richer decoder than PNG's. Pinned, the PNG or GIF
+# reader refuses anything else as undecodable, and the row says not-compared.
 measure() {
-  local old="$1" new="$2" s="$3"
-  "$IM_CONVERT" "$old" -coalesce -append +repage "$s/old.png" 2>/dev/null || return 1
-  "$IM_CONVERT" "$new" -coalesce -append +repage "$s/new.png" 2>/dev/null || return 1
+  local old="$1" new="$2" s="$3" co cn
+  co="$(coder_of "$old")" && cn="$(coder_of "$new")" || return 1
+  "$IM_CONVERT" "$co:$old" -coalesce -append +repage "png:$s/old.png" 2>/dev/null || return 1
+  "$IM_CONVERT" "$cn:$new" -coalesce -append +repage "png:$s/new.png" 2>/dev/null || return 1
   local d0 d1
-  d0="$("$IM_CONVERT" "$s/old.png" -format '%w %h' info: 2>/dev/null)" || return 1
-  d1="$("$IM_CONVERT" "$s/new.png" -format '%w %h' info: 2>/dev/null)" || return 1
+  d0="$("$IM_CONVERT" "png:$s/old.png" -format '%w %h' info: 2>/dev/null)" || return 1
+  d1="$("$IM_CONVERT" "png:$s/new.png" -format '%w %h' info: 2>/dev/null)" || return 1
   if [ "$d0" != "$d1" ]; then
     echo "$d0 $d1 0"; return 0
   fi
@@ -142,7 +161,7 @@ measure() {
   # to stderr. -precision 16: IM6 otherwise prints a large count as 1.234e+06.
   local out rc=0 px
   out="$("$IM_COMPARE" -precision 16 -metric AE -fuzz "${FUZZ_PCT}%" \
-           "$s/old.png" "$s/new.png" null: 2>&1)" || rc=$?
+           "png:$s/old.png" "png:$s/new.png" null: 2>&1)" || rc=$?
   [ "$rc" -le 1 ] || return 1
   px="$(printf '%s\n' "$out" | awk 'NF { printf "%.0f\n", $1; exit }')"
   case "$px" in ''|*[!0-9]*) return 1 ;; esac
@@ -228,7 +247,7 @@ run() {
               *) detail="empty image" ;;
             esac
           else
-            cls=not-compared; detail="ImageMagick could not decode one side"
+            cls=not-compared; detail="ImageMagick could not decode one side as .$ext"
           fi
         fi ;;
     esac
@@ -355,7 +374,9 @@ selftest_e2e() {
   self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
   t="$(mktemp -d)"
   # shellcheck disable=SC2064  # expand $t now: it is local to this function
-  trap "rm -rf '$t'" RETURN
+  # The trap clears itself: a RETURN trap set in a function outlives it and
+  # would fire again when the caller returns.
+  trap "rm -rf '$t'; trap - RETURN" RETURN
   r="$t/repo"
   mkdir -p "$r"
   ok() { echo "ok   [e2e $1]"; }
@@ -383,6 +404,11 @@ selftest_e2e() {
   "$IM_CONVERT" -delay 10 "$f/base.png" "$f/shift.png" "$f/base.png" "$f/three.gif"
   # The same two frames with the 120-px wobble on frame 1: 0.2% of the strip.
   "$IM_CONVERT" -delay 10 "$f/noise.png" "$f/shift.png" "$f/two-wobble.gif"
+  # The base image's exact pixels, GIF-encoded, under a .png name — staged
+  # (h.png) and committed (i.png), since both sides come from the branch. A
+  # byte-sniffing read decodes it and calls it noise 0.0000%; the pinned PNG
+  # coder must refuse it (the stand-in for SVG/MVG bytes in a .png).
+  "$IM_CONVERT" "$f/base.png" "gif:$f/base-as-gif.bin"
 
   # S0: three designs, sources + committed previews.
   (
@@ -399,9 +425,10 @@ selftest_e2e() {
       echo "iso | 0,0,0,55,0,25,140" > "designs/$n/previews/cameras.conf"
       cp "$f/base.png" "designs/$n/previews/a.png"
     done
-    for x in b c d f g; do cp "$f/base.png" "designs/still/previews/$x.png"; done
+    for x in b c d f g h; do cp "$f/base.png" "designs/still/previews/$x.png"; done
     cp "$f/two.gif" designs/still/previews/anim.gif
     cp "$f/two.gif" designs/still/previews/wobble.gif
+    cp "$f/base-as-gif.bin" designs/still/previews/i.png
     cp "$f/base.png" designs/moved/photo.png
     echo "readme" > README.md
     git add -A && git commit -qm S0
@@ -421,6 +448,8 @@ selftest_e2e() {
     cp "$f/base.png" designs/still/previews/e.png
     cp "$f/reencoded.png" designs/still/previews/f.png
     cp "$f/faint.png" designs/still/previews/g.png
+    cp "$f/base-as-gif.bin" designs/still/previews/h.png
+    cp "$f/base.png" designs/still/previews/i.png
     cp "$f/three.gif" designs/still/previews/anim.gif
     cp "$f/two-wobble.gif" designs/still/previews/wobble.gif
     cp "$f/shift.png" designs/edited/previews/a.png
@@ -461,17 +490,27 @@ noise|designs/still/previews/wobble.gif
 content|designs/edited/previews/a.png
 noise|designs/moved/previews/a.png
 WANT
-  # Exactly eleven rows: nothing dropped, and nothing outside previews/*.png|gif
-  # (the stamp, the README, designs/moved/photo.png) admitted.
+  # Exactly thirteen rows (the eleven above plus h.png and i.png): nothing
+  # dropped, and nothing outside previews/*.png|gif (the stamp, the README,
+  # designs/moved/photo.png) admitted.
   local nrows
   nrows="$(grep -c '^PREVIEW-DIFF ' <<<"$out" || true)"
-  [ "$nrows" -eq 11 ] && ok "exactly one row per staged preview" || bad "row count" "expected 11 PREVIEW-DIFF lines, got $nrows"
+  [ "$nrows" -eq 13 ] && ok "exactly one row per staged preview" || bad "row count" "expected 13 PREVIEW-DIFF lines, got $nrows"
   grep -q 'PREVIEW-DIFF .* designs/still/previews/f.png$' <<<"$out" \
     && grep -q '^PREVIEW-DIFF noise 0.0000% designs/still/previews/f.png$' <<<"$out" \
     && ok "byte-different, pixel-identical re-encode measures 0.0000%" \
     || bad "re-encode" "expected 'noise 0.0000%'"
+  # NEGATIVE CONTROL: h.png (staged side) and i.png (committed side) hold the
+  # base image's own pixels, GIF-encoded. A read that sniffs the bytes decodes
+  # them and calls each noise 0.0000%; the pinned PNG coder must refuse them,
+  # so both list as not-compared.
+  for x in h i; do
+    grep -q "^PREVIEW-DIFF not-compared - designs/still/previews/$x.png\$" <<<"$out" \
+      && ok "NEGCTL a GIF as .png ($x.png) is refused by the PNG coder, not sniffed" \
+      || bad "NEGCTL coder pin $x.png" "expected $x.png 'not-compared -'"
+  done
   nrows="$(grep -c '^| `' "$sum" || true)"
-  [ "$nrows" -eq 11 ] && ok "summary table carries all eleven rows" || bad "summary" "expected 11 table rows, got $nrows"
+  [ "$nrows" -eq 13 ] && ok "summary table carries all thirteen rows" || bad "summary" "expected 13 table rows, got $nrows"
 
   # Cross-check: still (prose + stamp only — not sources) warns; edited
   # (cameras.conf moved — a source) must NOT warn; moved (.scad moved, noise
@@ -513,11 +552,11 @@ WANT
   rc=0
   out="$(PREVIEW_DIFF_COMPARE=__preview_diff_absent__ bash "$self" --repo "$r" --base HEAD --source-base "$s0" 2>&1)" || rc=$?
   nrows="$(grep -c '^PREVIEW-DIFF not-compared ' <<<"$out" || true)"
-  if [ "$rc" -eq 0 ] && [ "$nrows" -eq 9 ] \
+  if [ "$rc" -eq 0 ] && [ "$nrows" -eq 11 ] \
      && grep -q '^PREVIEW-DIFF new - designs/still/previews/e.png$' <<<"$out" \
      && grep -q '^PREVIEW-DIFF removed - designs/still/previews/d.png$' <<<"$out" \
      && ! grep -q '^::warning::' <<<"$out"; then
-    ok "ImageMagick absent: 9 not-compared, new/removed kept, no guessed warning, exit 0"
+    ok "ImageMagick absent: 11 not-compared, new/removed kept, no guessed warning, exit 0"
   else
     bad "ImageMagick absent" "rc=$rc, not-compared=$nrows"; printf '%s\n' "$out" | sed 's/^/    /' >&2
   fi
