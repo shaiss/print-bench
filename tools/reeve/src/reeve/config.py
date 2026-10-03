@@ -24,6 +24,8 @@ import math
 import re
 from dataclasses import dataclass
 
+from . import approval
+
 DEFAULT_PATH = ".github/reeve.conf"
 
 # The only keys the file may carry. Anything else is a typo and must fail.
@@ -34,6 +36,8 @@ _KNOWN_KEYS = (
     "greenlight_cap",
     "greenlight_precedent_cap",
     "provider",
+    "approve_auto",
+    "approve_deny",
     "low_headroom_pct",
     "score_drop",
     "score_floor",
@@ -128,6 +132,30 @@ def _parse_positive_float(value: str, key: str, where: str) -> float:
     return parsed
 
 
+def _parse_categories(value: str, key: str, where: str) -> tuple[str, ...]:
+    """A comma list over the closed approval vocabulary (issue #446).
+
+    An empty value is the empty list (every parked decision asks — the
+    fail-safe default). Otherwise every item must be a known category, named
+    once: an empty item (``docs,``), an unknown name or a repeat is a typo,
+    and a typo in a standing approval rule must never be silently ignored.
+    """
+    if not value.strip():
+        return ()
+    items = [item.strip() for item in value.split(",")]
+    for item in items:
+        if not item:
+            raise ValueError(f"{where}: {key!r} has an empty item in {value!r}")
+        if item not in approval.CATEGORIES:
+            raise ValueError(
+                f"{where}: {key!r} names unknown category {item!r} "
+                f"(known: {list(approval.CATEGORIES)})"
+            )
+    if len(set(items)) != len(items):
+        raise ValueError(f"{where}: {key!r} names a category twice in {value!r}")
+    return tuple(items)
+
+
 def _validate_cadence(value: str, where: str) -> str:
     """Return the cron for ``value`` (preset name or raw 5-field cron)."""
     if value in CADENCE_PRESETS:
@@ -168,6 +196,12 @@ class Config:
     # scheduled sibling runs on, so an absent key is never a silently-wrong
     # endpoint.
     provider: str = "zai"
+    # The greenlight loop's standing approval modes (issue #446): comma lists
+    # over approval.CATEGORIES. Empty = every parked decision asks (#444's
+    # behaviour) — the fail-safe default, so a conf without these keys, or a
+    # poll never handed the conf, can neither auto-approve nor deny anything.
+    approve_auto: tuple = ()
+    approve_deny: tuple = ()
     low_headroom_pct: float = 15.0
     score_drop: int = 3
     score_floor: float = 80.0
@@ -175,6 +209,10 @@ class Config:
     walltime_min_seconds: int = 30
     routine_dead_runs: int = 3
     lock_leak_hours: float = 2.0
+
+    def approval_rules(self) -> approval.Rules:
+        """The standing approval rules as the poll and Select step consume them."""
+        return approval.Rules(auto=frozenset(self.approve_auto), deny=frozenset(self.approve_deny))
 
 
 def load(path: str = DEFAULT_PATH) -> Config:
@@ -211,6 +249,8 @@ def load(path: str = DEFAULT_PATH) -> Config:
                         f"got {value!r}"
                     )
                 cfg.provider = value
+            elif key in ("approve_auto", "approve_deny"):
+                setattr(cfg, key, _parse_categories(value, key, where))
             elif key in ("low_headroom_pct", "score_floor"):
                 setattr(cfg, key, _parse_pct(value, key, where))
             elif key == "walltime_ratio":
@@ -227,6 +267,14 @@ def load(path: str = DEFAULT_PATH) -> Config:
                 cfg.lock_leak_hours = _parse_positive_float(value, key, where)
             else:  # score_drop, walltime_min_seconds, greenlight_cap, greenlight_precedent_cap
                 setattr(cfg, key, _parse_positive_int(value, key, where))
+    # A category in both lists is contradictory standing authority — refused
+    # whole rather than resolved by precedence, so the reviewed file always
+    # says exactly one thing per category.
+    both = set(cfg.approve_auto) & set(cfg.approve_deny)
+    if both:
+        raise ValueError(
+            f"{path}: categories {sorted(both)} are in both 'approve_auto' and 'approve_deny'"
+        )
     return cfg
 
 
@@ -243,6 +291,8 @@ def get(key: str, path: str = DEFAULT_PATH) -> str:
     value = getattr(cfg, key)
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, tuple):
+        return ", ".join(value)  # a category list, as the conf writes it
     return str(value)
 
 

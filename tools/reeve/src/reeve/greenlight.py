@@ -33,7 +33,9 @@ Three shapes this module owns:
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
+
+from . import approval
 
 # The wrapper's greenlight first line. Attributes after `issue=` are
 # order-tolerant so a future optional attribute needs no parser change:
@@ -288,6 +290,9 @@ def poll_outcome(
     approvers: list[str],
     overrulers: list[str],
     decide: Optional[dict[str, str]] = None,
+    mode: str = approval.MODE_ASK,
+    categories: Iterable[str] = (),
+    grace_elapsed: bool = False,
 ) -> dict[str, Any]:
     """Aggregate one live greenlight's permission-checked signals.
 
@@ -296,6 +301,13 @@ def poll_outcome(
     this function never sees a read-only reaction. ``decide`` is the
     newest authorized :func:`decide_candidates` entry when a human command
     exists, else ``None``.
+
+    ``mode``/``categories`` are the thread's standing approval mode and the
+    categories behind it (``approval.mode_for``, issue #446), and
+    ``grace_elapsed`` whether the greenlight has waited out
+    ``approval.AUTO_APPROVE_GRACE`` (``approval.grace_elapsed``). Every
+    default is the fail-safe one — ``ask``, no category, grace not elapsed —
+    so a caller that never classified gets #444's behaviour exactly.
 
     Precedence, in order (each documented, each testable):
 
@@ -308,12 +320,22 @@ def poll_outcome(
     2. **A route sets no gate verdict** — the wrapper's own footer says a
        reaction on a routing note approves nothing, so reactions on it are
        ignored entirely.
-    3. **An authorized 👎 overrules, even against a 👍** — a contested
+    3. **A deny category is human-only** (#446) — the loop steps out
+       entirely: no approval even on a 👍, no overrule reply on a 👎, no
+       write of any kind. Only a human ``/decide`` (rule 1) resolves it.
+    4. **An authorized 👎 overrules, even against a 👍** — a contested
        greenlight stays parked (fail-closed: not resolving is the
-       recoverable direction; a human ``/decide`` breaks the tie).
-    4. **An authorized 👍 approves** — the greenlight's own verdict is what
-       resolves: ``yes`` → approved, ``no`` → rejected.
-    5. Otherwise keep waiting — and never a duplicate greenlight while one
+       recoverable direction; a human ``/decide`` breaks the tie). This
+       holds in ``auto`` mode too: a standing rule never outvotes a human.
+    5. **An authorized 👍 approves** — the greenlight's own verdict is what
+       resolves: ``yes`` → approved, ``no`` → rejected. In ``auto`` mode a
+       👍 still resolves at once, without waiting out the grace window.
+    6. **A standing auto-approve rule resolves a YES** (#446) — ``auto``
+       mode, verdict ``yes``, no 👎, and the grace window elapsed: approved
+       with the approver recorded as ``standing-rule:<category>``, never a
+       human login. Inside the window it waits; a ``no`` verdict is never
+       auto-resolved (only a YES is pre-approved — a NO still asks).
+    7. Otherwise keep waiting — and never a duplicate greenlight while one
        is live (the wrapper already refuses; this poll adds nothing).
     """
     if decide is not None:
@@ -329,6 +351,12 @@ def poll_outcome(
             "outcome": OUTCOME_WAIT,
             "reason": "a routing note sets no gate verdict; a reaction approves nothing",
         }
+    if mode == approval.MODE_DENY:
+        named = ", ".join(sorted(categories)) or "?"
+        return {
+            "outcome": OUTCOME_WAIT,
+            "reason": f"deny category ({named}): human only — resolve it with /decide",
+        }
     if overrulers:
         return {"outcome": OUTCOME_OVERRULE, "overrulers": overrulers, "reason": "👎 overrule"}
     if approvers:
@@ -338,6 +366,26 @@ def poll_outcome(
             "arm": bool(greenlight.get("arm")),
             "approvers": approvers,
             "reason": "👍 approval",
+        }
+    if mode == approval.MODE_AUTO:
+        rule = ", ".join(sorted(categories))
+        if greenlight["verdict"] != "yes":
+            return {
+                "outcome": OUTCOME_WAIT,
+                "reason": f"standing rule auto-approve: {rule} pre-approves only a YES — a NO still asks",
+            }
+        if not grace_elapsed:
+            return {
+                "outcome": OUTCOME_WAIT,
+                "reason": f"standing rule auto-approve: {rule} — inside the 👎 grace window",
+            }
+        return {
+            "outcome": OUTCOME_APPROVE,
+            "verdict": "yes",
+            "arm": bool(greenlight.get("arm")),
+            "approvers": [approval.standing_rule_login(categories)],
+            "standing_rule": rule,
+            "reason": f"standing rule auto-approve: {rule}",
         }
     return {"outcome": OUTCOME_WAIT, "reason": "no qualifying reactions yet"}
 
