@@ -21,7 +21,6 @@ its own intended size so a measured print is unambiguous.
 
 **Deferred** — good ideas, not now:
 
-- A multi-size sweep strip (5/10/20/30 mm cubes on one plate).
 - Optional X/Y/Z axis letters on the side faces.
 
 **Never:**
@@ -80,7 +79,7 @@ cube; the deterministic turntable GIF stays the motion-true artifact.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | Multi-size sweep strip | Most-asked variation; one plate, several sizes | design only |
+| B1 | Multi-size sweep strip (5/10/20/30 on one plate) | Most-asked variation; one plate, several sizes | design only — **done** (ci.plate deliverable) |
 | B2 | Optional X/Y/Z face letters | Helps attribute which axis is off | design only |
 
 ## Open decisions
@@ -93,5 +92,6 @@ cube; the deterministic turntable GIF stays the motion-true artifact.
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-09-12 | Ship B1 as four separate cubes on a `ci.plate` 3MF, not a fused strip bar | Each cube is an independent dimensional sample; air-gapping matches the repo's sweep-strip convention and keeps STL/3MF separation honest |
 | 2026-08-08 | Add a high three-quarter `size-marker` studio shot beside the hero | The hero shows the engraved size edge-on; the marker is the product's one trick and deserves a shot that makes it the subject |
 | 2026-08-08 | Add a `bench-calipers` tier-2 lifestyle scene | A cube-with-calipers scene reinforces the calibration use case; cosmetic and disclosed |
