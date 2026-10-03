@@ -223,11 +223,13 @@ module knurl_slots() {
 }
 
 module arrow() {
-  // raised index marker on the wheel top, pointing CCW = the free direction
+  // raised index marker on the wheel top, pointing CCW = the free direction:
+  // centred at r = 13 on the +y axis, tip along the CCW tangent (−x there).
+  // Local frame before the 90° turn: +y local is the CCW tangent at +x.
   rotate([0, 0, 90])
     translate([13, 0, 0])
       linear_extrude(0.4)
-        polygon([[0, -1.2], [0, 1.2], [4, 0]]);
+        polygon([[-1.2, -2], [1.2, -2], [0, 2]]);
 }
 
 module wheel(bore_r = bore) {

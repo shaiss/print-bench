@@ -34,12 +34,15 @@ arrow on the wheel marks the free direction.
 - **First motion:** give the wheel a firm twist in the arrow (free) direction
   to shear the break-free layer, then enjoy
 - **If the wheel welds:** the internal gaps are ~0.2 mm and a slicer's default
-  gap-fill/gap-closing (0.2 mm) can eat exactly that — disable gap-fill or
-  raise `k_xy` by 0.05, then reprint
+  gap-fill/gap-closing (0.2 mm) can eat exactly that — disable gap-fill first.
+  Then open the gap that actually welded by 0.05 and reprint: tooth tips to
+  the pawls/frame blocks is `web_clr`; the bore to the post is `k_xy`; the
+  wheel to the base or cap (axial) is `z_layers`
 
 Print the coupon first if you want to tune the click force — see NOTES.md
 "Print this first" for the 0.1 mm sweep of pawl thickness. Expect the coupon's
-strip to need a firm first slide too: the channel rails are a snug 0.3 mm and
+strip to need a firm first slide too: the far rail is a snug 0.3 mm
+(`rail_gap`, in `pip-ratchet-coupon.scad`) and
 first-layer squish plus bridge sag take a bite of that — that's the break-free
 step doing its job, not a failed print.
 
@@ -50,11 +53,12 @@ step doing its job, not a failed print.
 | `wheel_dia` | 56 mm | tooth-tip diameter of the wheel |
 | `teeth` | 24 | tooth count (even — the two pawls sit diametric) |
 | `tooth_depth` | 1.6 mm | how deep the pawls ride over each tooth |
-| `drive_flank_deg` | 60° | the ramp angle the pawl climbs — lower = softer click |
+| `drive_flank_deg` | 60° | drive-flank (ramp) angle from radial — the ramp spans `tooth_depth·tan(angle)` of arc, so higher = a longer, shallower ramp; tune feel with `pawl_t` |
 | `pawl_t` | 1.2 mm | pawl beam thickness — **the feel knob**: stiffness ~ t³ |
-| `pawl_l` | 18 mm | pawl free length — longer = softer, less stress |
+| `pawl_l` | 18 mm | pawl beam length, nose to root — the frame block clamps the beam from a fixed 13 mm (`block_front_u`), so the flexing length stays ~13 mm and this does not change the feel |
 | `lock_gap` | 0.5 mm | nose-face to tooth-wall gap in the locked pose |
-| `k_xy` | 0.45 | radial clearance factor — raise if the wheel welds, lower if it rattles |
+| `web_clr` | 0.2 mm | tooth-tip clearance to the pawl beams and frame blocks — raise if the teeth weld to a pawl |
+| `k_xy` | 0.45 | bore-to-post clearance factor (`xy_tol = k_xy·line_w`) — raise if the bore welds to the post, lower if it rattles |
 | `z_layers` | 2 | axial clearance in whole 0.2 mm layers |
 
 All parameters are at the top of `pip-ratchet.scad`, grouped in Customizer
@@ -71,4 +75,5 @@ flip the wheel phase — or just print it and use the arrow.
 
 If the wheel is stiff to free or the clicks feel heavy, drop `pawl_t` by 0.1
 (the coupon sweep shows the whole range on one plate). If anything welded,
-raise `k_xy` by 0.05 and reprint.
+raise the clearance for that gap by 0.05 and reprint — `web_clr` for teeth to
+pawls, `k_xy` for bore to post (see Print settings).

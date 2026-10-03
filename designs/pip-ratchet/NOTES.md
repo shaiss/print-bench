@@ -113,7 +113,10 @@ family: tune the coupon, print the wheel.
    freely +x and lock dead −x at every t.
 3. Pick t by feel against the brief's 1–2 N rim target: stiffness scales t³
    (t = 1.0 ≈ 1.9 N predicted vs t = 1.2 ≈ 3 N peak). If the strip welded
-   into the channel, raise `k_xy` by 0.05 and reprint; if it rattles, lower it.
+   into the channel, open the gap that welded by 0.05 and reprint: the tooth
+   tips to the near wall / pawl is `web_clr` (entry file), the strip to the
+   far rail is `rail_gap` (coupon file); if it rattles, lower it. (`k_xy`
+   only drives the demonstrator's bore-to-post gap, not the coupon's.)
 4. Set `pawl_t` in `pip-ratchet.scad` and print the demonstrator. First
    motion: shear the wheel free (firm twist CCW — the arrow direction), then
    verify it freewheels CCW with a click and cannot be turned CW by hand.

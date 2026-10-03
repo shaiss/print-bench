@@ -10,7 +10,9 @@
 //   ./scripts/render.sh pip-ratchet --sweep pawl_t=0.9:1.5:0.1
 // Stiffness (click force) scales ~ t³ and ride-up stress ~ t: thicker clicks
 // harder and lives longer, thinner feels lighter. If the strip welds into the
-// channel, raise k_xy by 0.05 in the entry file and reprint both. See NOTES.md
+// channel, open that gap by 0.05 and reprint: tooth tips to the near wall/pawl
+// is web_clr (entry file, -D overridable), strip to the far rail is rail_gap
+// (below). k_xy only sets the demonstrator's bore. See NOTES.md
 // "Print this first". Overrides sit below the include (OpenSCAD resolves
 // top-level variables last-assignment-wins); "coupon" has no dispatch branch,
 // so the demonstrator itself renders nothing here.

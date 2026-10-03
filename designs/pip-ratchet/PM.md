@@ -37,7 +37,7 @@ coupon sweep plate renders, every Must-fit/hold row measured on the export
 ## Art-direction brief (for /art-direction)
 
 Page promise: "a mechanism that works the moment it leaves the bed."
-Tier-1 shots: `hero` — high 3/4 angle, pawl visibly engaged with a tooth at
+Tier-1 shots: `product-hero` — high 3/4 angle, pawl visibly engaged with a tooth at
 the rim, arrow readable on the wheel top, warm orange on studio grey.
 No lifestyle scene in v1; revisit once a field test exists.
 
