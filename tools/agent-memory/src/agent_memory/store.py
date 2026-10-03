@@ -17,8 +17,11 @@ content-addressed ids that can only mean the file was edited after it was
 written, which is exactly what immutable episodes forbid. A correction is a new
 note whose ``links`` point at the one it corrects.
 
-This is the only module in the package that touches the filesystem, and it
-writes only beneath the store root it is handed.
+This is the only module that reads or writes the store, and it writes only
+beneath the store root it is handed. (Two other modules touch the filesystem,
+neither of them the store: ``cli`` reads the event file, and ``selftest``
+writes inside a throwaway temporary directory. The purity tests hold that
+split: only ``store`` and ``selftest`` may write.)
 """
 
 from __future__ import annotations

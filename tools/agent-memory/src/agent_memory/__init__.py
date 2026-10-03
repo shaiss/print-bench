@@ -16,8 +16,9 @@ reinforcement and clustering (1c) and routine wiring (1d) are later slices and
 deliberately absent: nothing here reads a note *for* a routine, and nothing
 calls this package yet.
 
-Stdlib-only, zero network; ``store.py`` is the one module that touches the
-filesystem (the purity tests hold all of it).
+Stdlib-only, zero network; ``store.py`` is the one module that reads or
+writes the store. ``cli`` also reads the event file, and ``selftest`` writes
+only inside a temporary directory. The purity tests hold all of it.
 """
 
 from .note import NoteError, canonical_bytes, content_id, encode, parse_note

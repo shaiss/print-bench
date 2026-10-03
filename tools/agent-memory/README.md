@@ -295,7 +295,7 @@ PR for the owner:
 
 - `src/agent_memory/rules.py` — importance, depth, provenance: the pure rules and their constants
 - `src/agent_memory/note.py` — event validation, encoding, canonical bytes, the content id, the strict reader
-- `src/agent_memory/store.py` — `record` / `load` / `check`; the only filesystem module
+- `src/agent_memory/store.py` — `record` / `load` / `check`; the only module that reads or writes the store (`cli` also reads the event file, and `selftest` writes only inside a temp dir)
 - `src/agent_memory/selftest.py` — the offline `--selftest` check.sh runs
 - `src/agent_memory/cli.py` — `record` / `score` / `check` / `--selftest`
 - `tests/` — the suite above
