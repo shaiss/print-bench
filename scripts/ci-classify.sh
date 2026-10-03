@@ -239,6 +239,15 @@ classify() {
         .github/reeve-growth.conf|.github/wright.conf|.github/reeve.conf) mrtests=true ;;
       esac
       case "$f" in
+        # The cap-state wiring drift guard (tools/model-registry's
+        # test_cap_state_wiring.py, the #549 class) reads each MCP write
+        # server's CAP_STATE_ENV literal and the --mcp-config JSON that
+        # launches it, so a server- or config-only edit (a renamed env var)
+        # must re-run it — the reason the growth posting server re-runs
+        # tools/growth's parity test below.
+        .claude/skills/*_mcp.py|.claude/skills/*-mcp.json) mrtests=true ;;
+      esac
+      case "$f" in
         tools/telemetry/*|.github/workflows/ci.yml) tmtests=true ;;
       esac
       case "$f" in
@@ -270,9 +279,15 @@ classify() {
         # The growth desk (docs/growth.md): tools/growth's own tests. The
         # posting server is here because test_server_parity.py pins its
         # weighted-length copy to growth.tweetlen — a server-only edit that
-        # skipped these tests could drift the two rules apart unchecked.
+        # skipped these tests could drift the two rules apart unchecked. The
+        # queue server and reeve-growth.yml are here for the same reason:
+        # test_queue_dedup_parity.py pins the queue server's near-duplicate
+        # rule and context reader to growth.dedup, and
+        # test_reeve_growth_wiring.py pins the workflow's dedup-context wiring.
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
         .claude/skills/growth-twitter/growth_mcp.py|\
+        .claude/skills/growth-queue/queue_mcp.py|\
+        .github/workflows/reeve-growth.yml|\
         .github/workflows/ci.yml) gwtests=true ;;
       esac
       case "$f" in
@@ -682,6 +697,21 @@ selftest() {
   # tests, so a server-only edit must re-run them.
   out="$(run ".claude/skills/growth-twitter/growth_mcp.py")"
   check "growth-server-parity-drift" "$out" "growth_tests=true"
+  # The cap-state wiring guard reads every MCP write server's CAP_STATE_ENV
+  # literal and the --mcp-config JSON naming it, so a server- or config-only
+  # edit re-runs the model-registry suite — and a skill's prose does not.
+  out="$(run ".claude/skills/oracle-review/oracle_mcp.py")"
+  check "mcp-server-cap-wiring-drift" "$out" "model_registry_tests=true"
+  out="$(run ".claude/skills/product-scout/scout-mcp.json")"
+  check "mcp-config-cap-wiring-drift" "$out" "model_registry_tests=true"
+  out="$(run ".claude/skills/oracle-review/SKILL.md")"
+  check "skill-prose-is-not-cap-wiring" "$out" "model_registry_tests=false"
+  # Likewise the queue server's dedup backstop (parity-pinned) and the
+  # reeve-growth workflow's dedup-context wiring (pinned by the tool's tests).
+  out="$(run ".claude/skills/growth-queue/queue_mcp.py")"
+  check "growth-queue-server-parity-drift" "$out" "growth_tests=true"
+  out="$(run ".github/workflows/reeve-growth.yml")"
+  check "reeve-growth-dedup-wiring-drift" "$out" "growth_tests=true"
   # 4h. The AI andon cord (docs/andon-cord.md) is soft-infra the same way: the
   #     reconciler tool moves no mesh, but a tools/andon-only PR must still RUN
   #     the required contexts. Its tests pin the reconciler workflow, so an
@@ -749,6 +779,16 @@ selftest() {
   out="$(run "designs/categories.conf")"
   check "categories-conf" "$out" \
     "regen=true" "regen_designs=ALL" "gate=false" "gate_designs=" "scad=true"
+
+  # 4c'''. preview-diff.sh (issue #470) JUDGES the regenerated previews in the
+  #        regen job; it generates none. So it is plain soft-infra (run,
+  #        gate nothing) and must NOT join regen_all: listing it there would
+  #        re-render the whole catalog to measure a classifier edit. Negative
+  #        control for that — regen stays false. (It is not a regen-stamp.sh
+  #        input either, for the same reason.)
+  out="$(run "scripts/preview-diff.sh")"
+  check "preview-diff-judges-not-generates" "$out" \
+    "regen=false" "regen_designs=" "gate=true" "gate_designs=" "scad=true"
 
   # 5. A design path whose entry point does not exist is dropped — the guard
   #    against gating a deleted/renamed design under the wrong name.

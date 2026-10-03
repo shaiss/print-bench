@@ -10,6 +10,13 @@ tooling appends an attribution footer and decide.yml anchors on a bare
 command, so a bot-posted command is silently neutralized while the run
 reports success).
 
+The same sequence serves the owner's standing approval modes (issue #446):
+``run_poll`` classifies each live thread through the pure ``approval.py``,
+and a YES in an ``approve_auto`` category resolves with no reaction once its
+👎 grace window has passed — recorded under the rule's own identity
+(``standing-rule:<category>``), never a person's — while an ``approve_deny``
+thread is never written to at all.
+
 This is deliberately the **only module in the reeve package that performs
 an HTTP write verb** — the confined seam exemption the package's
 no-write-verb rule gains for the greenlight loop (the backlog groomer's
@@ -47,7 +54,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from . import greenlight, github
+from . import approval, greenlight, github
 
 _TIMEOUT_S = 30
 
@@ -192,8 +199,16 @@ def push_approval(
     decision_id: str,
     approvers: list[str],
     now: Optional[datetime] = None,
+    standing_rule: Optional[str] = None,
+    standing_evidence: tuple = (),
 ) -> dict[str, Any]:
     """Apply an approved greenlight: labels first (fail closed), then the rest.
+
+    ``standing_rule`` names the ``approve_auto`` category that resolved it
+    when no human reacted (#446); ``approvers`` is then the rule's own
+    identity (``standing-rule:<category>``), which is what the ledger row
+    records — the sequence below is otherwise identical to a 👍's, arming
+    included, and only the reply's header and explanation differ.
 
     Order, mirroring decide.yml's ``Resolve the decision``:
 
@@ -300,11 +315,23 @@ def push_approval(
     reply = [
         f"<!-- reeve-greenlight v1 issue={issue_number} resolution=approved id={decision_id} -->",
         "",
-        f"✅ **Approved by 👍 ({approvers[0]}) — recorded {want}**",
-        "",
-        "Applied the `/decide` sequence via the API (never a posted command): "
-        f"`{want}` added first, {lifted_text}{arming_text}{ledger_text}",
     ]
+    if standing_rule:
+        reply += [
+            f"✅ **Approved by standing rule `approve_auto: {standing_rule}` — recorded {want}**",
+            "",
+            "No reaction was needed: `.github/reeve.conf` pre-approves a **YES** greenlight "
+            f"in the `{standing_rule}` category (a human-merged standing rule, #446), the 👎 "
+            "grace window passed with no overrule, and this decision classifies as:",
+        ]
+        reply += [f"- {line}" for line in standing_evidence]
+        reply.append("")
+    else:
+        reply += [f"✅ **Approved by 👍 ({approvers[0]}) — recorded {want}**", ""]
+    reply.append(
+        "Applied the `/decide` sequence via the API (never a posted command): "
+        f"`{want}` added first, {lifted_text}{arming_text}{ledger_text}"
+    )
     for note in notes:
         reply.append(f"- {note}")
     reply.append("")
@@ -316,7 +343,7 @@ def push_approval(
 
     return {
         "outcome": "approved", "label": want, "armed": armed,
-        "ledger": ledger, "notes": notes,
+        "ledger": ledger, "notes": notes, "standing_rule": standing_rule,
     }
 
 
@@ -355,7 +382,11 @@ def push_overrule(
 # ---------------------------------------------------------------------------
 
 def run_poll(
-    repo: str, token: str, pat: str, now: Optional[datetime] = None
+    repo: str,
+    token: str,
+    pat: str,
+    now: Optional[datetime] = None,
+    rules: Optional[approval.Rules] = None,
 ) -> list[dict[str, Any]]:
     """Poll every open parked decision's greenlight; push what is approved.
 
@@ -375,7 +406,18 @@ def run_poll(
     why a mid-read failure (a bad permission payload, a network blip) is
     reported rather than raised: the issue simply waits this run, which is
     the fail-closed direction for a gate.
+
+    ``rules`` are the committed standing approval modes (#446,
+    ``Config.approval_rules``); ``None`` is the empty rule set, so every
+    thread asks exactly as before. Each live thread is classified
+    (``approval.classify``/``mode_for``) from its labels and text; only when a
+    label that could LOOSEN is present is its applier read
+    (``github.list_label_events``) and held to the 👍 bar
+    (``approval.label_actor_trusted``) — a deny is decided before that read,
+    since nothing may loosen a deny.
     """
+    rules = rules or approval.Rules()
+    now = now or datetime.now(timezone.utc)
     results: list[dict[str, Any]] = []
     permissions: dict[str, str] = {}
 
@@ -391,6 +433,27 @@ def run_poll(
         # below, so a bad permission read leaves the issue waiting — the
         # fail-closed direction — rather than trusting the marker.
         return greenlight.marker_author_trusted(login, _authorized)
+
+    def _approval_mode(thread: dict[str, Any]) -> tuple[str, frozenset, tuple]:
+        # Untrusted signals first: the text and the labels as-is can only
+        # deny or ask, so a deny is final before any label history is read.
+        labels = thread.get("labels") or []
+        title, body = thread.get("title", ""), thread.get("body", "")
+        classification = approval.classify(labels, title, body)
+        mode, categories = approval.mode_for(classification, rules)
+        loosening = approval.loosening_labels(labels, rules)
+        # Read the label history only when it could matter: no deny, and
+        # every category seen is an auto category (a text hit on a non-auto
+        # category already pins this thread at ask, whoever applied a label).
+        if mode != approval.MODE_DENY and loosening and classification.categories <= rules.auto:
+            events = github.list_label_events(repo, token, thread["number"])
+            verified = [
+                label for label in loosening
+                if approval.label_actor_trusted(approval.label_applier(events, label), _authorized)
+            ]
+            classification = approval.classify(labels, title, body, verified)
+            mode, categories = approval.mode_for(classification, rules)
+        return mode, categories, classification.evidence
 
     for thread in github.gather_greenlight_poll(repo, token):
         number = thread["number"]
@@ -428,12 +491,19 @@ def run_poll(
                 if _authorized(login):
                     (approvers if content == greenlight.APPROVE_REACTION else overrulers).append(login)
 
-            polled = greenlight.poll_outcome(info, approvers, overrulers, decide)
+            mode, categories, evidence = _approval_mode(thread)
+            polled = greenlight.poll_outcome(
+                info, approvers, overrulers, decide,
+                mode=mode, categories=categories,
+                grace_elapsed=approval.grace_elapsed(info.get("created_at", ""), now),
+            )
             if polled["outcome"] == greenlight.OUTCOME_APPROVE:
                 results.append({
                     "number": number,
                     **push_approval(
-                        repo, token, pat, number, info, decision_id, polled["approvers"], now
+                        repo, token, pat, number, info, decision_id, polled["approvers"], now,
+                        standing_rule=polled.get("standing_rule"),
+                        standing_evidence=evidence,
                     ),
                 })
             elif polled["outcome"] == greenlight.OUTCOME_OVERRULE:

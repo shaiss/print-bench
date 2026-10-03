@@ -367,11 +367,16 @@ surfaces studies awaiting a read live in
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):
-    every reviewer ship step in `auto-review.yml` must pass its backstop, the
-    backstop must deny the whole render toolchain (openscad, xvfb-run,
-    prusa-slicer, printcheck, the render/gate/check scripts) and never deny
-    the read surface a review needs; `--selftest` with a positive and a
-    negative control, run by check.sh.
+    each backstop must deny every Bash allow outside an exact review-surface
+    exemption (gh, git, jq, mktemp; the reviewer's also keeps PM triage's
+    `chunk-helper.sh`), always deny the render toolchain (apt, openscad,
+    xvfb-run, prusa-slicer, printcheck, the render/gate/check scripts,
+    session-start.sh) and never deny the review surface (gh/git, the read
+    tools; Write/Edit too for the coach); `--selftest` with a positive and a
+    negative control per rule, run by check.sh. The workflow half — every
+    reviewer ship step in `auto-review.yml` passes its backstop under
+    `dontAsk` — is pinned by
+    `tools/model-registry/tests/test_reviewer_backstop_wiring.py`.
   - `spike-converter-perms-check.sh` — the same drift check for the scheduled
     spike-to-brief converter's own deny backstop
     (`.claude/spike-converter-settings.json`, #245 child C / issue #440), the
@@ -485,6 +490,12 @@ surfaces studies awaiting a read live in
   - `regen-stamp.sh` — a design's regeneration input fingerprint; CI skips
     re-rendering previews/GIFs/product shots when it matches the committed
     stamp
+  - `preview-diff.sh` — the regen-faithfulness check (issue #470): classes
+    each regenerated preview against the committed bytes it replaces (noise /
+    content / resized / new / removed, a pixel-count band sized for
+    cross-runner render wobble) and warns when a design's previews changed
+    though its own sources did not. Advisory — run by CI's regen job just
+    before it commits, with a `--selftest`
   - `field-test.sh` — appends a FIELD-TEST entry (one real print's result) to
     a design's NOTES.md; the tested core of the "Log a print result" Action
     (issue #101)
