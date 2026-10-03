@@ -1,0 +1,9 @@
+# Print-in-place fit proof: the wheel must be a free captive body, clearing the
+# fixed base + post + cap + both pawl blocks and both pawls on every surface.
+# `fitcheck` renders wheel ∩ fixed and must be EMPTY (bore radial gap, axial
+# base/cone gaps, tooth-tip-to-block web_clr, and the pawl's static clearances
+# — nose face lock_gap from the tooth wall, beam web_clr over the tips, hook
+# clear of the ramp — all clear in the as-drawn pose). `fitcheck_neg` shrinks
+# the bore onto the post so it MUST overlap, proving the check can fail.
+fitcheck      empty
+fitcheck_neg  interferes
