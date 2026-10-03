@@ -130,9 +130,22 @@ def detail_line(context_label: str, chain: str, providers: Sequence[str],
             f"{_walk_of(providers)}, first seen {when} {affected_marker(chain)}")
 
 
-def render_body(reason: str, details: Sequence[str]) -> str:
-    """A fresh shared escalation issue body (the file path)."""
+def render_body(reason: str, details: Sequence[str],
+                reset: str = "") -> str:
+    """A fresh shared escalation issue body (the file path).
+
+    ``reset`` is the quota-exhaustion timestamp classify extracted (issue
+    #545) — empty when the body named none. When present it is woven in after
+    the remediation so the ask names *when* the chain comes back.
+    """
     did = decision_id_for(reason)
+    reset_lines: list[str] = []
+    if reset:
+        reset_lines = [
+            f"The provider's error body names the reset: **{reset}**. After "
+            "that (or once the cap is raised), confirm with a smoke run.",
+            "",
+        ]
     return "\n".join([
         marker_for(reason),
         f"🚦 DECISION NEEDED — `{did}`",
@@ -144,6 +157,7 @@ def render_body(reason: str, details: Sequence[str]) -> str:
         "",
         remediation_for(reason),
         "",
+        *reset_lines,
         "**Affected chains** — this escalation is shared by every chain that "
         f"exhausts with reason **{reason}**, so one `/decide` resolves the "
         "whole set (issue #550):",
@@ -200,12 +214,15 @@ class Plan:
 
 def plan_escalation(reason: str, chain: str, context_label: str,
                     providers: Sequence[str], when: str,
-                    open_issues: Sequence[Mapping[str, Any]]) -> Plan:
+                    open_issues: Sequence[Mapping[str, Any]],
+                    reset: str = "") -> Plan:
     """Decide file / join / already from a simulated-or-live open-issue list.
 
     Pure: every caller (the CLI live path, the tests) supplies the same shaped
     list — ``number``, ``html_url`` and ``body`` per open ``needs-decision``
-    issue — and gets back exactly the write to perform.
+    issue — and gets back exactly the write to perform. ``reset`` (issue #545)
+    is woven into a freshly filed body only; a join keeps the existing body
+    text and just accumulates the affected-chain line.
     """
     remediation_for(reason)  # the guard: only needs-human reasons escalate
     marker = marker_for(reason)
@@ -217,7 +234,7 @@ def plan_escalation(reason: str, chain: str, context_label: str,
         return Plan(
             action="file",
             title=f"🚦 Provider unusable: {reason}",
-            body=render_body(reason, [line]),
+            body=render_body(reason, [line], reset=reset),
             notice=f"chain {chain} exhausted ({reason}) with no open "
                    f"escalation — filing the shared issue",
         )
@@ -332,10 +349,12 @@ def _open_issues(gh: _Request, repo: str, token: str
 
 def run_escalation(reg: Registry, chain: str, reason: str, context_label: str,
                    repo: str, token: str, when: Optional[str] = None,
-                   gh: Optional[_Request] = None) -> int:
+                   gh: Optional[_Request] = None,
+                   reset: str = "") -> int:
     """The live path: list, plan, perform. Prints the notices; returns the
     process exit code (0 on every decided outcome — advisory; 1 only on a
-    transport/API error or a guard firing, which are defects, not outages)."""
+    transport/API error or a guard firing, which are defects, not outages).
+    ``reset`` is the quota reset timestamp classify extracted (issue #545)."""
     if gh is None:
         gh = _request
     when = when or datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -352,7 +371,8 @@ def run_escalation(reg: Registry, chain: str, reason: str, context_label: str,
     if err is not None:
         print(f"::error::provider escalation for {chain} ({reason}) failed: {err}")
         return 1
-    plan = plan_escalation(reason, chain, context_label, providers, when, issues)
+    plan = plan_escalation(reason, chain, context_label, providers, when, issues,
+                           reset=reset)
 
     if plan.action == "file":
         status, body, _ = gh("POST", f"{API_BASE}/repos/{repo}/issues", token,

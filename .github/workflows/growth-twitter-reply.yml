@@ -1,0 +1,108 @@
+name: Growth — X reply one-shot
+
+# A human-triggered workflow_dispatch that posts ONE reply under an existing
+# tweet via tools/growth's poster seam — no agent, no queue drain. Lark's MCP
+# posting tool only threads parts it composed in the same run (each part
+# replies to the previous); it cannot reply under an arbitrary parent tweet.
+# This workflow fills that gap for one-off fixes (e.g. #650 @vercel partner tag).
+#
+# Requires repository write access to dispatch. Uses the same four X_* secrets
+# as growth-twitter.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reply_to:
+        description: 'Parent tweet id to reply under'
+        required: true
+        type: string
+      text:
+        description: 'Reply body (weighted 280; URLs count as 23)'
+        required: true
+        type: string
+      issue:
+        description: 'Optional GitHub issue number to comment with the tweet URL'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  reply:
+    name: Post an X reply
+    # Pin to the default branch: this job holds X credentials, and
+    # workflow_dispatch can target any in-repo ref — a dispatch against a PR
+    # branch must not run that branch's code with the secrets.
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Post reply via growth.poster
+        id: post
+        env:
+          PYTHONPATH: tools/growth/src
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          REPLY_TO: ${{ github.event.inputs.reply_to }}
+          TEXT: ${{ github.event.inputs.text }}
+        run: |
+          set -euo pipefail
+          tweet_id="$(python3 -c '
+          import os
+          from growth.poster import post_tweet
+          tid = post_tweet(os.environ["TEXT"], reply_to=os.environ["REPLY_TO"])
+          print(tid)
+          ')"
+          tweet_url="https://x.com/i/web/status/${tweet_id}"
+          echo "TWEET_URL=${tweet_url}"
+          echo "tweet_id=${tweet_id}" >> "$GITHUB_OUTPUT"
+          echo "tweet_url=${tweet_url}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## X reply posted"
+            echo "- parent: \`${REPLY_TO}\`"
+            echo "- url: ${tweet_url}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the tweet URL on the issue
+        if: github.event.inputs.issue != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.inputs.issue }}
+          TWEET_URL: ${{ steps.post.outputs.tweet_url }}
+          REPLY_TO: ${{ github.event.inputs.reply_to }}
+        run: |
+          set -euo pipefail
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "$(cat <<EOF
+          ## 🐦 Posted X reply (one-shot workflow)
+
+          Replied under parent tweet \`${REPLY_TO}\` (not a growth-queue drain):
+
+          ${TWEET_URL}
+          EOF
+          )"
+
+  off-branch-notice:
+    name: Explain an off-branch dispatch
+    if: github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why the reply did not run
+        env:
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          echo "::notice::the X reply one-shot only runs on the default branch (${DEFAULT_BRANCH}); this dispatch targeted '${REF}'. Re-dispatch from ${DEFAULT_BRANCH}."

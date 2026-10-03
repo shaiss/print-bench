@@ -56,6 +56,11 @@ read -ra OSC_ARGS <<<"${OPENSCAD_ARGS:-}"
 # blew up mid-render as one that cleanly emitted no geometry, and the
 # base-safety proof would pass on a design nobody can even render. Demanding
 # the absence of ERROR is what keeps "empty" meaning empty.
+#
+# LINEAGE_RENDER_LOG=<path>, when set, additionally saves OpenSCAD's full
+# output there on every path (an optional out-parameter: unset by default,
+# so no existing caller changes). scripts/kinematics-check.sh sets it to fail
+# a check on a wrong-geometry WARNING that the empty path returns success on.
 lineage_render_binstl() {
   local src="$1" out="$2"
   shift 2
@@ -66,6 +71,15 @@ lineage_render_binstl() {
   local log rc=0
   log=$(xvfb-run -a "$OPENSCAD_BIN" ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
     --export-format binstl -o "$out" "$@" "$src" 2>&1) || rc=$?
+  # Optional out-parameter, unset by every caller but the kinematics gate: a
+  # path in LINEAGE_RENDER_LOG receives OpenSCAD's full output on every path
+  # below — the cleanly-empty one included, where a wrong-geometry WARNING
+  # ("Ignoring unknown module": the call skipped, the top level empty) is the
+  # success this function returns and nothing is printed. A caller that must
+  # fail on that reads the file back. Unset, nothing here changes.
+  if [[ -n "${LINEAGE_RENDER_LOG:-}" ]]; then
+    printf '%s\n' "$log" > "$LINEAGE_RENDER_LOG"
+  fi
   if (( rc != 0 )); then
     if grep -qF "Current top level object is empty" <<<"$log" \
        && ! grep -qF "ERROR" <<<"$log"; then
