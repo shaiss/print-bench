@@ -16,9 +16,14 @@
 //
 // 1. NAMED TOPOLOGY. "warren" (alternating face diagonals, ribs only at the
 //    needle ends), "pratt" (a rib at every panel point plus face diagonals
-//    rising toward midspan as the taper deepens), "vierendeel" (ribs only —
-//    open panels, no face diagonals). An unknown name aborts the render;
-//    it never falls back silently.
+//    descending toward midspan — each runs from the top chord at a panel's
+//    outer station down to the bottom chord at its inner one, the tension
+//    diagonals of a gravity-loaded pratt), "vierendeel" (ribs only — open
+//    panels, no face diagonals). The rising mirror of pratt is the howe
+//    truss, which this library does not offer. space_frame_diagonals()
+//    exports the diagonal layout the module draws, so the direction is a
+//    pinned contract (the demo asserts it), not a reading of the code. An
+//    unknown name aborts the render; it never falls back silently.
 //
 // 2. TAPER. Frame depth (the outer z extent, bed plane to top-chord crown)
 //    follows a raised-cosine law from `depth` at midspan out to `end_depth`
@@ -134,6 +139,31 @@ function strut_section(strut_floor_mult) =
         " mm thin-feature floor"))
     strut_floor_mult * SF_PRINTABLE_FLOOR;
 
+// The face-diagonal layout of a topology: one [top_station, bottom_station]
+// pair per diagonal, stations indexed 0..bays along x. Both faces draw the
+// same pairs (the top chord to the bottom chord on its side). space_frame()
+// draws exactly this list, so a caller reads the member layout here instead
+// of in the module, and the demo pins what each name promises:
+//   warren     — alternating: even bays rise left-to-right (bottom i to
+//                top i+1), odd bays fall (top i to bottom i+1).
+//   pratt      — descending toward midspan: each diagonal's top end is the
+//                panel's OUTER station (farther from midspan), its bottom end
+//                the inner one. With an odd bay count the middle panel has
+//                no inner side; it takes the left half's direction.
+//   vierendeel — none (open panels).
+// An unknown name aborts here too, so a direct caller cannot get a silent [].
+function space_frame_diagonals(bays, topology) =
+    assert(topology == "warren" || topology == "pratt" || topology == "vierendeel",
+        str("space_frame_diagonals: unknown topology \"", topology,
+            "\" — expected \"warren\", \"pratt\" or \"vierendeel\""))
+    assert(bays == floor(bays) && bays >= 1,
+        str("space_frame_diagonals: bays must be a whole number >= 1, got ", bays))
+    topology == "warren"
+        ? [for (i = [0:bays - 1]) i % 2 == 0 ? [i + 1, i] : [i, i + 1]]
+    : topology == "pratt"
+        ? [for (i = [0:bays - 1]) i < bays / 2 ? [i, i + 1] : [i + 1, i]]
+    : [];
+
 // ---------------------------------------------------------------------------
 // Point helpers
 // ---------------------------------------------------------------------------
@@ -224,30 +254,16 @@ module _sf_web(pts_bl, pts_br, pts_t, r, rn, topology, x_depth, panel_nodes) {
         _sf_member(pts_t[i], pts_br[i], r);
     }
 
-    if (topology == "warren")
-        // Alternating face diagonals: the zig-zag. Even bays rise left-to-right,
-        // odd bays fall — both faces in phase, so the silhouette reads as one
-        // warren from either side.
-        for (i = [0:n - 1])
-            if (i % 2 == 0) {
-                _sf_member(pts_bl[i], pts_t[i + 1], r);
-                _sf_member(pts_br[i], pts_t[i + 1], r);
-            } else {
-                _sf_member(pts_t[i], pts_bl[i + 1], r);
-                _sf_member(pts_t[i], pts_br[i + 1], r);
-            }
-
-    if (topology == "pratt")
-        // A diagonal per bay per face, rising toward midspan as the taper
-        // deepens — the pratt reading of "diagonals point at the busy half".
-        for (i = [0:n - 1])
-            if (i < n / 2) {
-                _sf_member(pts_bl[i], pts_t[i + 1], r);
-                _sf_member(pts_br[i], pts_t[i + 1], r);
-            } else {
-                _sf_member(pts_t[i], pts_bl[i + 1], r);
-                _sf_member(pts_t[i], pts_br[i + 1], r);
-            }
+    // Face diagonals, drawn from the one exported layout (see
+    // space_frame_diagonals): warren's alternating zig-zag, pratt's diagonals
+    // descending toward midspan, none for vierendeel. Both faces in phase, so
+    // the silhouette reads as one truss from either side. Each member is
+    // drawn top node to bottom node: a cylinder from a to b and one from b to
+    // a are the same faceted solid (the section polygon's vertex angles are
+    // symmetric), so the draw direction changes no geometry.
+    for (d = space_frame_diagonals(n, topology))
+        for (base = [pts_bl, pts_br])
+            _sf_member(pts_t[d[0]], base[d[1]], r);
 
     if (topology == "vierendeel" && x_depth > 0)
         // Hub-and-spoke X per panel per face: hub at the panel's centre, four
@@ -281,7 +297,8 @@ module _sf_web(pts_bl, pts_br, pts_t, r, rn, topology, x_depth, panel_nodes) {
 // width   — bottom chord separation along y (mm); top chord at y = 0
 // depth   — outer z extent at midspan (mm)
 // bays    — panel count along the span (whole number >= 1)
-// topology     — "warren" | "pratt" | "vierendeel"
+// topology     — "warren" | "pratt" (diagonals descending toward midspan) |
+//                "vierendeel"
 // end_depth    — outer z extent at the needle ends (>= strut section)
 // strut_floor_mult — strut section as a multiple of the 0.8 mm printable floor
 // x_depth      — X-bracing depth as a fraction of panel height, (0, 1],

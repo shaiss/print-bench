@@ -39,11 +39,44 @@ assert(frame_depth_at(L / 4, L, D, DE) > DE &&
        frame_depth_at(L / 4, L, D, DE) < D,
        "frame_depth_at must taper monotonically between end and midspan");
 
+//    The named-topology contract, pinned on the diagonal layout space_frame()
+//    draws (space_frame_diagonals: [top_station, bottom_station] pairs). The
+//    renders below cannot tell a diagonal's direction — a howe truss and a
+//    pratt export equally watertight and score the same — so the names are
+//    held here. Odd and even bay counts both, since the halves split
+//    differently.
+for (nb = [BAYS, BAYS2, 8]) {
+    // Pratt: one diagonal per bay, DESCENDING toward midspan — its top end is
+    // the panel's outer station, strictly farther from midspan than its
+    // bottom end (an odd count's middle panel straddles midspan, so it has
+    // no outer side and is exempt). The rising mirror (howe) fails this.
+    pr = space_frame_diagonals(nb, "pratt");
+    assert(len(pr) == nb, str("pratt: one diagonal per bay, got ", len(pr)));
+    for (d = pr) {
+        assert(abs(d[0] - d[1]) == 1, str("pratt diagonal ", d, " must span one bay"));
+        assert(abs(d[0] - nb / 2) > abs(d[1] - nb / 2) || min(d) == (nb - 1) / 2,
+               str("pratt diagonal ", d, " (", nb, " bays) does not descend toward ",
+                   "midspan — its top end must be the panel's outer station"));
+    }
+    // Warren: the zig-zag — bay i's top end alternates right (even i) and
+    // left (odd i), so consecutive diagonals share a node.
+    wa = space_frame_diagonals(nb, "warren");
+    assert(len(wa) == nb, str("warren: one diagonal per bay, got ", len(wa)));
+    for (i = [0:nb - 1])
+        assert(wa[i] == (i % 2 == 0 ? [i + 1, i] : [i, i + 1]),
+               str("warren diagonal ", i, " is ", wa[i], " — the zig-zag must alternate"));
+    // Vierendeel: open panels.
+    assert(space_frame_diagonals(nb, "vierendeel") == [],
+           "vierendeel must have no face diagonals");
+}
+
 // 1. Warren: alternating face diagonals, ribs only at the needle ends.
 space_frame(L, W, D, BAYS,
             topology = "warren", end_depth = DE, strut_floor_mult = MULT);
 
-// 2. Pratt: a rib at every panel point, face diagonals rising to midspan.
+// 2. Pratt: a rib at every panel point, face diagonals descending toward
+//    midspan (top chord at a panel's outer station down to the bottom chord
+//    at its inner one).
 translate([L + 40, 0, 0])
     space_frame(L, W, D, BAYS,
                 topology = "pratt", end_depth = DE, strut_floor_mult = MULT);
