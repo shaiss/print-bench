@@ -71,10 +71,12 @@ is split into a NUGGS ecosystem collection plus the technique domains from
 `docs/advanced-techniques.md` — the same groups, in the same order, the README
 gallery renders (issue #374). The authority is `scripts/catalog.sh`, driven by
 the closed vocabulary in `designs/categories.conf`: a design named
-`nuggs`/`nuggs-*` that **also** includes `lib/nuggs-coupling.scad` derives its
-NUGGS group from that and carries no `catalog.conf`; a `nuggs-*` name without the
-coupling is a collision (e.g. `nuggs-yard`, the hamster's) and declares a
-`category:` like every other design. `lib/catalog.mjs` re-implements that rule in JS (the deploy
+`nuggs`/`nuggs-*` that **also** reaches `lib/nuggs-coupling.scad through its
+include closure** (issue #517 — inherited through a parent counts) derives its
+NUGGS group from that and carries no `catalog.conf`; a `nuggs-*` name that
+reaches the coupling nowhere in its closure is a collision (e.g. `nuggs-yard`,
+the hamster's) and declares a `category:` like every other design.
+`lib/catalog.mjs` re-implements that rule in JS (the deploy
 can't run bash+Python), and `test/catalog.test.mjs` runs both over the same
 trees — including the real repo — and fails on any disagreement about a
 design's group or the order, the `lineage.mjs` cross-check pattern again.
@@ -252,7 +254,7 @@ things keep it consistent with the rest of the site:
   its member's header derives) and peoplePage (the studio's data block)
 - `lib/content.mjs` — what exists: designs, styles, pitches, parts, previews
 - `lib/lineage.mjs` — `derives.conf` → gallery order and parentage, ported from `tools/lineage`
-- `lib/catalog.mjs` — `designs/categories.conf` + the `nuggs`/`nuggs-*` name **and** the `lib/nuggs-coupling.scad` include (NUGGS is derived; a coupling-less `nuggs-*` name is a collision, grouped by its `category:`) or each other design's `category:` → the index's catalog groups, ported from `scripts/catalog.sh` and cross-checked against it (issue #374)
+- `lib/catalog.mjs` — `designs/categories.conf` + the `nuggs`/`nuggs-*` name **and** reaching `lib/nuggs-coupling.scad` through the include closure (NUGGS is derived, inheritance through a parent counts — issue #517; a `nuggs-*` name reaching it nowhere is a collision, grouped by its `category:`) or each other design's `category:` → the index's catalog groups, ported from `scripts/catalog.sh` and cross-checked against it (issue #374)
 - `lib/markdown.mjs` — markdown → HTML, link resolution and rewriting
 - `lib/llms.mjs` — the AI-native serving layer: discovers the docs served
   verbatim (`docs/contributing/`, `docs/architecture/`), checks their local
