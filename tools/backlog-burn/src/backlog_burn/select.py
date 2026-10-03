@@ -14,7 +14,15 @@ Every exclusion here mirrors the ``/ship-issue`` skill's own §0 lock check:
   timeline/GraphQL metadata this stdlib snapshot deliberately does not fetch);
   the skill's own linked-PR-metadata check is the backstop, so the worst case
   is one wasted selection the skill then declines, never a wrong ship,
-* an existing remote ``claude/issue-<N>-*`` branch.
+* an existing remote ``claude/issue-<N>-*`` branch **that carries unmerged
+  work**. A branch whose compare against the default branch reports
+  ``ahead_by == 0`` — every commit it holds is already on the default branch
+  (the #565 shape: its PR closed with head == base, the fix landed through
+  another commit) — is an orphan, not a claim. Before this rule a branch was
+  a claim forever, so one orphan starved its issue out of every firing. The
+  compare is fail-conservative: a branch whose compare is missing or failed
+  still claims, because only a positively observed zero proves it empty.
+  ``scripts/routine-lock-cleanup.sh`` scores ``delivered`` by the same rule.
 
 One further exclusion does not come from the lock check: an issue carrying the
 ``needs-decision`` label is skipped because an agentic run parked it for a human
@@ -320,10 +328,41 @@ def _issue_branch_re(number: int) -> re.Pattern[str]:
     return re.compile(rf"^claude/issue-{re.escape(str(number))}-")
 
 
-def _has_issue_branch(branches: list[str], number: int) -> bool:
-    """True if any branch is this issue's ``claude/issue-<number>-*``."""
+def _known_empty(ahead_by: Any) -> bool:
+    """True only for a compare that positively reported zero commits ahead.
+
+    ``type(...) is int`` rather than ``isinstance``: a malformed snapshot's
+    ``false`` (a ``bool``, which Python counts as an ``int`` equal to 0) or
+    ``"0"`` must not release a claim. Anything but a real integer zero —
+    missing, ``None``, a string, a failed compare — reads as "may carry
+    work", the fail-conservative direction.
+    """
+    return type(ahead_by) is int and ahead_by == 0
+
+
+def _issue_branches(branches: list[str], number: int) -> list[str]:
+    """Every branch that is this issue's ``claude/issue-<number>-*``."""
     rx = _issue_branch_re(number)
-    return any(rx.match(b or "") for b in (branches or []))
+    return [b for b in (branches or []) if rx.match(b or "")]
+
+
+def _has_issue_branch(
+    branches: list[str],
+    number: int,
+    branch_ahead_by: Optional[dict[str, Any]] = None,
+) -> bool:
+    """True if a ``claude/issue-<number>-*`` branch claims the issue.
+
+    A branch claims unless its compare against the default branch is known
+    to report zero commits ahead (:func:`_known_empty`). With no compare data
+    at all (``branch_ahead_by`` omitted, or the branch absent from it) every
+    matching branch claims — the rule before compares existed, and the safe
+    reading of "unknown".
+    """
+    ahead = branch_ahead_by or {}
+    return any(
+        not _known_empty(ahead.get(b)) for b in _issue_branches(branches, number)
+    )
 
 
 def _open_pr_claims(open_prs: list[dict[str, Any]], number: int) -> bool:
@@ -347,6 +386,7 @@ def exclusion_reason(
     decision_label: str = DECISION_PENDING_LABEL,
     decline_cooldown_hours: float = DECLINE_COOLDOWN_HOURS,
     defer_cooldown_hours: float = DEFER_COOLDOWN_HOURS,
+    branch_ahead_by: Optional[dict[str, Any]] = None,
 ) -> Optional[str]:
     """Why this issue is *not* eligible, or ``None`` if it is.
 
@@ -354,7 +394,9 @@ def exclusion_reason(
     on purpose: by the time we ask about the lock, a corroborating branch or
     PR has already been ruled out, so a ``stale`` lock verdict means precisely
     the skill's takeover condition — an old claim with nothing backing it —
-    and the issue is left eligible rather than frozen forever.
+    and the issue is left eligible rather than frozen forever. A branch known
+    to carry no unmerged work (``branch_ahead_by`` maps it to 0) backs
+    nothing, so it neither claims the issue nor keeps a stale lock alive.
 
     The ``needs-decision`` guard sits just after the opt-in label check, ahead
     of every claim guard: a parked decision is a *durable* block that must hold
@@ -375,7 +417,7 @@ def exclusion_reason(
         return f"not labelled {required_label!r}"
     if decision_label in labels:
         return f"awaiting a human decision ({decision_label})"
-    if _has_issue_branch(branches, number):
+    if _has_issue_branch(branches, number, branch_ahead_by):
         return f"a claude/issue-{number}-* branch already exists"
     if _open_pr_claims(open_prs, number):
         return f"an open PR already closes #{number}"
@@ -396,6 +438,46 @@ def exclusion_reason(
     return None
 
 
+def _snapshot_ahead_by(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """The snapshot's ``branchAheadBy`` map, or ``{}`` when absent/malformed.
+
+    A snapshot from before compares existed (or a hand-written fixture) has
+    no such key; a malformed one is not a dict. Both read as "nothing known",
+    so every matching branch keeps claiming — never the other way round.
+    """
+    ahead = snapshot.get("branchAheadBy") or {}
+    return ahead if isinstance(ahead, dict) else {}
+
+
+def branches_needing_compare(
+    snapshot: dict[str, Any],
+    required_label: str = DEFAULT_REQUIRED_LABEL,
+    now: Optional[datetime] = None,
+) -> list[str]:
+    """The ``claude/issue-<N>-*`` branches whose compare could change the pick.
+
+    Pure, like everything here: it tells the live gather which branches are
+    worth one ``compare`` request each, so the network cost scales with the
+    handful of *otherwise-eligible* candidates rather than with every
+    ``claude/issue-*`` branch in the repo. An issue is otherwise-eligible when
+    :func:`exclusion_reason` admits it with the branch guard taken out of the
+    picture (no branches passed); only for such an issue can a branch's
+    ahead-count decide between selected and skipped. Sorted and de-duplicated
+    so the request order is deterministic.
+    """
+    issues = snapshot.get("issues", []) or []
+    open_prs = snapshot.get("openPRs", []) or []
+    branches = snapshot.get("branches", []) or []
+    wanted: set[str] = set()
+    for issue in issues:
+        matching = _issue_branches(branches, issue["number"])
+        if not matching:
+            continue
+        if exclusion_reason(issue, open_prs, [], required_label, now=now) is None:
+            wanted.update(matching)
+    return sorted(wanted)
+
+
 def select_issue(
     snapshot: dict[str, Any],
     required_label: str = DEFAULT_REQUIRED_LABEL,
@@ -412,16 +494,24 @@ def select_issue(
     and decline/defer markers for cooldown; the CLI passes the current UTC
     time. With ``now`` omitted, a claim is never treated as stale and a
     stop marker never as expired — the conservative reading.
+
+    ``snapshot["branchAheadBy"]`` (optional) maps a branch name to the
+    ``ahead_by`` its compare against the default branch reported; a branch
+    mapped to 0 carries no unmerged work and claims nothing. Those released
+    branches are listed in the record (``empty_branches``) so the summary
+    says why an issue with a ``claude/issue-<N>-*`` branch was still taken.
     """
     issues = snapshot.get("issues", []) or []
     open_prs = snapshot.get("openPRs", []) or []
     branches = snapshot.get("branches", []) or []
+    ahead_by = _snapshot_ahead_by(snapshot)
 
     eligible: list[dict[str, Any]] = []
     excluded: dict[str, str] = {}
     for issue in issues:
         reason = exclusion_reason(
-            issue, open_prs, branches, required_label, now=now
+            issue, open_prs, branches, required_label, now=now,
+            branch_ahead_by=ahead_by,
         )
         if reason is None:
             eligible.append(issue)
@@ -438,6 +528,16 @@ def select_issue(
     selected = eligible[0] if eligible else None
     deferred = [i["number"] for i in eligible[1:]]
 
+    # Branches the compare proved empty, among those that would otherwise
+    # have claimed one of the considered issues — the orphans this firing
+    # looked past. Sorted for a deterministic record.
+    empty_branches = sorted({
+        b
+        for issue in issues
+        for b in _issue_branches(branches, issue["number"])
+        if _known_empty(ahead_by.get(b))
+    })
+
     return {
         "selected": (selected["number"] if selected else None),
         "selected_title": (selected.get("title") if selected else None),
@@ -446,6 +546,7 @@ def select_issue(
         "deferred": deferred,
         "excluded": excluded,
         "required_label": required_label,
+        "empty_branches": empty_branches,
     }
 
 
@@ -470,6 +571,12 @@ def render_summary(record: dict[str, Any]) -> str:
     if record["deferred"]:
         deferred = ", ".join(f"#{n}" for n in record["deferred"])
         lines.append(f"- deferred to a later firing (cap 1): {deferred}")
+    if record.get("empty_branches"):
+        empty = ", ".join(f"`{b}`" for b in record["empty_branches"])
+        lines.append(
+            "- not a claim (no commits ahead of the default branch — an "
+            f"orphan, safe to delete): {empty}"
+        )
     if record["excluded"]:
         lines.append("- skipped:")
         for num, reason in sorted(record["excluded"].items(), key=lambda kv: int(kv[0])):

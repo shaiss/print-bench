@@ -19,7 +19,11 @@
 # value meaning no ship link ran at all. Every other value — 'success'
 # included — gets the full corroboration read below, and the disposition is
 # derived from what exists on GitHub:
-#   delivered  a claude/issue-<N>-* branch or an open closing PR exists
+#   delivered  a claude/issue-<N>-* branch carrying unmerged work (its compare
+#              against the default branch is not a literal ahead_by 0 —
+#              an orphan whose commits are all already on the default
+#              branch delivered nothing; tools/backlog-burn's selector
+#              reads the same rule) or an open closing PR exists
 #   declined   a 🚢 DECLINED / 🚦 DECISION NEEDED comment posted after the
 #              latest claim, that claim already reading SHIP-LOCK
 #              WITHDRAWN in the agent's own (non-death) wording, or a
@@ -237,11 +241,31 @@ death_marked() {
 }
 
 # stdin: branch names, one per line. $1: the issue number (validated as an
-# integer up front, so it needs no regex escaping). Exit 0 when a
-# claude/issue-<N>-* branch exists — the trailing "-" keeps issue 281 from
-# being corroborated by claude/issue-2811-*.
-branch_corroborates() {
-  grep -q "^claude/issue-$1-"
+# integer up front, so it needs no regex escaping). Prints every
+# claude/issue-<N>-* branch (nothing when there is none) — the trailing "-"
+# keeps issue 281 from matching claude/issue-2811-*.
+issue_branches() {
+  grep "^claude/issue-$1-" || true
+}
+
+# $1: the ahead_by a compare of the default branch against a claude/issue-<N>-*
+# branch reported. Exit 0 when the branch carries work the default branch
+# lacks — i.e. unless the value is exactly 0. A branch with nothing ahead is
+# an orphan whose every commit is already on the default branch (the #565
+# shape: its PR closed with head == base, the fix landed as another commit):
+# it corroborates nothing, so it is not a delivery. Anything that is not a
+# literal 0 — a count, "null", an empty string — reads as work, the same
+# fail-conservative rule tools/backlog-burn's selector applies: only a
+# positively observed zero releases a branch.
+branch_has_work() {
+  [ "$1" != "0" ]
+}
+
+# $1: a ref name. Prints it percent-encoded for a URL path with "/" kept
+# literal (a claude/issue-<N>-* name is path-shaped by design) — the same
+# encoding as tools/backlog-burn's urllib.parse.quote(ref, safe="/").
+ref_path() {
+  jq -rn --arg r "$1" '$r | @uri | gsub("%2F"; "/")'
 }
 
 # stdin: NDJSON PRs {ref, body}. $1: the issue number. Prints true/false: an
@@ -332,14 +356,27 @@ run_live() {
   fi
 
   # 2/3. Corroboration before the lock (the selector's own ordering): a
-  # claude/issue-<N>-* branch or a closing PR means the claim is backed by
-  # real work in flight — delivered, whatever the ship links' exit codes
-  # said (a link can time out a minute after pushing).
-  local branches prs comments state
+  # claude/issue-<N>-* branch carrying unmerged work or a closing PR means
+  # the claim is backed by real work in flight — delivered, whatever the
+  # ship links' exit codes said (a link can time out a minute after
+  # pushing). A matching branch with nothing ahead of the default branch is
+  # an orphan, not a delivery: scoring it delivered let a run that claimed
+  # an issue with a stale branch, then died, stay green with its lock
+  # standing. A failed compare is the usual fail-loud exit 1 — it withdraws
+  # nothing, so unknown never reads as "empty" here either.
+  local branches matching default b ahead prs comments state
   branches="$(gh_api --paginate "/repos/$REPO/branches?per_page=100" --jq '.[].name')"
-  if branch_corroborates "$ISSUE" <<<"$branches"; then
-    echo "::notice::a claude/issue-$ISSUE-* branch exists — the run delivered; not withdrawing"
-    conclude true false false false "delivered (a corroborating branch exists)"
+  matching="$(issue_branches "$ISSUE" <<<"$branches")"
+  if [ -n "$matching" ]; then
+    default="$(gh_api "/repos/$REPO" --jq '.default_branch')"
+    while IFS= read -r b; do
+      ahead="$(gh_api "/repos/$REPO/compare/$(ref_path "$default")...$(ref_path "$b")" --jq '.ahead_by')"
+      if branch_has_work "$ahead"; then
+        echo "::notice::$b carries unmerged work (ahead_by: ${ahead:-unknown}) — the run delivered; not withdrawing"
+        conclude true false false false "delivered (a corroborating branch with unmerged work exists)"
+      fi
+      echo "::notice::$b has no commits ahead of $default — an orphan, not a delivery"
+    done <<<"$matching"
   fi
 
   prs="$(gh_api --paginate "/repos/$REPO/pulls?state=open&per_page=100" \
@@ -644,13 +681,26 @@ EOF
     || st_fail "a Bot type with an empty login was read as a defer"
   echo "ok    selftest: deferred detection (in-window / older-claimless / older-claimed / before-claim / mid-line / stale / none / author)"
 
-  # -- branch corroboration + the near-miss --------------------------------
-  printf 'main\nclaude/issue-281-fix-thing\n' | branch_corroborates 281 \
-    || st_fail "claude/issue-281-* did not corroborate issue 281"
-  if printf 'main\nclaude/issue-2811-x\n' | branch_corroborates 281; then
-    st_fail "claude/issue-2811-* wrongly corroborated issue 281"
+  # -- branch matching + the near-miss --------------------------------------
+  [ "$(printf 'main\nclaude/issue-281-fix-thing\n' | issue_branches 281)" = "claude/issue-281-fix-thing" ] \
+    || st_fail "claude/issue-281-* was not matched for issue 281"
+  [ -z "$(printf 'main\nclaude/issue-2811-x\n' | issue_branches 281)" ] \
+    || st_fail "claude/issue-2811-* was wrongly matched for issue 281"
+  # -- unmerged work: only a literal 0 ahead releases a branch -------------
+  # The #565 orphan (nothing ahead of the default branch) corroborates
+  # nothing; a count, or anything that is not a clean 0 (a compare whose
+  # ahead_by came back null or empty), stays work — the selector's
+  # fail-conservative rule.
+  if branch_has_work 0; then
+    st_fail "a branch with 0 commits ahead was read as carrying work"
   fi
-  echo "ok    selftest: branch corroboration + near-miss (issue-2811 vs 281)"
+  for ahead in 1 12 null ''; do
+    branch_has_work "$ahead" \
+      || st_fail "ahead_by '$ahead' was read as no work — only a literal 0 may release a branch"
+  done
+  [ "$(ref_path 'claude/issue-1-a#b c')" = 'claude/issue-1-a%23b%20c' ] \
+    || st_fail "ref_path did not percent-encode a ref while keeping its slashes"
+  echo "ok    selftest: branch matching + near-miss (issue-2811 vs 281) + unmerged-work rule (0 releases; count/null/empty keep)"
 
   # -- closing keywords + the #9-vs-#95 boundary ---------------------------
   [ "$(printf '{"ref": "feature-x", "body": "Closes #38"}\n' | pr_corroborates 38)" = "true" ] \
@@ -714,6 +764,10 @@ case "$joined" in
   *"/pulls?state=open"*) fixture=pulls ;;
   *"/comments?per_page=100"*) fixture=comments ;;
   *"repos/o/r/labels"*) fixture=labels ;;
+  # compare-<base>...<head>, slashes folded to "_": the fixture's NAME pins
+  # which base the script compared against and which branch it asked about.
+  *"/compare/"*) fixture="compare-$(printf '%s' "${joined##*/compare/}" | tr '/' '_')" ;;
+  "api /repos/o/r") fixture=repo ;;
   *) echo "gh stub: unhandled api call: $joined" >&2; exit 1 ;;
 esac
 # -r: gh api --jq prints string results raw (the ensure-label idiom greps
@@ -756,12 +810,73 @@ STUB
     || st_fail "the dead case did not post the withdrawal comment"
 
   # Row 2: exit 0 with a corroborating branch → delivered, nothing posted.
+  # The branch carries unmerged work: its compare against the default branch
+  # (read from the repo, "trunk" here, never assumed to be main — the
+  # fixture's file name pins the base) reports commits ahead.
   e2e_fix branch comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
   e2e_fix branch branches '[{"name": "claude/issue-1-the-fix"}]'
   e2e_fix branch pulls '[]'
+  e2e_fix branch repo '{"default_branch": "trunk"}'
+  e2e_fix branch 'compare-trunk...claude_issue-1-the-fix' '{"ahead_by": 2, "behind_by": 0}'
   e2e branch success
   grep -qx 'delivered=true' "$tmp/branch-out" || st_fail "exit-0 + branch did not emit delivered=true"
   no_posts branch
+
+  # Row 2b (the #565 shape): the only claude/issue-1-* branch is an orphan —
+  # nothing ahead of the default branch — and the run claimed, then died.
+  # Not delivered: dead, the claim is withdrawn. Before the unmerged-work
+  # rule this read "delivered" and the dead run's lock stood, green.
+  e2e_fix orphan comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix orphan branches '[{"name": "claude/issue-1-scout-cap-state"}]'
+  e2e_fix orphan pulls '[]'
+  e2e_fix orphan repo '{"default_branch": "main"}'
+  e2e_fix orphan 'compare-main...claude_issue-1-scout-cap-state' '{"ahead_by": 0, "behind_by": 40}'
+  e2e orphan success
+  grep -qx 'delivered=false' "$tmp/orphan-out" || st_fail "an orphan branch (0 ahead) was scored delivered"
+  grep -qx 'withdrawn=true' "$tmp/orphan-out" || st_fail "a dead run behind an orphan branch did not withdraw its claim"
+  grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/orphan-postlog" \
+    || st_fail "the orphan-branch death did not post the withdrawal comment"
+
+  # Row 2c: an orphan beside a branch with real work → delivered (any one
+  # branch carrying work corroborates), nothing posted.
+  e2e_fix mixed comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix mixed branches '[{"name": "claude/issue-1-old"},{"name": "claude/issue-1-new"}]'
+  e2e_fix mixed pulls '[]'
+  e2e_fix mixed repo '{"default_branch": "main"}'
+  e2e_fix mixed 'compare-main...claude_issue-1-old' '{"ahead_by": 0}'
+  e2e_fix mixed 'compare-main...claude_issue-1-new' '{"ahead_by": 3}'
+  e2e mixed success
+  grep -qx 'delivered=true' "$tmp/mixed-out" || st_fail "an orphan beside a branch with work was not scored delivered"
+  no_posts mixed
+
+  # Row 2d: a compare whose payload has no ahead_by → unknown, which is
+  # work (fail-conservative, the selector's rule): delivered, nothing posted.
+  e2e_fix unknown comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix unknown branches '[{"name": "claude/issue-1-the-fix"}]'
+  e2e_fix unknown pulls '[]'
+  e2e_fix unknown repo '{"default_branch": "main"}'
+  e2e_fix unknown 'compare-main...claude_issue-1-the-fix' '{"message": "no ahead_by here"}'
+  e2e unknown success
+  grep -qx 'delivered=true' "$tmp/unknown-out" || st_fail "a compare with no ahead_by released the branch (unknown must read as work)"
+  no_posts unknown
+
+  # Row 2e: the compare request itself fails (no fixture → the stub exits
+  # 1) → the script's fail-loud exit 1, with no output and nothing posted:
+  # an unreadable branch never reads as empty, so no claim is withdrawn.
+  e2e_fix cmpfail comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix cmpfail branches '[{"name": "claude/issue-1-the-fix"}]'
+  e2e_fix cmpfail pulls '[]'
+  e2e_fix cmpfail repo '{"default_branch": "main"}'
+  : > "$tmp/cmpfail-postlog"; : > "$tmp/cmpfail-out"
+  rc=0
+  PATH="$tmp/bin:$PATH" GH_TOKEN=stub GH_STUB_FIXTURES="$tmp/cmpfail-fix" \
+    GH_STUB_POSTLOG="$tmp/cmpfail-postlog" GITHUB_OUTPUT="$tmp/cmpfail-out" \
+    GITHUB_STEP_SUMMARY='' "$SELF" \
+    --repo o/r --issue 1 --agent-outcome success --run-url u --routine backlog-burn \
+    >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 1 ] || st_fail "a failed compare exited $rc, not 1 (fail loud)"
+  [ ! -s "$tmp/cmpfail-out" ] || st_fail "a failed compare still emitted a disposition: $(cat "$tmp/cmpfail-out")"
+  no_posts cmpfail
 
   # Row 3: exit 0 with a DECLINED comment after the claim → declined, nothing
   # posted (the lock is left to age out through the selector's staleness, per
@@ -885,6 +1000,8 @@ STUB
   e2e_fix deferbranch comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix deferbranch branches '[{"name": "claude/issue-1-the-fix"}]'
   e2e_fix deferbranch pulls '[]'
+  e2e_fix deferbranch repo '{"default_branch": "main"}'
+  e2e_fix deferbranch 'compare-main...claude_issue-1-the-fix' '{"ahead_by": 1}'
   e2e deferbranch success
   grep -qx 'delivered=true' "$tmp/deferbranch-out" || st_fail "exit-0 + branch + DEFERRED did not emit delivered=true"
   grep -qx 'declined=false' "$tmp/deferbranch-out" || st_fail "the branch-plus-DEFERRED case wrongly emitted declined=true"
@@ -904,7 +1021,7 @@ STUB
   grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/esc-postlog" \
     || st_fail "the escalation did not post the decision comment"
 
-  echo "ok    selftest: end-to-end dispositions (dead / delivered / declined / self-withdrawn / deferred / prior-defer / escalated)"
+  echo "ok    selftest: end-to-end dispositions (dead / delivered / orphan-branch / unknown-compare / failed-compare / declined / self-withdrawn / deferred / prior-defer / escalated)"
 
   # -- #670: cleanup runs the start commit's script, not the tree's copy -----
   # The scheduled workflows pin the cleanup script to the commit the job
