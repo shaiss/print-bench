@@ -31,6 +31,8 @@ rail_t = 1.4;
 rail_gap = 0.3;
 // Near rail resumes this far ahead of the nose face (mm)
 nose_clear = 1;
+// Joint offset (mm): keeps fixture faces that meet the pawl off its planes
+joint_e = 0.05;
 
 // ---- derived (linear unroll at the root circle) ------------------------
 pitch_mm = tooth_pitch_arc();
@@ -59,16 +61,19 @@ module coupon() {
   linear_extrude(rack_h) polygon(rack_pts());
   // the pawl, full production section, nose face at x = 0
   linear_extrude(pawl_w) polygon(pawl_pts_linear());
-  // clamping block burying the pawl root (mirrors the demonstrator's sector)
-  translate([-block_back_u, web_y, 0])
-    cube([block_back_u - block_front_u, block_y_out - web_y, pawl_w]);
+  // clamping block burying the pawl root (mirrors the demonstrator's sector).
+  // Its underside sits joint_e ABOVE the pawl's underside plane: flush, the
+  // two coincide with the rail's underside too, and the Manifold backend
+  // unions three coplanar faces into a non-manifold seam (issue #668 CI).
+  translate([-block_back_u, web_y + joint_e, 0])
+    cube([block_back_u - block_front_u, block_y_out - web_y - joint_e, pawl_w]);
   // tooth-side channel wall, interrupted by the pawl: behind the block (its
-  // end reaches 3 mm INSIDE the block's x-span — a tangent face-only contact
-  // leaves the fixture as two shells, which the body count would read as a
-  // third body), and ahead of the nose; between them the pawl's own underside
-  // is the wall
+  // end stops 0.5 mm short of the pawl's root face, INSIDE the block's x-span
+  // — a tangent face-only contact leaves the fixture as two shells, and an
+  // end flush on the pawl's underside is the same coplanar seam), and ahead of
+  // the nose; between them the pawl's own underside is the wall
   translate([x_rack0, web_y, 0])
-    cube([-(block_front_u + 3) - x_rack0, rail_t, pawl_w]);
+    cube([-(pawl_l + 0.5) - x_rack0, rail_t, pawl_w]);
   translate([nose_clear, web_y, 0])
     cube([x_rack1 - nose_clear, rail_t, pawl_w]);
   // far-side rail: the click reaction pushes the strip against this
@@ -77,11 +82,12 @@ module coupon() {
   // z-confinement bridges over the strip, 2 layers above it (z_tol) —
   // printed between the rails; they reach 0.2 mm INTO the near-rail band (or
   // the block, for the one behind the pawl) so every fixture joint is
-  // volumetric, not face-tangent. The −20 bridge lands over the block's clamp
+  // volumetric, not face-tangent. The −20.5 bridge lands over the block's clamp
   // zone — frame-welds to frame, clear of the flexure (which starts at
   // x = −block_front_u = −13) — and is what ties the far-rail/ahead-rail group
   // to the pawl/block group, so the fixture is ONE body.
-  for (bx = [-20, 6, 16])
+  // (−20.5, not −20: its faces stay off the pawl's 1 mm-spaced beam vertices)
+  for (bx = [-20.5, 6, 16])
     translate([bx, -rack_body - rail_gap - rail_t, rack_h + z_tol])
       cube([6, web_y + rack_body + rail_gap + rail_t + 0.2,
             pawl_w - rack_h - z_tol]);

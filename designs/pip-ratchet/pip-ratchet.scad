@@ -306,10 +306,12 @@ module main() {
     fixed();
   else if (part == "coupon")
     ;                                     // the coupon wrapper's geometry
-  else {
+  else if (part == "") {
     fixed();
     wheel();
-  }
+  } else
+    assert(false, str("unknown part \"", part, "\" — expected \"\", wheel, ",
+                      "frame, fitcheck, fitcheck_neg, fused or coupon"));
 }
 
 main();
