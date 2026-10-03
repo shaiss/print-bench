@@ -1,0 +1,7 @@
+# Structural refusal (selftest: must FAIL before rendering): nested_phase is
+# assigned only inside a module body in broken.scad, never at top level. A
+# -D cannot replace a nested assignment, so the sweep would leave top-level
+# geometry unmoving — reject it as not a top-level variable.
+sweep nested_phase
+empty broken-solid
+empty-control broken-solid

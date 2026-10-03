@@ -76,7 +76,9 @@ shell:
   **binds the write to the run's candidate set** and **rejects a duplicate**
   disposition on an issue it (or a prior run) already commented on; it prepends
   the advisory framing to every body, applies **no label**, and **caps
-  dispositions per run** via a run-scoped in-process counter.
+  dispositions per run** — counted in a state file every link step of the chain
+  walk shares (`ASSESSOR_CAP_STATE`, issue #569), so the bound spans the whole
+  walk and not one server process.
 
 ### 2. `--permission-mode dontAsk` runs unattended; the deny backstop restricts tools
 
