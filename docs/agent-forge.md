@@ -143,7 +143,7 @@ dedup, and for `needs-decision` threads whose answer is a small tool).
 | Brief flood | `WRIGHT_MAX_BRIEFS` (tool-enforced, walk-spanning via the shared `WRIGHT_CAP_STATE` file — #566) + `WRIGHT_MAX_PENDING` backpressure (trusted bash) |
 | Duplicate verdicts / re-judging | verdict-label re-read + marker dedup, both at write time |
 | Verdict label applied but comment lost | label-first ordering — the label is the operative record; the next Select excludes the brief, so no re-rule |
-| Sign-off model chain head dies | the `wright-signoff` chain walks past it since #544 (labeler-style): three GLM links, then the Anthropic tail (`claude-sonnet-5` → `claude-haiku-4-5`), and total exhaustion runs `provider-triage` → `classify`, escalating a human-fixable cause once through the `needs-decision` gate. Reeve's `routine-dead` detector does **not** watch wright.yml yet (`ROUTINE_WORKFLOWS` covers the four #326 routines) — extending it is a named first agent-brief (see Future work) |
+| Sign-off model chain head dies | the `wright-signoff` chain walks past it since #544 (labeler-style): three GLM links, then the Anthropic tail (`claude-sonnet-5` → `claude-haiku-4-5`), and total exhaustion runs `provider-triage` → `classify`, escalating a human-fixable cause once through the `needs-decision` gate. A forge death-streak itself is visible to Reeve's `routine-dead` since #745 (`wright.yml` and `growth-board-sync.yml` joined `ROUTINE_WORKFLOWS`, and the `agent-brief-queue` detector surfaces briefs pending / parked / declined beside it) |
 | Propose model dies | the `wright` chain walks past it since #544 (scout precedent): a dead GLM head falls through to the Anthropic tail (`claude-sonnet-5` → `claude-haiku-4-5`), and total exhaustion runs `provider-triage` → `classify`, escalating a human-fixable cause once through the `needs-decision` gate; sign-off is unaffected (separate job, its own walk) |
 | A build run dies mid-flight after arming | the burn's existing `routine-lock-cleanup.sh` (SHIP-LOCK withdrawal + red-on-death) — the forge adds no new lock machinery |
 | An armed brief is actually too big | `/ship-issue` declines → `declined-too-big` → the chunker splits → the burn ships the pieces (the existing loop) |
@@ -191,9 +191,12 @@ Shipped fully disarmed. To turn the autopilot on:
   `claude-sonnet-5` → `claude-haiku-4-5`); what remains is putting the judge's
   HEAD on the other vendor, so a proposal and its verdict never share a model
   on the common path.
-- Reeve watching the forge: `tools/reeve`'s `ROUTINE_WORKFLOWS` predates
-  wright.yml, so a forge death-streak is red in Actions but absent from the
-  bench-health report — adding it (plus a pending/parked agent-brief
-  detector) is a natural first agent-brief.
+- Reeve watching the forge: **landed at #745** — `tools/reeve`'s
+  `ROUTINE_WORKFLOWS` now includes `wright.yml` and `growth-board-sync.yml`,
+  and the `agent-brief-queue` detector (open briefs pending / parked /
+  declined) sits beside `routine-dead` in the bench-health report. The
+  optional tuple mates (`reeve-growth.yml`, `adoption-assessor.yml`,
+  `product-scout.yml`) and an oldest-pending age signal remain open
+  follow-ups.
 - Per-agent memory for Wright (issue #426's pilot order applies) so a
   declined-gap class stops being re-derived from scratch each firing.

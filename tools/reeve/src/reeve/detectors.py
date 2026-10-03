@@ -18,9 +18,10 @@ The snapshot (built by ``signals.gather_snapshot``) is a plain dict::
 
 The optional ``runHealth`` block (``github.gather_run_health``, issue #313)
 carries ``gatheredAt``, per-routine ``workflows`` run conclusions, the open
-``issues`` holding an active 🚢 SHIP-LOCK claim, and the ``openPRs`` /
-``branches`` that would corroborate one. It is absent on an offline run
-(no ``--repo``), and the two run-health detectors then read "not evaluated".
+``issues`` holding an active 🚢 SHIP-LOCK claim, the ``openPRs`` /
+``branches`` that would corroborate one, the open ``adoptionStudies`` and the
+open ``agentBriefs`` (#745). It is absent on an offline run
+(no ``--repo``), and the run-health detectors then read "not evaluated".
 
 Gate-run records carry the telemetry schema (issue #93): ``meta.designs``
 (``"ALL"`` for a full-catalog run, else a scoped list), ``gate.parts`` (per
@@ -267,6 +268,58 @@ def adoption_study(studies: list[dict]) -> list[dict]:
     return findings
 
 
+# Labels that take an open agent-brief out of the forge's queue without a
+# flagged state: armed for the burn, or resolved through decide.yml. Mirrors
+# the resolved half of wright.yml's sign-off Select search (which also
+# excludes needs-decision / wright-declined — those are flagged states here).
+RESOLVED_BRIEF_LABELS = ("autonomy-ok", "decision-approved", "decision-rejected")
+
+
+def agent_brief_queue(briefs: list[dict]) -> list[dict]:
+    """Open ``agent-brief`` issues by forge state — the queue, not a verdict.
+
+    The #745 companion to ``routine_dead``: a forge death-streak shows up as a
+    brief queue that stopped moving, so the report surfaces the backlog's state
+    beside the run health that explains it. Each brief carries its own
+    ``labels`` (``github.gather_run_health`` only lists **open** issues, so a
+    ruled-and-closed brief never reaches here). The state is read from those
+    labels, in precedence order:
+
+    - ``needs-decision`` → ``needs-decision`` (parked at the HITL gate — the
+      actionable one, so it outranks a co-present decline);
+    - ``wright-declined`` → ``wright-declined`` (ruled against; still counted,
+      because a pile of declined briefs is itself backlog signal);
+    - ``autonomy-ok`` → not flagged (approved and armed — the backlog burn's
+      queue now, not the forge's);
+    - ``decision-approved`` / ``decision-rejected`` → not flagged (resolved
+      through the decision gate: a human ruled via /decide, which replaces
+      ``needs-decision``, and a decided brief is never re-judged);
+    - none of them → ``pending`` (filed, no verdict yet).
+
+    The not-flagged set is exactly the resolved set ``wright.yml``'s sign-off
+    Select excludes from its pending candidates (``RESOLVED_BRIEF_LABELS``),
+    so the report's "pending" can never disagree with what the forge will
+    actually judge.
+    """
+    findings: list[dict] = []
+    for brief in briefs:
+        labels = brief.get("labels", [])
+        if "needs-decision" in labels:
+            state = "needs-decision"
+        elif "wright-declined" in labels:
+            state = "wright-declined"
+        elif any(lbl in RESOLVED_BRIEF_LABELS for lbl in labels):
+            continue  # armed or decided — out of the forge's queue
+        else:
+            state = "pending"
+        findings.append(
+            {"number": brief["number"], "title": brief.get("title", ""),
+             "state": state, "url": brief.get("url", "")}
+        )
+    findings.sort(key=lambda f: f["number"])
+    return findings
+
+
 def score_regression(records: list[dict], score_drop: int, score_floor: float) -> list[dict]:
     """Parts below the score floor, or down by ≥ ``score_drop`` vs the prior run.
 
@@ -363,13 +416,14 @@ def evaluate(snapshot: dict[str, Any], cfg: Any) -> dict[str, Any]:
         findings["gate-failing"] = gate_failing(records[-1])
 
     # Run health is opt-in (issue #313): absent means an offline run, and the
-    # "not evaluated is never silently empty" rule applies to both detectors.
+    # "not evaluated is never silently empty" rule applies to all its detectors.
     run_health = snapshot.get("runHealth")
     if run_health is None:
         reason = "no GitHub run-health gathered (offline run — pass --repo to enable)"
         not_evaluated["routine-dead"] = reason
         not_evaluated["lock-leak"] = reason
         not_evaluated["adoption-study"] = reason
+        not_evaluated["agent-brief-queue"] = reason
     else:
         rh_now = run_health.get("gatheredAt") or snapshot["generatedAt"]
         findings["routine-dead"] = routine_dead(
@@ -381,6 +435,9 @@ def evaluate(snapshot: dict[str, Any], cfg: Any) -> dict[str, Any]:
         )
         findings["adoption-study"] = adoption_study(
             run_health.get("adoptionStudies", [])
+        )
+        findings["agent-brief-queue"] = agent_brief_queue(
+            run_health.get("agentBriefs", [])
         )
 
     all_with_parts = [r for r in _all_records(records) if r.get("gate", {}).get("parts")]

@@ -37,12 +37,18 @@ The primary pulse is entirely file-read from the committed tree:
 Plus one opt-in, GET-only live read (`src/reeve/github.py`, the groomer's
 pattern; issue #313) — only when `--repo` is passed:
 
-- **Workflow-run conclusions** for the scheduled routines (`design-run.yml`,
-  `backlog-burn.yml`, `chunker.yml`, `labeler.yml`) — the ten newest completed
-  runs each.
+- **Workflow-run conclusions** for the scheduled workflows on the watch list
+  (`ROUTINE_WORKFLOWS`, the single source of truth: `design-run.yml`,
+  `backlog-burn.yml`, `chunker.yml`, `labeler.yml`, `growth-twitter.yml`,
+  `wright.yml`, `growth-board-sync.yml` — the forge and the growth-board lens
+  joined at #745, when the board's sync had hard-failed on rate-limit for days
+  without ever reaching this report) — the ten newest completed runs each.
 - **Open issues carrying an active 🚢 SHIP-LOCK** claim, and the open PRs and
   `claude/issue-<N>-*` branches that would corroborate one (the selector's
   lock semantics, mirrored from `tools/backlog-burn`, not imported).
+- **Open `adoption-study` and `agent-brief` issues** with their labels (the
+  same listing, no extra request) — the inputs of the `adoption-study` and
+  `agent-brief-queue` detectors.
 
 The same `github.py` serves the greenlight loop's trusted Select step (issue
 #443): `gather_greenlight_queue` lists the open `needs-decision` issues and
@@ -59,14 +65,16 @@ live in `pushthrough.py`, never here.
 
 ## The detectors
 
-Eight pure functions of one snapshot, deterministic order, byte-stable report:
+Ten pure functions of one snapshot, deterministic order, byte-stable report:
 
 | Detector | Fires when |
 |---|---|
 | `budget-tightening` | a committed preview's size headroom is under `low_headroom_pct` (or over budget) |
 | `gate-failing` | the latest run has pre-fails, a part with no score / criticals / a failed slice, or a false derivative override |
-| `routine-dead` | none of a routine's last `routine_dead_runs` completed runs succeeded and at least one hard-failed (a pure-cancelled streak is queue noise) |
+| `routine-dead` | none of a watched workflow's last `routine_dead_runs` completed runs succeeded and at least one hard-failed (a pure-cancelled streak is queue noise) |
+| `agent-brief-queue` | an open forge brief is pending / parked `needs-decision` / `wright-declined` — the queue state beside `routine-dead`, so a forge death-streak shows as a backlog that stopped moving (#745; an armed brief is not flagged) |
 | `lock-leak` | an active 🚢 SHIP-LOCK is older than `lock_leak_hours` with no corroborating branch or closing PR — a killed run's ghost claim (issue #312) |
+| `adoption-study` | an open study submission has no `disposition:*` label yet, or is flagged `disposition:worth-raising` |
 | `score-regression` | a part is below `score_floor`, or down ≥ `score_drop` vs the prior full-catalog run |
 | `walltime-regression` | a design's gate wall time rose ≥ `walltime_ratio`× (and past `walltime_min_seconds`) |
 | `archived-creep` | a design newly dropped out of gating vs the prior full-catalog run |
@@ -75,7 +83,7 @@ Eight pure functions of one snapshot, deterministic order, byte-stable report:
 Comparisons only use full-catalog (`designs=ALL`) runs — a scoped run gates
 fewer parts. A detector whose input is absent is reported **not evaluated** with
 a reason, never silently empty (the groomer's honesty rule); an offline run
-(no `--repo`) reports both run-health detectors that way.
+(no `--repo`) reports every run-health detector that way.
 
 ## Advisory-only, checkable
 
