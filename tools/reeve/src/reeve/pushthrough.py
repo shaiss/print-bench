@@ -442,7 +442,10 @@ def run_poll(
         classification = approval.classify(labels, title, body)
         mode, categories = approval.mode_for(classification, rules)
         loosening = approval.loosening_labels(labels, rules)
-        if mode != approval.MODE_DENY and loosening:
+        # Read the label history only when it could matter: no deny, and
+        # every category seen is an auto category (a text hit on a non-auto
+        # category already pins this thread at ask, whoever applied a label).
+        if mode != approval.MODE_DENY and loosening and classification.categories <= rules.auto:
             events = github.list_label_events(repo, token, thread["number"])
             verified = [
                 label for label in loosening

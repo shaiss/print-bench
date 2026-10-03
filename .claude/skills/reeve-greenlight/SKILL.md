@@ -85,9 +85,10 @@ the workflow-selected issues.
   once its 👎 grace window passes — so on such an issue, write the YES as if it
   were the final word, and if the thread shows the yes-branch reaching beyond
   documentation despite the label, say so plainly in the reasoning so the
-  human sees it inside the window. You are never handed a decision in an
-  `approve_deny` category (gate machinery is human-only); the Select step
-  drops it. Nothing about the verdict or the wrapper call changes.
+  human sees it inside the window. You are never handed a decision labeled
+  for an `approve_deny` category (`gate-machinery` is human-only); the Select
+  step drops it. A decision whose text merely names gate machinery is still
+  handed to you — it can never auto-approve, so a human reacts to your call. Nothing about the verdict or the wrapper call changes.
 
 ## What to do, per issue
 

@@ -298,10 +298,25 @@ def test_auto_yields_to_an_authorized_decide(monkeypatch):
 
 
 def _deny_thread(number=401):
+    # Deny takes the category's label (owner ruling 2026-10-03): text naming
+    # gate machinery only blocks auto.
     thread = greenlight_thread(number, verdict="yes", arm=True)
     thread["title"] = "Tighten the gate"
-    thread["body"] += "\n\nThis edits `.github/workflows/ci.yml`."
+    thread["labels"] = ["needs-decision", GATES_LABEL]
     return thread
+
+
+def test_gate_text_without_the_label_still_resolves_on_an_upvote(monkeypatch):
+    # Text alone never denies: a thread whose body names ci.yml stays at ask,
+    # so an authorized 👍 approves it exactly as before #446.
+    thread = greenlight_thread(402, verdict="yes", arm=False)
+    thread["body"] += "\n\nThis edits `.github/workflows/ci.yml`."
+    writes, _ = install_classified(
+        monkeypatch, threads=[thread], permissions={"shaiss": "admin"},
+        reactions={1302: [react("+1", "shaiss")]})
+    results = pushthrough.run_poll(REPO, TOKEN, PAT, now=NEXT_DAY, rules=OWNER_RULES)
+    assert results[0]["outcome"] == "approved"
+    assert _label_posts(writes, 402)[0] == ["decision-approved"]
 
 
 def test_deny_thread_with_an_upvote_is_never_written(monkeypatch):
@@ -338,13 +353,14 @@ def test_deny_thread_with_a_downvote_is_never_written(monkeypatch):
 
 def test_docs_label_cannot_launder_gate_text(monkeypatch):
     # A verified docs-only label on a thread whose body names gate machinery
-    # is a deny: tighten wins, and no label history is even read.
+    # cannot auto-approve: the text pins it at ask (a human must react), and
+    # no label history is even read, since it could not loosen anything.
     thread = docs_thread(303, body_extra="\nalso `scripts/reeve-perms-check.sh`")
     writes, gets = install_classified(
         monkeypatch, threads=[thread], permissions={"shaiss": "admin"},
         label_events={303: [(DOCS_LABEL, "shaiss")]})
     results = pushthrough.run_poll(REPO, TOKEN, PAT, now=NEXT_DAY, rules=OWNER_RULES)
-    assert results[0]["outcome"] == "wait" and "gates" in results[0]["reason"]
+    assert results[0]["outcome"] == "wait"
     assert writes == []
     assert _events_url(303) not in gets
 
@@ -419,11 +435,13 @@ def test_select_never_hands_over_a_deny_issue(tmp_path, monkeypatch, capsys):
     rc = main(["greenlight-select", "--repo", REPO, "--conf", conf, "--gh-output", str(gh_out)])
     assert rc == 0
     captured = capsys.readouterr()
-    assert captured.out == "501 503\n"       # text-denied 502 and label-denied 504 dropped
-    assert "#502 skipped" in captured.err and "#504 skipped" in captured.err
+    # Label-denied 504 is dropped; text-only 502 is NOT (text never denies on
+    # its own — owner ruling 2026-10-03), so Reeve still drafts on it.
+    assert captured.out == "501 502 503\n"
+    assert "#504 skipped" in captured.err and "#502 skipped" not in captured.err
     written = gh_out.read_text(encoding="utf-8")
-    assert "issues=501 503\n" in written
-    assert "denied=502 504\n" in written
+    assert "issues=501 502 503\n" in written
+    assert "denied=504\n" in written
 
 
 def test_select_without_a_deny_rule_hands_over_everything(tmp_path, monkeypatch, capsys):
@@ -436,7 +454,7 @@ def test_select_without_a_deny_rule_hands_over_everything(tmp_path, monkeypatch,
 
 def test_select_drops_deny_before_the_cap(tmp_path, monkeypatch, capsys):
     # A denied issue costs no slot: cap 2 still yields two draftable issues.
-    _select_fixture(monkeypatch, [ISSUES[1], ISSUES[0], ISSUES[2]])
+    _select_fixture(monkeypatch, [ISSUES[3], ISSUES[0], ISSUES[2]])
     conf = _conf(tmp_path, "approve_deny: gates\ngreenlight_cap: 2\n")
     assert main(["greenlight-select", "--repo", REPO, "--conf", conf]) == 0
     assert capsys.readouterr().out == "501 503\n"
