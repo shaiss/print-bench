@@ -268,6 +268,8 @@ surfaces studies awaiting a read live in
   archived sushi-battleship),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
+  `helical-window.scad` (the ovodyo signature slot as a cut-through or
+  debossed brand-mark cutter, with a sever guard),
   `bevel.scad` (FDM bevel and spur gear pairs from one generator and one
   clearance, on BOSL2's gears),
   each with a `*-demo.scad` regression render, plus vendored
