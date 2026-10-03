@@ -127,7 +127,8 @@ the keyless report and:
   `provider-triage` escalation (its body carries the `<!--
   provider-escalation:<reason> -->` marker — one shared issue per cause since
   #550, which also covers the Oracle's escalations): an account/key ask with a
-  fixed remedy is not a decision a charter verdict can rule on;
+  fixed remedy is not a decision a charter verdict can rule on — and any in a
+  standing `approve_deny` category, which is human-only (#446, below);
 - runs the drafter (`/reeve-greenlight`, `.claude/skills/reeve-greenlight/`)
   with `--permission-mode dontAsk` over the #442 wrapper — its only shell
   surface — behind `.claude/reeve-settings.json`, its writes bound to the
@@ -185,6 +186,67 @@ tests); `pushthrough.py` is the one write seam; `test_pushthrough.py` pins the
 five Done-when cases from the issue, including the injected mid-sequence
 failure that must leave `decision-approved` set with `needs-decision` still in
 place — never the reverse.
+
+### Standing approval modes (issue #446)
+
+The owner's reviewed, per-category standing rules — the session-permission-mode
+analogue #296 named — in `.github/reeve.conf`, over a closed category
+vocabulary defined in `src/reeve/approval.py` (`docs`, `gates`):
+
+```
+approve_auto: docs     # a YES resolves with no reaction, after the 👎 grace window
+approve_deny: gates    # human only: no greenlight drafted, never resolved
+```
+
+Everything in neither list **asks** — #444's behaviour exactly. Both keys are
+strict comma lists (an unknown category, a repeat, or a category in both lists
+fails the parse) and both default to empty, so a conf without them — or a poll
+never handed the conf — auto-approves nothing and denies nothing. The shipped
+set is the owner's 2026-08-30 ruling on #446: auto-approve doc-only
+follow-ups, deny gate machinery, everything else asks.
+
+A parked decision is an issue, not a PR — there are no changed paths — so the
+classification reads the two deterministic signals it has, **asymmetrically**:
+
+- **only a trusted signal loosens.** An issue reaches `auto` only through its
+  category's label (`docs` → `docs-only`), and only when the label's latest
+  applier — read from the issue's label events (`github.list_label_events`) —
+  is a human whose real permission is write-level: the bar a 👍 clears. A
+  label a bot applied (`github-actions[bot]` or any `[bot]` App) never
+  loosens, because an agentic routine reading untrusted issue text may hold
+  `issues: write`. `docs-only` is deliberately not the generic
+  `documentation` label, which has been applied to issues whose fix shipped a
+  check script.
+- **untrusted text only tightens.** The title and body can place an issue in
+  `gates` (it names a `*-check.sh`, a perms-check, `gate.sh`, `ci.yml`, a
+  `*-settings.json` backstop or the shared `.claude/settings.json` — the
+  owner's list), as can the `gate-machinery` label from anyone; neither can
+  ever vouch for an `auto` category. Text cannot tell "touches" from
+  "mentions", so an issue that names `gate.sh` only as its verification step
+  is denied too — Reeve stays silent and a human rules, the recoverable
+  direction.
+
+Most restrictive wins — deny > ask > auto — and a mix of an auto category with
+anything else asks. What each mode does:
+
+- **deny** — `reeve greenlight-select` drops the issue before the cap (named on
+  stderr and in `denied=`), so the drafter is never handed it and the wrapper,
+  bound to the selected set, refuses a post on it; the poll writes nothing to a
+  denied thread — no approval even on a 👍, no overrule reply on a 👎. Only a
+  human `/decide` resolves it.
+- **auto** — a **YES** greenlight with no 👎 resolves once the
+  `AUTO_APPROVE_GRACE` window (20h from its post — under the daily cadence, so
+  the next scheduled run always qualifies and a same-day `workflow_dispatch`
+  never does) has passed: decide.yml's sequence exactly as for a 👍, `arm=1`
+  arming included, with the ledger row and the reply naming the rule
+  (`standing-rule:docs`), never a person. A 👍 still resolves at once, a 👎
+  still overrules, a `/decide` still outranks, and a **NO** still asks.
+- **ask** — unchanged.
+
+`approval.py` is pure (held to the package's purity scan);
+`tests/test_approval.py` pins the classification and the conf keys,
+`tests/test_approval_poll.py` the poll, the Select step and the workflow's
+`--conf` wiring — each rule with a negative control.
 
 ## The learning half (issue #445)
 
@@ -250,7 +312,8 @@ reeve config --get enabled                   # read the committed policy
 reeve armed --variable "$REEVE_ENABLED" --conf-enabled "$enabled"
 reeve greenlight-select --repo owner/name    # the draftable parked-decision queue
 reeve greenlight-poll --repo owner/name      # poll prior greenlights; push approvals
-                                             # (reads REGEN_TOKEN for the ledger commit)
+                                             # (reads REGEN_TOKEN for the ledger commit;
+                                             # --conf applies the standing modes, #446)
 reeve greenlight-context --repo owner/name   # the drafter's precedent digest (#445)
 reeve greenlight-append --repo owner/name    # records for newly-resolved rounds (#445)
 ```
