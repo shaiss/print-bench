@@ -12,7 +12,10 @@ Also reads gate.sh's `<status>  derivative <name>: <kind> <subject> — <detail>
 lines into their own section. A derivative whose override silently failed to
 bind renders, slices and scores exactly like a healthy part, so the derivative
 check is the only place that failure is visible at all — leaving it out of the
-PR comment would make the report itself complicit in the silence.
+PR comment would make the report itself complicit in the silence. The
+`fusecheck` and `cogcheck` line families get their own sections for the same
+reason: a fuse WARN and a tip-risk WARN both leave the printcheck table
+spotless, so the sticky comment is the only place they become visible.
 """
 import re
 import sys
@@ -39,6 +42,7 @@ def main() -> int:
     pre_fails = []     # FAIL lines emitted before printcheck ran (render/missing)
     derivs = []        # {ok, design, kind, subject, detail} from derivative_gate
     fusechecks = []    # {status, design, detail} from the ci.fusecheck gate
+    cogchecks = []     # {status, design, detail} from the ci.cog gate
     cur = None
     for line in lines:
         m = re.match(r"== .*: printcheck (\S+) ==", line)
@@ -73,6 +77,15 @@ def main() -> int:
             fusechecks.append({"status": status, "design": design,
                                "detail": detail.strip()})
             continue
+        # Claimed before pre_fails for the same reason as fusecheck: the
+        # containment FAIL ("...which the gate never rendered — ... not found"
+        # shapes) must land in this section, not be swallowed below.
+        m = re.match(r"(ok|warn|FAIL)\s+cogcheck (\S+): (.+)$", line)
+        if m:
+            status, design, detail = m.groups()
+            cogchecks.append({"status": status, "design": design,
+                              "detail": detail.strip()})
+            continue
         m = re.match(r"FAIL\s+(.+: (?:render failed|\S+ not found))$", line)
         if m:
             pre_fails.append(m.group(1))
@@ -105,7 +118,8 @@ def main() -> int:
 
     print("### printcheck + slice results")
     print()
-    if not rows and not pre_fails and not derivs and not fusechecks:
+    if not rows and not pre_fails and not derivs and not fusechecks \
+            and not cogchecks:
         print("_no gate output captured_")
         return 0
     if rows:
@@ -165,6 +179,23 @@ def main() -> int:
             if u["status"] == "warn":
                 detail = f"**STRONG WARN — reviewer signoff required.** {detail}"
             print(f"| `{u['design']}` | {icons.get(u['status'], '')} {detail} |")
+    if cogchecks:
+        # Its own section for the fusecheck reason plus one: a tip-risk WARN
+        # is ADVISORY, not a signoff demand — the wording must not borrow the
+        # fusecheck STRONG WARN phrasing, because reviewer-signoff.sh keys on
+        # exactly that and a CoG warn is a design call to look at, not a gate
+        # the reviewers must consciously clear.
+        print()
+        print("### CoG stability (tip-over)")
+        print()
+        print("| Design | Result |")
+        print("|---|---|")
+        icons = {"ok": "✅", "FAIL": "❌", "warn": "⚠️"}
+        for c in cogchecks:
+            detail = c["detail"].replace("|", "\\|")
+            if c["status"] == "warn":
+                detail = f"**advisory — does not block the merge.** {detail}"
+            print(f"| `{c['design']}` | {icons.get(c['status'], '')} {detail} |")
     return 0
 
 
