@@ -10,6 +10,10 @@
 * **One writer** — only ``store`` (the write path) and ``selftest`` (inside a
   temporary directory) touch the filesystem.
 
+``store`` imports ``tempfile``, whose file *names* are random: that is the
+private temp file a note is written to before ``link`` publishes it, never
+anything a note's bytes or path depend on.
+
 Each scanner has a negative control proving it fires on a planted violation.
 """
 
@@ -30,7 +34,10 @@ _NONDETERMINISTIC = {"time", "random", "uuid", "secrets"}
 _CLOCK_CALLS = {"now", "utcnow", "today", "time", "time_ns", "monotonic", "perf_counter"}
 _IO = {"os", "pathlib", "io", "sys", "shutil", "tempfile", "glob"}
 _WRITE_ATTRS = {"write", "writelines", "write_text", "write_bytes", "mkdir", "makedirs",
-                "rmdir", "touch", "remove", "unlink", "rename", "replace", "rmtree"}
+                "rmdir", "touch", "remove", "unlink", "rename", "replace", "rmtree",
+                "link", "symlink", "hardlink_to", "symlink_to", "mkstemp", "mkdtemp"}
+#: Openers whose mode argument decides read vs write: builtin ``open`` and ``os.fdopen``.
+_OPENERS = {"open", "fdopen"}
 _WRITE_PATH = ("rules.py", "note.py", "store.py")
 _PURE = ("rules.py", "note.py")
 _WRITERS = {"store.py", "selftest.py"}
@@ -59,13 +66,16 @@ def _clock_calls(tree: ast.AST) -> list[str]:
 def _writes(tree: ast.AST) -> list[str]:
     hits = []
     for n in ast.walk(tree):
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in _WRITE_ATTRS:
+        if not isinstance(n, ast.Call):
+            continue
+        if isinstance(n.func, ast.Attribute) and n.func.attr in _WRITE_ATTRS:
             hits.append(n.func.attr)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "open":
+        callee = getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+        if callee in _OPENERS:
             modes = [a.value for a in n.args[1:2] if isinstance(a, ast.Constant)]
             modes += [k.value.value for k in n.keywords if k.arg == "mode" and isinstance(k.value, ast.Constant)]
             if any(set("wax+") & set(m) for m in modes):
-                hits.append(f"open({modes[0]!r})")
+                hits.append(f"{callee}({modes[0]!r})")
     return hits
 
 
@@ -99,9 +109,23 @@ def test_only_the_store_and_the_selftest_write(path):
 
 
 def test_the_store_writes_create_only():
-    # The one write in the write path opens "xb" — create-if-absent — never
-    # "w", and nothing renames, replaces or unlinks a committed note.
-    assert sorted(_writes(_tree("store.py"))) == ["mkdir", "open('xb')", "write"]
+    # The one write in the write path fills a private mkstemp() file, then
+    # publishes it with link() — create-if-absent, atomic — never "w" on a note
+    # path and never rename/replace (both overwrite on POSIX).
+    assert sorted(_writes(_tree("store.py"))) == ["fdopen('wb')", "link", "mkdir", "mkstemp",
+                                                  "unlink", "write"]
+
+
+def test_the_store_unlinks_only_its_own_temp_file():
+    # The one unlink removes the temp file mkstemp() just made — never a note.
+    tree = _tree("store.py")
+    unlinks = [ast.unparse(n) for n in ast.walk(tree) if isinstance(n, ast.Call)
+               and isinstance(n.func, ast.Attribute) and n.func.attr == "unlink"]
+    temps = [ast.unparse(n.targets[0]) for n in ast.walk(tree) if isinstance(n, ast.Assign)
+             and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute)
+             and n.value.func.attr == "mkstemp"]
+    assert unlinks == ["os.unlink(tmp)"]
+    assert temps == ["(fd, tmp)"]
 
 
 # --- negative controls: each scanner fires on a planted violation ---------------
@@ -111,9 +135,10 @@ def test_negative_control_the_scanners_can_fail():
     planted = ast.parse(
         "import urllib.request\nimport time\nfrom pathlib import Path\n"
         "x = datetime.datetime.now()\nopen(p, 'w')\nPath(p).write_text('x')\n"
+        "os.fdopen(fd, 'ab')\nos.link(a, b)\ntempfile.mkstemp()\nopen(p)\nos.fdopen(fd, 'rb')\n"
     )
     assert _imports(planted) & _NETWORK == {"urllib"}
     assert _imports(planted) & _NONDETERMINISTIC == {"time"}
     assert _imports(planted) & _IO == {"pathlib"}
     assert _clock_calls(planted) == ["now"]
-    assert sorted(_writes(planted)) == ["open('w')", "write_text"]
+    assert sorted(_writes(planted)) == ["fdopen('ab')", "link", "mkstemp", "open('w')", "write_text"]

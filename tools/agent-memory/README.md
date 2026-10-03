@@ -52,12 +52,17 @@ into it; `check` treats its absence as empty.
 ## Immutable, append-only
 
 #426 rejected reconsolidation: a memory is never rewritten. The package has
-no update and no delete — only `record` (create-only: the file is opened
-`"xb"`, so the existence test and the write are one syscall), `load` and
-`check`. A `record` that finds *different* bytes already at its path refuses
-(`ImmutableNoteError`): with content-addressed ids that can only mean the file
-was edited after it was written. **A correction is a new note whose `links`
-point at the one it corrects**; the original stays byte-identical.
+no update and no delete — only `record` (create-only: the note is written
+and fsynced to a private temp file beside its path, then published with
+`os.link`, which refuses an existing path — so the existence test and the
+publish are one syscall, and a concurrent reader or recorder sees no note or
+the whole note, never a partial one), `load` and `check`. A crash mid-write
+can leave at most a stray temp file, which `check` names, never a corrupt note
+that every retry would refuse. A `record` that finds *different* bytes already
+at its path refuses (`ImmutableNoteError`): with content-addressed ids that can
+only mean the file was edited after it was written. **A correction is a new
+note whose `links` point at the one it corrects**; the original stays
+byte-identical.
 
 `check` catches what the write path cannot see — an edit made by hand or by a
 script. It re-derives every note from its own inputs and refuses: a field
@@ -237,8 +242,10 @@ A positive case and a negative control per rule:
   shape-checked but not resolved in 1a, a hand-flipped `verified`
   refused;
 - `test_immutability.py` — create-only, idempotent re-record, refused
-  overwrite, corrections as linked notes, per-agent links, no update/delete
-  surface, and `check` catching each kind of edit;
+  overwrite, the atomic publish (a concurrent recorder mid-write and a crash
+  mid-write each leave no partial note), corrections as linked notes,
+  per-agent links, no update/delete surface, and `check` catching each kind
+  of edit;
 - `test_store.py` — the diffable artifact, read-cold loading, determinism
   (input order, line endings, Unicode composition), and the strict schema;
 - `test_cli.py` — exit codes and output shapes (a malformed event — not

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 from agent_memory import rules, selftest, store
@@ -40,13 +42,9 @@ def test_negative_control_a_broken_rule_fails_the_selftest(monkeypatch, target, 
 
 
 def test_negative_control_an_overwriting_store_fails_the_selftest(monkeypatch):
-    # A store that silently overwrites (the destructive edit) must be caught.
-    real_open = open
-
-    def clobbering_open(path, mode="r", *a, **kw):
-        return real_open(path, mode.replace("x", "w"), *a, **kw)
-
-    monkeypatch.setattr(store, "open", clobbering_open, raising=False)
+    # A store whose publish silently overwrites (the destructive edit) must be
+    # caught: swap the create-only link() for a copy that clobbers.
+    monkeypatch.setattr(store.os, "link", shutil.copyfile)
     rc, lines = _run()
     assert rc == 1
     assert any(ln.startswith("FAIL") and "immutability" in ln for ln in lines), lines

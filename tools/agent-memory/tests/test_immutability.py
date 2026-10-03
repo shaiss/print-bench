@@ -5,7 +5,9 @@ new note *linked* to the old one. The store enforces it three ways, each
 with its negative control here:
 
 * the write path is create-only — re-recording the same episode is an
-  idempotent no-op, and a write that would change committed bytes refuses;
+  idempotent no-op, and a write that would change committed bytes refuses —
+  and its publish is atomic, so neither a concurrent recorder nor a crash
+  mid-write can leave a partial note at an id that every retry then refuses;
 * the package has no update or delete surface at all;
 * ``check`` re-derives every note from its own inputs, so an edit made
   outside the write path (by hand, by a script) is caught on the next run.
@@ -14,13 +16,15 @@ with its negative control here:
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
 import agent_memory
-from agent_memory import (ImmutableNoteError, NoteError, check, content_id, encode, load,
-                          record)
-from agent_memory.store import note_path
+import agent_memory.store as store_mod
+from agent_memory import (ImmutableNoteError, NoteError, canonical_bytes, check, content_id,
+                          encode, load, record)
+from agent_memory.store import NOTE_FILE_RE, note_path
 from conftest import make_event
 
 
@@ -49,6 +53,95 @@ def test_negative_control_an_overwrite_with_different_bytes_is_refused(store):
     with pytest.raises(ImmutableNoteError, match="immutable"):
         record(store, make_event())
     assert rec.path.read_bytes() == tampered  # the refusal touched nothing
+
+
+# --- the publish is atomic: no one ever sees a partial note ----------------------
+
+
+def _before_the_first_write(monkeypatch, hook):
+    """Run ``hook`` once, just before the store writes a note's bytes.
+
+    That is the instant a concurrent recorder races this one, or a crash lands.
+    It wraps whichever opener the store writes through (the builtin ``open`` or
+    ``os.fdopen``), so the tests pin the behavior, not the mechanism.
+    """
+    pending = [hook]
+
+    class Proxy:
+        def __init__(self, fh):
+            self._fh = fh
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return self._fh.__exit__(*exc)
+
+        def __getattr__(self, name):
+            return getattr(self._fh, name)
+
+        def write(self, data):
+            if pending:
+                pending.pop()()
+            return self._fh.write(data)
+
+    def wrap(opener):
+        return lambda *a, **kw: Proxy(opener(*a, **kw))
+
+    monkeypatch.setattr(store_mod, "open", wrap(open), raising=False)
+    monkeypatch.setattr(os, "fdopen", wrap(os.fdopen))
+
+
+class _Killed(BaseException):
+    """The process dying mid-write: a BaseException, so nothing swallows it."""
+
+
+def test_a_concurrent_recorder_of_the_same_episode_never_sees_a_partial_note(store, monkeypatch):
+    # A second routine records the same episode while the first is mid-write.
+    # It must find no note or the whole note, never an empty one it would
+    # refuse as an edit: both calls succeed, exactly one of them creating.
+    inner = []
+    _before_the_first_write(monkeypatch, lambda: inner.append(record(store, make_event())))
+    outer = record(store, make_event())
+    assert [r.created for r in inner] == [True]
+    assert not outer.created
+    assert outer.path.read_bytes() == canonical_bytes(outer.note)
+    assert [p.name for p in (store / "design-run").iterdir()] == [outer.path.name]
+
+
+def test_a_crash_mid_write_leaves_no_note_and_the_retry_records_it(store, monkeypatch):
+    def die():
+        raise _Killed
+
+    _before_the_first_write(monkeypatch, die)
+    with pytest.raises(_Killed):
+        record(store, make_event())
+    assert not [p for p in (store / "design-run").iterdir() if NOTE_FILE_RE.match(p.name)]
+    retry = record(store, make_event())
+    assert retry.created
+    assert check(store) == ([], 1)
+
+
+def test_a_hard_killed_writers_leftover_temp_neither_blocks_a_retry_nor_passes_check(store):
+    # A SIGKILL skips the cleanup, so a temp file can outlive its writer. It is
+    # never at a note's path, so the retry records cleanly; ``check`` names it
+    # as a stray rather than trust it.
+    note_id = encode(make_event())["id"]
+    leftover = store / "design-run" / f".{note_id}.killed.tmp"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_bytes(b'{"partial')
+    assert record(store, make_event()).created
+    problems, count = check(store)
+    assert count == 1 and len(problems) == 1 and leftover.name in problems[0]
+
+
+def test_no_temp_file_outlives_a_record_however_it_ends(store):
+    first = record(store, make_event())                        # created
+    assert not record(store, make_event()).created             # unchanged
+    first.path.write_bytes(first.path.read_bytes().replace(b"gate green", b"gate red"))
+    with pytest.raises(ImmutableNoteError):
+        record(store, make_event())                            # refused
+    assert [p.name for p in (store / "design-run").iterdir()] == [first.path.name]
 
 
 def test_a_correction_is_a_new_linked_note_and_the_original_is_untouched(store):

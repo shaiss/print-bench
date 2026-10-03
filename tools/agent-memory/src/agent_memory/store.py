@@ -17,6 +17,13 @@ content-addressed ids that can only mean the file was edited after it was
 written, which is exactly what immutable episodes forbid. A correction is a new
 note whose ``links`` point at the one it corrects.
 
+The publish is atomic as well as create-only: the bytes are written and fsynced
+to a private temp file beside the note, then hard-linked to the note's path —
+``os.link`` fails if that path exists, so the existence test and the publish are
+still one syscall. A concurrent reader or recorder therefore sees no note or the
+whole note, never a partial one, and a crash mid-write can leave at most a stray
+temp file (which ``check`` names), never a corrupt note every retry refuses.
+
 This is the only module that reads or writes the store, and it writes only
 beneath the store root it is handed. (Two other modules touch the filesystem,
 neither of them the store: ``cli`` reads the event file, and ``selftest``
@@ -27,7 +34,9 @@ split: only ``store`` and ``selftest`` may write.)
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -70,19 +79,30 @@ def record(store: Path, event: Mapping[str, Any]) -> Recorded:
     path = note_path(store, agent, note["id"])
     data = canonical_bytes(note)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Write the whole note privately first; only a complete, fsynced file is
+    # ever published. (The temp name is random, but it never reaches the
+    # store: the note's bytes and path are still pure functions of the event.)
+    fd, tmp = tempfile.mkstemp(prefix=f".{note['id']}.", suffix=".tmp", dir=path.parent)
     try:
-        # "x": create-only. The existence test and the write are one syscall,
-        # so a concurrent writer of the same id cannot be clobbered either.
-        with open(path, "xb") as fh:
+        with os.fdopen(fd, "wb") as fh:
             fh.write(data)
-    except FileExistsError:
-        if path.read_bytes() == data:
-            return Recorded(note=note, path=path, created=False)
-        raise ImmutableNoteError(
-            f"refusing to overwrite {path}: a note with this id is already committed with "
-            "different bytes. Notes are immutable — record a correction as a new note that "
-            "links to this one, and run `check` to find the edited file."
-        ) from None
+            fh.flush()
+            os.fsync(fh.fileno())
+        try:
+            # Create-only publish: link() refuses an existing path, so the
+            # existence test and the publish are one syscall and a concurrent
+            # writer of the same id cannot be clobbered.
+            os.link(tmp, path)
+        except FileExistsError:
+            if path.read_bytes() == data:
+                return Recorded(note=note, path=path, created=False)
+            raise ImmutableNoteError(
+                f"refusing to overwrite {path}: a note with this id is already committed with "
+                "different bytes. Notes are immutable — record a correction as a new note that "
+                "links to this one, and run `check` to find the edited file."
+            ) from None
+    finally:
+        os.unlink(tmp)  # the temp only; a published note keeps its own link
     return Recorded(note=note, path=path, created=True)
 
 
