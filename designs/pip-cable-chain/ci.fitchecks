@@ -7,7 +7,7 @@
 # the end stops at BOTH sweep limits: 1° short of the ±45° stop must clear
 # (EMPTY) — the joint really articulates through its range — and 2° past must
 # interfere (NON-EMPTY) — the printed plate stops are what block it, at the
-# angle the derivation claims. All eight are rendered straight from the
+# angle the derivation claims. All six are rendered straight from the
 # production link(); none is posed by hand.
 fitcheck      empty
 fitcheck_neg  interferes

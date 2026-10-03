@@ -87,7 +87,9 @@ Customizer sections; override on the command line with
    passage, and connect the moving end.
 4. A joint that binds means welds in the bore: raise `clear_xy` by 0.05
    (`clear_z` re-derives to the next whole layer automatically) and
-   reprint. A stub that snaps out means too loose: lower it by 0.05.
+   reprint. A stub that snaps out means too loose: if you raised
+   `clear_xy` earlier, step it back down by 0.05 — but never below 0.25,
+   the measured weld floor the design refuses to render under.
 
 Tune `clear_xy` in one place — the coupon and the chain share every
 parameter through the include.

@@ -169,6 +169,11 @@ arm_x0 = 8.4;
 // enters it at any bend angle (the previous bar and plates live in the lug
 // band and the plate bands).
 ear_nose = arm_x0;
+// The post's rear face sits a hair ahead of the ear nose's front face. Both
+// cross the floor and roof plates; on one shared x-plane their edges land
+// collinear on the plate faces and the Manifold backend emits zero-area
+// facets along that line. 0.2 mm is invisible and only removes material.
+post_x0 = arm_x0 + 0.2;
 plate_gap = 0.7;   // swept plate corner vs the next plate's front edge
 // ---- The end-stop construction (a corner riding ONTO a plate face) ----
 // In the rotating plate's frame the fixed lug-tip corner travels on
@@ -291,23 +296,27 @@ module link(tab_rear = false, tab_front = false, stub_d = pin_d) {
     // Bore is the blind cut from the ear's inner face.
     for (sy = [-1, 1])
         difference() {
-            union() {
-                // main box, extruded along Y from an (x,z) profile so its
-                // REAR-TOP corner carries a chamfer: the sharp corner sweeps
-                // into the previous link's ear-nose front face past ~42 deg
-                // (measured 0.9 mm^3 per ear at 44 deg); the chamfer keeps
-                // the ear's worst radius inside the nose face's own minimum.
-                translate([0, sy > 0 ? ear_y_in + ear_t : -ear_y_in, 0])
-                    rotate([90, 0, 0])   // profile u->x, v->z, extrudes -Y
-                        linear_extrude(ear_t)
-                            polygon([[-ear_back, ear_main_z0],
-                                     [-ear_back, ear_z1 - style_edge_chamfer],
-                                     [-ear_back + style_edge_chamfer, ear_z1],
-                                     [ear_nose, ear_z1],
-                                     [ear_nose, ear_main_z0]]);
-                translate([ear_low_x0, sy < 0 ? -ear_y_out : ear_y_in, ear_low_z0])
-                    cube([ear_low_x0 * -1 + ear_nose, ear_t, ear_low_z1 - ear_low_z0]);
-            }
+            // Main box + low web as ONE (x,z) profile extruded along Y. Two
+            // separately-placed solids sharing the ear's side and front
+            // faces only NEARLY coincide in floating point (-ear_y_out +
+            // ear_t != -ear_y_in by an ulp), and the Manifold backend turns
+            // that sliver into non-manifold edges and zero-area facets. One
+            // extrusion has exactly one set of faces. The main box's
+            // REAR-TOP corner carries a chamfer: the sharp corner sweeps
+            // into the previous link's ear-nose front face past ~42 deg
+            // (measured 0.9 mm^3 per ear at 44 deg); the chamfer keeps the
+            // ear's worst radius inside the nose face's own minimum. The low
+            // web (ear_low_x0.., ear_low_z0..ear_low_z1) is the step under it.
+            translate([0, sy > 0 ? ear_y_in + ear_t : -ear_y_in, 0])
+                rotate([90, 0, 0])   // profile u->x, v->z, extrudes -Y
+                    linear_extrude(ear_t)
+                        polygon([[-ear_back, ear_main_z0],
+                                 [-ear_back, ear_z1 - style_edge_chamfer],
+                                 [-ear_back + style_edge_chamfer, ear_z1],
+                                 [ear_nose, ear_z1],
+                                 [ear_nose, ear_low_z0],
+                                 [ear_low_x0, ear_low_z0],
+                                 [ear_low_x0, ear_main_z0]]);
             // Both sides extrude -Y (profile roof stays +Z); the origin sits
             // at the bore floor on +Y, 0.01 outside the inner face on -Y —
             // a sy*-mirrored rotation would flip the teardrop roof down.
@@ -344,8 +353,8 @@ module link(tab_rear = false, tab_front = false, stub_d = pin_d) {
     // the lug bar itself (reduced height, running to the tip whose corners
     // are the stop faces — left SHARP, the derivation depends on them).
     for (sy = [-1, 1]) {
-        translate([arm_x0, sy < 0 ? -lug_y_out : lug_y_in, wall - 0.6])
-            cube([arm_x1b - arm_x0, wall, passage_h + 1.2]);
+        translate([post_x0, sy < 0 ? -lug_y_out : lug_y_in, wall - 0.6])
+            cube([arm_x1b - post_x0, wall, passage_h + 1.2]);
         translate([arm_x0, sy < 0 ? -lug_y_out : lug_y_in, z_pin - lug_hz])
             cube([pitch + lug_tip - arm_x0, wall, 2 * lug_hz]);
     }
@@ -431,7 +440,7 @@ module main() {
     assert(lug_tip * cos(stop_angle + 2) - lug_hz * sin(stop_angle + 2)
                > plate_x0 + 0.15,
            "lug corner exits the plate rear face before stop_angle+2 — the stop window is too short (lower plate_x0)");
-    assert(arm_x0 > 0 && arm_x1b > arm_x0 + 1, "lug arm degenerate");
+    assert(arm_x0 > 0 && arm_x1b > post_x0 + 1, "lug arm degenerate");
     assert(sqrt(pow(ear_back, 2) + pow(ear_z1 - z_pin, 2))
                < sqrt(pow(plate_back, 2) + pow(passage_h / 2, 2)) - 0.3,
            "ear rear-top corner sweeps into the previous roof plate's front edge (D7)");
@@ -444,6 +453,14 @@ module main() {
            "ear rear-top corner sweeps into the previous link's ear nose (chamfer too small)");
     assert(ridge_x0 > plate_x0 && plate_x1 - ridge_x0 > 3,
            "vault ridge span degenerate — the ceiling would open or the ridge vanish");
+
+    // An unknown part (a typo'd -D part=...) must not fall through to the
+    // straight run: a gate expecting EMPTY would then see a full chain, and
+    // one expecting the run would silently pass on the wrong geometry.
+    assert(part == "" || part == "fitcheck" || part == "fitcheck_neg"
+               || part == "pose_up44" || part == "pose_dn44"
+               || part == "stop_up47" || part == "stop_dn47" || part == "fused",
+           str("unknown part \"", part, "\""));
 
     if (part == "fitcheck") {
         // every adjacent pair at the print pose must clear — zero facets

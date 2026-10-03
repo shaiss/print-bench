@@ -243,7 +243,9 @@ production cross-section.
    0.05 (clear_z re-derives to the next whole layer automatically) and
    reprint. Do not go below 0.25 — that is pip_hinge's measured weld floor.
 4. If a stub snaps out of its bore on flexing (too loose, or layer adhesion
-   poor): lower clear_xy by 0.05 rather than raising print temperature.
+   poor) and you raised clear_xy in step 3: step it back down by 0.05
+   rather than raising print temperature — but never below 0.25. The
+   design asserts `clear_xy >= 0.25`, so the default is already the floor.
 
 Tune `clear_xy` in one place — the coupon and the chain share every
 parameter through the include.
