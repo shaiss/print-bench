@@ -267,6 +267,9 @@ surfaces studies awaiting a read live in
   `print-in-place.scad` (print-in-place slide rails, tabs, end-stops,
   sacrificial membranes and a teardrop-bore hinge, extracted from the
   archived sushi-battleship),
+  `compliant.scad` (flexure primitives — the bistable snap-through arch and
+  weld-safe flexure-root fillets, harvested from the compliant designs;
+  issue #202 stage 1),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
   `helical-window.scad` (the ovodyo signature slot as a cut-through or
