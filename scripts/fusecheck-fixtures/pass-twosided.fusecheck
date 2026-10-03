@@ -1,0 +1,5 @@
+# Fusecheck fixture (scripts/fusecheck-check.sh --selftest): the two-sided
+# MIN MAX bound with the count inside it.
+assert fusecheck-fixtures-separable.stl 2 2
+# Mandatory negative control.
+control fused 1
