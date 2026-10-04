@@ -485,6 +485,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -506,6 +512,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -527,6 +539,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -550,6 +568,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -574,6 +598,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -599,6 +629,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -771,6 +807,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -792,6 +834,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -813,6 +861,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -836,6 +890,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -860,6 +920,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -885,6 +951,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -1304,6 +1376,20 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
           /usr/bin/git checkout "$BASE_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
@@ -1323,6 +1409,12 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -1337,6 +1429,20 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
           /usr/bin/git checkout "$BASE_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
@@ -1356,6 +1462,12 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -1370,6 +1482,20 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
           /usr/bin/git checkout "$BASE_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
@@ -1389,6 +1515,12 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -1408,6 +1540,20 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
           /usr/bin/git checkout "$BASE_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
@@ -1429,6 +1575,12 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -1449,6 +1601,20 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
           /usr/bin/git checkout "$BASE_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
@@ -1471,6 +1637,12 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -1492,6 +1664,20 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
           /usr/bin/git checkout "$BASE_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
@@ -1515,6 +1701,12 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -1547,6 +1739,20 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+          export PYTHONNOUSERSITE=1
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
           CHECK="${RUNNER_TEMP:-/tmp}/coach-lock-check.sh"
           /usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh" > "$CHECK"
           chmod +x "$CHECK"

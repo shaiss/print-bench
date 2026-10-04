@@ -221,6 +221,13 @@ def _assert_one_restore_step(restore: str, *, at: str) -> None:
     assert "/usr/bin/git checkout" in run, (
         f"{at} does not invoke /usr/bin/git — a GITHUB_PATH write from an "
         "earlier Write/Edit/Bash link would run a stub git")
+    assert 'export PATH="/usr/bin:/bin:/usr/local/bin"' in run, (
+        f"{at} does not reset PATH — a GITHUB_PATH write would run a stub git")
+    assert "unset PYTHONPATH" in run, (
+        f"{at} does not drop PYTHONPATH — a GITHUB_ENV write would inject "
+        "sitecustomize into a later python, and LD_PRELOAD would hijack git")
+    assert "GIT_ALLOW_PROTOCOL=https" in run, (
+        f"{at} does not re-assert the git protocol lock after GITHUB_ENV")
     for path in COACH_RESTORE_PATHS:
         assert path in run, (
             f"{at} no longer overlays {path} from base.sha")
@@ -345,6 +352,13 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
         "auto-review.yml [design-coach] lock-check does not reset PATH — "
         "a GITHUB_PATH write from the Bash-capable coach would run a "
         "stub python3/gh")
+    assert "unset PYTHONPATH" in run, (
+        "auto-review.yml [design-coach] lock-check does not drop "
+        "PYTHONPATH — a GITHUB_ENV write would inject sitecustomize "
+        "into the completeness pin")
+    assert "GIT_ALLOW_PROTOCOL=https" in run, (
+        "auto-review.yml [design-coach] lock-check does not re-assert "
+        "the git protocol lock after GITHUB_ENV")
     assert "/usr/bin/bash" in run, (
         "auto-review.yml [design-coach] lock-check does not invoke the "
         "extracted script with /usr/bin/bash")
@@ -535,13 +549,15 @@ def test_coach_guard_rejects_restore_only_before_the_first_link():
 
 
 def test_coach_guard_rejects_an_interpolated_restore_script():
+    # Insert ${{ without removing the checkout marker — a replace that
+    # ate the restore identification string used to miss this guard.
     tampered = _job_replace(
         _workflow_text(), "design-coach",
         '          set -euo pipefail\n'
-        '          /usr/bin/git checkout "$BASE_SHA" -- \\\n',
+        '          export PATH="/usr/bin:/bin:/usr/local/bin"\n',
         '          set -euo pipefail\n'
         '          : ${{ github.event.pull_request.number }}\n'
-        '          /usr/bin/git checkout "$BASE_SHA" -- \\\n')
+        '          export PATH="/usr/bin:/bin:/usr/local/bin"\n')
     with pytest.raises(AssertionError, match="interpolates an expression"):
         _assert_coach_restores_posting_surface_from_base(tampered)
 
@@ -552,6 +568,15 @@ def test_coach_guard_rejects_a_path_git_on_restore():
         '          /usr/bin/git checkout "$BASE_SHA" -- \\\n',
         '          git checkout "$BASE_SHA" -- \\\n')
     with pytest.raises(AssertionError, match="/usr/bin/git"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_restore_inheriting_pythonpath():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        "unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \\\n",
+        "true PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \\\n")
+    with pytest.raises(AssertionError, match="PYTHONPATH"):
         _assert_coach_restores_posting_surface_from_base(tampered)
 
 
@@ -589,6 +614,19 @@ def test_coach_lock_guard_rejects_running_the_workspace_script():
         '          /usr/bin/bash "$CHECK" "$PR"\n',
         '          ./scripts/coach-lock-check.sh "$PR"\n')
     with pytest.raises(AssertionError, match="workspace script"):
+        _assert_coach_lock_check_runs_base_copy(tampered)
+
+
+def test_coach_lock_guard_rejects_inheriting_pythonpath():
+    # Unique to the lock-check step (restore has no PYTHONNOUSERSITE).
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        "unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \\\n"
+        "                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \\\n"
+        "                DYLD_INSERT_LIBRARIES BASH_ENV ENV || true\n"
+        "          export PYTHONNOUSERSITE=1\n",
+        "export PYTHONNOUSERSITE=1\n")
+    with pytest.raises(AssertionError, match="PYTHONPATH"):
         _assert_coach_lock_check_runs_base_copy(tampered)
 
 

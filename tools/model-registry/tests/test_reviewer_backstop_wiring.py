@@ -248,6 +248,13 @@ def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
         assert env.get("REVIEWER_POST_STATE") == POST_STATE, (
             f"{at} sets REVIEWER_POST_STATE="
             f"{env.get('REVIEWER_POST_STATE')!r}, not {POST_STATE!r}")
+        assert env.get("PYTHONPATH") == '""', (
+            f"{at} does not clear PYTHONPATH — a GITHUB_ENV write from an "
+            "earlier Bash link would inject sitecustomize into the posting "
+            "server even under /usr/bin/python3")
+        assert env.get("PYTHONNOUSERSITE") == '"1"', (
+            f"{at} does not set PYTHONNOUSERSITE=1 — user-site sitecustomize "
+            "would still load without isolated mode")
 
 
 def test_every_coach_ship_step_carries_the_post_surface():
@@ -258,14 +265,22 @@ MCP_PYTHON = "/usr/bin/python3"
 
 
 def _assert_mcp_command_is_absolute(raw: str) -> None:
-    """PATH `python3` is GITHUB_PATH-poisonable after a Bash coach link."""
+    """PATH `python3` is GITHUB_PATH-poisonable after a Bash coach link.
+    ``-I`` is isolated mode so PYTHONPATH/PYTHONHOME from GITHUB_ENV cannot
+    inject sitecustomize into the posting server."""
     data = json.loads(raw)
     cmd = data["mcpServers"]["reviewer"]["command"]
+    args = data["mcpServers"]["reviewer"]["args"]
     assert cmd == MCP_PYTHON, (
         f"{POST_CONFIG} command is {cmd!r}, not {MCP_PYTHON} — a PATH-relative "
         "python3 is GITHUB_PATH-poisonable after a failed Bash-capable coach "
         "link, and claude-code-action looks up the command before "
         "--allowedTools applies"
+    )
+    assert args and args[0] == "-I", (
+        f"{POST_CONFIG} args are {args!r}, not starting with -I — "
+        "/usr/bin/python3 still loads PYTHONPATH sitecustomize without "
+        "isolated mode"
     )
 
 
@@ -280,6 +295,15 @@ def test_posting_mcp_guard_rejects_path_python3():
     assert raw != (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8"), (
         "tamper did not land — the fixture is stale")
     with pytest.raises(AssertionError, match="PATH-relative"):
+        _assert_mcp_command_is_absolute(raw)
+
+
+def test_posting_mcp_guard_rejects_missing_isolated_mode():
+    raw = (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8").replace(
+        '"-I", ', "")
+    assert raw != (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8"), (
+        "tamper did not land — the fixture is stale")
+    with pytest.raises(AssertionError, match="isolated mode"):
         _assert_mcp_command_is_absolute(raw)
 
 
@@ -399,6 +423,7 @@ def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
     (5,
      "REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts",
      "REVIEWER_POST_STATE: reviewer-posts", "REVIEWER_POST_STATE"),
+    (0, '          PYTHONPATH: ""\n', "", "PYTHONPATH"),
 ])
 def test_coach_post_surface_guard_rejects_a_tampered_step(step, old, new, match):
     tampered = _tamper(_workflow_text(), "design-coach", step, old, new)
