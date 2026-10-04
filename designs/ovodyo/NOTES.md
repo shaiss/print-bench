@@ -181,9 +181,19 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
     core in. `pocket-clear` proves the cavity ∩ the core's outer 1.2 mm shell
     (the section eroded by 1.2 + the sockets grown by 1.2, ends included) is
     empty; the control raises the ceiling through the roof (156 facets). Whether
-    55 g at z ≈ 5 mm is enough against two ~50 g balls at 124 mm is the
-    **CoG/tip-over gate that is NOT in scope tonight** — this number is an
-    assumption to be measured, never a README stability claim.
+    55 g at z ≈ 5 mm is enough against two ~50 g balls at 124 mm is now measured
+    by the advisory **CoG/tip-over gate** (`designs/ovodyo/ci.cog`, tools/cogcheck,
+    #623 / remaining #603 item 10). TIP-RISK is a WARN, not a hard fail. The
+    ≈55 g fill stays a **starting guess to tune against the measured verdict** —
+    never claim STABLE in the README if the check says TIP-RISK, and never
+    promise STABLE for every later geometry or fill change. Solid-mesh PLA
+    at 1.24 g/cm³ over-masses the balls vs 15–20 % infill (conservative toward
+    TIP-RISK). **First gate emit on this tip** (PR [#789](https://github.com/shaiss/print-bench/pull/789)
+    printcheck+slice sticky, `d8d9cf5`): **STABLE** — CoG ground projection
+    clears the support footprint by **38.28 mm** (required margin 2.00 mm),
+    under that solid-mesh PLA 1.24 over-mass. That is one measured fill on one
+    tip, not a lifetime claim. If a later run says **TIP-RISK**, follow
+    **TIP-RISK care** below — add shot, do not slab the truss.
   - **Feet.** Each wing carries two Ø7 pads under its inner-end chord nodes
     (`_bx(bays)` − 4 in x, `_bw` − 2 in y: hanging below the chord, inboard of
     its outer face, invisible from the hero camera). The pad bottom is FLUSH
@@ -218,7 +228,7 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
 | ~~Deliverable gated as loose parts; no `ci.plate`~~ done: `ci.plate` → `build/ovodyo-plate.3mf`, 8 objects | (`ci.fusecheck` stays with the seam work) |
 | Ball generator is design-local | #600 (promote to `lib/`, with a `tri_k` guard + facet mate) |
 | No committed style pack / stylelift metrics | #601 (style pack + facet/openness metrics) |
-| Ballast pockets + a stated ≈55 g shot fill exist, but no CoG/tip-over gate proves it is enough | #603 (CoG/tip-over gate) |
+| Ballast pockets + ≈55 g starting fill; `ci.cog` advisory CoG/tip-over (WARN on TIP-RISK); first emit on `d8d9cf5` / PR #789 measured STABLE 38.28 mm — fill still a starting guess, playbook in “TIP-RISK care” | #603 (item 10 remaining: this manifest; platform half #623 / #652) |
 
 ## Tumble kinematics (N2)
 
@@ -368,6 +378,56 @@ max error ≤ 3°, every face presented once, and monotone stops.
   (head-down). Fit checks: core-seat 0 facets, core-seat-ctrl 702, pocket-clear
   0, pocket-ctrl 156 (`lineage.sh facet-count`). Plate: 8 objects == 8 parts.
 
+## TIP-RISK care (ballast playbook)
+
+TIP-RISK is an **advisory WARN**. The gate still exits 0. Do **not** thicken
+the truss, grow the feet, or “fix” ball/slot/chamfer geometry to force STABLE.
+
+**Where to read the line.** On a design PR, the printcheck+slice sticky
+(`<!-- printcheck-gate-report -->`, posted by `github-actions`) has a
+**CoG stability (tip-over)** table after the per-part scores. The row is
+`ovodyo` plus either a green STABLE clearance (mm inside the footprint vs the
+manifest `margin:`) or **TIP-RISK** (mm outside). Same numbers come from
+`./scripts/cog-check.sh ovodyo` locally (`VERDICT: STABLE` / `TIP-RISK`).
+The first emit on this branch was the sticky on tip `d8d9cf5` / PR #789:
+STABLE, 38.28 mm clearance, margin 2.00 mm.
+
+**Starting fill.** ≈55 g of Ø2 mm steel shot (chrome-steel or #9), **split
+across both pockets** (manifest `27.5 g` each; NOTES rounds 2 × 28 g). Fill
+and plug **before** the keel slides in. That number is the packed-capacity
+estimate from the figures already in the ballast subsection, not a new
+measurement: both cavities **11.8 cm³** together; at 7.85 g/cm³ × ~0.60
+random packing ≈ **4.7 g/cm³** → 11.8 × 4.7 ≈ **55 g**. Pocket headroom at
+that packing is essentially **none** — the starting pour is already the
+full-pocket estimate. Slack is packing, not unused cavity: if the shot still
+rattles, there is room; if it is packed to the ports, there is not.
+
+**If TIP-RISK fires**
+
+1. Read the sticky millimetres (how far outside, vs margin 2.00 mm). Close to
+   the margin is a light add; a large outside distance will not be closed by
+   a gram or two.
+2. Start from ≈55 g only if that is what you poured. If you under-filled,
+   get to ≈55 g first, split evenly, re-run / re-read the advisory line.
+3. Add shot in **~5 g steps, split across both pockets** (~2.5 g each) so the
+   keel stays left/right even. 5 g at 4.7 g/cm³ is ~1.1 cm³ (~9 % of 11.8 cm³)
+   — it only fits if packing is looser than the 0.60 estimate. Stop when the
+   ports are packed; do not ram extra shot.
+4. Re-render is not required for a fill-only change: edit the two `mass:
+   ballast-* | grams:` lines in `ci.cog` to the new total, run
+   `./scripts/cog-check.sh ovodyo` (needs the gated STLs in `build/`), or wait
+   for CI’s sticky. Geometry-unchanged, fill-changed: the WARN/STABLE line is
+   the answer; do not iterate the lattice.
+5. If the pockets are already packed and TIP-RISK still fires, **stop**. Live
+   with the WARN (desk placement, bumpers, don’t park at the shelf edge).
+   Park a geometry “fix” as needs-decision; this playbook does not authorise
+   one.
+
+The `mass: base-end-plus` second wing is mesh volume × 1.24 of
+`ovodyo-base-end.stl` from the same PR’s argus-diff sticky (6323.1 mm³ →
+**7.84 g**), not slicer filament-est grams (those were 7.89 g on the
+printcheck table — infill, not solid-mesh).
+
 ## Print this first
 
 `designs/ovodyo/ovodyo-coupon.scad` (part `seam-coupon`, gated as
@@ -419,6 +479,10 @@ the red ballast keel that seats in the centre segment (`core_body()`, modelled
 in place on z = 0) and `base-plug` its port plug (print two); `core-seat`,
 `core-seat-ctrl`, `pocket-clear`, `pocket-ctrl` are the `ci.fitchecks` parts
 (never printed). `ci.plate` builds the multi-object 3MF deliverable.
+`ci.cog` is the assembled standing-frame CoG / tip-over manifest (advisory
+WARN on TIP-RISK). First CI emit on tip `d8d9cf5` / PR #789 sticky: STABLE,
+38.28 mm clearance under solid-mesh PLA 1.24; ≈55 g remains the starting
+fill. TIP-RISK care (add shot, never slab the truss) is the section above.
 `base-mech` (whole drivetrain) and `pod-drive` (one pod's gear train) are
 PREVIEW-ONLY coloured mechanism — not in `ci.parts`, not printed. The ball's
 faceting is `facet` in `ovodyo.scad` (passed as `tri_k`; `_GB_TRI_K` in
