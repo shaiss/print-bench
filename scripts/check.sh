@@ -18,7 +18,11 @@
 #      element and overlapping labels
 #   9. fusecheck selftest (scripts/fusecheck-check.sh --selftest): the
 #      ci.fusecheck bound grammar — legacy, MIN MAX, =N, malformed, exit-4 —
-#      every negative row asserted to fire on committed fixtures (issue #627)
+#      every negative row asserted to fire on committed fixtures (issue #627),
+#      plus the include-closure control proof (issue #766)
+#   9b. scad-closure selftest (scripts/scad-closure.sh --selftest): the
+#      include-closure `part ==` branch proof still finds a parent / two-hop
+#      branch and still refuses a name nowhere in the closure
 # Run before committing. For full STL+PNG output use scripts/render.sh.
 set -euo pipefail
 
@@ -216,6 +220,11 @@ fi
 # the two fixture renders; no skip path — a skipped selftest is exactly the
 # silent green this exists to close, so CI installs printcheck in every job
 # that runs check.sh.
+echo "-- scad-closure selftest: scripts/scad-closure.sh --selftest"
+if ! ./scripts/scad-closure.sh --selftest; then
+  fail=1
+fi
+
 echo "-- fusecheck selftest: scripts/fusecheck-check.sh --selftest"
 if ! ./scripts/fusecheck-check.sh --selftest; then
   fail=1
@@ -580,6 +589,24 @@ if ! ./scripts/reviewer-perms-check.sh; then
   fail=1
 fi
 
+# Reviewer MCP posting tool: the Jane/Drik reviewers' ONE write surface is the
+# post_review MCP tool (.claude/reviewer-post/reviewer_mcp.py, issue #764) —
+# a JSON-argument tool because a multi-line review body cannot pass the
+# dontAsk Bash matcher under any quoting, which is the hole that kept every
+# workflow review round from posting its sign-off. Its --selftest proves the
+# invariants a live run cannot show: the sign-off marker is assembled
+# server-side from validated sha/verdict/fuse fields (malformed markers are
+# unpostable), caller-supplied JANE/DRIK_SIGNOFF HTML comments in the body
+# are refused so one reviewer cannot satisfy the other identity, the marker
+# family follows the trusted REVIEWER_ID env so a Jane session cannot forge a
+# DRIK sign-off, the target PR is pinned to REVIEWER_PR,
+# and the one-post-per-run cap spans the chain walk cross-process — the same
+# firing-guard discipline the perms-checks follow.
+echo "-- reviewer-post MCP selftest: .claude/reviewer-post/reviewer_mcp.py --selftest"
+if ! python3 .claude/reviewer-post/reviewer_mcp.py --selftest; then
+  fail=1
+fi
+
 # Reviewer deny-rule runtime canary (issue #776): the FILE half above is a
 # Python MODEL of the matcher. This --selftest is the harness for the canary
 # that extracts the REAL matcher from the Claude Code build the pinned
@@ -671,7 +698,9 @@ fi
 # logic behind the `reviewer-signoff` required status (auto-review.yml, W2). The
 # gate is fail-closed — a design PR without two clean, current sign-offs blocks —
 # so the selftest is the only thing that proves it both passes clean AND fails
-# closed (missing/malformed/stale/blocking/fuse-unacked markers each block).
+# closed (missing/malformed/stale/blocking/fuse-unacked markers each block;
+# fuse-warn sticky selection: only a body that starts with the printcheck
+# marker, and only the real fusecheck STRONG WARN cell — PR #634).
 echo "-- reviewer-signoff selftest: scripts/reviewer-signoff.sh --selftest"
 if ! ./scripts/reviewer-signoff.sh --selftest; then
   fail=1

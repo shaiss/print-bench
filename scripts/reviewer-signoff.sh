@@ -25,6 +25,13 @@
 #       every key the `decide` call compares with this, never with its own
 #       rev-parse, so the posting and the checking side cannot drift.
 #
+#   scripts/reviewer-signoff.sh fuse-warn
+#       Read a PR comment body on stdin; print `true` or `false`. True only
+#       when the body IS the printcheck gate sticky (starts with
+#       `<!-- printcheck-gate-report -->`) AND it carries the fusecheck
+#       STRONG WARN phrase gate-summary.py writes. A mention of the marker
+#       or of "STRONG WARN" in reviewer prose is false (PR #634).
+#
 #   scripts/reviewer-signoff.sh round --head <sha> --stamp <sha|empty> [--merge <ref>]
 #       The regen review guard (issue #470): "SKIP <reason>" (exit 0) when
 #       every designs/ change since the last reviewed round (the
@@ -105,6 +112,11 @@ KEY_WALK_MAX=50
 # looks like a commit-back can only be forged: auto-review.yml sets this to 0
 # for a fork head, and then key is the raw tree and round always opens.
 SIGNOFF_TRUST_REGEN="${SIGNOFF_TRUST_REGEN:-1}"
+# The printcheck sticky CI posts (ci.yml) and the fusecheck cell
+# gate-summary.py writes into it. fuse-warn matches these literals, never a
+# substring of "No fusecheck STRONG WARN". The selftest pins both producers.
+PRINTCHECK_STICKY_MARKER="<!-- printcheck-gate-report -->"
+FUSECHECK_STRONG_WARN="**STRONG WARN — reviewer signoff required.**"
 
 # --- field extraction (pure string ops; no git, no network) -----------------
 # Echo the value of `<key>=<value>` inside a marker string, or empty. Values are
@@ -142,6 +154,27 @@ _review_problem() {
     printf '%s has not acknowledged the fusecheck STRONG WARN' "$who"; return
   fi
   printf ''
+}
+
+# _fuse_warn_live BODY — echo true only for the real printcheck sticky carrying
+# the fusecheck STRONG WARN cell. Fail-closed on a real warn: the exact
+# gate-summary.py phrase is required (a "No fusecheck STRONG WARN" line cannot
+# match it). A body that merely *mentions* the sticky marker is not a sticky.
+_fuse_warn_live() {
+  local body="$1"
+  if [[ "$body" != "${PRINTCHECK_STICKY_MARKER}"* ]]; then
+    echo false; return 0
+  fi
+  if [[ "$body" == *"${FUSECHECK_STRONG_WARN}"* ]]; then
+    echo true; return 0
+  fi
+  echo false
+}
+
+fuse_warn() {
+  local body
+  body="$(cat)"
+  _fuse_warn_live "$body"
 }
 
 decide() {
@@ -484,6 +517,11 @@ selftest() {
     --no-auto-review true --override false --fuse-warn false --andon true \
     --jane "" --drik "" --tree-current "$T" --jane-tree "" --drik-tree ""
 
+  # Fuse-warn sticky selection (PR #634): the real gate sticky, then the
+  # negation-in-prose and mention-of-marker negatives. Pin auto-review.yml
+  # and gate-summary.py so YAML cannot drift back to contains()+grep.
+  selftest_fuse_warn
+
   # THE REGEN COMMIT-BACK RULE (issue #470) — pure tables, then real git.
   selftest_regen
 
@@ -766,10 +804,130 @@ selftest_regen_drift() {
   rm -f "$tmp"
 }
 
+# selftest_fuse_warn — the #634 false-positive: Drik quoting the sticky
+# marker and writing "No fusecheck STRONG WARN" must not set fuse_warn, while
+# the real gate-summary cell still must. Also pin auto-review.yml to startswith
+# + this subcommand, and gate-summary.py to the phrase this matcher keys on.
+selftest_fuse_warn() {
+  local label want got body
+  _expect_fuse() {
+    label="$1" want="$2" body="$3"
+    got="$(_fuse_warn_live "$body")"
+    if [[ "$got" == "$want" ]]; then
+      echo "selftest ok    fuse-warn ${label} (${got})"
+    else
+      echo "SELFTEST FAIL  fuse-warn ${label}: wanted ${want}, got ${got}"; pass=0
+    fi
+  }
+
+  _expect_fuse sticky-strong-warn true \
+"${PRINTCHECK_STICKY_MARKER}
+### Fusecheck (separable bodies)
+| Design | Result |
+|---|---|
+| \`pip\` | ⚠️ ${FUSECHECK_STRONG_WARN} 2 bodies, want >= 3 |"
+
+  _expect_fuse sticky-printable-no-warn false \
+"${PRINTCHECK_STICKY_MARKER}
+| Part | Result |
+| \`cube\` | PRINTABLE 100/100 |"
+
+  # Reproduction: last comment matching contains("printcheck-gate-report")
+  # was Drik's sign-off, which names the sticky and the STRONG WARN in a
+  # negation. Must stay false.
+  _expect_fuse drik-prose-negation false \
+"Looked at the sticky \`${PRINTCHECK_STICKY_MARKER}\`.
+No fusecheck STRONG WARN → fuse none
+<!-- DRIK_SIGNOFF sha=0d1dcfac77f9b5478a5393cbc503c6241f552527 verdict=pass fuse=none -->"
+
+  _expect_fuse mention-plus-real-phrase-but-not-sticky false \
+"citing ${PRINTCHECK_STICKY_MARKER}
+also quoting ${FUSECHECK_STRONG_WARN} in a review"
+
+  _expect_fuse empty false ""
+
+  # Fail-closed: a sticky that also contains the negation still trips, because
+  # the real warn cell is present.
+  _expect_fuse sticky-warn-and-negation-prose true \
+"${PRINTCHECK_STICKY_MARKER}
+No fusecheck STRONG WARN is not the cell.
+| \`pip\` | ⚠️ ${FUSECHECK_STRONG_WARN} fused |"
+
+  # stdin path auto-review.yml uses
+  got="$(printf '%s' "${PRINTCHECK_STICKY_MARKER}"$'\n'"${FUSECHECK_STRONG_WARN}" | fuse_warn)"
+  if [[ "$got" == true ]]; then
+    echo "selftest ok    fuse-warn stdin-sticky-warn (true)"
+  else
+    echo "SELFTEST FAIL  fuse-warn stdin-sticky-warn: wanted true, got ${got}"; pass=0
+  fi
+  got="$(printf '%s' "No fusecheck STRONG WARN ${PRINTCHECK_STICKY_MARKER}" | fuse_warn)"
+  if [[ "$got" == false ]]; then
+    echo "selftest ok    fuse-warn stdin-drik-prose (false)"
+  else
+    echo "SELFTEST FAIL  fuse-warn stdin-drik-prose: wanted false, got ${got}"; pass=0
+  fi
+
+  selftest_fuse_warn_drift
+}
+
+_fuse_warn_yaml_pin() {  # _fuse_warn_yaml_pin <auto-review.yml>
+  local f="$1" lit
+  for lit in \
+    'startswith("<!-- printcheck-gate-report -->")' \
+    'scripts/reviewer-signoff.sh fuse-warn'; do
+    grep -qF -- "$lit" "$f" || { printf '%s' "$lit"; return 1; }
+  done
+  # The two #634 bugs: contains() last picks a reviewer mention; grep of
+  # "STRONG WARN" matches "No fusecheck STRONG WARN".
+  if grep -qF 'contains("printcheck-gate-report")' "$f"; then
+    printf '%s' 'contains("printcheck-gate-report")'; return 1
+  fi
+  if grep -qE 'grep[[:space:]]+-qi[[:space:]]+"STRONG WARN"' "$f"; then
+    printf '%s' 'grep -qi "STRONG WARN"'; return 1
+  fi
+}
+
+selftest_fuse_warn_drift() {
+  local wf gs miss tmp
+  wf="$(dirname "$0")/../.github/workflows/auto-review.yml"
+  gs="$(dirname "$0")/../scripts/gate-summary.py"
+  if [[ ! -f "$wf" ]]; then
+    echo "SELFTEST FAIL  fuse-warn-drift: $wf not found"; pass=0; return
+  fi
+  if [[ ! -f "$gs" ]]; then
+    echo "SELFTEST FAIL  fuse-warn-drift: $gs not found"; pass=0; return
+  fi
+  if grep -qF -- "${FUSECHECK_STRONG_WARN}" "$gs"; then
+    echo "selftest ok    fuse-warn-drift gate-summary.py still writes the STRONG WARN cell"
+  else
+    echo "SELFTEST FAIL  fuse-warn-drift: gate-summary.py no longer writes: ${FUSECHECK_STRONG_WARN}"; pass=0
+  fi
+  if miss="$(_fuse_warn_yaml_pin "$wf")"; then
+    echo "selftest ok    fuse-warn-drift auto-review.yml selects the sticky via startswith + fuse-warn"
+  else
+    echo "SELFTEST FAIL  fuse-warn-drift: auto-review.yml pin: ${miss}"; pass=0
+  fi
+  tmp="$(mktemp)"
+  sed 's/startswith("<!-- printcheck-gate-report -->")/contains("printcheck-gate-report")/' "$wf" > "$tmp"
+  if _fuse_warn_yaml_pin "$tmp" >/dev/null; then
+    echo "SELFTEST FAIL  fuse-warn-drift NEGCTL: pin passed a YAML that used contains()"; pass=0
+  else
+    echo "selftest ok    fuse-warn-drift NEGCTL a YAML that reverted to contains() fails the pin"
+  fi
+  grep -vF 'scripts/reviewer-signoff.sh fuse-warn' "$wf" > "$tmp" || true
+  if _fuse_warn_yaml_pin "$tmp" >/dev/null; then
+    echo "SELFTEST FAIL  fuse-warn-drift NEGCTL: pin passed a YAML with no fuse-warn call"; pass=0
+  else
+    echo "selftest ok    fuse-warn-drift NEGCTL a YAML that dropped fuse-warn fails the pin"
+  fi
+  rm -f "$tmp"
+}
+
 case "${1:-}" in
   --selftest) selftest ;;
   decide) shift; decide "$@" ;;
   key) shift; key "$@" ;;
   round) shift; round "$@" ;;
-  *) echo "usage: reviewer-signoff.sh decide <args> | key <commit> | round --head <sha> --stamp <sha> [--merge <ref>] | --selftest" >&2; exit 2 ;;
+  fuse-warn) fuse_warn ;;
+  *) echo "usage: reviewer-signoff.sh decide <args> | key <commit> | round --head <sha> --stamp <sha> [--merge <ref>] | fuse-warn | --selftest" >&2; exit 2 ;;
 esac
