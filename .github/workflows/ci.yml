@@ -499,8 +499,18 @@ jobs:
         # parent shell's /proc/<pid>/environ. No secret is in this step's env;
         # the base it compares against was fetched before any repo code ran.
         #
-        # Advisory: continue-on-error AND the `|| echo` fallback, so it can
-        # never fail this job, and the timeout keeps it from stalling the push.
+        # Advisory: continue-on-error AND the rc check below, so it can never
+        # fail this job, and the timeout keeps it from stalling the push.
+        #
+        # Its one output, `verdict`, is the run's PREVIEW-DIFF-VERDICT line
+        # (all-noise | content), set only when preview-diff finished cleanly.
+        # The commit step turns it into the commit-back's `Preview-Diff:`
+        # trailer, which auto-review.yml reads to skip a new review round on a
+        # previews-only all-noise commit-back (the owner's ruling on decision
+        # regen-commitback-review-retrigger, issue #470). It crosses into the
+        # token step as DATA: that step matches it against two literals and
+        # runs nothing of the branch's.
+        id: pdiff
         if: steps.plan.outputs.gallery == 'true'
         continue-on-error: true
         env:
@@ -519,9 +529,20 @@ jobs:
           else
             echo "::notice::preview-diff: no fetched source base — the source cross-check is skipped this run"
           fi
+          out="$RUNNER_TEMP/preview-diff.out"
+          rc=0
           timeout 900 ./scripts/preview-diff.sh --base HEAD ${src_args[@]+"${src_args[@]}"} \
-              --summary "$GITHUB_STEP_SUMMARY" \
-            || echo "::warning::preview-diff could not run — the regenerated previews are unmeasured (advisory, issue #470)"
+              --summary "$GITHUB_STEP_SUMMARY" > "$out" || rc=$?
+          cat "$out"
+          if [ "$rc" -ne 0 ]; then
+            # No verdict from a run that did not finish: the commit-back then
+            # carries no trailer, and review treats it as content (fail-closed).
+            echo "::warning::preview-diff could not run — the regenerated previews are unmeasured (advisory, issue #470)"
+            exit 0
+          fi
+          verdict="$(sed -n 's/^PREVIEW-DIFF-VERDICT \(all-noise\|content\)$/\1/p' "$out" | tail -n 1)"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "commit-back verdict: ${verdict:-(none)}"
 
       - name: Commit and push what changed
         id: commit
@@ -532,6 +553,8 @@ jobs:
           # Scoped to this step alone — see persist-credentials on the
           # checkout. Actions masks it in the log.
           PUSH_TOKEN: ${{ secrets.REGEN_TOKEN || github.token }}
+          # The measure step's verdict (data only — see that step).
+          PREVIEW_VERDICT: ${{ steps.pdiff.outputs.verdict }}
           BRANCH: >-
             ${{ github.event_name == 'pull_request'
                 && github.event.pull_request.head.ref
@@ -582,7 +605,16 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "$REGEN_SUBJECT"
+          # The Preview-Diff trailer (issue #470): only these two literals pass;
+          # anything else, or no verdict, means no trailer — which review reads
+          # as content. scripts/reviewer-signoff.sh recognises exactly this
+          # subject, identity and trailer, and its selftest pins all three here.
+          trailer=()
+          pd=none
+          case "${PREVIEW_VERDICT:-}" in
+            all-noise|content) trailer=(-m "Preview-Diff: ${PREVIEW_VERDICT}"); pd="$PREVIEW_VERDICT" ;;
+          esac
+          git commit -m "$REGEN_SUBJECT" ${trailer[@]+"${trailer[@]}"}
           # Credential supplied here rather than persisted in .git/config, so
           # the generators that ran above never had it in reach.
           git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
@@ -604,6 +636,9 @@ jobs:
             git show --pretty=format: --name-only HEAD | while IFS= read -r f; do
               [ -n "$f" ] && printf -- "- \`%s\`\n" "$f"
             done
+            echo
+            echo "Preview-Diff trailer: \`${pd}\` — a previews-only \`all-noise\`"
+            echo "commit-back opens no new design-review round (issue #470)."
             echo
             echo "A product page drafted by \`scripts/product-page.sh\` carries an"
             echo "\`AI-drafted\` marker comment — read it before merging and delete the marker."
