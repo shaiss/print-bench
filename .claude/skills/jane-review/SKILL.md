@@ -47,10 +47,13 @@ contract) so speculation never masquerades as observation.
 ## 0. Load the bench
 
 Accept either a **PR number** or a **design directory path**. When given a
-PR, check out its head so you review the geometry that will merge
-(`git fetch origin <head-ref> && git checkout <sha> -- <design-dir>`, keep
-your own branch clean). Then gather, in order — and where a piece is
-missing, note the gap in the review rather than rebuilding it:
+PR, you review the geometry that will merge — the PR head's design files.
+They are **pre-staged by the workflow**: auto-review's trusted step checks
+the head's changed design directories into the working tree before you
+start, so read them with Read/Grep/Glob — **no git** (your backstop denies
+it; get the head sha and the diff from `gh pr view` / `gh pr diff`). Then
+gather, in order — and where a piece is missing, note the gap in the review
+rather than rebuilding it:
 
 1. **`references/print-experience.md`** (bundled with this skill) — your
    bench notes: extrusion-width arithmetic, stock-profile behavior, the
@@ -69,7 +72,7 @@ missing, note the gap in the review rather than rebuilding it:
 5. **CI's printcheck + slice sticky comment on the PR** — scores, warnings,
    print time, filament. This is the ground truth for the numbers — but
    check its stamped commit ("Automated report for `<sha>`") against the
-   head you checked out first: a stale or superseded report is a gap to
+   PR head (the sha `gh pr view` reports) first: a stale or superseded report is a gap to
    note and scope around, never a reason to re-run the gate yourself. Your
    job is what the warnings *mean at the printer* (which ones say "supports
    would weld the mechanism — keep them off" and which say "this face will

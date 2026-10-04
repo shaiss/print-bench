@@ -463,13 +463,21 @@ jobs:
           REGEN_TOKEN: ${{ secrets.REGEN_TOKEN }}
         run: |
           set -euo pipefail
-          reeve greenlight-poll --repo "$GITHUB_REPOSITORY" --gh-output "$GITHUB_OUTPUT"
+          # --conf carries the standing approval modes (issue #446:
+          # approve_auto / approve_deny). Without it the rule set is empty and
+          # every thread asks — so dropping the flag would silently disable
+          # the committed rules (a test pins it).
+          reeve greenlight-poll --repo "$GITHUB_REPOSITORY" \
+            --conf .github/reeve.conf --gh-output "$GITHUB_OUTPUT"
           {
             echo "## Reeve greenlight — approval poll"
             if [ -n "$(sed -n 's/^resolved=//p' "$GITHUB_OUTPUT" | head -1)" ]; then
-              echo "- resolved by 👍: #$(sed -n 's/^resolved=//p' "$GITHUB_OUTPUT" | head -1 | sed 's/ / #/g')"
+              echo "- resolved (👍 or a standing \`approve_auto\` rule): #$(sed -n 's/^resolved=//p' "$GITHUB_OUTPUT" | head -1 | sed 's/ / #/g')"
             else
-              echo "- no greenlights approved by a qualifying reaction this run"
+              echo "- no greenlights approved by a qualifying reaction or standing rule this run"
+            fi
+            if [ -n "$(sed -n 's/^standing=//p' "$GITHUB_OUTPUT" | head -1)" ]; then
+              echo "- of those, resolved by a standing \`approve_auto\` rule with no reaction: #$(sed -n 's/^standing=//p' "$GITHUB_OUTPUT" | head -1 | sed 's/ / #/g')"
             fi
             if [ -n "$(sed -n 's/^overruled=//p' "$GITHUB_OUTPUT" | head -1)" ]; then
               echo "- overruled by 👎 (gate stays parked): #$(sed -n 's/^overruled=//p' "$GITHUB_OUTPUT" | head -1 | sed 's/ / #/g')"
@@ -532,12 +540,16 @@ jobs:
           reeve greenlight-select --repo "$GITHUB_REPOSITORY" \
             --conf .github/reeve.conf --gh-output "$GITHUB_OUTPUT"
           nums="$(sed -n 's/^issues=//p' "$GITHUB_OUTPUT" | head -1)"
+          denied="$(sed -n 's/^denied=//p' "$GITHUB_OUTPUT" | head -1)"
           {
             echo "## Reeve greenlight — selection"
             if [ -z "$nums" ]; then
-              echo "- no parked decisions awaiting a greenlight (every open \`needs-decision\` issue already carries one)"
+              echo "- no parked decisions awaiting a greenlight (every open \`needs-decision\` issue already carries one, or is human-only)"
             else
               echo "- parked decisions to draft: #${nums// / #}"
+            fi
+            if [ -n "$denied" ]; then
+              echo "- skipped — a standing \`approve_deny\` category, human only (#446): #${denied// / #}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -763,7 +775,7 @@ jobs:
 
       - name: Explain an empty selection
         if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight == 'true' && steps.select.outputs.issues == ''
-        run: echo "::notice::no parked decisions awaiting a greenlight — every open needs-decision issue already carries one; nothing to draft"
+        run: echo "::notice::no parked decisions awaiting a greenlight — every open needs-decision issue already carries one or sits in a standing approve_deny category (human only); nothing to draft"
 
       # No SHIP-LOCK lifecycle here, so the terminal link failing IS the job
       # failure — but before that stands, recover WHY the chain exhausted (the

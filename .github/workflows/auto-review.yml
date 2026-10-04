@@ -24,8 +24,9 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     PrusaSlicer mid-session, running a duplicate 200 s `gate.sh --slice` and
 #     re-rendering all five previews (Jane's #321 review documents all three).
 #   * The invariant the recast (PR #322) bought: the reviewer jobs' own steps
-#     are checkout/bun/claude-code-action only — nothing installs or runs the
-#     render toolchain. The sessions consume CI's printcheck+slice sticky and
+#     are checkout/bun/claude-code-action only (plus Jane's and Drik's
+#     git-only head-staging step) — nothing installs or runs the render
+#     toolchain. The sessions consume CI's printcheck+slice sticky and
 #     the committed previews instead of re-deriving. Regression signals: a
 #     reviewer job above this envelope; `apt-get` / `openscad` / `xvfb-run` /
 #     `prusa-slicer` / `scripts/gate.sh` / `scripts/render.sh` appearing in a
@@ -33,7 +34,40 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     Caveat: claude-code-action runs the agent with its output hidden, so a
 #     log grep proves the job scaffolding clean, not the session — the wall
 #     time and the review comments are the behavioral evidence. Enforcement
-#     (a deny backstop) is sibling issue #451, not this comment.
+#     is the deny backstop every ship step passes under --permission-mode
+#     dontAsk (.claude/reviewer-settings.json for Jane/Drik/PM triage,
+#     .claude/design-coach-settings.json for the coach; issue #451):
+#     scripts/reviewer-perms-check.sh holds what they deny, and
+#     tools/model-registry/tests/test_reviewer_backstop_wiring.py holds
+#     every ship step here to its backstop.
+#
+# Git containment (code-scanning finding on #760). A deny list cannot contain
+# git: a subcommand option no prefix rule sees (`git fetch origin
+# --upload-pack=<cmd>` runs <cmd> over the local file transport), an exec key
+# in a repo config reached through a PR-committed bare-repository layout, a gh
+# subcommand that spawns git. So, structurally:
+#   * Jane / Drik / PM triage get NO git — their backstop denies Bash(git:*)
+#     outright. Jane and Drik review the PR head's geometry, so a trusted step
+#     in their jobs stages the head's changed design directories into the
+#     checkout before the agent starts (the merge ref at fetch-depth 2 already
+#     holds the head commit, so no fetch and no credential). PM triage reads
+#     the charter from the merge checkout and needs nothing from git.
+#   * The coach keeps git checkout/add/commit/push (it pushes its rounds) but
+#     its backstop denies fetch/clone/pull/ls-remote and every global option;
+#     its checkout is full history, so every branch head is already local.
+#   * Every reviewer and coach job carries a job-level ENVIRONMENT lock that
+#     holds whatever the option order: GIT_ALLOW_PROTOCOL=https (git refuses
+#     the file/ext/ssh transports, so --upload-pack/--receive-pack/-u have
+#     nothing local to run, while the coach's push to origin over https still
+#     works) plus command-scope config via GIT_CONFIG_COUNT —
+#     safe.bareRepository=explicit (no implicit discovery of a bare-repository
+#     layout committed in the PR), core.fsmonitor=false, core.hooksPath=
+#     /dev/null (no hooks run) and core.pager=cat. Command scope outranks any
+#     repo config, and gh's own git calls inherit the lock too. An agent
+#     cannot lift it: an env-prefixed command (`GIT_ALLOW_PROTOCOL=file git
+#     …`) does not start with `git`, so the Bash(git:*) allow never grants it
+#     under dontAsk. The lock and the staging step are pinned by
+#     tools/model-registry/tests/test_reviewer_git_containment.py.
 #
 # Scope guard (prevents spurious runs on backend/infra-only PRs):
 #   * The `design-changes` job checks whether the PR diff contains any file
@@ -47,6 +81,16 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     since the last reviewed commit; pure fixup pushes that touch only docs or
 #     CI config are ignored.  The "last reviewed commit" is tracked by a sticky
 #     comment the first round leaves on the PR (see `review-stamp` step).
+#   * A regen commit-back opens no round when it touches only preview images
+#     and .regen-stamp files AND carries `Preview-Diff: all-noise` (CI's
+#     preview-diff rated every changed image noise) AND the last reviewed
+#     round is current at its parent — the owner's option C on decision
+#     regen-commitback-review-retrigger (issue #470) — AND the merge ref this
+#     job checks out carries the same designs/ tree as the PR head (so a
+#     base-branch design change is never skipped). Any content diff still
+#     opens one. `scripts/reviewer-signoff.sh round` decides it, and the
+#     sign-off currency below reads back past exactly those commits, so a
+#     skipped round never leaves the sign-offs stale.
 #   * `/design-coach` uses its own COACH-LOCK comment marker (documented in the
 #     skill) to prevent a second coach session on the same PR regardless of how
 #     many times this workflow fires.
@@ -181,15 +225,34 @@ jobs:
       # We track rounds with a sticky comment whose body starts with
       # AUTO_REVIEW_STAMP followed by the last-reviewed HEAD SHA.  If that SHA
       # matches HEAD we skip the round (already reviewed this commit).
-      - name: Check whether this is a new round
-        id: round
+      # Split in two so repo code never runs beside a token: this step holds
+      # GH_TOKEN and only reads the stamp comment through gh; the next step,
+      # which runs scripts/reviewer-signoff.sh from the checkout, holds none.
+      - name: Read the last review stamp
+        id: stamp
         if: steps.check.outputs.designs_changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Find the stamp comment and extract the stamped SHA (40 hex or
+          # nothing — the grep is the only thing that reaches the output).
+          stamp_sha="$(gh api \
+            "/repos/$GITHUB_REPOSITORY/issues/${PR_NUMBER}/comments" \
+            --jq '[.[] | select(.body | startswith("<!-- AUTO_REVIEW_STAMP"))] | last | .body' \
+            2>/dev/null \
+            | grep -oP '(?<=sha=)[0-9a-f]{40}' || true)"
+          echo "sha=$stamp_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this is a new round
+        id: round
+        if: steps.check.outputs.designs_changed == 'true'
+        env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          EVENT: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
+          LAST_REVIEWED: ${{ steps.stamp.outputs.sha }}
+          SIGNOFF_TRUST_REGEN: ${{ github.event.pull_request.head.repo.full_name == github.repository && '1' || '0' }}
         run: |
           set -euo pipefail
           # opened / ready_for_review / reopened → always a new round
@@ -198,13 +261,9 @@ jobs:
             exit 0
           fi
           # synchronize → new round only when design files changed since the
-          # last stamp.  Find the stamp comment and extract the stamped SHA.
-          stamp_sha="$(gh api \
-            "/repos/$GITHUB_REPOSITORY/issues/${PR_NUMBER}/comments" \
-            --jq '[.[] | select(.body | startswith("<!-- AUTO_REVIEW_STAMP"))] | last | .body' \
-            2>/dev/null \
-            | grep -oP '(?<=sha=)[0-9a-f]{40}' || true)"
-          if [ -z "$stamp_sha" ]; then
+          # last stamp (read, token-side, by the step above).
+          stamp_sha="$LAST_REVIEWED"
+          if ! [[ "$stamp_sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "is_new_round=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -223,7 +282,23 @@ jobs:
           fi
           # Compare design files between stamp_sha and HEAD
           if git diff --name-only "${stamp_sha}..HEAD" | grep -q '^designs/'; then
-            echo "is_new_round=true" >> "$GITHUB_OUTPUT"
+            # Designs moved — unless every move since the stamp is a regen
+            # commit-back the owner ruled needs no new round (issue #470,
+            # decision regen-commitback-review-retrigger, option C): previews
+            # and .regen-stamp only, `Preview-Diff: all-noise`, and the stamp
+            # current at its parent. The rule and its selftest live in
+            # reviewer-signoff.sh, beside the currency key the sign-off status
+            # computes, so the two cannot disagree. `--merge HEAD` makes it
+            # refuse to skip when this merge-ref checkout carries a designs/
+            # tree the PR head does not (a base-branch design change). Any
+            # non-zero exit (ROUND, or an error) opens the round: fail-closed.
+            if guard="$(scripts/reviewer-signoff.sh round --head "$HEAD_SHA" --stamp "$stamp_sha" --merge HEAD)"; then
+              echo "is_new_round=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::${guard#SKIP }"
+            else
+              echo "is_new_round=true" >> "$GITHUB_OUTPUT"
+              echo "regen review guard: ${guard:-no verdict}"
+            fi
           else
             echo "is_new_round=false" >> "$GITHUB_OUTPUT"
             echo "::notice::no design files changed since last review round — skipping"
@@ -262,10 +337,56 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      # Git environment lock (code-scanning finding on #760; see the header).
+      # Job-level so every step inherits it — every chain link of every
+      # provider, and any link added later. Pinned per ship step by
+      # tools/model-registry/tests/test_reviewer_git_containment.py.
+      GIT_ALLOW_PROTOCOL: https
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: safe.bareRepository
+      GIT_CONFIG_VALUE_0: explicit
+      GIT_CONFIG_KEY_1: core.fsmonitor
+      GIT_CONFIG_VALUE_1: "false"
+      GIT_CONFIG_KEY_2: core.hooksPath
+      GIT_CONFIG_VALUE_2: /dev/null
+      GIT_CONFIG_KEY_3: core.pager
+      GIT_CONFIG_VALUE_3: cat
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # The merge ref plus its parents: the PR head (the merge's second
+          # parent) is then local for the staging step below — no fetch.
+          fetch-depth: 2
+
+      # Trusted head staging (code-scanning finding on #760). This reviewer
+      # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
+      # outright — so the PR head's design directories are staged into the
+      # checkout here, by workflow code, before any agent step starts; the
+      # skill reads them with Read/Grep/Glob. The design names come from the
+      # PR's own paths, so they are validated and never globbed before they
+      # reach a path, and never echoed back unvalidated.
+      - name: Stage the PR head's design directories (trusted, no agent)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
+        run: |
+          set -euo pipefail
+          set -f   # PR-controlled names: no globbing
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          for d in $CHANGED_DESIGNS; do
+            if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+              echo "::warning::skipped a changed design directory whose name is not [A-Za-z0-9._-]"
+              continue
+            fi
+            rm -rf -- "designs/${d}"
+            if git cat-file -e "${HEAD_SHA}:designs/${d}" 2>/dev/null; then
+              git checkout "$HEAD_SHA" -- "designs/${d}"
+              echo "staged designs/${d} at ${HEAD_SHA}"
+            else
+              echo "designs/${d} is removed at the PR head; left absent"
+            fi
+          done
 
       - name: /jane-review via Z.AI GLM (chain link 1)
         id: p1
@@ -439,10 +560,56 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      # Git environment lock (code-scanning finding on #760; see the header).
+      # Job-level so every step inherits it — every chain link of every
+      # provider, and any link added later. Pinned per ship step by
+      # tools/model-registry/tests/test_reviewer_git_containment.py.
+      GIT_ALLOW_PROTOCOL: https
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: safe.bareRepository
+      GIT_CONFIG_VALUE_0: explicit
+      GIT_CONFIG_KEY_1: core.fsmonitor
+      GIT_CONFIG_VALUE_1: "false"
+      GIT_CONFIG_KEY_2: core.hooksPath
+      GIT_CONFIG_VALUE_2: /dev/null
+      GIT_CONFIG_KEY_3: core.pager
+      GIT_CONFIG_VALUE_3: cat
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # The merge ref plus its parents: the PR head (the merge's second
+          # parent) is then local for the staging step below — no fetch.
+          fetch-depth: 2
+
+      # Trusted head staging (code-scanning finding on #760). This reviewer
+      # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
+      # outright — so the PR head's design directories are staged into the
+      # checkout here, by workflow code, before any agent step starts; the
+      # skill reads them with Read/Grep/Glob. The design names come from the
+      # PR's own paths, so they are validated and never globbed before they
+      # reach a path, and never echoed back unvalidated.
+      - name: Stage the PR head's design directories (trusted, no agent)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
+        run: |
+          set -euo pipefail
+          set -f   # PR-controlled names: no globbing
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          for d in $CHANGED_DESIGNS; do
+            if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+              echo "::warning::skipped a changed design directory whose name is not [A-Za-z0-9._-]"
+              continue
+            fi
+            rm -rf -- "designs/${d}"
+            if git cat-file -e "${HEAD_SHA}:designs/${d}" 2>/dev/null; then
+              git checkout "$HEAD_SHA" -- "designs/${d}"
+              echo "staged designs/${d} at ${HEAD_SHA}"
+            else
+              echo "designs/${d} is removed at the PR head; left absent"
+            fi
+          done
 
       - name: /drik-review via Z.AI GLM (chain link 1)
         id: p1
@@ -629,6 +796,20 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      # Git environment lock (code-scanning finding on #760; see the header).
+      # Job-level so every step inherits it — every chain link of every
+      # provider, and any link added later. Pinned per ship step by
+      # tools/model-registry/tests/test_reviewer_git_containment.py.
+      GIT_ALLOW_PROTOCOL: https
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: safe.bareRepository
+      GIT_CONFIG_VALUE_0: explicit
+      GIT_CONFIG_KEY_1: core.fsmonitor
+      GIT_CONFIG_VALUE_1: "false"
+      GIT_CONFIG_KEY_2: core.hooksPath
+      GIT_CONFIG_VALUE_2: /dev/null
+      GIT_CONFIG_KEY_3: core.pager
+      GIT_CONFIG_VALUE_3: cat
     steps:
       - uses: actions/checkout@v7
         with:
@@ -875,10 +1056,28 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      # Git environment lock (code-scanning finding on #760; see the header).
+      # Job-level so every step inherits it — every chain link of every
+      # provider, and any link added later. Pinned per ship step by
+      # tools/model-registry/tests/test_reviewer_git_containment.py.
+      GIT_ALLOW_PROTOCOL: https
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: safe.bareRepository
+      GIT_CONFIG_VALUE_0: explicit
+      GIT_CONFIG_KEY_1: core.fsmonitor
+      GIT_CONFIG_VALUE_1: "false"
+      GIT_CONFIG_KEY_2: core.hooksPath
+      GIT_CONFIG_VALUE_2: /dev/null
+      GIT_CONFIG_KEY_3: core.pager
+      GIT_CONFIG_VALUE_3: cat
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # Full history: every branch head (the PR's included) is local, so
+          # the coach loads and pushes its rounds without `git fetch`/`pull`,
+          # which its backstop denies (code-scanning finding on #760).
+          fetch-depth: 0
 
       - name: /design-coach via Z.AI GLM (chain link 1)
         id: p1
@@ -1156,8 +1355,11 @@ jobs:
   #    check.sh) — so the fail-closed policy is proven, not asserted in YAML.
   #
   #    Runs on EVERY PR event (always(), needs the reviewer jobs only so the
-  #    sign-off markers are already posted when we read them). It never checks
-  #    out or runs untrusted PR code beyond `git rev-parse` on tree objects.
+  #    sign-off markers are already posted when we read them). The only repo
+  #    code it runs is reviewer-signoff.sh (`key`, which reads commits and
+  #    trees with git, and `decide`), from the same merge-ref checkout this
+  #    workflow file and the design-changes job's round guard come from — so
+  #    the skip and the currency are always one version of one rule.
   #
   #    ARMING (the one manual step): this status only *blocks* a merge once an
   #    admin adds `reviewer-signoff` to the branch's required status checks.
@@ -1176,8 +1378,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          fetch-depth: 0                       # older head shas must resolve
-          ref: ${{ github.event.pull_request.head.sha }}
+          # Full history: older head shas must resolve, and the currency key
+          # walks the head's first-parent line. The default (merge) ref, not
+          # head.sha: the head is one of its parents, and it carries the
+          # reviewer-signoff.sh this workflow was written against — a branch
+          # that predates the `key` verb would otherwise compute no keys and
+          # stale every sign-off the round guard just carried forward.
+          fetch-depth: 0
       - name: Compute and post the reviewer-signoff status
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1188,6 +1395,7 @@ jobs:
           DESIGNS_CHANGED: ${{ needs.design-changes.outputs.designs_changed }}
           NO_AUTO_REVIEW: ${{ contains(github.event.pull_request.labels.*.name, 'no-auto-review') }}
           OVERRIDE: ${{ contains(github.event.pull_request.labels.*.name, 'signoff-override') }}
+          SIGNOFF_TRUST_REGEN: ${{ github.event.pull_request.head.repo.full_name == github.repository && '1' || '0' }}
           ANDON: ${{ vars.AI_ANDON_CORD == 'pulled' }}
         run: |
           set -euo pipefail
@@ -1225,13 +1433,16 @@ jobs:
             fuse_warn=true
           fi
 
-          # Design tree at the current head, and at each reviewer's sha, so a
-          # sign-off survives a push that changed no designs/ file (currency).
-          tree_current="$(git rev-parse "${HEAD_SHA}:designs" 2>/dev/null || true)"
-          tree_of() {   # echo the designs tree object at a marker's sha, or empty
+          # Currency key at the current head, and at each reviewer's sha, so a
+          # sign-off survives a push that changed no designs/ file — or a
+          # previews-only, all-noise regen commit-back (issue #470). Both sides
+          # come from reviewer-signoff.sh's one `key`, never a rev-parse here,
+          # so the posting and checking sides cannot drift. Empty = stale.
+          tree_current="$(scripts/reviewer-signoff.sh key "$HEAD_SHA" 2>/dev/null || true)"
+          tree_of() {   # echo the currency key at a marker's sha, or empty
             local sha; sha="$(grep -oiE 'sha=[0-9a-f]+' <<<"$1" | head -1 | cut -d= -f2)"
             if [[ -n "$sha" ]]; then
-              git rev-parse "${sha}:designs" 2>/dev/null || true
+              scripts/reviewer-signoff.sh key "$sha" 2>/dev/null || true
             fi
           }
           jane_tree="$(tree_of "$jane")"

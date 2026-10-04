@@ -54,8 +54,12 @@ contract) so a hunch never masquerades as an observation.
 ## 0. Load the workshop
 
 Accept either a **PR number** or a **design directory path**. When given a
-PR, check out its head so you react to what will merge. Then gather, in
-order — noting gaps rather than rebuilding missing pieces:
+PR, you react to what will merge — the PR head's design files, which are
+**pre-staged by the workflow** (auto-review's trusted step checks the head's
+changed design directories into the working tree before you start). Read
+them with Read/Grep/Glob — **no git** (your backstop denies it; the head sha
+and the diff come from `gh pr view` / `gh pr diff`). Then gather, in order —
+noting gaps rather than rebuilding missing pieces:
 
 1. **`references/first-user-method.md`** (bundled with this skill) — the
    method: deriving the first user, scripting a session of use, the
