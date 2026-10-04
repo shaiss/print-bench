@@ -13,7 +13,10 @@
 #      lifestyle disclosure guards still refuse an undisclosed AI shot or clip
 #   7. shot-spec selftest (scripts/shot-spec.sh --selftest): the shot-manifest
 #      freeze guard and field validators still refuse a bad line
-#   8. fusecheck selftest (scripts/fusecheck-check.sh --selftest): the
+#   8. concept-preview selftest (scripts/concept-preview.sh --selftest): the
+#      concept-sheet checks still refuse a malformed spec, an out-of-bounds
+#      element and overlapping labels
+#   9. fusecheck selftest (scripts/fusecheck-check.sh --selftest): the
 #      ci.fusecheck bound grammar — legacy, MIN MAX, =N, malformed, exit-4 —
 #      every negative row asserted to fire on committed fixtures (issue #627)
 # Run before committing. For full STL+PNG output use scripts/render.sh.
@@ -760,6 +763,17 @@ fi
 # leave every other check green — and it is fast (no render), so it runs here.
 echo "-- shot-spec selftest: scripts/shot-spec.sh --selftest"
 if ! ./scripts/shot-spec.sh --selftest; then
+  fail=1
+fi
+
+# concept-preview.sh draws a design's blueprint concept sheets from its
+# preview-spec.conf (issue #472). Its --selftest emits the fixture's four
+# sheets and requires every check to pass, then proves each negative control
+# still FAILS with the check it names — a malformed spec, an out-of-bounds
+# element, two overlapping labels. No design ships a spec yet, so this is the
+# only thing that would notice a check gone soft. Pure stdlib, no render.
+echo "-- concept-preview selftest: scripts/concept-preview.sh --selftest"
+if ! ./scripts/concept-preview.sh --selftest; then
   fail=1
 fi
 
