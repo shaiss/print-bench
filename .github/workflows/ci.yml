@@ -200,6 +200,39 @@ jobs:
           # authenticates the clone; the push re-supplies it explicitly.)
           token: ${{ secrets.REGEN_TOKEN || github.token }}
 
+      - name: Fetch the preview-diff cross-check base
+        # preview-diff (issue #470, the measure step below) cross-checks each
+        # design's preview diff against whether its own sources moved since
+        # this commit, and the checkout is depth 1, so the commit has to be
+        # fetched. HERE, before the plan step runs the first line of repo
+        # code: this step holds a token and runs only git, and a step that
+        # runs after the generators could find .git rewritten under it. The
+        # job token, not REGEN_TOKEN: a read-only fetch needs nothing the PAT
+        # adds. Depth 1 — a tree diff needs no history. A failed fetch only
+        # leaves the output empty, which turns the cross-check off and says
+        # so; it never fails this job.
+        id: srcbase
+        if: needs.changes.outputs.regen == 'true'
+        env:
+          FETCH_TOKEN: ${{ github.token }}
+          # The PR's base tip, or on a push the commit the branch moved from.
+          SOURCE_BASE: >-
+            ${{ github.event_name == 'pull_request'
+                && github.event.pull_request.base.sha
+                || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SOURCE_BASE:-}" ] || [ "$SOURCE_BASE" = 0000000000000000000000000000000000000000 ]; then
+            echo "::notice::preview-diff: no source base for this event — the source cross-check is skipped this run"
+            exit 0
+          fi
+          if timeout 120 git fetch --quiet --no-tags --depth=1 \
+               "https://x-access-token:${FETCH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$SOURCE_BASE"; then
+            echo "sha=$SOURCE_BASE" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::preview-diff: could not fetch ${SOURCE_BASE} — the source cross-check is skipped this run"
+          fi
+
       - name: Decide what needs regenerating
         id: plan
         env:
@@ -449,6 +482,67 @@ jobs:
         if: steps.plan.outputs.designs != '' && vars.AI_ANDON_CORD == 'pulled'
         run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — product-page drafting (the one Claude API call in CI) was skipped; previews, animations, product shots and the gallery were regenerated deterministically as usual; no provider API call was made. Release the cord to resume — see docs/andon-cord.md."
 
+      - name: Measure regenerated previews against the committed bytes (advisory)
+        # The faithfulness half of #69 (issue #470): preview-diff classes each
+        # staged preview against HEAD's bytes (noise / content / resized / new
+        # / removed / not-compared, band 1% of pixels) into the job summary,
+        # and warns on a content change to a design whose own sources did not
+        # move since the fetched base. That puts a number behind the "rendering
+        # noise" the commit step below asserts on a default-branch push and on
+        # the loop guard's second pass.
+        #
+        # Its OWN step, never part of the commit step: preview-diff.sh comes
+        # from the PR branch, so this is repo code, and this job's rule is
+        # that repo code never runs in the step that holds PUSH_TOKEN. Unsetting
+        # the variable for one command would not do — a child can read its
+        # parent shell's /proc/<pid>/environ. No secret is in this step's env;
+        # the base it compares against was fetched before any repo code ran.
+        #
+        # Advisory: continue-on-error AND the rc check below, so it can never
+        # fail this job, and the timeout keeps it from stalling the push.
+        #
+        # Its one output, `verdict`, is the run's PREVIEW-DIFF-VERDICT line
+        # (all-noise | content), set only when preview-diff finished cleanly.
+        # The commit step turns it into the commit-back's `Preview-Diff:`
+        # trailer, which auto-review.yml reads to skip a new review round on a
+        # previews-only all-noise commit-back (the owner's ruling on decision
+        # regen-commitback-review-retrigger, issue #470). It crosses into the
+        # token step as DATA: that step matches it against two literals and
+        # runs nothing of the branch's.
+        id: pdiff
+        if: steps.plan.outputs.gallery == 'true'
+        continue-on-error: true
+        env:
+          SOURCE_BASE: ${{ steps.srcbase.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # The commit step's exact staging (idempotent — it stages again).
+          git add -A designs README.md
+          if git diff --cached --quiet; then
+            echo "nothing regenerated — nothing to measure"
+            exit 0
+          fi
+          src_args=()
+          if [ -n "${SOURCE_BASE:-}" ]; then
+            src_args=(--source-base "$SOURCE_BASE")
+          else
+            echo "::notice::preview-diff: no fetched source base — the source cross-check is skipped this run"
+          fi
+          out="$RUNNER_TEMP/preview-diff.out"
+          rc=0
+          timeout 900 ./scripts/preview-diff.sh --base HEAD ${src_args[@]+"${src_args[@]}"} \
+              --summary "$GITHUB_STEP_SUMMARY" > "$out" || rc=$?
+          cat "$out"
+          if [ "$rc" -ne 0 ]; then
+            # No verdict from a run that did not finish: the commit-back then
+            # carries no trailer, and review treats it as content (fail-closed).
+            echo "::warning::preview-diff could not run — the regenerated previews are unmeasured (advisory, issue #470)"
+            exit 0
+          fi
+          verdict="$(sed -n 's/^PREVIEW-DIFF-VERDICT \(all-noise\|content\)$/\1/p' "$out" | tail -n 1)"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "commit-back verdict: ${verdict:-(none)}"
+
       - name: Commit and push what changed
         id: commit
         env:
@@ -458,6 +552,8 @@ jobs:
           # Scoped to this step alone — see persist-credentials on the
           # checkout. Actions masks it in the log.
           PUSH_TOKEN: ${{ secrets.REGEN_TOKEN || github.token }}
+          # The measure step's verdict (data only — see that step).
+          PREVIEW_VERDICT: ${{ steps.pdiff.outputs.verdict }}
           BRANCH: >-
             ${{ github.event_name == 'pull_request'
                 && github.event.pull_request.head.ref
@@ -485,7 +581,7 @@ jobs:
             # to fail this required job and red `ci-ok` on every
             # regen-touching push to the default branch. Report the diff for
             # visibility and stop; do not commit or push it.
-            echo "::notice::default-branch push — committed artifacts already arrived fresh via the merged PR; the diff above is cross-runner rendering noise and is not pushed to ${BRANCH} (direct pushes to the default branch are disallowed by the ruleset; this is expected, not a failure)."
+            echo "::notice::default-branch push — committed artifacts already arrived fresh via the merged PR; the diff above is cross-runner rendering noise (the preview-diff table in the job summary measures that claim per file) and is not pushed to ${BRANCH} (direct pushes to the default branch are disallowed by the ruleset; this is expected, not a failure)."
             git reset >/dev/null
             echo "sha=" >> "$GITHUB_OUTPUT"
             exit 0
@@ -497,7 +593,7 @@ jobs:
             # something to fix by pushing again. Report it and stop: the
             # committed artifacts are the first pass's, which the gates in
             # this very run have judged.
-            echo "::warning::Regenerating produced a different result than the regen commit already on this branch, with no source change in between. That means a generator is not reproducible across runners — the files above differ only by rendering noise. Committed artifacts are left as they are; the loop guard stops here rather than pushing again."
+            echo "::warning::Regenerating produced a different result than the regen commit already on this branch, with no source change in between. That means a generator is not reproducible across runners — the files above should differ only by rendering noise, and the preview-diff table in the job summary says whether they do. Committed artifacts are left as they are; the loop guard stops here rather than pushing again."
             echo "sha=" >> "$GITHUB_OUTPUT"
             git reset >/dev/null
             exit 0
@@ -508,7 +604,16 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "$REGEN_SUBJECT"
+          # The Preview-Diff trailer (issue #470): only these two literals pass;
+          # anything else, or no verdict, means no trailer — which review reads
+          # as content. scripts/reviewer-signoff.sh recognises exactly this
+          # subject, identity and trailer, and its selftest pins all three here.
+          trailer=()
+          pd=none
+          case "${PREVIEW_VERDICT:-}" in
+            all-noise|content) trailer=(-m "Preview-Diff: ${PREVIEW_VERDICT}"); pd="$PREVIEW_VERDICT" ;;
+          esac
+          git commit -m "$REGEN_SUBJECT" ${trailer[@]+"${trailer[@]}"}
           # Credential supplied here rather than persisted in .git/config, so
           # the generators that ran above never had it in reach.
           git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
@@ -530,6 +635,9 @@ jobs:
             git show --pretty=format: --name-only HEAD | while IFS= read -r f; do
               [ -n "$f" ] && printf -- "- \`%s\`\n" "$f"
             done
+            echo
+            echo "Preview-Diff trailer: \`${pd}\` — a previews-only \`all-noise\`"
+            echo "commit-back opens no new design-review round (issue #470)."
             echo
             echo "A product page drafted by \`scripts/product-page.sh\` carries an"
             echo "\`AI-drafted\` marker comment — read it before merging and delete the marker."

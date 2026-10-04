@@ -75,7 +75,8 @@ def cmd_gather(args: argparse.Namespace) -> int:
     """`gather`: print the live snapshot for ``--repo`` as JSON."""
     from .github import gather_snapshot  # imported here so `select` needs no network stack
 
-    snapshot = gather_snapshot(args.repo, _token())
+    snapshot = gather_snapshot(args.repo, _token(), required_label=args.label,
+                               now=datetime.now(timezone.utc))
     json.dump(snapshot, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0
@@ -85,9 +86,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     """`run`: gather the live snapshot then apply the policy."""
     from .github import gather_snapshot
 
-    snapshot = gather_snapshot(args.repo, _token())
-    record = select_issue(snapshot, required_label=args.label,
-                          now=datetime.now(timezone.utc))
+    # One `now` for both halves: the gather asks the policy which branches
+    # deserve a compare, and must ask about the same instant it then selects at.
+    now = datetime.now(timezone.utc)
+    snapshot = gather_snapshot(args.repo, _token(), required_label=args.label, now=now)
+    record = select_issue(snapshot, required_label=args.label, now=now)
     _emit(record, args)
     return 0
 
@@ -152,6 +155,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_gather = sub.add_parser("gather", help="read the live snapshot from GitHub")
     p_gather.add_argument("--repo", required=True, help="owner/name")
+    p_gather.add_argument("--label", default=DEFAULT_REQUIRED_LABEL,
+                          help="opt-in label whose candidates' claude/issue-* branches get "
+                               f"a compare (default: {DEFAULT_REQUIRED_LABEL})")
     p_gather.set_defaults(func=cmd_gather)
 
     p_run = sub.add_parser("run", help="gather then select")

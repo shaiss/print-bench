@@ -23,6 +23,12 @@ never depend on a model's judgment:
   default 2) whichever (delayed) firings GitHub delivers.
 * :mod:`growth.simulate` — the accelerated dry-run: walk N days of cadence
   over a queue snapshot and render exactly what would have been posted, when.
+* :mod:`growth.dedup` — the queuer's dedup context: every open or
+  recently-closed ``channel:*`` issue, split into "queued" and "already
+  covered or declined", plus the near-duplicate title rule the queue tool's
+  backstop copies.
+* :mod:`growth.github` — the GitHub read seam behind the dedup context
+  (GET-only, pinned by ``tests/test_purity.py``).
 * :mod:`growth.poster` — the X API v2 seam (OAuth 1.0a signing, stdlib-only);
   inert unless every credential is present.
 
@@ -34,6 +40,8 @@ __all__ = [
     "config",
     "cron",
     "daycap",
+    "dedup",
+    "github",
     "poster",
     "queue",
     "simulate",
