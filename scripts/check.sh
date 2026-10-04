@@ -661,7 +661,9 @@ fi
 # logic behind the `reviewer-signoff` required status (auto-review.yml, W2). The
 # gate is fail-closed — a design PR without two clean, current sign-offs blocks —
 # so the selftest is the only thing that proves it both passes clean AND fails
-# closed (missing/malformed/stale/blocking/fuse-unacked markers each block).
+# closed (missing/malformed/stale/blocking/fuse-unacked markers each block;
+# fuse-warn sticky selection: only a body that starts with the printcheck
+# marker, and only the real fusecheck STRONG WARN cell — PR #634).
 echo "-- reviewer-signoff selftest: scripts/reviewer-signoff.sh --selftest"
 if ! ./scripts/reviewer-signoff.sh --selftest; then
   fail=1
