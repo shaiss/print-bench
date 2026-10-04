@@ -209,5 +209,9 @@ it only when you already know the printer.
   foot vs 0.3 mm recess clearance), plate filament-per-object sentence,
   Arachne/gap-fill "won't free at 0.25" line, ±20° is trim. Declined moving
   `collar-closeup` (frozen at R1; companion already added). Queued B5:
-  cylindrical tenon for the full recess — today's cone wedges after ~1 mm;
+  cylindrical tenon for the full recess —   today's cone wedges after ~1 mm;
   that rebuild adds height and a camera, not a freeze-move.
+- **Drik R3.1 (sha `352bb2ad`).** The rotate_extrude "chamfer" was a V-groove:
+  the flare grows to r+0.95z, so the cut's (r, 0.5) apex left a knife-edge
+  Ø14 skirt. Replaced with a 0.5 mm 45° cylinder *under* the original flare
+  (`tenon_bed_chamfer`); zc() includes it. Coupon support should stay ~4%.
