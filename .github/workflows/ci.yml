@@ -71,6 +71,7 @@ jobs:
       brief_sources_tests: ${{ steps.filter.outputs.brief_sources_tests }}
       growth_tests: ${{ steps.filter.outputs.growth_tests }}
       andon_tests: ${{ steps.filter.outputs.andon_tests }}
+      concept_preview_tests: ${{ steps.filter.outputs.concept_preview_tests }}
       agent_memory_tests: ${{ steps.filter.outputs.agent_memory_tests }}
       styles: ${{ steps.filter.outputs.styles }}
       gate: ${{ steps.filter.outputs.gate }}
@@ -904,6 +905,29 @@ jobs:
         # Pins the reconciler workflow's shape (job/cron/marker parity with
         # the tool), so andon.yml and ci.yml edits re-run these too.
         run: python -m pytest tools/andon/tests -q
+
+  concept-preview-tests:
+    name: concept-preview unit tests
+    needs: changes
+    if: needs.changes.outputs.concept_preview_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install concept-preview
+        # The blueprint concept-sheet emitter (issue #472). Stdlib-only like
+        # its siblings — the [test] extra is just pytest; the wrapper script
+        # runs the package straight from src/ with no install at all.
+        run: pip install -e 'tools/concept-preview[test]'
+      - name: Run tests
+        # Includes the wrapper's own selftest (scripts/concept-preview.sh),
+        # so a wrapper-only edit re-runs this job too.
+        run: python -m pytest tools/concept-preview/tests -q
 
   agent-memory-tests:
     name: agent-memory unit tests
@@ -1922,6 +1946,7 @@ jobs:
       - brief-sources-tests
       - growth-tests
       - andon-tests
+      - concept-preview-tests
       - agent-memory-tests
       - telemetry-tests
       - ci-gates-tests
