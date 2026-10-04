@@ -74,13 +74,13 @@ mass: ballast-neg | grams: 27.5 | at: -1.4,-21.65,3.91
 mass: ballast-pos | grams: 27.5 | at: -1.4, 21.65,3.91
 
 # ---- second printed copies (not a second part: line) -----------------------
-# +x wing: full_base() mirrors the −x wing in x. PLA estimate from the
-# inline strut/boss/foot/nose inventory of base_end() (cylinder lengths of
-# strut_d=2.8, node-sphere overlaps ignored): V ≈ 7.16 cm³ → 8.9 g at
-# strut-midpoint CoG (−110.9, −0.1, 6.5); mirrored x → (110.9, −0.1, 6.5).
-# Replace grams with mesh volume × 1.24 of ovodyo-base-end.stl once a gate
-# render measures it.
-mass: base-end-plus | grams: 8.9 | at: 110.9,-0.1,6.5
+# +x wing: full_base() mirrors the −x wing in x. Mesh volume of
+# ovodyo-base-end.stl from PR #789 argus-diff sticky on d8d9cf5:
+# 6323.1 mm³ × 1.24 g/cm³ = 7.84 g (replaces the 8.9 g strut-inventory
+# estimate). Not the printcheck filament-est 7.89 g (infill, not solid mesh).
+# CoG still the strut-midpoint used for that estimate (−110.9, −0.1, 6.5);
+# mirrored x → (110.9, −0.1, 6.5).
+mass: base-end-plus | grams: 7.84 | at: 110.9,-0.1,6.5
 # −y ballast plug: same PLA frustum-head estimate as core_plug()
 # (head Ø5×1.2 + taper 3.3→2.7 × 4.5 mm → 0.069 g). Print-frame CoG ≈
 # (0,0,2.15); after rotate([0,-90,0]) + translate(61.2, −22, 5.75) →
