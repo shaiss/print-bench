@@ -152,6 +152,35 @@ default-depth holder pair.
   stays boss + default collar). No new coupon — thread/bore coupons already
   cover the fits. Default `engagement_depth`, deep geometry, fitchecks, and
   style claim unchanged.
+- **D13 — (B1) Seat detent + witness window, both on by default.** The closed
+  socket hid whether the rod had bottomed on the shoulder. Two small features
+  on `collar_use` (so `collar-shallow` inherits them via `depth=`):
+  1. **Seat detent** — a triangular annulus, `seat_detent_radial` 0.30 mm
+     inward, `seat_detent_h` 0.8 mm, starting `seat_detent_lift` 0.4 mm above
+     the rod-seat plane. Peak bore = 40.6 − 0.60 = **40.0** — line-to-line
+     with a 40 mm rod (0.10 mm diametral interference if the lip is pushed to
+     0.35). The rod scrapes the peak then drops the last 0.4 mm onto the
+     shoulder: click, then solid stop. Added *after* the bore cut so the
+     Ø40.6 cylinder cannot eat it. Union-welded 0.6 mm into the tube wall;
+     load-bearing wall stays 3.2. Hand-pushable: the lip is a short axial
+     bump, not a press-fit length.
+  2. **Witness window** — two 1.6 × 8 mm axial capsule slots through the
+     rod-tube wall, 180° apart, rounded ends sitting on the seat plane so
+     the rod *tip* is visible when seated (empty dark at the seat = not in).
+     Printed **rod-mouth-down** (D5) the slots sit near the top of the print;
+     the 1.6 mm hoop width is the bridge a stock 0.4/0.2 profile takes
+     without supports (N4). Slots stay above the female thread, so
+     `fit-mate` / phase / `lead_in` are untouched (D3).
+  Production defaults **on** (`seat_detent`, `witness_window`); either can
+  be switched off. Asserts cap the lip at 0.5 mm radial, the slot width at
+  3 mm (bridge), and both features to fit `shallow_engagement_depth`.
+  **Bore coupon left alone:** it is a 12 mm slice of the *straight* slip
+  bore, meant to prove `rod_clearance` by sliding along the pole. The detent
+  is a seat-only catch, not a bore-diameter change; putting it on the coupon
+  would turn a slip check into a catch check. Thread coupon unchanged (N5).
+  Field confirmation — does the click survive ~730 axial curtain-tugs/yr,
+  and is the tip readable in the slot — waits on the proving print's
+  week-of-use seat check. Geometry is otherwise v2.
 
 ## Print settings
 
@@ -190,6 +219,8 @@ production modules — what you print *is* what ships.
    - Visible wobble → lower it 0.1 mm.
    - In ASA print this coupon first: bore shrink is ~0.2–0.4 mm, most of
      the slip — expect +0.1–0.2 mm on `rod_clearance`.
+   - The seat detent is **not** on this coupon (D13): it proves the slip
+     bore, not the seat catch. Tune the catch on a full collar.
 
 Measure the pole with calipers first and set `rod_d` to the *barrel* reading
 (where the socket sits), not the finial/ring size.

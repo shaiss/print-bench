@@ -143,6 +143,8 @@ you'll export the fused assembly preview instead of a printable part):
 | `screw_count` | 1 | 1 central M5, or 2 off-axis (grows the flange; stops boss spin) |
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
+| `seat_detent` | on | annular catch at the rod seat — feel "fully in" |
+| `witness_window` | on | two axial sight slots at the seat — see "fully in" |
 
 Sizes other than the default 40 mm rod are **untested** — the geometry
 scales, but the fits are only proven at 40 mm, and the coupons are the
@@ -158,11 +160,15 @@ proof: print them in your material first and trust them over this page.
    weight — heavier curtains than that want a stud or `screw_count=2`
    (derivation in NOTES).
 2. Slide the collars over the rod before hanging it — one at each end.
-3. Thread each collar onto its boss until the rim seats on the plate. For a
-   rigid rod between two fixed walls: use one default `collar` (deep) and one
-   `collar-shallow` — push into the deep side, drop the shallow end in,
-   tighten both collars. Cut the rod ≈ **18–20 mm short of the mouth-to-mouth
-   span** (28 mm deep − 12 mm shallow + each mouth's lead-in).
+3. Thread each collar onto its boss until the rim seats on the plate. Push
+   each rod end in until it **clicks** past the seat detent, then bottoms on
+   the shoulder — look through the two thin slots near the grip-to-tube
+   flare: you should see the rod *tip* at the seat (dark empty at the bottom
+   of the slot = not fully in). For a rigid rod between two fixed walls: use
+   one default `collar` (deep) and one `collar-shallow` — push into the deep
+   side, drop the shallow end in, tighten both collars. Cut the rod ≈
+   **18–20 mm short of the mouth-to-mouth span** (28 mm deep − 12 mm shallow
+   + each mouth's lead-in).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out — **holding the flange still** as you
    unthread, because unscrewing friction can walk the single M5 out of the
