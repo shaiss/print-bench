@@ -421,7 +421,8 @@ in place on z = 0) and `base-plug` its port plug (print two); `core-seat`,
 (never printed). `ci.plate` builds the multi-object 3MF deliverable.
 `base-mech` (whole drivetrain) and `pod-drive` (one pod's gear train) are
 PREVIEW-ONLY coloured mechanism — not in `ci.parts`, not printed. The ball's
-faceting is `_GB_TRI_K` in `geodesic-ball.scad`; the numeral stencil ties are
+faceting is `facet` in `ovodyo.scad` (passed as `tri_k`; `_GB_TRI_K` in
+`geodesic-ball.scad` is only the helper's default); the numeral stencil ties are
 `_gb_stencil` (proved island-free by CGAL `Volumes: 2`). Previews are frozen in
 `previews/cameras.conf` (added `base-mech`). NOTE: `--viewall` mis-scales this
 design because the ball's rotated half-space cubes fatten OpenSCAD's preview
