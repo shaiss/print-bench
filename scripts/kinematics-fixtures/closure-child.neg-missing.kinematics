@@ -1,0 +1,7 @@
+# Include-closure negative control (selftest: must FAIL before rendering):
+# `closure-nope` is not a `part ==` branch anywhere in the include closure
+# (the parent only has `counterpart == "closure-nope"`). Mirrors fusecheck's
+# fail-closure-missing.fusecheck.
+stops stop 0
+empty closure-nope
+empty-control closure-solid
