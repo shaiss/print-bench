@@ -14,6 +14,8 @@ own intended size.
 
 ![Product shot: the engraved 20 mm size marker, high three-quarter view, satin orange PLA](previews/size-marker.png)
 
+![Product shot: multi-size strip — separate 5 / 10 / 20 / 30 mm cubes, air-gapped, satin orange PLA](previews/size-sweep.png)
+
 ![Turntable: chamfered bottom edges and the engraved size marker](previews/turntable.gif)
 
 ![AI-styled scene: calibration-cube in motion, staged in a real-world setting](previews/lifestyle-turntable.gif)
