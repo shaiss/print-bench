@@ -124,6 +124,19 @@ def _assert_reviewer_steps_carry_their_backstop(text: str) -> None:
                 f"{at} passes deny backstop {settings or 'none'}, not exactly "
                 f"[{BACKSTOPS[job]!r}] — the settings.json allows it inherits "
                 f"are no longer neutralised (or it wears the other backstop)")
+            # Cursor cloud agents initiate the workflow as cursor[bot]. The
+            # action's default allowed_bots is empty and refuses that actor
+            # before any review runs. Pin the slug the error names (`cursor`,
+            # not `cursor[bot]` and not `*`). Check `*` first so a widen
+            # fails on that pin rather than the missing-cursor assertion.
+            assert not re.search(
+                r"(?m)^\s+allowed_bots:\s+['\"]?\*['\"]?\s*$", chunk
+            ), (
+                f"{at} sets allowed_bots to '*' — that lets any GitHub App "
+                f"trigger the action on a public repo")
+            assert re.search(r"(?m)^\s+allowed_bots:\s+cursor\s*$", chunk), (
+                f"{at} omits `allowed_bots: cursor` — a Cursor-authored design "
+                f"PR would fail at the human-actor check")
 
 
 def test_every_reviewer_ship_step_carries_its_backstop():
@@ -234,6 +247,12 @@ def _tamper(text: str, job: str, step: int, old: str, new: str) -> str:
     # The skip-all-permissions flag appended.
     ("jane-review", 3, " --model", " --dangerously-skip-permissions --model",
      "dangerously-skip-permissions"),
+    # Cursor allowlist dropped: Jane/Drik fail on cursor[bot] PRs before review.
+    ("jane-review", 0, "          allowed_bots: cursor\n", "",
+     "allowed_bots: cursor"),
+    # Widened to every bot — public-repo Apps could trigger the action.
+    ("drik-review", 0, "          allowed_bots: cursor\n",
+     "          allowed_bots: '*'\n", "allowed_bots to '*'"),
 ])
 def test_wiring_guard_rejects_a_tampered_step(job, step, old, new, match):
     # NEGATIVE CONTROLS: each tamper must fail the pin, or it proves nothing.
