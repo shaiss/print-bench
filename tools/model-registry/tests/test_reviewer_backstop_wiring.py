@@ -36,6 +36,16 @@ from test_workflow_drift import (
 
 REVIEWER_BACKSTOP = ".claude/reviewer-settings.json"
 COACH_BACKSTOP = ".claude/design-coach-settings.json"
+# The posting surface (issue #764): the Jane/Drik ship steps must also carry
+# the reviewer MCP server and pin its trusted env, or the reviewers relapse
+# into having NO postable write (every round then ends with denials and an
+# exit-0 job that posted nothing — the bug this closes). PM triage and the
+# coach post no sign-off, so they stay on reads only.
+POST_CONFIG = ".claude/reviewer-post/reviewer-mcp.json"
+POST_TOOL = "mcp__reviewer__post_review"
+POST_JOBS = {"jane-review": "jane", "drik-review": "drik"}
+POST_PR = "${{ github.event.pull_request.number }}"
+POST_STATE = "${{ runner.temp }}/reviewer-posts"
 # job → the deny backstop its ship steps pass. The coach's differs because it
 # pushes iterations (Write/Edit stay allowed); the reviewers are read-only.
 BACKSTOPS = {
@@ -133,6 +143,57 @@ def test_every_reviewer_ship_step_carries_its_backstop():
     _assert_reviewer_steps_carry_their_backstop(_workflow_text())
 
 
+def _step_env(chunk: str) -> dict[str, str]:
+    """The step's `env:` scalar entries — the trusted inputs the posting
+    server reads (REVIEWER_ID / REVIEWER_PR / REVIEWER_POST_STATE)."""
+    env: dict[str, str] = {}
+    for m in re.finditer(r"^ +([A-Z][A-Z0-9_]+): (.+)$", chunk, re.MULTILINE):
+        env[m.group(1)] = m.group(2).strip()
+    return env
+
+
+def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
+    """Every Jane/Drik ship step wires the posting server AND pins its trusted
+    env — the flags prove the tool is loaded and allowed, the env proves the
+    server can know WHICH reviewer and WHICH PR it is posting for. Factored
+    out for the tamper negative controls."""
+    assert (REPO_ROOT / POST_CONFIG).is_file(), (
+        f"{POST_CONFIG} is missing — the reviewers have no postable write")
+    for job, who in POST_JOBS.items():
+        block = _without_comments(_job_blocks(text)[job])
+        for n, chunk in enumerate(_ship_chunks(block), 1):
+            at = f"auto-review.yml [{job}] ship step {n}"
+            args = _claude_args(chunk)[0]
+            configs = _flag(args, "--mcp-config")
+            assert configs == [POST_CONFIG], (
+                f"{at} passes --mcp-config {configs or 'none'}, not exactly "
+                f"[{POST_CONFIG!r}] — the reviewer posts via that server or "
+                f"not at all (issue #764)")
+            tools = _flag(args, "--allowedTools")
+            allowed = tools[0].strip('"').split(",") if tools else []
+            assert len(tools) == 1 and POST_TOOL in allowed, (
+                f"{at} does not allow {POST_TOOL} — the session would be "
+                f"denied on its only write surface")
+            env = _step_env(chunk)
+            assert env.get("REVIEWER_ID") == who, (
+                f"{at} sets REVIEWER_ID={env.get('REVIEWER_ID')!r}, not "
+                f"{who!r} — the env selects the sign-off family (JANE_ vs "
+                f"DRIK_), so a wrong value posts the wrong reviewer's marker")
+            assert env.get("REVIEWER_PR") == POST_PR, (
+                f"{at} sets REVIEWER_PR={env.get('REVIEWER_PR')!r}, not the "
+                f"workflow's PR — the posting server pins its target to this "
+                f"env; anything else lets the comment land elsewhere")
+            assert env.get("REVIEWER_POST_STATE") == POST_STATE, (
+                f"{at} sets REVIEWER_POST_STATE="
+                f"{env.get('REVIEWER_POST_STATE')!r}, not the shared "
+                f"{POST_STATE!r} — one path across the chain walk is what "
+                f"makes the one-review cap span the links")
+
+
+def test_every_reviewer_ship_step_carries_the_post_surface():
+    _assert_reviewer_steps_carry_their_post_surface(_workflow_text())
+
+
 def test_backstop_table_covers_every_reviewer_job():
     # The review-chain guard's job list and this table cannot drift: a reviewer
     # job enrolled there without a backstop here would ship unpinned.
@@ -198,6 +259,51 @@ def test_wiring_guard_rejects_a_tampered_step(job, step, old, new, match):
     tampered = _tamper(_workflow_text(), job, step, old, new)
     with pytest.raises(AssertionError, match=match):
         _assert_reviewer_steps_carry_their_backstop(tampered)
+
+
+@pytest.mark.parametrize("job,step,old,new,match", [
+    # The posting server dropped: back to denials and an exit-0 nothing.
+    ("jane-review", 0, " --mcp-config .claude/reviewer-post/reviewer-mcp.json",
+     "", "--mcp-config"),
+    # The tool dropped from --allowedTools: loaded but never permitted.
+    ("drik-review", 2,
+     '--allowedTools "mcp__reviewer__post_review,Read,Grep,Glob"',
+     '--allowedTools "Read,Grep,Glob"', "only write surface"),
+    # REVIEWER_ID crossed: a Jane step posting DRIK's sign-off family.
+    ("jane-review", 4, "REVIEWER_ID: jane", "REVIEWER_ID: drik",
+     "REVIEWER_ID"),
+    # REVIEWER_PR unpinned: the server would refuse (or post elsewhere).
+    ("drik-review", 5,
+     "REVIEWER_PR: ${{ github.event.pull_request.number }}",
+     "REVIEWER_PR: 1", "REVIEWER_PR"),
+    # The state path off runner.temp / per-link: the cap stops spanning the walk.
+    ("jane-review", 1,
+     "REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts",
+     "REVIEWER_POST_STATE: reviewer-posts", "REVIEWER_POST_STATE"),
+    # The state env dropped entirely.
+    ("drik-review", -1, "          REVIEWER_POST_STATE: ${{ runner.temp }}"
+     "/reviewer-posts\n", "", "REVIEWER_POST_STATE"),
+])
+def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
+    # NEGATIVE CONTROLS for the posting-surface pin, same discipline.
+    tampered = _tamper(_workflow_text(), job, step, old, new)
+    with pytest.raises(AssertionError, match=match):
+        _assert_reviewer_steps_carry_their_post_surface(tampered)
+
+
+def test_post_surface_guard_rejects_a_missing_server():
+    # NEGATIVE CONTROL: the wiring can be perfect and still post nothing if
+    # the server file the config launches is gone. Prove the pin sees the
+    # file, without deleting it: point the constant at a missing path.
+    text = _workflow_text()
+    import test_reviewer_backstop_wiring as mod
+    real = mod.POST_CONFIG
+    try:
+        mod.POST_CONFIG = ".claude/reviewer-post/gone-mcp.json"
+        with pytest.raises(AssertionError, match="is missing"):
+            _assert_reviewer_steps_carry_their_post_surface(text)
+    finally:
+        mod.POST_CONFIG = real
 
 
 def test_wiring_guard_rejects_a_reflowed_step_that_shed_its_backstop():
