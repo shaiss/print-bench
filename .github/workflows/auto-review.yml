@@ -1357,9 +1357,10 @@ jobs:
   #    Runs on EVERY PR event (always(), needs the reviewer jobs only so the
   #    sign-off markers are already posted when we read them). The only repo
   #    code it runs is reviewer-signoff.sh (`key`, which reads commits and
-  #    trees with git, and `decide`), from the same merge-ref checkout this
-  #    workflow file and the design-changes job's round guard come from — so
-  #    the skip and the currency are always one version of one rule.
+  #    trees with git, `fuse-warn`, and `decide`), from the same merge-ref
+  #    checkout this workflow file and the design-changes job's round guard
+  #    come from — so the skip, the fuse sticky, and the currency are always
+  #    one version of one rule.
   #
   #    ARMING (the one manual step): this status only *blocks* a merge once an
   #    admin adds `reviewer-signoff` to the branch's required status checks.
@@ -1423,15 +1424,18 @@ jobs:
 
           # Fuse warn live this round? The render-gate sticky (W1) renders a
           # fusecheck STRONG WARN when a print-in-place mechanism welds shut.
-          # Best-effort cross-workflow read: if the gate sticky isn't posted yet
-          # the flag is false and the reviewers' own acknowledgement (their skill)
-          # plus the visible warn carry it — documented in reviewer-signoff.sh.
-          fuse_warn=false
-          if gh api --paginate "/repos/$REPO/issues/$PR_NUMBER/comments" \
-               --jq '[.[] | select(.body | contains("printcheck-gate-report"))] | last | .body' \
-               2>/dev/null | grep -qi "STRONG WARN"; then
-            fuse_warn=true
-          fi
+          # Select only a body that STARTS with the sticky marker — a review
+          # comment that quotes `<!-- printcheck-gate-report -->` is not the
+          # sticky (PR #634: `contains()` + last picked Drik's sign-off).
+          # The STRONG WARN match lives in reviewer-signoff.sh fuse-warn so
+          # "No fusecheck STRONG WARN" cannot trip it. Best-effort: if the
+          # sticky isn't posted yet the flag is false and the reviewers' own
+          # acknowledgement plus the visible warn carry it.
+          sticky="$(gh api --paginate "/repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '[.[] | select((.body // "") | startswith("<!-- printcheck-gate-report -->"))] | last | .body // empty' \
+            2>/dev/null || true)"
+          fuse_warn="$(printf '%s' "$sticky" | scripts/reviewer-signoff.sh fuse-warn || true)"
+          [[ "$fuse_warn" == true ]] || fuse_warn=false
 
           # Currency key at the current head, and at each reviewer's sha, so a
           # sign-off survives a push that changed no designs/ file — or a
