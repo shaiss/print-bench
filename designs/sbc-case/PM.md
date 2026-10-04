@@ -60,7 +60,7 @@ and believes the assembly before trying it.
 |---|---|---|---|---|
 | product-hero | the closed case, fan in the lid | hero | #35383d satin | `part="assembled"` |
 | product-populated | your Pi on the generated standoffs, ports open — the promise `product-base`'s empty tray didn't sell (round 2) | high angle | #35383d satin | `part="base-board"` |
-| product-base | the bare tray: generated standoffs, through-bored posts, skirt | high angle | #35383d satin | `part="base"` |
+| product-base | the bare tray: generated standoffs, stepped-seat lid-screw posts, skirt | high angle | #35383d satin | `part="base"` |
 
 Frozen preview cameras (`previews/cameras.conf`): `iso`, `top`, `ports`
 (assembled), `board` (base), `notch` (base + board, round 2) and the bare

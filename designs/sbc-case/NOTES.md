@@ -364,7 +364,7 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
-26. **B4 — stepped insert seat on base lid-screw posts.** `insert_post(...,
+27. **B4 — stepped insert seat on base lid-screw posts.** `insert_post(...,
     through=true)` no longer full-height Ø4.0: from the post top, Ø4.0 ×
     `insert_length(F1BM3)` = 5.8 mm (vitamin), then
     `2 * screw_clearance_radius(M3_cap_screw)` = 3.3 mm through the rest so an
@@ -400,7 +400,10 @@ structure proof:
 1. **Insert fit:** an F1BM3 should press into the post's Ø4.0 hole and grab.
    Loose → drop `post_d` shell or check hole size first; the hole diameter is
    `2 * insert_hole_radius(F1BM3)` from the vitamin, so tune by printer, not
-   by editing the vitamin value.
+   by editing the vitamin value. The coupon crop includes a **stepped post** —
+   melt a real insert into that coupon post and confirm it stops flush before
+   you commit to the full `base` (dry-fit proves diameter; melt proves the
+   shoulder).
 2. **Register fit:** flip the lid corner over and drop it onto the base
    corner — the lip notch should pass the post and the lip face seat against
    the wall with light friction, no force. Tight → `fit_clearance` +0.05

@@ -27,7 +27,7 @@ view lower down shows the green board and gold header pins seated just below the
 
 - `base` — the tray: floor, skirted cable edges, four board standoffs (generated
   from `pcb_screw_positions`), four stepped-seat lid-screw posts (Ø4.0 insert
-  bore over M3 clearance through the floor)
+  bore over M3 clearance into the floor)
   (~95 × 76 × 26 mm)
 - `lid` — the flat top: register lip (notched around the lid-screw posts),
   Ø37 fan aperture, four insert bosses on the inner face, lid-screw holes
@@ -73,6 +73,10 @@ strip of **adhesive feet** — **four carts, not five** separate hardware orders
   nests the lid and base crops on one plate? A **global** elephant-foot setting is
   fine — the base crop's fit is a vertical cavity wall the compensation never
   touches, and its floor-and-skirt footprint hides the 0.1–0.2 mm shave.
+- **Insert seats:** each base post's Ø4.0 melt zone is **5.8 mm** tall — **29
+  layers** at the pinned 0.2 mm height. Coarser layer presets stack fewer slices
+  in that band, so an insert can bottom **proud** of flush; clear the shoulder
+  with a **4 mm drill** or knife (~0.35 mm wide) if needed.
 - **Feet:** stick four **adhesive rubber feet** on the floor — the case sits on
   a flat base, and feet keep it from walking when you plug a cable in one-handed.
 
@@ -101,7 +105,7 @@ override on the command line with `-D 'fit_clearance=0.3'`.
 Full bill of materials and step-by-step instructions: [ASSEMBLY.md](ASSEMBLY.md)
 and the exploded view below. The short version: melt the base lid-screw inserts
 in **flush with the post top** — a stepped shoulder in each post stops them
-going deeper (see the exploded view), drop the
+going deeper (Ø4.0 × 5.8 mm seat — [ASSEMBLY.md](ASSEMBLY.md) step 1), drop the
 board on (it self-locates on the standoffs), screw it down, seat the lid, bolt
 the fan on blowing into the case.
 
