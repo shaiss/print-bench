@@ -1048,9 +1048,11 @@ jobs:
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR via the post_triage MCP tool (body, design, sha) — never
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1079,9 +1081,11 @@ jobs:
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR via the post_triage MCP tool (body, design, sha) — never
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1110,9 +1114,11 @@ jobs:
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR via the post_triage MCP tool (body, design, sha) — never
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1143,9 +1149,11 @@ jobs:
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR via the post_triage MCP tool (body, design, sha) — never
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1177,9 +1185,11 @@ jobs:
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR via the post_triage MCP tool (body, design, sha) — never
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1212,9 +1222,11 @@ jobs:
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR via the post_triage MCP tool (body, design, sha) — never
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the

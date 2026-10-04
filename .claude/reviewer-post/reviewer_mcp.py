@@ -38,7 +38,8 @@ comment on the ONE PR the workflow selected":
     pass|block verdict, none|acknowledged fuse) — the fail-closed
     reviewer-signoff gate's "malformed marker" failure mode is unreachable
     from this path. PM triage markers are assembled as
-    ``<!-- PM_TRIAGE design=<name> sha=<40hex> -->`` (the /pm §8 family);
+    ``<!-- PM_TRIAGE design=<name>[,<name>…] sha=<40hex> -->`` (the /pm §8
+    family — one ruling per run, every covered design named);
   * a caller body that contains ``<!-- JANE_SIGNOFF`` / ``<!-- DRIK_SIGNOFF``
     / ``<!-- PM_TRIAGE`` (case-insensitive) is refused, not posted:
     ``get_marker()`` greps every comment with no author check, so a Jane body
@@ -250,11 +251,38 @@ def _marker_line(marker, sha, verdict, fuse):
     return f"<!-- {marker} sha={sha} verdict={verdict} fuse={fuse} -->"
 
 
-def _triage_marker_line(design, sha):
-    """The PM triage marker, assembled from validated fields — the /pm §8
-    family: <!-- PM_TRIAGE design=<name> sha=<40hex> -->
+def _parse_designs(raw):
+    """Every design this ruling covers. Sorted unique names, or an error.
+
+    One post per run (MAX_POSTS_PER_RUN) has to name every design the PR
+    touches, so ``design`` accepts a comma- or space-separated list. A
+    single name stays the common case and keeps the historical marker
+    ``design=<name>``.
     """
-    return f"<!-- PM_TRIAGE design={design} sha={sha} -->"
+    if not isinstance(raw, str) or not raw.strip():
+        return None, _tool_error(
+            "post_triage: 'design' must name every design this ruling "
+            "covers ([A-Za-z0-9][A-Za-z0-9._-]*), comma- or "
+            f"space-separated; got {raw!r}")
+    names = [t for t in re.split(r"[\s,]+", raw.strip()) if t]
+    if not names:
+        return None, _tool_error(
+            "post_triage: 'design' must name every design this ruling "
+            f"covers; got {raw!r}")
+    bad = [n for n in names if not _DESIGN_RE.fullmatch(n)]
+    if bad:
+        return None, _tool_error(
+            "post_triage: 'design' must be design directory name(s) "
+            "([A-Za-z0-9][A-Za-z0-9._-]*), comma- or space-separated; "
+            f"got {bad[0]!r}")
+    return sorted(set(names)), None
+
+
+def _triage_marker_line(designs, sha):
+    """The PM triage marker, assembled from validated fields — the /pm §8
+    family: <!-- PM_TRIAGE design=<name>[,<name>…] sha=<40hex> -->
+    """
+    return f"<!-- PM_TRIAGE design={','.join(designs)} sha={sha} -->"
 
 
 def _post_comment(body, marker_line):
@@ -431,11 +459,9 @@ def _post_triage(arguments):
     err = _validate_sha("post_triage", sha)
     if err is not None:
         return err
-    if not isinstance(design, str) or not _DESIGN_RE.fullmatch(design):
-        return _tool_error(
-            "post_triage: 'design' must be the design directory name "
-            "([A-Za-z0-9][A-Za-z0-9._-]*); got "
-            f"{design!r}")
+    designs, err = _parse_designs(design)
+    if err is not None:
+        return err
 
     try:
         who, marker = _reviewer()
@@ -449,7 +475,7 @@ def _post_triage(arguments):
     if marker != "PM_TRIAGE":
         return _tool_error(
             "post_triage: REVIEWER_ID did not select the PM_TRIAGE family")
-    return _emit("post_triage", body, _triage_marker_line(design, sha),
+    return _emit("post_triage", body, _triage_marker_line(designs, sha),
                  "triage")
 
 
@@ -525,7 +551,8 @@ TOOLS = [
             "multi-line markdown with tables, pipes and backticks. The "
             "PM_TRIAGE marker and the attribution footer are added "
             "automatically from the design/sha fields — never type the "
-            "marker yourself. One post per run; a second call is refused."
+            "marker yourself. One post per run covering every named "
+            "design (a section each in the body); a second call is refused."
         ),
         "inputSchema": {
             "type": "object",
@@ -541,9 +568,11 @@ TOOLS = [
                 "design": {
                     "type": "string",
                     "description": (
-                        "The design directory this ruling is for "
-                        "(designs/<name>/). Assembled into the PM_TRIAGE "
-                        "marker server-side."
+                        "Every design directory this ruling covers "
+                        "(designs/<name>/), comma- or space-separated. "
+                        "A single name is fine. Assembled into the "
+                        "PM_TRIAGE marker server-side so the comment "
+                        "identifies every design it rules on."
                     ),
                 },
                 "sha": {
@@ -787,6 +816,22 @@ def selftest():
     check("an invalid design name is refused",
           refused(_post_triage({"body": "x", "design": "../etc", "sha": H40}),
                   "'design'")
+          and _last_payload is None)
+    ok = _post_triage({"body": "## 🧭 PM triage — alpha\n## 🧭 PM triage — beta",
+                       "design": "beta alpha", "sha": H40})
+    check("a combined ruling names every design in the marker, sorted",
+          ok.get("isError") is False
+          and "\n<!-- PM_TRIAGE design=alpha,beta sha=" + H40 + " -->\n"
+          in posted_body())
+    ok = _post_triage({"body": "comma list", "design": "alpha, beta",
+                       "sha": H40})
+    check("comma-separated design names assemble the same marker",
+          ok.get("isError") is False
+          and "PM_TRIAGE design=alpha,beta sha=" + H40 in posted_body())
+    _last_payload = None
+    check("a mixed list with one invalid name is refused",
+          refused(_post_triage({"body": "x", "design": "alpha,../etc",
+                                "sha": H40}), "'design'")
           and _last_payload is None)
     os.environ["REVIEWER_ID"] = "jane"
     _last_payload = None
