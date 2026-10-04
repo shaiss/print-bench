@@ -29,7 +29,8 @@ view lower down shows the green board and gold header pins seated just below the
   from `pcb_screw_positions`), four through-bored lid-screw posts
   (~95 × 76 × 26 mm)
 - `lid` — the flat top: register lip (notched around the lid-screw posts),
-  Ø37 fan aperture, four insert bosses on the inner face, lid-screw holes
+  co-planar finger-guard grille over the Ø37 fan zone (not an open bore),
+  four insert bosses on the inner face, lid-screw holes
   (~95 × 76 × 2.5 mm plate + 7 mm bosses)
 - `sbc-case-coupon` — two crops of the same case corner that nest; print it
   first to tune the fits (~33 × 76 × 26 mm)
@@ -87,8 +88,9 @@ The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 | `fit_clearance` | 0.25 mm | lid register lip vs cavity wall; tune on the coupon |
 | `standoff_h` | 5 mm | board standoff height (4–6 per the brief) |
 | `interior_h` | 24 mm | interior height; sized over the tallest RPI4 connector |
-| `fan_type` | `fan40x11` | fan vitamin; aperture and boss pitch follow it |
+| `fan_type` | `fan40x11` | fan vitamin; grille clip and boss pitch follow it |
 | `fan_center` | (−10, 0) mm | fan position; biased toward the SoC |
+| `grille_hole_d` / `grille_web` | 5.0 / 2.0 mm | co-planar intake holes and solid web (B11) |
 | `board_clr` | 0.75 mm | board-to-wall clearance |
 | `wall` / `floor_t` / `lid_t` | 2.0 / 2.0 / 2.5 mm | shell thicknesses |
 
@@ -123,9 +125,14 @@ so what you feel there is what the full parts do.
   thread. The board screws are the ones you touch once. One catch the fan adds: it
   lives on the lid, but its lead plugs into the board — so unplug that lead at the
   header before you lift the lid, or a set-aside lid hangs by two wires.
-- **Keep it breathing.** The fan blows *in* through an open-skirted case, so
-  it is an intake for dust too — on an always-on build, blow the fan and the
-  vent row out every few months.
+- **Finger guard on the intake.** The lid plate carries a co-planar grille over
+  the fan zone (not an open Ø37 hole), so blades sit behind ~5 mm openings and
+  ~2 mm webs — poke a pencil through, not a fingertip. Airflow is reduced versus
+  a bare bore (~40 % of the old free area); tune `grille_hole_d` / `grille_web`
+  on the coupon if your fan needs more pull.
+- **Keep it breathing.** The fan still blows *in* through the grille and the
+  open-skirted case, so it is an intake for dust too — on an always-on build,
+  blow through the grille and the vent row out every few months.
 
 ![GPIO access notch above the 2×20 header — jumpers exit here with the lid on](previews/notch.png)
 
