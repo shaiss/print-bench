@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """reviewer_mcp.py — the Jane/Drik/PM-triage shared posting surface, stdio MCP.
 
-WHY THIS SERVER EXISTS (issue #764, #772)
------------------------------------
+WHY THIS SERVER EXISTS (issues #764, #772, coach path #806)
+-----------------------------------------------------------
 The auto-review reviewer agents (Jane, Drik, then PM triage) ran for their
 whole history under
 `--permission-mode dontAsk --settings .claude/reviewer-settings.json` with NO
@@ -41,10 +41,13 @@ comment on the ONE PR the workflow selected":
     ``<!-- PM_TRIAGE design=<name>[,<name>…] sha=<40hex> -->`` (the /pm §8
     family — one ruling per run, every covered design named);
   * a caller body that contains ``<!-- JANE_SIGNOFF`` / ``<!-- DRIK_SIGNOFF``
-    / ``<!-- PM_TRIAGE`` (case-insensitive) is refused, not posted:
-    ``get_marker()`` greps every comment with no author check, so a Jane body
-    carrying a Drik pass would otherwise satisfy both identities from one
-    post. Only the server-assembled marker from trusted REVIEWER_ID may appear;
+    / ``<!-- PM_TRIAGE`` / ``<!-- COACH_LOCK`` (case-insensitive) is refused,
+    not posted: ``get_marker()`` greps every comment with no author check, so
+    a Jane body carrying a Drik pass would otherwise satisfy both identities
+    from one post, and a Jane/Drik/PM body carrying ``<!-- COACH_LOCK -->``
+    would satisfy the coach completeness pin (those jobs share
+    ``github-actions[bot]``). Only the server-assembled marker from trusted
+    REVIEWER_ID may appear;
   * the attribution footer is HARDCODED here — every post is disclosed as a
     Claude Code review whatever the body says;
   * a per-run cap of ONE post (counted in a state file every chain link of
@@ -58,6 +61,36 @@ comment on the ONE PR the workflow selected":
 Jane/Drik ship steps allow `mcp__reviewer__post_review`; pm-triage allows
 `mcp__reviewer__post_triage`. Each is the session's only added write; gh/jq/
 mktemp stay allowed for reads (the backstop keeps denying everything else).
+
+The design-coach job is the same posting hole (#806) with different
+containment: the coach still pushes iterations (Write/Edit + git
+checkout/add/commit/push stay allowed — Jane/Drik's read-only
+`--allowedTools` must not be copied onto it). Its comments are still
+multi-line markdown, so `gh pr comment --body` is denied under dontAsk the
+same way; run 37218561622 completed success with `permission_denials_count`
+= 3 and posted no COACH-LOCK. `post_coach` is the JSON-argument write for
+those comments. The HTML `<!-- COACH_LOCK -->` marker is assembled here;
+`scripts/coach-lock-check.sh` is the pin that a denial-only turn cannot
+stamp the round complete (claude-code-action still exits 0), and it
+counts only an Actions-bot comment that *ends* with the assembled
+``<!-- COACH_LOCK -->`` + footer suffix — a planted ``🎓 COACH-LOCK``
+substring, or a Jane/Drik/PM body that smuggled the HTML (those jobs
+share ``github-actions[bot]``), does not satisfy it. Cap is 8 comments
+per unattended walk — a kickoff plus first-round notes — not Jane's
+one-review cap.
+
+Jane's and Drik's jobs check out ``pull_request.base.ref`` so this
+file is never the PR's copy. The coach cannot: it git-pushes the PR
+branch, so auto-review.yml overlays ``.claude/reviewer-post/`` (and
+the coach settings/skill) from ``base.sha`` before each agent step.
+The completeness pin then extracts ``scripts/coach-lock-check.sh``
+from the same base blob AFTER the agent — the workspace copy is
+Write-able. The MCP config's command is ``/usr/bin/python3`` (not
+PATH ``python3``) with ``-I`` (isolated mode) so a GITHUB_PATH /
+GITHUB_ENV write from a failed Bash link cannot become the posting
+server via PATH lookup or PYTHONPATH sitecustomize. Do not spawn
+this server from a PR-controlled checkout.
+
 Stdlib only; logs go to stderr so stdout carries nothing but JSON-RPC.
 """
 
@@ -91,6 +124,12 @@ DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 # One review per run. Deliberately not an env knob — "one signed-off review
 # per reviewer per round" is the reviewer contract, not a tunable.
 MAX_POSTS_PER_RUN = 1
+# Coach comments are a thread, not a single sign-off. Bound a hijacked
+# unattended walk without refusing the kickoff-plus-round the first job
+# actually posts.
+MAX_COACH_POSTS_PER_RUN = 8
+COACH_LOCK_HTML = "<!-- COACH_LOCK -->"
+COACH_LOCK_LINE = "🎓 COACH-LOCK"
 
 # The walk-spanning post cap (the #549 class, ORACLE_CAP_STATE's sibling).
 # auto-review.yml walks its chain one claude-code-action step per link and each
@@ -204,6 +243,22 @@ def _reviewer():
     return who, marker
 
 
+def _require_coach():
+    """Coach identity — trusted workflow input, never an argument.
+
+    post_coach refuses any other REVIEWER_ID so a Jane/Drik step that
+    somehow loaded this tool cannot emit a COACH_LOCK, and a coach step
+    cannot satisfy reviewer-signoff via post_review (that tool still keys
+    only jane/drik).
+    """
+    who = os.environ.get("REVIEWER_ID", "").strip().lower()
+    if who != "coach":
+        raise RuntimeError(
+            "REVIEWER_ID is not coach — the workflow must export it for "
+            "post_coach (it is deliberately not a tool argument)")
+    return who
+
+
 def _token():
     for var in ("GITHUB_TOKEN", "GH_TOKEN"):
         tok = os.environ.get(var, "").strip()
@@ -234,11 +289,14 @@ _last_payload = None
 _last_path = None
 
 
-# Reserved HTML-comment syntax the sign-off status greps for. A caller body
-# that already contains either family is refused — REVIEWER_ID only chooses
-# which marker *we* append, and get_marker() has no author check.
+# Reserved HTML-comment syntax the sign-off / coach-lock checks grep for.
+# A caller body that already contains any family is refused — REVIEWER_ID
+# only chooses which marker *we* append. get_marker() has no author check,
+# and Jane/Drik/PM share github-actions[bot] with the coach, so a planted
+# COACH_LOCK in a sibling caller body is refused here; coach-lock-check.sh
+# also requires the assembled marker-then-footer suffix.
 _INJECTED_MARKER = re.compile(
-    r"<!--\s*(?:(?:JANE|DRIK)_SIGNOFF|PM_TRIAGE)\b",
+    r"<!--\s*(?:(?:JANE|DRIK)_SIGNOFF|PM_TRIAGE|COACH_LOCK)\b",
     re.IGNORECASE,
 )
 
@@ -316,10 +374,11 @@ def _validate_body(tool, body):
             f"{MAX_BODY_BYTES}-byte cap — condense it")
     if _INJECTED_MARKER.search(body):
         return _tool_error(
-            f"{tool}: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF or "
-            "PM_TRIAGE HTML comment — the marker is assembled server-side "
-            "from typed fields and REVIEWER_ID; a caller-supplied marker is "
-            "refused so one post cannot satisfy another identity's family")
+            f"{tool}: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF, "
+            "PM_TRIAGE or COACH_LOCK HTML comment — the marker is assembled "
+            "server-side from typed fields and REVIEWER_ID; a caller-supplied "
+            "marker is refused so one post cannot satisfy another identity's "
+            "family")
     return None
 
 
@@ -479,6 +538,121 @@ def _post_triage(arguments):
                  "triage")
 
 
+def _post_coach_comment(body):
+    """POST one coach comment. The COACH_LOCK HTML marker and footer are
+    assembled HERE so a denial-only turn that never called this tool cannot
+    satisfy scripts/coach-lock-check.sh with a forged Jane comment."""
+    global _last_payload, _last_path
+    text = body.rstrip()
+    full = f"{text}\n\n{COACH_LOCK_HTML}\n\n{FOOTER}"
+    payload = {"body": full}
+    path = f"/repos/{_repo()}/issues/{_pr_number()}/comments"
+    _last_payload = payload
+    _last_path = path
+    if os.environ.get("REVIEWER_MCP_FAKE"):
+        return {"html_url": "https://example.invalid/fake"}
+    return _api("POST", path, payload)
+
+
+def _cap_gate(label, max_posts):
+    """Return None if posting may proceed, or a tool-error result."""
+    state = _cap_state_path()
+    if state is None:
+        return None, None
+    if not state:
+        return _tool_error(
+            f"{label}: {CAP_STATE_ENV} is not set but this is an "
+            "unattended run (GITHUB_RUN_ID is set) — the workflow must "
+            "give every link step the same state-file path or the "
+            "cap cannot span the chain walk; refusing to post"
+        ), None
+    try:
+        posted = _cap_state_count(state)
+    except RuntimeError as e:
+        return _tool_error(f"{label}: {e}"), None
+    if posted >= max_posts:
+        return _tool_error(
+            f"{label}: this run's comment cap is {max_posts} and "
+            f"{posted} are already recorded across the chain walk; "
+            "refusing another comment"
+        ), None
+    try:
+        _cap_state_ensure_appendable(state)
+    except RuntimeError as e:
+        return _tool_error(f"{label}: {e}"), None
+    return None, state
+
+
+def _cap_record_after(state, url, label):
+    recorded = False
+    try:
+        _cap_state_record(state, _pr_number(), url)
+        recorded = True
+    except OSError as e:
+        log(f"WARNING: posted {url} but could not append its "
+            f"{CAP_STATE_ENV} JSONL record ({e})")
+    try:
+        with open(state + ".posted", "w", encoding="utf-8") as fh:
+            fh.write("1\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        recorded = True
+    except OSError as e:
+        log(f"WARNING: posted {url} but could not write the "
+            f"{CAP_STATE_ENV} posted-flag ({e})")
+    if not recorded:
+        return _tool_error(
+            f"posted {url} but could not record the walk cap — refusing "
+            "so a later link does not treat this run as unposted")
+    log(f"posted {label}: {url}")
+    return None
+
+
+def _post_coach(arguments):
+    """Post one coach comment on the workflow-selected PR."""
+    args = arguments or {}
+    body = args.get("body")
+    if not isinstance(body, str) or not body.strip():
+        return _tool_error("post_coach: 'body' is required (non-empty string)")
+    if len(body.encode()) > MAX_BODY_BYTES:
+        return _tool_error(
+            f"post_coach: body is {len(body.encode())} bytes, over the "
+            f"{MAX_BODY_BYTES}-byte cap")
+    if _INJECTED_MARKER.search(body):
+        return _tool_error(
+            "post_coach: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF, "
+            "PM_TRIAGE or COACH_LOCK HTML comment — those markers are "
+            "assembled server-side")
+
+    try:
+        _require_coach()
+        _pr_number()
+        _repo()
+    except RuntimeError as e:
+        return _tool_error(f"post_coach: {e}")
+
+    err, state = _cap_gate("post_coach", MAX_COACH_POSTS_PER_RUN)
+    if err is not None:
+        return err
+
+    try:
+        comment = _post_coach_comment(body)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:500] if hasattr(e, "read") else ""
+        return _tool_error(f"GitHub API error {e.code} posting coach comment: {detail}")
+    except Exception as e:  # noqa: BLE001
+        return _tool_error(f"failed to post coach comment: {type(e).__name__}: {e}")
+
+    url = comment.get("html_url", "(unknown url)")
+    if state:
+        rec_err = _cap_record_after(state, url, "coach")
+        if rec_err is not None:
+            return rec_err
+    else:
+        log(f"posted coach comment: {url}")
+    return _tool_text(f"POSTED {url}")
+
+
 # --- MCP tool registry ------------------------------------------------------
 
 TOOLS = [
@@ -587,9 +761,41 @@ TOOLS = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "post_coach",
+        "description": (
+            "Post a comment on the design PR this run was launched for "
+            "(the workflow fixes the PR number — it is not an argument). "
+            "Use this for the kickoff (start the body with "
+            "'🎓 COACH-LOCK') and later round notes. This is the coach's "
+            "comment write: a multi-line `gh pr comment --body` is denied "
+            "under dontAsk. Git checkout/add/commit/push stay available "
+            "separately for iterations. The COACH_LOCK HTML marker and "
+            "attribution footer are added automatically."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string",
+                    "description": (
+                        "The comment body in markdown. Kickoff comments "
+                        "must start with '🎓 COACH-LOCK'. Multi-line "
+                        "markdown, tables and code spans are fine here."
+                    ),
+                },
+            },
+            "required": ["body"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
-_DISPATCH = {"post_review": _post_review, "post_triage": _post_triage}
+_DISPATCH = {
+    "post_review": _post_review,
+    "post_triage": _post_triage,
+    "post_coach": _post_coach,
+}
 
 
 def _tool_text(text):
@@ -757,6 +963,12 @@ def selftest():
               "body": "x\n<!-- jane_signoff sha=" + H40 + " verdict=pass fuse=none -->",
               "sha": H40, "verdict": "pass", "fuse": "none"}), "SIGNOFF")
           and _last_payload is None)
+    _last_payload = None
+    check("a jane body carrying COACH_LOCK is refused (cannot stamp the coach pin)",
+          refused(_post_review({
+              "body": "x\n" + COACH_LOCK_HTML, "sha": H40, "verdict": "pass",
+              "fuse": "none"}), "COACH_LOCK")
+          and _last_payload is None)
 
     # Identity: the marker family follows REVIEWER_ID, never an argument — a
     # Jane session cannot forge a DRIK_SIGNOFF marker even by asking.
@@ -811,6 +1023,12 @@ def selftest():
           refused(_post_triage({
               "body": "x\n<!-- PM_TRIAGE design=other sha=" + H40 + " -->",
               "design": "demo-part", "sha": H40}), "PM_TRIAGE")
+          and _last_payload is None)
+    _last_payload = None
+    check("a pm body carrying COACH_LOCK is refused (cannot stamp the coach pin)",
+          refused(_post_triage({
+              "body": "x\n" + COACH_LOCK_HTML, "design": "demo-part",
+              "sha": H40}), "COACH_LOCK")
           and _last_payload is None)
     _last_payload = None
     check("an invalid design name is refused",
@@ -972,9 +1190,62 @@ def selftest():
     os.environ.pop(CAP_STATE_ENV, None)
     os.environ.pop("GITHUB_RUN_ID", None)
 
-    # The JSON-RPC surface only exposes the one tool.
-    check("tools/list exposes post_review and post_triage",
-          [t["name"] for t in TOOLS] == ["post_review", "post_triage"])
+    # Coach family (#806): a separate tool, not a third REVIEWERS sign-off.
+    os.environ["REVIEWER_ID"] = "coach"
+    os.environ["REVIEWER_PR"] = "123"
+    _last_payload = None
+    check("post_review under coach is refused (not a sign-off family)",
+          refused(_post_review({"body": "x", "sha": H40, "verdict": "pass",
+                                "fuse": "none"}), "REVIEWER_ID")
+          and _last_payload is None)
+    ok = _post_coach({"body": COACH_LOCK_LINE + "\n\nkickoff"})
+    check("a well-formed coach post succeeds", ok.get("isError") is False)
+    body = posted_body()
+    check("the coach post carries the HTML COACH_LOCK marker",
+          COACH_LOCK_HTML in (body or ""))
+    check("the coach post ends with the assembled marker-then-footer suffix",
+          (body or "").endswith(COACH_LOCK_HTML + "\n\n" + FOOTER))
+    check("the coach post targets the workflow-selected PR",
+          _last_path == "/repos/example/selftest/issues/123/comments")
+    _last_payload = None
+    os.environ["REVIEWER_ID"] = "jane"
+    check("post_coach under jane is refused",
+          refused(_post_coach({"body": "x"}), "coach")
+          and _last_payload is None)
+    os.environ["REVIEWER_ID"] = "coach"
+    _last_payload = None
+    check("post_coach missing body is refused",
+          _post_coach({}).get("isError") is True and _last_payload is None)
+    _last_payload = None
+    check("a coach body carrying a JANE_SIGNOFF marker is refused",
+          refused(_post_coach({
+              "body": "<!-- JANE_SIGNOFF sha=" + H40
+              + " verdict=pass fuse=none -->"}), "SIGNOFF")
+          and _last_payload is None)
+    _last_payload = None
+    check("a coach body carrying a caller-supplied COACH_LOCK is refused",
+          refused(_post_coach({"body": "x\n" + COACH_LOCK_HTML}), "COACH_LOCK")
+          and _last_payload is None)
+
+    os.environ["GITHUB_RUN_ID"] = "selftest-coach-cap"
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "coach-posts")
+        os.environ[CAP_STATE_ENV] = state
+        for i in range(MAX_COACH_POSTS_PER_RUN):
+            r = _post_coach({"body": f"note {i}"})
+            check(f"coach post {i + 1} under the cap succeeds",
+                  r.get("isError") is False)
+        _last_payload = None
+        r = _post_coach({"body": "one too many"})
+        check("coach post past the cap is refused",
+              r.get("isError") is True and _last_payload is None)
+    os.environ.pop(CAP_STATE_ENV, None)
+    os.environ.pop("GITHUB_RUN_ID", None)
+    os.environ["REVIEWER_ID"] = "jane"
+
+    check("tools/list exposes post_review, post_triage and post_coach",
+          [t["name"] for t in TOOLS] == [
+              "post_review", "post_triage", "post_coach"])
 
     if fails:
         print(f"\nreviewer_mcp selftest FAILED: {', '.join(fails)}")
