@@ -598,8 +598,9 @@ if ! python3 .claude/reviewer-post/reviewer_mcp.py --selftest; then
 fi
 
 # Coach-lock presence pin (issue #806): a ship-step success is not a
-# completed coach round unless an Actions-bot comment ends with the
-# assembled `<!-- COACH_LOCK -->` + footer suffix the posting tool writes.
+# completed coach round unless an Actions-bot comment from this run
+# ends with the assembled `<!-- COACH_LOCK -->` + footer suffix the
+# posting tool writes (a lock from an earlier coach run does not count).
 echo "-- coach-lock-check selftest: scripts/coach-lock-check.sh --selftest"
 if ! ./scripts/coach-lock-check.sh --selftest; then
   fail=1

@@ -284,6 +284,9 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     assert "${{" not in ready_run, (
         "auto-review.yml [design-coach] ready step interpolates an "
         "expression into its script")
+    assert 'echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"' in ready_run, (
+        "auto-review.yml [design-coach] ready step does not record "
+        "started_at — the lock-check cannot bound the pin to this run")
     assert 'fetch --no-tags origin "$BASE_SHA"' in ready_run, (
         "auto-review.yml [design-coach] ready step does not fetch the base "
         "SHA when it is not already local")
@@ -349,6 +352,11 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
     assert env.get("PR") == "${{ github.event.pull_request.number }}", (
         "auto-review.yml [design-coach] lock-check step does not take "
         "the PR number through env")
+    assert env.get("COACH_LOCK_SINCE") == (
+        "${{ steps.ready.outputs.started_at }}"), (
+        "auto-review.yml [design-coach] lock-check step does not take "
+        "the ready step's started_at — a COACH-LOCK from an earlier coach "
+        "run would stamp a denial-only reopened/ready_for_review turn")
     for key in ("LD_PRELOAD", "BASH_ENV", "ENV"):
         assert env.get(key) == "", (
             f"auto-review.yml [design-coach] lock-check YAML env does not "
@@ -376,6 +384,13 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
     assert "/usr/bin/bash" in run, (
         "auto-review.yml [design-coach] lock-check does not invoke the "
         "extracted script with /usr/bin/bash")
+    assert '--since "$COACH_LOCK_SINCE"' in run, (
+        "auto-review.yml [design-coach] lock-check does not pass "
+        "--since \"$COACH_LOCK_SINCE\" — a lock from an earlier coach run "
+        "would stamp this round complete")
+    assert 'if [ -z "${COACH_LOCK_SINCE:-}" ]' in run, (
+        "auto-review.yml [design-coach] lock-check does not refuse an "
+        "empty COACH_LOCK_SINCE — the this-run bound would silently drop")
 
 
 def test_coach_lock_check_runs_the_base_copy_after_the_agent():
@@ -642,9 +657,18 @@ def test_coach_guard_rejects_a_ship_step_not_gated_on_ready():
 def test_coach_lock_guard_rejects_running_the_workspace_script():
     tampered = _job_replace(
         _workflow_text(), "design-coach",
-        '          /usr/bin/bash "$CHECK" "$PR"\n',
+        '          /usr/bin/bash "$CHECK" "$PR" --since "$COACH_LOCK_SINCE"\n',
         '          ./scripts/coach-lock-check.sh "$PR"\n')
     with pytest.raises(AssertionError, match="workspace script"):
+        _assert_coach_lock_check_runs_base_copy(tampered)
+
+
+def test_coach_lock_guard_rejects_dropping_this_run_since():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        '          /usr/bin/bash "$CHECK" "$PR" --since "$COACH_LOCK_SINCE"\n',
+        '          /usr/bin/bash "$CHECK" "$PR"\n')
+    with pytest.raises(AssertionError, match="--since"):
         _assert_coach_lock_check_runs_base_copy(tampered)
 
 
@@ -662,10 +686,11 @@ def test_coach_lock_guard_rejects_inheriting_pythonpath():
 
 
 def test_coach_lock_guard_rejects_unpinned_process_start_env():
-    # Unique to lock-check (PR: is not on restore env).
+    # Unique to lock-check (PR: is not on restore env). Keep the this-run
+    # since binding — this tamper only drops the process-start pins.
     tampered = _job_replace(
         _workflow_text(), "design-coach",
-        '          PR: ${{ github.event.pull_request.number }}\n'
+        '          COACH_LOCK_SINCE: ${{ steps.ready.outputs.started_at }}\n'
         '          # Process-start pins: GITHUB_ENV from a prior Bash coach link\n'
         '          # is applied before this script body, so in-script unset is too\n'
         '          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced\n'
@@ -679,7 +704,7 @@ def test_coach_lock_guard_rejects_unpinned_process_start_env():
         '          LD_AUDIT: ""\n'
         '          BASH_ENV: ""\n'
         '          ENV: ""\n',
-        '          PR: ${{ github.event.pull_request.number }}\n')
+        '          COACH_LOCK_SINCE: ${{ steps.ready.outputs.started_at }}\n')
     with pytest.raises(AssertionError, match="LD_PRELOAD"):
         _assert_coach_lock_check_runs_base_copy(tampered)
 

@@ -92,11 +92,12 @@ name: Auto design review (Jane / Drik / PM / coach)
 # after any ship step that claims success the lock-check step extracts
 # `scripts/coach-lock-check.sh` from base.sha into a temp file (the
 # workspace copy is Write-able) and runs that; it fails the job unless
-# an Actions-bot comment *ends* with the assembled suffix
+# an Actions-bot comment from *this run* (created_at >= the ready
+# step's started_at) *ends* with the assembled suffix
 # (`<!-- COACH_LOCK -->` immediately before the hardcoded footer) —
 # a substring planted by any other author, a Jane/Drik/PM body that
-# smuggled those bytes, or a rewritten workspace script, does not
-# stamp the round complete.
+# smuggled those bytes, a lock from an earlier coach run, or a
+# rewritten workspace script, does not stamp the round complete.
 #
 # Git containment (code-scanning finding on #760). A deny list cannot contain
 # git: a subcommand option no prefix rule sees (`git fetch origin
@@ -1456,6 +1457,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Bound the completeness pin to this run: a COACH-LOCK from an
+          # earlier coach turn (reopened / ready_for_review) must not
+          # stamp a denial-only success here.
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
             echo "::add-mask::${FETCH_AUTH}"
@@ -1917,6 +1922,9 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR: ${{ github.event.pull_request.number }}
+          # This run's bound — a lock from an earlier coach turn must not
+          # stamp a denial-only reopened / ready_for_review success.
+          COACH_LOCK_SINCE: ${{ steps.ready.outputs.started_at }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -1947,10 +1955,14 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          if [ -z "${COACH_LOCK_SINCE:-}" ]; then
+            echo "FAIL  COACH_LOCK_SINCE is empty — the ready step must record started_at" >&2
+            exit 1
+          fi
           CHECK="${RUNNER_TEMP:-/tmp}/coach-lock-check.sh"
           /usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh" > "$CHECK"
           chmod +x "$CHECK"
-          /usr/bin/bash "$CHECK" "$PR"
+          /usr/bin/bash "$CHECK" "$PR" --since "$COACH_LOCK_SINCE"
 
       - name: No provider key configured
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
