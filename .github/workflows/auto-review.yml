@@ -55,19 +55,19 @@ name: Auto design review (Jane / Drik / PM / coach)
 # JANE/DRIK_SIGNOFF marker ever landed from the workflow — every sign-off on
 # record was an attended local run, and reviewer-signoff (fail-closed) blocked
 # every design PR. The fix is the oracle pattern: the reviewers' ONE write is
-# the mcp__reviewer__post_review tool (served by .claude/reviewer-post/
-# reviewer_mcp.py via --mcp-config), a JSON argument so the body may be any
-# markdown. The tool assembles the sign-off marker server-side from typed
-# fields (sha/verdict/fuse); REVIEWER_ID — step env, never an argument —
-# selects JANE_ vs DRIK_ so a session cannot post as the other reviewer, and
-# REVIEWER_PR pins the target. Exactly one post per run, counted across the
-# whole chain walk via REVIEWER_POST_STATE (one shared runner.temp file: each
-# link spawns a fresh server process, so an in-process counter would reset per
-# link — the #549 class). Jane's and Drik's jobs check out
-# pull_request.base.ref (the Oracle's trust boundary) so the MCP server,
-# deny backstop and skills are never the PR's copy; design geometry is a
-# trusted overlay of the head's designs/ dirs. First landing (the files
-# absent on base) skips the review rather than executing a PR-controlled
+# mcp__reviewer__post_review (Jane/Drik) and mcp__reviewer__post_triage (PM)
+# (served by .claude/reviewer-post/reviewer_mcp.py via --mcp-config), a JSON
+# argument so the body may be any markdown. The tool assembles the marker
+# server-side from typed fields; REVIEWER_ID — step env, never an argument —
+# selects JANE_ vs DRIK_ vs PM_TRIAGE so a session cannot post as another
+# identity, and REVIEWER_PR pins the target. Exactly one post per run,
+# counted across the whole chain walk via REVIEWER_POST_STATE (one shared
+# runner.temp file: each link spawns a fresh server process, so an in-process
+# counter would reset per link — the #549 class). Jane, Drik and PM triage
+# check out pull_request.base.ref (the Oracle's trust boundary) so the MCP
+# server, deny backstop and skills are never the PR's copy; design geometry
+# is a trusted overlay of the head's designs/ dirs. First landing (the files
+# absent on base) skips the job rather than executing a PR-controlled
 # poster. Pinned by test_reviewer_backstop_wiring.py (the flags),
 # test_reviewer_git_containment.py (the base checkout + head overlay),
 # test_cap_state_wiring.py (the state wiring) and the server's own
@@ -79,12 +79,11 @@ name: Auto design review (Jane / Drik / PM / coach)
 # in a repo config reached through a PR-committed bare-repository layout, a gh
 # subcommand that spawns git. So, structurally:
 #   * Jane / Drik / PM triage get NO git — their backstop denies Bash(git:*)
-#     outright. Jane and Drik review the PR head's geometry from a BASE-branch
+#     outright. They review the PR head's geometry from a BASE-branch
 #     checkout (the posting MCP must not be PR-controlled), so a trusted step
 #     fetches the head SHA (Oracle extraheader auth; persist-credentials is
 #     false) and overlays the changed design directories before the agent
-#     starts. PM triage reads the charter from the merge checkout and needs
-#     nothing from git.
+#     starts.
 #   * The coach keeps git checkout/add/commit/push (it pushes its rounds) but
 #     its backstop denies fetch/clone/pull/ls-remote and every global option;
 #     its checkout is full history, so every branch head is already local.
@@ -1175,142 +1174,234 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # The BASE branch, not the merge ref: the secret-bearing agent runs
+          # the reviewed posting MCP / settings / skills, never a PR's copy
+          # (Oracle's trust boundary). Design geometry arrives as a trusted
+          # overlay below.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Check the reviewer posting surface is on the base branch
+        id: ready
+        run: |
+          set -euo pipefail
+          if [ -f .claude/reviewer-post/reviewer_mcp.py ] \
+             && [ -f .claude/reviewer-post/reviewer-mcp.json ] \
+             && [ -f .claude/reviewer-settings.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the Jane/Drik/PM posting surface is not on the base branch yet (first landing) — skipping triage rather than running a PR-controlled copy"
+          fi
+
+      # Trusted head staging (code-scanning finding on #760). This reviewer
+      # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
+      # outright — so the PR head's design directories (charters, NOTES) are
+      # staged into the BASE checkout here, by workflow code, before any
+      # agent step starts; the skill reads them with Read/Grep/Glob.
+      - name: Stage the PR head's design directories (trusted, no agent)
+        if: steps.ready.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
+        run: |
+          set -euo pipefail
+          set -f   # PR-controlled names: no globbing
+          FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${FETCH_AUTH}"
+          git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+            fetch --no-tags origin "$HEAD_SHA"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          for d in $CHANGED_DESIGNS; do
+            if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+              echo "::warning::skipped a changed design directory whose name is not [A-Za-z0-9._-]"
+              continue
+            fi
+            rm -rf -- "designs/${d}"
+            if git cat-file -e "${HEAD_SHA}:designs/${d}" 2>/dev/null; then
+              git checkout "$HEAD_SHA" -- "designs/${d}"
+              echo "staged designs/${d} at ${HEAD_SHA}"
+            else
+              echo "designs/${d} is removed at the PR head; left absent"
+            fi
+          done
 
       - name: /pm triage via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
 
       - name: /pm triage via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
 
       - name: /pm triage via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
 
       - name: /pm triage via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
 
       - name: /pm triage via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
 
       - name: /pm triage via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1318,25 +1409,33 @@ jobs:
           && steps.p5.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
 
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping the PM triage for PR #${{ github.event.pull_request.number }}"
 
@@ -1346,7 +1445,8 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1364,7 +1464,8 @@ jobs:
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'

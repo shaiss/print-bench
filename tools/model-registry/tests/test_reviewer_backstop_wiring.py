@@ -36,14 +36,18 @@ from test_workflow_drift import (
 
 REVIEWER_BACKSTOP = ".claude/reviewer-settings.json"
 COACH_BACKSTOP = ".claude/design-coach-settings.json"
-# The posting surface (issue #764): the Jane/Drik ship steps must also carry
-# the reviewer MCP server and pin its trusted env, or the reviewers relapse
-# into having NO postable write (every round then ends with denials and an
-# exit-0 job that posted nothing — the bug this closes). PM triage and the
-# coach post no sign-off, so they stay on reads only.
+# The posting surface (issues #764 / #772): Jane, Drik and pm-triage ship
+# steps must also carry the reviewer MCP server and pin its trusted env, or
+# they relapse into having NO postable write (every round then ends with
+# denials and an exit-0 job that posted nothing — the bug this closes). The
+# coach lands iterations via Write/Edit + git push, so it stays off this table.
 POST_CONFIG = ".claude/reviewer-post/reviewer-mcp.json"
-POST_TOOL = "mcp__reviewer__post_review"
-POST_JOBS = {"jane-review": "jane", "drik-review": "drik"}
+# job → (REVIEWER_ID, allowed MCP tool)
+POST_JOBS = {
+    "jane-review": ("jane", "mcp__reviewer__post_review"),
+    "drik-review": ("drik", "mcp__reviewer__post_review"),
+    "pm-triage": ("pm", "mcp__reviewer__post_triage"),
+}
 POST_PR = "${{ github.event.pull_request.number }}"
 POST_STATE = "${{ runner.temp }}/reviewer-posts"
 # job → the deny backstop its ship steps pass. The coach's differs because it
@@ -159,7 +163,7 @@ def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
     out for the tamper negative controls."""
     assert (REPO_ROOT / POST_CONFIG).is_file(), (
         f"{POST_CONFIG} is missing — the reviewers have no postable write")
-    for job, who in POST_JOBS.items():
+    for job, (who, tool) in POST_JOBS.items():
         block = _without_comments(_job_blocks(text)[job])
         for n, chunk in enumerate(_ship_chunks(block), 1):
             at = f"auto-review.yml [{job}] ship step {n}"
@@ -168,17 +172,17 @@ def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
             assert configs == [POST_CONFIG], (
                 f"{at} passes --mcp-config {configs or 'none'}, not exactly "
                 f"[{POST_CONFIG!r}] — the reviewer posts via that server or "
-                f"not at all (issue #764)")
+                f"not at all (issue #764/#772)")
             tools = _flag(args, "--allowedTools")
             allowed = tools[0].strip('"').split(",") if tools else []
-            assert len(tools) == 1 and POST_TOOL in allowed, (
-                f"{at} does not allow {POST_TOOL} — the session would be "
+            assert len(tools) == 1 and tool in allowed, (
+                f"{at} does not allow {tool} — the session would be "
                 f"denied on its only write surface")
             env = _step_env(chunk)
             assert env.get("REVIEWER_ID") == who, (
                 f"{at} sets REVIEWER_ID={env.get('REVIEWER_ID')!r}, not "
-                f"{who!r} — the env selects the sign-off family (JANE_ vs "
-                f"DRIK_), so a wrong value posts the wrong reviewer's marker")
+                f"{who!r} — the env selects the marker family, so a wrong "
+                f"value posts the wrong identity's marker")
             assert env.get("REVIEWER_PR") == POST_PR, (
                 f"{at} sets REVIEWER_PR={env.get('REVIEWER_PR')!r}, not the "
                 f"workflow's PR — the posting server pins its target to this "
@@ -283,6 +287,14 @@ def test_wiring_guard_rejects_a_tampered_step(job, step, old, new, match):
     # The state env dropped entirely.
     ("drik-review", -1, "          REVIEWER_POST_STATE: ${{ runner.temp }}"
      "/reviewer-posts\n", "", "REVIEWER_POST_STATE"),
+    # pm-triage: dropping the posting server is the #772 silent-no-post again.
+    ("pm-triage", 0, " --mcp-config .claude/reviewer-post/reviewer-mcp.json",
+     "", "--mcp-config"),
+    ("pm-triage", 2,
+     '--allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob"',
+     '--allowedTools "Read,Grep,Glob"', "only write surface"),
+    ("pm-triage", 4, "REVIEWER_ID: pm", "REVIEWER_ID: jane",
+     "REVIEWER_ID"),
 ])
 def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
     # NEGATIVE CONTROLS for the posting-surface pin, same discipline.
