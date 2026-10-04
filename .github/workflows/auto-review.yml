@@ -79,11 +79,13 @@ name: Auto design review (Jane / Drik / PM / coach)
 # and its checkout stays the PR (full history) so git push has the
 # branch local. Comments go through mcp__reviewer__post_coach on the
 # same server (REVIEWER_ID=coach). The posting files themselves are
-# restored from pull_request.base.sha before any agent step — Jane/Drik
+# restored from pull_request.base.sha before EACH agent step — Jane/Drik
 # checkout base wholesale; the coach cannot, so a trusted overlay puts
 # reviewer-post / design-coach-settings / the skill / coach-lock-check.sh
-# back to the base copy (a PR that rewrites the MCP cannot run as the
-# poster). claude-code-action still exits 0 on a denial-only turn, so
+# back to the base copy immediately before every chain link (a failed
+# first link with Write/Edit/Bash must not leave a rewritten MCP for
+# the next spawn). claude-code-action still exits 0 on a denial-only
+# turn, so
 # after any ship step that claims success the lock-check step extracts
 # `scripts/coach-lock-check.sh` from base.sha into a temp file (the
 # workspace copy is Write-able) and runs that; it fails the job unless
@@ -106,8 +108,9 @@ name: Auto design review (Jane / Drik / PM / coach)
 #   * The coach keeps git checkout/add/commit/push (it pushes its rounds) but
 #     its backstop denies fetch/clone/pull/ls-remote and every global option;
 #     its checkout is full history, so every branch head is already local.
-#     A trusted step then overlays the posting surface from base.sha so the
-#     MCP the action spawns is never the PR's copy.
+#     A trusted step then overlays the posting surface from base.sha
+#     immediately before each ship step so the MCP the action spawns is
+#     never the PR's copy (including after a failed earlier link).
 #   * Every reviewer and coach job carries a job-level ENVIRONMENT lock that
 #     holds whatever the option order: GIT_ALLOW_PROTOCOL=https (git refuses
 #     the file/ext/ssh transports, so --upload-pack/--receive-pack/-u have
@@ -1264,7 +1267,8 @@ jobs:
           # which its backstop denies (code-scanning finding on #760).
           # This is the PR merge tree, not Jane's base.ref — the coach
           # still git-pushes. The posting MCP is overlaid from base
-          # below, so a PR cannot replace the server this job executes.
+          # immediately before each ship step, so a PR (or a failed
+          # earlier link) cannot replace the server this job executes.
           fetch-depth: 0
 
       - name: Check the coach posting surface is on the base branch
@@ -1291,13 +1295,13 @@ jobs:
             echo "::notice::the coach posting surface is not on the base branch yet (first landing) — skipping the coach rather than running a PR-controlled copy"
           fi
 
-      - name: Restore the coach posting surface from the base branch
-        if: steps.ready.outputs.ready == 'true'
+      - name: Restore the coach posting surface from the base branch (before chain link 1)
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$BASE_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -1320,10 +1324,21 @@ jobs:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 2)
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Z.AI GLM (chain link 2)
         id: p2
@@ -1342,10 +1357,21 @@ jobs:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 3)
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Z.AI GLM (chain link 3)
         id: p3
@@ -1364,10 +1390,26 @@ jobs:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 4)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Anthropic (chain link 4)
         id: p4
@@ -1388,10 +1430,27 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 5)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Anthropic (chain link 5)
         id: p5
@@ -1413,10 +1472,28 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 6)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Anthropic (chain link 6)
         id: p6
@@ -1439,7 +1516,6 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          show_full_output: "true"
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}

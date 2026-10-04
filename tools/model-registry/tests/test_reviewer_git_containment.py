@@ -21,10 +21,13 @@ containment is structural, in two halves:
     ``fetch-depth: 0``, then a TRUSTED step fetches the PR head SHA
     (Oracle extraheader auth) and overlays the changed design directories
     before any agent step;
-  - the coach's checkout is full history (it no longer fetches) of the
+    - the coach's checkout is full history (it no longer fetches) of the
     PR, not base.ref — it still git-pushes. A trusted step then overlays
-    the posting surface from ``pull_request.base.sha`` so the MCP the
-    action spawns is never the PR's copy.
+    the posting surface from ``pull_request.base.sha`` immediately before
+    each ship step so the MCP the action spawns is never the PR's copy
+    (including after a failed earlier Write/Edit/Bash link). Coach ship
+    steps must not set ``show_full_output`` (Jane/Drik keep the SDK log
+    hidden).
 
 Every pin has a tamper negative control below, derived from the live
 workflow text, proving it can fail.
@@ -205,38 +208,47 @@ def _assert_coach_checks_out_full_history(text: str) -> None:
         "surface from base.sha instead")
 
 
+def _assert_one_restore_step(restore: str, *, at: str) -> None:
+    assert "uses:" not in restore.split("run:", 1)[0], (
+        f"{at} is not a run step")
+    env = _env_map(restore, 8)
+    assert env.get("BASE_SHA") == BASE_SHA, (
+        f"{at} does not take the PR base sha")
+    run = restore.split("run:", 1)[1]
+    assert "${{" not in run, (
+        f"{at} interpolates an expression into its script — PR-controlled "
+        "values must arrive through env")
+    assert "/usr/bin/git checkout" in run, (
+        f"{at} does not invoke /usr/bin/git — a GITHUB_PATH write from an "
+        "earlier Write/Edit/Bash link would run a stub git")
+    for path in COACH_RESTORE_PATHS:
+        assert path in run, (
+            f"{at} no longer overlays {path} from base.sha")
+
+
 def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     """The coach cannot checkout base wholesale (it git-pushes the PR).
     The posting MCP / settings / skill are overlaid from base.sha by a
-    trusted step before any agent runs, and ship steps are gated on that
-    surface existing on the base (Jane's first-landing skip)."""
+    trusted step immediately before EACH ship step (a failed first link
+    with Write/Edit/Bash must not leave a rewritten MCP for the next
+    spawn), and ship steps are gated on that surface existing on the
+    base (Jane's first-landing skip)."""
     block = _without_comments(_job_blocks(text)["design-coach"])
     steps = _steps(block)
-    ship_at = next(i for i, c in enumerate(steps)
-                   if "uses: anthropics/claude-code-action" in c)
+    ship_at = [i for i, c in enumerate(steps)
+               if "uses: anthropics/claude-code-action" in c]
     restore_at = [i for i, c in enumerate(steps) if COACH_RESTORE_MARKER in c]
     assert restore_at, (
         "auto-review.yml [design-coach] has no trusted step restoring the "
         "posting surface from base.sha — the MCP would be the PR's copy")
-    assert restore_at[0] < ship_at, (
-        "auto-review.yml [design-coach] restores the posting surface AFTER "
-        "an agent step — the action would spawn the PR's MCP")
-    restore = steps[restore_at[0]]
-    assert "uses:" not in restore.split("run:", 1)[0], (
-        "restore step is not a run step")
-    env = _env_map(restore, 8)
-    assert env.get("BASE_SHA") == BASE_SHA, (
-        "auto-review.yml [design-coach] restore step does not take the PR "
-        "base sha")
-    run = restore.split("run:", 1)[1]
-    assert "${{" not in run, (
-        "auto-review.yml [design-coach] restore step interpolates an "
-        "expression into its script — PR-controlled values must arrive "
-        "through env")
-    for path in COACH_RESTORE_PATHS:
-        assert path in run, (
-            f"auto-review.yml [design-coach] restore step no longer overlays "
-            f"{path} from base.sha")
+    assert ship_at, "auto-review.yml [design-coach]: no ship step found"
+    for n, idx in enumerate(ship_at, 1):
+        assert idx > 0 and COACH_RESTORE_MARKER in steps[idx - 1], (
+            f"auto-review.yml [design-coach] ship step {n} is not preceded "
+            "by a trusted overlay of the posting surface from base.sha — "
+            "a failed earlier link could rewrite the MCP the next spawn loads")
+        _assert_one_restore_step(
+            steps[idx - 1], at=f"auto-review.yml [design-coach] restore before ship {n}")
     ready_at = [i for i, c in enumerate(steps) if COACH_POST_BLOB in c]
     assert ready_at, (
         "auto-review.yml [design-coach] ready step no longer probes the "
@@ -270,6 +282,10 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
             f"auto-review.yml [design-coach] ship step {n} is not gated on "
             "the base posting surface being present — a first landing "
             "would run the PR's copy")
+        assert "show_full_output" not in chunk, (
+            f"auto-review.yml [design-coach] ship step {n} sets "
+            "show_full_output — Jane/Drik keep the SDK log hidden; full "
+            "action logs are a live channel for transformed secrets")
 
 
 def test_every_reviewer_ship_step_runs_under_the_git_lock():
@@ -483,8 +499,10 @@ def _restore_chunk(text: str) -> str:
 
 def test_coach_guard_rejects_a_job_without_the_restore_step():
     text = _workflow_text()
-    restore = _restore_chunk(text)
-    tampered = text.replace("\n      - " + restore, "", 1)
+    block = _job_blocks(text)["design-coach"]
+    tampered = text
+    for restore in [c for c in _steps(block) if COACH_RESTORE_MARKER in c]:
+        tampered = tampered.replace("\n      - " + restore, "", 1)
     assert tampered != text, "tamper did not land — the fixture is stale"
     with pytest.raises(AssertionError, match="no trusted step restoring"):
         _assert_coach_restores_posting_surface_from_base(tampered)
@@ -499,7 +517,20 @@ def test_coach_guard_rejects_restore_after_the_agent():
         first_ship, first_ship + "\n      - " + restore, 1)
     tampered = text.replace(block, moved, 1)
     assert tampered != text, "tamper did not land — the fixture is stale"
-    with pytest.raises(AssertionError, match="AFTER an agent step"):
+    with pytest.raises(AssertionError, match="not preceded"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_restore_only_before_the_first_link():
+    # NEGATIVE CONTROL: overlay once before link 1, then a failed
+    # Write/Edit/Bash turn rewrites the MCP the next spawn loads.
+    text = _workflow_text()
+    block = _job_blocks(text)["design-coach"]
+    restores = [c for c in _steps(block) if COACH_RESTORE_MARKER in c]
+    assert len(restores) >= 2, "fixture stale — expected a restore per link"
+    tampered = text.replace("\n      - " + restores[1], "", 1)
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="not preceded"):
         _assert_coach_restores_posting_surface_from_base(tampered)
 
 
@@ -507,11 +538,30 @@ def test_coach_guard_rejects_an_interpolated_restore_script():
     tampered = _job_replace(
         _workflow_text(), "design-coach",
         '          set -euo pipefail\n'
-        '          git checkout "$BASE_SHA" -- \\\n',
+        '          /usr/bin/git checkout "$BASE_SHA" -- \\\n',
         '          set -euo pipefail\n'
         '          : ${{ github.event.pull_request.number }}\n'
-        '          git checkout "$BASE_SHA" -- \\\n')
+        '          /usr/bin/git checkout "$BASE_SHA" -- \\\n')
     with pytest.raises(AssertionError, match="interpolates an expression"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_a_path_git_on_restore():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        '          /usr/bin/git checkout "$BASE_SHA" -- \\\n',
+        '          git checkout "$BASE_SHA" -- \\\n')
+    with pytest.raises(AssertionError, match="/usr/bin/git"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_show_full_output():
+    tampered = _step_replace(
+        _workflow_text(), "design-coach", 0,
+        "          allowed_bots: cursor\n",
+        "          allowed_bots: cursor\n"
+        "          show_full_output: \"true\"\n")
+    with pytest.raises(AssertionError, match="show_full_output"):
         _assert_coach_restores_posting_surface_from_base(tampered)
 
 
@@ -525,8 +575,8 @@ def test_coach_guard_rejects_a_working_tree_ready_check():
 
 
 def test_coach_guard_rejects_a_ship_step_not_gated_on_ready():
-    tampered = _job_replace(
-        _workflow_text(), "design-coach",
+    tampered = _step_replace(
+        _workflow_text(), "design-coach", 0,
         "        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'\n",
         "        if: env.HAS_ZAI == 'true'\n")
     with pytest.raises(AssertionError, match="not gated on"):
