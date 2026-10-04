@@ -326,11 +326,12 @@ ring_col_x  = [r_out + 4 + ring_dx / 2 + 2, r_out + 4 + ring_dx / 2 + 2 + ring_d
 ring_row_y  = [-21, 21];
 strip_h     = 2.4;   // strip thickness; beds at z_tip with the port stub
 strip_x1    = ring_col_x[1] + throat_or(max(coupon_tols)) + 6.4;
-strip_y     = 46;    // half-width
+strip_y     = 47;    // half-width; +1 mm so size-8 Bold does not notch the long edge
 // Integer labels (tol×100) in Bold: size-4 default-sans strokes were ~one
 // extrusion width and printed as mush. Size 8 Bold is ~two line widths.
-// Y is a hair outboard of the old ±(strip_y-4.5) so the em box clears the
-// largest ring OD (~38.1) without walking off the ±46 edge.
+// Centres at ±(strip_y-4.5) = ±42.5: outboard of the largest ring OD
+// (~38.1, outer y ≈ ±40.05) with ~4.5 mm to the ±47 edge — the size-8
+// em box is ~4 mm half-height, so it no longer clips (Drik, PR #813).
 coupon_label_size = 8;
 coupon_label_font = "Liberation Sans:style=Bold";
 coupon_label_cut  = 0.6;   // engraving depth, mm (≥ two 0.2 mm layers)
@@ -389,7 +390,7 @@ module bottle_fit_coupon() {
         for (row = [0, 1])
             for (col = [0, 1])
                 translate([ring_col_x[col],
-                           (row ? 1 : -1) * (strip_y - 3.5),
+                           (row ? 1 : -1) * (strip_y - 4.5),
                            z_tip + strip_h - coupon_label_cut])
                     linear_extrude(coupon_label_cut + 0.1)
                         text(coupon_tol_mark(coupon_tols[row * 2 + col]),
