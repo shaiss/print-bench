@@ -64,8 +64,11 @@ chinchilla dust**, which is a respiratory irritant for hamsters. Pour to the
 shallow groove on the inside walls — that is the designed sand line, 18 mm
 above the floor / **15 mm below the low rim**. About 245 mL reaches it; a dig
 will fling some against the 15 mm freeboard, and the 20 mm lip keeps it out
-of the tunnel. To clean, sift or replace the sand and rinse the dish — no
-glued seams, everything is printed.
+of the tunnel. To clean, sift or replace the sand, then hand-wash the dish
+(NUGGS family **N7**): ≤ 50 °C only, mild unscented dish soap is fine, rinse
+and dry fully — **never a dishwasher** (the heated dry cycle exceeds even
+PETG, and a warped port is a narrowed bore). No glued seams; everything is
+printed.
 
 If the port feels loose or rocks when locked, print the coupon
 (`nuggs-sand-bath-coupon.scad` — about 4.5 h and 60 g, so budget an evening;

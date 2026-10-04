@@ -230,6 +230,9 @@ segments, not rectangles.
   carries 4 of its own, i.e. they come from the coupling, not this junction.
 - **Fill with bathing *sand* (0.1–0.5 mm grain), never chinchilla dust** —
   dust is a respiratory irritant for hamsters.
+- **Cleaning (family N7, `designs/nuggs/PM.md`):** after sifting or replacing
+  sand, hand wash the dish only, ≤ 50 °C, mild unscented dish soap OK; rinse
+  and dry fully — never a dishwasher.
 
 ## Print this first
 
