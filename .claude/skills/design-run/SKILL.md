@@ -44,12 +44,17 @@ so the two never collide on the same issue.
    - **an active claim marker** — read the *latest* `🚢 SHIP-LOCK` comment and
      act on that one. `🚢 SHIP-LOCK` is active and the issue is taken;
      `🚢 SHIP-LOCK WITHDRAWN` is released and blocks nothing. An active claim
-     more than a few hours old with **no** `claude/issue-<N>-*` branch and **no**
-     open PR closing the issue is *stale* — take it over, naming the one you
-     superseded.
+     more than a few hours old with **no** `claude/issue-<N>-*` branch carrying
+     unmerged work and **no** open PR closing the issue is *stale* — take it
+     over, naming the one you superseded.
    - **an open PR closes it** — read the issue's linked-PR metadata (GitHub's
      nine closing keywords, case-insensitive), don't grep the body.
-   - a remote branch `claude/issue-<N>-*` already exists.
+   - **a remote branch `claude/issue-<N>-*` carrying unmerged work** — at least
+     one commit the default branch lacks (`git rev-list --count
+     origin/<default>..origin/<branch>` > 0). A matching branch with **zero**
+     commits ahead is an orphan whose work is already on the default branch: it
+     blocks nothing. When you cannot tell, treat it as a claim. Same rule as
+     `/ship-issue` §0.3, the selector and `scripts/routine-lock-cleanup.sh`.
 4. **Claim it** by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`,
    **before you scaffold a single part**. Keep **one active claim** per issue at
    a time — never delete a claim comment (the timestamps are the record),
@@ -60,11 +65,12 @@ so the two never collide on the same issue.
    comment so its first line reads `🚢 SHIP-LOCK WITHDRAWN` — never delete it)
    and stop. Last writer yields.
 6. **Release on a terminal stop.** If you stop for any reason *before* a
-   `claude/issue-<N>-*` branch or an open closing PR exists — a §1 decline, a
-   §4 non-convergence, any §8 stop — **withdraw your claim** the same way (edit
-   the first line to `🚢 SHIP-LOCK WITHDRAWN`). A run that claimed then walked
-   away must not leave the brief frozen until it ages into a stale takeover; the
-   branch/PR is what carries the claim forward once real work exists.
+   `claude/issue-<N>-*` branch with unmerged work or an open closing PR exists
+   — a §1 decline, a §4 non-convergence, any §8 stop — **withdraw your claim**
+   the same way (edit the first line to `🚢 SHIP-LOCK WITHDRAWN`). A run that
+   claimed then walked away must not leave the brief frozen until it ages into a
+   stale takeover; the branch/PR is what carries the claim forward once real
+   work exists.
 
 If the issue is taken, say so and stop. Never work two.
 

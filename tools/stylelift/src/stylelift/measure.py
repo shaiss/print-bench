@@ -25,6 +25,7 @@ from pathlib import Path
 
 import numpy as np
 import trimesh
+from shapely.ops import unary_union
 
 
 @dataclass
@@ -76,6 +77,35 @@ class Config:
     overhang_limit_deg: float = 45.0
     # A face this close to the lowest point counts as sitting on the bed.
     bed_tol_mm: float = 0.01
+    # --- the faceted, cut-through look -------------------------------------
+    # What separates a design facet from the mesh's own tessellation is the
+    # curve resolution the mesh itself declares: a fold turning no more than
+    # one segment of the finest curve the part draws is that curve's
+    # tessellation, whatever its absolute angle. When a part draws no curve at
+    # all there is nothing to normalise against, so the smooth-curve
+    # convention stands in (a curve a design means to be smooth is drawn at
+    # $fn >= 48, i.e. folds of 7.5 degrees or less).
+    fn_curve_fallback: int = 48
+    # Absorbs the spread in a measured segment count (the mode's median turn
+    # wobbles by about a segment) without letting a genuinely steeper fold
+    # through.
+    tessellation_slack: float = 1.1
+    # Edges of the sharpness histogram, in degrees of fold turn. A readable
+    # ladder rather than even bins: the interesting action is between "finest
+    # drawn curve" (~5 deg at $fn=64) and "corner" (90).
+    histogram_bins_deg: tuple = (0.5, 2, 5, 10, 20, 35, 55, 90, 180)
+    # --- openness (projected void fraction) ---------------------------------
+    # Directions sampled on the sphere, and parallel lines sampled per
+    # direction, for the pose-stable void integral. Deterministic: a Fibonacci
+    # lattice for the directions, a golden-spiral disc for the offsets, no
+    # randomness anywhere.
+    void_dirs: int = 48
+    void_rays_per_dir: int = 32
+    # The glyph aperture gets a second, finer fan seeded by the coarse one:
+    # target fine spacing as a share of the circumradius, capped per view so
+    # an airy part — open from every direction — cannot make the pass explode.
+    glyph_spacing_frac: float = 0.02
+    glyph_rays_max: int = 1024
 
 
 def load_mesh(path: str | Path) -> trimesh.Trimesh:
@@ -792,6 +822,634 @@ def _symmetry(mesh: trimesh.Trimesh, cfg: Config) -> dict:
     return out
 
 
+def _curve_resolution(edges: dict, features: dict) -> float | None:
+    """The finest curve resolution the mesh itself draws, in segments/turn.
+
+    The honest evidence is the *edge* rounding vocabulary and the cylindrical
+    features: a rounding mode is one edge band drawn at one resolution (every
+    fold in it turns the same amount), and a cylindrical feature is a uniform
+    circle — both carry an `implied_fn` a design actually chose. Form
+    curvature is deliberately excluded: a barrel or a sphere is a
+    parameterized surface whose fold angle varies across it, so a mode's
+    median turn there describes where the surface's own parameterization
+    happens to sample, not a resolution the author wrote. A uv sphere of
+    $fn=64 compresses to 0.7-degree folds at its poles, which drags the
+    median to ~2.9 degrees and would report $fn=126 — a threshold finer than
+    the author's own sampling, calling their equator folds design facets. The
+    latitude rings of that same sphere are detected as cylinders at $fn=64,
+    which is the truth the surface mode buried.
+
+    The finest reported resolution is what the sharpness metric normalises
+    against: a part that draws its curves at $fn=64 has declared 5.6 degrees
+    to be tessellation, so its 45-degree folds must be design; a part whose
+    finest curve is an 8-sided barrel has declared 45 degrees to be a curve's
+    segment, so the same fold there is tessellation.
+    """
+    reported = []
+    for side in ("convex", "concave"):
+        for mode in (edges.get("rounding") or {}).get(side, []):
+            if mode.get("implied_fn"):
+                reported.append(float(mode["implied_fn"]))
+    for cyl in features.get("cylinders", []):
+        if cyl.get("implied_fn"):
+            reported.append(float(cyl["implied_fn"]))
+    return max(reported) if reported else None
+
+
+def _facetedness(mesh: trimesh.Trimesh, edges: dict, features: dict,
+                 cfg: Config) -> dict:
+    """Dihedral-sharpness histogram: how much of the shaped edge length is
+    *design facet* rather than tessellation.
+
+    A style built from flat facets meeting at decided angles — a low-poly
+    solid, stencil-cut glyphs, a truss — is the opposite of the smoothed
+    vocabulary above, and `softness` cannot see it: a fully faceted part and
+    a coarsely drawn smooth one both turn steep folds everywhere. What tells
+    them apart is not the angle but the resolution the mesh claims for its
+    own curves. A fold turning one segment of the finest curve the part
+    actually draws is that curve's tessellation; a fold turning decisively
+    more than that is a corner somebody drew. The threshold is therefore
+    derived per mesh (`tessellation_turn_deg` = 360/$fn, with a little slack)
+    rather than fixed, which is why a coarse export of a smooth part earns no
+    facetedness credit for its tessellation edges: its own curves are its
+    coarsest evidence, and they explain every fold it has.
+
+    Shares are of *shaped* edge length — folds turning at least `flat_deg`,
+    the same denominator `softness` uses — so the coplanar diagonals every
+    quad strip is made of never dilute the count.
+    """
+    angles = np.asarray(mesh.face_adjacency_angles, dtype=float)
+    edges_arr = mesh.face_adjacency_edges
+    verts = mesh.vertices
+    if not len(angles):
+        return {"fn_curve": None, "tessellation_turn_deg": None,
+                "sharpness": 0.0, "shaped_length_mm": 0.0,
+                "facet_length_mm": 0.0, "histogram": []}
+    lengths = np.linalg.norm(verts[edges_arr[:, 0]] - verts[edges_arr[:, 1]],
+                             axis=1)
+    shaped = angles >= np.radians(cfg.flat_deg)
+
+    fn_curve = _curve_resolution(edges, features)
+    floor = cfg.fn_curve_fallback if fn_curve is None else fn_curve
+    tess_turn = cfg.tessellation_slack * 360.0 / floor
+    facet = shaped & (np.degrees(angles) > tess_turn)
+
+    shaped_len = float(lengths[shaped].sum())
+    facet_len = float(lengths[facet].sum())
+    bins = []
+    bounds = cfg.histogram_bins_deg
+    for lo, hi in zip(bounds[:-1], bounds[1:]):
+        inside = shaped & (angles > np.radians(lo)) & (angles <= np.radians(hi))
+        length = float(lengths[inside].sum())
+        bins.append({
+            "lo_deg": lo, "hi_deg": hi,
+            "length_mm": round(length, 3),
+            "share": round(length / shaped_len, 4) if shaped_len > 0 else 0.0,
+            # A bin straddling the tessellation threshold carries both kinds;
+            # flag it by whichever kind owns more of its length.
+            "facet": bool(lengths[inside & facet].sum() > length / 2),
+        })
+    return {
+        "fn_curve": round(fn_curve, 1) if fn_curve else None,
+        "tessellation_turn_deg": round(tess_turn, 2),
+        "sharpness": round(facet_len / shaped_len, 4) if shaped_len > 0 else 0.0,
+        "shaped_length_mm": round(shaped_len, 3),
+        "facet_length_mm": round(facet_len, 3),
+        "histogram": bins,
+    }
+
+
+def _fibonacci_sphere(n: int) -> np.ndarray:
+    """N near-uniform directions: a Fibonacci lattice, deterministic."""
+    i = np.arange(n) + 0.5
+    phi = np.arccos(1.0 - 2.0 * i / n)          # uniform in cos: uniform on sphere
+    golden = np.pi * (1 + 5 ** 0.5)
+    theta = golden * i
+    return np.stack([np.sin(phi) * np.cos(theta),
+                     np.sin(phi) * np.sin(theta),
+                     np.cos(phi)], axis=1)
+
+
+def _t_junction_count(mesh: trimesh.Trimesh, tol: float) -> int:
+    """Vertices lying strictly inside another edge — T-junctions.
+
+    A triangulation with T-junctions is not a simplicial complex, so its
+    V - E + F is not the surface's Euler characteristic and any handle count
+    derived from it would be a confident wrong number (mapbox-earcut's
+    multi-ring path emits exactly this for axis-aligned holes: long cap edges
+    passing straight through hole-rim vertices). Counting the incidences is
+    the guard — OpenSCAD/CGAL exports share every vertex and never have them.
+    """
+    from scipy.spatial import cKDTree           # scipy is a declared dep
+
+    m = mesh.copy()
+    m.merge_vertices()
+    verts = np.asarray(m.vertices, dtype=float)
+    tree = cKDTree(verts)
+    count = 0
+    for a, b in m.edges_unique:
+        p, q = verts[a], verts[b]
+        d = q - p
+        length2 = float(d @ d)
+        if length2 <= 0.0:
+            continue
+        # Candidates near the edge first, then the exact point-segment test:
+        # a vertex counts only strictly between the endpoints, on the segment.
+        mid = (p + q) / 2.0
+        for idx in tree.query_ball_point(mid, np.sqrt(length2) / 2 + tol):
+            if idx == a or idx == b:
+                continue
+            w = verts[idx] - p
+            t = float(w @ d) / length2
+            if 1e-9 < t < 1.0 - 1e-9 and float(np.linalg.norm(w - t * d)) <= tol:
+                count += 1
+    return count
+
+
+def _through_cut_topology(mesh: trimesh.Trimesh, tol: float) -> dict:
+    """How many cuts pass through the part, as mesh topology.
+
+    A through-cut is a handle of the surface: a hole that connects one side
+    of the part to the other, which a blind pocket or an enclosed cavity
+    never is. Handles come from the Euler characteristic (H = (2*C - chi)/2
+    for C connected components), which is exact and pose-invariant — no ray
+    sampling decides it. Refuses rather than guesses on a triangulation the
+    count cannot trust (#702).
+    """
+    junctions = _t_junction_count(mesh, tol)
+    if junctions:
+        return {"count": None,
+                "reason": f"{junctions} T-junction edge(s): triangulation "
+                          "is not a simplicial complex, so handle counts "
+                          "from it would not be trustworthy"}
+    m = mesh.copy()
+    m.merge_vertices()
+    chi = len(m.vertices) - len(m.edges_unique) + len(m.faces)
+    bodies = int(m.body_count)
+    slack = 2 * bodies - chi
+    if slack < 0 or slack % 2:
+        return {"count": None,
+                "reason": f"Euler characteristic {chi} on {bodies} body(ies) "
+                          "is not a closed surface's; handle count refused"}
+    return {"count": slack // 2}
+
+
+def _openness(mesh: trimesh.Trimesh, cfg: Config) -> dict:
+    """Projected-void-fraction: how much of the form is open, pose-stably.
+
+    A single projection cannot answer "how open is this part" — face-on, a
+    stencil plate is mostly void; edge-on it is almost all material — and any
+    *chosen* projection smuggles the answer in with the choice. So integrate
+    over the sphere instead: for each of `void_dirs` near-uniform directions,
+    cast a fan of parallel lines through the part and measure the open share
+    of that view's silhouette — lines that cross the convex hull but never
+    meet material. The mean of the per-view open fractions is a solid-angle
+    integral, so rotating the part permutes the directions and changes
+    nothing: the pose stability is in the construction, not the sampling
+    luck.
+
+    The convex hull is the reference silhouette, so deep concavities count as
+    openness alongside true cut-throughs — the honest reading of this number
+    is "how airy is the form", and a lattice or a stencil scores high for the
+    same reason a solid block scores zero.
+
+    Two questions are kept apart: does a cut pass *through* the part at all,
+    and how big is its visible mark. Hull-referenced airiness is not
+    through-cutting, so existence is topological, not a chord threshold
+    (#702): `through_cut_count` is the mesh's handle count (a hole that
+    connects one side to the other; a blind pocket, an open channel or an
+    enclosed cavity is never one). The largest gap a line threads
+    (`max_void_span_mm`) is kept as the hull-referenced chord it is — it also
+    hulls in leading pocket gaps and silhouette slack — and
+    `max_through_span_mm` reports only chords bounded by material on both
+    sides (a ray that enters material, crosses the cut, and re-enters
+    material), never one that ends on an enclosed cavity's wall.
+
+    Neither chord is the glyph's size (#701): a chord measures depth along
+    the ray, so a hole as narrow as a nozzle tip but drilled deep reads
+    "legible" to a rule keyed on it. The glyph's size is its aperture — the
+    extent of the connected opening in its own plane — measured here
+    (`max_glyph_aperture_mm`, as `max_glyph_aperture_fraction` of the part)
+    from planar sections just inside each hull plane
+    (`_sectioned_aperture`): exact and pose-invariant, with a projected
+    fallback (`_projected_aperture`) for a mouth small enough to hide
+    between hull planes. A narrow-deep hole slices to the same small
+    mouth however deep its bore runs; a wide opening measures its own
+    width. The denominator is the hull circumdiameter (pose-invariant); an
+    AABB side length would grow toward the space diagonal under rotation and
+    shrink the fraction from export pose alone. The narrowest material span
+    (`min_bridge_mm`) is measured by inward normal rays the way `walls`
+    measures thickness, with plate-thickness faces filtered out so a thin
+    plate with a wide web reports the web — a bridge under two extrusion
+    widths will not print clean.
+    """
+    if not mesh.is_watertight or len(mesh.faces) == 0:
+        return {"measured": False, "reason": "mesh is not watertight"}
+    hull = mesh.convex_hull
+    centre = hull.bounds.mean(axis=0)
+    radius = float(np.linalg.norm(hull.vertices - centre, axis=1).max())
+    if radius <= 0:
+        return {"measured": False, "reason": "degenerate part"}
+
+    directions = _fibonacci_sphere(cfg.void_dirs)
+    # Golden-spiral disc offsets: even coverage of each view, no randomness.
+    j = np.arange(cfg.void_rays_per_dir)
+    discs = radius * np.sqrt((j + 0.5) / len(j))
+    angles = j * np.pi * (3 - 5 ** 0.5)
+    offsets = np.stack([discs * np.cos(angles), discs * np.sin(angles)], axis=1)
+
+    span = 4.0 * radius          # far enough that every line crosses everything
+    eps = 1e-6 * radius          # merge numerical double-hits, ignore dust
+    topology = _through_cut_topology(mesh, eps)
+    cavity = _cavity_faces(mesh)
+    # Air in front must reach this depth before a ray is said to look *into*
+    # the part (1% of the diameter, floored at half a tenth of a millimetre):
+    # without it, the wedge of draft or export tolerance where a surface
+    # recedes from the hull at a silhouette edge would pose as an opening.
+    gap_floor = max(0.05, 0.02 * radius)
+    coarse_spacing = radius * np.sqrt(np.pi / cfg.void_rays_per_dir)
+    per_view = []
+    void_spans: list[float] = []
+    through_spans: list[float] = []
+    seeded: list[tuple] = []
+    for w in directions:
+        helper = np.array([0.0, 0.0, 1.0]) if abs(w[2]) < 0.9 \
+            else np.array([1.0, 0.0, 0.0])
+        u = np.cross(w, helper)
+        u /= np.linalg.norm(u)
+        v = np.cross(w, u)
+        origins = (centre + offsets[:, 0, None] * u + offsets[:, 1, None] * v
+                   - w * span / 2)
+        ray_dirs = np.tile(w, (len(origins), 1))
+        solid, solid_ray, solid_tri = mesh.ray.intersects_location(
+            origins, ray_dirs, multiple_hits=True)
+        outline, outline_ray, _ = hull.ray.intersects_location(
+            origins, ray_dirs, multiple_hits=True)
+        solid_d = _distances_by_ray(solid, solid_ray, origins)
+        hull_d = _distances_by_ray(outline, outline_ray, origins)
+        on_cavity = cavity[solid_tri] if len(solid_tri) else solid_tri
+        cavity_d = _distances_by_ray(solid[on_cavity], solid_ray[on_cavity],
+                                     origins)
+        votes = solid_votes = 0
+        open_front: list[int] = []
+        for ray, chord in hull_d.items():
+            # A convex body gives exactly an entry and an exit; a ray with
+            # less is a numerical grazing and costs only itself.
+            if len(chord) < 2:
+                continue
+            h0, h1 = chord[0], chord[-1]
+            votes += 1
+            merged: list[float] = []
+            for d in solid_d.get(ray, []):
+                if h0 - eps <= d <= h1 + eps:
+                    if not merged or d - merged[-1] > eps:
+                        merged.append(d)
+            # Front air: how far the ray travels inside the hull before it
+            # first meets material. Past the floor the ray looks into an
+            # opening (a mouth, a groove, a slot), and its offset becomes a
+            # seed for the aperture measurement below.
+            front = (h1 - h0) if not merged else (merged[0] - h0)
+            if front >= gap_floor:
+                open_front.append(ray)
+            if not merged:
+                gap = h1 - h0            # threads the form without meeting it
+                if gap > eps:
+                    void_spans.append(gap)
+                continue
+            solid_votes += 1
+            if len(merged) % 2:
+                continue        # unfinished entry/exit pair: no span stats
+            bounds = [h0] + merged + [h1]
+            for k in range(0, len(bounds) - 1, 2):
+                gap = bounds[k + 1] - bounds[k]
+                if gap > eps:
+                    void_spans.append(gap)
+                    # Material-bounded on both sides (both endpoints from
+                    # `merged`, not the hull chord): a chord across a cut that
+                    # passes *through* the part — unlike the leading and
+                    # trailing hull gaps a blind pocket or silhouette slack
+                    # produces. Existence is settled by topology above; these
+                    # chords size the cut. A chord that ends on an enclosed
+                    # cavity's wall crosses sealed air, not a cut, even when
+                    # the part has a handle elsewhere.
+                    if (2 <= k and k + 1 <= len(merged)
+                            and not _ends_on(cavity_d.get(ray, []),
+                                             bounds[k], bounds[k + 1], eps)):
+                        through_spans.append(gap)
+        if open_front:
+            seeded.append((w, u, v, offsets[open_front]))
+        if votes:
+            per_view.append(1.0 - solid_votes / votes)
+
+    # Pose-invariant part size: hull circumdiameter, not an AABB side.
+    diameter = 2.0 * radius
+    thinnest = _thinnest_span(mesh, cfg)
+    cut_count = topology["count"]
+    # No handles, or a count that cannot be trusted: no through-cut chords to
+    # report. Interior material-bounded chords on a genus-0 solid belong to
+    # pockets and channels, not to cuts that pass through.
+    max_through = (max(through_spans)
+                   if cut_count and through_spans else 0.0)
+    aperture = _sectioned_aperture(mesh, hull, radius)
+    if aperture <= 0 and seeded:
+        # Soft mouths only: no fold rings the opening, so project it.
+        aperture = max(_projected_aperture(
+            mesh, hull, centre, w, u, v, seeds, radius, cfg,
+            gap_floor, coarse_spacing, eps, span)
+            for w, u, v, seeds in seeded)
+    result = {
+        "measured": True,
+        "void_fraction": round(float(np.mean(per_view)), 4) if per_view else 0.0,
+        "directions": int(cfg.void_dirs),
+        "rays_per_direction": int(cfg.void_rays_per_dir),
+        "views_with_void": int(sum(1 for v in per_view if v > 0)),
+        "max_void_span_mm": round(max(void_spans), 3) if void_spans else 0.0,
+        "max_void_span_fraction": (round(max(void_spans) / diameter, 4)
+                                   if void_spans and diameter > 0 else 0.0),
+        "through_cut_count": cut_count,
+        "max_through_span_mm": round(max_through, 3) if max_through else 0.0,
+        "max_through_span_fraction": (round(max_through / diameter, 4)
+                                      if max_through and diameter > 0 else 0.0),
+        "max_glyph_aperture_mm": round(aperture, 3),
+        "max_glyph_aperture_fraction": (round(aperture / diameter, 4)
+                                        if diameter > 0 else 0.0),
+        "min_bridge_mm": round(thinnest, 3) if thinnest is not None else None,
+    }
+    if cut_count is None:
+        result["through_cut_reason"] = topology["reason"]
+    return result
+
+
+def _groups(n: int, pairs: np.ndarray) -> list[list[int]]:
+    """Connected components of `n` items joined by the (k, 2) pair list."""
+    parent = list(range(n))
+
+    def find(a: int) -> int:
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for a, b in pairs:
+        ra, rb = find(int(a)), find(int(b))
+        if ra != rb:
+            parent[rb] = ra
+    out: dict[int, list[int]] = {}
+    for a in range(n):
+        out.setdefault(find(a), []).append(a)
+    return list(out.values())
+
+
+def _sectioned_aperture(mesh: trimesh.Trimesh, hull: trimesh.Trimesh,
+                        radius: float) -> float:
+    """The widest opening mouth, read off planar sections of the part — exactly.
+
+    A mouth is where void meets the outer envelope, and the envelope's
+    faces are the hull's. So: slice the mesh a hair inside each hull
+    plane, take the slice's own convex hull, and read the difference —
+    every connected piece of it is an opening at that plane, a hole or a
+    bay, and the widest pair of points on one piece is its aperture: the
+    extent of the connected opening in its own plane, which is what a
+    legibility rule has to compare against the part. A narrow-deep hole
+    slices to the same small mouth at both ends however deep its bore
+    runs between them; a drafted flank's top edge, which folds like a
+    mouth over air *outside* the silhouette, slices to solid disk and
+    reads nothing. Because each slice's hull is the slice's own, the
+    reading self-normalizes: a chamfered slab's shrunken bottom section
+    is its own hull, not a giant false opening. No rays and no chosen
+    view — the number is exact and rotation-proof.
+
+    What this cannot see: a mouth small enough to hide between hull
+    planes — facing a hull edge rather than a face, so no inward slice
+    crosses it. Those fall back to projection in `_openness`.
+
+    The difference carries two kinds of degenerate piece that are not
+    openings at all: zero-area slivers where the slice boundary runs
+    along its own hull (a flat side plane), and tessellation-thin
+    crescents between a curved slice and its hull (a smooth ball). A
+    piece counts only if it survives eroding the same visibility floor
+    the projection fallback uses — an opening thinner than that is
+    below the floor everywhere, and reporting it would give a closed
+    part a phantom aperture.
+    """
+    normals = hull.face_normals
+    planes = np.einsum("ij,ij->i", normals, hull.triangles_center)
+    # One slice per distinct hull plane; a quad's two triangles agree.
+    _, first = np.unique(np.round(np.column_stack((normals, planes)), 6),
+                         axis=0, return_index=True)
+    inset = 1e-3 * radius
+    floor = max(0.05, 0.02 * radius)
+    widest = 0.0
+    for i in first:
+        origin = hull.triangles_center[i] - normals[i] * inset
+        section = mesh.section(plane_origin=origin, plane_normal=normals[i])
+        if section is None:
+            continue
+        planar, _ = section.to_2D()
+        polys = planar.polygons_full
+        if not polys:
+            continue
+        region = unary_union(polys)
+        if region.is_empty:
+            continue
+        for void in _polygons(region.convex_hull.difference(region)):
+            core = void.buffer(-floor)
+            if core.is_empty or core.area <= 0:
+                continue
+            pts = np.asarray(void.exterior.coords)
+            widest = max(widest, float(np.linalg.norm(
+                pts[:, None, :] - pts[None, :, :], axis=-1).max()))
+    return widest
+
+
+def _polygons(geom) -> list:
+    """The Polygon pieces of a shapely geometry (itself if it is one)."""
+    if geom.is_empty:
+        return []
+    return ([geom] if geom.geom_type == "Polygon"
+            else [g for g in geom.geoms if g.geom_type == "Polygon"])
+
+
+def _projected_aperture(mesh: trimesh.Trimesh, hull: trimesh.Trimesh,
+                        centre: np.ndarray, w: np.ndarray, u: np.ndarray,
+                        v: np.ndarray, seeds: np.ndarray, radius: float,
+                        cfg: Config, gap_floor: float, coarse_spacing: float,
+                        eps: float, span: float) -> float:
+    """The widest connected visible opening in this one view, in mm.
+
+    The fallback path for openings whose mouths carry no measurable fold
+    (a filleted rim, a smoothly curving window): the section reading cannot
+    see them, so they are measured in projection instead. Seeded by the coarse
+    fan's front-open rays, a fine golden-spiral fan is cast over the seeds'
+    bounding box, padded by one coarse spacing so the true boundary of a
+    region whose edge fell between coarse samples cannot sit outside the
+    window. Each fine ray is classified by the same front-air rule as the
+    coarse pass — a real hull ray cast for entry and exit, because the fan
+    is a disc and overshoots the window — and the open points are grouped into
+    connected openings by union-find, and the widest group's extent is the
+    aperture. One realized spacing is added back at the end: point samples
+    land half a spacing short of the region's edge on each side.
+
+    The linkage distance is what keeps neighbouring *distinct* openings
+    apart: it must bridge the fan's own gaps (1.5 spacings) while staying
+    below the webs that separate glyphs — which is also this path's known
+    limit, since a view foreshortens a web exactly as it shrinks the mouths,
+    and at a steep enough angle the projected web drops under the linkage
+    and merges its neighbours. That is why this is the fallback and the
+    fold-ringed rim is the primary: the rim reads the opening in its own
+    plane, where nothing is foreshortened.
+    """
+    lo = seeds.min(axis=0) - coarse_spacing
+    hi = seeds.max(axis=0) + coarse_spacing
+    mid = (lo + hi) / 2.0
+    win_r = float(np.linalg.norm(hi - lo) / 2.0)
+    if win_r <= 0:
+        return 0.0
+    spacing = cfg.glyph_spacing_frac * radius
+    n = int(min(cfg.glyph_rays_max,
+                max(64.0, np.pi * win_r ** 2 / spacing ** 2)))
+    j = np.arange(n) + 0.5
+    discs = win_r * np.sqrt(j / n)
+    angles = j * np.pi * (3 - 5 ** 0.5)
+    fine = np.stack([discs * np.cos(angles), discs * np.sin(angles)], axis=1)
+    origins = (centre
+               + (mid[0] + fine[:, 0])[:, None] * u
+               + (mid[1] + fine[:, 1])[:, None] * v
+               - w * span / 2)
+    ray_dirs = np.tile(w, (n, 1))
+
+    # Hull entry and exit from a real ray cast, not from the hull's face
+    # planes: the fan is a disc around the seeds and overshoots their padded
+    # bounding box, and a ray outside the silhouette has no plane pair to
+    # stop it — the infinite planes would hand it a full-height "chord" and
+    # a ring of phantom openings around the part.
+    outline, outline_ray, _ = hull.ray.intersects_location(
+        origins, ray_dirs, multiple_hits=True)
+    hull_d = _distances_by_ray(outline, outline_ray, origins)
+    solid, solid_ray, _ = mesh.ray.intersects_location(
+        origins, ray_dirs, multiple_hits=True)
+    solid_d = _distances_by_ray(solid, solid_ray, origins)
+    pts = []
+    for ray in range(n):
+        chord = hull_d.get(ray, [])
+        if len(chord) < 2:
+            continue        # misses the hull: outside the silhouette
+        h0, h1 = chord[0], chord[-1]
+        # A chord shorter than the floor is a miss or a grazing sliver; no
+        # visible opening can live on it.
+        if h1 - h0 <= gap_floor:
+            continue
+        merged: list[float] = []
+        for d in solid_d.get(ray, []):
+            if h0 - eps <= d <= h1 + eps:
+                if not merged or d - merged[-1] > eps:
+                    merged.append(d)
+        gap = (h1 - h0) if not merged else (merged[0] - h0)
+        if gap >= gap_floor:
+            pts.append(fine[ray])
+    if len(pts) < 2:
+        return 0.0
+
+    pts = np.asarray(pts)
+    dist2 = ((pts[:, None, :] - pts[None, :, :]) ** 2).sum(-1)
+    realized = win_r * np.sqrt(np.pi / n)
+    link = 1.5 * realized
+    joined = np.argwhere(np.triu(dist2 <= link * link, 1))
+    widest = 0.0
+    for members in _groups(len(pts), joined):
+        if len(members) > 1:
+            widest = max(widest,
+                         float(np.sqrt(dist2[np.ix_(members, members)].max())))
+    return widest + realized
+
+
+def _cavity_faces(mesh: trimesh.Trimesh) -> np.ndarray:
+    """Boolean mask of the faces bounding an enclosed cavity.
+
+    A watertight, consistently wound mesh bounds each sealed cavity with its
+    own inward-facing shell: a connected face component whose signed volume
+    is negative. Chords that end on one cross sealed air, not a cut.
+    """
+    mask = np.zeros(len(mesh.faces), dtype=bool)
+    labels = trimesh.graph.connected_component_labels(
+        mesh.face_adjacency, node_count=len(mesh.faces))
+    tri = mesh.triangles
+    signed = np.einsum("ij,ij->i", tri[:, 0],
+                       np.cross(tri[:, 1], tri[:, 2])) / 6.0
+    for label in np.unique(labels):
+        faces = labels == label
+        if signed[faces].sum() < 0:
+            mask[faces] = True
+    return mask
+
+
+def _ends_on(hits: list[float], a: float, b: float, eps: float) -> bool:
+    """Whether either chord endpoint `a`, `b` is one of the given hits."""
+    return any(abs(h - a) <= eps or abs(h - b) <= eps for h in hits)
+
+
+def _distances_by_ray(locations: np.ndarray, index_ray: np.ndarray,
+                      origins: np.ndarray) -> dict[int, list[float]]:
+    """Hit distances along each ray of a batched intersect_location call."""
+    out: dict[int, list[float]] = {}
+    if len(locations):
+        dist = np.linalg.norm(locations - origins[index_ray], axis=1)
+        for ray, d in zip(index_ray, dist):
+            out.setdefault(int(ray), []).append(float(d))
+    for ray in out:
+        out[ray].sort()
+    return out
+
+
+def _thinnest_span(mesh: trimesh.Trimesh, cfg: Config) -> float | None:
+    """The narrowest material span, measured the way `walls` measures.
+
+    Inward normal rays from area-weighted surface samples: a web between two
+    cut-outs is bounded by exactly such walls, and the ray from one crosses
+    the web to the next, so the minimum over samples is the bridge a rule
+    about printing clean needs. Faces carry area, so — unlike chord sampling
+    — no grazing near a cut-out's corner can mint a sliver-thickness that
+    exists nowhere on the part.
+
+    Plate-thickness faces (the large top/bottom of a stencil plate) are
+    filtered out when one normal axis dominates the surface area: sampling
+    them would report stock thickness instead of the web, false-failing a
+    thin plate with a wide valid bridge. DESIGN_SA: this is a cheap normal-
+    axis filter, not a full "opposing cut-out wall" topology walk.
+    """
+    areas = np.asarray(mesh.area_faces, dtype=float)
+    total = float(areas.sum())
+    if total <= 0:
+        return None
+    weights = areas.copy()
+    normals = np.asarray(mesh.face_normals, dtype=float)
+    # Second-moment of face normals: the axis most surface area faces along
+    # (and against) is the plate normal on a flat stencil. When it clearly
+    # dominates, drop those faces so rays measure webs, not stock thickness.
+    moment = (normals * areas[:, None]).T @ normals
+    evals, evecs = np.linalg.eigh(moment)
+    if evals[-1] > 2.0 * max(evals[-2], 1e-18):
+        plate_axis = evecs[:, -1]
+        plate_faces = np.abs(normals @ plate_axis) >= 0.85
+        weights[plate_faces] = 0.0
+    wsum = float(weights.sum())
+    if wsum <= 0:
+        weights = areas
+        wsum = total
+    n = min(cfg.thickness_samples, int((weights > 0).sum()))
+    if n <= 0:
+        return None
+    rng = np.random.default_rng(0)                      # fixed: results repeat
+    idx = rng.choice(len(mesh.faces), size=n, replace=False, p=weights / wsum)
+    directions = -normals[idx]
+    origins = np.asarray(mesh.triangles_center)[idx] + directions * 1e-4
+    hits, ray_idx, _ = mesh.ray.intersects_location(origins, directions,
+                                                    multiple_hits=False)
+    if not len(hits):
+        return None
+    return float(np.linalg.norm(hits - origins[ray_idx], axis=1).min())
+
+
 def measure(path: str | Path, cfg: Config | None = None) -> dict:
     """Measure every style-bearing property of a mesh file."""
     cfg = cfg or Config()
@@ -800,6 +1458,9 @@ def measure(path: str | Path, cfg: Config | None = None) -> dict:
     internal = edges.pop("_internal", None)
     features = (_cylindrical_features(mesh, internal, cfg) if internal
                 else {"cylinders": [], "count": 0})
+    # Reads the curve resolutions the passes above measured, so it must run
+    # after them — but it only adds a key, it changes nothing they reported.
+    edges["facetedness"] = _facetedness(mesh, edges, features, cfg)
     walls = _walls(mesh, cfg)
     massing = _massing(mesh)
 
@@ -829,6 +1490,7 @@ def measure(path: str | Path, cfg: Config | None = None) -> dict:
         "features": features,
         "orientation": _orientation(mesh, cfg),
         "walls": walls,
+        "openness": _openness(mesh, cfg),
         "symmetry": _symmetry(mesh, cfg),
         "ratios": ratios,
         "config": asdict(cfg),

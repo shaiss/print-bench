@@ -57,6 +57,10 @@ def _responses():
         # under adoptionStudies.
         {"number": 4, "title": "PR wearing the adoption-study label", "comments": 0,
          "pull_request": {"url": "..."}, "labels": [{"name": "adoption-study"}]},
+        # A PR wearing the agent-brief label — same guard, same drop, must NOT
+        # appear under agentBriefs.
+        {"number": 5, "title": "PR wearing the agent-brief label", "comments": 0,
+         "pull_request": {"url": "..."}, "labels": [{"name": "agent-brief"}]},
         # Zero comments — the comments endpoint must never be fetched for it.
         {"number": 3, "title": "Quiet issue", "comments": 0},
         # An active lock (the #312 ghost).
@@ -75,6 +79,18 @@ def _responses():
          "html_url": "https://github.com/o/r/issues/305"},
         # An unlabeled issue — the control; must NOT appear under adoptionStudies.
         {"number": 306, "title": "Unlabeled issue", "comments": 0, "labels": []},
+        # An agent brief pending a verdict (#745). Zero comments, still
+        # collected — the label scan precedes the comments skip here too.
+        {"number": 741, "title": "Agent brief: detect stale style packs", "comments": 0,
+         "labels": [{"name": "agent-brief"}, {"name": "points-2"}],
+         "created_at": "2026-08-12T05:00:00Z", "updated_at": "2026-08-13T05:00:00Z",
+         "html_url": "https://github.com/o/r/issues/741"},
+        # An agent brief parked at the HITL gate — comments on the thread (no
+        # lock among them), and still gathered by its labels alone.
+        {"number": 743, "title": "Agent brief: dedupe greenlight precedents", "comments": 1,
+         "labels": [{"name": "agent-brief"}, {"name": "needs-decision"}],
+         "created_at": "2026-08-11T05:00:00Z", "updated_at": "2026-08-14T05:00:00Z",
+         "html_url": "https://github.com/o/r/issues/743"},
     ]
     responses[f"{github.API_ROOT}/repos/{REPO}/issues?state=open&per_page=100"] = (
         issues_page1, '<https://next.example/issues2>; rel="next"')
@@ -92,6 +108,9 @@ def _responses():
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/290/comments?per_page=100"] = ([
         {"body": "just a comment", "created_at": "2026-08-10T05:23:00Z"},
+    ], "")
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/743/comments?per_page=100"] = ([
+        _lock("🚦 DECISION NEEDED — parked for the lead", "2026-08-14T05:23:00Z"),
     ], "")
 
     responses[f"{github.API_ROOT}/repos/{REPO}/pulls?state=open&per_page=100"] = ([
@@ -184,6 +203,47 @@ def test_gather_collects_adoption_studies_and_drops_pr(monkeypatch):
     ]
     # A zero-comment study is gathered without ever fetching its comments.
     assert not any("/issues/305/comments" in url for url in calls)
+
+
+def test_gather_collects_agent_briefs_and_drops_pr(monkeypatch):
+    calls: list[str] = []
+    fake_get(monkeypatch, calls)
+    health = github.gather_run_health(REPO, "tok")
+    # Both open briefs are collected with their labels + timestamps (the
+    # #745 agent-brief-queue detector reads state from those labels); the
+    # PR wearing the label (#5) is dropped as a PR, and an armed brief needs
+    # no special-casing here — the gather is label-blind beyond the filter.
+    assert health["agentBriefs"] == [
+        {"number": 741, "title": "Agent brief: detect stale style packs",
+         "labels": ["agent-brief", "points-2"],
+         "createdAt": "2026-08-12T05:00:00Z", "updatedAt": "2026-08-13T05:00:00Z",
+         "url": "https://github.com/o/r/issues/741"},
+        {"number": 743, "title": "Agent brief: dedupe greenlight precedents",
+         "labels": ["agent-brief", "needs-decision"],
+         "createdAt": "2026-08-11T05:00:00Z", "updatedAt": "2026-08-14T05:00:00Z",
+         "url": "https://github.com/o/r/issues/743"},
+    ]
+    # The zero-comment brief is gathered without ever fetching its comments;
+    # the parked one's thread IS read (the lock scan), and its DECISION NEEDED
+    # comment is not a SHIP-LOCK, so it never reaches `issues`.
+    assert not any("/issues/741/comments" in url for url in calls)
+    assert health["issues"] == [
+        {"number": 281, "title": "Design brief: NUGGS desiccant tower",
+         "lockCreatedAt": "2026-08-14T05:23:00Z"},
+    ]
+
+
+def test_routine_workflows_pin_the_745_additions():
+    # The watch list is data, and data drifts: every gather test builds its
+    # responses FROM the tuple, so a refactor that drops a workflow leaves
+    # those green while the report silently stops watching it — exactly the
+    # off-report death-streak #745 was filed on. The two additions are pinned
+    # by name so removing either from ROUTINE_WORKFLOWS fails here first.
+    for added in ("wright.yml", "growth-board-sync.yml"):
+        assert added in github.ROUTINE_WORKFLOWS, (
+            f"{added} left ROUTINE_WORKFLOWS — its death-streak is red in "
+            "Actions but invisible to the bench-health report (#745)"
+        )
 
 
 def test_missing_workflow_runs_key_raises(monkeypatch):

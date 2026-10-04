@@ -19,10 +19,29 @@
 # value meaning no ship link ran at all. Every other value — 'success'
 # included — gets the full corroboration read below, and the disposition is
 # derived from what exists on GitHub:
-#   delivered  a claude/issue-<N>-* branch or an open closing PR exists
+#   delivered  a claude/issue-<N>-* branch carrying unmerged work (its compare
+#              against the default branch is not a literal ahead_by 0 —
+#              an orphan whose commits are all already on the default
+#              branch delivered nothing; tools/backlog-burn's selector
+#              reads the same rule) or an open closing PR exists
 #   declined   a 🚢 DECLINED / 🚦 DECISION NEEDED comment posted after the
-#              latest claim, or that claim already reading SHIP-LOCK
-#              WITHDRAWN in the agent's own (non-death) wording
+#              latest claim, that claim already reading SHIP-LOCK
+#              WITHDRAWN in the agent's own (non-death) wording, or a
+#              🚢 DEFERRED (re-check-later) stop (#690) — the walk found
+#              the issue's dependencies unlanded and deferred, which it
+#              often does without ever claiming. A walk can decline
+#              without claiming too (a §1 decline precedes any claim — the
+#              #675 shape), so on a thread with NO claim any of the three
+#              stop markers counts only when it is this firing's: the
+#              thread's latest comment, inside --run-started-at, by a
+#              GitHub Bot or the repo owner (the PAT identity; login
+#              compared to the first segment of --repo) — one shared jq
+#              test, JQ_THIS_RUN. A DEFERRED after a claim must pass the
+#              same window and author gate. An outsider's comment, or one
+#              with no login or type, does not count — a public comment
+#              during the job window must not mint a stop. An older stop
+#              still sitting as the latest comment does not vouch for a
+#              later walk that posted nothing.
 #   dead       anything else — withdrawal posted, death counted, escalation
 #              at the threshold — regardless of the exit code passed in,
 #              which is carried in the withdrawal body as a diagnostic only
@@ -43,6 +62,7 @@
 #   scripts/routine-lock-cleanup.sh --repo <owner/name> --issue <N> \
 #       --agent-outcome <not-run|success|failure|cancelled|skipped> \
 #       --run-url <url> --routine <design-run|backlog-burn> \
+#       [--run-started-at <YYYY-MM-DDTHH:MM:SSZ>] \
 #       [--escalate-after <n>]                                # default 3
 #   scripts/routine-lock-cleanup.sh --selftest
 #
@@ -84,6 +104,7 @@ usage() {  # [message]
 usage: scripts/routine-lock-cleanup.sh --repo <owner/name> --issue <N>
            --agent-outcome <not-run|success|failure|cancelled|skipped>
            --run-url <url> --routine <design-run|backlog-burn>
+           [--run-started-at <YYYY-MM-DDTHH:MM:SSZ>]
            [--escalate-after <n>]
        scripts/routine-lock-cleanup.sh --selftest
 EOF
@@ -104,11 +125,20 @@ command -v jq >/dev/null 2>&1 || {
 # ---- pure decision functions (JSON/text on stdin, no network) -------------
 
 # The comment markers a deliberate terminal stop leads with (the skill's §1
-# decline and §8 decision-gate forms). Counted as "declined" only when posted
-# AFTER the latest claim, so a previous run's decline never vouches for this
-# one.
+# decline and §8 decision-gate forms). Counted as "declined" only when it is
+# THIS firing's stop — posted AFTER the latest claim, or, on a thread with no
+# claim at all, the claimless test below — so a previous run's decline never
+# vouches for this one.
 DECLINE_MARKER_1='🚢 DECLINED'
 DECLINE_MARKER_2='🚦 DECISION NEEDED'
+# The marker a deferring walk leads with (#690): dependencies not landed,
+# re-check later — a deliberate non-delivery, so decline-class for the
+# red-on-death gate. Kept in its own function (deferred_indicated) because
+# its claimed branch is stricter than the decline's — job window and
+# author gate there too — but both functions run the same claimless test
+# (JQ_THIS_RUN): a previous firing's stop that is still the latest comment
+# is not this firing.
+DEFER_MARKER='🚢 DEFERRED'
 
 # The latest SHIP-LOCK comment (claim or withdrawal form alike), or null.
 # First-of-ties on equal created_at, matching Python max() in the selector
@@ -132,19 +162,104 @@ lock_state() {
       else "active" end'
 }
 
-# stdin: NDJSON comments. Prints true/false: a 🚢 DECLINED or 🚦 DECISION
-# NEEDED comment was posted strictly after the latest claim — the skill's own
-# terminal-stop markers. A decline posted BEFORE the claim (a previous run's)
-# does not count, and neither does the marker mid-line: the skill leads its
-# stop comments with the marker.
-decline_indicated() {
+# jq prelude: "is this stop comment THIS firing's?" — the one definition both
+# stop detectors (decline_indicated, deferred_indicated) run, so the twins
+# cannot drift. Needs JQ_FL, and the --arg variables $since (this run's start,
+# UTC ISO-8601, or "" when the caller has no job window) and $owner (the
+# first segment of --repo).
+#   stop_trusted — the author gate: GitHub type "Bot", or a login equal to
+#     the repo owner (case-insensitive — the PAT posts as that User, the #641
+#     and #675 shapes). A missing or empty login or type fails closed: an
+#     outsider, or a comment the fetch could not attribute, must not set
+#     declined and skip red-on-death.
+#   in_window — strictly after $since; with no window, unbounded (the
+#     claimed branches' anchor is the claim itself, so a hand run that
+#     passed no --run-started-at still works there).
+#   claimless_stop(is_stop) — for a thread with NO SHIP-LOCK at all, where
+#     there is no claim timestamp to anchor on: the thread's LATEST comment
+#     (first-of-ties, as latest_lock) must be a stop (is_stop, applied to
+#     its first line), strictly after $since, by a trusted author. Anything
+#     newer means the stop is history; no window, or a stop that predates
+#     the window, is not this firing — a later success that posts nothing
+#     must not reuse it, set declined, and skip red-on-death.
+JQ_THIS_RUN='def stop_trusted:
+    ((.login // "") | length) > 0 and ((.type // "") | length) > 0
+    and (
+      .type == "Bot"
+      or (($owner | length) > 0
+          and ((.login | ascii_downcase) == ($owner | ascii_downcase)))
+    );
+  def in_window: ($since | length) == 0 or .created_at > $since;
+  def claimless_stop(is_stop):
+    if ($since | length) == 0 or length == 0 then false
+    else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
+         | (fl(.body) | is_stop) and (.created_at > $since) and stop_trusted
+    end;'
+
+# stdin: NDJSON comments {body, created_at, login, type}. $1: this run's
+# start (UTC ISO-8601 YYYY-MM-DDTHH:MM:SSZ), or empty when the caller has
+# no job window. Prints true/false: a first-line 🚢 DECLINED or 🚦 DECISION
+# NEEDED — the skill's own terminal-stop markers — is this firing's stop.
+#   * claimed — posted strictly after the latest SHIP-LOCK, inside the job
+#     window (in_window), and by a trusted author (stop_trusted) — the SAME
+#     gate deferred_indicated's claimed branch applies, so the three markers
+#     share one jq test and cannot drift. A decline posted BEFORE the claim
+#     (a previous run's) does not count; and on a public issue an untrusted
+#     commenter cannot spoof a stop under a live SHIP-LOCK to suppress the
+#     death-withdrawal and leave a ghost lock starving selection.
+#   * claimless — the thread carries no SHIP-LOCK at all: JQ_THIS_RUN's
+#     claimless_stop (latest comment, inside the window, trusted author).
+#     A §1 decline is posted before any claim (the #675 shape: /design-run
+#     declines "parent #676 still open" every firing and never claims), so
+#     without this branch a legitimate decline read as a death and redded
+#     the run daily.
+# Neither branch counts the marker mid-line: the skill leads its stop
+# comments with the marker.
+decline_indicated() {  # [run-started-at]
   jq -rs --arg marker "$LOCK_MARKER" --arg d1 "$DECLINE_MARKER_1" --arg d2 "$DECLINE_MARKER_2" \
-    "$JQ_FL $JQ_LATEST_LOCK"'
+    --arg since "${1:-}" --arg owner "${REPO%%/*}" \
+    "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
     latest_lock as $l
-    | if $l == null then false
-      else [ .[] | select(.created_at > $l.created_at)
-             | select(fl(.body) | startswith($d1) or startswith($d2)) ]
-           | length > 0
+    | if $l == null then claimless_stop(startswith($d1) or startswith($d2))
+      else
+        [ .[]
+          | select(.created_at > $l.created_at)
+          | select(in_window)
+          | select(fl(.body) | startswith($d1) or startswith($d2))
+          | select(stop_trusted) ]
+        | length > 0
+      end'
+}
+
+# stdin: NDJSON comments {body, created_at, login, type}. $1: this run's
+# start (UTC ISO-8601 YYYY-MM-DDTHH:MM:SSZ), or empty when the caller has
+# no job window.
+# Prints true/false.
+#
+# A first-line 🚢 DEFERRED is decline-class only when it is attributable to
+# THIS firing, never because an older one is still the freshest comment,
+# and only when its author is one of ours (JQ_THIS_RUN's stop_trusted, on
+# both branches).
+#   * claimed — posted strictly after the latest SHIP-LOCK. When a job
+#     window was given, the comment must also be strictly after $1, so a
+#     defer that merely follows some earlier claim is that earlier run's
+#     stop, not this firing's.
+#   * claimless — the #641 walk never posts a SHIP-LOCK, so there is no
+#     claim timestamp to anchor on: JQ_THIS_RUN's claimless_stop, the same
+#     test decline_indicated's claimless branch runs.
+deferred_indicated() {  # [run-started-at]
+  jq -rs --arg marker "$LOCK_MARKER" --arg d "$DEFER_MARKER" --arg since "${1:-}" \
+    --arg owner "${REPO%%/*}" \
+    "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
+    latest_lock as $l
+    | if $l == null then claimless_stop(startswith($d))
+      else
+        [ .[]
+          | select(.created_at > $l.created_at)
+          | select(in_window)
+          | select(fl(.body) | startswith($d))
+          | select(stop_trusted) ]
+        | length > 0
       end'
 }
 
@@ -163,11 +278,31 @@ death_marked() {
 }
 
 # stdin: branch names, one per line. $1: the issue number (validated as an
-# integer up front, so it needs no regex escaping). Exit 0 when a
-# claude/issue-<N>-* branch exists — the trailing "-" keeps issue 281 from
-# being corroborated by claude/issue-2811-*.
-branch_corroborates() {
-  grep -q "^claude/issue-$1-"
+# integer up front, so it needs no regex escaping). Prints every
+# claude/issue-<N>-* branch (nothing when there is none) — the trailing "-"
+# keeps issue 281 from matching claude/issue-2811-*.
+issue_branches() {
+  grep "^claude/issue-$1-" || true
+}
+
+# $1: the ahead_by a compare of the default branch against a claude/issue-<N>-*
+# branch reported. Exit 0 when the branch carries work the default branch
+# lacks — i.e. unless the value is exactly 0. A branch with nothing ahead is
+# an orphan whose every commit is already on the default branch (the #565
+# shape: its PR closed with head == base, the fix landed as another commit):
+# it corroborates nothing, so it is not a delivery. Anything that is not a
+# literal 0 — a count, "null", an empty string — reads as work, the same
+# fail-conservative rule tools/backlog-burn's selector applies: only a
+# positively observed zero releases a branch.
+branch_has_work() {
+  [ "$1" != "0" ]
+}
+
+# $1: a ref name. Prints it percent-encoded for a URL path with "/" kept
+# literal (a claude/issue-<N>-* name is path-shaped by design) — the same
+# encoding as tools/backlog-burn's urllib.parse.quote(ref, safe="/").
+ref_path() {
+  jq -rn --arg r "$1" '$r | @uri | gsub("%2F"; "/")'
 }
 
 # stdin: NDJSON PRs {ref, body}. $1: the issue number. Prints true/false: an
@@ -258,14 +393,27 @@ run_live() {
   fi
 
   # 2/3. Corroboration before the lock (the selector's own ordering): a
-  # claude/issue-<N>-* branch or a closing PR means the claim is backed by
-  # real work in flight — delivered, whatever the ship links' exit codes
-  # said (a link can time out a minute after pushing).
-  local branches prs comments state
+  # claude/issue-<N>-* branch carrying unmerged work or a closing PR means
+  # the claim is backed by real work in flight — delivered, whatever the
+  # ship links' exit codes said (a link can time out a minute after
+  # pushing). A matching branch with nothing ahead of the default branch is
+  # an orphan, not a delivery: scoring it delivered let a run that claimed
+  # an issue with a stale branch, then died, stay green with its lock
+  # standing. A failed compare is the usual fail-loud exit 1 — it withdraws
+  # nothing, so unknown never reads as "empty" here either.
+  local branches matching default b ahead prs comments state
   branches="$(gh_api --paginate "/repos/$REPO/branches?per_page=100" --jq '.[].name')"
-  if branch_corroborates "$ISSUE" <<<"$branches"; then
-    echo "::notice::a claude/issue-$ISSUE-* branch exists — the run delivered; not withdrawing"
-    conclude true false false false "delivered (a corroborating branch exists)"
+  matching="$(issue_branches "$ISSUE" <<<"$branches")"
+  if [ -n "$matching" ]; then
+    default="$(gh_api "/repos/$REPO" --jq '.default_branch')"
+    while IFS= read -r b; do
+      ahead="$(gh_api "/repos/$REPO/compare/$(ref_path "$default")...$(ref_path "$b")" --jq '.ahead_by')"
+      if branch_has_work "$ahead"; then
+        echo "::notice::$b carries unmerged work (ahead_by: ${ahead:-unknown}) — the run delivered; not withdrawing"
+        conclude true false false false "delivered (a corroborating branch with unmerged work exists)"
+      fi
+      echo "::notice::$b has no commits ahead of $default — an orphan, not a delivery"
+    done <<<"$matching"
   fi
 
   prs="$(gh_api --paginate "/repos/$REPO/pulls?state=open&per_page=100" \
@@ -275,15 +423,21 @@ run_live() {
     conclude true false false false "delivered (an open PR closes #$ISSUE)"
   fi
 
-  # 4. A deliberate terminal stop by the run that claimed: the skill's own
-  # §1/§8 stop comment posted after its claim, or its §0.6 release (the claim
+  # 4. A deliberate terminal stop by this run: the skill's own §1/§8 stop
+  # comment posted after its claim — or, by a run that never claimed (a §1
+  # decline comes before any claim), as the thread's latest comment inside
+  # this run's window by a trusted author — or its §0.6 release (the claim
   # edited to SHIP-LOCK WITHDRAWN in the agent's wording — never this
   # script's DEATH_PREFIX, which marks a death, not a decline).
   comments="$(gh_api --paginate "/repos/$REPO/issues/$ISSUE/comments?per_page=100" \
-    --jq '.[] | {body: (.body // ""), created_at: .created_at}')"
-  if [ "$(decline_indicated <<<"$comments")" = "true" ]; then
-    echo "::notice::a DECLINED/DECISION NEEDED comment follows the claim on #$ISSUE — a deliberate stop, not a death"
-    conclude false true false false "declined (a stop comment follows the claim)"
+    --jq '.[] | {body: (.body // ""), created_at: .created_at, login: (.user.login // ""), type: (.user.type // "")}')"
+  if [ "$(decline_indicated "$RUN_STARTED_AT" <<<"$comments")" = "true" ]; then
+    echo "::notice::a DECLINED/DECISION NEEDED comment from this run is the stop on #$ISSUE — a deliberate stop, not a death"
+    conclude false true false false "declined (a stop comment from this run)"
+  fi
+  if [ "$(deferred_indicated "$RUN_STARTED_AT" <<<"$comments")" = "true" ]; then
+    echo "::notice::a DEFERRED (re-check when dependencies land) comment from this run is the stop on #$ISSUE — a deliberate defer, not a death"
+    conclude false true false false "declined (a DEFERRED comment defers to unlanded dependencies)"
   fi
   state="$(lock_state <<<"$comments")"
   if [ "$state" = "withdrawn" ] && [ "$(death_marked <<<"$comments")" != "true" ]; then
@@ -345,6 +499,10 @@ run_live() {
 selftest() {
   local tmp deaths rc
   tmp="$(mktemp -d)"
+  # deferred_indicated's owner is the first segment of --repo. Live mode
+  # sets REPO from that flag; these pure-function cases use the same o/r
+  # the end-to-end stub passes, so the owner is "o".
+  REPO=o/r
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" EXIT
 
@@ -410,17 +568,43 @@ EOF
   # BEFORE the claim (a previous run's decline never vouches for this one),
   # the marker mid-line, and a thread with no claim at all.
   cat > "$tmp/declined-after.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(decline_indicated < "$tmp/declined-after.ndjson")" = "true" ] \
-    || st_fail "a DECLINED comment after the claim was not read as a decline"
+    || st_fail "a DECLINED comment after the claim by the owner was not read as a decline"
   cat > "$tmp/decision-after.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚦 DECISION NEEDED — `tol-default-loosen`\n\nparked per the gate", "created_at": "2026-08-02T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
+{"body": "🚦 DECISION NEEDED — `tol-default-loosen`\n\nparked per the gate", "created_at": "2026-08-02T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
 EOF
   [ "$(decline_indicated < "$tmp/decision-after.ndjson")" = "true" ] \
-    || st_fail "a DECISION NEEDED comment after the claim was not read as a decline"
+    || st_fail "a DECISION NEEDED comment after the claim by a Bot was not read as a decline"
+  # Author gate on the CLAIMED branch (Cursor finding on #760): under a live
+  # SHIP-LOCK, a later first-line stop marker by an UNTRUSTED commenter must
+  # NOT read as this run's deliberate stop — otherwise a public-issue spoof
+  # suppresses the death-withdrawal and the ghost lock starves selection.
+  # Both DECLINED and DECISION NEEDED, each the positive fixture above with
+  # only the stop author changed to an outsider.
+  cat > "$tmp/declined-after-attacker.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z", "login": "attacker", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/declined-after-attacker.ndjson")" = "false" ] \
+    || st_fail "an outsider's DECLINED under a live SHIP-LOCK minted a decline (ghost-lock spoof)"
+  cat > "$tmp/decision-after-attacker.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚦 DECISION NEEDED — `tol-default-loosen`\n\nparked per the gate", "created_at": "2026-08-02T00:00:00Z", "login": "attacker", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/decision-after-attacker.ndjson")" = "false" ] \
+    || st_fail "an outsider's DECISION NEEDED under a live SHIP-LOCK minted a decline (ghost-lock spoof)"
+  # …and the claimed branch also fails closed when the stop carries no author
+  # data the fetch could attribute.
+  cat > "$tmp/declined-after-anon.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision", "created_at": "2026-08-02T00:00:00Z"}
+EOF
+  [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/declined-after-anon.ndjson")" = "false" ] \
+    || st_fail "a claimed DECLINED with no login or type was read as a decline"
   cat > "$tmp/declined-before.ndjson" <<'EOF'
 {"body": "🚢 DECLINED — earlier run gave up here", "created_at": "2026-08-01T00:00:00Z"}
 {"body": "🚢 SHIP-LOCK\n\nclaimed afresh", "created_at": "2026-08-02T00:00:00Z"}
@@ -435,6 +619,53 @@ EOF
     || st_fail "a mid-line decline marker was counted as a stop comment"
   [ "$(decline_indicated < "$tmp/nolock.ndjson")" = "false" ] \
     || st_fail "a thread with no claim at all read as declined"
+  [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/nolock.ndjson")" = "false" ] \
+    || st_fail "a claimless thread whose latest comment is no stop read as declined"
+
+  # -- claimless decline (the #675 shape): a §1 stop precedes any claim -----
+  # /design-run declines #675 at §1 every firing ("parent #676 still open")
+  # and never claims, so the thread holds a stack of DECLINEDs and no
+  # SHIP-LOCK. Positive: the thread's LATEST comment is a DECLINED (or a
+  # DECISION NEEDED) posted strictly inside this run's window by the owner
+  # (the PAT) or a Bot. Negative controls — each the same thread with one
+  # thing wrong: the decline predates the window (the previous firing's,
+  # still the latest comment), no window at all, the decline sits exactly
+  # at the window start, an outsider posted it, it carries no author data,
+  # and a newer comment follows it.
+  cat > "$tmp/decline-claimless.ndjson" <<'EOF'
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-01T19:40:49Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "login": "o", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless.ndjson")" = "true" ] \
+    || st_fail "the #675 shape (a claimless DECLINED inside this run's window, by the owner) was not read as a decline"
+  [ "$(decline_indicated 2026-10-03T23:05:00Z < "$tmp/decline-claimless.ndjson")" = "false" ] \
+    || st_fail "a claimless DECLINED that predates this run's window vouched for this firing"
+  [ "$(decline_indicated < "$tmp/decline-claimless.ndjson")" = "false" ] \
+    || st_fail "a claimless DECLINED with no run window was accepted"
+  [ "$(decline_indicated 2026-10-02T23:08:39Z < "$tmp/decline-claimless.ndjson")" = "false" ] \
+    || st_fail "a claimless DECLINED timestamped exactly at run start counted as this firing"
+  cat > "$tmp/decision-claimless-bot.ndjson" <<'EOF'
+{"body": "🚦 DECISION NEEDED — `pick-a-hinge`\n\nparked per the gate", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot"}
+EOF
+  [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decision-claimless-bot.ndjson")" = "true" ] \
+    || st_fail "a claimless DECISION NEEDED by a Bot inside the window was not read as a decline"
+  cat > "$tmp/decline-claimless-attacker.ndjson" <<'EOF'
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "login": "attacker", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-attacker.ndjson")" = "false" ] \
+    || st_fail "an outsider's claimless DECLINED inside the window minted a decline"
+  cat > "$tmp/decline-claimless-anon.ndjson" <<'EOF'
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z"}
+EOF
+  [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-anon.ndjson")" = "false" ] \
+    || st_fail "a claimless DECLINED with no login or type was read as a decline"
+  cat > "$tmp/decline-claimless-followed.ndjson" <<'EOF'
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "login": "o", "type": "User"}
+{"body": "#676 merged — this can go now.", "created_at": "2026-10-02T23:09:10Z", "login": "o", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-followed.ndjson")" = "false" ] \
+    || st_fail "a claimless DECLINED that a newer comment followed was still read as this run's stop"
+  echo "ok    selftest: decline detection (after-claim owner/Bot / claimed outsider / claimed anon / before-claim / mid-line / no-claim / claimless #675 in-window / prior-window / no-window / at-start / Bot / outsider / anon / followed)"
 
   # -- death-marking: our own withdrawal notice is a death, not a decline ---
   cat > "$tmp/our-death.ndjson" <<'EOF'
@@ -447,15 +678,141 @@ EOF
     || st_fail "an agent's own (non-death) withdrawal was wrongly death-marked"
   [ "$(death_marked < "$tmp/nolock.ndjson")" = "false" ] \
     || st_fail "a thread with no lock at all read as death-marked"
-  echo "ok    selftest: decline detection (after-claim / before-claim / mid-line / no-claim) + death marking"
+  echo "ok    selftest: death marking (our withdrawal / agent's own / no lock)"
 
-  # -- branch corroboration + the near-miss --------------------------------
-  printf 'main\nclaude/issue-281-fix-thing\n' | branch_corroborates 281 \
-    || st_fail "claude/issue-281-* did not corroborate issue 281"
-  if printf 'main\nclaude/issue-2811-x\n' | branch_corroborates 281; then
-    st_fail "claude/issue-2811-* wrongly corroborated issue 281"
+  # -- deferred detection (#690): the re-check-later stop marker -----------
+  # Both directions of "this firing, not history". Positive: a DEFERRED
+  # after the claim and inside the job window, and — the #641 shape — a
+  # claimless thread whose LATEST comment is a DEFERRED posted strictly
+  # after this run's start. Negative: the defer before a later claim, the
+  # marker mid-line, a claimless DEFERRED that predates the window (still
+  # the latest comment — the later success-with-no-comment firing), the
+  # same thread with no window at all, a post-claim DEFERRED that predates
+  # the window, a defer a newer comment followed, and a non-defer latest
+  # comment.
+  cat > "$tmp/defer-after.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "login": "o", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T15:00:00Z < "$tmp/defer-after.ndjson")" = "true" ] \
+    || st_fail "a DEFERRED comment after the claim and inside the window was not read as a defer"
+  # No window still anchors on the claim (a hand run that did not pass
+  # --run-started-at). The claimless shape below does not.
+  [ "$(deferred_indicated < "$tmp/defer-after.ndjson")" = "true" ] \
+    || st_fail "a DEFERRED comment after the claim was not read as a defer"
+  cat > "$tmp/defer-before.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED — dependency not landed yet.", "created_at": "2026-09-01T15:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\nclaimed afresh", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T14:00:00Z < "$tmp/defer-before.ndjson")" = "false" ] \
+    || st_fail "a defer posted BEFORE the claim wrongly vouched for this run"
+  cat > "$tmp/defer-midline.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
+{"body": "beware the 🚢 DEFERRED marker mid-line", "created_at": "2026-09-01T15:02:00Z", "login": "o", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T15:00:00Z < "$tmp/defer-midline.ndjson")" = "false" ] \
+    || st_fail "a mid-line defer marker was counted as a stop comment"
+  # The #641 shape, attributed to THIS run: no lock anywhere, the walk's
+  # DEFERRED is the latest comment, and it was posted after the window opened.
+  cat > "$tmp/defer-claimless.ndjson" <<'EOF'
+{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-01T05:53:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-claimless.ndjson")" = "true" ] \
+    || st_fail "a claimless DEFERRED posted inside this run's window was not read as a defer"
+  # The Copilot direction: the same latest DEFERRED, but the window opened
+  # AFTER it — a later firing that posted no comment of its own. History,
+  # not this run. Equal to the comment timestamp is not inside the window
+  # either (strictly after).
+  [ "$(deferred_indicated 2026-09-01T07:00:00Z < "$tmp/defer-claimless.ndjson")" = "false" ] \
+    || st_fail "an older claimless DEFERRED still the latest comment vouched for this firing"
+  [ "$(deferred_indicated 2026-09-01T06:01:00Z < "$tmp/defer-claimless.ndjson")" = "false" ] \
+    || st_fail "a claimless DEFERRED timestamped exactly at run start counted as this firing"
+  [ "$(deferred_indicated < "$tmp/defer-claimless.ndjson")" = "false" ] \
+    || st_fail "a claimless DEFERRED with no run window was accepted"
+  # Same bug on the claimed shape: a historical claim+DEFERRED pair must
+  # not vouch for a later firing whose window opens after that defer.
+  [ "$(deferred_indicated 2026-09-01T16:00:00Z < "$tmp/defer-after.ndjson")" = "false" ] \
+    || st_fail "a post-claim DEFERRED that predates this run's window still counted"
+  cat > "$tmp/defer-stale.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
+{"body": "**Ops stopgap** — parking until deps land.", "created_at": "2026-09-01T06:36:00Z", "login": "o", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-stale.ndjson")" = "false" ] \
+    || st_fail "a DEFERRED that a newer comment followed was still read as this run's stop"
+  [ "$(deferred_indicated 2026-09-01T05:00:00Z < "$tmp/nolock.ndjson")" = "false" ] \
+    || st_fail "a claimless thread whose latest comment is not a defer read as deferred"
+  [ "$(deferred_indicated 2026-09-01T05:00:00Z < /dev/null)" = "false" ] \
+    || st_fail "an empty comment thread read as deferred"
+
+  # Author gate. The window is necessary but not sufficient: a DEFERRED
+  # counts only for a GitHub Bot, or for a User whose login is the repo
+  # owner (REPO=o/r → "o", case-insensitive — the PAT identity). Missing
+  # login or type fails closed. An outsider who can comment on a public
+  # repo during the job window must not mint a stop on either branch.
+  cat > "$tmp/defer-bot.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "github-actions[bot]", "type": "Bot"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-bot.ndjson")" = "true" ] \
+    || st_fail "a Bot (github-actions[bot]) claimless DEFERRED inside the window was not read as a defer"
+  cat > "$tmp/defer-owner.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-owner.ndjson")" = "true" ] \
+    || st_fail "an owner User (o) claimless DEFERRED inside the window was not read as a defer"
+  cat > "$tmp/defer-owner-case.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "O", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-owner-case.ndjson")" = "true" ] \
+    || st_fail "an owner login that differs only in case was not read as a defer"
+  cat > "$tmp/defer-attacker.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "attacker", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-attacker.ndjson")" = "false" ] \
+    || st_fail "an outsider User (attacker) claimless DEFERRED inside the window was read as a defer"
+  cat > "$tmp/defer-attacker-claimed.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "login": "attacker", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T15:00:00Z < "$tmp/defer-attacker-claimed.ndjson")" = "false" ] \
+    || st_fail "an outsider User DEFERRED after the lock was read as a defer"
+  cat > "$tmp/defer-anon.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-anon.ndjson")" = "false" ] \
+    || st_fail "a claimless DEFERRED with no login or type was read as a defer"
+  cat > "$tmp/defer-notype.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": ""}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-notype.ndjson")" = "false" ] \
+    || st_fail "an owner login with an empty type was read as a defer"
+  cat > "$tmp/defer-nologin.ndjson" <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "", "type": "Bot"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-nologin.ndjson")" = "false" ] \
+    || st_fail "a Bot type with an empty login was read as a defer"
+  echo "ok    selftest: deferred detection (in-window / older-claimless / older-claimed / before-claim / mid-line / stale / none / author)"
+
+  # -- branch matching + the near-miss --------------------------------------
+  [ "$(printf 'main\nclaude/issue-281-fix-thing\n' | issue_branches 281)" = "claude/issue-281-fix-thing" ] \
+    || st_fail "claude/issue-281-* was not matched for issue 281"
+  [ -z "$(printf 'main\nclaude/issue-2811-x\n' | issue_branches 281)" ] \
+    || st_fail "claude/issue-2811-* was wrongly matched for issue 281"
+  # -- unmerged work: only a literal 0 ahead releases a branch -------------
+  # The #565 orphan (nothing ahead of the default branch) corroborates
+  # nothing; a count, or anything that is not a clean 0 (a compare whose
+  # ahead_by came back null or empty), stays work — the selector's
+  # fail-conservative rule.
+  if branch_has_work 0; then
+    st_fail "a branch with 0 commits ahead was read as carrying work"
   fi
-  echo "ok    selftest: branch corroboration + near-miss (issue-2811 vs 281)"
+  for ahead in 1 12 null ''; do
+    branch_has_work "$ahead" \
+      || st_fail "ahead_by '$ahead' was read as no work — only a literal 0 may release a branch"
+  done
+  [ "$(ref_path 'claude/issue-1-a#b c')" = 'claude/issue-1-a%23b%20c' ] \
+    || st_fail "ref_path did not percent-encode a ref while keeping its slashes"
+  echo "ok    selftest: branch matching + near-miss (issue-2811 vs 281) + unmerged-work rule (0 releases; count/null/empty keep)"
 
   # -- closing keywords + the #9-vs-#95 boundary ---------------------------
   [ "$(printf '{"ref": "feature-x", "body": "Closes #38"}\n' | pr_corroborates 38)" = "true" ] \
@@ -519,6 +876,10 @@ case "$joined" in
   *"/pulls?state=open"*) fixture=pulls ;;
   *"/comments?per_page=100"*) fixture=comments ;;
   *"repos/o/r/labels"*) fixture=labels ;;
+  # compare-<base>...<head>, slashes folded to "_": the fixture's NAME pins
+  # which base the script compared against and which branch it asked about.
+  *"/compare/"*) fixture="compare-$(printf '%s' "${joined##*/compare/}" | tr '/' '_')" ;;
+  "api /repos/o/r") fixture=repo ;;
   *) echo "gh stub: unhandled api call: $joined" >&2; exit 1 ;;
 esac
 # -r: gh api --jq prints string results raw (the ensure-label idiom greps
@@ -527,15 +888,18 @@ if [ -n "$filter" ]; then jq -r "$filter" < "${GH_STUB_FIXTURES:?}/$fixture.json
 STUB
   chmod +x "$tmp/bin/gh"
 
-  # run_case <name> <outcome> -- runs the real CLI over $tmp/<name>-fix/
-  e2e() {  # name outcome
-    local name="$1" outcome="$2"
+  # run_case <name> <outcome> [run-started-at] -- real CLI over $tmp/<name>-fix/
+  e2e() {  # name outcome [run-started-at]
+    local name="$1" outcome="$2" since="${3:-}"
+    local -a extra=()
     : > "$tmp/$name-postlog"
     : > "$tmp/$name-out"
+    [ -z "$since" ] || extra=(--run-started-at "$since")
     PATH="$tmp/bin:$PATH" GH_TOKEN=stub GH_STUB_FIXTURES="$tmp/$name-fix" \
       GH_STUB_POSTLOG="$tmp/$name-postlog" GITHUB_OUTPUT="$tmp/$name-out" \
       GITHUB_STEP_SUMMARY='' "$SELF" \
       --repo o/r --issue 1 --agent-outcome "$outcome" --run-url u --routine backlog-burn \
+      "${extra[@]}" \
       >/dev/null || st_fail "the '$name' case exited non-zero"
   }
   e2e_fix() {  # case fixture json → writes $tmp/<case>-fix/<fixture>.json
@@ -558,22 +922,98 @@ STUB
     || st_fail "the dead case did not post the withdrawal comment"
 
   # Row 2: exit 0 with a corroborating branch → delivered, nothing posted.
+  # The branch carries unmerged work: its compare against the default branch
+  # (read from the repo, "trunk" here, never assumed to be main — the
+  # fixture's file name pins the base) reports commits ahead.
   e2e_fix branch comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
   e2e_fix branch branches '[{"name": "claude/issue-1-the-fix"}]'
   e2e_fix branch pulls '[]'
+  e2e_fix branch repo '{"default_branch": "trunk"}'
+  e2e_fix branch 'compare-trunk...claude_issue-1-the-fix' '{"ahead_by": 2, "behind_by": 0}'
   e2e branch success
   grep -qx 'delivered=true' "$tmp/branch-out" || st_fail "exit-0 + branch did not emit delivered=true"
   no_posts branch
 
+  # Row 2b (the #565 shape): the only claude/issue-1-* branch is an orphan —
+  # nothing ahead of the default branch — and the run claimed, then died.
+  # Not delivered: dead, the claim is withdrawn. Before the unmerged-work
+  # rule this read "delivered" and the dead run's lock stood, green.
+  e2e_fix orphan comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix orphan branches '[{"name": "claude/issue-1-scout-cap-state"}]'
+  e2e_fix orphan pulls '[]'
+  e2e_fix orphan repo '{"default_branch": "main"}'
+  e2e_fix orphan 'compare-main...claude_issue-1-scout-cap-state' '{"ahead_by": 0, "behind_by": 40}'
+  e2e orphan success
+  grep -qx 'delivered=false' "$tmp/orphan-out" || st_fail "an orphan branch (0 ahead) was scored delivered"
+  grep -qx 'withdrawn=true' "$tmp/orphan-out" || st_fail "a dead run behind an orphan branch did not withdraw its claim"
+  grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/orphan-postlog" \
+    || st_fail "the orphan-branch death did not post the withdrawal comment"
+
+  # Row 2c: an orphan beside a branch with real work → delivered (any one
+  # branch carrying work corroborates), nothing posted.
+  e2e_fix mixed comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix mixed branches '[{"name": "claude/issue-1-old"},{"name": "claude/issue-1-new"}]'
+  e2e_fix mixed pulls '[]'
+  e2e_fix mixed repo '{"default_branch": "main"}'
+  e2e_fix mixed 'compare-main...claude_issue-1-old' '{"ahead_by": 0}'
+  e2e_fix mixed 'compare-main...claude_issue-1-new' '{"ahead_by": 3}'
+  e2e mixed success
+  grep -qx 'delivered=true' "$tmp/mixed-out" || st_fail "an orphan beside a branch with work was not scored delivered"
+  no_posts mixed
+
+  # Row 2d: a compare whose payload has no ahead_by → unknown, which is
+  # work (fail-conservative, the selector's rule): delivered, nothing posted.
+  e2e_fix unknown comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix unknown branches '[{"name": "claude/issue-1-the-fix"}]'
+  e2e_fix unknown pulls '[]'
+  e2e_fix unknown repo '{"default_branch": "main"}'
+  e2e_fix unknown 'compare-main...claude_issue-1-the-fix' '{"message": "no ahead_by here"}'
+  e2e unknown success
+  grep -qx 'delivered=true' "$tmp/unknown-out" || st_fail "a compare with no ahead_by released the branch (unknown must read as work)"
+  no_posts unknown
+
+  # Row 2e: the compare request itself fails (no fixture → the stub exits
+  # 1) → the script's fail-loud exit 1, with no output and nothing posted:
+  # an unreadable branch never reads as empty, so no claim is withdrawn.
+  e2e_fix cmpfail comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix cmpfail branches '[{"name": "claude/issue-1-the-fix"}]'
+  e2e_fix cmpfail pulls '[]'
+  e2e_fix cmpfail repo '{"default_branch": "main"}'
+  : > "$tmp/cmpfail-postlog"; : > "$tmp/cmpfail-out"
+  rc=0
+  PATH="$tmp/bin:$PATH" GH_TOKEN=stub GH_STUB_FIXTURES="$tmp/cmpfail-fix" \
+    GH_STUB_POSTLOG="$tmp/cmpfail-postlog" GITHUB_OUTPUT="$tmp/cmpfail-out" \
+    GITHUB_STEP_SUMMARY='' "$SELF" \
+    --repo o/r --issue 1 --agent-outcome success --run-url u --routine backlog-burn \
+    >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 1 ] || st_fail "a failed compare exited $rc, not 1 (fail loud)"
+  [ ! -s "$tmp/cmpfail-out" ] || st_fail "a failed compare still emitted a disposition: $(cat "$tmp/cmpfail-out")"
+  no_posts cmpfail
+
   # Row 3: exit 0 with a DECLINED comment after the claim → declined, nothing
   # posted (the lock is left to age out through the selector's staleness, per
   # the fix's design).
-  e2e_fix declined comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z"},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z"}]'
+  e2e_fix declined comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix declined branches '[]'
   e2e_fix declined pulls '[]'
   e2e declined success
-  grep -qx 'declined=true' "$tmp/declined-out" || st_fail "exit-0 + DECLINED did not emit declined=true"
+  grep -qx 'declined=true' "$tmp/declined-out" || st_fail "exit-0 + DECLINED (by the owner) did not emit declined=true"
   no_posts declined
+
+  # Row 3a (Cursor finding on #760): same shape, but the DECLINED under the
+  # live SHIP-LOCK is an OUTSIDER's — not a stop, so the active lock is a
+  # death and gets withdrawn (declined=false, withdrawn=true, the withdrawal
+  # comment posted). Mirrors the deferatklock control for the decline path:
+  # a public-issue spoof can no longer suppress the death-withdrawal and
+  # strand a ghost lock.
+  e2e_fix declatklock comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z", "user": {"login": "attacker", "type": "User"}}]'
+  e2e_fix declatklock branches '[]'
+  e2e_fix declatklock pulls '[]'
+  e2e declatklock success 2026-09-01T15:00:00Z
+  grep -qx 'declined=false' "$tmp/declatklock-out" || st_fail "an outsider DECLINED after the lock minted a decline (declined=true)"
+  grep -qx 'withdrawn=true' "$tmp/declatklock-out" || st_fail "an outsider DECLINED after the lock was not treated as a dead claim"
+  grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/declatklock-postlog" \
+    || st_fail "the outsider-decline claimed case did not post the withdrawal comment"
 
   # Row 3b: exit 0 with the claim self-withdrawn in the agent's own wording →
   # declined (its §0.6 release), nothing posted.
@@ -583,6 +1023,157 @@ STUB
   e2e selfwd success
   grep -qx 'declined=true' "$tmp/selfwd-out" || st_fail "a self-withdrawn claim did not emit declined=true"
   no_posts selfwd
+
+  # Row 3c (the #675 shape, end to end): /design-run's §1 decline, never
+  # claimed — a stack of DECLINEDs from earlier firings and this firing's
+  # own as the latest comment, posted inside the window by the owner (the
+  # PAT identity), no branch, no PR → declined, nothing posted. Before the
+  # claimless branch this read as the all-false no-op and the red gate
+  # failed the run on every firing that re-declined.
+  local claimless_declines name
+  claimless_declines='{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-01T19:40:49Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "user": {"login": "o", "type": "User"}}'
+  e2e_fix declfree comments "[$claimless_declines]"
+  e2e_fix declfree branches '[]'
+  e2e_fix declfree pulls '[]'
+  e2e declfree success 2026-10-02T23:05:00Z
+  grep -qx 'declined=true' "$tmp/declfree-out" || st_fail "the #675 shape (claimless in-window DECLINED) did not emit declined=true"
+  grep -qx 'delivered=false' "$tmp/declfree-out" || st_fail "the #675 shape did not emit delivered=false"
+  grep -qx 'withdrawn=false' "$tmp/declfree-out" || st_fail "the #675 shape did not emit withdrawn=false"
+  no_posts declfree
+
+  # Row 3c's negative controls, each the all-false no-op the red gate fails
+  # on (claimless, so there is no lock to withdraw and nothing is posted):
+  #   declold   — the same thread, but this firing's window opened after the
+  #               last DECLINED: a previous firing's stop, and this run
+  #               posted nothing.
+  #   declatk   — the in-window DECLINED is an outsider's.
+  #   declnewer — a newer comment follows the in-window DECLINED.
+  e2e_fix declold comments "[$claimless_declines]"
+  e2e_fix declatk comments '[{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "user": {"login": "attacker", "type": "User"}}]'
+  e2e_fix declnewer comments "[$claimless_declines"',{"body": "#676 merged — this can go now.", "created_at": "2026-10-02T23:09:10Z", "user": {"login": "o", "type": "User"}}]'
+  for name in declold declatk declnewer; do
+    e2e_fix "$name" branches '[]'
+    e2e_fix "$name" pulls '[]'
+  done
+  e2e declold success 2026-10-03T23:05:00Z
+  e2e declatk success 2026-10-02T23:05:00Z
+  e2e declnewer success 2026-10-02T23:05:00Z
+  for name in declold declatk declnewer; do
+    for kv in delivered=false declined=false withdrawn=false; do
+      grep -qx "$kv" "$tmp/$name-out" || st_fail "the claimless-decline control '$name' did not emit $kv"
+    done
+    no_posts "$name"
+  done
+
+  # Row 4 (#690's exact shape): exit 0, the walk's DEFERRED as the latest
+  # comment on a claimless thread, posted inside this run's window by the
+  # repo owner (the PAT identity), no branch/PR → declined (a deliberate
+  # defer), nothing posted — so the red gate's delivered/declined condition
+  # reads declined=true and the job stays green instead of false-redding.
+  e2e_fix deferred comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "o", "type": "User"}}]'
+  e2e_fix deferred branches '[]'
+  e2e_fix deferred pulls '[]'
+  e2e deferred success 2026-09-19T06:00:00Z
+  grep -qx 'declined=true' "$tmp/deferred-out" || st_fail "exit-0 + claimless in-window DEFERRED did not emit declined=true"
+  grep -qx 'delivered=false' "$tmp/deferred-out" || st_fail "the deferred case did not emit delivered=false"
+  grep -qx 'withdrawn=false' "$tmp/deferred-out" || st_fail "the deferred case did not emit withdrawn=false"
+  no_posts deferred
+
+  # The same claimless in-window DEFERRED, but posted by github-actions[bot].
+  # Proves the live fetch's type field reaches the author gate: a Bot counts
+  # even though its login is not the repo owner.
+  e2e_fix deferbot comments '[{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}}]'
+  e2e_fix deferbot branches '[]'
+  e2e_fix deferbot pulls '[]'
+  e2e deferbot success 2026-09-19T06:00:00Z
+  grep -qx 'declined=true' "$tmp/deferbot-out" || st_fail "exit-0 + claimless in-window Bot DEFERRED did not emit declined=true"
+  no_posts deferbot
+
+  # Security control: the same window, but the commenter is some other User.
+  # declined stays false. Claimless, so there is no lock to withdraw — the
+  # all-false no-op, and red-on-death is not skipped.
+  e2e_fix deferatk comments '[{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "attacker", "type": "User"}}]'
+  e2e_fix deferatk branches '[]'
+  e2e_fix deferatk pulls '[]'
+  e2e deferatk success 2026-09-19T06:00:00Z
+  grep -qx 'declined=false' "$tmp/deferatk-out" || st_fail "an outsider claimless DEFERRED minted a decline (declined=true)"
+  grep -qx 'delivered=false' "$tmp/deferatk-out" || st_fail "the outsider claimless case did not emit delivered=false"
+  grep -qx 'withdrawn=false' "$tmp/deferatk-out" || st_fail "the outsider claimless case did not emit withdrawn=false"
+  no_posts deferatk
+
+  # Same control on the claimed branch: an outsider's DEFERRED after the
+  # lock is not a stop, so the active lock is a death and gets withdrawn.
+  e2e_fix deferatklock comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "attacker", "type": "User"}}]'
+  e2e_fix deferatklock branches '[]'
+  e2e_fix deferatklock pulls '[]'
+  e2e deferatklock success 2026-09-01T15:00:00Z
+  grep -qx 'declined=false' "$tmp/deferatklock-out" || st_fail "an outsider DEFERRED after the lock minted a decline (declined=true)"
+  grep -qx 'withdrawn=true' "$tmp/deferatklock-out" || st_fail "an outsider DEFERRED after the lock was not treated as a dead claim"
+  grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/deferatklock-postlog" \
+    || st_fail "the outsider-defer claimed case did not post the withdrawal comment"
+
+  # Row 4's negative control (AC1's other direction): the same claimless
+  # fixture WITHOUT the DEFERRED comment stays the all-false no-op — no
+  # branch, no PR, no stop marker of any kind — so delivered=false AND
+  # declined=false reach the red gate and the job fails. A claimless walk
+  # that posted nothing is still a death.
+  e2e_fix nodefer comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z"}]'
+  e2e_fix nodefer branches '[]'
+  e2e_fix nodefer pulls '[]'
+  e2e nodefer success 2026-09-19T06:00:00Z
+  grep -qx 'declined=false' "$tmp/nodefer-out" || st_fail "a claimless walk with no stop marker wrongly emitted declined=true"
+  grep -qx 'delivered=false' "$tmp/nodefer-out" || st_fail "the no-defer control did not emit delivered=false"
+  grep -qx 'withdrawn=false' "$tmp/nodefer-out" || st_fail "the no-defer control did not emit withdrawn=false"
+  no_posts nodefer
+
+  # Row 4's other negative control: a later firing, success, posts no
+  # comment, and the previous firing's DEFERRED is still the latest
+  # comment. The window opened after that comment, so it is not this
+  # firing's defer — declined stays false and red-on-death is not skipped.
+  e2e_fix priordefer comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "o", "type": "User"}}]'
+  e2e_fix priordefer branches '[]'
+  e2e_fix priordefer pulls '[]'
+  e2e priordefer success 2026-09-19T07:00:00Z
+  grep -qx 'declined=false' "$tmp/priordefer-out" || st_fail "a prior claimless DEFERRED vouched for a later markerless firing (declined=true)"
+  grep -qx 'delivered=false' "$tmp/priordefer-out" || st_fail "the prior-defer firing did not emit delivered=false"
+  grep -qx 'withdrawn=false' "$tmp/priordefer-out" || st_fail "the prior-defer firing did not emit withdrawn=false"
+  no_posts priordefer
+
+  # Row 4b: the claimed shape — the walk claimed, deferred inside the
+  # window, and left the lock standing → declined, nothing posted (the lock
+  # ages out through the selector's staleness, the DECLINED row's design).
+  e2e_fix deferlock comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}}]'
+  e2e_fix deferlock branches '[]'
+  e2e_fix deferlock pulls '[]'
+  e2e deferlock success 2026-09-01T15:00:00Z
+  grep -qx 'declined=true' "$tmp/deferlock-out" || st_fail "exit-0 + DEFERRED after the claim did not emit declined=true"
+  no_posts deferlock
+
+  # Row 4b's other direction: the same claim+DEFERRED pair, but this firing's
+  # window opens after both. The defer is not this run's, the lock is still
+  # active and nothing was delivered, so the run is dead and the claim is
+  # withdrawn — not quietly declined.
+  e2e_fix deferold comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "o", "type": "User"}}]'
+  e2e_fix deferold branches '[]'
+  e2e_fix deferold pulls '[]'
+  e2e deferold success 2026-09-01T16:00:00Z
+  grep -qx 'declined=false' "$tmp/deferold-out" || st_fail "a historical post-claim DEFERRED vouched for a later firing (declined=true)"
+  grep -qx 'withdrawn=true' "$tmp/deferold-out" || st_fail "a later firing with a stale claim+DEFERRED did not withdraw the dead lock"
+  grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/deferold-postlog" \
+    || st_fail "the stale claim+DEFERRED firing did not post the withdrawal comment"
+
+  # Row 4c: corroboration outranks the defer — a branch exists even though
+  # the thread's latest stop is a DEFERRED → delivered, nothing posted (a
+  # walk that deferred and then landed anyway is a delivery, not a defer).
+  e2e_fix deferbranch comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "o", "type": "User"}}]'
+  e2e_fix deferbranch branches '[{"name": "claude/issue-1-the-fix"}]'
+  e2e_fix deferbranch pulls '[]'
+  e2e_fix deferbranch repo '{"default_branch": "main"}'
+  e2e_fix deferbranch 'compare-main...claude_issue-1-the-fix' '{"ahead_by": 1}'
+  e2e deferbranch success
+  grep -qx 'delivered=true' "$tmp/deferbranch-out" || st_fail "exit-0 + branch + DEFERRED did not emit delivered=true"
+  grep -qx 'declined=false' "$tmp/deferbranch-out" || st_fail "the branch-plus-DEFERRED case wrongly emitted declined=true"
+  no_posts deferbranch
 
   # Escalation still fires at the threshold under the new disposition: two
   # prior death-withdrawals + this death → withdrawal, label add, decision
@@ -598,7 +1189,7 @@ STUB
   grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/esc-postlog" \
     || st_fail "the escalation did not post the decision comment"
 
-  echo "ok    selftest: end-to-end dispositions (dead / delivered / declined / self-withdrawn / escalated)"
+  echo "ok    selftest: end-to-end dispositions (dead / delivered / orphan-branch / unknown-compare / failed-compare / declined / self-withdrawn / claimless-decline #675 + controls / deferred / prior-defer / escalated)"
 
   # -- #670: cleanup runs the start commit's script, not the tree's copy -----
   # The scheduled workflows pin the cleanup script to the commit the job
@@ -905,6 +1496,11 @@ EOF
   "$SELF" --repo o/r --issue 1 --agent-outcome exploded \
     --run-url u --routine design-run >/dev/null 2>&1 || rc=$?
   [ "$rc" = 2 ] || st_fail "an unknown --agent-outcome exited $rc, not 2"
+  rc=0
+  "$SELF" --repo o/r --issue 1 --agent-outcome success \
+    --run-url u --routine design-run --run-started-at yesterday \
+    >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 2 ] || st_fail "a non-ISO --run-started-at exited $rc, not 2"
   echo "ok    selftest: usage errors exit 2"
 }
 
@@ -916,7 +1512,7 @@ fi
 
 # ---- argument parsing -----------------------------------------------------
 
-REPO='' ISSUE='' OUTCOME='' RUN_URL='' ROUTINE='' ESCALATE_AFTER=3
+REPO='' ISSUE='' OUTCOME='' RUN_URL='' ROUTINE='' RUN_STARTED_AT='' ESCALATE_AFTER=3
 
 need_val() { [ "$#" -ge 2 ] || usage "$1 requires a value"; }
 
@@ -927,6 +1523,7 @@ while [ $# -gt 0 ]; do
     --agent-outcome)  need_val "$@"; OUTCOME="$2"; shift 2 ;;
     --run-url)        need_val "$@"; RUN_URL="$2"; shift 2 ;;
     --routine)        need_val "$@"; ROUTINE="$2"; shift 2 ;;
+    --run-started-at) need_val "$@"; RUN_STARTED_AT="$2"; shift 2 ;;
     --escalate-after) need_val "$@"; ESCALATE_AFTER="$2"; shift 2 ;;
     *) usage "unknown argument: $1" ;;
   esac
@@ -941,5 +1538,15 @@ case "$OUTCOME" in not-run|success|failure|cancelled|skipped) : ;;
 case "$ROUTINE" in design-run|backlog-burn) : ;;
   *) usage "--routine must be design-run|backlog-burn, got '$ROUTINE'" ;; esac
 case "$ESCALATE_AFTER" in ''|0|*[!0-9]*) usage "--escalate-after must be a positive integer, got '$ESCALATE_AFTER'" ;; esac
+# Optional. When set, claimless stop comments (DECLINED, DECISION NEEDED,
+# DEFERRED) count only if posted strictly after this instant (the workflow
+# stamps it before the ship steps) and the author is a Bot or the repo
+# owner. Empty leaves the claimless path unable to attribute a stop.
+if [ -n "$RUN_STARTED_AT" ]; then
+  case "$RUN_STARTED_AT" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) usage "--run-started-at must be UTC ISO-8601 (YYYY-MM-DDTHH:MM:SSZ), got '$RUN_STARTED_AT'" ;;
+  esac
+fi
 
 run_live

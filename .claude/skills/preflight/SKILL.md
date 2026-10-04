@@ -38,6 +38,7 @@ drifts. Read the outputs and run §2 accordingly:
 | `printcheck_tests` | `pytest tools/printcheck/tests` |
 | `stylelift_tests` | `pytest tools/stylelift/tests` |
 | `lineage_tests` | `pytest tools/lineage/tests` |
+| `cogcheck_tests` | `pytest tools/cogcheck/tests` |
 | `backlog_burn_tests` | `pytest tools/backlog-burn/tests` |
 | `backlog_groomer_tests` | `pytest tools/backlog-groomer/tests` |
 | `model_registry_tests` | `pytest tools/model-registry/tests` |
@@ -48,6 +49,7 @@ drifts. Read the outputs and run §2 accordingly:
 | `ci_gates_tests` | `pytest tools/ci-gates/tests` |
 | `growth_tests` | `pytest tools/growth/tests` |
 | `andon_tests` | `pytest tools/andon/tests` |
+| `agent_memory_tests` | `pytest tools/agent-memory/tests` |
 
 The classifier already applies everything this section used to spell out by
 hand — the geo/soft-infra split, blast radius (a changed design drags in its
@@ -79,6 +81,7 @@ actionlint .github/workflows/*.yml   # if missing: install pinned, same as ci.ym
 python -m pytest tools/printcheck/tests -q           # if printcheck_tests=true
 python -m pytest tools/stylelift/tests -q            # if stylelift_tests=true
 python -m pytest tools/lineage/tests -q              # if lineage_tests=true
+python -m pytest tools/cogcheck/tests -q             # if cogcheck_tests=true
 python -m pytest tools/backlog-burn/tests -q         # if backlog_burn_tests=true
 python -m pytest tools/backlog-groomer/tests -q      # if backlog_groomer_tests=true
 python -m pytest tools/model-registry/tests -q       # if model_registry_tests=true
@@ -89,6 +92,7 @@ python -m pytest tools/telemetry/tests -q            # if telemetry_tests=true
 python -m pytest tools/ci-gates/tests -q             # if ci_gates_tests=true
 python -m pytest tools/growth/tests -q               # if growth_tests=true
 python -m pytest tools/andon/tests -q                # if andon_tests=true
+python -m pytest tools/agent-memory/tests -q         # if agent_memory_tests=true
 ```
 
 The `if <output>=true` conditions above are exactly §1's table — read them off
@@ -98,7 +102,7 @@ The pytest lines presume the suite's package is importable. CI pip-installs each
 one before running it; locally the SessionStart hook installs only `printcheck`
 and `stylelift`. Of the rest, the suites whose tests bootstrap `src/` into
 `sys.path` themselves (`lineage`, `stylelift`, `model-registry`, `ci-gates`,
-`backlog-burn`) collect with no install, while `reeve`, `backlog-groomer`,
+`backlog-burn`, `cogcheck`) collect with no install, while `reeve`, `backlog-groomer`,
 `telemetry`, `brief-sources` and `growth` die at collection with
 `ModuleNotFoundError` in a fresh session — run `pip install -e 'tools/<t>[test]'`
 on those first (the same command CI's job uses).

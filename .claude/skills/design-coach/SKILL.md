@@ -69,9 +69,13 @@ mechanism earns its place.
 
 ## 2. Evidence, never re-derivation
 
-Before accepting any round: fetch the branch and load it into the working
-tree (`git checkout <sha> -- designs/<name>`, keep your own branch clean) so
-you read the diff and the geometry that will merge. Then judge the round
+Before accepting any round: load the branch into the working tree
+(`git checkout <sha> -- designs/<name>`, keep your own branch clean) so you
+read the diff and the geometry that will merge. In the auto-review job the
+checkout is full history — every branch head is already local — and your
+backstop denies `git fetch`/`pull`/`clone`/`ls-remote` and every git global
+option (`-c`, `-C`, `--git-dir`, …); a head pushed after the job started is
+read through `gh pr diff` / `gh api` (contents at that ref), never fetched. Then judge the round
 against evidence already on the record: the diff, the committed previews,
 and CI's sticky comment on the new head. A task closes when its fix is
 visible in one of those, and a thread resolves the same way — resolve your

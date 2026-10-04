@@ -182,6 +182,17 @@ jobs:
         id: start_ref
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Note the job window start
+        # Stamped before any agent step and passed to routine-lock-cleanup as
+        # --run-started-at. A claimless stop (🚢 DEFERRED, 🚢 DECLINED or
+        # 🚦 DECISION NEEDED — the #675 §1 decline never claims) counts as
+        # this firing's decline only when the comment is strictly newer than
+        # this instant and its author is a GitHub Bot or the repository owner,
+        # so a later success that posts nothing cannot reuse an older stop
+        # that is still the thread's latest comment, and an outsider who
+        # comments during the window cannot mint a stop and skip red-on-death.
+        run: echo "JOB_WINDOW_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -350,7 +361,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
@@ -374,7 +385,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
@@ -396,7 +407,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
@@ -431,7 +442,7 @@ jobs:
         # repo secrets; the motivating run 31967535913 authenticated with
         # CLAUDE_KEY). The drift guard reads <alias>=<registry-secret> here and
         # pins the step to that provider's endpoint.
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
@@ -454,7 +465,7 @@ jobs:
         # registry-secret-alias: CLAUDE_KEY=ANTHROPIC_API_KEY — same alias as
         # link 4 (the marker must sit inside every step chunk the drift guard
         # reads).
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
@@ -553,8 +564,16 @@ jobs:
             exit 1
           fi
           chmod +x scripts/routine-lock-cleanup.sh
+          # JOB_WINDOW_START is stamped by "Note the job window start" into
+          # GITHUB_ENV before any agent step. Do not drop it: without a window
+          # a claimless DEFERRED cannot be attributed to this firing.
+          if [ -z "${JOB_WINDOW_START:-}" ]; then
+            echo "::error::JOB_WINDOW_START is empty — the job-window step did not run"
+            exit 1
+          fi
           ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
-            --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine design-run
+            --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine design-run \
+            --run-started-at "$JOB_WINDOW_START"
 
       - name: Explain a skipped agentic run
         if: >-
@@ -695,7 +714,9 @@ jobs:
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.CLAUDE_KEY }}
           github-token: ${{ github.token }}
-          context: the design-run routine (issue #${{ steps.select.outputs.issue }})
+          # Quoted: unquoted, YAML reads " #" as a comment and the issue number
+          # never reaches the escalation (#637 read "(issue —").
+          context: "the design-run routine (issue #${{ steps.select.outputs.issue }})"
           escalate: "true"
 
       - name: Turn a dead agentic run red

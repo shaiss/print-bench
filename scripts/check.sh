@@ -13,6 +13,9 @@
 #      lifestyle disclosure guards still refuse an undisclosed AI shot or clip
 #   7. shot-spec selftest (scripts/shot-spec.sh --selftest): the shot-manifest
 #      freeze guard and field validators still refuse a bad line
+#   8. fusecheck selftest (scripts/fusecheck-check.sh --selftest): the
+#      ci.fusecheck bound grammar — legacy, MIN MAX, =N, malformed, exit-4 —
+#      every negative row asserted to fire on committed fixtures (issue #627)
 # Run before committing. For full STL+PNG output use scripts/render.sh.
 set -euo pipefail
 
@@ -196,6 +199,56 @@ fi
 # one that cannot see one. ~1–2 min of coarse CGAL on the fixtures.
 echo "-- kinematics selftest: scripts/kinematics-check.sh --selftest"
 if ! ./scripts/kinematics-check.sh --selftest; then
+  fail=1
+fi
+
+# And this proves the fusecheck gate's own seam — the `assert <stl> <min>
+# [<max>]` / `=N` tokenisation and the exit-3/exit-4 verdict mapping in
+# scripts/fusecheck-check.sh, the runner gate.sh sources — still discriminates:
+# every pass row passes, the too-few row WARNs without failing the run, the
+# too-many row hard-FAILs, the malformed lines fail the parse. The fixtures'
+# body counts are re-measured with fusecheck itself before any row is trusted,
+# so a drifted fixture fails loudly instead of gating on a stale expectation
+# (issue #627). Needs printcheck (the gate's own dependency) and openscad for
+# the two fixture renders; no skip path — a skipped selftest is exactly the
+# silent green this exists to close, so CI installs printcheck in every job
+# that runs check.sh.
+echo "-- fusecheck selftest: scripts/fusecheck-check.sh --selftest"
+if ! ./scripts/fusecheck-check.sh --selftest; then
+  fail=1
+fi
+
+# And this proves the CoG stability verdict still discriminates: a stable
+# configuration passes, one whose CoG falls outside its support footprint is
+# flagged TIP-RISK, and a malformed manifest is refused loudly (tools/cogcheck,
+# ci.cog, issue #623). The issue #37 rule again — a check that cannot fail is
+# worthless — and the negative control is the half a green run never exercises
+# on its own, since no committed design ships a ci.cog yet. Pure stdlib: no
+# OpenSCAD, no slicer, so it runs everywhere check.sh does, unconditionally.
+echo "-- cog-check selftest: scripts/cog-check.sh --selftest"
+if ! ./scripts/cog-check.sh --selftest; then
+  fail=1
+fi
+
+# And this proves the agentic-memory write path (tools/agent-memory, issue
+# #429 — Slice 1a of docs/agentic-memory.md) still enforces its four rules:
+# importance scored by prediction error + Zeigarnik, depth set by salience,
+# provenance `source-confirmed` only when a source is cited (cited, not
+# resolved: in 1a the ref is shape-checked only, and the salience inputs are
+# the caller's word — see the tool's README), and immutable notes — each with
+# its negative control, offline, in a throwaway temp dir. Then `check`
+# re-derives every committed note under tools/agent-memory/store/ (empty until
+# Slice 1d wires a routine), so a note edited by hand after it was written —
+# a promoted importance, a hand-flipped `verified` field, a reformatted file —
+# fails here rather than poisoning a routine's recall. Pure stdlib, imported
+# from its src/ tree (the cog-check pattern), so it runs unconditionally.
+echo "-- agent-memory selftest + store check: python3 -m agent_memory"
+if ! env PYTHONPATH="$PWD/tools/agent-memory/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m agent_memory --selftest; then
+  fail=1
+fi
+if ! env PYTHONPATH="$PWD/tools/agent-memory/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m agent_memory check --store tools/agent-memory/store; then
   fail=1
 fi
 
@@ -508,14 +561,21 @@ if ! ./scripts/reeve-perms-check.sh; then
   fail=1
 fi
 
-	echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
-	if ! ./scripts/reviewer-perms-check.sh --selftest; then
-	  fail=1
-	fi
-	echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
-	if ! ./scripts/reviewer-perms-check.sh; then
-	  fail=1
-	fi
+# Reviewer permission drift (issue #323): the auto-review sessions (Jane,
+# Drik, PM triage, the coach) load .claude/settings.json additively via
+# settingSources=project, so their backstops (.claude/reviewer-settings.json,
+# .claude/design-coach-settings.json) must deny every Bash allow outside the
+# review surface, always deny the render toolchain, and never deny gh/git or
+# the read tools (the coach also keeps Write/Edit). --selftest proves each
+# rule can pass AND fail.
+echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
+if ! ./scripts/reviewer-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
+if ! ./scripts/reviewer-perms-check.sh; then
+  fail=1
+fi
 
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
@@ -684,6 +744,21 @@ fi
 # leave every other check green — and it is fast (no render), so it runs here.
 echo "-- shot-spec selftest: scripts/shot-spec.sh --selftest"
 if ! ./scripts/shot-spec.sh --selftest; then
+  fail=1
+fi
+
+# preview-diff.sh is the regen-faithfulness check (issue #470): the regen
+# job runs it, just before committing, to class each regenerated preview
+# against the committed bytes. It is advisory, so a weakened classifier
+# (always "noise") would leave every run green — the selftest is the only thing
+# that proves the band and the source cross-check still fire. Run
+# unconditionally rather than gated on ImageMagick the way the plate selftest
+# is gated on prusa-slicer: the pure classifier rows need nothing and must run
+# everywhere, and the script skips its own end-to-end half with a notice where
+# ImageMagick is absent (the scad-check jobs, whose cached apt cannot carry it
+# — issue #85).
+echo "-- preview-diff selftest: scripts/preview-diff.sh --selftest"
+if ! ./scripts/preview-diff.sh --selftest; then
   fail=1
 fi
 
