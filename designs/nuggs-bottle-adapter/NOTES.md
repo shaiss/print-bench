@@ -108,6 +108,9 @@ standard … No caliper numbers will follow; the standard is the spec."
   perimeters at 0.4 mm).
 - **Infill:** 15% gyroid/gird; the working surfaces are all perimeters.
 - **Brim:** none needed; the sector-tip foot is the family bed patch.
+- **Wash (family N7):** hand-wash only, ≤ 50 °C; mild unscented dish soap OK,
+  rinse and dry fully — never a dishwasher (heated dry exceeds even PETG; a
+  warped port is a narrowed bore).
 
 ## Print this first
 

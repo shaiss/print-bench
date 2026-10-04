@@ -21,7 +21,8 @@ habitat plumbing.
 
 ## Print settings
 
-- **Material:** PLA (dry service) or PETG (hot washing)
+- **Material:** PLA (dry service) or PETG if you hand-wash warm — family N7 still
+  applies; see Use & care
 - **Layer height:** 0.2 mm with a 0.4 mm nozzle — the thread ridges are 3
   layers wide; coarser loses the thread
 - **Infill:** 15% (all working surfaces are perimeters)
@@ -69,3 +70,10 @@ override on the command line with `-D 'bottle_tol=0.22'`.
 The adapter does not seal: it passes what the bottle's own orifice passes,
 through a printed land. For wet service see the design's backlog (an O-ring
 groove variant); for gating flow, pair it with the `nuggs-shutter-valve`.
+
+## Use & care
+
+When you wash the adapter (or the bottle while it stays screwed in), hand-wash
+it (NUGGS family **N7**): ≤ 50 °C only, mild unscented dish soap is fine, rinse
+and dry fully — **never a dishwasher** (the heated dry cycle exceeds even
+PETG, and a warped port is a narrowed bore).
