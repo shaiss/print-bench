@@ -327,6 +327,14 @@ ring_row_y  = [-21, 21];
 strip_h     = 2.4;   // strip thickness; beds at z_tip with the port stub
 strip_x1    = ring_col_x[1] + throat_or(max(coupon_tols)) + 6.4;
 strip_y     = 46;    // half-width
+// Integer labels (tol×100) in Bold: size-4 default-sans strokes were ~one
+// extrusion width and printed as mush. Size 8 Bold is ~two line widths.
+// Y is a hair outboard of the old ±(strip_y-4.5) so the em box clears the
+// largest ring OD (~38.1) without walking off the ±46 edge.
+coupon_label_size = 8;
+coupon_label_font = "Liberation Sans:style=Bold";
+coupon_label_cut  = 0.6;   // engraving depth, mm (≥ two 0.2 mm layers)
+function coupon_tol_mark(tol) = str(round(tol * 100));
 
 module coupon_ring(tol) {
     ring_h = ring_base_h + throat_top;
@@ -376,15 +384,17 @@ module bottle_fit_coupon() {
             for (col = [0, 1])
                 translate([ring_col_x[col], ring_row_y[row], z_tip - 0.5])
                     cylinder(r = land_ir, h = strip_h + 1.0);
-        // Labels, cut 0.5 mm into the strip top outboard of each row: the
-        // tol value beside the ring it sizes.
+        // Labels, cut coupon_label_cut into the strip top outboard of each
+        // row: integer tol×100 beside the ring it sizes (15/22/30/38).
         for (row = [0, 1])
             for (col = [0, 1])
                 translate([ring_col_x[col],
-                           (row ? 1 : -1) * (strip_y - 4.5),
-                           z_tip + strip_h - 0.5])
-                    linear_extrude(0.6)
-                        text(str(coupon_tols[row * 2 + col]), size = 4,
+                           (row ? 1 : -1) * (strip_y - 3.5),
+                           z_tip + strip_h - coupon_label_cut])
+                    linear_extrude(coupon_label_cut + 0.1)
+                        text(coupon_tol_mark(coupon_tols[row * 2 + col]),
+                             size = coupon_label_size,
+                             font = coupon_label_font,
                              halign = "center", valign = "center");
     }
 }

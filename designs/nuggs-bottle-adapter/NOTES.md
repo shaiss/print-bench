@@ -76,7 +76,8 @@ standard … No caliper numbers will follow; the standard is the spec."
    `z_floor`; the coupon's Y bed-fit is `max(2 * strip_y, 2 * r_out)`.
 8. **Coupon layout.** Two stations on one plate: the library's own
    `nuggs_neck` stub in the family coupon pose, plus four labelled rings
-   carrying the production `throat_cavity` verbatim at tol 0.15/0.22/0.30/0.38.
+   carrying the production `throat_cavity` verbatim at tol 0.15/0.22/0.30/0.38
+  (rings engraved 15 / 22 / 30 / 38).
    Two disconnected bodies on purpose (printcheck notes them as INFO) — the
    coupon is a hand fixture. Both bed at `z_tip` (the port's sector tips);
    the strip is not at `z = 0`. Each ring's land opening pierces through the
@@ -123,12 +124,13 @@ carries both fits. In order:
    the very start of insertion and free after is elephant foot, not tolerance
    — a knife pass on the tips (or less first-layer squish) fixes that; tune
    only when it's tight through the whole engagement.
-2. **Thread stations** — four rings labelled 0.15–0.38. Screw a real
+2. **Thread stations** — four rings labelled 15 / 22 / 30 / 38. Screw a real
    PCO-1881 bottle (any soda/water bottle, washed) into each: find the
    station that grips firmly without cracking or skipping threads when you
    try to rotate the bottle by hand. Set `bottle_tol` in the design to that
    value and slice the adapter.
 3. The label is cut into the strip beside each ring (outboard of its row).
+   `15 / 22 / 30 / 38 = bottle_tol × 100`.
 
 A station whose thread skips (crest rides over the ridge) is too tight;
 one that spins freely is too loose. If *none* grip, raise `f_thread_depth`
