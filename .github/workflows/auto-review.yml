@@ -41,6 +41,27 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     tools/model-registry/tests/test_reviewer_backstop_wiring.py holds
 #     every ship step here to its backstop.
 #
+# Posting surface (issue #764). A review body is rich multi-line markdown, and
+# under --permission-mode dontAsk the Bash permission matcher denies any
+# command whose argument carries shell structure — a table pipe or an embedded
+# newline is enough, no quoting fixes it — so Jane and Drik had NO permitted
+# write that could carry a review: every post attempt was denied, the agent
+# ended its turn, claude-code-action still exited 0 (the #538 pattern), and no
+# JANE/DRIK_SIGNOFF marker ever landed from the workflow — every sign-off on
+# record was an attended local run, and reviewer-signoff (fail-closed) blocked
+# every design PR. The fix is the oracle pattern: the reviewers' ONE write is
+# the mcp__reviewer__post_review tool (served by .claude/reviewer-post/
+# reviewer_mcp.py via --mcp-config), a JSON argument so the body may be any
+# markdown. The tool assembles the sign-off marker server-side from typed
+# fields (sha/verdict/fuse); REVIEWER_ID — step env, never an argument —
+# selects JANE_ vs DRIK_ so a session cannot post as the other reviewer, and
+# REVIEWER_PR pins the target. Exactly one post per run, counted across the
+# whole chain walk via REVIEWER_POST_STATE (one shared runner.temp file: each
+# link spawns a fresh server process, so an in-process counter would reset per
+# link — the #549 class). Pinned by test_reviewer_backstop_wiring.py (the
+# flags), test_cap_state_wiring.py (the state wiring) and the server's own
+# --selftest, which scripts/check.sh runs.
+#
 # Git containment (code-scanning finding on #760). A deny list cannot contain
 # git: a subcommand option no prefix rule sees (`git fetch origin
 # --upload-pack=<cmd>` runs <cmd> over the local file transport), an exec key
@@ -397,10 +418,14 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -413,10 +438,14 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -429,10 +458,14 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -444,11 +477,16 @@ jobs:
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -461,11 +499,16 @@ jobs:
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -479,11 +522,16 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
@@ -620,10 +668,14 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -636,10 +688,14 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -652,10 +708,14 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -667,11 +727,16 @@ jobs:
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -684,11 +749,16 @@ jobs:
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
@@ -702,11 +772,16 @@ jobs:
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
