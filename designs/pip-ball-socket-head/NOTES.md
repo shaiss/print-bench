@@ -55,8 +55,8 @@ small ball-head mount.
   cup's lower hemisphere is then an every-layer-supported bowl; capture cone
   and dome close at ≤ 25° / 15° from vertical; the stud is a vertical
   cylinder; the M4 nut sits in a side-entry trap with a 1.6 mm floor (the
-  bolt pulls the head, Drik R4); the only horizontal ceiling is the 2 mm
-  top annulus around
+  bolt pulls the head, Drik R4); the nut-slot roof is a 7.4 mm bridge; the
+  only other horizontal ceiling is the 2 mm top annulus around
   the stud aperture, landing on the dome cone. Printed stud-down, the dome
   becomes a bridge over the whole ball — the design forbids it by geometry.
 - **D4 — ¼″-20 stud = BOSL2 machine threads** (repo rule: BOSL2 for machine
@@ -66,14 +66,16 @@ small ball-head mount.
   style pack's one recorded deviation**: `workshop-utility`'s fastener
   vocabulary is M3; the payload stud is the camera standard, not the family's.
   The base's M4s are the brief's own call, same deviation, same record.
-- **D5 — Head-to-base joint: one M4×8 socket-cap into a captured M4 nut.**
-  Drik R4: an open-bed hex lets the nut walk toward the bolt, so torque
-  clamps nut-to-base and the head floats. The trap is a 1.6 mm floor with
-  Ø4.5 through it, hex pocket + side window at −X (slit is +X), relief to
-  z=8.5. Tightening pulls the nut down against the floor, which is the
-  head. Assemble head-to-base *before* mounting. Recess 2.4 mm, flare
-  wedges at ~0.8 mm, that ring is the bearing. Lift-by-the-head is the
-  acceptance check.
+- **D5 — Head-to-base joint: one M4×8 (or ×10) socket-cap into a captured
+  M4 nut.** Drik R4: an open-bed hex lets the nut walk toward the bolt, so
+  torque clamps nut-to-base and the head floats. Drik R5: a window cube to
+  x = +AC/2 at Y = ±AC/2 erased every hex flat and the nut spun. The trap
+  is a 1.6 mm floor with Ø4.5 through it, hex pocket, and an AF-wide
+  window at −X that **stops at x = 0** so the +X hex half keys the nut.
+  Slot 3.8 mm (0.2 mm extra for PETG roof sag). Relief to z=8.5. M4×8
+  ends at the nut top at the nominal 0.8 mm seat; M4×10 still 1.7 mm
+  under the relief. Lift-by-the-head *and* torque-without-holding-the-nut
+  are the checks.
 - **D6 — v1 base = M4 foot plate** (the brief's "one choice, not both").
   Evidence: a plate prints flat with zero tuned fits and mounts to a desk
   edge, a shelf underside or a wall with two M4s; a fixed-width clamp jaw
@@ -231,3 +233,8 @@ it only when you already know the printer.
   nut trap with a 1.6 mm floor; lift-by-the-head is the check. M4×8 still
   the measured length (counterbore floor at 4, nut on the floor at head
   z=1.6 → base 8.8, 8 mm shank ends at the nut top).
+- **Drik R5 BLOCK (sha `29a9485a`).** Direction was right; the window cube
+  ran to x = +AC/2 at Y = ±AC/2 and swallowed every hex flat, so the nut
+  spun in a 8.55 mm slot. Window is now AF-wide (7.4) and stops at x = 0;
+  slot 3.8 mm; hardware line is M4×8 or M4×10. Torque-without-holding-the-
+  nut plus lift-by-the-head.

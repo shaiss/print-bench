@@ -34,10 +34,10 @@ separate jobs.
 - `base` — M4 foot plate, 48 × 48 × 8 mm, two mounting holes + the centre
   recess the head's tenon seats in
 
-**Hardware (not printed):** 1× M4 × 8 socket-cap bolt + M4 nut (head to
-base — measured: 8 mm plate with a 4 mm underside counterbore, ~0.8 mm
-tenon seat, nut on a 1.6 mm floor inside the tenon, 8 mm shank ends at the
-nut top).
+**Hardware (not printed):** 1× M4 × 8 or M4 × 10 socket-cap bolt + M4 nut
+(head to base — measured: 8 mm plate with a 4 mm underside counterbore,
+~0.8 mm tenon seat, nut on a 1.6 mm floor inside the tenon; M4×8 ends at
+the nut top at the nominal seat, M4×10 still 1.7 mm under the relief).
 2× M4 screws (mounting — machine screws with nuts, or wood screws into a
 desk edge).
 
@@ -111,14 +111,17 @@ Bolt the head to the base **before** you mount anything. The centre bolt
 comes in from the base's underside, which is also the mounting face.
 
 1. Slide an M4 nut into the hex window on the tenon (the opening opposite
-   the slit). It sits on a 1.6 mm floor — it cannot fall out the bed. Any of
-   the six hex rotations fits.
+   the slit), **flats to the window**. Push it home so the far vertex seats
+   in the surviving +X hex. It sits on a 1.6 mm floor — it cannot fall out
+   the bed. If it will not slide, the 7.4 mm slot roof sagged; a light file
+   on the roof, or a 0.2 mm extra on `nut_slot_h`, clears it.
 2. Seat the tenon nose in the base's centre recess with the **slit and wings
    clocked toward the desk edge** (~3 o'clock if the two mounting holes sit
    left/right). The 45° flare wedges at about 0.8 mm; that ring is the
-   bearing, not a deep shoulder. Pull it down with the **M4 × 8 socket-cap**
-   from underneath into the counterbore so the plate sits flat. Lift the
-   assembled unit by the head: the base comes with it.
+   bearing, not a deep shoulder. Pull it down with an **M4 × 8 or M4 × 10
+   socket-cap** from underneath into the counterbore so the plate sits
+   flat. The bolt should torque without holding the nut. Lift the assembled
+   unit by the head: the base comes with it.
 3. Bolt the assembled unit to the desk edge, shelf underside or wall with
    two M4s. Use hex-drive screws (or drive a Phillips at a slight angle) —
    a straight #2 driver hits the socket ring.
