@@ -1,11 +1,12 @@
 # NUGGS bottle adapter
 
-Turn a standard off-the-shelf water bottle into a drop-in module of a
-N.U.G.G.S. hamster habitat: this one printed part screws onto any PCO-1881
-bottle finish (the world soda/water-bottle neck) and plugs into the standard
-genderless quarter-turn NUGGS port — no special bottles, no fasteners, no
-tools. Swap water bottles in seconds; wash and refill the bottle, not the
-habitat plumbing.
+Turn a PCO-1881 soda/water bottle into a drop-in module of a N.U.G.G.S.
+hamster habitat: this one printed part screws onto that standard neck finish
+and plugs into the genderless quarter-turn NUGGS port — no special bottles,
+no fasteners, no tools. It does **not** seal on its own; it passes what the
+bottle's orifice passes, so treat it as a **dispenser**, not a watertight
+waterer — pair with `nuggs-shutter-valve` when you need to gate flow. Swap
+bottles in seconds; wash and refill the bottle, not the habitat plumbing.
 
 ![Product shot](previews/product-hero.png)
 
@@ -18,6 +19,11 @@ habitat plumbing.
 - `coupon` — the print-this-first fit checker: the port stub plus four
   labelled thread rings to find your printer's `bottle_tol` before you commit
   to the body (approx. 187 × 97 × 31 mm).
+
+**Which bottles fit:** PCO-1881 is the standard Coke/Pepsi soda neck — not
+every "water bottle" uses it. Before you commit filament: if the cap from a
+Coke bottle fits yours, or the neck measures about 28 mm inside, you're on
+PCO-1881; when unsure, the coupon is the proof.
 
 ## Print settings
 
@@ -77,3 +83,10 @@ When you wash the adapter (or the bottle while it stays screwed in), hand-wash
 it (NUGGS family **N7**): ≤ 50 °C only, mild unscented dish soap is fine, rinse
 and dry fully — **never a dishwasher** (the heated dry cycle exceeds even
 PETG, and a warped port is a narrowed bore).
+
+The printed bottle thread is the high-cycle joint on bottle swaps — expect on
+the order of hundreds of turn cycles a year once you're in the rhythm of
+refills. A ring of plastic dust under the bottle, or a grip that skips when
+you seat it, means **reprint the adapter** (~4 h 10 m and ~53 g per CI's
+printcheck numbers on this design) — cheap compared with a full bottle dropping
+from the port.
