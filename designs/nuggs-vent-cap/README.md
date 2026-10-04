@@ -29,7 +29,8 @@ the standard.
 
 ## Print settings
 
-- **Material:** PETG (gnaw-durable); PLA fine for a calm cage
+- **Material:** PETG (gnaw-durable); PLA fine for a calm cage. Either way,
+  family N7 still applies — see Use & care
 - **Layer height:** 0.2 mm
 - **Infill:** 10–15 % grid, guides only — the lattice is the structure
 - **Supports:** **none** — the dome is a 45° lattice cone by design; every
@@ -63,9 +64,12 @@ grouped in Customizer sections; override on the command line with
   (0.30 is the standard's default and has never been measured on a printer).
 - **Clocking:** any quarter-turn position seats; the port is genderless like
   the rest of the system.
-- **Condensation:** a breathing cap still traps humid air at the dome's crown.
-  In humid rooms, pull and dry the cap weekly, and keep bedding off the dome's
-  underside.
+- **Condensation and wash (family N7):** a breathing cap still traps humid
+  air at the dome's crown. In humid rooms, pull and dry the cap weekly, and
+  keep bedding off the dome's underside. When you wash it, hand-wash the cap
+  (NUGGS family **N7**): ≤ 50 °C only, mild unscented dish soap is fine, rinse
+  and dry fully — **never a dishwasher** (the heated dry cycle exceeds even
+  PETG, and a warped port is a narrowed bore).
 - **Airflow:** the lattice holds ≥ 30 % open area by construction. If a keeper
   reports stuffiness, the lever is `aperture_max` (within the welfare ceiling)
   — never thinner strands.

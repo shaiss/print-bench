@@ -160,6 +160,13 @@ idiom. The dome's 45° slope rises from the wall rim; the lattice strands'
 undersides are all sub-5 mm bridges; the crown disc bridges its ~10 mm spokes.
 No supports, no brim. PLA or PETG; PETG for gnaw durability.
 
+- **Care (family N7, `designs/nuggs/PM.md`):** hand wash only, ≤ 50 °C; never
+  a dishwasher. PLA Tg ~57–70 °C and PETG ~80–85 °C sit at or below a
+  dishwasher dry cycle (70 °C+); a warped port is a narrowed bore, so the
+  material failure is the injury failure. The README condensation note
+  (weekly pull-and-dry in humid rooms) is husbandry on top of that, not a
+  substitute for the wash ceiling.
+
 ## Print this first
 
 The coupon (`build/nuggs-vent-cap-coupon.stl`, `part="coupon"` in
