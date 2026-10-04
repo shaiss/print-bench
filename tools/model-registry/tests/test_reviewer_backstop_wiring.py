@@ -39,11 +39,16 @@ COACH_BACKSTOP = ".claude/design-coach-settings.json"
 # The posting surface (issue #764): the Jane/Drik ship steps must also carry
 # the reviewer MCP server and pin its trusted env, or the reviewers relapse
 # into having NO postable write (every round then ends with denials and an
-# exit-0 job that posted nothing — the bug this closes). PM triage and the
-# coach post no sign-off, so they stay on reads only.
+# exit-0 job that posted nothing — the bug this closes). PM triage stays
+# off this pin (its posting path is #772/#807). The coach is issue #806:
+# same MCP server, a *different* tool and a wider --allowedTools so git
+# push still works.
 POST_CONFIG = ".claude/reviewer-post/reviewer-mcp.json"
 POST_TOOL = "mcp__reviewer__post_review"
 POST_JOBS = {"jane-review": "jane", "drik-review": "drik"}
+COACH_POST_TOOL = "mcp__reviewer__post_coach"
+COACH_POST_JOB = "design-coach"
+COACH_ALLOWED_KEEP = ("Write", "Edit", "Bash")
 POST_PR = "${{ github.event.pull_request.number }}"
 POST_STATE = "${{ runner.temp }}/reviewer-posts"
 # job → the deny backstop its ship steps pass. The coach's differs because it
@@ -194,6 +199,53 @@ def test_every_reviewer_ship_step_carries_the_post_surface():
     _assert_reviewer_steps_carry_their_post_surface(_workflow_text())
 
 
+def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
+    """Coach ship steps load post_coach AND keep Write/Edit/Bash.
+
+    Copying Jane's read-only --allowedTools onto the coach is the #806
+    containment trap: comments would post but iterations could not push.
+    """
+    assert (REPO_ROOT / POST_CONFIG).is_file()
+    block = _without_comments(_job_blocks(text)[COACH_POST_JOB])
+    chunks = _ship_chunks(block)
+    assert chunks, "auto-review.yml [design-coach]: no ship step found"
+    assert "scripts/coach-lock-check.sh" in block, (
+        "auto-review.yml [design-coach] has no coach-lock-check.sh step — "
+        "a denial-only turn would still stamp the round complete (issue #806)")
+    for n, chunk in enumerate(chunks, 1):
+        at = f"auto-review.yml [design-coach] ship step {n}"
+        args = _claude_args(chunk)[0]
+        configs = _flag(args, "--mcp-config")
+        assert configs == [POST_CONFIG], (
+            f"{at} passes --mcp-config {configs or 'none'}, not exactly "
+            f"[{POST_CONFIG!r}] — the coach posts via that server or not at all")
+        tools = _flag(args, "--allowedTools")
+        allowed = tools[0].strip('"').split(",") if tools else []
+        assert len(tools) == 1 and COACH_POST_TOOL in allowed, (
+            f"{at} does not allow {COACH_POST_TOOL} — the session would be "
+            "denied on its comment write (issue #806)")
+        assert POST_TOOL not in allowed, (
+            f"{at} allows {POST_TOOL} — the coach must not hold the "
+            "reviewers' sign-off tool")
+        for keep in COACH_ALLOWED_KEEP:
+            assert keep in allowed, (
+                f"{at} dropped {keep} from --allowedTools — copying Jane's "
+                "read-only list onto the coach would block git push")
+        env = _step_env(chunk)
+        assert env.get("REVIEWER_ID") == "coach", (
+            f"{at} sets REVIEWER_ID={env.get('REVIEWER_ID')!r}, not 'coach'")
+        assert env.get("REVIEWER_PR") == POST_PR, (
+            f"{at} sets REVIEWER_PR={env.get('REVIEWER_PR')!r}, not the "
+            "workflow's PR")
+        assert env.get("REVIEWER_POST_STATE") == POST_STATE, (
+            f"{at} sets REVIEWER_POST_STATE="
+            f"{env.get('REVIEWER_POST_STATE')!r}, not {POST_STATE!r}")
+
+
+def test_every_coach_ship_step_carries_the_post_surface():
+    _assert_coach_steps_carry_their_post_surface(_workflow_text())
+
+
 def test_backstop_table_covers_every_reviewer_job():
     # The review-chain guard's job list and this table cannot drift: a reviewer
     # job enrolled there without a backstop here would ship unpinned.
@@ -289,6 +341,41 @@ def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
     tampered = _tamper(_workflow_text(), job, step, old, new)
     with pytest.raises(AssertionError, match=match):
         _assert_reviewer_steps_carry_their_post_surface(tampered)
+
+
+@pytest.mark.parametrize("step,old,new,match", [
+    (0, " --mcp-config .claude/reviewer-post/reviewer-mcp.json",
+     "", "--mcp-config"),
+    (1,
+     '--allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash"',
+     '--allowedTools "mcp__reviewer__post_review,Read,Grep,Glob"',
+     "post_coach"),
+    (2,
+     '--allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash"',
+     '--allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob"',
+     "Write"),
+    (3, "REVIEWER_ID: coach", "REVIEWER_ID: jane",
+     "REVIEWER_ID"),
+    (4,
+     "REVIEWER_PR: ${{ github.event.pull_request.number }}",
+     "REVIEWER_PR: 1", "REVIEWER_PR"),
+    (5,
+     "REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts",
+     "REVIEWER_POST_STATE: reviewer-posts", "REVIEWER_POST_STATE"),
+])
+def test_coach_post_surface_guard_rejects_a_tampered_step(step, old, new, match):
+    tampered = _tamper(_workflow_text(), "design-coach", step, old, new)
+    with pytest.raises(AssertionError, match=match):
+        _assert_coach_steps_carry_their_post_surface(tampered)
+
+
+def test_coach_lock_check_step_cannot_be_dropped():
+    text = _workflow_text()
+    dropped = text.replace("        run: ./scripts/coach-lock-check.sh "
+                           "${{ github.event.pull_request.number }}\n", "", 1)
+    assert dropped != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="coach-lock-check"):
+        _assert_coach_steps_carry_their_post_surface(dropped)
 
 
 def test_post_surface_guard_rejects_a_missing_server():

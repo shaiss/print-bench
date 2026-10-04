@@ -73,6 +73,15 @@ name: Auto design review (Jane / Drik / PM / coach)
 # test_cap_state_wiring.py (the state wiring) and the server's own
 # --selftest, which scripts/check.sh runs.
 #
+# Coach posting (issue #806) is the same exit-0 silence with different
+# containment. The coach still pushes iterations, so its --allowedTools
+# keep Write/Edit/Bash (Jane/Drik's read-only list must not be copied).
+# Comments go through mcp__reviewer__post_coach on the same server
+# (REVIEWER_ID=coach). claude-code-action still exits 0 on a denial-only
+# turn, so after any ship step that claims success, `scripts/coach-lock-check.sh`
+# fails the job unless the thread carries COACH_LOCK — that is what stops
+# a silent no-post round from stamping complete.
+#
 # Git containment (code-scanning finding on #760). A deny list cannot contain
 # git: a subcommand option no prefix rule sees (`git fetch origin
 # --upload-pack=<cmd>` runs <cmd> over the local file transport), an exec key
@@ -1253,11 +1262,16 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
@@ -1270,11 +1284,16 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
@@ -1287,11 +1306,16 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
@@ -1304,11 +1328,17 @@ jobs:
           && steps.p3.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
@@ -1322,11 +1352,17 @@ jobs:
           && steps.p4.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
@@ -1341,13 +1377,39 @@ jobs:
           && steps.p5.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          show_full_output: "true"
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+
+      - name: Coach posted a COACH-LOCK
+        # claude-code-action exits 0 on a denial-only turn (#538/#764/#806).
+        # A ship-step success is not a completed coach round unless the
+        # marker is on the thread. Fail here so review-stamp cannot mark
+        # the round complete.
+        if: >-
+          always()
+          && (steps.p1.outcome == 'success'
+              || steps.p2.outcome == 'success'
+              || steps.p3.outcome == 'success'
+              || steps.p4.outcome == 'success'
+              || steps.p5.outcome == 'success'
+              || steps.p6.outcome == 'success')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: ./scripts/coach-lock-check.sh ${{ github.event.pull_request.number }}
 
       - name: No provider key configured
         if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'

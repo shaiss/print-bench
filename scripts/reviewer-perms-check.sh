@@ -153,7 +153,10 @@ elif kind == "coach":
     # stay usable on the tree, but a written .git/config could bind an exec
     # key (an alias, diff.external, a pager.<cmd>) the env lock does not pin.
     POSTURE_DENY = [{"NotebookEdit"}, {"Edit(./.git/**)"}]
-    NEVER_DENY_TOOLS = ["Read", "Grep", "Glob", "Write", "Edit"]
+    NEVER_DENY_TOOLS = [
+        "Read", "Grep", "Glob", "Write", "Edit",
+        "mcp__reviewer", "mcp__reviewer__post_coach",
+    ]
     # The coach's git floor: global options and verbs that run a user command,
     # reach a non-origin repository, or move a credential. Each `:*` rule is a
     # WORD-BOUNDARY prefix in Claude Code (`git -c:*` is `git -c *`), so it does
@@ -536,6 +539,10 @@ PY2
   for f in "mcp__reviewer__post_review" "mcp__reviewer"; do
     derive "$R" "$tmp/r.json" deny "+$f"
     expect fail "denying the posting surface with $f fails the check" "$S" "$tmp/r.json" reviewer
+  done
+  for f in "mcp__reviewer__post_coach" "mcp__reviewer"; do
+    derive "$C" "$tmp/c.json" deny "+$f"
+    expect fail "denying the coach posting surface with $f fails the check" "$S" "$tmp/c.json" coach
   done
   # Posture: the reviewer must deny Write; the coach must not deny Edit, and
   # must deny Edit into .git/ (a written .git/config binds exec keys).

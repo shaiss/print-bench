@@ -243,11 +243,13 @@ def test_lock_guard_rejects_one_link_overriding_the_protocol():
 
 
 def test_lock_guard_rejects_the_tail_link_shedding_its_config():
-    # NEGATIVE CONTROL: the terminal Anthropic link (no env block of its own,
-    # seen only on full fall-through) gains one that zeroes the config count.
+    # NEGATIVE CONTROL: the terminal Anthropic coach link (fall-through only)
+    # overrides the job-level config count from its own env block.
     tampered = _step_replace(
         _workflow_text(), "design-coach", -1,
-        "        with:\n", '        env:\n          GIT_CONFIG_COUNT: "0"\n        with:\n')
+        "          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts\n",
+        "          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts\n"
+        "          GIT_CONFIG_COUNT: \"0\"\n")
     with pytest.raises(AssertionError, match="ship step 6 runs without"):
         _assert_every_ship_step_is_git_locked(tampered)
 
