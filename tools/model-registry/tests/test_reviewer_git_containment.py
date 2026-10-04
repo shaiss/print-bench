@@ -210,13 +210,20 @@ def _assert_coach_checks_out_full_history(text: str) -> None:
         "surface from base.sha instead")
 
 
+COACH_ABS_SHELL = "shell: /usr/bin/bash --noprofile --norc -e {0}"
+
+
 def _assert_one_restore_step(restore: str, *, at: str) -> None:
     assert "uses:" not in restore.split("run:", 1)[0], (
         f"{at} is not a run step")
+    assert COACH_ABS_SHELL in restore.split("run:", 1)[0], (
+        f"{at} does not pin an absolute /usr/bin/bash shell — a GITHUB_PATH "
+        "write from an earlier Bash link would make the runner look up a "
+        "shim bash before PATH is reset in-script")
     env = _env_map(restore, 8)
     assert env.get("BASE_SHA") == BASE_SHA, (
         f"{at} does not take the PR base sha")
-    for key in ("LD_PRELOAD", "BASH_ENV", "ENV"):
+    for key in ("LD_PRELOAD", "BASH_ENV", "ENV", "NODE_OPTIONS", "NODE_PATH"):
         assert env.get(key) == "", (
             f"{at} YAML env does not pin {key} to empty — GITHUB_ENV from "
             "a Bash-capable coach is applied at process start, before the "
@@ -287,6 +294,10 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     assert 'fetch --no-tags origin "$BASE_SHA"' in ready_run, (
         "auto-review.yml [design-coach] ready step does not fetch the base "
         "SHA when it is not already local")
+    assert 'started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)' in ready_run, (
+        "auto-review.yml [design-coach] ready step does not stamp "
+        "started_at — the lock-check could accept a COACH-LOCK from an "
+        "earlier coach run on reopened / ready_for_review")
     assert COACH_LOCK_CHECK_BLOB in ready_run, (
         "auto-review.yml [design-coach] ready step no longer probes "
         "scripts/coach-lock-check.sh on base.sha — a missing-on-base first "
@@ -342,6 +353,11 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
     check = steps[show_at[0]]
     assert "uses:" not in check.split("run:", 1)[0], (
         "lock-check step is not a run step")
+    assert COACH_ABS_SHELL in check.split("run:", 1)[0], (
+        "auto-review.yml [design-coach] lock-check does not pin an absolute "
+        "/usr/bin/bash shell — a GITHUB_PATH write from an earlier Bash "
+        "link would make the runner look up a shim bash before PATH is "
+        "reset in-script")
     env = _env_map(check, 8)
     assert env.get("BASE_SHA") == BASE_SHA, (
         "auto-review.yml [design-coach] lock-check step does not take "
@@ -349,7 +365,11 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
     assert env.get("PR") == "${{ github.event.pull_request.number }}", (
         "auto-review.yml [design-coach] lock-check step does not take "
         "the PR number through env")
-    for key in ("LD_PRELOAD", "BASH_ENV", "ENV"):
+    assert env.get("SINCE") == "${{ steps.ready.outputs.started_at }}", (
+        "auto-review.yml [design-coach] lock-check step does not take "
+        "started_at through SINCE — a lock from an earlier coach run "
+        "would satisfy the pin")
+    for key in ("LD_PRELOAD", "BASH_ENV", "ENV", "NODE_OPTIONS", "NODE_PATH"):
         assert env.get(key) == "", (
             f"auto-review.yml [design-coach] lock-check YAML env does not "
             f"pin {key} to empty — GITHUB_ENV from a Bash-capable coach is "
@@ -373,9 +393,10 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
     assert "GIT_ALLOW_PROTOCOL=https" in run, (
         "auto-review.yml [design-coach] lock-check does not re-assert "
         "the git protocol lock after GITHUB_ENV")
-    assert "/usr/bin/bash" in run, (
+    assert '/usr/bin/bash "$CHECK" "$PR" --since "$SINCE"' in run, (
         "auto-review.yml [design-coach] lock-check does not invoke the "
-        "extracted script with /usr/bin/bash")
+        "extracted script with /usr/bin/bash --since — a stale lock from "
+        "an earlier run would stamp the round complete")
 
 
 def test_coach_lock_check_runs_the_base_copy_after_the_agent():
@@ -642,9 +663,18 @@ def test_coach_guard_rejects_a_ship_step_not_gated_on_ready():
 def test_coach_lock_guard_rejects_running_the_workspace_script():
     tampered = _job_replace(
         _workflow_text(), "design-coach",
-        '          /usr/bin/bash "$CHECK" "$PR"\n',
+        '          /usr/bin/bash "$CHECK" "$PR" --since "$SINCE"\n',
         '          ./scripts/coach-lock-check.sh "$PR"\n')
     with pytest.raises(AssertionError, match="workspace script"):
+        _assert_coach_lock_check_runs_base_copy(tampered)
+
+
+def test_coach_lock_guard_rejects_dropping_since():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        '          /usr/bin/bash "$CHECK" "$PR" --since "$SINCE"\n',
+        '          /usr/bin/bash "$CHECK" "$PR"\n')
+    with pytest.raises(AssertionError, match="--since"):
         _assert_coach_lock_check_runs_base_copy(tampered)
 
 
@@ -654,7 +684,7 @@ def test_coach_lock_guard_rejects_inheriting_pythonpath():
         _workflow_text(), "design-coach",
         "unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \\\n"
         "                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \\\n"
-        "                DYLD_INSERT_LIBRARIES BASH_ENV ENV || true\n"
+        "                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true\n"
         "          export PYTHONNOUSERSITE=1\n",
         "export PYTHONNOUSERSITE=1\n")
     with pytest.raises(AssertionError, match="PYTHONPATH"):
@@ -662,14 +692,18 @@ def test_coach_lock_guard_rejects_inheriting_pythonpath():
 
 
 def test_coach_lock_guard_rejects_unpinned_process_start_env():
-    # Unique to lock-check (PR: is not on restore env).
+    # Unique to lock-check (PR: / SINCE: are not on restore env).
     tampered = _job_replace(
         _workflow_text(), "design-coach",
         '          PR: ${{ github.event.pull_request.number }}\n'
+        '          SINCE: ${{ steps.ready.outputs.started_at }}\n'
         '          # Process-start pins: GITHUB_ENV from a prior Bash coach link\n'
         '          # is applied before this script body, so in-script unset is too\n'
         '          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced\n'
         '          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).\n'
+        '          # Absolute shell below: PATH is reset in-script too late — the\n'
+        '          # runner looks up default `bash` on PATH after applying a prior\n'
+        '          # GITHUB_PATH write, so a shim could exit 0 before the extract.\n'
         '          PYTHONPATH: ""\n'
         '          PYTHONHOME: ""\n'
         '          PYTHONSTARTUP: ""\n'
@@ -678,9 +712,36 @@ def test_coach_lock_guard_rejects_unpinned_process_start_env():
         '          LD_LIBRARY_PATH: ""\n'
         '          LD_AUDIT: ""\n'
         '          BASH_ENV: ""\n'
-        '          ENV: ""\n',
-        '          PR: ${{ github.event.pull_request.number }}\n')
+        '          ENV: ""\n'
+        '          NODE_OPTIONS: ""\n'
+        '          NODE_PATH: ""\n',
+        '          PR: ${{ github.event.pull_request.number }}\n'
+        '          SINCE: ${{ steps.ready.outputs.started_at }}\n')
     with pytest.raises(AssertionError, match="LD_PRELOAD"):
+        _assert_coach_lock_check_runs_base_copy(tampered)
+
+
+def test_coach_lock_guard_rejects_relative_shell():
+    # Unique to lock-check (restore has no PYTHONNOUSERSITE after unset).
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        "        " + COACH_ABS_SHELL + "\n"
+        "        run: |\n"
+        "          set -euo pipefail\n"
+        '          export PATH="/usr/bin:/bin:/usr/local/bin"\n'
+        "          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \\\n"
+        "                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \\\n"
+        "                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true\n"
+        "          export PYTHONNOUSERSITE=1\n",
+        "        shell: bash --noprofile --norc -e {0}\n"
+        "        run: |\n"
+        "          set -euo pipefail\n"
+        '          export PATH="/usr/bin:/bin:/usr/local/bin"\n'
+        "          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \\\n"
+        "                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \\\n"
+        "                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true\n"
+        "          export PYTHONNOUSERSITE=1\n")
+    with pytest.raises(AssertionError, match="absolute"):
         _assert_coach_lock_check_runs_base_copy(tampered)
 
 

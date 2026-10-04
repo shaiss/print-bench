@@ -259,6 +259,13 @@ def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
         assert env.get("PYTHONNOUSERSITE") == '"1"', (
             f"{at} does not set PYTHONNOUSERSITE=1 — user-site sitecustomize "
             "would still load without isolated mode")
+        assert env.get("NODE_OPTIONS") == '""', (
+            f"{at} does not clear NODE_OPTIONS — a GITHUB_ENV write from an "
+            "earlier Bash link would --require attacker code into the Node "
+            "claude-code-action and its posting MCP child")
+        assert env.get("NODE_PATH") == '""', (
+            f"{at} does not clear NODE_PATH — a GITHUB_ENV write would inject "
+            "modules into the Node action the same way PYTHONPATH does")
 
 
 def test_every_coach_ship_step_carries_the_post_surface():
@@ -436,6 +443,7 @@ def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
      "REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts",
      "REVIEWER_POST_STATE: reviewer-posts", "REVIEWER_POST_STATE"),
     (0, '          PYTHONPATH: ""\n', "", "PYTHONPATH"),
+    (1, '          NODE_OPTIONS: ""\n', "", "NODE_OPTIONS"),
 ])
 def test_coach_post_surface_guard_rejects_a_tampered_step(step, old, new, match):
     tampered = _tamper(_workflow_text(), "design-coach", step, old, new)
