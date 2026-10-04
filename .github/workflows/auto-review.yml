@@ -1543,6 +1543,8 @@ jobs:
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
           # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
@@ -1631,6 +1633,8 @@ jobs:
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
           # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
@@ -1719,6 +1723,8 @@ jobs:
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
           # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
@@ -1814,6 +1820,8 @@ jobs:
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
           # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
@@ -1911,6 +1919,8 @@ jobs:
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
           # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
@@ -2010,6 +2020,8 @@ jobs:
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
           # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior

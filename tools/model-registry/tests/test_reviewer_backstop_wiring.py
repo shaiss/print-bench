@@ -270,6 +270,11 @@ def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
             f"{at} does not clear LD_AUDIT — a GITHUB_ENV write from an "
             "earlier Bash link would load attacker ELF audit code into the "
             "Node action and posting MCP child")
+        for key in ("BASH_ENV", "ENV"):
+            assert env.get(key) == '""', (
+                f"{at} does not clear {key} — a GITHUB_ENV write from an "
+                "earlier Bash link would be sourced by the first bash child "
+                "under GITHUB_TOKEN / REVIEWER_* / provider keys")
         assert env.get("GIT_CONFIG_VALUE_2") == "/dev/null", (
             f"{at} does not re-pin core.hooksPath=/dev/null — a GITHUB_ENV "
             "rewrite of GIT_CONFIG_* would run attacker hooks under the "
@@ -456,7 +461,8 @@ def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
     (0, '          PYTHONPATH: ""\n', "", "PYTHONPATH"),
     (1, '          NODE_OPTIONS: ""\n', "", "NODE_OPTIONS"),
     (2, '          LD_AUDIT: ""\n', "", "LD_AUDIT"),
-    (3, "GIT_CONFIG_VALUE_2: /dev/null", "GIT_CONFIG_VALUE_2: .githooks",
+    (3, '          BASH_ENV: ""\n', "", "BASH_ENV"),
+    (4, "GIT_CONFIG_VALUE_2: /dev/null", "GIT_CONFIG_VALUE_2: .githooks",
      "hooksPath"),
 ])
 def test_coach_post_surface_guard_rejects_a_tampered_step(step, old, new, match):
