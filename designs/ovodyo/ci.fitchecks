@@ -1,0 +1,9 @@
+# Captive threaded seam (#602): the male ring of a bottom half intersected with
+# a top half at the SEATED pose (ball frame, seam plane z = 0) must render zero
+# facets at seam_tol — the ring clears the female bore, groove and boss on
+# every surface. `seam-fit-ctrl` is the mandatory negative control: the same
+# intersection with the top half parked a quarter-turn off (a pitch/4 axial
+# mismatch between rib and groove), which MUST interfere, proving the check can
+# fail. Both are `part` values of ovodyo.scad (module seam_fit).
+seam-fit       empty
+seam-fit-ctrl  interferes
