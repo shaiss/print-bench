@@ -128,9 +128,14 @@ base_w = 48;
 base_t = 8;
 // Pitch of the two M4 mounting holes (mm, X)
 base_hole_pitch = 30;
-// Recess the head's tenon seats in: diameter (mm) and depth (mm)
+// Recess the head's tenon seats in: diameter (mm) and depth (mm). Depth is
+// whatever is left after the M4 socket-cap counterbore and a 1.6 mm web —
+// the 45° flare only enters ~0.8 mm before it hits Ø14.6 (Drik R3.2).
 tenon_recess_d = 14.6;
-tenon_recess_depth = 6;
+tenon_recess_depth = 2.4;
+// How far the tenon actually sits into the recess (mm) — assembled preview.
+// Not the recess depth: the cone wedges at Ø14.6 after ~0.8 mm.
+tenon_seat = 0.8;
 
 /* [Preview only] */
 // Tilt the head for the assembled preview (deg). PRINT AT 0.
@@ -281,22 +286,32 @@ module socket_body(clear = ball_xy_clear, collar = true, dome = true) {
         translate([0, 0, -0.01]) cylinder(d = 8.55, h = 4.01, $fn = 6);
         translate([0, 0, -0.01])
             cylinder(d1 = 8.55 + 1.0, d2 = 8.55, h = 0.51, $fn = 6);
+        // clearance above the pocket so an M4×8 from the base counterbore
+        // cannot jack against the cup floor (floor is at z = 9). Stops 0.5 mm
+        // short of it (Drik R3.2: M4×16 hit solid PETG).
+        translate([0, 0, 3.99]) cylinder(d = 4.5, h = 4.52);
     }
 }
 
 // The base: M4 foot plate — two mounting holes through, a centre recess the
-// head's tenon seats in, and a plain hole for the M4 bolt that pulls the
-// tenon's hex nut up against the recess ceiling.
+// head's tenon nose seats in, an underside socket-cap counterbore so the
+// plate sits flat on the mount, and a through hole for the M4×8 that pulls
+// the tenon's hex nut down.
 module base() {
+    hd = socket_head("M4");
     difference() {
         rounded_box([base_w, base_w, base_t], r = style_corner_r,
                     bottom_chamfer = style_edge_chamfer);
-        // tenon recess, with a 0.6 lead-in chamfer at the mouth
+        // tenon recess. Lead-in at the TOP mouth: wide at the plate top,
+        // narrowing into the pocket (the previous cone was inverted and
+        // lived above the part — Drik R3.2).
         translate([0, 0, base_t - tenon_recess_depth])
             cylinder(d = tenon_recess_d, h = tenon_recess_depth + 0.01);
-        translate([0, 0, base_t - 0.01])
-            cylinder(d1 = tenon_recess_d + 1.2, d2 = tenon_recess_d, h = 0.61);
-        // bolt hole through to the pocket
+        translate([0, 0, base_t - 0.6])
+            cylinder(d1 = tenon_recess_d, d2 = tenon_recess_d + 1.2, h = 0.61);
+        // M4 socket-cap counterbore on the underside, then a through hole.
+        // Head below the recess floor so the tenon never sits on the bolt.
+        translate([0, 0, -0.01]) cylinder(d = hd[0], h = hd[1] + 0.01);
         translate([0, 0, -0.01]) cylinder(d = 4.5, h = base_t + 0.02);
         // two M4 mounting holes (the brief's assumed shelf mount)
         for (x = [-base_hole_pitch/2, base_hole_pitch/2])
@@ -312,10 +327,10 @@ module head() {
 }
 
 // The head tilted `a` degrees about the ball centre — pivot at the installed
-// position for the preview: seated in the base recess (head z0 drops
-// tenon_recess_depth below the plate top, so the tenon is inside the recess).
+// position for the preview: the tenon nose in the recess at `tenon_seat`
+// (not the full recess depth — the cone cannot reach the floor).
 module head_tilted(a) {
-    translate([0, 0, base_t - tenon_recess_depth + zc()])
+    translate([0, 0, base_t - tenon_seat + zc()])
         rotate([a, 0, 0])
             translate([0, 0, -zc()])
                 head();

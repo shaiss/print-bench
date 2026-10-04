@@ -34,8 +34,11 @@ separate jobs.
 - `base` — M4 foot plate, 48 × 48 × 8 mm, two mounting holes + the centre
   recess the head's tenon seats in
 
-**Hardware (not printed):** 1× M4 × 16 bolt + M4 nut (head to base), 2× M4
-screws (mounting — machine screws with nuts, or wood screws into a desk edge).
+**Hardware (not printed):** 1× M4 × 8 socket-cap bolt + M4 nut (head to
+base — measured: 8 mm plate with a 4 mm underside counterbore, ~0.8 mm
+tenon seat, 4 mm nut pocket, clearance above so the bolt cannot jack).
+2× M4 screws (mounting — machine screws with nuts, or wood screws into a
+desk edge).
 
 ## Print settings
 
@@ -103,15 +106,20 @@ Customizer sections; override on the command line with `-D 'ball_xy_clear=0.25'`
 
 ## Assembly & use
 
-1. Bolt the `base` to the desk edge, shelf underside or wall with two M4s.
-2. Drop an M4 nut into the hex pocket in the head's tenon from below — the
+Bolt the head to the base **before** you mount anything. The centre bolt
+comes in from the base's underside, which is also the mounting face.
+
+1. Drop an M4 nut into the hex pocket in the head's tenon from below — the
    pocket is blind at the top, so the nut has to go in before the head seats
-   (any of the six hex rotations fits). Seat the tenon in the base's centre
-   recess with the **slit and wings clocked toward the desk edge** (~3
-   o'clock if the two mounting holes sit left/right), then pull it down with
-   the M4 × 16 bolt from underneath. The torque path is the tenon shoulder,
-   not the bolt.
-3. Thread your camera/light onto the ¼″-20 stud, tilt to aim, pinch the
+   (any of the six hex rotations fits).
+2. Seat the tenon nose in the base's centre recess with the **slit and wings
+   clocked toward the desk edge** (~3 o'clock if the two mounting holes sit
+   left/right). The 45° flare wedges at about 0.8 mm; that ring is the
+   bearing, not a deep shoulder. Pull it down with the **M4 × 8 socket-cap**
+   from underneath into the counterbore so the plate sits flat.
+3. Bolt the assembled unit to the desk edge, shelf underside or wall with
+   two M4s.
+4. Thread your camera/light onto the ¼″-20 stud, tilt to aim, pinch the
    wings to lock. ±20° is trim: mount the base pointing roughly right, the
    joint fine-aims from there.
 

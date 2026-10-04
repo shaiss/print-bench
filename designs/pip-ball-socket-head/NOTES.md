@@ -65,12 +65,17 @@ small ball-head mount.
   style pack's one recorded deviation**: `workshop-utility`'s fastener
   vocabulary is M3; the payload stud is the camera standard, not the family's.
   The base's M4s are the brief's own call, same deviation, same record.
-- **D5 — Head-to-base joint: one M4 bolt into a printed hex nut pocket.** The
-  pocket opens down at the head's bed (printable as a first-layer ring, zero
-  overhang); the base recess leads with a 0.6 chamfer. Hardware is already in
-  the brief's assumptions for mounting; the joint adds one bolt + one nut, no
-  glue, no inserts. Torque path is the tenon shoulder against the recess
-  ceiling, not the bolt.
+- **D5 — Head-to-base joint: one M4×8 socket-cap into a printed hex nut
+  pocket.** The pocket opens down at the head's bed (first-layer ring, zero
+  overhang) with a Ø4.5 relief above it so the bolt cannot jack against the
+  cup floor. The base has an underside M4 socket counterbore (plate sits
+  flat) and a 0.6 mm lead-in at the recess *mouth* (wide at the plate top —
+  the 2026-10-04 cone was inverted and lived above the part, Drik R3.2).
+  Recess depth is 2.4 mm (counterbore + 1.6 mm web eat the rest of the 8 mm
+  plate); the 45° flare wedges at ~0.8 mm on the recess rim, and that ring
+  is the bearing. Assemble head-to-base *before* mounting: the centre bolt
+  shares the underside with the mount. Torque path is that rim, not the
+  bolt. M4×16 was a page error — it hits PETG ~5 mm early.
 - **D6 — v1 base = M4 foot plate** (the brief's "one choice, not both").
   Evidence: a plate prints flat with zero tuned fits and mounts to a desk
   edge, a shelf underside or a wall with two M4s; a fixed-width clamp jaw
@@ -209,9 +214,16 @@ it only when you already know the printer.
   foot vs 0.3 mm recess clearance), plate filament-per-object sentence,
   Arachne/gap-fill "won't free at 0.25" line, ±20° is trim. Declined moving
   `collar-closeup` (frozen at R1; companion already added). Queued B5:
-  cylindrical tenon for the full recess —   today's cone wedges after ~1 mm;
+  cylindrical tenon for the full recess — today's cone wedges after ~1 mm;
   that rebuild adds height and a camera, not a freeze-move.
 - **Drik R3.1 (sha `352bb2ad`).** The rotate_extrude "chamfer" was a V-groove:
   the flare grows to r+0.95z, so the cut's (r, 0.5) apex left a knife-edge
   Ø14 skirt. Replaced with a 0.5 mm 45° cylinder *under* the original flare
   (`tenon_bed_chamfer`); zc() includes it. Coupon support should stay ~4%.
+- **Drik R3.2 BLOCK (sha `f6a794b4`).** Three assembly faults, none of them
+  the joint: (1) M4×16 vs 4 mm blind pocket + 8 mm plate — bolt jacks;
+  (2) mount-then-bolt order, underside is the mount face; (3) base lead-in
+  cone inverted, living above the plate. Fix: M4×8 socket-cap, underside
+  counterbore, 2.4 mm recess (c'bore + 1.6 mm web), mouth lead-in flipped,
+  Ø4.5 relief above the nut pocket, assemble head-to-base first, preview
+  seats at `tenon_seat` 0.8 mm. B5 still the cylindrical tenon.

@@ -85,3 +85,4 @@ clearance is the `fitcheck_tilt` gate, not a pretty camera.
 | 2026-09-12 | Rim capture, dome sized for the tilted stud | Pinch-cone interferes at height or kills tilt |
 | 2026-10-04 | stylelift files a fused sphere as form | Ø20 ball is a Must-fit, not a 10 mm family fillet |
 | 2026-10-04 | Jane delayed-sha: tenon bed chamfer now; cylindrical tenon queued B5 | Elephant-foot on the Ø14 first layer is cheap; rebuilding the stem to match the recess moves cameras |
+| 2026-10-04 | Drik R3.2: M4×8 + underside counterbore; recess 2.4 mm; lead-in flipped | M4×16 jacked; mount face hid the bolt; inverted cone was not a chamfer |
