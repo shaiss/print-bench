@@ -428,7 +428,7 @@ def _step_replace(text: str, job: str, step: int, old: str, new: str) -> str:
     # A job sheds the protocol lock: every one of its links can --upload-pack.
     ("pm-triage", "      GIT_ALLOW_PROTOCOL: https\n", ""),
     # The count shrinks and silently drops core.pager.
-    ("design-coach", 'GIT_CONFIG_COUNT: "4"', 'GIT_CONFIG_COUNT: "3"'),
+    ("jane-review", 'GIT_CONFIG_COUNT: "4"', 'GIT_CONFIG_COUNT: "3"'),
     # A value is weakened: hooks run again.
     ("jane-review", "GIT_CONFIG_VALUE_2: /dev/null", "GIT_CONFIG_VALUE_2: .githooks"),
     # Bare-repository discovery re-enabled.
@@ -452,15 +452,29 @@ def test_lock_guard_rejects_one_link_overriding_the_protocol():
 
 
 def test_lock_guard_rejects_the_tail_link_shedding_its_config():
-    # NEGATIVE CONTROL: the terminal Anthropic coach link (fall-through only)
-    # overrides the job-level config count from its own env block.
+    # NEGATIVE CONTROL: the terminal Anthropic coach link weakens its own
+    # step-level re-pin of the git lock (coach ships re-pin GIT_CONFIG_*
+    # against GITHUB_ENV; dropping the count here must fail the guard).
     tampered = _step_replace(
         _workflow_text(), "design-coach", -1,
-        "          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts\n",
-        "          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts\n"
-        "          GIT_CONFIG_COUNT: \"0\"\n")
+        '          GIT_CONFIG_COUNT: "4"\n',
+        '          GIT_CONFIG_COUNT: "0"\n')
     with pytest.raises(AssertionError, match="ship step 6 runs without"):
         _assert_every_ship_step_is_git_locked(tampered)
+
+
+def test_lock_guard_rejects_coach_step_shedding_ld_audit():
+    # Coach ships must pin LD_AUDIT empty — same process-start class as
+    # LD_PRELOAD / NODE_OPTIONS (GITHUB_ENV from a prior Bash link).
+    tampered = _step_replace(
+        _workflow_text(), "design-coach", 0,
+        '          LD_AUDIT: ""\n',
+        "")
+    with pytest.raises(AssertionError, match="LD_AUDIT"):
+        from test_reviewer_backstop_wiring import (
+            _assert_coach_steps_carry_their_post_surface,
+        )
+        _assert_coach_steps_carry_their_post_surface(tampered)
 
 
 def _stage_chunk(text: str, job: str) -> str:

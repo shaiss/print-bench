@@ -1542,8 +1542,22 @@ jobs:
           PYTHONNOUSERSITE: "1"
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -1616,8 +1630,22 @@ jobs:
           PYTHONNOUSERSITE: "1"
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -1690,8 +1718,22 @@ jobs:
           PYTHONNOUSERSITE: "1"
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -1771,8 +1813,22 @@ jobs:
           PYTHONNOUSERSITE: "1"
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -1854,8 +1910,22 @@ jobs:
           PYTHONNOUSERSITE: "1"
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -1939,8 +2009,22 @@ jobs:
           PYTHONNOUSERSITE: "1"
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}

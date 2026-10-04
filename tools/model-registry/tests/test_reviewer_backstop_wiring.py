@@ -266,6 +266,17 @@ def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
         assert env.get("NODE_PATH") == '""', (
             f"{at} does not clear NODE_PATH — a GITHUB_ENV write would inject "
             "modules into the Node action the same way PYTHONPATH does")
+        assert env.get("LD_AUDIT") == '""', (
+            f"{at} does not clear LD_AUDIT — a GITHUB_ENV write from an "
+            "earlier Bash link would load attacker ELF audit code into the "
+            "Node action and posting MCP child")
+        assert env.get("GIT_CONFIG_VALUE_2") == "/dev/null", (
+            f"{at} does not re-pin core.hooksPath=/dev/null — a GITHUB_ENV "
+            "rewrite of GIT_CONFIG_* would run attacker hooks under the "
+            "coach's git push")
+        assert env.get("GIT_ALLOW_PROTOCOL") == "https", (
+            f"{at} does not re-pin GIT_ALLOW_PROTOCOL=https against a "
+            "GITHUB_ENV rewrite")
 
 
 def test_every_coach_ship_step_carries_the_post_surface():
@@ -444,6 +455,9 @@ def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
      "REVIEWER_POST_STATE: reviewer-posts", "REVIEWER_POST_STATE"),
     (0, '          PYTHONPATH: ""\n', "", "PYTHONPATH"),
     (1, '          NODE_OPTIONS: ""\n', "", "NODE_OPTIONS"),
+    (2, '          LD_AUDIT: ""\n', "", "LD_AUDIT"),
+    (3, "GIT_CONFIG_VALUE_2: /dev/null", "GIT_CONFIG_VALUE_2: .githooks",
+     "hooksPath"),
 ])
 def test_coach_post_surface_guard_rejects_a_tampered_step(step, old, new, match):
     tampered = _tamper(_workflow_text(), "design-coach", step, old, new)
