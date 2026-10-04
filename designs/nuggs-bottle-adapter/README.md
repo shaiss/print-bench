@@ -42,7 +42,10 @@ PCO-1881; when unsure, the coupon is the proof.
 - **PETG note:** expect some droop on the 44° funnel ceiling — cosmetic only,
   the flow path is set by the land opening
 - **Print first:** the coupon, and set `bottle_tol` from the ring that grips
-  a real bottle best (see below)
+  a real bottle best (see below). The coupon being heavier and slower than
+  the adapter body is intentional: a full throat rehearsal (port stub +
+  bottle rings), not a bug to "fix" (~4 h 57 m / 62.55 g vs the adapter's
+  ~4 h 10 m / 53.16 g)
 
 ## Parameters
 
@@ -67,7 +70,9 @@ override on the command line with `-D 'bottle_tol=0.22'`.
    skipping; put that number in `bottle_tol` and print the adapter.
 2. Screw the bottle into the adapter mouth-down until its lip seats on the
    land (about 1.8 turns from first contact). The bottle's weight rests on
-   the printed land — the thread only keeps it from unscrewing.
+   the printed land — the thread only keeps it from unscrewing. Any rotational
+   "label clock" for which way the bottle brand faces the room is fine
+   mechanically; there is no preferred orientation.
 3. Quarter-turn the coupling into any NUGGS port, the same as every module.
 4. If the bottle bottoms out before seating (you feel the tamper ring hit),
    your bottle's finish runs long — the design clears the standard's 10.8 mm
