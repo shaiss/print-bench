@@ -73,6 +73,15 @@
 #     in .github/reeve.conf (#441's vocabulary), counted across this run's
 #     wrapper invocations in a state file — a bash wrapper has no in-process
 #     counter to keep, unlike the scout/growth MCP tools.
+#   * text binding (the #760 security finding): the marker carries
+#     `text=<16 hex>`, the digest of the issue text this greenlight was drafted
+#     on — sha256 of the bytes `title + "\n" + (body // "") + "\n"` (what
+#     `gh api … --jq` emits), first 16 hex, the definition tools/reeve's
+#     approval.text_digest mirrors byte for byte. The standing docs-only
+#     auto-approve fires only while the live text still hashes to it, so an
+#     author editing the issue after the greenlight cannot ride the rule. The
+#     read is LIVE at post time and a failed read aborts the post
+#     (fail-closed: a greenlight with no binding never posts).
 #   * idempotency: refuse when the issue already carries a greenlight marker
 #     comment BY A TRUSTED AUTHOR (#546: the workflow's own bot login or a
 #     write-level collaborator — the same author test the approval poll
@@ -253,6 +262,24 @@ reject_if_greenlighted() {
   done <<<"$authors"
 }
 
+# The issue-text digest the marker binds (#760). ONE canonical definition,
+# mirrored by tools/reeve's approval.text_digest: sha256 over the exact bytes
+# `title + "\n" + (body // "") + "\n"` — gh's --jq prints a string result
+# raw plus one trailing newline, and the bytes are PIPED into sha256sum, never
+# captured through $(...) first (which would strip trailing newlines and
+# change the digest of a body that ends in blank lines). pipefail makes a
+# failed `gh api` read fail the pipeline instead of hashing empty input; the
+# caller aborts the post on any failure or a malformed result.
+TEXT_DIGEST_JQ='.title + "\n" + (.body // "")'
+issue_text_digest() {
+  local n="$1" d
+  d="$(set -o pipefail; gh api "repos/$repo/issues/$n" --jq "$TEXT_DIGEST_JQ" | sha256sum)" \
+    || return 1
+  d="${d:0:16}"
+  [[ "$d" =~ ^[0-9a-f]{16}$ ]] || return 1
+  printf '%s' "$d"
+}
+
 # Offline proof that every enforcement above still fires. Nothing here touches
 # the network or a real repository: the wrapper is re-invoked against a
 # recording gh stub that answers the fixed subcommands from fixtures, and any
@@ -305,6 +332,23 @@ case "$1 $2" in
   "issue list")
     [ -f "$GH_FIXTURES/issue-list" ] && cat "$GH_FIXTURES/issue-list"
     exit 0 ;;
+  "api repos/"*"/issues/"*)
+    # The #760 text-binding read: repos/<o>/<r>/issues/<n> --jq <filter>.
+    # The filter must be the canonical one (an edited filter would silently
+    # change the digest); it is run through real jq over an issue-<n>.json
+    # fixture, or a default {"title":"Parked <n>","body":"Body <n>"}.
+    n="${2##*/}"
+    if [ -f "$GH_FIXTURES/fail-issue-$n" ]; then
+      echo "gh stub: simulated issue read failure for #$n" >&2; exit 1
+    fi
+    [ "${3:-}" = "--jq" ] && [ "${4:-}" = '.title + "\n" + (.body // "")' ] \
+      || { echo "gh stub: issue read must use the canonical digest filter, got: '${4:-}'" >&2; exit 9; }
+    if [ -f "$GH_FIXTURES/issue-$n.json" ]; then
+      jq -r "$4" "$GH_FIXTURES/issue-$n.json"
+    else
+      printf '{"title":"Parked %s","body":"Body %s"}' "$n" "$n" | jq -r "$4"
+    fi
+    exit $? ;;
   "api repos/"*"collaborators/"*"/permission")
     # The marker-author trust read (#546): repos/<o>/<r>/collaborators/<login>
     # /permission --jq .permission. Answered ONLY from a declared
@@ -355,6 +399,47 @@ STUB
   }
   posts() { grep -c '^===POST===' "$tmp/posts" 2>/dev/null || true; }
   reset() { : > "$tmp/posts"; : > "$tmp/calls"; : > "$tmp/state"; }
+  # The canonical digest computed by an INDEPENDENT route (printf, not jq):
+  # sha256 of title + "\n" + body + "\n", first 16 hex — what the marker's
+  # text= must equal and what tools/reeve's approval.text_digest computes.
+  digest_of() { printf '%s\n%s\n' "$1" "$2" | sha256sum | cut -c1-16; }
+
+  # The #760 text binding: the marker's text= is the digest of the issue's
+  # LIVE title+body, byte-exact — trailing blank lines, CRLF and unicode
+  # survive (the bytes are piped, never captured through $(...)), and a null
+  # body hashes as "". Python's approval.text_digest pins the same values.
+  reset
+  printf '%s' '{"title":"Docs — ünïcödé ✓","body":"line one\r\nline two\n\n\n"}' > "$fx/issue-72.json"
+  run_w "$repo_key" - post-greenlight 72 --verdict yes --body "GREENLIGHT: YES
+Charter line N6: the tooling must not outgrow the designs it serves." >/dev/null
+  first="$(awk '/^===POST===/{getline; print; exit}' "$tmp/posts")"
+  # Hash the exact bytes (title, "\n", body, "\n") — the body's own trailing
+  # newlines included, which digest_of's $(...)-captured argument could not carry.
+  want="$( { printf '%s\n' 'Docs — ünïcödé ✓'; printf 'line one\r\nline two\n\n\n\n'; } | sha256sum | cut -c1-16)"
+  [ "$first" = "<!-- reeve-greenlight v1 issue=72 verdict=yes text=$want -->" ] \
+    || { echo "FAIL  selftest: the text digest is not byte-exact over trailing newlines/CRLF/unicode: '$first' (want text=$want)"; return 1; }
+  [ "$want" = "12e3e433b82bf3ce" ] \
+    || { echo "FAIL  selftest: the digest definition drifted from the Python-pinned value: $want"; return 1; }
+  reset
+  printf '%s' '{"title":"Null body","body":null}' > "$fx/issue-73.json"
+  run_w "$repo_key" - post-greenlight 73 --verdict yes --body "GREENLIGHT: YES
+Charter line N6: the tooling must not outgrow the designs it serves." >/dev/null
+  first="$(awk '/^===POST===/{getline; print; exit}' "$tmp/posts")"
+  [ "$first" = "<!-- reeve-greenlight v1 issue=73 verdict=yes text=$(digest_of 'Null body' '') -->" ] \
+    || { echo "FAIL  selftest: a null body did not hash as \"\": '$first'"; return 1; }
+  echo "ok    selftest: the marker binds text= to the issue text, byte-exact (CRLF, trailing newlines, unicode, null body)"
+
+  # Refusal (#760): a failed issue read aborts the post — a greenlight that
+  # cannot bind its text never publishes — and consumes no cap.
+  reset
+  : > "$fx/fail-issue-74"
+  if run_w "$repo_key" - post-greenlight 74 --verdict yes --body "GREENLIGHT: YES
+Charter line N6: the tooling must not outgrow the designs it serves." 2>/dev/null; then
+    echo "FAIL  selftest: a failed issue-text read still posted"; return 1
+  fi
+  [ "$(posts)" = "0" ] || { echo "FAIL  selftest: a failed issue-text read published a post"; return 1; }
+  [ "$(post_count "$tmp/state")" = "0" ] || { echo "FAIL  selftest: a failed issue-text read consumed cap"; return 1; }
+  echo "ok    selftest: a failed issue-text read aborts the post (fail-closed, no cap spent)"
 
   # Refusal: no --verdict at all, and a --verdict that is neither yes nor no.
   # Nothing may be published either way.
@@ -434,7 +519,7 @@ reasoning"; then
   fi
   [ "$(posts)" = "1" ] || { echo "FAIL  selftest: the untrusted-marker case published $(posts) posts (want 1)"; return 1; }
   first="$(awk '/^===POST===/{getline; print; exit}' "$tmp/posts")"
-  [ "$first" = "<!-- reeve-greenlight v1 issue=90 verdict=yes -->" ] \
+  [ "$first" = "<!-- reeve-greenlight v1 issue=90 verdict=yes text=$(digest_of 'Parked 90' 'Body 90') -->" ] \
     || { echo "FAIL  selftest: the untrusted-marker post's marker line is wrong: '$first'"; return 1; }
   echo "ok    selftest: an untrusted author's pasted marker does NOT refuse the post"
 
@@ -475,7 +560,7 @@ reasoning"; then
 GREENLIGHT: YES
 Charter line N6: the tooling must not outgrow the designs it serves." >/dev/null
   first="$(awk '/^===POST===/{getline; print; exit}' "$tmp/posts")"
-  [ "$first" = "<!-- reeve-greenlight v1 issue=40 verdict=yes -->" ] \
+  [ "$first" = "<!-- reeve-greenlight v1 issue=40 verdict=yes text=$(digest_of 'Parked 40' 'Body 40') -->" ] \
     || { echo "FAIL  selftest: the posted marker line is not the wrapper's own: '$first'"; return 1; }
   if grep -q 'verdict=no' "$tmp/posts"; then
     echo "FAIL  selftest: a forged marker verdict survived into the post"; return 1
@@ -523,7 +608,7 @@ two verdict lines"; then
 Charter line N6: the tooling must not outgrow the designs it serves." >/dev/null
   posted="$(sed -n '/^===POST===$/,$p' "$tmp/posts" | tail -n +2)"
   expected="$(cat <<'SHAPE'
-<!-- reeve-greenlight v1 issue=70 verdict=yes -->
+<!-- reeve-greenlight v1 issue=70 verdict=yes text=@TEXT@ -->
 
 GREENLIGHT: YES
 Charter line N6: the tooling must not outgrow the designs it serves.
@@ -531,6 +616,7 @@ Charter line N6: the tooling must not outgrow the designs it serves.
 React 👍 to approve this greenlight, or 👎 to overrule it. Only reactions from accounts with write access on this repo count; the next scheduled run polls them.
 SHAPE
 )"
+  expected="${expected/@TEXT@/$(digest_of 'Parked 70' 'Body 70')}"
   [ "$posted" = "$expected" ] \
     || { echo "FAIL  selftest: the assembled yes-comment is not the pinned shape:"; printf '%s\n' "--- got ---" "$posted" "--- want ---" "$expected"; return 1; }
   echo "ok    selftest: a YES comment assembles marker + verdict line + reasoning + approval footer"
@@ -544,7 +630,7 @@ SHAPE
 This is a shape call on one design's look; it belongs to the design PM (/pm) and the human lead." >/dev/null
   posted="$(sed -n '/^===POST===$/,$p' "$tmp/posts" | tail -n +2)"
   expected="$(cat <<'SHAPE2'
-<!-- reeve-greenlight v1 issue=71 verdict=route -->
+<!-- reeve-greenlight v1 issue=71 verdict=route text=@TEXT@ -->
 
 GREENLIGHT: ROUTE
 This is a shape call on one design's look; it belongs to the design PM (/pm) and the human lead.
@@ -552,6 +638,7 @@ This is a shape call on one design's look; it belongs to the design PM (/pm) and
 Design-taste decision — routed to the design PM and the human lead. This note sets no gate verdict; a reaction here approves nothing.
 SHAPE2
 )"
+  expected="${expected/@TEXT@/$(digest_of 'Parked 71' 'Body 71')}"
   [ "$posted" = "$expected" ] \
     || { echo "FAIL  selftest: the assembled route-comment is not the pinned shape"; printf '%s\n' "--- got ---" "$posted" "--- want ---" "$expected"; return 1; }
   echo "ok    selftest: a ROUTE comment assembles marker + routing note + the no-verdict footer"
@@ -580,7 +667,7 @@ reasoning"; then
 Charter line N6: the tooling must not outgrow the designs it serves." >/dev/null
   posted="$(sed -n '/^===POST===$/,$p' "$tmp/posts" | tail -n +2)"
   expected="$(cat <<'SHAPE3'
-<!-- reeve-greenlight v1 issue=82 verdict=yes arm=1 -->
+<!-- reeve-greenlight v1 issue=82 verdict=yes arm=1 text=@TEXT@ -->
 
 GREENLIGHT: YES
 Charter line N6: the tooling must not outgrow the designs it serves.
@@ -589,6 +676,7 @@ React 👍 to approve this greenlight, or 👎 to overrule it. Only reactions fr
 Approving this one also applies `autonomy-ok`, arming the scheduled backlog burn to pick the work up and land it as a draft PR a human still merges.
 SHAPE3
 )"
+  expected="${expected/@TEXT@/$(digest_of 'Parked 82' 'Body 82')}"
   [ "$posted" = "$expected" ] \
     || { echo "FAIL  selftest: the assembled armed-comment is not the pinned shape"; printf '%s\n' "--- got ---" "$posted" "--- want ---" "$expected"; return 1; }
   echo "ok    selftest: an ARMED comment carries arm=1 in the marker and discloses the arming in the footer"
@@ -602,7 +690,7 @@ SHAPE3
 GREENLIGHT: YES
 Charter line N6: the tooling must not outgrow the designs it serves." >/dev/null
   first="$(awk '/^===POST===/{getline; print; exit}' "$tmp/posts")"
-  [ "$first" = "<!-- reeve-greenlight v1 issue=83 verdict=yes -->" ] \
+  [ "$first" = "<!-- reeve-greenlight v1 issue=83 verdict=yes text=$(digest_of 'Parked 83' 'Body 83') -->" ] \
     || { echo "FAIL  selftest: a forged arm bit changed the marker: '$first'"; return 1; }
   if grep -q 'arm=1' "$tmp/posts"; then
     echo "FAIL  selftest: a forged arm=1 survived into the post"; return 1
@@ -715,9 +803,11 @@ labels: {{range .labels}}{{.name}} {{end}}
     require_selected_issue "$n"              # only a workflow-selected issue
     cap_check "$(greenlight_cap_value)" "$state"  # bounded per run
     reject_if_greenlighted "$n"              # only where none exists (fail-closed)
+    text="$(issue_text_digest "$n")" \
+      || die "post-greenlight: could not read #$n to bind the greenlight to its text (#760) — nothing posted"
     marker="<!-- reeve-greenlight v1 issue=$n verdict=$verdict"
     [ "$arm" -eq 0 ] || marker="$marker arm=1"
-    marker="$marker -->"
+    marker="$marker text=$text -->"
     gh issue comment "$n" --repo "$repo" --body "$marker
 
 $clean

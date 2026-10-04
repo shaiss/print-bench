@@ -22,15 +22,16 @@ size = 20;
 // 45-degree chamfer on the bottom edges so the first layer releases cleanly (mm, 0 to disable)
 bottom_chamfer = 0.6;
 
+/* [Sweep] */
+// Fixed edge lengths on the multi-size strip (mm); charter backlog B1
+sweep_sizes = [5, 10, 20, 30];
+// Air gap between cubes on the strip layout / plate (mm) — not fused, so a warp
+// on one cube cannot pull its neighbours (same idea as render.sh --sweep).
+sweep_gap = 4;
+
 /* [Quality] */
 // Iterating: 32. Production: 64+.
 $fn = 64;
-
-// Fixed sizes for the multi-size sweep strip (charter backlog B1).
-sweep_sizes = [5, 10, 20, 30];
-// Air gap between cubes on the strip layout / plate — not fused, so a warp
-// on one cube cannot pull its neighbours (same idea as render.sh --sweep).
-sweep_gap = 4;
 
 function sweep_x(i, sizes = sweep_sizes, gap = sweep_gap) =
     i <= 0 ? 0 : sweep_x(i - 1, sizes, gap) + sizes[i - 1] + gap;

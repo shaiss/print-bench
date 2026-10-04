@@ -81,6 +81,7 @@ _These parts come off the bed ready to move — free each one as its card says, 
 | <a href="designs/desiccant-capsule/"><img src="designs/desiccant-capsule/previews/contact-sheet.png" width="320" alt="desiccant-capsule previews"></a> | **[desiccant-capsule](designs/desiccant-capsule/)** — Refillable two-part capsule for loose silica gel beads, lived-in filament dry-boxes. Perforated body lets air/moisture reach the beads; screw-on lid with real threads (not press-fit) and a ribbed grip edge so it can be opened with dry-box gloves on. Must print on FDM with no supports on either part. |
 | <a href="designs/extrusion-shelf-bracket/"><img src="designs/extrusion-shelf-bracket/previews/contact-sheet.png" width="320" alt="extrusion-shelf-bracket previews"></a> | **[extrusion-shelf-bracket](designs/extrusion-shelf-bracket/)** — A shelf corner bracket that locks into the **side slot of standard 2020 T-slot aluminum extrusion**: hammer-head lugs on the back of the plate slide along the slot, so a shelf board attaches anywhere along a rail with no T-nuts and no frame teardown. Horizontal arm carries the board between 45° gussets and a front stop lip. One printable part + a fit coupon. Brief: issue #283 (design-brief, `workshop-utility` style). |
 | <a href="designs/nuggs-yard/"><img src="designs/nuggs-yard/previews/contact-sheet.png" width="320" alt="nuggs-yard previews"></a> | **[nuggs-yard](designs/nuggs-yard/)** — An open-top run for an adult Syrian hamster's **playpen** — free-roam time outside the cage. The ask was "loops and twists, turns, branches, all the stuff to keep him busy". It is a floor-standing kit of modules the owner lays out themselves, not a fixed object. Despite the `nuggs-` name, it is a sibling of the NUGGS tunnel system, not a module in it — its lap-skirt joint does not mate with the NUGGS port. |
+| <a href="designs/ovodyo/"><img src="designs/ovodyo/previews/contact-sheet.png" width="320" alt="ovodyo previews"></a> | **[ovodyo](designs/ovodyo/)** — A clean-room, print-bench-native re-creation of Mectolab's "ovodyo" kinetic dice-ball clock, built as the **v0 base** every issue in the [#599](https://github.com/shaiss/print-bench/issues/599) improvement backlog modifies. The reference study and the improvement brainstorm were produced in-session (design study + `ovodyo-improvement-brainstorm.md`). |
 | <a href="designs/preroll-elevator/"><img src="designs/preroll-elevator/previews/contact-sheet.png" width="320" alt="preroll-elevator previews"></a> | **[preroll-elevator](designs/preroll-elevator/)** — A chapstick / glue-stick–style twist tube that stores and *presents* pre-rolls. Unscrew the hex cap-nut lid, twist the hex knob at the base → a central screw raises an internal elevator carrying 4 pre-rolls in a ring so their tops rise out the top to grab; twist back to retract, cap the lid to close and protect. Styled deliberately as an **industrial hex bolt with a nut on top** — the mechanical look is the point, and the interior echoes it (the elevator is literally a nut climbing a bolt). |
 | <a href="designs/sbc-case/"><img src="designs/sbc-case/previews/contact-sheet.png" width="320" alt="sbc-case previews"></a> | **[sbc-case](designs/sbc-case/)** — A hardware-rich single-board-computer case (Raspberry Pi 4 primary target) that is deliberately the **reference / stress-test design for the assembly-instructions feature** (issue #158): it ships an `assembly.conf` declaring real `vitamin:` entries — board, inserts, three screw types, washers, fan — so it exercises the NopSCADlib vitamin path, the BOM collection pass, and the GPL-3.0 product-page disclosure no existing design carries. |
 <!-- gallery:end -->
@@ -267,6 +268,12 @@ surfaces studies awaiting a read live in
   `print-in-place.scad` (print-in-place slide rails, tabs, end-stops,
   sacrificial membranes and a teardrop-bore hinge, extracted from the
   archived sushi-battleship),
+  `compliant.scad` (flexure primitives — the bistable snap-through arch and
+  weld-safe flexure-root fillets, harvested from the compliant designs;
+  issue #202 stage 1),
+  `spaceframe.scad` (parametric space-frame trusses — warren/pratt/vierendeel
+  topologies, cosine taper to needle ends, a separate core/web split for
+  two-tone exports),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
   `stencil-glyphs.scad` (clean-room 2D stencil digits 0-9 with bridged
@@ -369,11 +376,22 @@ surfaces studies awaiting a read live in
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):
-    every reviewer ship step in `auto-review.yml` must pass its backstop, the
-    backstop must deny the whole render toolchain (openscad, xvfb-run,
-    prusa-slicer, printcheck, the render/gate/check scripts) and never deny
-    the read surface a review needs; `--selftest` with a positive and a
-    negative control, run by check.sh.
+    each backstop must deny every Bash allow outside an exact review-surface
+    exemption (gh, jq, mktemp; the reviewer's also keeps PM triage's
+    `chunk-helper.sh`, the coach's git), always deny the render toolchain
+    (apt, openscad, xvfb-run, prusa-slicer, printcheck, the render/gate/check
+    scripts, session-start.sh) and the gh escape hatches, and never deny the
+    review surface (gh, the read tools; git checkout/add/commit/push and
+    Write/Edit too for the coach). A deny list cannot contain git, so the
+    reviewers get none (`Bash(git:*)` denied; the workflow stages the PR
+    head for Jane and Drik) and the coach's git is fenced to local verbs;
+    `--selftest` with a positive and a negative control per rule, run by
+    check.sh. The workflow half — every reviewer ship step in
+    `auto-review.yml` passes its backstop under `dontAsk` and runs under the
+    git environment lock (`GIT_ALLOW_PROTOCOL=https` plus command-scope
+    config) — is pinned by
+    `tools/model-registry/tests/test_reviewer_backstop_wiring.py` and
+    `test_reviewer_git_containment.py`.
   - `spike-converter-perms-check.sh` — the same drift check for the scheduled
     spike-to-brief converter's own deny backstop
     (`.claude/spike-converter-settings.json`, #245 child C / issue #440), the
@@ -411,8 +429,9 @@ surfaces studies awaiting a read live in
     `reviewer-signoff` required commit status (posted by `auto-review.yml`), the
     second required context that makes Jane and Drik actually run and sign off
     before a design PR merges. Fail-closed: a design PR without two clean,
-    current sign-offs blocks (a sign-off survives a non-design push via
-    design-tree currency, and must acknowledge a live `fusecheck` STRONG WARN);
+    current sign-offs blocks (a sign-off survives a non-design push, or a
+    previews-only all-noise regen commit-back, via its `key` currency, and must
+    acknowledge a live `fusecheck` STRONG WARN);
     a non-design PR and the `no-auto-review`/`signoff-override` labels pass so a
     required check never strands a PR it wasn't meant to gate. All the policy
     lives here behind a `--selftest` with a negative control per row
@@ -473,6 +492,12 @@ surfaces studies awaiting a read live in
   - `shot-spec.sh` — authors `shots.conf`/`lifestyle.conf` from a PM's
     art-direction brief (named views/colors, freeze and disclosure enforced);
     the mechanics behind the `/art-direction` skill
+  - `concept-preview.sh` — a design's four blueprint-style concept sheets
+    (exterior, cutaway, top section, exploded + bill of parts) as checked
+    SVGs from its `preview-spec.conf`, in one house drafting style; nothing
+    is written unless every sheet parses, stays self-contained and in bounds,
+    and has no overlapping labels — the mechanics behind the
+    `/concept-preview` skill
   - `lifestyle-clip.sh` — tier-2 AI motion clips from `motion.conf` via the
     Z.AI Vidu 2 image-to-video API, transcoded to a budgeted GIF (cosmetic,
     geometry-approximate, motion illustrative, disclosed)
@@ -493,6 +518,12 @@ surfaces studies awaiting a read live in
   - `regen-stamp.sh` — a design's regeneration input fingerprint; CI skips
     re-rendering previews/GIFs/product shots when it matches the committed
     stamp
+  - `preview-diff.sh` — the regen-faithfulness check (issue #470): classes
+    each regenerated preview against the committed bytes it replaces (noise /
+    content / resized / new / removed, a pixel-count band sized for
+    cross-runner render wobble) and warns when a design's previews changed
+    though its own sources did not. Advisory — run by CI's regen job just
+    before it commits, with a `--selftest`
   - `field-test.sh` — appends a FIELD-TEST entry (one real print's result) to
     a design's NOTES.md; the tested core of the "Log a print result" Action
     (issue #101)
@@ -538,6 +569,12 @@ surfaces studies awaiting a read live in
   `product-shot.sh`, which turns a design's own STL export into the
   photographed-looking hero image on its product page — see its
   [README](tools/photoshot/README.md)
+- `tools/concept-preview/` — the blueprint concept-sheet emitter behind
+  `concept-preview.sh`: one drafting system defined once (lifted from the
+  approved pre-roll elevator canvas, with local fonts so no served byte
+  reaches the network), six pure drafting primitives, a fail-loud spec
+  parser, and an independent checker for XML, bounds and label collisions —
+  see its [README](tools/concept-preview/README.md)
 - `tools/lineage/` — the lineage resolver: reads each design's
   `derives.conf` and its include lines, and answers who derives from whom —
   see its [README](tools/lineage/README.md)

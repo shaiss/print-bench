@@ -66,7 +66,7 @@ Customizer sections; override on the command line with `-D 'size=25'` or
 
 Nothing to assemble. Print a cube (or the strip plate), then measure the
 X, Y, and Z faces with calipers and compare against the number engraved on
-top. If you want a different single reference size, change `size` and
+top — on X and Y, measure above the bottom chamfer, not on the bed footprint. If you want a different single reference size, change `size` and
 reprint — the marker follows automatically. The strip gives four reference
 sizes in one print so you can see whether error scales with size.
 
