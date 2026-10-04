@@ -138,6 +138,64 @@ REQUIRED_DENIES = [
     {"mcp__growth_twitter", "mcp__growth_twitter__post_tweet"},
 ] + POSTURE_DENY
 
+# Escape-hatch floor: git/gh subcommands and global options that are
+# arbitrary-command-execution or credential-exfil vectors. The blanket
+# Bash(git:*) / Bash(gh:*) allows ARE the review surface (exempt from coverage
+# rule 1), and allow rules merge additively so the backstop cannot narrow them
+# to read verbs — deny always beats allow but allow cannot be subtracted. So
+# these dangerous verbs/options must be denied verbatim as a FLOOR, the same
+# way the render toolchain is, or a prompt-injected reviewer runs shell through
+# git/gh's own hooks (a config-injected pager, an alias bound to a shell, an
+# --exec-path or submodule/bisect/rebase/filter-branch/difftool runner) or
+# exfils a token. Present in BOTH backstops; none is a verb a review runs —
+# SHARED_PROBES proves the real surface (git diff/log/fetch/checkout, and the
+# coach's add/commit/push; gh pr/issue/api) stays open under these denies.
+#   git --paginate / -p is deliberately NOT denied: a pager is set only via
+# config (denied) or the GIT_PAGER/PAGER env, and an env-prefixed command
+# ("GIT_PAGER=x git -p log") does not start with "git", so Bash(git:*) never
+# grants it in the first place — the hole closes at the allow, not here.
+ESCAPE_HATCH_DENIES = [
+    # git: global options evaluated before the verb (config/pager/exec-path
+    # injection — the `:*`→prefix match covers both spaced `git -c x=y` and
+    # combined `git -cx=y`), then the verbs that run a user command or move a
+    # credential.
+    {"Bash(git -c:*)"}, {"Bash(git -C:*)"},
+    {"Bash(git --config-env:*)"}, {"Bash(git --exec-path:*)"},
+    {"Bash(git config:*)"}, {"Bash(git submodule:*)"},
+    {"Bash(git bisect:*)"}, {"Bash(git rebase:*)"},
+    {"Bash(git filter-branch:*)"}, {"Bash(git difftool:*)"},
+    {"Bash(git mergetool:*)"}, {"Bash(git daemon:*)"},
+    {"Bash(git archive:*)"}, {"Bash(git upload-pack:*)"},
+    {"Bash(git upload-archive:*)"}, {"Bash(git credential:*)"},
+    # gh: alias/extension bind or run a shell; config set swaps pager/editor/
+    # browser to one; codespace runs remote commands; auth/secret/ssh-key/
+    # gpg-key print or plant credentials; workflow/run trigger or re-run CI.
+    {"Bash(gh alias:*)"}, {"Bash(gh extension:*)"}, {"Bash(gh ext:*)"},
+    {"Bash(gh config:*)"}, {"Bash(gh codespace:*)"}, {"Bash(gh cs:*)"},
+    {"Bash(gh secret:*)"}, {"Bash(gh ssh-key:*)"}, {"Bash(gh gpg-key:*)"},
+    {"Bash(gh auth:*)"}, {"Bash(gh workflow:*)"}, {"Bash(gh run:*)"},
+]
+
+# Representative dangerous invocations each floor rule must actually BLOCK —
+# the negative half of the floor (presence alone could pass with a rule that is
+# spelled so it matches nothing). Benign placeholder args; these are test
+# strings, not runnable attacks. Each must be blocked by >= 1 deny.
+ESCAPE_PROBES = [
+    "git -c core.pager=x log", "git -cx=y status",
+    "git -C /path/to/repo status",
+    "git --config-env=x=y status", "git --exec-path=/path log",
+    "git config core.pager x", "git submodule foreach x",
+    "git bisect run x", "git rebase --exec x HEAD~1",
+    "git filter-branch --tree-filter x HEAD",
+    "git difftool -x x HEAD", "git mergetool",
+    "git daemon --export-all", "git archive --remote=x x HEAD",
+    "git upload-pack .", "git upload-archive .", "git credential fill",
+    "gh alias set x y", "gh extension install o/r", "gh ext exec x",
+    "gh config set pager x", "gh codespace ssh", "gh cs ssh",
+    "gh secret list", "gh ssh-key add k", "gh gpg-key add k",
+    "gh auth token", "gh workflow run x", "gh run rerun 1",
+]
+
 # A tool-rule specifier that scopes nothing — `Read(**)` denies Read outright.
 BLANKET_SPECS = {"", "*", "**", "/**", "./**", "**/*", "//**"}
 
@@ -176,6 +234,11 @@ missing = [r for r in allow
 # 2 + 4. The floor and the posture, asserted whatever settings.json says.
 missing_required = [sorted(alts) for alts in REQUIRED_DENIES
                     if not (alts & deny_set)]
+# 2b. The git/gh escape-hatch floor: present verbatim AND actually matching.
+missing_escape = [sorted(alts) for alts in ESCAPE_HATCH_DENIES
+                  if not (alts & deny_set)]
+unblocked_escape = [p for p in ESCAPE_PROBES
+                    if not any(bash_deny_blocks(d, p) for d in deny)]
 # 3 + 4. Nothing may block the review surface or a tool the backstop needs.
 blocked = [(d, p) for d in deny for p in PROBES if bash_deny_blocks(d, p)]
 blocked += [(d, t) for d in deny for t in NEVER_DENY_TOOLS
@@ -207,6 +270,23 @@ if missing_required:
         f"{kind}'s file-tool posture) are missing from {backstop_path}:\n")
     for alts in missing_required:
         sys.stderr.write(f"    {' or '.join(alts)}\n")
+if missing_escape:
+    ok = False
+    sys.stderr.write(
+        f"git/gh escape-hatch floor denies are missing from {backstop_path} "
+        f"(the Bash(git:*)/Bash(gh:*) review surface is exempt from coverage, "
+        f"so these command-execution/credential vectors must be denied "
+        f"explicitly or the {kind} inherits them):\n")
+    for alts in missing_escape:
+        sys.stderr.write(f"    {' or '.join(alts)}\n")
+if unblocked_escape:
+    ok = False
+    sys.stderr.write(
+        f"escape-hatch floor denies in {backstop_path} do not actually block "
+        f"these invocations (a rule is present but spelled so it matches "
+        f"nothing):\n")
+    for p in unblocked_escape:
+        sys.stderr.write(f"    {p}\n")
 if dupes:
     ok = False
     sys.stderr.write(
@@ -272,7 +352,7 @@ EOF
   # The matching good backstops: the floor, the growth servers, the covered
   # allows, and each one's posture.
   cat > "$tmp/reviewer.json" <<'EOF'
-{"permissions":{"deny":["Bash(apt:*)","Bash(apt-get:*)","Bash(openscad:*)","Bash(openscad-nightly:*)","Bash(xvfb-run:*)","Bash(prusa-slicer:*)","Bash(printcheck:*)","Bash(./scripts/gate.sh:*)","Bash(scripts/gate.sh:*)","Bash(./scripts/render.sh:*)","Bash(scripts/render.sh:*)","Bash(./scripts/check.sh:*)","Bash(scripts/check.sh:*)","Bash(.claude/hooks/session-start.sh:*)","Bash(./.claude/hooks/session-start.sh:*)","mcp__growth_queue","mcp__growth_twitter","Bash(tee:*)","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(apt:*)","Bash(apt-get:*)","Bash(openscad:*)","Bash(openscad-nightly:*)","Bash(xvfb-run:*)","Bash(prusa-slicer:*)","Bash(printcheck:*)","Bash(./scripts/gate.sh:*)","Bash(scripts/gate.sh:*)","Bash(./scripts/render.sh:*)","Bash(scripts/render.sh:*)","Bash(./scripts/check.sh:*)","Bash(scripts/check.sh:*)","Bash(.claude/hooks/session-start.sh:*)","Bash(./.claude/hooks/session-start.sh:*)","mcp__growth_queue","mcp__growth_twitter","Bash(git -c:*)","Bash(git -C:*)","Bash(git --config-env:*)","Bash(git --exec-path:*)","Bash(git config:*)","Bash(git submodule:*)","Bash(git bisect:*)","Bash(git rebase:*)","Bash(git filter-branch:*)","Bash(git difftool:*)","Bash(git mergetool:*)","Bash(git daemon:*)","Bash(git archive:*)","Bash(git upload-pack:*)","Bash(git upload-archive:*)","Bash(git credential:*)","Bash(gh alias:*)","Bash(gh extension:*)","Bash(gh ext:*)","Bash(gh config:*)","Bash(gh codespace:*)","Bash(gh cs:*)","Bash(gh secret:*)","Bash(gh ssh-key:*)","Bash(gh gpg-key:*)","Bash(gh auth:*)","Bash(gh workflow:*)","Bash(gh run:*)","Bash(tee:*)","Write","Edit","NotebookEdit"]}}
 EOF
   derive "$tmp/reviewer.json" "$tmp/coach.json" deny -Write -Edit \
     "+Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)" \
@@ -325,6 +405,30 @@ EOF
   # Hygiene: a duplicated rule.
   derive "$C" "$tmp/c.json" deny "+Bash(./scripts/gate.sh:*)"
   expect fail "a duplicate deny rule fails the check" "$S" "$tmp/c.json" coach
+
+  # Escape-hatch floor: dropping ANY one of the git/gh command-execution denies
+  # must fail the check — the negative control per floor rule, in BOTH
+  # backstops (they share the floor). The complete-backstop pass cases above
+  # are the positive control.
+  for f in \
+    "Bash(git -c:*)" "Bash(git -C:*)" "Bash(git --config-env:*)" \
+    "Bash(git --exec-path:*)" "Bash(git config:*)" "Bash(git submodule:*)" \
+    "Bash(git bisect:*)" "Bash(git rebase:*)" "Bash(git filter-branch:*)" \
+    "Bash(git difftool:*)" "Bash(git mergetool:*)" "Bash(git daemon:*)" \
+    "Bash(git archive:*)" "Bash(git upload-pack:*)" "Bash(git upload-archive:*)" \
+    "Bash(git credential:*)" "Bash(gh alias:*)" "Bash(gh extension:*)" \
+    "Bash(gh ext:*)" "Bash(gh config:*)" "Bash(gh codespace:*)" "Bash(gh cs:*)" \
+    "Bash(gh secret:*)" "Bash(gh ssh-key:*)" "Bash(gh gpg-key:*)" \
+    "Bash(gh auth:*)" "Bash(gh workflow:*)" "Bash(gh run:*)"; do
+    derive "$R" "$tmp/r.json" deny "-$f"
+    expect fail "dropping escape-hatch floor deny $f fails the check (reviewer)" "$S" "$tmp/r.json" reviewer
+    derive "$C" "$tmp/c.json" deny "-$f"
+    expect fail "dropping escape-hatch floor deny $f fails the check (coach)" "$S" "$tmp/c.json" coach
+  done
+  # And the floor must not cost the real surface: the complete coach backstop
+  # (which carries the floor) still passes with its push verbs intact — the
+  # per-rule drops above would also catch a floor deny that swallowed a probe.
+  expect pass "the floor leaves the coach's git add/commit/push surface open" "$S" "$C" coach
 
   echo "      selftest: $n cases"
   return "$bad"
