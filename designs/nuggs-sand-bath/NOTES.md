@@ -46,7 +46,7 @@ The brief's "port-axis vertical standing on the sector tips, dish mouth up" is
 
 They cannot be one pose: a mouth-up *print* would put the dish floor and the
 far wall over the trough as flat ceilings, and a port-vertical *use* would point
-the port at the sky. `part = "hero"` is the use-pose preview (`rotate([-90,0,0])`
+the port at the sky. `part = "hero"` is the use-pose preview (`rotate([90,0,0])`
 of the same solid); `part = "body"` is the printable print-pose part.
 
 ## Run-break ruling (brief open question 1)
@@ -79,8 +79,10 @@ together: the welfare source behind the brief's floor says 2–3 cm (15 is the
 floor, not the target), and 18 is what closes the ~250 mL capacity row under
 the 199 mm print ceiling while keeping `lip_h − sand_depth ≥ 2` (asserted; at
 18 it sits at exactly 2 — sand line 2 mm below the port invert, so a quarter-turn
-shake does not feed the run). `-D sand_depth=20` is a valid override for an
-owner who wants the full 2 cm; the assert will refuse anything past 18 with the
+shake does not feed the run). The default pair `lip_h = 20` / `sand_depth = 18`
+is the documented corner on that margin (exactly 2 mm). For a full 2 cm of sand,
+use `-D sand_depth=20` **and** raise the lip so `lip_h - sand_depth ≥ 2` still
+holds (e.g. `-D lip_h=22`); the assert refuses `sand_depth = 20` with the
 default lip.
 
 ## The height ceiling
@@ -114,7 +116,9 @@ The capacity trade that lands under the ceiling: `dish_w = 110` (brief-exact) ×
 `sand_depth = 18` × `floor_run = 96` → print height **197.155 mm**, measured
 capacity 245.5 mL. **The escape hatch on a taller printer is `-D floor_run=…`,
 never `dish_w`**: width is brief-pinned and buys less capacity per millimetre
-than run does; run is pure length. `-D floor_run=140` fits a 250 mm-tall volume.
+than run does; run is pure length. `-D floor_run=140 -D max_build_height=250`
+fits a 250 mm-tall volume (the bed assert is keyed to `max_build_height`, 199
+by default for CI).
 
 A note for the platform, not this design: `printcheck.args` says
 `--build-volume 256x256x256` (family-consistent with the other NUGGS modules)

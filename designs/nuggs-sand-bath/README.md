@@ -44,7 +44,7 @@ The handful worth tuning — the rest live at the top of
 | Parameter | Default | What it does |
 |---|---|---|
 | `sand_depth` | 18 mm | Bathing sand depth on the floor (welfare guidance: 2–3 cm; must stay ≥ 2 mm below the lip) |
-| `floor_run` | 96 mm | Flat floor length — the capacity knob. On a printer taller than 200 mm, `-D floor_run=140` buys a bigger bath |
+| `floor_run` | 96 mm | Flat floor length — the capacity knob. On a printer taller than 200 mm, `-D floor_run=140 -D max_build_height=250` buys a bigger bath |
 | `dish_w` | 110 mm | Inside width of the dish, across the port axis |
 | `lip_h` | 20 mm | Containment lip: port invert above the dish floor |
 | `freeboard` | 15 mm | Dish wall height above the sand line |
@@ -53,10 +53,11 @@ The handful worth tuning — the rest live at the top of
 ## Assembly & use
 
 Quarter-turn the module onto any NUGGS port face — it is genderless, so either
-way round, and it locks with a twist in either direction. Mount it as a
-**destination at the end of a run**: the open top counts as a run break under
-the NUGGS length rule (same reasoning as an open module), so treat it as
-somewhere to visit, not a corridor to pass through.
+way round, and it locks with a twist in either direction. **Layout (pending
+owner confirmation, issue #667):** the engineering notes treat an open-topped
+dish at the end of a run as a run break under the NUGGS length rule (same
+reasoning as an open module) — mount it as a destination, not mid-run passage —
+but that ruling is not final until the owner confirms on the issue thread.
 
 Fill through the open mouth with **bathing sand (0.1–0.5 mm grain) — never
 chinchilla dust**, which is a respiratory irritant for hamsters. About 245 mL

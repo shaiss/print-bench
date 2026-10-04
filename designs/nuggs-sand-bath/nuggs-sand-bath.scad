@@ -30,7 +30,7 @@
 // straight to the dish section needs a corner-driven ~39 mm flare run, while
 // a circle needs only lip_h. NOTES.md, "The height ceiling", records the
 // depth-for-flat-run trade; the escape hatch on a taller printer is
-// -D floor_run=<more>, never dish_w.
+// -D floor_run=<more> with a matching -D max_build_height=<tall>, never dish_w.
 use <nuggs-coupling.scad>
 
 /* [What to render] */
@@ -93,7 +93,7 @@ dish_w = 110;
 // Flat floor run beyond the widening zone, before the far ramp (mm). Sets
 // capacity with the rows above; print height = 101 + floor_run, asserted
 // under the 199 mm ceiling. A taller printer buys capacity here, not in
-// dish_w: -D floor_run=140 on a 250 mm-tall volume.
+// dish_w: -D floor_run=140 -D max_build_height=250 on a 250 mm-tall volume.
 floor_run = 96;
 // Dish shell thickness (mm). Separate knob from the tube `wall`; keep >= 1.2
 // (3 perimeters at a 0.4 mm nozzle).
@@ -114,6 +114,9 @@ $fs = 0.8;
 
 /* [Hidden] */
 eps = 0.01;
+// Build-height ceiling (mm) for the BATH BED assert. CI's test-slice uses 199;
+// on a taller printer pair `-D floor_run=140` with `-D max_build_height=250`.
+max_build_height = 199;
 
 // ---------------------------------------------------------------------------
 // The coupling configuration — ONE cfg, built once, handed to every port call.
@@ -274,17 +277,22 @@ assert(rake_dz >= rake_dy, str(
 // 199, not ~241: the CI test-slice's PrusaSlicer default profile tops out at
 // exactly 200 mm of build height (measured with calibration boxes, NOTES.md
 // "The height ceiling"), and gate.sh passes no printer profile to raise it.
-assert(z_far_out - z_tip <= 199, str(
-    "BATH BED: print height ", z_far_out - z_tip, " mm exceeds the 199 mm the ",
-    "CI test-slice's default PrusaSlicer profile allows (200 mm hard, ",
-    "measured). Cut floor_run or dish_w."));
+assert(z_far_out - z_tip <= max_build_height, str(
+    "BATH BED: print height ", z_far_out - z_tip, " mm exceeds max_build_height ",
+    "= ", max_build_height, " mm. On a taller printer raise max_build_height ",
+    "(e.g. -D floor_run=140 -D max_build_height=250); otherwise cut ",
+    "floor_run or dish_w."));
 
 // Capacity, guarded loosely on the shape-corrected estimate (+/-5% of the
 // brief's ~250 mL); the audited number is measured off the exported mesh
 // (NOTES.md, "Capacity"), never read from here.
-assert(cap_est_ml >= 238 && cap_est_ml <= 262, str(
-    "BATH CAPACITY: estimated ", cap_est_ml, " mL against the ~250 mL brief ",
-    "target. Adjust floor_run or sand_depth."));
+assert(cap_est_ml >= 238, str(
+    "BATH CAPACITY: estimated ", cap_est_ml, " mL is under the 238 mL floor. ",
+    "Adjust floor_run or sand_depth."));
+assert(floor_run <= 96 ? cap_est_ml <= 262 : true, str(
+    "BATH CAPACITY: at the default floor_run = 96 mm, estimated ", cap_est_ml,
+    " mL exceeds the ~250 mL brief band (+5%). Shorten floor_run or ",
+    "sand_depth."));
 
 // ---------------------------------------------------------------------------
 // Sections
@@ -456,5 +464,5 @@ else if (part == "mated")
 else if (part == "mated_neg")
     intersection() { nuggs_sand_bath(); mate_neck(0); }
 else if (part == "sandbody") sand_body();
-else if (part == "hero") rotate([-90, 0, 0]) nuggs_sand_bath();
+else if (part == "hero") rotate([90, 0, 0]) nuggs_sand_bath();
 else assert(false, str("nuggs-sand-bath: unknown part '", part, "'"));

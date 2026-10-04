@@ -73,7 +73,7 @@ render and the stranger's decision.
 |---|---|---|---|
 | B1 | Lid variant (hinged or lift-off) | named follow-up in the brief; keeps sand in during transport | a second part + its own gates |
 | B2 | Multi-port in-run variant | explicitly out of scope v1; changes the run-break story | its own brief |
-| B3 | `floor_run=140` recipe for ≥250 mm printers | documented escape hatch already in README; needs a real tall-printer field test | print time ~2× |
+| B3 | `floor_run=140` + `max_build_height=250` for ≥250 mm printers | documented escape hatch in README; needs a real tall-printer field test | print time ~2× |
 | B4 | Harness follow-up: printcheck 256³ vs slicer 200 mm ceiling mismatch | platform, not this design — flag in PR, file on the harness | an issue |
 
 ## Open decisions
@@ -81,7 +81,7 @@ render and the stranger's decision.
 | Question | Blocking? | Assumption if unanswered |
 |---|---|---|
 | Run-break ruling (owner confirm) | no | recorded: open top counts as a run break — destination, not corridor |
-| Sand depth 15 vs 20 mm | no | 18 (welfare 2–3 cm + capacity trade); `-D sand_depth=20` |
+| Sand depth 15 vs 20 mm | no | 18 (welfare 2–3 cm + capacity trade); full 2 cm needs `-D sand_depth=20 -D lip_h=22` (lip−sand ≥ 2) |
 
 ## Decision log
 
