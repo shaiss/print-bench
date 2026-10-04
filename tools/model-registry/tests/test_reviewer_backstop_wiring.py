@@ -117,15 +117,16 @@ def _assert_reviewer_steps_carry_their_backstop(text: str) -> None:
             # Cursor cloud agents initiate the workflow as cursor[bot]. The
             # action's default allowed_bots is empty and refuses that actor
             # before any review runs. Pin the slug the error names (`cursor`,
-            # not `cursor[bot]` and not `*`).
-            assert re.search(r"(?m)^\s+allowed_bots:\s+cursor\s*$", chunk), (
-                f"{at} omits `allowed_bots: cursor` — a Cursor-authored design "
-                f"PR would fail at the human-actor check")
+            # not `cursor[bot]` and not `*`). Check `*` first so a widen
+            # fails on that pin rather than the missing-cursor assertion.
             assert not re.search(
                 r"(?m)^\s+allowed_bots:\s+['\"]?\*['\"]?\s*$", chunk
             ), (
                 f"{at} sets allowed_bots to '*' — that lets any GitHub App "
                 f"trigger the action on a public repo")
+            assert re.search(r"(?m)^\s+allowed_bots:\s+cursor\s*$", chunk), (
+                f"{at} omits `allowed_bots: cursor` — a Cursor-authored design "
+                f"PR would fail at the human-actor check")
 
 
 def test_every_reviewer_ship_step_carries_its_backstop():
