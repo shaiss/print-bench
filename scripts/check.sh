@@ -580,6 +580,24 @@ if ! ./scripts/reviewer-perms-check.sh; then
   fail=1
 fi
 
+# Reviewer MCP posting tool: the Jane/Drik reviewers' ONE write surface is the
+# post_review MCP tool (.claude/reviewer-post/reviewer_mcp.py, issue #764) —
+# a JSON-argument tool because a multi-line review body cannot pass the
+# dontAsk Bash matcher under any quoting, which is the hole that kept every
+# workflow review round from posting its sign-off. Its --selftest proves the
+# invariants a live run cannot show: the sign-off marker is assembled
+# server-side from validated sha/verdict/fuse fields (malformed markers are
+# unpostable), caller-supplied JANE/DRIK_SIGNOFF HTML comments in the body
+# are refused so one reviewer cannot satisfy the other identity, the marker
+# family follows the trusted REVIEWER_ID env so a Jane session cannot forge a
+# DRIK sign-off, the target PR is pinned to REVIEWER_PR,
+# and the one-post-per-run cap spans the chain walk cross-process — the same
+# firing-guard discipline the perms-checks follow.
+echo "-- reviewer-post MCP selftest: .claude/reviewer-post/reviewer_mcp.py --selftest"
+if ! python3 .claude/reviewer-post/reviewer_mcp.py --selftest; then
+  fail=1
+fi
+
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
 # wrapper is the greenlight loop's ONE shell surface, and its --selftest is
@@ -661,7 +679,9 @@ fi
 # logic behind the `reviewer-signoff` required status (auto-review.yml, W2). The
 # gate is fail-closed — a design PR without two clean, current sign-offs blocks —
 # so the selftest is the only thing that proves it both passes clean AND fails
-# closed (missing/malformed/stale/blocking/fuse-unacked markers each block).
+# closed (missing/malformed/stale/blocking/fuse-unacked markers each block;
+# fuse-warn sticky selection: only a body that starts with the printcheck
+# marker, and only the real fusecheck STRONG WARN cell — PR #634).
 echo "-- reviewer-signoff selftest: scripts/reviewer-signoff.sh --selftest"
 if ! ./scripts/reviewer-signoff.sh --selftest; then
   fail=1
