@@ -19,10 +19,6 @@ its own intended size so a measured print is unambiguous.
 
 ## Out of scope
 
-**Deferred** — good ideas, not now:
-
-- Optional X/Y/Z axis letters on the side faces.
-
 **Never:**
 
 - **Overhang/bridging test features.** This is a *dimensional* cube; bolting
@@ -81,7 +77,7 @@ cube; the deterministic turntable GIF stays the motion-true artifact.
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
 | B1 | Multi-size sweep strip (5/10/20/30 on one plate) | Most-asked variation; one plate, several sizes | design only — **done** (ci.plate deliverable) |
-| B2 | Optional X/Y/Z face letters | Helps attribute which axis is off | design only |
+| B2 | Optional X/Y/Z face letters | Helps attribute which axis is off | design only — **done** (`face_letters`, default off) |
 
 ## Open decisions
 
@@ -93,7 +89,8 @@ cube; the deterministic turntable GIF stays the motion-true artifact.
 
 | Date | Decision | Reason |
 |---|---|---|
-| 2026-10-04 | Tighten `size-sweep` framing `25,22,0.42` → `20,32,0.60` (same 1280×720, orange/satin) | Drik showroom-distance hunch: 10/20/30 read clean, the 5 is a tiny mark; raise zoom and elev so the 5 mm top glyph fills more of the frame. Camera-only — first print still has to confirm the engraved 5 is readable at arm's length after a 0.2 mm slice |
+| 2026-10-04 | Ship B2 as optional engraved X/Y/Z on the side faces, default off | Keel approved the charter item. Letters are 0.4 mm pockets on vertical faces (no overhang); off keeps the starter 20 mm cube a clean dimensional check. The 5 mm top mark is a blob — identify that cube by plate position, not the glyph; no brim, keep the 4 mm strip gap; seam is slicer-rear-corner guidance; printable story stays the four-object plate 3MF |
+| 2026-10-04 | Tighten `size-sweep` framing `25,22,0.42` → `20,32,0.60` (same 1280×720, orange/satin) | Drik showroom-distance hunch: 10/20/30 read clean, the 5 is a tiny mark; raise zoom and elev so the 5 mm cube fills more of the frame. Camera-only — the grown 5 mm glyph remains a blob, not a readable size label |
 | 2026-10-04 | Add tier-1 `size-sweep` studio shot of the B1 strip layout | Drik fitness pass: showroom sold only the 20 mm cube while README owned the strip; charter allows adding a shot row, never repurposing |
 | 2026-09-12 | Ship B1 as four separate cubes on a `ci.plate` 3MF, not a fused strip bar | Each cube is an independent dimensional sample; air-gapping matches the repo's sweep-strip convention and keeps STL/3MF separation honest |
 | 2026-08-08 | Add a high three-quarter `size-marker` studio shot beside the hero | The hero shows the engraved size edge-on; the marker is the product's one trick and deserves a shot that makes it the subject |

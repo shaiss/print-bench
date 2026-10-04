@@ -21,6 +21,8 @@ size = 20;
 /* [Printing] */
 // 45-degree chamfer on the bottom edges so the first layer releases cleanly (mm, 0 to disable)
 bottom_chamfer = 0.6;
+// Engrave X / Y / Z on the side faces (off: clean dimensional cube)
+face_letters = false;
 
 /* [Sweep] */
 // Fixed edge lengths on the multi-size strip (mm); charter backlog B1
@@ -39,7 +41,9 @@ function sweep_x(i, sizes = sweep_sizes, gap = sweep_gap) =
 // Size-marker glyph. Small cubes' default font strokes leave sub-nozzle
 // walls that printcheck rejects; grow the outline just enough to clear the
 // 0.8 mm floor. At the starter 20 mm size the grow is 0, so the engraved
-// look stays the one the product shots already show.
+// look stays the one the product shots already show. On the 5 mm cube the
+// grown glyph is a blob — identify that cube by plate position / `cube5`,
+// not by reading the top mark.
 function marker_text_size(cube_size) = cube_size * 0.35;
 function marker_stroke_grow(cube_size) =
     cube_size < 8 ? 0.40 : 0;
@@ -56,7 +60,31 @@ module size_marker(cube_size) {
              halign = "center", valign = "center");
 }
 
-module calibration_cube(cube_size = size, chamfer = bottom_chamfer) {
+// Optional axis labels (charter B2). Engraved 0.4 mm into the vertical
+// faces — pockets, not raised letters — so they print supportless with
+// the cube flat-face-down. X on +X, Y on +Y, Z on −Y (height; the top
+// already carries the size marker). Faces under 10 mm have no room for a
+// readable glyph and are left blank.
+module axis_letters(cube_size) {
+    if (cube_size >= 10) {
+        ts = cube_size * 0.32;
+        translate([cube_size - 0.4, cube_size / 2, cube_size / 2])
+            rotate([90, 0, 90])
+                linear_extrude(0.5)
+                    text("X", size = ts, halign = "center", valign = "center");
+        translate([cube_size / 2, cube_size - 0.4, cube_size / 2])
+            rotate([90, 0, 180])
+                linear_extrude(0.5)
+                    text("Y", size = ts, halign = "center", valign = "center");
+        translate([cube_size / 2, 0.4, cube_size / 2])
+            rotate([90, 0, 0])
+                linear_extrude(0.5)
+                    text("Z", size = ts, halign = "center", valign = "center");
+    }
+}
+
+module calibration_cube(cube_size = size, chamfer = bottom_chamfer,
+                        letters = face_letters) {
     assert(cube_size > 0, "cube_size must be positive");
     assert(chamfer >= 0, "bottom_chamfer must be >= 0");
     // N2: when enabled, the release chamfer is at least 0.4 mm.
@@ -76,6 +104,8 @@ module calibration_cube(cube_size = size, chamfer = bottom_chamfer) {
         translate([cube_size / 2, cube_size / 2, cube_size - 0.4])
             linear_extrude(0.5)
                 size_marker(cube_size);
+        if (letters)
+            axis_letters(cube_size);
     }
 }
 

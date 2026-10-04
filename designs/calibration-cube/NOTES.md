@@ -7,8 +7,10 @@ design demonstrating the parameter conventions.
 ## Key dimensions
 - 20 mm cube (parametric via `size`; `part = "cube"`)
 - Multi-size strip: 5 / 10 / 20 / 30 mm fixed cubes (`part = "cube5"` …)
-- 0.6 mm 45° chamfer on bottom edges
-- Top face engraved with the edge length (0.4 mm deep)
+- 0.6 mm 45° chamfer on bottom edges (5 mm cube first-layer patch: 3.8 mm)
+- Top face engraved with the edge length (0.4 mm deep); 5 mm top mark is
+  a blob, not a readable size label
+- Optional X/Y/Z side letters, default off (`face_letters`)
 
 ## Decisions
 - Chamfer via `hull()` of a thin base slab and the upper body — keeps the
@@ -17,17 +19,28 @@ design demonstrating the parameter conventions.
   slicing at 0.2 mm layers. On cubes under 8 mm the glyph outline is
   grown (`offset(delta=0.40)`) so letter strokes clear the 0.8 mm
   nozzle-safe wall floor; at the default 20 mm the grow is zero and the
-  engraved look matches the committed product shots.
+  engraved look matches the committed product shots. That grow turns the
+  5 mm "5" into a blob (visible on `previews/size-sweep.png`); do **not**
+  treat that mark as the size label — the 5 mm cube is `cube5`, the
+  smallest object on the plate. 10 / 20 / 30 still read.
 - Multi-size strip (charter B1) is four **separate** cubes on one plate,
   not a fused bar: each cube stays an independent dimensional sample, and
   a warp on one cannot pull its neighbours (same air-gap idea as
   `render.sh --sweep`). Deliverable is `ci.plate` →
-  `build/calibration-cube-plate.3mf` via `plate.sh`; `part = "sweep"` is
-  only a layout preview (STL cannot carry object separation).
+  `build/calibration-cube-plate.3mf` via `plate.sh` (`cube5`/`cube10`/
+  `cube20`/`cube30`); `part = "sweep"` is only a layout preview (STL
+  cannot carry object separation). Keep the 4 mm air gap; do not add a
+  brim. After the 0.6 mm chamfer the 5 mm cube's first layer is a 3.8 mm
+  patch (`size − 2·chamfer`) — that is the sample, not something to pad.
 - `size-sweep` studio framing is `20,32,0.60` (was `25,22,0.42`) so the
-  5 mm glyph is larger at showroom distance; print readability of that
-  glyph at arm's length is still a first-print question, not closed by
-  the camera.
+  5 mm cube occupies more of the frame; the top mark is still a blob.
+- Optional X/Y/Z side letters (charter B2, Keel-approved) default **off**
+  so the starter print stays a clean dimensional cube. When on, they are
+  0.4 mm engraved pockets on the vertical faces (X on +X, Y on +Y, Z on
+  −Y for height — the top already carries the size), not raised glyphs,
+  so they add no overhang. Faces under 10 mm stay blank. A face-aligned
+  slicer seam is a ridge a caliper will catch; park it on a rear corner
+  in the slicer — the model does not force a face seam.
 
 ## Print orientation
 As modeled: flat face down, no supports. Print at 100% infill if using it
