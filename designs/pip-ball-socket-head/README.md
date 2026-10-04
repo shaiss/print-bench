@@ -24,7 +24,9 @@ the printed answer to the ubiquitous small ball-head mount.
 
 Two printed parts, joined by one M4 bolt. Slice the **plate**
 (`build/pip-ball-socket-head-plate.3mf`) so the head and base import as
-separate objects — a single assembled STL would weld them.
+separate objects — a single assembled STL would weld them. The plate carries
+two objects; assign filament per object (head = PETG) or print them as
+separate jobs.
 
 - `head` — the print-in-place mechanism, one piece: stem tenon, socket ring
   with slit collar and clamp wings, the Ø20 ball and ¼″-20 stud printed
@@ -43,7 +45,7 @@ screws (mounting — machine screws with nuts, or wood screws into a desk edge).
 - **Layer height:** 0.2 mm. The break-in fusion at the cup floor and every Z
   gap in the joint are whole-layer numbers.
 - **Infill:** 15–20 % gyroid, 3 perimeters.
-- **Seam:** Scarf (or Back). The default Aligned seam stacks a 0.1–0.2 mm ridge on the ball — the same order as the 0.15–0.25 mm radial clearance — and on the ¼″-20 flank.
+- **Seam:** Scarf (or Back), never Random. The default Aligned seam stacks a 0.1–0.2 mm ridge on the ball — the same order as the 0.15–0.25 mm radial clearance — and on the ¼″-20 flank; Random scatters pimples over the whole mating surface.
 - **Supports: none inside the joint — ever.** An auto-support inside the
   socket welds the ball into it, which is the exact failure this design
   exists to defeat; the capture cone (≤ 25° from vertical) and dome (15°)
@@ -68,7 +70,9 @@ Cells 1–3 sweep the ball-to-socket clearance (0.15 / 0.20 / 0.25 mm); work eac
 ball free — the cell that frees and then moves without rattle is your
 printer's value, set `ball_xy_clear` to it. If all three cells weld, check
 slicer gap-closing / flow (the 0.15–0.25 mm band straddles the typical 0.2 mm
-gap-close default) before raising `ball_xy_clear`. Cell 4 is the slit-collar
+gap-close default) before raising `ball_xy_clear`. If the joint won't free
+even at 0.25, turn off gap fill for this print and check you are not on an
+Arachne-modified profile. Cell 4 is the slit-collar
 station: pinch the wings, the ball should lock and release. Cell 5 is an 8 mm
 ¼″-20 stub — try it in the camera body before committing to the head. Details
 in NOTES.md.
@@ -108,7 +112,8 @@ Customizer sections; override on the command line with `-D 'ball_xy_clear=0.25'`
    the M4 × 16 bolt from underneath. The torque path is the tenon shoulder,
    not the bolt.
 3. Thread your camera/light onto the ¼″-20 stud, tilt to aim, pinch the
-   wings to lock.
+   wings to lock. ±20° is trim: mount the base pointing roughly right, the
+   joint fine-aims from there.
 
 **Honest payload figure:** ≤ 250 g at a 60 mm lever is the design target
 (assumed — a typical webcam is 100–200 g); it is a *field-test* number, not a

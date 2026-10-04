@@ -62,10 +62,11 @@ clearance is the `fitcheck_tilt` gate, not a pretty camera.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | FIELD-TEST: break-in torque + 250 g hold in PETG, plus a 50-cycle count and a 24 h creep clock | The payload number is a target, not a measurement; Jane/Drik R2 named the hold-over-time the kitchen scale still has to record | one print + kitchen scale |
+| B1 | FIELD-TEST: break-in torque + 250 g hold in PETG, plus a 50-cycle count, a 24 h creep clock, and the unpinched static hold (does it sag while you re-grip?) | The payload number is a target, not a measurement; Jane/Drik named hold-over-time and the unlocked droop a boolean fitcheck cannot see | one print + kitchen scale |
 | B2 | Parameterized shelf-clamp jaw (the v1-not-chosen mount) | Second user; v1 is the M4 foot | new `part` + coupon |
 | B3 | Two-joint articulated arm | Brief's named follow-up | new design SKU |
 | B4 | Smaller coupon cells (cost inversion: strip 3 h 36 m vs head 1 h 14 m) | Round-2 honesty fixed the copy; shrinking geometry waits until a FIELD-TEST says the open-top cells still teach at reduced ball_d | coupon re-tune + fusecheck |
+| B5 | Cylindrical Ø14 tenon for the full recess depth, flare above the plate | NOTES' shoulder-on-ceiling; today's cone wedges in the Ø14.6 pocket after ~1 mm. Needs +height and a camera add, not a freeze-move | head stem + one new camera |
 
 ## Open decisions
 
@@ -83,4 +84,4 @@ clearance is the `fitcheck_tilt` gate, not a pretty camera.
 | 2026-09-12 | Stem-down, stud up | Capture cone/dome print supportless; stud-down bridges the ball |
 | 2026-09-12 | Rim capture, dome sized for the tilted stud | Pinch-cone interferes at height or kills tilt |
 | 2026-10-04 | stylelift files a fused sphere as form | Ø20 ball is a Must-fit, not a 10 mm family fillet |
-| 2026-10-04 | Jane/Drik R2: honest coupon cost, hex-pocket lead-in, ¼″-20 stub, companion collar camera | Page honesty (N4 payload pattern) + freeze-window close-up; no joint geometry change |
+| 2026-10-04 | Jane delayed-sha: tenon bed chamfer now; cylindrical tenon queued B5 | Elephant-foot on the Ø14 first layer is cheap; rebuilding the stem to match the recess moves cameras |

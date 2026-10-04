@@ -204,3 +204,10 @@ it only when you already know the printer.
   never moved). Queued: FIELD-TEST cycle count + PETG 24 h creep (B1);
   shrinking coupon cells (B4). Declined this round: cable-hung test as a
   `[hunch]` (rides B1).
+- **Jane delayed-sha `8c0cd83` (after R2).** Seam / gap-fill already on the
+  page; landed the rest of the cheap set: 0.5 mm tenon bed chamfer (elephant
+  foot vs 0.3 mm recess clearance), plate filament-per-object sentence,
+  Arachne/gap-fill "won't free at 0.25" line, ±20° is trim. Declined moving
+  `collar-closeup` (frozen at R1; companion already added). Queued B5:
+  cylindrical tenon for the full recess — today's cone wedges after ~1 mm;
+  that rebuild adds height and a camera, not a freeze-move.

@@ -225,11 +225,13 @@ module socket_body(clear = ball_xy_clear, collar = true, dome = true) {
     top_rel = dome ? dome_apex_above_center + 2 : rim_above_center + 3;
     difference() {
         union() {
-            // 45-degree flare from the tenon to the ring: the cup floor's
-            // underside would otherwise overhang the tenon (a flat ceiling
-            // over air) — the flare is that ceiling converted to a wall. It
-            // is also the Ø14 tenon that seats in the base recess.
-            cylinder(d1 = stem_d, d2 = 2 * ring, h = flare_h);
+            // 0.5 mm 45° elephant-foot chamfer at the bed-side tenon
+            // (Jane: 0.3 mm radial recess clearance sits in the squish band).
+            // Then the 45° flare to the ring — that flare is also the Ø14
+            // tenon that seats in the base recess.
+            cylinder(d1 = stem_d - 1.0, d2 = stem_d, h = 0.5);
+            translate([0, 0, 0.5])
+                cylinder(d1 = stem_d, d2 = 2 * ring, h = flare_h - 0.5);
             // floor slab + ring, from the flare top to the chamfered top edge
             translate([0, 0, flare_h])
                 chamfered_cylinder(d = 2 * ring, h = floor_t + Rs_ + top_rel,
