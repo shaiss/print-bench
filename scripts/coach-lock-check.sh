@@ -17,18 +17,19 @@ cd "$ROOT"
 
 MARKER_HTML='<!-- COACH_LOCK'
 MARKER_LINE='🎓 COACH-LOCK'
+export MARKER_HTML MARKER_LINE
 
 comments_carry_lock() {
   python3 -c '
-import json, sys
+import json, os, sys
 raw = sys.stdin.read().strip()
 if not raw:
     raise SystemExit(1)
 data = json.loads(raw)
 if not isinstance(data, list):
     data = [data]
-html = "<!-- COACH_LOCK"
-line = "🎓 COACH-LOCK"
+html = os.environ["MARKER_HTML"]
+line = os.environ["MARKER_LINE"]
 for c in data:
     body = c.get("body") or ""
     if html in body or line in body:
