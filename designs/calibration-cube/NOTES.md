@@ -16,13 +16,10 @@ design demonstrating the parameter conventions.
 - Chamfer via `hull()` of a thin base slab and the upper body — keeps the
   model a single convex solid, no BOSL2 needed.
 - Size marker is subtracted 0.4 mm below the top surface so it survives
-  slicing at 0.2 mm layers. On cubes under 8 mm the glyph outline is
-  grown (`offset(delta=0.40)`) so letter strokes clear the 0.8 mm
-  nozzle-safe wall floor; at the default 20 mm the grow is zero and the
-  engraved look matches the committed product shots. That grow turns the
-  5 mm "5" into a blob (visible on `previews/size-sweep.png`); do **not**
-  treat that mark as the size label — the 5 mm cube is `cube5`, the
-  smallest object on the plate. 10 / 20 / 30 still read.
+  slicing at 0.2 mm layers. Marker stroke-grow ladder: under 8 mm → 0.40
+  (the 5 mm "5" becomes a blob — identify `cube5` by plate position, not
+  that mark); under 12 mm → 0.25 (the 10 mm cube, so grooves clear a 0.4 mm
+  nozzle); else 0, so 20 / 30 match the committed product shots.
 - Multi-size strip (charter B1) is four **separate** cubes on one plate,
   not a fused bar: each cube stays an independent dimensional sample, and
   a warp on one cannot pull its neighbours (same air-gap idea as

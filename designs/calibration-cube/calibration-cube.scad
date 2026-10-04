@@ -38,15 +38,16 @@ $fn = 64;
 function sweep_x(i, sizes = sweep_sizes, gap = sweep_gap) =
     i <= 0 ? 0 : sweep_x(i - 1, sizes, gap) + sizes[i - 1] + gap;
 
-// Size-marker glyph. Small cubes' default font strokes leave sub-nozzle
-// walls that printcheck rejects; grow the outline just enough to clear the
-// 0.8 mm floor. At the starter 20 mm size the grow is 0, so the engraved
-// look stays the one the product shots already show. On the 5 mm cube the
-// grown glyph is a blob — identify that cube by plate position / `cube5`,
-// not by reading the top mark.
+// Size-marker glyph. Default-font strokes on small cubes sit under a 0.4 mm
+// nozzle; grow the outline just enough to clear the 0.8 mm floor. Ladder:
+//   < 8 mm  → 0.40 (the 5 mm cube: printability; the grown glyph is a blob —
+//             identify that cube by plate position / `cube5`, not the mark)
+//   < 12 mm → 0.25 (the 10 mm cube: grooves out of the coin-flip zone,
+//             ~0.85–0.9 mm)
+//   else    → 0    (20 / 30 mm: product-shot look unchanged)
 function marker_text_size(cube_size) = cube_size * 0.35;
 function marker_stroke_grow(cube_size) =
-    cube_size < 8 ? 0.40 : 0;
+    cube_size < 8 ? 0.40 : cube_size < 12 ? 0.25 : 0;
 
 module size_marker(cube_size) {
     ts = marker_text_size(cube_size);

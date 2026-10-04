@@ -33,10 +33,11 @@ No assembly. Two ways to print:
   engraved 0.4 mm deep into the top face. Optional X/Y/Z side letters are
   **off** by default (`face_letters`).
 - **Multi-size strip** — four separate cubes (5 / 10 / 20 / 30 mm) as
-  distinct objects on one plate, not a fused bar. The 10 / 20 / 30 tops
-  read as those numbers. The 5 mm cube is the **smallest** on the plate
-  (`cube5`); its top engraving is a blob at showroom and slice scale, not
-  a readable 5 — do not treat that mark as the size label.
+  distinct objects on one plate, not a fused bar. The 20 / 30 tops read
+  as those numbers. The 10 mm marker is slightly thickened so its engraved
+  strokes clear a 0.4 mm nozzle. The 5 mm cube is the **smallest** on the
+  plate (`cube5`); its top engraving is a blob at showroom and slice scale,
+  not a readable 5 — do not treat that mark as the size label.
 
 **Deliverable for the strip.** STL carries no object separation, so the
 printable strip is the multi-object 3MF from
