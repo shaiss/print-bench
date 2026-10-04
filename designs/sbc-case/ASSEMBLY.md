@@ -18,7 +18,7 @@
 
 ## Assembly steps
 
-1. Press the 4 F1BM3 inserts into the base's lid-screw posts — melt each one until it sits FLUSH with the post top. Each post has a stepped bore: Ø4.0 × 5.8 mm from the top, then a narrower M3-clearance hole through the rest, so the insert bottoms on a plastic shoulder and an M3×10 tip still clears into free space. A shouldered M3 soldering-iron tip that lands on the post top at flush is still a good assembly aid if your iron runs hot.
+1. Press the 4 F1BM3 inserts into the base's lid-screw posts — melt each one until it sits FLUSH with the post top. Each post has a stepped bore: Ø4.0 × 5.8 mm from the top, then a narrower M3-clearance hole through the rest, so the insert bottoms on a plastic shoulder and an M3×10 tip still clears into free space. A shouldered M3 soldering-iron tip that lands on the post top at flush is still a good assembly aid if your iron runs hot. Before committing the full `base`, melt a real insert into the **coupon** crop's stepped post and confirm it stops flush — dry-fit proves diameter; melt proves the shoulder.
 2. Press the 4 F1BM3 inserts into the lid's fan bosses from the inner face (lid inner-face-up; the inserts melt in blind-side-down so the fan screws thread into them through the plate).
 3. Drop the Raspberry Pi 4 onto the standoffs — every standoff is generated from the board's own hole list, so it self-locates.
 4. Fix the board with 4 M2.5 cap screws into the printed pilot bosses (they self-tap; do not overtighten).
