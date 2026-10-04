@@ -242,7 +242,11 @@ anything else asks. What each mode does:
   passed: decide.yml's sequence exactly as for a 👍, `arm=1`
   arming included, with the ledger row and the reply naming the rule
   (`standing-rule:docs`), never a person. A 👍 still resolves at once, a 👎
-  still overrules, a `/decide` still outranks, and a **NO** still asks.
+  still overrules, a `/decide` still outranks, and a **NO** still asks. The
+  label vouches only for the greenlit text: it must have been applied at or
+  after the greenlight's post, and the live title+body must still hash to the
+  marker's `text=` digest (`approval.text_digest`, which the wrapper computes
+  byte-identically) — otherwise the thread asks.
 - **ask** — unchanged.
 
 `approval.py` is pure (held to the package's purity scan);

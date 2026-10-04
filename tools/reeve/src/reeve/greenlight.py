@@ -11,11 +11,14 @@ without a request ever leaving the process.
 Three shapes this module owns:
 
 * **The greenlight marker** — the wrapper's invisible first line
-  ``<!-- reeve-greenlight v1 issue=<N> verdict=yes|no|route [arm=1] -->``.
+  ``<!-- reeve-greenlight v1 issue=<N> verdict=yes|no|route [arm=1] text=<hex> -->``.
   The optional ``arm=1`` attribute (#444) is the drafter's machine-readable
   "arm it for autonomy on approval" bit: stage 1 proved it is per-greenlight
   (#201 asked to be armed, #202 explicitly did not, both ``verdict=yes``),
-  and the poll is deterministic code that cannot read prose safely.
+  and the poll is deterministic code that cannot read prose safely. The
+  ``text=`` attribute is the wrapper's ``approval.text_digest`` of the issue
+  text the greenlight reasoned on; a standing auto-approve fires only while
+  the live text still hashes to it (the #760 security finding).
 * **The resolution marker** — the push-through's reply,
   ``<!-- reeve-greenlight v1 issue=<N> resolution=approved|overruled id=<id> -->``
   (the exact shape the stage-1 session-drafted resolution comments used).
@@ -119,8 +122,9 @@ def first_line(text: str) -> str:
 def parse_greenlight_marker(line: str) -> Optional[dict[str, Any]]:
     """Parse one greenlight marker line, or ``None`` if it is not one.
 
-    Returns ``{"version", "issue", "verdict", "arm"}`` — ``arm`` is the
-    optional ``arm=1`` bit (#444). Unknown attributes are tolerated
+    Returns ``{"version", "issue", "verdict", "arm", "text"}`` — ``arm`` is
+    the optional ``arm=1`` bit (#444), ``text`` the optional issue-text
+    digest (``""`` when absent, which a standing auto-approve never trusts). Unknown attributes are tolerated
     (forward-compatible) but a missing/unknown ``verdict`` parses as no
     greenlight: the wrapper always writes one, so a line without it is a
     resolution comment, a truncation or a forgery — never acted on.
@@ -137,6 +141,7 @@ def parse_greenlight_marker(line: str) -> Optional[dict[str, Any]]:
         "issue": int(match.group(2)),
         "verdict": verdict,
         "arm": attrs.get("arm") == "1",
+        "text": attrs.get("text", ""),
     }
 
 
@@ -293,6 +298,7 @@ def poll_outcome(
     mode: str = approval.MODE_ASK,
     categories: Iterable[str] = (),
     grace_elapsed: bool = False,
+    issue_text: Optional[tuple[str, Optional[str]]] = None,
 ) -> dict[str, Any]:
     """Aggregate one live greenlight's permission-checked signals.
 
@@ -308,6 +314,10 @@ def poll_outcome(
     ``approval.AUTO_APPROVE_GRACE`` (``approval.grace_elapsed``). Every
     default is the fail-safe one — ``ask``, no category, grace not elapsed —
     so a caller that never classified gets #444's behaviour exactly.
+    ``issue_text`` is the thread's LIVE ``(title, body)``; a standing
+    auto-approve requires its ``approval.text_digest`` to equal the marker's
+    ``text=`` (``approval.text_binding_blocker``) — ``None`` (never handed
+    the text) blocks auto, the fail-safe default.
 
     Precedence, in order (each documented, each testable):
 
@@ -334,7 +344,10 @@ def poll_outcome(
        mode, verdict ``yes``, no 👎, and the grace window elapsed: approved
        with the approver recorded as ``standing-rule:<category>``, never a
        human login. Inside the window it waits; a ``no`` verdict is never
-       auto-resolved (only a YES is pre-approved — a NO still asks).
+       auto-resolved (only a YES is pre-approved — a NO still asks); and
+       the issue text must still be the text the greenlight reasoned on
+       (the marker's ``text=`` digest) — an edit since, or a marker without
+       a digest, waits for a 👍 or ``/decide``.
     7. Otherwise keep waiting — and never a duplicate greenlight while one
        is live (the wrapper already refuses; this poll adds nothing).
     """
@@ -374,6 +387,13 @@ def poll_outcome(
                 "outcome": OUTCOME_WAIT,
                 "reason": f"standing rule auto-approve: {rule} pre-approves only a YES — a NO still asks",
             }
+        if issue_text is None:
+            blocker = ("standing rule auto-approve: the issue text was not checked against "
+                       "the greenlight — needs a 👍 or /decide")
+        else:
+            blocker = approval.text_binding_blocker(greenlight.get("text"), *issue_text)
+        if blocker:
+            return {"outcome": OUTCOME_WAIT, "reason": blocker}
         if not grace_elapsed:
             return {
                 "outcome": OUTCOME_WAIT,

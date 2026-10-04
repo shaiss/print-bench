@@ -384,3 +384,86 @@ def test_committed_conf_rules_parse_into_the_closed_vocabulary():
     # committed rules parse and name only categories the code can classify.
     rules = config.load(str(REPO_ROOT / config.DEFAULT_PATH)).approval_rules()
     assert set(rules.auto) | set(rules.deny) <= set(approval.CATEGORIES)
+
+
+# ---------------------------------------------------------------------------
+# The #760 bindings: the label vouches only for the greenlit text
+# ---------------------------------------------------------------------------
+
+def test_label_applied_returns_the_newest_event_and_its_time():
+    events = [
+        _ev("labeled", DOCS_LABEL, "early", "2026-08-01T00:00:00Z"),
+        _ev("labeled", DOCS_LABEL, "shaiss", "2026-08-20T07:00:00Z"),
+    ]
+    assert approval.label_applied(events, DOCS_LABEL) == ("shaiss", "2026-08-20T07:00:00Z")
+    assert approval.label_applied([], DOCS_LABEL) == ("", "")
+
+
+def test_label_vouches_only_at_or_after_the_greenlight():
+    gl = "2026-08-20T06:00:00Z"
+    assert approval.label_vouches("2026-08-20T07:00:00Z", gl)
+    assert approval.label_vouches(gl, gl)                        # same second counts
+    # NEGATIVE CONTROLS: before the greenlight, or an unknowable stamp.
+    assert not approval.label_vouches("2026-08-19T00:00:00Z", gl)
+    assert not approval.label_vouches("", gl)
+    assert not approval.label_vouches("2026-08-20T07:00:00Z", "")
+
+
+def test_text_digest_is_the_documented_canonical_form():
+    import hashlib
+    want = hashlib.sha256("T\nB\n".encode("utf-8")).hexdigest()[:16]
+    assert approval.text_digest("T", "B") == want
+    # A null body hashes as "" — the same as jq's `.body // ""`.
+    assert approval.text_digest("T", None) == approval.text_digest("T", "")
+    assert len(want) == 16 and all(c in "0123456789abcdef" for c in want)
+
+
+def test_text_digest_changes_on_any_edit():
+    base = approval.text_digest("Fix docs", "Reword it.")
+    assert approval.text_digest("Fix docs", "Reword it. ") != base   # trailing space
+    assert approval.text_digest("Fix docs", "Reword it.\r\n") != base
+    assert approval.text_digest("Fix Docs", "Reword it.") != base
+
+
+def test_text_binding_blocker():
+    digest = approval.text_digest("T", "B")
+    assert approval.text_binding_blocker(digest, "T", "B") == ""
+    # NEGATIVE CONTROLS: a mismatch, and a marker without a digest.
+    assert "changed since the greenlight" in approval.text_binding_blocker(digest, "T", "B2")
+    assert "does not record" in approval.text_binding_blocker("", "T", "B")
+    assert "does not record" in approval.text_binding_blocker(None, "T", "B")
+
+
+PARITY_CASES = [
+    ("Fix the docs", "Reword the paragraph."),
+    ("Trailing newlines", "body ends in newlines\n\n\n"),
+    ("CRLF", "line one\r\nline two\r\n"),
+    ("Unicode — ünïcödé ✓ 🚦", "zero\u200bwidth and emoji 🚀\n"),
+    ("Null body", None),
+    ("", ""),
+]
+
+
+@pytest.mark.parametrize("title,body", PARITY_CASES)
+def test_text_digest_matches_the_wrappers_shell_pipeline(tmp_path, title, body):
+    # The wrapper computes the digest as `gh api … --jq '<filter>' | sha256sum`
+    # (bytes piped, never through $(...)); jq -r with the same filter is that
+    # pipeline offline. Python and the shell must agree byte for byte.
+    import json
+    import shutil
+    import subprocess
+    if not (shutil.which("jq") and shutil.which("sha256sum")):
+        pytest.skip("jq/sha256sum not installed")
+    issue = tmp_path / "issue.json"
+    issue.write_text(json.dumps({"title": title, "body": body}), encoding="utf-8")
+    out = subprocess.run(
+        ["bash", "-c", "jq -r '.title + \"\\n\" + (.body // \"\")' \"$1\" | sha256sum", "_", str(issue)],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert out[:16] == approval.text_digest(title, body)
+
+
+def test_text_digest_cross_pin_with_the_wrapper_selftest():
+    # greenlight-helper.sh --selftest pins the same value for the same text:
+    # change the definition on either side and one of the two fails.
+    assert approval.text_digest("Docs — ünïcödé ✓", "line one\r\nline two\n\n\n") == "12e3e433b82bf3ce"

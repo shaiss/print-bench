@@ -56,7 +56,7 @@ the workflow-selected issues.
   ```
 
   The wrapper writes the marker first line
-  (`<!-- reeve-greenlight v1 issue=<N> verdict=yes -->`), enforces that your
+  (`<!-- reeve-greenlight v1 issue=<N> verdict=yes text=<digest> -->`, `text=` binding the issue text it read at post time), enforces that your
   body's first line is exactly `GREENLIGHT: YES` (or NO/ROUTE, matching
   `--verdict`) and carries no second verdict line, appends the fixed approval
   footer, refuses any issue outside the workflow-selected

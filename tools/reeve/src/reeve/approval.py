@@ -41,6 +41,22 @@ property this module exists to hold:
   hit on a deny category still blocks ``auto`` — so gate items never resolve
   without a human — while a full deny takes the category's label.
 
+**The trusted label vouches for exactly the greenlit text** (the Cursor
+security finding on #760). Classification re-reads the LIVE title and body,
+so a label alone would let an issue's author file docs-looking text, wait for
+``docs-only`` and a YES greenlight, then edit the body into a different
+request the 20h window would auto-approve (and arm). Two bindings close both
+edit windows, both fail-closed to ``ask``:
+
+* **ordering** — a label loosens only when its newest ``labeled`` event is at
+  or after the greenlight comment's own post (:func:`label_vouches`), so the
+  human's label is a vouch for the text the greenlight already reasoned on;
+* **text binding** — the greenlight marker carries ``text=<digest>`` of the
+  issue text the drafter read (:func:`text_digest`, computed byte-identically
+  by the wrapper), and auto requires the live text's digest to equal it
+  (:func:`text_binding_blocker`). A 👍 or ``/decide`` is unaffected — a human
+  reacting reads the current text themselves.
+
 Most restrictive wins — deny > ask > auto — and an unclassified issue asks.
 A parked decision is an *issue*, not a PR, so there are no changed paths to
 read: the labels and the text that names paths are the only deterministic
@@ -53,6 +69,7 @@ labels, the text and the label events through the GET seam and calls here.
 
 from __future__ import annotations
 
+import hashlib
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -233,7 +250,9 @@ def classify(
             evidence.append(f"`{category}`: label `{label}` (applied by a write-permission human)")
         else:
             untrusted.add(category)
-            evidence.append(f"`{category}`: label `{label}` (applier not verified — cannot loosen)")
+            evidence.append(
+                f"`{category}`: label `{label}` (applier not verified, or applied before "
+                "the greenlight — cannot loosen)")
     for category, patterns in text_hits(title, body).items():
         untrusted.add(category)
         named = ", ".join(f"`{p}`" for p in patterns)
@@ -282,14 +301,15 @@ def loosening_labels(labels: Iterable[str], rules: Rules) -> list[str]:
     )
 
 
-def label_applier(events: Iterable[dict[str, Any]], label: str) -> str:
-    """The login whose ``labeled`` event most recently applied ``label``.
+def label_applied(events: Iterable[dict[str, Any]], label: str) -> tuple[str, str]:
+    """``(login, created_at)`` of the ``labeled`` event that most recently applied ``label``.
 
     ``events`` is the issue's label-event history as the GET seam returns it
     (``{"event", "label", "actor", "created_at"}``). The newest ``labeled``
     event for the name wins — the one that put the label there now. No such
-    event (a renamed label, a truncated history) is ``""``: an unknown applier,
-    which :func:`label_actor_trusted` never trusts.
+    event (a renamed label, a truncated history) is ``("", "")``: an unknown
+    applier at an unknown time, which neither :func:`label_actor_trusted` nor
+    :func:`label_vouches` ever trusts.
     """
     newest: Optional[dict[str, Any]] = None
     for event in events or ():
@@ -297,7 +317,62 @@ def label_applier(events: Iterable[dict[str, Any]], label: str) -> str:
             continue
         if newest is None or str(event.get("created_at", "")) >= str(newest.get("created_at", "")):
             newest = event
-    return (newest or {}).get("actor", "") or ""
+    newest = newest or {}
+    return (newest.get("actor", "") or "", str(newest.get("created_at", "") or ""))
+
+
+def label_applier(events: Iterable[dict[str, Any]], label: str) -> str:
+    """The login whose ``labeled`` event most recently applied ``label`` (``""`` if none)."""
+    return label_applied(events, label)[0]
+
+
+def label_vouches(label_at: str, greenlight_at: str) -> bool:
+    """Whether a label applied at ``label_at`` vouches for a greenlight posted at ``greenlight_at``.
+
+    Only a label applied AT OR AFTER the greenlight loosens: the human
+    applying it has the drafted greenlight — and the text it reasoned on — in
+    front of them. A label that predates the greenlight vouched for whatever
+    the text said then, which an author may have edited since. Either stamp
+    unparseable → ``False`` (fail-closed: the thread asks).
+    """
+    applied = _parse_iso(label_at)
+    posted = _parse_iso(greenlight_at)
+    if applied is None or posted is None:
+        return False
+    return applied >= posted
+
+
+def text_digest(title: str, body: Optional[str]) -> str:
+    r"""The canonical digest of an issue's text — the greenlight marker's ``text=``.
+
+    ``sha256(utf8(title + "\n" + (body or "") + "\n"))``, first 16 hex
+    characters. The trailing ``"\n"`` is what ``jq -r`` emits after the
+    string, because the wrapper computes the same value as
+    ``gh api repos/$REPO/issues/$N --jq '.title + "\n" + (.body // "")' |
+    sha256sum`` — bytes piped, never through ``$(...)``, which would strip
+    trailing newlines. A null body is ``""``. No normalization of any kind:
+    CRLF, trailing whitespace and unicode are hashed as GitHub stores them,
+    so ANY edit changes the digest (the fail-closed direction).
+    """
+    text = f"{title or ''}\n{body or ''}\n"
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def text_binding_blocker(marker_text: Optional[str], title: str, body: Optional[str]) -> str:
+    """Why a standing auto-approve may NOT fire on this text, or ``""`` if it may.
+
+    ``marker_text`` is the greenlight marker's ``text=`` digest (``None``/
+    ``""`` for a marker without one — a pre-binding greenlight, or a forged
+    one). Missing or mismatched → a reason: the thread falls to ask, so only
+    a 👍 or ``/decide`` resolves it.
+    """
+    if not marker_text:
+        return ("standing rule auto-approve: the greenlight does not record the issue text "
+                "it reasoned on — needs a 👍 or /decide")
+    if marker_text != text_digest(title, body):
+        return ("standing rule auto-approve: issue text changed since the greenlight — "
+                "needs a 👍 or /decide")
+    return ""
 
 
 def label_actor_trusted(login: str, authorized: Callable[[str], bool]) -> bool:

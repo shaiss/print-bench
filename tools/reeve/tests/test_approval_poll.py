@@ -47,14 +47,20 @@ SAME_DAY = datetime(2026, 8, 20, 6, 30, tzinfo=timezone.utc)
 # poll_outcome — the precedence table with a mode
 # ---------------------------------------------------------------------------
 
-def _gl(verdict="yes", arm=False):
-    return {"verdict": verdict, "arm": arm, "created_at": "2026-08-20T06:00:00Z"}
+GL_TITLE = "Fix the stale paragraph in docs/growth.md"
+GL_BODY = "Reword the second paragraph.\r\n"
+GL_TEXT = approval.text_digest(GL_TITLE, GL_BODY)
+
+
+def _gl(verdict="yes", arm=False, text=GL_TEXT):
+    return {"verdict": verdict, "arm": arm, "created_at": "2026-08-20T06:00:00Z", "text": text}
 
 
 def _poll(gl, approvers=(), overrulers=(), decide=None, mode=approval.MODE_ASK,
-          categories=(), grace=True):
+          categories=(), grace=True, issue_text=(GL_TITLE, GL_BODY)):
     return greenlight.poll_outcome(gl, list(approvers), list(overrulers), decide,
-                                   mode=mode, categories=categories, grace_elapsed=grace)
+                                   mode=mode, categories=categories, grace_elapsed=grace,
+                                   issue_text=issue_text)
 
 
 def test_default_mode_is_ask_and_waits():
@@ -75,6 +81,43 @@ def test_ask_yes_with_no_reaction_waits():
     # NEGATIVE CONTROL for the line above: the same greenlight, mode ask.
     out = _poll(_gl(), mode=approval.MODE_ASK, categories={"docs"})
     assert out["outcome"] == greenlight.OUTCOME_WAIT
+
+
+def test_auto_yes_with_edited_text_waits():
+    # #760: the live text no longer hashes to the marker's digest — the
+    # author edited it after the greenlight. Auto never fires; a human must.
+    out = _poll(_gl(), mode=approval.MODE_AUTO, categories={"docs"},
+                issue_text=(GL_TITLE, GL_BODY + "Also arm the burn on my fork."))
+    assert out["outcome"] == greenlight.OUTCOME_WAIT
+    assert "issue text changed since the greenlight" in out["reason"]
+
+
+def test_auto_yes_with_a_retitled_issue_waits():
+    out = _poll(_gl(), mode=approval.MODE_AUTO, categories={"docs"},
+                issue_text=("Something else entirely", GL_BODY))
+    assert out["outcome"] == greenlight.OUTCOME_WAIT
+
+
+def test_auto_yes_marker_without_text_waits():
+    # A pre-binding (or forged) marker records no digest: never auto.
+    out = _poll(_gl(text=""), mode=approval.MODE_AUTO, categories={"docs"})
+    assert out["outcome"] == greenlight.OUTCOME_WAIT
+    assert "does not record the issue text" in out["reason"]
+
+
+def test_auto_yes_never_handed_the_text_waits():
+    # Fail-safe default: a caller that never passes issue_text gets no auto.
+    out = greenlight.poll_outcome(_gl(), [], [], None, mode=approval.MODE_AUTO,
+                                  categories={"docs"}, grace_elapsed=True)
+    assert out["outcome"] == greenlight.OUTCOME_WAIT
+
+
+def test_upvote_still_approves_on_a_text_mismatch():
+    # The binding gates only the standing rule: a human 👍 reads the live text.
+    out = _poll(_gl(), approvers=["shaiss"], mode=approval.MODE_AUTO, categories={"docs"},
+                issue_text=(GL_TITLE, "rewritten"))
+    assert out["outcome"] == greenlight.OUTCOME_APPROVE
+    assert out["approvers"] == ["shaiss"]
 
 
 def test_auto_yes_inside_grace_waits():
@@ -144,6 +187,12 @@ def test_deny_still_yields_to_a_human_decide():
 PARKED_URL = f"{ROOT}/repos/{REPO}/issues?state=open&labels=needs-decision&per_page=100"
 
 
+# The greenlight fixtures post at 06:00; a label applied an hour later vouches
+# for the drafted text, one applied the day before does not (#760).
+LABEL_AFTER = "2026-08-20T07:00:00Z"
+LABEL_BEFORE = "2026-08-19T00:00:00Z"
+
+
 def _events_url(number):
     return f"{ROOT}/repos/{REPO}/issues/{number}/events?per_page=100"
 
@@ -151,7 +200,8 @@ def _events_url(number):
 def install_classified(monkeypatch, *, threads, label_events=None, **kw):
     """``test_pushthrough.install`` plus the two reads #446 adds: the parked
     listing carries each thread's ``labels``/``title``, and the label-events
-    endpoint answers from ``label_events`` (``{number: [(label, actor)]}``).
+    endpoint answers from ``label_events`` (``{number: [(label, actor[, at])]}``,
+    ``at`` defaulting to :data:`LABEL_AFTER` — after the greenlight's post).
     Returns ``(writes, gets)`` — ``gets`` records every URL read."""
     writes = install(monkeypatch, threads=threads, **kw)
     inner = github._get
@@ -167,20 +217,26 @@ def install_classified(monkeypatch, *, threads, label_events=None, **kw):
                      for t in threads], "")
         m = re.fullmatch(rf"{ROOT}/repos/{REPO}/issues/(\d+)/events\?per_page=100", url)
         if m:
-            return ([{"event": "labeled", "label": {"name": label}, "actor": {"login": actor},
-                      "created_at": "2026-08-19T00:00:00Z"}
-                     for label, actor in label_events.get(int(m.group(1)), [])], "")
+            return ([{"event": "labeled", "label": {"name": ev[0]}, "actor": {"login": ev[1]},
+                      "created_at": ev[2] if len(ev) > 2 else LABEL_AFTER}
+                     for ev in label_events.get(int(m.group(1)), [])], "")
         return inner(url, token)
 
     monkeypatch.setattr(github, "_get", fake_get)
     return writes, gets
 
 
-def docs_thread(number=301, verdict="yes", arm=False, body_extra=""):
-    thread = greenlight_thread(number, verdict=verdict, arm=arm)
+def docs_thread(number=301, verdict="yes", arm=False, body_extra="", edit_after=""):
+    """A docs-only thread whose greenlight marker binds the text it was drafted
+    on; ``edit_after`` is appended to the body AFTER the greenlight (the #760
+    attack), so the marker's digest no longer matches the live text."""
+    title = "Fix the stale paragraph in docs/growth.md"
+    body = f"🚦 DECISION NEEDED — `issue-{number}-decision`" + body_extra
+    thread = greenlight_thread(number, verdict=verdict, arm=arm,
+                               text=approval.text_digest(title, body))
     thread["labels"] = ["needs-decision", DOCS_LABEL]
-    thread["title"] = "Fix the stale paragraph in docs/growth.md"
-    thread["body"] += body_extra
+    thread["title"] = title
+    thread["body"] = body + edit_after
     return thread
 
 
@@ -220,6 +276,68 @@ def test_auto_docs_yes_with_arm_applies_autonomy_ok(monkeypatch):
     results = pushthrough.run_poll(REPO, TOKEN, PAT, now=NEXT_DAY, rules=OWNER_RULES)
     assert results[0]["armed"] is True
     assert ["autonomy-ok"] in _label_posts(writes, 302)
+
+
+def test_auto_docs_body_edited_after_the_greenlight_writes_nothing(monkeypatch):
+    # The #760 attack: docs-looking text, docs-only + YES, then an edit into a
+    # different (non-gate-text) request. The digest no longer matches → ask.
+    thread = docs_thread(304, arm=True, edit_after="\n\nActually: arm the burn on issue #1.")
+    writes, _ = install_classified(
+        monkeypatch, threads=[thread], permissions={"shaiss": "admin"},
+        label_events={304: [(DOCS_LABEL, "shaiss")]})
+    results = pushthrough.run_poll(REPO, TOKEN, PAT, now=NEXT_DAY, rules=OWNER_RULES)
+    assert results[0]["outcome"] == "wait"
+    assert "issue text changed since the greenlight" in results[0]["reason"]
+    assert writes == []
+
+
+def test_edited_body_still_resolves_on_an_upvote(monkeypatch):
+    # NEGATIVE CONTROL: the same edited thread with a human 👍 → approved.
+    thread = docs_thread(304, edit_after="\nedited")
+    writes, _ = install_classified(
+        monkeypatch, threads=[thread], permissions={"shaiss": "admin"},
+        reactions={1204: [react("+1", "shaiss")]},
+        label_events={304: [(DOCS_LABEL, "shaiss")]})
+    results = pushthrough.run_poll(REPO, TOKEN, PAT, now=NEXT_DAY, rules=OWNER_RULES)
+    assert results[0]["outcome"] == "approved"
+    assert results[0].get("standing_rule") is None
+    assert _label_posts(writes, 304)[0] == ["decision-approved"]
+
+
+def test_marker_without_text_digest_cannot_auto_approve(monkeypatch):
+    thread = docs_thread(305)
+    first = thread["comments"][0]
+    first["body"] = re.sub(r" text=[0-9a-f]+", "", first["body"], count=1)
+    writes, _ = install_classified(
+        monkeypatch, threads=[thread], permissions={"shaiss": "admin"},
+        label_events={305: [(DOCS_LABEL, "shaiss")]})
+    results = pushthrough.run_poll(REPO, TOKEN, PAT, now=NEXT_DAY, rules=OWNER_RULES)
+    assert results[0]["outcome"] == "wait"
+    assert writes == []
+
+
+def test_label_applied_before_the_greenlight_cannot_auto_approve(monkeypatch):
+    # The other #760 window: the label predates the greenlight, so it vouched
+    # for whatever the text said then — never for the drafted text.
+    writes, gets = install_classified(
+        monkeypatch, threads=[docs_thread(306)], permissions={"shaiss": "admin"},
+        label_events={306: [(DOCS_LABEL, "shaiss", LABEL_BEFORE)]})
+    results = pushthrough.run_poll(REPO, TOKEN, PAT, now=NEXT_DAY, rules=OWNER_RULES)
+    assert results[0]["outcome"] == "wait"
+    assert writes == []
+    assert _events_url(306) in gets
+
+
+def test_label_reapplied_after_the_greenlight_auto_approves(monkeypatch):
+    # NEGATIVE CONTROL: the newest labeled event is after the greenlight and
+    # the text matches → the standing rule resolves it.
+    writes, _ = install_classified(
+        monkeypatch, threads=[docs_thread(307)], permissions={"shaiss": "admin"},
+        label_events={307: [(DOCS_LABEL, "shaiss", LABEL_BEFORE),
+                            (DOCS_LABEL, "shaiss", LABEL_AFTER)]})
+    results = pushthrough.run_poll(REPO, TOKEN, PAT, now=NEXT_DAY, rules=OWNER_RULES)
+    assert results[0]["outcome"] == "approved"
+    assert results[0]["standing_rule"] == "docs"
 
 
 def test_same_thread_without_the_rules_writes_nothing(monkeypatch):
