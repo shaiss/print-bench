@@ -45,7 +45,7 @@ Frozen once reviewed — add a row, never repurpose one.
 |---|---|---|---|---|
 | product-hero | the printed part, at a glance | hero (low ¾) | orange / satin | — |
 | size-marker | the self-labeling top face — the whole point | high ¾, elevated (`18,58,0.92`) | orange / satin | — |
-| size-sweep | the multi-size strip (B1) — four separate cubes on one plate | low ¾, wide (`25,22,0.42`) | orange / satin | `part="sweep"` |
+| size-sweep | the multi-size strip (B1) — four separate cubes on one plate | low ¾ (`20,32,0.60`) | orange / satin | `part="sweep"` |
 
 **AI product stills — tier 1.5 (AI, bare product, disclosed).** The bare cube,
 no scene, image-to-image seeded from a tier-1 render — angle = which render it
@@ -93,6 +93,7 @@ cube; the deterministic turntable GIF stays the motion-true artifact.
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-10-04 | Tighten `size-sweep` framing `25,22,0.42` → `20,32,0.60` (same 1280×720, orange/satin) | Drik showroom-distance hunch: 10/20/30 read clean, the 5 is a tiny mark; raise zoom and elev so the 5 mm top glyph fills more of the frame. Camera-only — first print still has to confirm the engraved 5 is readable at arm's length after a 0.2 mm slice |
 | 2026-10-04 | Add tier-1 `size-sweep` studio shot of the B1 strip layout | Drik fitness pass: showroom sold only the 20 mm cube while README owned the strip; charter allows adding a shot row, never repurposing |
 | 2026-09-12 | Ship B1 as four separate cubes on a `ci.plate` 3MF, not a fused strip bar | Each cube is an independent dimensional sample; air-gapping matches the repo's sweep-strip convention and keeps STL/3MF separation honest |
 | 2026-08-08 | Add a high three-quarter `size-marker` studio shot beside the hero | The hero shows the engraved size edge-on; the marker is the product's one trick and deserves a shot that makes it the subject |

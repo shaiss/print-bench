@@ -24,6 +24,10 @@ design demonstrating the parameter conventions.
   `render.sh --sweep`). Deliverable is `ci.plate` →
   `build/calibration-cube-plate.3mf` via `plate.sh`; `part = "sweep"` is
   only a layout preview (STL cannot carry object separation).
+- `size-sweep` studio framing is `20,32,0.60` (was `25,22,0.42`) so the
+  5 mm glyph is larger at showroom distance; print readability of that
+  glyph at arm's length is still a first-print question, not closed by
+  the camera.
 
 ## Print orientation
 As modeled: flat face down, no supports. Print at 100% infill if using it
