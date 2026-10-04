@@ -181,9 +181,13 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
     core in. `pocket-clear` proves the cavity ∩ the core's outer 1.2 mm shell
     (the section eroded by 1.2 + the sockets grown by 1.2, ends included) is
     empty; the control raises the ceiling through the roof (156 facets). Whether
-    55 g at z ≈ 5 mm is enough against two ~50 g balls at 124 mm is the
-    **CoG/tip-over gate that is NOT in scope tonight** — this number is an
-    assumption to be measured, never a README stability claim.
+    55 g at z ≈ 5 mm is enough against two ~50 g balls at 124 mm is now measured
+    by the advisory **CoG/tip-over gate** (`designs/ovodyo/ci.cog`, tools/cogcheck,
+    #623 / remaining #603 item 10). TIP-RISK is a WARN, not a hard fail. The
+    ≈55 g fill stays a **starting guess to tune against the measured verdict** —
+    never claim STABLE in the README if the check says TIP-RISK. Solid-mesh PLA
+    at 1.24 g/cm³ over-masses the balls vs 15–20 % infill (conservative toward
+    TIP-RISK).
   - **Feet.** Each wing carries two Ø7 pads under its inner-end chord nodes
     (`_bx(bays)` − 4 in x, `_bw` − 2 in y: hanging below the chord, inboard of
     its outer face, invisible from the hero camera). The pad bottom is FLUSH
@@ -218,7 +222,7 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
 | ~~Deliverable gated as loose parts; no `ci.plate`~~ done: `ci.plate` → `build/ovodyo-plate.3mf`, 8 objects | (`ci.fusecheck` stays with the seam work) |
 | Ball generator is design-local | #600 (promote to `lib/`, with a `tri_k` guard + facet mate) |
 | No committed style pack / stylelift metrics | #601 (style pack + facet/openness metrics) |
-| Ballast pockets + a stated ≈55 g shot fill exist, but no CoG/tip-over gate proves it is enough | #603 (CoG/tip-over gate) |
+| Ballast pockets + a stated ≈55 g shot fill exist; `ci.cog` now runs the advisory CoG/tip-over check (WARN on TIP-RISK) — fill still to tune against that verdict | #603 (item 10 remaining: this manifest; platform half #623 / #652) |
 
 ## Tumble kinematics (N2)
 
@@ -419,6 +423,8 @@ the red ballast keel that seats in the centre segment (`core_body()`, modelled
 in place on z = 0) and `base-plug` its port plug (print two); `core-seat`,
 `core-seat-ctrl`, `pocket-clear`, `pocket-ctrl` are the `ci.fitchecks` parts
 (never printed). `ci.plate` builds the multi-object 3MF deliverable.
+`ci.cog` is the assembled standing-frame CoG / tip-over manifest (advisory
+WARN on TIP-RISK; first gate render emits STABLE or TIP-RISK from the STLs).
 `base-mech` (whole drivetrain) and `pod-drive` (one pod's gear train) are
 PREVIEW-ONLY coloured mechanism — not in `ci.parts`, not printed. The ball's
 faceting is `facet` in `ovodyo.scad` (passed as `tri_k`; `_GB_TRI_K` in
