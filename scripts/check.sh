@@ -587,7 +587,8 @@ fi
 # is the hole that let workflow rounds exit 0 having posted nothing. The
 # coach still pushes iterations (Write/Edit + git stay allowed). --selftest
 # proves the sign-off marker is assembled server-side, caller-supplied
-# JANE/DRIK_SIGNOFF HTML comments are refused, the marker family follows
+# JANE/DRIK_SIGNOFF/PM_TRIAGE/COACH_LOCK HTML comments are refused, the
+# marker family follows
 # REVIEWER_ID, post_coach requires REVIEWER_ID=coach, the target PR is
 # pinned to REVIEWER_PR, and the walk cap spans the chain via
 # REVIEWER_POST_STATE.

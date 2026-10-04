@@ -72,10 +72,12 @@ same way; run 37218561622 completed success with `permission_denials_count`
 those comments. The HTML `<!-- COACH_LOCK -->` marker is assembled here;
 `scripts/coach-lock-check.sh` is the pin that a denial-only turn cannot
 stamp the round complete (claude-code-action still exits 0), and it
-counts only an Actions-bot comment carrying that exact marker — a
-planted `🎓 COACH-LOCK` substring from any other author does not
-satisfy it. Cap is 8 comments per unattended walk — a kickoff plus
-first-round notes — not Jane's one-review cap.
+counts only an Actions-bot comment that *ends* with the assembled
+``<!-- COACH_LOCK -->`` + footer suffix — a planted ``🎓 COACH-LOCK``
+substring, or a Jane/Drik/PM body that smuggled the HTML (those jobs
+share ``github-actions[bot]``), does not satisfy it. Cap is 8 comments
+per unattended walk — a kickoff plus first-round notes — not Jane's
+one-review cap.
 
 Jane's and Drik's jobs check out ``pull_request.base.ref`` so this
 file is never the PR's copy. The coach cannot: it git-pushes the PR
@@ -289,9 +291,10 @@ _last_path = None
 
 # Reserved HTML-comment syntax the sign-off / coach-lock checks grep for.
 # A caller body that already contains any family is refused — REVIEWER_ID
-# only chooses which marker *we* append, get_marker() has no author check,
-# and coach-lock-check.sh counts any Actions-bot comment (Jane/Drik/PM and
-# the coach share github-actions[bot]).
+# only chooses which marker *we* append. get_marker() has no author check,
+# and Jane/Drik/PM share github-actions[bot] with the coach, so a planted
+# COACH_LOCK in a sibling caller body is refused here; coach-lock-check.sh
+# also requires the assembled marker-then-footer suffix.
 _INJECTED_MARKER = re.compile(
     r"<!--\s*(?:(?:JANE|DRIK)_SIGNOFF|PM_TRIAGE|COACH_LOCK)\b",
     re.IGNORECASE,
