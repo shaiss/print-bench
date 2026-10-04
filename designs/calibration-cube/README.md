@@ -57,11 +57,17 @@ to pad.
 - **Infill:** 100% if you'll check dimensional accuracy under load; otherwise
   your usual default
 - **Supports:** none needed
+- **Brim:** no brim — PrusaSlicer's skirt default is fine. On the multi-size
+  strip, leave the 4 mm air gap between cubes; Bambu Studio's stock **Auto**
+  brim can pad the 5 mm cube's 3.8 mm first-layer patch and chain the four
+  objects across that gap.
 - **Orientation:** as modeled — flat face down
 - **Seam:** park the seam on a **rear corner** before you measure. A stock
   aligned seam on a face leaves a ridge a caliper will catch. This is
-  slicer guidance (the model does not force a face seam); in PrusaSlicer,
-  Seam position → Rear, or paint the seam to a back corner.
+  slicer guidance (the model does not force a face seam): PrusaSlicer →
+  Seam position → **Rear**, or paint the seam to a back corner; Bambu
+  Studio → Seam position → **Back**, or use scarf seam / paint the seam to
+  a back corner.
 
 ## Parameters
 
