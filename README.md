@@ -374,7 +374,9 @@ surfaces studies awaiting a read live in
     the assembled comment shape — marker, `GREENLIGHT: YES|NO|ROUTE` verdict
     line, reasoning, wrapper-appended approval footer) must never be denied
   - `coach-lock-check.sh` — fails a design-coach round that posted no
-    COACH-LOCK (claude-code-action exits 0 on a denial-only turn; issue #806)
+    trusted COACH-LOCK (an Actions-bot comment carrying the exact
+    `<!-- COACH_LOCK -->` marker; claude-code-action exits 0 on a
+    denial-only turn; issue #806)
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):

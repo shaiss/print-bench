@@ -21,7 +21,10 @@ containment is structural, in two halves:
     ``fetch-depth: 0``, then a TRUSTED step fetches the PR head SHA
     (Oracle extraheader auth) and overlays the changed design directories
     before any agent step;
-  - the coach's checkout is full history (it no longer fetches).
+  - the coach's checkout is full history (it no longer fetches) of the
+    PR, not base.ref — it still git-pushes. A trusted step then overlays
+    the posting surface from ``pull_request.base.sha`` so the MCP the
+    action spawns is never the PR's copy.
 
 Every pin has a tamper negative control below, derived from the live
 workflow text, proving it can fail.
@@ -49,6 +52,14 @@ STAGED_JOBS = ("jane-review", "drik-review")
 STAGE_MARKER = 'git checkout "$HEAD_SHA" -- "designs/${d}"'
 HEAD_FETCH = 'fetch --no-tags origin "$HEAD_SHA"'
 BASE_REF = "${{ github.event.pull_request.base.ref }}"
+BASE_SHA = "${{ github.event.pull_request.base.sha }}"
+COACH_RESTORE_MARKER = 'git checkout "$BASE_SHA" --'
+COACH_POST_BLOB = '${BASE_SHA}:.claude/reviewer-post/reviewer_mcp.py'
+COACH_RESTORE_PATHS = (
+    ".claude/reviewer-post",
+    ".claude/design-coach-settings.json",
+    ".claude/skills/design-coach",
+)
 
 
 def _steps(block: str) -> list[str]:
@@ -183,6 +194,72 @@ def _assert_coach_checks_out_full_history(text: str) -> None:
     assert _checkout_depth(block) == 0, (
         "auto-review.yml [design-coach] checkout is not full history — the "
         "coach's backstop denies git fetch, so the PR branch must be local")
+    assert _checkout_ref(block) != BASE_REF, (
+        "auto-review.yml [design-coach] checks out base.ref — the coach "
+        "must keep the PR branch local for git push; overlay the posting "
+        "surface from base.sha instead")
+
+
+def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
+    """The coach cannot checkout base wholesale (it git-pushes the PR).
+    The posting MCP / settings / skill are overlaid from base.sha by a
+    trusted step before any agent runs, and ship steps are gated on that
+    surface existing on the base (Jane's first-landing skip)."""
+    block = _without_comments(_job_blocks(text)["design-coach"])
+    steps = _steps(block)
+    ship_at = next(i for i, c in enumerate(steps)
+                   if "uses: anthropics/claude-code-action" in c)
+    restore_at = [i for i, c in enumerate(steps) if COACH_RESTORE_MARKER in c]
+    assert restore_at, (
+        "auto-review.yml [design-coach] has no trusted step restoring the "
+        "posting surface from base.sha — the MCP would be the PR's copy")
+    assert restore_at[0] < ship_at, (
+        "auto-review.yml [design-coach] restores the posting surface AFTER "
+        "an agent step — the action would spawn the PR's MCP")
+    restore = steps[restore_at[0]]
+    assert "uses:" not in restore.split("run:", 1)[0], (
+        "restore step is not a run step")
+    env = _env_map(restore, 8)
+    assert env.get("BASE_SHA") == BASE_SHA, (
+        "auto-review.yml [design-coach] restore step does not take the PR "
+        "base sha")
+    run = restore.split("run:", 1)[1]
+    assert "${{" not in run, (
+        "auto-review.yml [design-coach] restore step interpolates an "
+        "expression into its script — PR-controlled values must arrive "
+        "through env")
+    for path in COACH_RESTORE_PATHS:
+        assert path in run, (
+            f"auto-review.yml [design-coach] restore step no longer overlays "
+            f"{path} from base.sha")
+    ready_at = [i for i, c in enumerate(steps) if COACH_POST_BLOB in c]
+    assert ready_at, (
+        "auto-review.yml [design-coach] ready step no longer probes the "
+        "posting MCP blob on base.sha — a working-tree check would accept "
+        "the PR's copy")
+    assert ready_at[0] < restore_at[0], (
+        "auto-review.yml [design-coach] probes the base posting surface "
+        "after restoring it")
+    ready = steps[ready_at[0]]
+    ready_env = _env_map(ready, 8)
+    assert ready_env.get("BASE_SHA") == BASE_SHA, (
+        "auto-review.yml [design-coach] ready step does not take the PR "
+        "base sha")
+    assert ready_env.get("GH_TOKEN") == "${{ github.token }}", (
+        "auto-review.yml [design-coach] ready step has no job token for "
+        "the authenticated base fetch (a private-repo anonymous fetch 403s)")
+    ready_run = ready.split("run:", 1)[1]
+    assert "${{" not in ready_run, (
+        "auto-review.yml [design-coach] ready step interpolates an "
+        "expression into its script")
+    assert 'fetch --no-tags origin "$BASE_SHA"' in ready_run, (
+        "auto-review.yml [design-coach] ready step does not fetch the base "
+        "SHA when it is not already local")
+    for n, chunk in enumerate(_ship_chunks(block), 1):
+        assert "steps.ready.outputs.ready" in chunk, (
+            f"auto-review.yml [design-coach] ship step {n} is not gated on "
+            "the base posting surface being present — a first landing "
+            "would run the PR's copy")
 
 
 def test_every_reviewer_ship_step_runs_under_the_git_lock():
@@ -195,6 +272,10 @@ def test_jane_and_drik_get_the_head_staged_by_a_trusted_step():
 
 def test_coach_checks_out_full_history():
     _assert_coach_checks_out_full_history(_workflow_text())
+
+
+def test_coach_restores_posting_surface_from_base():
+    _assert_coach_restores_posting_surface_from_base(_workflow_text())
 
 
 # ── negative controls ─────────────────────────────────────────────────────────
@@ -323,3 +404,70 @@ def test_coach_guard_rejects_a_shallow_checkout():
                             "          fetch-depth: 0\n", "")
     with pytest.raises(AssertionError, match="full history"):
         _assert_coach_checks_out_full_history(tampered)
+
+
+def test_coach_guard_rejects_a_base_ref_checkout():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        "          persist-credentials: false\n",
+        "          persist-credentials: false\n"
+        "          ref: ${{ github.event.pull_request.base.ref }}\n")
+    with pytest.raises(AssertionError, match="base.ref"):
+        _assert_coach_checks_out_full_history(tampered)
+
+
+def _restore_chunk(text: str) -> str:
+    return next(c for c in _steps(_job_blocks(text)["design-coach"])
+                if COACH_RESTORE_MARKER in c)
+
+
+def test_coach_guard_rejects_a_job_without_the_restore_step():
+    text = _workflow_text()
+    restore = _restore_chunk(text)
+    tampered = text.replace("\n      - " + restore, "", 1)
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="no trusted step restoring"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_restore_after_the_agent():
+    text = _workflow_text()
+    block = _job_blocks(text)["design-coach"]
+    restore = _restore_chunk(text)
+    first_ship = _ship_chunks(block)[0]
+    moved = block.replace("\n      - " + restore, "", 1).replace(
+        first_ship, first_ship + "\n      - " + restore, 1)
+    tampered = text.replace(block, moved, 1)
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="AFTER an agent step"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_an_interpolated_restore_script():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        '          set -euo pipefail\n'
+        '          git checkout "$BASE_SHA" -- \\\n',
+        '          set -euo pipefail\n'
+        '          : ${{ github.event.pull_request.number }}\n'
+        '          git checkout "$BASE_SHA" -- \\\n')
+    with pytest.raises(AssertionError, match="interpolates an expression"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_a_working_tree_ready_check():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        'git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer_mcp.py"',
+        'test -f .claude/reviewer-post/reviewer_mcp.py')
+    with pytest.raises(AssertionError, match="posting MCP blob"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_a_ship_step_not_gated_on_ready():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        "        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'\n",
+        "        if: env.HAS_ZAI == 'true'\n")
+    with pytest.raises(AssertionError, match="not gated on"):
+        _assert_coach_restores_posting_surface_from_base(tampered)

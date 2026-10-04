@@ -65,9 +65,17 @@ same way; run 37218561622 completed success with `permission_denials_count`
 = 3 and posted no COACH-LOCK. `post_coach` is the JSON-argument write for
 those comments. The HTML `<!-- COACH_LOCK -->` marker is assembled here;
 `scripts/coach-lock-check.sh` is the pin that a denial-only turn cannot
-stamp the round complete (claude-code-action still exits 0). Cap is 8
-comments per unattended walk — a kickoff plus first-round notes — not Jane's
-one-review cap.
+stamp the round complete (claude-code-action still exits 0), and it
+counts only an Actions-bot comment carrying that exact marker — a
+planted `🎓 COACH-LOCK` substring from any other author does not
+satisfy it. Cap is 8 comments per unattended walk — a kickoff plus
+first-round notes — not Jane's one-review cap.
+
+Jane's and Drik's jobs check out ``pull_request.base.ref`` so this
+file is never the PR's copy. The coach cannot: it git-pushes the PR
+branch, so auto-review.yml overlays ``.claude/reviewer-post/`` (and
+the coach settings/skill) from ``base.sha`` before any agent step.
+Do not spawn this server from a PR-controlled checkout.
 
 Stdlib only; logs go to stderr so stdout carries nothing but JSON-RPC.
 """

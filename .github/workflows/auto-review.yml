@@ -75,12 +75,19 @@ name: Auto design review (Jane / Drik / PM / coach)
 #
 # Coach posting (issue #806) is the same exit-0 silence with different
 # containment. The coach still pushes iterations, so its --allowedTools
-# keep Write/Edit/Bash (Jane/Drik's read-only list must not be copied).
-# Comments go through mcp__reviewer__post_coach on the same server
-# (REVIEWER_ID=coach). claude-code-action still exits 0 on a denial-only
-# turn, so after any ship step that claims success, `scripts/coach-lock-check.sh`
-# fails the job unless the thread carries COACH_LOCK — that is what stops
-# a silent no-post round from stamping complete.
+# keep Write/Edit/Bash (Jane/Drik's read-only list must not be copied)
+# and its checkout stays the PR (full history) so git push has the
+# branch local. Comments go through mcp__reviewer__post_coach on the
+# same server (REVIEWER_ID=coach). The posting files themselves are
+# restored from pull_request.base.sha before any agent step — Jane/Drik
+# checkout base wholesale; the coach cannot, so a trusted overlay puts
+# reviewer-post / design-coach-settings / the skill back to the base
+# copy (a PR that rewrites the MCP cannot run as the poster).
+# claude-code-action still exits 0 on a denial-only turn, so after any
+# ship step that claims success, `scripts/coach-lock-check.sh` fails
+# the job unless an Actions-bot comment carries the exact server
+# marker `<!-- COACH_LOCK -->` — a substring planted by any other
+# author does not stamp the round complete.
 #
 # Git containment (code-scanning finding on #760). A deny list cannot contain
 # git: a subcommand option no prefix rule sees (`git fetch origin
@@ -97,6 +104,8 @@ name: Auto design review (Jane / Drik / PM / coach)
 #   * The coach keeps git checkout/add/commit/push (it pushes its rounds) but
 #     its backstop denies fetch/clone/pull/ls-remote and every global option;
 #     its checkout is full history, so every branch head is already local.
+#     A trusted step then overlays the posting surface from base.sha so the
+#     MCP the action spawns is never the PR's copy.
 #   * Every reviewer and coach job carries a job-level ENVIRONMENT lock that
 #     holds whatever the option order: GIT_ALLOW_PROTOCOL=https (git refuses
 #     the file/ext/ssh transports, so --upload-pack/--receive-pack/-u have
@@ -1251,11 +1260,48 @@ jobs:
           # Full history: every branch head (the PR's included) is local, so
           # the coach loads and pushes its rounds without `git fetch`/`pull`,
           # which its backstop denies (code-scanning finding on #760).
+          # This is the PR merge tree, not Jane's base.ref — the coach
+          # still git-pushes. The posting MCP is overlaid from base
+          # below, so a PR cannot replace the server this job executes.
           fetch-depth: 0
+
+      - name: Check the coach posting surface is on the base branch
+        id: ready
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+            echo "::add-mask::${FETCH_AUTH}"
+            git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+              fetch --no-tags origin "$BASE_SHA"
+          fi
+          if git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer_mcp.py" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer-mcp.json" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:.claude/design-coach-settings.json" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:.claude/skills/design-coach/SKILL.md" 2>/dev/null; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the coach posting surface is not on the base branch yet (first landing) — skipping the coach rather than running a PR-controlled copy"
+          fi
+
+      - name: Restore the coach posting surface from the base branch
+        if: steps.ready.outputs.ready == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach
 
       - name: /design-coach via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -1277,7 +1323,7 @@ jobs:
 
       - name: /design-coach via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -1299,7 +1345,7 @@ jobs:
 
       - name: /design-coach via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -1322,7 +1368,8 @@ jobs:
       - name: /design-coach via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1345,7 +1392,8 @@ jobs:
       - name: /design-coach via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1369,7 +1417,8 @@ jobs:
       - name: /design-coach via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1412,7 +1461,7 @@ jobs:
         run: ./scripts/coach-lock-check.sh ${{ github.event.pull_request.number }}
 
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
 
@@ -1422,7 +1471,8 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1440,7 +1490,8 @@ jobs:
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
