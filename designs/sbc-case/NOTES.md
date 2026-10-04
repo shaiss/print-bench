@@ -64,7 +64,12 @@ NopSCADlib vitamins (the brief's named source), read at build time:
    over the 2×20 header), not a window — no bridging, and the wall keeps its
    bottom half for stiffness.
 5. **Fan bolts flush to the lid's outer face; the insert bosses are on the
-   inner face.** Aperture = the fan's own Ø37 bore (from `fan_bore(fan_type)`).
+   inner face.** Intake is a **co-planar grille** in the lid plate (B11): Ø5
+   holes on a 7 mm pitch (2 mm webs), clipped to the vitamin's Ø37 bore
+   (`fan_bore(fan_type)`). Plate material bounds every opening — no bar across
+   the bore span (N4 / outer-face-down print). Measured open area inside the
+   bore: **~40 %** of an unobstructed Ø37 disc (~426 mm² vs 1075 mm²); ~60 %
+   of the former free hole is now solid web blocking fingers from the blades.
    Fan screws (M3 dome ×20, washer under each head) pass through the fan frame
    and the plate into the inner bosses — 11 + 2.5 + 5.8 = 19.3 mm of stack, so
    ×20. The bosses hang 7 mm into the cavity at the fan's corner pitch
@@ -364,6 +369,13 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
+19. **B11 — co-planar fan grille (2026-10-04).** Replaced the through-bored
+    Ø37 lid cut with `fan_grille_cut2d()` — Ø5 holes, 7 mm pitch, 2 mm webs,
+    clipped to `fan_bore(fan_type)`. Trade: ~40 % of the unobstructed bore's
+    free area retained (Monte Carlo on the parametric grid); finger reach to
+    spinning blades blocked; dust still enters through the holes (page updated).
+    Boss pitch and M3 fan screws unchanged; grille stays inside the bore circle,
+    clear of the corner bosses at 16 mm pitch.
 
 ## Print settings
 
