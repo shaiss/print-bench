@@ -392,6 +392,17 @@ surfaces studies awaiting a read live in
     config) — is pinned by
     `tools/model-registry/tests/test_reviewer_backstop_wiring.py` and
     `test_reviewer_git_containment.py`.
+  - `reviewer-deny-canary.sh` — runtime proof that the Claude Code build
+    `auto-review.yml`'s pinned `claude-code-action` SHA actually installs
+    still refuses the three syntax families the reviewer/coach backstops
+    spell (issue #776): mid-string `*`, `:*` word-boundary prefix, and
+    `Edit(./.git/**)`. `reviewer-perms-check.sh` is a Python model of the
+    matcher; this extracts the matcher from CLI 2.1.287 (the version that
+    SHA hardcodes and installs at run time — not bundled, not `latest`)
+    and fails if a denied probe is not refused. `--selftest` run by
+    `check.sh`; the live extract is `.github/workflows/reviewer-deny-canary.yml`
+    (dispatchable, not a required check). Record in
+    [docs/actions-security.md](docs/actions-security.md) CR-A.
   - `spike-converter-perms-check.sh` — the same drift check for the scheduled
     spike-to-brief converter's own deny backstop
     (`.claude/spike-converter-settings.json`, #245 child C / issue #440), the

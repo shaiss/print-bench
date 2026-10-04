@@ -580,6 +580,16 @@ if ! ./scripts/reviewer-perms-check.sh; then
   fail=1
 fi
 
+# Reviewer deny-rule runtime canary (issue #776): the FILE half above is a
+# Python MODEL of the matcher. This --selftest is the harness for the canary
+# that extracts the REAL matcher from the Claude Code build the pinned
+# action SHA installs (docs/actions-security.md, CR-A). The live extract
+# lives in .github/workflows/reviewer-deny-canary.yml (not a required check).
+echo "-- reviewer-deny-canary selftest: scripts/reviewer-deny-canary.sh --selftest"
+if ! ./scripts/reviewer-deny-canary.sh --selftest; then
+  fail=1
+fi
+
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
 # wrapper is the greenlight loop's ONE shell surface, and its --selftest is

@@ -72,6 +72,30 @@ Two facts bound the severity, both empirically checked against the Claude Code b
 
 **Scope note.** The same additive-allow inheritance applies to `backlog-burn.yml` and `design-run.yml` — but those routines *need* the broad tool surface (they run `/ship-issue` and `/design-run`: renders, slices, git, `gh`), so a deny backstop is not appropriate there. Their mitigations remain the ones in the table above (off-by-default gates, default-branch pin, same-repo push checks). The chunker is the one agentic routine whose job is narrow enough to lock to a single wrapper, which is why the backstop lives only there.
 
+**Matcher syntax is a property of the CLI build (issue #776, from #763 item 2).** The reviewer/coach backstops (`.claude/reviewer-settings.json`, `.claude/design-coach-settings.json`) spell three syntax families the Python model in `scripts/reviewer-perms-check.sh` cannot prove at runtime: mid-string `*` (`Bash(git -*)`, `Bash(git --git-dir*)`), `:*` word-boundary prefix (`Bash(git:*)`), and `Edit(./.git/**)`. `auto-review.yml` pins `anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029` (v1.0.239, dependabot #765; older issue text named `9171db3e…`). That SHA does **not** bundle the CLI. `src/entrypoints/run.ts` hardcodes `const claudeCodeVersion = "2.1.287"` and installs at run time with `curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.287`. It is install-at-runtime of a **pinned** version, not a moving latest, so the SHA pin **does** pin the matcher provided `install.sh` honors the version argument.
+
+Verified 2026-10-04 against that SHA:
+
+| | |
+|---|---|
+| Action SHA | `97c53473391bff1901034d4b454b5bac7ab7a029` (commit message: bump Claude Code to 2.1.287 and Agent SDK to 0.3.287) |
+| CLI the SHA installs | **2.1.287** (native build under `~/.local/share/claude/versions/2.1.287`; `claude --version` reports `2.1.287 (Claude Code)`) |
+| Bundled vs moving | Runtime install of a hardcoded version. Not bundled in the action tarball. Not `latest`. |
+| Three syntax families | Present in that binary: `kwe` (`:*` prefix), `V8r`/`$8` (mid-string `*`), `ZQe` (classifier), Edit among `filePatternTools`. No pin bump. CR-A's 2.1.225 empirical checks above still hold; 2.1.287 is the successor this pin actually runs. |
+
+**How to run the canary.** `scripts/reviewer-deny-canary.sh` extracts those functions from the installed 2.1.287 binary and checks one denied probe per family under the committed backstops (`git status` vs `Bash(git:*)`, `git -C /tmp status` vs `Bash(git -*)`, `git --git-dir=/path log` vs `Bash(git --git-dir*)`, `./.git/config` vs `Edit(./.git/**)`). It fails loudly if a probe is not refused, if `auto-review.yml` moves off the recorded SHA, or if the binary no longer contains the matcher. `--selftest` (run by `check.sh`) proves the harness can pass and fail without the CLI.
+
+```bash
+# Live (needs the CLI the action installs):
+curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.287
+./scripts/reviewer-deny-canary.sh
+
+# Harness only:
+./scripts/reviewer-deny-canary.sh --selftest
+```
+
+CI: `.github/workflows/reviewer-deny-canary.yml` — `workflow_dispatch`, and on PRs that touch the backstops, the auto-review pin, the canary, or this CR-A record. Modeled on `model-smoke.yml`: **not** a required check, **not** in `ci-ok`, no provider key (it never starts a model session). If a future pin installs a moving version instead of a hardcoded one, write that down here: the SHA would no longer pin the matcher and this canary would be the only enforcement.
+
 ## The decision
 
 **Accept and document the current posture** (Option 2 of the two #113 listed). Rationale: write-access ⇒ already-trusted actor; not reachable from a fork; the two heaviest routines are off by default; and the property is intrinsic to `workflow_dispatch` — no file in the repo can neutralize it.

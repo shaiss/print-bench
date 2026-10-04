@@ -1,0 +1,65 @@
+name: Reviewer deny-rule canary
+
+# Proof that the Claude Code build auto-review.yml's pinned action SHA
+# actually installs still refuses the three syntax families the reviewer/
+# coach backstops spell (issue #776 / #763 item 2). scripts/reviewer-perms-check.sh
+# checks those rules against a Python MODEL of the matcher; this workflow
+# installs the SAME CLI the action installs (2.1.287, hardcoded in the SHA)
+# and runs the REAL matcher extracted from that binary.
+#
+# Modeled on model-smoke.yml: dispatchable, may run on a PR that touches the
+# backstops / the pin / this workflow, MUST NOT be a required check (not in
+# ci-ok). No provider key — it never starts a model session — so it is not
+# an AI-consuming job and does not take the andon-cord gate.
+#
+# TWO WAYS IN:
+#   • Automatically, on a PR that edits a reviewer/coach backstop, the
+#     auto-review pin, the canary, or the CR-A record — so a backstop edit
+#     cannot ship an un-refusing syntax family just because nobody dispatched.
+#   • On demand via workflow_dispatch — after bumping the action pin, or
+#     when a Claude Code release is suspected of changing match semantics.
+#
+# Fail-loud: a denied probe that is not refused exits 1. A build whose
+# binary no longer contains kwe / V8r / $8 / ZQe also exits 1 (pin bump).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".claude/reviewer-settings.json"
+      - ".claude/design-coach-settings.json"
+      - "scripts/reviewer-deny-canary.sh"
+      - ".github/workflows/reviewer-deny-canary.yml"
+      - ".github/workflows/auto-review.yml"
+      - "docs/actions-security.md"
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: Deny-rule matcher canary
+    # Skip fork PRs: install.sh talks to claude.ai; a fork run that cannot
+    # reach it would fail the check for an environmental reason. Dispatch
+    # and same-repo PRs still run for real.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install the CLI version the pinned action SHA installs
+        run: |
+          set -euo pipefail
+          curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.287
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Exercise the real matcher under the committed backstops
+        run: |
+          set -euo pipefail
+          claude --version
+          ./scripts/reviewer-deny-canary.sh
