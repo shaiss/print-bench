@@ -22,6 +22,7 @@ parser) so the pin reads on its own.
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -251,6 +252,35 @@ def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
 
 def test_every_coach_ship_step_carries_the_post_surface():
     _assert_coach_steps_carry_their_post_surface(_workflow_text())
+
+
+MCP_PYTHON = "/usr/bin/python3"
+
+
+def _assert_mcp_command_is_absolute(raw: str) -> None:
+    """PATH `python3` is GITHUB_PATH-poisonable after a Bash coach link."""
+    data = json.loads(raw)
+    cmd = data["mcpServers"]["reviewer"]["command"]
+    assert cmd == MCP_PYTHON, (
+        f"{POST_CONFIG} command is {cmd!r}, not {MCP_PYTHON} — a PATH-relative "
+        "python3 is GITHUB_PATH-poisonable after a failed Bash-capable coach "
+        "link, and claude-code-action looks up the command before "
+        "--allowedTools applies"
+    )
+
+
+def test_posting_mcp_uses_absolute_python():
+    _assert_mcp_command_is_absolute(
+        (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8"))
+
+
+def test_posting_mcp_guard_rejects_path_python3():
+    raw = (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8").replace(
+        f'"{MCP_PYTHON}"', '"python3"')
+    assert raw != (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8"), (
+        "tamper did not land — the fixture is stale")
+    with pytest.raises(AssertionError, match="PATH-relative"):
+        _assert_mcp_command_is_absolute(raw)
 
 
 def test_backstop_table_covers_every_reviewer_job():

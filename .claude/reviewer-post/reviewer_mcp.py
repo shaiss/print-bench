@@ -77,7 +77,10 @@ branch, so auto-review.yml overlays ``.claude/reviewer-post/`` (and
 the coach settings/skill) from ``base.sha`` before each agent step.
 The completeness pin then extracts ``scripts/coach-lock-check.sh``
 from the same base blob AFTER the agent — the workspace copy is
-Write-able. Do not spawn this server from a PR-controlled checkout.
+Write-able. The MCP config's command is ``/usr/bin/python3`` (not
+PATH ``python3``) so a GITHUB_PATH write from a failed Bash link
+cannot become the posting server. Do not spawn this server from a
+PR-controlled checkout.
 
 Stdlib only; logs go to stderr so stdout carries nothing but JSON-RPC.
 """

@@ -84,8 +84,11 @@ name: Auto design review (Jane / Drik / PM / coach)
 # reviewer-post / design-coach-settings / the skill / coach-lock-check.sh
 # back to the base copy immediately before every chain link (a failed
 # first link with Write/Edit/Bash must not leave a rewritten MCP for
-# the next spawn). claude-code-action still exits 0 on a denial-only
-# turn, so
+# the next spawn). The MCP config's command is `/usr/bin/python3`, not
+# PATH `python3`: GITHUB_PATH from a failed Bash link is prepended on
+# later steps, and claude-code-action looks up the command before
+# `--allowedTools` applies. claude-code-action still exits 0 on a
+# denial-only turn, so
 # after any ship step that claims success the lock-check step extracts
 # `scripts/coach-lock-check.sh` from base.sha into a temp file (the
 # workspace copy is Write-able) and runs that; it fails the job unless

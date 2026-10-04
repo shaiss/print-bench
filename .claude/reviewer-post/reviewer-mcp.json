@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "reviewer": {
-      "command": "python3",
+      "command": "/usr/bin/python3",
       "args": [".claude/reviewer-post/reviewer_mcp.py"]
     }
   }
