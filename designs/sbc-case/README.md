@@ -35,8 +35,12 @@ view lower down shows the green board and gold header pins seated just below the
 - `sbc-case-coupon` — two crops of the same case corner that nest; print it
   first to tune the fits (~33 × 76 × 26 mm)
 - `sbc-case-grille-coupon` — a lid-plate crop over the fan bore at the same
-  outer-face-down pose as `lid`; print it to compare `grille_hole_d` /
-  `grille_web` without a full lid (~45 × 45 × 2.5 mm)
+  outer-face-down pose as `lid`; **plate only** (`lid_t` thick): co-planar
+  grille plus the four M3 fan screw holes on 32 mm pitch, **without** the inner
+  heat-set insert bosses. You can hold a 40 mm fan on the outer face and nut the
+  screws to check pattern and frame coverage; M3 × 20 screws meant for inserts
+  have nothing to bite. Print it to compare `grille_hole_d` / `grille_web`
+  without a full lid (~45 × 45 × 2.5 mm)
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
@@ -142,8 +146,11 @@ so what you feel there is what the full parts do.
   case**, a **pencil tip** fits a hole where a fingertip meets the web (assembled,
   the fan bolts to the outer face and covers the grille). Airflow is reduced
   versus a bare bore (~40 % of the old free area at the default 5.0 / 2.0 mm
-  holes and webs). Tune `grille_hole_d` / `grille_web` in the Customizer and
-  **reprint `sbc-case-grille-coupon`** to compare presets on the bench (for
+  holes and webs). Open **`sbc-case.scad`**, set **`part` to `grille-coupon`**, and
+  tune **`grille_hole_d` / `grille_web`** in the Customizer (the wrapper
+  `sbc-case-grille-coupon.scad` does not list those sliders — OpenSCAD only
+  exposes variables assigned in the file you opened, not in an `include`), then
+  **reprint the grille coupon** to compare presets on the bench (for
   example Ø6 holes on 7.6 mm pitch — 1.6 mm webs, ~49 % open — stays above the
   1.2 mm web floor) before committing to a full `lid` reprint. The grille coupon
   proves hole size, web width, and printability of the co-planar pattern only —

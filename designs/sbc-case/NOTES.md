@@ -386,8 +386,11 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     test (decision 8), so grille tuning gets its own wrapper
     (`sbc-case-grille-coupon.scad` → `part="grille-coupon"`): `lid()` at print
     pose, intersected with a 45 × 45 mm plate crop centred on `fan_center` (Ø37
-    bore + 4 mm margin). Proves hole/web printability and visual open area; not
-    airflow or thermals.
+    bore + 4 mm margin). The z crop spans only `lid_t` on the plate slab, so the
+    four fan through-holes at `fan_pitch` (32 mm) stay in; the inner insert
+    bosses (7 mm below the plate) are clipped out — plate-only, not a miniature
+    lid. Proves hole/web printability and visual open area; not airflow or
+    thermals.
 
 ## Print settings
 
@@ -429,9 +432,14 @@ structure proof:
 `grille_web` (PM open decision — Ø5 / 7 mm vs Ø6 / 7.6 mm), print
 `sbc-case-grille-coupon.scad` after the fit coupon. It is the production lid
 plate cropped over the vitamin bore at the same outer-face-down pose as `lid`
-— same `fan_grille_cut2d()` cut, no register lip or corner nest. Compare hole
-size and web feel on the bench; it does **not** measure airflow, thermals, or
-fan noise. When a preset wins, reprint the full `lid`. Gate slice on this branch:
+— same `fan_grille_cut2d()` cut, no register lip or corner nest; the four fan
+screw holes are in the crop but not the inner insert bosses (see decision 20).
+Tune the two grille parameters in **`sbc-case.scad`** with **`part =
+grille-coupon`** — the Customizer on the wrapper file does not show them. Compare
+hole size and web feel on the bench; you can also hold a 40 mm fan on the coupon
+and nut through the screw holes to check pattern and frame coverage. It does
+**not** measure airflow, thermals, or fan noise. When a preset wins, reprint the
+full `lid`. Gate slice on this branch:
 ~39m 9s, ~4.59 g (PrusaSlicer test profile; your slicer may differ).
 
 ## Derivations worth keeping
