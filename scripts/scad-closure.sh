@@ -15,7 +15,9 @@
 #     # file that carries the branch does not count, a commented include
 #     # does not count, an echo("include <...>") string is not walked, a
 #     # commented-out `part ==` selector (entry or included parent) is
-#     # refused, a cyclic include terminates. Run by check.sh.
+#     # refused, an early match in a large file still counts under
+#     # pipefail (no strip|grep -Eq SIGPIPE false-negative), a cyclic
+#     # include terminates. Run by check.sh.
 #
 # WHY NOT catalog.sh's walker: catalog.sh's includes_coupling (issue #517)
 # walks include AND use, because a NUGGS module can `use <nuggs-coupling.scad>`
@@ -150,17 +152,26 @@ closure_files() {
 # with comments stripped (kinematics-check.sh's kin_strip_comments move), so
 # a `// if (part == "clear")` in a parent header cannot satisfy an empty
 # fitcheck.
+# Under `set -o pipefail` (gate.sh / check.sh), piping strip→grep -Eq is a
+# false-negative trap: grep exits 0 on the first match and closes the pipe,
+# awk then dies with SIGPIPE (141), and pipefail makes the whole pipeline
+# non-zero — so a real `part ==` on a large file looks absent. Materialize
+# the stripped text first (kinematics-check.sh's comment-stripped matcher
+# does the same), then match. Also drain closure_files into an array so an
+# early return cannot SIGPIPE the producer's printf.
 closure_part_branch() { # <entry.scad> <part>
   local entry="$1" part="$2" f
+  local -a files=()
   [[ "$part" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
   [[ -f "$entry" ]] || return 1
-  while IFS= read -r f; do
+  mapfile -t files < <(closure_files "$entry")
+  for f in "${files[@]}"; do
     [[ -n "$f" ]] || continue
-    if closure_strip_comments "$f" \
-         | grep -Eq "part[[:space:]]*==[[:space:]]*\"${part}\""; then
+    if grep -Eq "part[[:space:]]*==[[:space:]]*\"${part}\"" \
+         <<<"$(closure_strip_comments "$f")"; then
       return 0
     fi
-  done < <(closure_files "$entry")
+  done
   return 1
 }
 
@@ -268,6 +279,21 @@ closure_selftest() {
     bad "a commented selector in an included parent was accepted"
   else
     ok "a commented selector in an included parent is refused"
+  fi
+
+  # pipefail + early match on a large file: strip|grep -Eq used to SIGPIPE
+  # the awk and report the branch missing (the CI failure on
+  # over-center-toggle-clamp / nuggs-rim-saddle / pop-fidget-card).
+  {
+    printf 'if (part == "fused") cube(1);\n'
+    # ~400 filler lines after the match — enough that grep -q exits before
+    # awk finishes when the two are piped under pipefail.
+    for _ in $(seq 1 400); do printf '// filler\n'; done
+  } >"$tmp/designs/plain/early-match.scad"
+  if closure_part_branch "$tmp/designs/plain/early-match.scad" fused; then
+    ok "an early part == match in a large file still counts under pipefail"
+  else
+    bad "an early part == match in a large file was lost to pipefail/SIGPIPE"
   fi
 
   # Wiring pin: the two proofs this helper exists to serve still call it.
