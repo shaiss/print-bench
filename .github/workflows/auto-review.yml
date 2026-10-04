@@ -58,8 +58,14 @@ name: Auto design review (Jane / Drik / PM / coach)
 # REVIEWER_PR pins the target. Exactly one post per run, counted across the
 # whole chain walk via REVIEWER_POST_STATE (one shared runner.temp file: each
 # link spawns a fresh server process, so an in-process counter would reset per
-# link — the #549 class). Pinned by test_reviewer_backstop_wiring.py (the
-# flags), test_cap_state_wiring.py (the state wiring) and the server's own
+# link — the #549 class). Jane's and Drik's jobs check out
+# pull_request.base.ref (the Oracle's trust boundary) so the MCP server,
+# deny backstop and skills are never the PR's copy; design geometry is a
+# trusted overlay of the head's designs/ dirs. First landing (the files
+# absent on base) skips the review rather than executing a PR-controlled
+# poster. Pinned by test_reviewer_backstop_wiring.py (the flags),
+# test_reviewer_git_containment.py (the base checkout + head overlay),
+# test_cap_state_wiring.py (the state wiring) and the server's own
 # --selftest, which scripts/check.sh runs.
 #
 # Git containment (code-scanning finding on #760). A deny list cannot contain
@@ -68,11 +74,12 @@ name: Auto design review (Jane / Drik / PM / coach)
 # in a repo config reached through a PR-committed bare-repository layout, a gh
 # subcommand that spawns git. So, structurally:
 #   * Jane / Drik / PM triage get NO git — their backstop denies Bash(git:*)
-#     outright. Jane and Drik review the PR head's geometry, so a trusted step
-#     in their jobs stages the head's changed design directories into the
-#     checkout before the agent starts (the merge ref at fetch-depth 2 already
-#     holds the head commit, so no fetch and no credential). PM triage reads
-#     the charter from the merge checkout and needs nothing from git.
+#     outright. Jane and Drik review the PR head's geometry from a BASE-branch
+#     checkout (the posting MCP must not be PR-controlled), so a trusted step
+#     fetches the head SHA (Oracle extraheader auth; persist-credentials is
+#     false) and overlays the changed design directories before the agent
+#     starts. PM triage reads the charter from the merge checkout and needs
+#     nothing from git.
 #   * The coach keeps git checkout/add/commit/push (it pushes its rounds) but
 #     its backstop denies fetch/clone/pull/ls-remote and every global option;
 #     its checkout is full history, so every branch head is already local.
@@ -376,24 +383,49 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          # The merge ref plus its parents: the PR head (the merge's second
-          # parent) is then local for the staging step below — no fetch.
-          fetch-depth: 2
+          # The BASE branch, not the merge ref: the secret-bearing agent runs
+          # the reviewed posting MCP / settings / skills, never a PR's copy
+          # (Oracle's trust boundary). Design geometry arrives as a trusted
+          # overlay below.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Check the reviewer posting surface is on the base branch
+        id: ready
+        run: |
+          set -euo pipefail
+          if [ -f .claude/reviewer-post/reviewer_mcp.py ] \
+             && [ -f .claude/reviewer-post/reviewer-mcp.json ] \
+             && [ -f .claude/reviewer-settings.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the Jane/Drik posting surface is not on the base branch yet (first landing) — skipping the review rather than running a PR-controlled copy"
+          fi
 
       # Trusted head staging (code-scanning finding on #760). This reviewer
       # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
       # outright — so the PR head's design directories are staged into the
-      # checkout here, by workflow code, before any agent step starts; the
-      # skill reads them with Read/Grep/Glob. The design names come from the
-      # PR's own paths, so they are validated and never globbed before they
-      # reach a path, and never echoed back unvalidated.
+      # BASE checkout here, by workflow code, before any agent step starts;
+      # the skill reads them with Read/Grep/Glob. The design names come from
+      # the PR's own paths, so they are validated and never globbed before
+      # they reach a path, and never echoed back unvalidated.
       - name: Stage the PR head's design directories (trusted, no agent)
+        if: steps.ready.outputs.ready == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         run: |
           set -euo pipefail
           set -f   # PR-controlled names: no globbing
+          # persist-credentials: false on the BASE branch, so HEAD is not
+          # local. Authenticate this one fetch with the job token (Oracle's
+          # pattern) so staging works on a private repo too.
+          FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${FETCH_AUTH}"
+          git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+            fetch --no-tags origin "$HEAD_SHA"
           git cat-file -e "${HEAD_SHA}^{commit}"
           for d in $CHANGED_DESIGNS; do
             if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
@@ -411,7 +443,7 @@ jobs:
 
       - name: /jane-review via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -431,7 +463,7 @@ jobs:
 
       - name: /jane-review via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -451,7 +483,7 @@ jobs:
 
       - name: /jane-review via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -472,7 +504,8 @@ jobs:
       - name: /jane-review via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -493,7 +526,8 @@ jobs:
       - name: /jane-review via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -515,7 +549,8 @@ jobs:
       - name: /jane-review via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -536,7 +571,7 @@ jobs:
             /jane-review ${{ github.event.pull_request.number }}
 
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /jane-review for PR #${{ github.event.pull_request.number }}"
 
@@ -549,7 +584,8 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -567,7 +603,8 @@ jobs:
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -626,24 +663,49 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          # The merge ref plus its parents: the PR head (the merge's second
-          # parent) is then local for the staging step below — no fetch.
-          fetch-depth: 2
+          # The BASE branch, not the merge ref: the secret-bearing agent runs
+          # the reviewed posting MCP / settings / skills, never a PR's copy
+          # (Oracle's trust boundary). Design geometry arrives as a trusted
+          # overlay below.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Check the reviewer posting surface is on the base branch
+        id: ready
+        run: |
+          set -euo pipefail
+          if [ -f .claude/reviewer-post/reviewer_mcp.py ] \
+             && [ -f .claude/reviewer-post/reviewer-mcp.json ] \
+             && [ -f .claude/reviewer-settings.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the Jane/Drik posting surface is not on the base branch yet (first landing) — skipping the review rather than running a PR-controlled copy"
+          fi
 
       # Trusted head staging (code-scanning finding on #760). This reviewer
       # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
       # outright — so the PR head's design directories are staged into the
-      # checkout here, by workflow code, before any agent step starts; the
-      # skill reads them with Read/Grep/Glob. The design names come from the
-      # PR's own paths, so they are validated and never globbed before they
-      # reach a path, and never echoed back unvalidated.
+      # BASE checkout here, by workflow code, before any agent step starts;
+      # the skill reads them with Read/Grep/Glob. The design names come from
+      # the PR's own paths, so they are validated and never globbed before
+      # they reach a path, and never echoed back unvalidated.
       - name: Stage the PR head's design directories (trusted, no agent)
+        if: steps.ready.outputs.ready == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         run: |
           set -euo pipefail
           set -f   # PR-controlled names: no globbing
+          # persist-credentials: false on the BASE branch, so HEAD is not
+          # local. Authenticate this one fetch with the job token (Oracle's
+          # pattern) so staging works on a private repo too.
+          FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${FETCH_AUTH}"
+          git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+            fetch --no-tags origin "$HEAD_SHA"
           git cat-file -e "${HEAD_SHA}^{commit}"
           for d in $CHANGED_DESIGNS; do
             if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
@@ -661,7 +723,7 @@ jobs:
 
       - name: /drik-review via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -681,7 +743,7 @@ jobs:
 
       - name: /drik-review via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -701,7 +763,7 @@ jobs:
 
       - name: /drik-review via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -722,7 +784,8 @@ jobs:
       - name: /drik-review via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -743,7 +806,8 @@ jobs:
       - name: /drik-review via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -765,7 +829,8 @@ jobs:
       - name: /drik-review via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -786,7 +851,7 @@ jobs:
             /drik-review ${{ github.event.pull_request.number }}
 
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
 
@@ -796,7 +861,8 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -814,7 +880,8 @@ jobs:
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'

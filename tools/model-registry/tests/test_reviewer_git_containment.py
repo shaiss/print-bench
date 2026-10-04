@@ -16,9 +16,11 @@ containment is structural, in two halves:
     ``core.hooksPath=/dev/null``, ``core.pager=cat`` via ``GIT_CONFIG_COUNT``),
     computed as the step's EFFECTIVE env (job env, then the step's own, the
     step winning) so a single link that overrides or sheds it fails;
-  - Jane's and Drik's jobs stage the PR head's design directories in a
-    TRUSTED step before any agent step (they have no git to do it
-    themselves), from a checkout deep enough to hold the head commit;
+  - Jane's and Drik's jobs check out ``pull_request.base.ref`` (the
+    posting MCP / settings / skills are never the PR's copy) at
+    ``fetch-depth: 0``, then a TRUSTED step fetches the PR head SHA
+    (Oracle extraheader auth) and overlays the changed design directories
+    before any agent step;
   - the coach's checkout is full history (it no longer fetches).
 
 Every pin has a tamper negative control below, derived from the live
@@ -45,6 +47,8 @@ CONFIG_LOCK = {
 # The jobs whose reviewer has no git and reviews the PR head's geometry.
 STAGED_JOBS = ("jane-review", "drik-review")
 STAGE_MARKER = 'git checkout "$HEAD_SHA" -- "designs/${d}"'
+HEAD_FETCH = 'fetch --no-tags origin "$HEAD_SHA"'
+BASE_REF = "${{ github.event.pull_request.base.ref }}"
 
 
 def _steps(block: str) -> list[str]:
@@ -123,6 +127,13 @@ def _checkout_depth(block: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _checkout_ref(block: str) -> str | None:
+    first = _steps(block)[0]
+    assert "uses: actions/checkout" in first, "first step is not the checkout"
+    m = re.search(r"^\s+ref:\s*(.+)$", first, re.MULTILINE)
+    return m.group(1).strip() if m else None
+
+
 def _assert_head_is_staged_before_the_agent(text: str) -> None:
     blocks = _job_blocks(text)
     for job in STAGED_JOBS:
@@ -145,6 +156,9 @@ def _assert_head_is_staged_before_the_agent(text: str) -> None:
         assert env.get("CHANGED_DESIGNS") == (
             "${{ needs.design-changes.outputs.changed_designs }}"), (
             f"auto-review.yml [{job}] staging step does not take the changed designs")
+        assert env.get("GH_TOKEN") == "${{ github.token }}", (
+            f"auto-review.yml [{job}] staging step has no job token for the "
+            f"authenticated head fetch (a private-repo anonymous fetch 403s)")
         run = stage.split("run:", 1)[1]
         assert "${{" not in run, (
             f"auto-review.yml [{job}] staging step interpolates an expression into "
@@ -152,13 +166,16 @@ def _assert_head_is_staged_before_the_agent(text: str) -> None:
         assert "set -f" in run and "[A-Za-z0-9._-]" in run, (
             f"auto-review.yml [{job}] staging step no longer refuses to glob or "
             f"validate the PR-controlled design names")
-        assert "git fetch" not in run, (
-            f"auto-review.yml [{job}] staging step fetches — the checkout must "
-            f"already hold the head")
+        assert HEAD_FETCH in run, (
+            f"auto-review.yml [{job}] staging step does not fetch the PR head "
+            f"SHA — the base checkout cannot already hold it")
         depth = _checkout_depth(block)
-        assert depth is not None and (depth == 0 or depth >= 2), (
-            f"auto-review.yml [{job}] checks out at fetch-depth {depth}: the PR "
-            f"head (the merge ref's second parent) is not local to stage")
+        assert depth == 0, (
+            f"auto-review.yml [{job}] checks out at fetch-depth {depth}: the "
+            f"base-branch checkout must be full history (Oracle's pattern)")
+        assert _checkout_ref(block) == BASE_REF, (
+            f"auto-review.yml [{job}] checkout ref is {_checkout_ref(block)!r}, "
+            f"not base.ref — the posting MCP would be the PR's copy")
 
 
 def _assert_coach_checks_out_full_history(text: str) -> None:
@@ -263,8 +280,25 @@ def test_stage_guard_rejects_staging_after_the_agent():
 
 def test_stage_guard_rejects_a_shallow_checkout():
     tampered = _job_replace(_workflow_text(), "jane-review",
-                            "          fetch-depth: 2\n", "")
+                            "          fetch-depth: 0\n", "")
     with pytest.raises(AssertionError, match="fetch-depth"):
+        _assert_head_is_staged_before_the_agent(tampered)
+
+
+def test_stage_guard_rejects_a_merge_ref_checkout():
+    tampered = _job_replace(_workflow_text(), "drik-review",
+                            "          ref: ${{ github.event.pull_request.base.ref }}\n",
+                            "")
+    with pytest.raises(AssertionError, match="base.ref"):
+        _assert_head_is_staged_before_the_agent(tampered)
+
+
+def test_stage_guard_rejects_staging_without_fetching_head():
+    tampered = _job_replace(
+        _workflow_text(), "jane-review",
+        '            fetch --no-tags origin "$HEAD_SHA"\n',
+        "")
+    with pytest.raises(AssertionError, match="does not fetch the PR head"):
         _assert_head_is_staged_before_the_agent(tampered)
 
 
