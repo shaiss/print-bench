@@ -1,0 +1,20 @@
+# Deterministic fuse detector (tools/printcheck fusecheck), run on the SLICED
+# STL — never a -D pose. The head prints as TWO bodies: the moving one
+# (ball + shank + stud) and the socket assembly (ring + collar + wings + stem
+# tenon, one solid joined through the uncut ring below the slit). Like the
+# piano hinge there is no flexure web to excuse: a healthy assembly is two
+# disjoint shells, counted directly. A ball welded to its socket (clearance
+# lost — the failure this design exists to defeat, invisible to printcheck)
+# reads as fewer bodies and is a STRONG WARN for reviewer signoff.
+assert pip-ball-socket-head-head.stl 2
+
+# The coupon's bodies: four cells, each a socket ring + its free ball
+# (the collar cell's slit does not divide the ring — below the slit start the
+# ring is solid) = 2 each.
+assert pip-ball-socket-head-coupon.stl 8
+
+# Mandatory negative control: part="fused" drives a grown ball into the
+# socket, welding the head into one solid. It must STAY one body — proving
+# the check can fire (and that no over-generous zone is masking a real fuse
+# by splitting the control too).
+control fused 1
