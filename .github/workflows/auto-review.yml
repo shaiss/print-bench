@@ -1374,6 +1374,19 @@ jobs:
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
         run: |
           set -euo pipefail
           export PATH="/usr/bin:/bin:/usr/local/bin"
@@ -1427,6 +1440,19 @@ jobs:
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
         run: |
           set -euo pipefail
           export PATH="/usr/bin:/bin:/usr/local/bin"
@@ -1480,6 +1506,19 @@ jobs:
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
         run: |
           set -euo pipefail
           export PATH="/usr/bin:/bin:/usr/local/bin"
@@ -1538,6 +1577,19 @@ jobs:
           && steps.p3.outcome != 'success'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
         run: |
           set -euo pipefail
           export PATH="/usr/bin:/bin:/usr/local/bin"
@@ -1599,6 +1651,19 @@ jobs:
           && steps.p4.outcome != 'success'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
         run: |
           set -euo pipefail
           export PATH="/usr/bin:/bin:/usr/local/bin"
@@ -1662,6 +1727,19 @@ jobs:
           && steps.p5.outcome != 'success'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
         run: |
           set -euo pipefail
           export PATH="/usr/bin:/bin:/usr/local/bin"
@@ -1736,6 +1814,19 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR: ${{ github.event.pull_request.number }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
         run: |
           set -euo pipefail
           export PATH="/usr/bin:/bin:/usr/local/bin"

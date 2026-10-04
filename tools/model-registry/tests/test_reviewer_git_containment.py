@@ -214,6 +214,12 @@ def _assert_one_restore_step(restore: str, *, at: str) -> None:
     env = _env_map(restore, 8)
     assert env.get("BASE_SHA") == BASE_SHA, (
         f"{at} does not take the PR base sha")
+    for key in ("LD_PRELOAD", "BASH_ENV", "ENV"):
+        assert env.get(key) == "", (
+            f"{at} YAML env does not pin {key} to empty — GITHUB_ENV from "
+            "a Bash-capable coach is applied at process start, before the "
+            "in-script unset, so LD_PRELOAD maps at exec and BASH_ENV is "
+            "sourced as bash starts")
     run = restore.split("run:", 1)[1]
     assert "${{" not in run, (
         f"{at} interpolates an expression into its script — PR-controlled "
@@ -341,6 +347,12 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
     assert env.get("PR") == "${{ github.event.pull_request.number }}", (
         "auto-review.yml [design-coach] lock-check step does not take "
         "the PR number through env")
+    for key in ("LD_PRELOAD", "BASH_ENV", "ENV"):
+        assert env.get(key) == "", (
+            f"auto-review.yml [design-coach] lock-check YAML env does not "
+            f"pin {key} to empty — GITHUB_ENV from a Bash-capable coach is "
+            "applied at process start, before the in-script unset, so "
+            "LD_PRELOAD maps at exec and BASH_ENV is sourced as bash starts")
     run = check.split("run:", 1)[1]
     assert "${{" not in run, (
         "auto-review.yml [design-coach] lock-check step interpolates an "
@@ -580,6 +592,23 @@ def test_coach_guard_rejects_restore_inheriting_pythonpath():
         _assert_coach_restores_posting_surface_from_base(tampered)
 
 
+def test_coach_guard_rejects_restore_without_process_start_env_pins():
+    # In-script unset is too late: GITHUB_ENV LD_PRELOAD is mapped at exec.
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        '          LD_PRELOAD: ""\n'
+        '          LD_LIBRARY_PATH: ""\n'
+        '          LD_AUDIT: ""\n'
+        '          BASH_ENV: ""\n'
+        '          ENV: ""\n',
+        '          LD_LIBRARY_PATH: ""\n'
+        '          LD_AUDIT: ""\n'
+        '          BASH_ENV: ""\n'
+        '          ENV: ""\n')
+    with pytest.raises(AssertionError, match="LD_PRELOAD"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
 def test_coach_guard_rejects_show_full_output():
     tampered = _step_replace(
         _workflow_text(), "design-coach", 0,
@@ -627,6 +656,29 @@ def test_coach_lock_guard_rejects_inheriting_pythonpath():
         "          export PYTHONNOUSERSITE=1\n",
         "export PYTHONNOUSERSITE=1\n")
     with pytest.raises(AssertionError, match="PYTHONPATH"):
+        _assert_coach_lock_check_runs_base_copy(tampered)
+
+
+def test_coach_lock_guard_rejects_unpinned_process_start_env():
+    # Unique to lock-check (PR: is not on restore env).
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        '          PR: ${{ github.event.pull_request.number }}\n'
+        '          # Process-start pins: GITHUB_ENV from a prior Bash coach link\n'
+        '          # is applied before this script body, so in-script unset is too\n'
+        '          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced\n'
+        '          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).\n'
+        '          PYTHONPATH: ""\n'
+        '          PYTHONHOME: ""\n'
+        '          PYTHONSTARTUP: ""\n'
+        '          PYTHONNOUSERSITE: "1"\n'
+        '          LD_PRELOAD: ""\n'
+        '          LD_LIBRARY_PATH: ""\n'
+        '          LD_AUDIT: ""\n'
+        '          BASH_ENV: ""\n'
+        '          ENV: ""\n',
+        '          PR: ${{ github.event.pull_request.number }}\n')
+    with pytest.raises(AssertionError, match="LD_PRELOAD"):
         _assert_coach_lock_check_runs_base_copy(tampered)
 
 
