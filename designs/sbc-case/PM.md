@@ -94,6 +94,7 @@ geometry, and the GPL/first-party story stays clean.
 | # | Question | Options | Default if no call |
 |---|---|---|---|
 | D1 | Optional **fan-top guard** — a separate part or add-on that covers the fan intake on the outer face (blade / finger guard from outside the case) | ship as-is (grille only closes the ceiling) / design a clip-on guard / decline | ship as-is — the grille's job is case closure, not blade guarding |
+| — | *(open, owner)* Should the **default grille** stay Ø5 / 7 mm pitch (~40 % open, 2 mm webs) or move to Jane's Ø6 / 7.6 mm pitch (~49 % open, 1.6 mm webs, above the 1.2 mm web floor)? Weigh together with **D1** (outer guard) — not decided in B11 | — | shipped defaults unchanged until called |
 
 The brief's four questions were all non-blocking and resolved on their stated
 assumptions (see the decision log).
