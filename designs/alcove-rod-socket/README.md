@@ -24,7 +24,7 @@ Printed **in pairs** (one holder per wall, one pair per rod):
 
 - `boss` — the wall plate: Ø58.8 × 18 mm disc with a countersunk M5 screw
   hole and an external printed thread. The wall face carries eight shallow
-  45° radial ribs (on by default) so a single central M5 in a drywall
+  45° V-grooves (on by default) so a single central M5 in a drywall
   anchor does not spin when the collar is torqued. For heavier installs
   (a hung pair over ~10 kg) set `screw_count=2` — that grows the flange
   for an off-axis pair and **omits** the ribs (the two screws already pin
@@ -100,8 +100,9 @@ Two such plates fit the 256 × 256 mm P2S bed.
   (Bambu Studio and most slicers brim per object — select just the collar).
   Its first layer is a thin ~2.2 mm annular rim carrying a 40.6 mm tube, the
   part that can lift; the boss doesn't need it — it prints flange-down on a
-  full Ø58.8 disc (the anti-rotation ribs are 0.8 mm pockets in that disc —
-  inner washer, outer rim, and eight lands still print on the bed). Cheap
+  full Ø58.8 disc (the anti-rotation keys are 0.8 mm 45° V-grooves in that
+  disc — inner washer, outer rim, and the lands between still print on
+  the bed). Cheap
   insurance on the collar rim's own merits (the v1 field failure was *packaging*, not adhesion
   — see NOTES.md — so the plate is what fixes that; the brim is separate). A
   per-object collar brim can't reach the ~5.7 mm gap to the boss, so nothing
@@ -145,7 +146,7 @@ you'll export the fused assembly preview instead of a printable part):
 | `engagement_depth` | 28 mm | deep-side rod plug depth (`collar`); far side is the gated `collar-shallow` part at 12 mm |
 | `thread_tol` | 0.3 mm | radial thread fit — dial on the thread coupon |
 | `screw_count` | 1 | 1 central M5, or 2 off-axis (grows the flange; stops boss spin) |
-| `anti_rotate` | on | wall-face bite ribs for a single M5; ignored at `screw_count=2` |
+| `anti_rotate` | on | wall-face 45° V-grooves for a single M5; ignored at `screw_count=2` |
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
 

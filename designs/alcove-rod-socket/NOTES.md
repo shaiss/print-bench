@@ -153,17 +153,18 @@ default-depth holder pair.
   stays boss + default collar). No new coupon — thread/bore coupons already
   cover the fits. Default `engagement_depth`, deep geometry, fitchecks, and
   style claim unchanged.
-- **D14 — (B2) Anti-rotation ribs on the boss wall face, on by default for
+- **D14 — (B2) Anti-rotation keys on the boss wall face, on by default for
   `screw_count=1`.** D9's off-axis pair still grows the flange for heavier
   installs; this is the screwless path so a single central M5 in a drywall
   anchor does not spin when the knurled collar is torqued on/off (brief
-  #355; Drik: make the boss resist spin). Eight radial trapezoidal lands,
-  `anti_rotate_h` 0.8 mm (4 layers), `anti_rotate_w` 2.4 mm, 45° flanks,
-  cut as a shallow pocket into the flange's bed/wall face (z≈0) leaving an
-  inner washer and outer rim uncut. Printed flange-down those lands *are*
-  the first layers — no spike below z=0, no new overhang (N4). `screw_count=2`
-  omits the pocket so the ribs never fight the off-axis shanks; the two
-  screws already pin rotation. Toggle `anti_rotate=false` for a flat flange
+  #355; Drik: make the boss resist spin). Eight radial **45° V-grooves**,
+  `anti_rotate_h` 0.8 mm (4 layers), `anti_rotate_w` 1.6 mm (= 2·h, so
+  flanks are exactly 45°), cut into the flange's bed/wall face (z≈0)
+  between an inner washer and the outer rim. Printed flange-down those
+  slots are first-layer gaps whose walls are self-supporting — no pocket
+  roof, no spike below z=0, no new overhang (N4). `screw_count=2` omits
+  the grooves so they never cross the off-axis shanks; the two screws
+  already pin rotation. Toggle `anti_rotate=false` for a flat flange
   (tile/masonry, where the lands cannot bite). Thread/bore coupons
   unchanged — they never include the flange. Collar untouched (B1's seat
   detent lives there). Field confirmation that the bite holds a week's
