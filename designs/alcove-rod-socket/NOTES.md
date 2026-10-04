@@ -165,8 +165,9 @@ default-depth holder pair.
      load-bearing wall stays 3.2. Hand-pushable: the lip is a short axial
      bump, not a press-fit length.
   2. **Witness window** — two 1.6 × 8 mm axial capsule slots through the
-     rod-tube wall, 180° apart, rounded ends sitting on the seat plane so
-     the rod *tip* is visible when seated (empty dark at the seat = not in).
+     rod-tube wall, 180° apart, rounded ends **0.3 mm above** the seat plane so
+     the rod *tip* is visible when seated (empty dark at the seat = not in)
+     without kissing the shoulder face (a coplanar kiss exported non-manifold).
      Printed **rod-mouth-down** (D5) the slots sit near the top of the print;
      the 1.6 mm hoop width is the bridge a stock 0.4/0.2 profile takes
      without supports (N4). Slots stay above the female thread, so

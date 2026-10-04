@@ -217,41 +217,44 @@ module mount_screw_holes() {
 module collar_use(depth = engagement_depth) {
     h = depth + collar_lower_h;                    // total collar height at this depth
     flare_h = (collar_lower_od - rod_tube_od) / 2;  // 45° flare, 3.5
-    union() {
-        difference() {
-            union() {
-                chamfered_cylinder(d = collar_lower_od, h = collar_lower_h,
-                                   chamfer1 = style_edge_chamfer,
-                                   chamfer2 = style_edge_chamfer);
-                // 45° flare from the grip band down to the rod tube (embedded 1
-                // mm so the union welds, not kisses)
-                translate([0, 0, collar_lower_h - 1.0])
-                    cylinder(d1 = collar_lower_od, d2 = rod_tube_od, h = 1.0 + flare_h);
-                translate([0, 0, collar_lower_h + flare_h - 0.5])
-                    chamfered_cylinder(d = rod_tube_od,
-                                       h = depth - flare_h + 0.5,
-                                       chamfer1 = 0, chamfer2 = style_edge_chamfer);
+    difference() {
+        union() {
+            difference() {
+                union() {
+                    chamfered_cylinder(d = collar_lower_od, h = collar_lower_h,
+                                       chamfer1 = style_edge_chamfer,
+                                       chamfer2 = style_edge_chamfer);
+                    // 45° flare from the grip band down to the rod tube (embedded 1
+                    // mm so the union welds, not kisses)
+                    translate([0, 0, collar_lower_h - 1.0])
+                        cylinder(d1 = collar_lower_od, d2 = rod_tube_od, h = 1.0 + flare_h);
+                    translate([0, 0, collar_lower_h + flare_h - 0.5])
+                        chamfered_cylinder(d = rod_tube_od,
+                                           h = depth - flare_h + 0.5,
+                                           chamfer1 = 0, chamfer2 = style_edge_chamfer);
+                }
+                // female thread: the mandatory minor bore, then the groove cutter
+                translate([0, 0, -0.01])
+                    cylinder(d = female_bore_d, h = collar_lower_h + 0.01);
+                translate([0, 0, lead_in])
+                    thread_bore_cut(thread_major, thread_depth, thread_pitch,
+                                    thread_starts, collar_lower_h - lead_in, thread_tol,
+                                    seg = thread_seg);
+                // rod bore with a 45° lead-in mouth where the rod enters
+                translate([0, 0, collar_lower_h - 0.01])
+                    cylinder(d = bore_d, h = depth + 0.02);
+                translate([0, 0, h - 1.0])
+                    cylinder(d1 = bore_d, d2 = bore_d + 2.0, h = 1.01);
+                knurl_cut();
             }
-            // female thread: the mandatory minor bore, then the groove cutter
-            translate([0, 0, -0.01])
-                cylinder(d = female_bore_d, h = collar_lower_h + 0.01);
-            translate([0, 0, lead_in])
-                thread_bore_cut(thread_major, thread_depth, thread_pitch,
-                                thread_starts, collar_lower_h - lead_in, thread_tol,
-                                seg = thread_seg);
-            // rod bore with a 45° lead-in mouth where the rod enters
-            translate([0, 0, collar_lower_h - 0.01])
-                cylinder(d = bore_d, h = depth + 0.02);
-            translate([0, 0, h - 1.0])
-                cylinder(d1 = bore_d, d2 = bore_d + 2.0, h = 1.01);
-            knurl_cut();
-            if (witness_window)
-                seat_witness_cut(depth);
+            // After the bore cut, or the Ø40.6 cylinder eats the lip. Shallow
+            // collar inherits this via depth= (B1 / D13). Witness slots are
+            // cut *after* this union so the ridge cannot grow back into them.
+            if (seat_detent)
+                seat_detent_ring();
         }
-        // After the bore cut, or the Ø40.6 cylinder eats the lip. Shallow
-        // collar inherits this via depth= (B1 / D13).
-        if (seat_detent)
-            seat_detent_ring();
+        if (witness_window)
+            seat_witness_cut(depth);
     }
 }
 
@@ -266,9 +269,9 @@ module seat_detent_ring() {
     translate([0, 0, collar_lower_h + seat_detent_lift])
         rotate_extrude(convexity = 4)
             polygon([
-                [r_bore - 0.01,              0],
+                [r_bore + 0.2,               0],
                 [r_bore - seat_detent_radial, seat_detent_h / 2],
-                [r_bore - 0.01,              seat_detent_h],
+                [r_bore + 0.2,               seat_detent_h],
                 [r_bore + embed,             seat_detent_h],
                 [r_bore + embed,             0]
             ]);
@@ -279,7 +282,9 @@ module seat_detent_ring() {
 // top of the print). Rounded ends rest on the seat plane so the rod tip
 // is visible when seated; the cut stays above the female thread.
 module seat_witness_cut(depth) {
-    z0 = collar_lower_h + witness_slot_w / 2;
+    // 0.3 mm above the seat plane so the capsule end cannot kiss the
+    // shoulder face (that kiss was a non-manifold edge on the first export).
+    z0 = collar_lower_h + 0.3 + witness_slot_w / 2;
     z1 = min(z0 + witness_slot_h - witness_slot_w,
              collar_lower_h + depth - 1.0 - witness_slot_w / 2);
     for (i = [0 : witness_slot_count - 1])
