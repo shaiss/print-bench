@@ -71,7 +71,8 @@ NopSCADlib vitamins (the brief's named source), read at build time:
    bore: **~40 %** of an unobstructed Ø37 disc (~426 mm² vs 1075 mm²); ~60 %
    of the former free hole is now solid web closing the case ceiling over the
    fan bore (the fan sits on the outer face; the grille is not a blade guard
-   from outside).
+   from outside). Honesty scale: stops fingers and larger dropped objects on the
+   webs; **Ø5 mm** holes still pass M2.5/M3 screws, paperclips, and wire.
    Fan screws (M3 dome ×20, washer under each head) pass through the fan frame
    and the plate into the inner bosses — 11 + 2.5 + 5.8 = 19.3 mm of stack, so
    ×20. The bosses hang 7 mm into the cavity at the fan's corner pitch
@@ -376,7 +377,8 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     clipped to `fan_bore(fan_type)`. Trade: ~40 % of the unobstructed bore's
     free area retained (Monte Carlo on the parametric grid); case ceiling closed
     over the fan bore (not a blade guard from outside); dust still enters through
-    the holes (page updated).
+    the holes (page updated). Page honesty (Drik round 2 on #810): fingers and
+    larger objects only — not screw or wire sealing at Ø5.
     Boss pitch and M3 fan screws unchanged; grille stays inside the bore circle,
     clear of the corner bosses at 16 mm pitch.
 
@@ -413,8 +415,8 @@ structure proof:
    steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
 3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
    the standoff sample and hold firm.
-4. Only then print `base` (~2h45m) and `lid` (~2h 2m 41s) — the head-stamped
-   gate times on PR #810; your slicer and material may differ.
+4. Only then print `base` (~2h 46m 37s) and `lid` (~2h 2m 41s) — printcheck
+   sticky on PR #810 tip `4f166d50`; your slicer and material may differ.
 
 ## Derivations worth keeping
 

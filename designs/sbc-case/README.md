@@ -132,9 +132,12 @@ so what you feel there is what the full parts do.
   header before you lift the lid, or a set-aside lid hangs by two wires.
 - **Closed ceiling over the fan bore.** The fan bolts to the lid's **outer**
   face (above the plate); the grille is co-planar holes in the plate, not a
-  blade guard from outside. It closes the case ceiling over the Ø37 zone so
-  fingers and dropped hardware cannot reach the board through the fan opening
-  — poke a **pencil tip** through a Ø5 hole, not a fingertip. Airflow is reduced
+  blade guard from outside.   It closes the case ceiling over the Ø37 zone so **fingers and larger dropped
+  objects** (coins, washers) meet the 2 mm webs instead of falling through a bare
+  bore — not protection against small hardware: **Ø5 mm** holes still pass M2.5/M3
+  screws (~2.5–3 mm shank), paperclips, and stiff wire. With the lid **off the
+  case**, a **pencil tip** fits a hole where a fingertip meets the web (assembled,
+  the fan bolts to the outer face and covers the grille). Airflow is reduced
   versus a bare bore (~40 % of the old free area at the default 5.0 / 2.0 mm
   holes and webs). Tune `grille_hole_d` / `grille_web` in the Customizer and
   **reprint the lid** if your fan needs more pull (for example Ø6 holes on
