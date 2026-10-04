@@ -228,10 +228,11 @@ newline in `--body` was enough to deny every filing attempt, no quoting fixed it
 and `body` as JSON over a stdio pipe, never on a command line, so that class of
 denial cannot occur. The server hardcodes the `design-brief` label, refuses any
 title without the `Design brief:` prefix, and caps how many issues one run may
-file (`SCOUT_MAX_BRIEFS`) with a run-scoped in-process counter — so a
-prompt-injected run can at worst file a bounded number of `design-brief`
-proposals, noise a human closes, never an escalation. Its only GitHub call is
-`POST /issues` on the current repo.
+file (`SCOUT_MAX_BRIEFS`), counted in the shared `SCOUT_CAP_STATE` state file
+every chain-link step names — so the cap spans the whole walk, not one server
+process (#565), and a prompt-injected run can at worst file a bounded number
+of `design-brief` proposals, noise a human closes, never an escalation. Its
+only GitHub call is `POST /issues` on the current repo.
 
 **Reading** stays on the committed wrapper
 `.claude/skills/product-scout/scout-helper.sh` (`list-briefs` / `read-thread`) —

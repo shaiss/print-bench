@@ -26,7 +26,8 @@ step: it lists the open ``needs-decision`` issues that carry no greenlight
 marker yet (``github.gather_greenlight_queue``, GET-only) and prints the
 oldest ``greenlight_cap`` of them as space-separated numbers — the bounded
 set the workflow hands the drafter as ``$REEVE_SELECTED_ISSUES``, so the
-agent never sees an issue it cannot post on.
+agent never sees an issue it cannot post on — nor one in a standing
+``approve_deny`` category (issue #446, ``approval.py``), which is human-only.
 
 ``greenlight-poll`` (issue #444) is the loop's authority half: GitHub fires
 no webhook for reactions, so the NEXT run polls its own prior greenlight
@@ -36,7 +37,11 @@ the API (never a posted ``/decide`` command). Its writes live in the
 package's one confined seam, ``pushthrough.py``; the ledger commit
 authenticates with ``REGEN_TOKEN`` — when that PAT is absent the append is
 skipped with a notice (the label still carries the verdict, decide.yml's
-documented degradation), never attempted with the workflow token.
+documented degradation), never attempted with the workflow token. With
+``--conf`` it also applies the committed standing approval modes (issue
+#446): a YES greenlight in an ``approve_auto`` category resolves without a
+reaction once its 👎 grace window has passed, and an ``approve_deny`` thread
+is left entirely to a human.
 ``greenlight-context`` and ``greenlight-append`` (issue #445) are the loop's
 learning half. The first renders the drafter's precedent digest — the most
 recent ``greenlight_precedent_cap`` records of the committed log plus the
@@ -56,6 +61,7 @@ import os
 import sys
 from typing import Any, Optional
 
+from . import approval
 from . import config as config_mod
 from . import greenlight
 from . import greenlights
@@ -179,7 +185,10 @@ def cmd_greenlight_select(args: argparse.Namespace) -> int:
     string is appended to ``$GITHUB_OUTPUT`` as ``issues=`` (the ``armed``
     precedent), so the workflow needs no stdout scraping. An empty queue
     prints an empty line and writes ``issues=`` — a legitimate state, not a
-    failure.
+    failure. An issue in an ``approve_deny`` category (#446) is dropped before
+    the cap — named on stderr and in ``denied=`` — so a human-only decision
+    never receives a greenlight post: the wrapper refuses any issue outside
+    the selected set, which makes this filter the enforcement, not a hint.
     """
     # Lazy for the same reason as in _gather: github.py is the one
     # network-capable module, and cli.py stays on the purity test's list.
@@ -204,12 +213,33 @@ def cmd_greenlight_select(args: argparse.Namespace) -> int:
         return greenlight.marker_author_trusted(login, _authorized)
 
     queue = gather_greenlight_queue(args.repo, _token(), _trusted)["queue"]
-    nums = " ".join(str(issue["number"]) for issue in queue[: cfg.greenlight_cap])
+    # The standing approval modes (#446): a deny category is human-only, so
+    # it never reaches the drafter — dropped BEFORE the cap, so a denied issue
+    # costs no slot. No label is verified here and none needs to be: with no
+    # trusted signal the classification can only deny or ask, and this step
+    # acts on deny alone.
+    rules = cfg.approval_rules()
+    draftable, denied = [], []
+    for issue in queue:
+        classification = approval.classify(
+            issue.get("labels", ()), issue.get("title", ""), issue.get("body", "")
+        )
+        mode, categories = approval.mode_for(classification, rules)
+        if mode == approval.MODE_DENY:
+            denied.append(issue["number"])
+            sys.stderr.write(
+                f"notice: #{issue['number']} skipped — deny category "
+                f"({', '.join(sorted(categories))}): human only, no greenlight drafted\n"
+            )
+        else:
+            draftable.append(issue)
+    nums = " ".join(str(issue["number"]) for issue in draftable[: cfg.greenlight_cap])
     sys.stdout.write(nums + "\n")
     gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
     if gh_output:
         with open(gh_output, "a", encoding="utf-8") as fh:
             fh.write(f"issues={nums}\n")
+            fh.write(f"denied={' '.join(str(n) for n in denied)}\n")
     return 0
 
 
@@ -225,8 +255,10 @@ def cmd_greenlight_poll(args: argparse.Namespace) -> int:
     ledger append, then the resolution reply. Per-issue failures are
     reported, never fatal to the rest: the fail-closed order leaves a
     half-applied push parked for the next run to retry. Prints one line per
-    issue and appends `resolved=`/`overruled=`/`failed=` to
-    ``$GITHUB_OUTPUT`` (the workflow's summary reads them).
+    issue and appends `resolved=`/`standing=`/`overruled=`/`failed=` to
+    ``$GITHUB_OUTPUT`` (the workflow's summary reads them; `standing=` is the
+    subset of `resolved=` a standing `approve_auto` rule resolved, #446).
+    ``--conf`` supplies those standing rules; without it every thread asks.
     """
     # Lazy like the other live commands: pushthrough.py is the package's one
     # write-bearing seam, and importing it here would defeat the point of
@@ -234,15 +266,22 @@ def cmd_greenlight_poll(args: argparse.Namespace) -> int:
     from .pushthrough import run_poll
 
     pat = os.environ.get("REGEN_TOKEN") or ""
-    results = run_poll(args.repo, _token(), pat)
+    # The standing approval modes (#446) come from the committed conf; with
+    # no --conf the rule set is empty and every thread asks (#444 exactly).
+    rules = _load_config(args.conf).approval_rules()
+    results = run_poll(args.repo, _token(), pat, rules=rules)
 
     resolved = [str(r["number"]) for r in results if r.get("outcome") == "approved"]
+    standing = [str(r["number"]) for r in results
+                if r.get("outcome") == "approved" and r.get("standing_rule")]
     overruled = [str(r["number"]) for r in results if r.get("outcome") == "overruled"]
     failed = [str(r["number"]) for r in results if r.get("outcome") == "error"]
     for result in results:
         number = result["number"]
         outcome = result.get("outcome", "?")
         reason = result.get("reason", "")
+        if not reason and result.get("standing_rule"):
+            reason = f"standing rule auto-approve: {result['standing_rule']}"
         detail = f" ({reason})" if reason else ""
         notes = "".join(f" [{note}]" for note in result.get("notes", []))
         print(f"#{number}: {outcome}{detail}{notes}")
@@ -252,6 +291,7 @@ def cmd_greenlight_poll(args: argparse.Namespace) -> int:
     if gh_output:
         with open(gh_output, "a", encoding="utf-8") as fh:
             fh.write(f"resolved={' '.join(resolved)}\n")
+            fh.write(f"standing={' '.join(standing)}\n")
             fh.write(f"overruled={' '.join(overruled)}\n")
             fh.write(f"failed={' '.join(failed)}\n")
     return 0
@@ -414,8 +454,12 @@ def build_parser() -> argparse.ArgumentParser:
                             help="poll prior greenlights' reactions; push approvals")
     p_poll.add_argument("--repo", required=True,
                         help="owner/name — the repo to poll parked decisions on")
+    p_poll.add_argument("--conf",
+                        help="policy file for the standing approval modes "
+                             "(approve_auto/approve_deny; default: none — every thread asks)")
     p_poll.add_argument("--gh-output",
-                        help="path to append resolved=/overruled=/failed= (defaults to $GITHUB_OUTPUT)")
+                        help="path to append resolved=/standing=/overruled=/failed= "
+                             "(defaults to $GITHUB_OUTPUT)")
     p_poll.set_defaults(func=cmd_greenlight_poll)
     p_ctx = sub.add_parser("greenlight-context",
                            help="the drafter's precedent digest (log + owner replies)")
