@@ -2,7 +2,7 @@
   "mcpServers": {
     "reviewer": {
       "command": "/usr/bin/python3",
-      "args": [".claude/reviewer-post/reviewer_mcp.py"]
+      "args": ["-I", ".claude/reviewer-post/reviewer_mcp.py"]
     }
   }
 }
