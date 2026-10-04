@@ -12,6 +12,19 @@
 //
 //   xvfb-run -a openscad -o /tmp/x.stl lib/stencil-glyphs-demo.scad 2>&1 | grep Volumes
 //
+// check.sh only fails this render on ERROR/WARNING, never on that count, so
+// the proof is ALSO enforced automatically, twice, each with a negative
+// control (#618 review):
+//   * tools/printcheck/tests/test_stencil_demo.py renders this file and
+//     asserts fusecheck's body count is 1 — then renders it again with
+//     -D 'demo_bridged=false' (the parameter below, which strips the bridge
+//     bars from the through-cuts only) and asserts the count is > 1: every
+//     counter freed, Volumes: 12. Run by the printcheck unit-tests CI job.
+//   * lib/stencil-glyphs-mates.conf (mate-check.sh, inside check.sh on every
+//     PR) intersects a probe box with a cut plate exactly where a "0" and an
+//     "8" tether must stand, and the same probe against bridged = false must
+//     measure nothing — pinning the tether geometry itself.
+//
 // The raised glyphs on the right half are the POSITIVE use (a linear_extrude
 // of the same modules, fused to the plate), plus the ':' glyph, ' ' spacing
 // and the unbroken bridged = false variant. They add no volume by
@@ -30,6 +43,12 @@ plate_t = 2.2;     // the ovodyo shell thickness
 gh      = 14;      // the ovodyo glyph height
 br      = 1.2;     // the ovodyo bridge
 eps     = 0.01;
+// The through-cuts' bridge bars. true is the design; false is the NEGATIVE
+// CONTROL for the counter-tether proof (every counter becomes a freed island
+// and the plate splits into eleven bodies) — test_stencil_demo.py renders
+// both. The raised zone's own bridged = false glyph is the positive use and
+// is not driven by this.
+demo_bridged = true;
 
 // Row layout: cut rows on the left, raised rows on the right.
 cut_w    = stencil_text_width("0123456789", gh);      // 113.1 at gh = 14
@@ -43,8 +62,10 @@ plate_h  = rows * row_p + 6;
 module cut_plate_2d() {
     difference() {
         translate([plate_x0, -plate_h / 2]) square([plate_w, plate_h]);
-        translate([0,  row_p / 2]) stencil_text("0123456789", gh, bridge = br);
-        translate([0, -row_p / 2]) stencil_text("12 05 10 00", gh, bridge = br);
+        translate([0,  row_p / 2])
+            stencil_text("0123456789", gh, bridge = br, bridged = demo_bridged);
+        translate([0, -row_p / 2])
+            stencil_text("12 05 10 00", gh, bridge = br, bridged = demo_bridged);
     }
 }
 

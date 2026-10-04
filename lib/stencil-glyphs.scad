@@ -32,11 +32,19 @@
 // all ten digits plus "12", "05", "10", "00" cut THROUGH a thin plate,
 // CGAL-rendered by check.sh, and the plate must stay ONE body (Volumes: 2 in
 // OpenSCAD's summary — one solid, one outer void). An island that came loose
-// would show as an extra volume. That is the library's regression test; the
-// gate that makes it enforceable on a SLICED part — where a tether can still
-// weld or vanish under a slicer's own rules — is the two-sided fusecheck of
-// #612 part 2 (tools/printcheck + gate.sh), which counts separable bodies on
-// the sliced STL and asserts exactly N.
+// would show as an extra volume. That is the library's regression test, and
+// it is enforced automatically rather than read by eye (check.sh fails a
+// demo only on ERROR/WARNING, never on a volume count): tools/printcheck/
+// tests/test_stencil_demo.py renders the demo and asserts fusecheck counts
+// ONE body, then renders it with -D 'demo_bridged=false' and asserts more
+// than one (the negative control — every counter freed); and stencil-glyphs-
+// mates.conf (mate-check.sh, inside check.sh) probes the tether geometry
+// itself, a box intersected with a cut plate exactly where a "0" and an "8"
+// tether must stand, with the same probe against bridged = false as its
+// control. The gate that carries the proof onto a SLICED part — where a
+// tether can still weld or vanish under a slicer's own rules — is the
+// two-sided fusecheck of #612 part 2 (tools/printcheck + gate.sh), which
+// counts separable bodies on the sliced STL and asserts exactly N.
 //
 // The same modules serve the POSITIVE use: linear_extrude a glyph and it is a
 // raised numeral, bridge gaps included (the family's stencil identity), or
@@ -57,10 +65,14 @@
 //       on the origin, `spacing` between glyph boxes.
 //   stencil_text_width(s, h, spacing = 0.12*h)      -> total width, mm
 //   stencil_glyph_width(c, h)                       -> one glyph's advance, mm
+//       Both width helpers refuse h <= 0 like the modules do: they are the
+//       caller's fit check, and a width scaled by a zero or negative height
+//       (0, or a negative "width") is a fit check that lies.
 //
 // GUARDS (every one has a refusing case in stencil-glyphs-guards.conf)
-//   h > 0; stroke >= 0.8 (two extrusion widths) and <= 0.26*h (heavier closes
-//   the counters); bridge_min >= 0.8; bridge >= bridge_min and <= 0.25*h;
+//   h > 0 (the modules AND the two width functions); stroke >= 0.8 (two
+//   extrusion widths) and <= 0.26*h (heavier closes the counters);
+//   bridge_min >= 0.8; bridge >= bridge_min and <= 0.25*h;
 //   n an integer 0-9; stencil_text refuses a non-string, an empty string and
 //   any character outside digits/':'/' '.
 //
@@ -88,12 +100,16 @@ function _sg_spacing_default(h) = 0.12 * h;
 
 // One glyph's advance width (mm) — digits are tabular.
 function stencil_glyph_width(c, h) =
+    assert(is_num(h) && h > 0,
+           str("stencil_glyph_width: cap height h must be positive (mm), got ", h))
     assert(_sg_char_ok(c), str("stencil_glyph_width: unsupported character '", c,
                                "' (digits 0-9, ':' and ' ' only)"))
     (c == ":" || c == " ") ? _sg_wc() * h : _sg_w() * h;
 
 // Total laid-out width (mm) of stencil_text(s, h, spacing = spacing).
 function stencil_text_width(s, h, spacing = undef) =
+    assert(is_num(h) && h > 0,
+           str("stencil_text_width: cap height h must be positive (mm), got ", h))
     assert(is_string(s), str("stencil_text_width: s must be a string, got ", s))
     let (sp = is_undef(spacing) ? _sg_spacing_default(h) : spacing)
     len(s) == 0 ? 0 : _sg_x(s, len(s), h, sp) - sp;
@@ -105,7 +121,7 @@ module stencil_digit(n, h, stroke = undef, bridge = 0.8, bridge_min = 0.8,
     st = is_undef(stroke) ? _sg_stroke_default(h) : stroke;
     _sg_check("stencil_digit", h, st, bridge, bridge_min, bridged)
         translate([-_sg_w() * h / 2, -h / 2]) scale(h)
-            _sg_glyph(str(n), st / h, bridge / h, bridged, 0.8 / h);
+            _sg_glyph(str(n), st / h, bridge / h, bridged);
 }
 
 module stencil_colon(h, stroke = undef) {
@@ -175,9 +191,9 @@ function _sg_x(s, i, h, sp) =
 // Geometry, in UNIT space: cap height 1, glyph box [0, _sg_w()] x [0, 1],
 // stroke s and bridge b as fractions of h. stencil_digit scales by h.
 // ---------------------------------------------------------------------------
-module _sg_glyph(c, s, b, bridged, min_s = 0) {
+module _sg_glyph(c, s, b, bridged) {
     difference() {
-        _sg_stroke(c, s, min_s);
+        _sg_stroke(c, s);
         if (bridged) _sg_bridges(c, s, b);
     }
 }
@@ -197,14 +213,14 @@ module _sg_bridges(c, s, b) {
     for (y = ys) translate([-1, y - b / 2]) square([_sg_w() + 2, b]);
 }
 
-module _sg_stroke(c, s, min_s = 0) {
+module _sg_stroke(c, s) {
     w = _sg_w(); cx = w / 2; ym = _sg_ym(); k = _sg_diag(); hs = s / 2;
     if (c == "0") {
         _sg_bowl(0, 0, w, 1, s);
     } else if (c == "1") {
         _sg_seg([cx, hs], [cx, 1 - hs], s);                 // stem
         _sg_seg([cx - 0.22, hs], [cx + 0.22, hs], s);       // foot
-        _sg_seg([cx, 1 - hs], [cx - 0.22, 0.70], max(s * k, min_s)); // flag
+        _sg_seg([cx, 1 - hs], [cx - 0.22, 0.70], s * k);    // flag
     } else if (c == "2") {
         // Top bowl kept from its left equator over the top and down the
         // right side to the point where a straight diagonal to the
@@ -223,7 +239,7 @@ module _sg_stroke(c, s, min_s = 0) {
             }
         }
         translate([hs, yct]) circle(d = s);                 // top-left terminal
-        _sg_seg(P, Q, max(s * k, min_s));                   // diagonal
+        _sg_seg(P, Q, s * k);                               // diagonal
         _sg_seg(Q, [w - hs, hs], s);                        // base bar
     } else if (c == "3") {
         y0 = ym - hs; y1 = ym + hs; yct = (y0 + 1) / 2; ycb = y1 / 2;
@@ -252,7 +268,7 @@ module _sg_stroke(c, s, min_s = 0) {
         _sg_seg([xs, hs], [xs, 1 - hs], s);                 // stem
         _sg_seg([hs, yc], [w - hs, yc], s);                 // crossbar
         _sg_seg([hs, yc], [hs, yk], s);                     // left arm
-        _sg_seg([hs, yk], [xs, 1 - hs], max(s * 0.85, min_s)); // diagonal, lighter still
+        _sg_seg([hs, yk], [xs, 1 - hs], s * 0.85);          // diagonal, lighter still
     } else if (c == "5") {
         yb = 0.55; y1 = yb + hs; rc = min(w, y1) / 2; ye = rc;
         CL = [rc, ye]; rm = rc - hs; ta = 210;
@@ -280,12 +296,12 @@ module _sg_stroke(c, s, min_s = 0) {
         translate(C + rm * [cos(te), sin(te)]) circle(d = s);
     } else if (c == "7") {
         _sg_seg([hs, 1 - hs], [w - hs, 1 - hs], s);         // top bar
-        _sg_seg([w - hs, 1 - hs], [0.25, hs], max(s * k, min_s)); // diagonal
+        _sg_seg([w - hs, 1 - hs], [0.25, hs], s * k);       // diagonal
     } else if (c == "8") {
         _sg_bowl(0, ym - hs, w, 1, s);
         _sg_bowl(0, 0, w, ym + hs, s);
     } else if (c == "9") {
-        translate([w, 1]) rotate(180) _sg_stroke("6", s, min_s); // the 6, turned
+        translate([w, 1]) rotate(180) _sg_stroke("6", s);   // the 6, turned
     }
 }
 

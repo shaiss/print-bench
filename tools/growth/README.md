@@ -20,6 +20,8 @@ judgment:
 | `growth.cron` | A minimal 5-field cron matcher (numbers, `*`, steps, lists, ranges) so the simulator can expand a cadence; anything fancier raises rather than simulating the wrong schedule. |
 | `growth.daycap` | The per-UTC-day live-post cap: given the desk's marker comments, today's UTC date, the trusted poster login(s), and the cap, how many live posts have gone out today and is the cap met? Counts the `<!-- growth-twitter:posted -->` marker (imported from `growth.board`, one pinned source) **from a trusted author** — one per live post — so an outsider commenting the marker can't mis-tally a day (a DoS), a dry-run never consumes a slot, and Lark holds at ≤`max_posts_per_day` (default 2) live posts/calendar-day whichever (delayed) firings GitHub delivers. Matches the poster across the bot's REST (`github-actions[bot]`) and GraphQL (`github-actions`) login spellings via `[bot]`-suffix normalization — the Select step reads the GraphQL spelling, so without this the guard rejected its own markers. The workflow's Select step calls it (failing closed on a scan error); the decision is here, not in bash. |
 | `growth.simulate` | The accelerated dry run: walk N days of firings over a snapshot + composed posts (holding once a day's `max_posts_per_day` cap is met, matching the per-day guard, so the timeline shows the real ~cap/day cadence) and render exactly what would have been posted, when — the committed artifact a human reads before arming anything live. Copy over the weighted 280 fails the simulation loudly. |
+| `growth.dedup` | The queuer's dedup context: every open issue carrying a `channel:*` label plus every one closed inside a window (default 120 days), classified into **queued** (open, still `growth-queue`, not parked or dispositioned) and **already covered or declined** (a `disposition:*` label, `needs-decision`, taken off the queue, or closed) — because a human's ruling usually removes `growth-queue`, a list of the open queue alone let declined #597 back in as #754. Renders `dedup.md` for the agent and `dedup.json` for the queue tool's near-duplicate backstop, and owns that backstop's title-similarity rule (prefix-stripped token Jaccard ≥ 0.6, the groomer's stopwords) — `tests/test_queue_dedup_parity.py` pins `queue_mcp.py`'s self-contained copy and its JSON reader to it. Pure. |
+| `growth.github` | The GitHub read seam behind `dedup-context --repo`: lists the repo's `channel:*` labels, then per label the open issues and the closed-since-cutoff ones (strongly-consistent REST listings, never the Search API — a tail link must see what the head just filed). GET-only and checkable: `tests/test_purity.py` holds it to urllib-only imports, no HTTP write verb, and no request body; bounded retry on transient failures, a page cap that raises rather than truncating. |
 | `growth.poster` | The X API v2 seam: OAuth 1.0a (HMAC-SHA1) signing by hand, stdlib-only, inert unless all four `X_*` credentials are present. Mechanics only — the policy (approval label, duplicate markers, caps) lives in the posting MCP tool beside the skill. |
 
 ## CLI
@@ -47,6 +49,14 @@ python3 -m growth simulate --conf .github/growth-twitter.conf \
   --out-md growth/twitter/dryruns/overnight.md \
   --out-ndjson growth/twitter/dryruns/overnight.ndjson
 
+# The queuer's dedup context (what /reeve-growth must not re-propose): every
+# open channel:* issue plus every one closed in the last --window-days, as
+# <dir>/dedup.md + <dir>/dedup.json. --repo reads GitHub live (GET-only, token
+# from GITHUB_TOKEN/GH_TOKEN); --snapshot reads a JSON list offline. On any
+# failure it still writes both files marked UNAVAILABLE and exits 1, so the
+# queue tool refuses rather than trusting an empty list:
+python3 -m growth dedup-context --repo shaiss/print-bench --out-dir .reeve-growth-context
+
 # The approval-board Stage per queue item — one `<url>\t<stage>` line per card
 # the growth-board-sync workflow reflects onto the board (reads a JSON list of
 # item snapshots from a file or stdin):
@@ -62,6 +72,8 @@ python -m pytest tools/growth/tests -q
 
 Stdlib-only on purpose (the tools/lineage rule): the scheduled workflow reads
 policy straight from the checkout, and the posting server beside the skill
-imports nothing beyond the standard library. A positive case and a negative
+imports nothing beyond the standard library. Exactly two modules touch the
+network, one direction each — `growth.poster` writes to X, `growth.github`
+reads GitHub — and `tests/test_purity.py` pins that confinement. A positive case and a negative
 control per parser/policy rule; the poster's signing path is exercised
 entirely offline through its transport seam.
