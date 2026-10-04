@@ -49,13 +49,18 @@ that takes up cables from Ø 3.4 to Ø 5 mm.
 ## Print settings
 
 - **Material:** PETG preferred (the fingers flex every probe insertion — PETG
-  tolerates the fatigue; PLA works with a coupon-tuned clearance)
+  tolerates the fatigue; PLA works with a coupon-tuned clearance). **Cleaning
+  (NUGGS N7):** hand wash only, ≤ 50 °C, mild unscented dish soap, rinse and
+  dry fully — never a dishwasher (the heated dry cycle exceeds even PETG and
+  can warp the port fit).
 - **Layer height:** 0.2 mm
 - **Infill:** 15 % gyroid — the part is shell-dominated
 - **Supports:** none needed — every surface prints at ≤ 50° or bridges under
   5 mm; **leave slicer supports off**
 - **Orientation:** as rendered, port face down on the three sector tips.
-  No brim needed (Ø 94.9 footprint).
+- **Brim:** recommended. Like every NUGGS module, bed contact is only the
+  three sector tips (~530 mm²); a brim keeps the first layer planted. The web
+  between tips is a bridge at the port plane — expected, not a fault.
 - **Walls:** 3 perimeters (the 1.6 mm finger walls come out at 4)
 
 ## Parameters
@@ -80,7 +85,7 @@ Customizer sections; override on the command line with
 1. **Print the coupon first** (`nuggs-probe-cap-coupon.scad`) and tune
    `grip_clearance` in ±0.05 steps per the ladder above — on the owner's
    actual probes and cables, not a drill bit of the nominal size.
-2. Print the cap, port face down, supports off.
+2. Print the cap, port face down, supports off, brim on.
 3. Drop each probe through its grip until it homes (~25 mm of the 30 mm
    length projects past the plate underside — its depth is held by the
    keeper, not the cap). Feed the cable through the gland.

@@ -101,7 +101,11 @@ Style: `none` (the brief's decision — functional part, no pack).
    probe gaps ≥ 8 mm of solid plate, and ≥ 6 mm clear to the axis (solid
    land under the island).
 
-7. **Probe depth is the keeper's, not the cap's.** A fully-home Ø 6 × 30
+7. **Open product policy (not this PR).** Sealed-cap / blind-terminus (N3)
+   and bore-side probe protrusion (N6) are parked for Keel — no geometry
+   change until those decisions land.
+
+8. **Probe depth is the keeper's, not the cap's.** A fully-home Ø 6 × 30
    probe projects ~25 mm past the plate underside; the mate's bore wall is
    40 mm off-axis, so a centered probe cannot touch it. The cap presents no
    sharp edge to blunt stainless (corrugated ceiling, vertical tunnel
@@ -110,7 +114,9 @@ Style: `none` (the brief's decision — functional part, no pack).
 ## Print settings
 
 - **Orientation:** as rendered — port face down on the sector tips. No
-  supports, no brim.
+  supports; brim recommended (sector-tip contact, same as sibling NUGGS
+  modules).
+- **Cleaning:** hand wash only, ≤ 50 °C; never a dishwasher (NUGGS N7).
 - **Material:** PETG preferred (fingers fatigue-tolerant); PLA workable with
   coupon-tuned thinner/clearanced fingers.
 - **Layer height:** 0.2 mm. **Walls:** 3 perimeters (finger wall 1.6 = 4).
@@ -142,3 +148,9 @@ brief's own warning: DS18B20 clones vary.
   **92/100** (only "2 degenerate faces" warning remains, post-slicer-repair
   class), coupon 100/100. Ceiling grooves verified in the mesh: 12 apex
   rings at r = 37.8 → 2.4 mm on the computed 3.214 mm pitch.
+- **Copilot review nits** (PR #737, hourly Quill pass): README brim aligned
+  with NUGGS sector-tip guidance (no “no brim” claim); fitcheck dispatch now
+  passes `at_*` placement + proxy depth explicitly (probe vs gland cannot
+  collapse when `probe_d == gland_d`); README + NOTES carry N7 hand-wash ≤
+  50 °C / no dishwasher. Skipped: N3 blind-terminus, N6 bore protrusion,
+  grip-preload redesign (Keel / larger eng).

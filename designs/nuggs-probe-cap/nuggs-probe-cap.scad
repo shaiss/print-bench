@@ -386,27 +386,30 @@ module coupon() {
 // Proxy and bore are cut at this file's $fa/$fs, so they share one
 // tessellation and the boundary case cannot sliver on a preset mismatch.
 // ---------------------------------------------------------------------------
-module grip_proxy(d, grow) {
+module grip_proxy(d, grow, below) {
     pd = d + grow;
-    // Reaches from probe_len below the plate (fully home) to above the
-    // finger tips; only the grip-zone overlap can produce facets.
-    translate([0, 0, cap_z - (d == probe_d ? probe_len : 8)])
-        cylinder(d = pd, h = plate_t + boss_h + 2
-                         + (d == probe_d ? probe_len : 8));
+    // Reaches from `below` under the plate (probe_len for probes, a short
+    // stub for the gland) to above the finger tips; only the grip-zone
+    // overlap can produce facets.
+    translate([0, 0, cap_z - below])
+        cylinder(d = pd, h = plate_t + boss_h + 2 + below);
 }
 
-module fitcheck(d, extra) {
+module fitcheck(at, d, extra, below) {
     intersection() {
         nuggs_probe_cap();
-        if (d == gland_d) at_gland() grip_proxy(d, extra);
-        else              at_probes() grip_proxy(d, extra);
+        at() grip_proxy(d, extra, below);
     }
 }
 
-module probe_seats() { fitcheck(probe_d, 0); }
-module probe_jams()  { fitcheck(probe_d, grip_clearance + jam_oversize); }
-module gland_seats() { fitcheck(gland_d, 0); }
-module gland_jams()  { fitcheck(gland_d, grip_clearance + jam_oversize); }
+module probe_seats() { fitcheck(at_probes, probe_d, 0, probe_len); }
+module probe_jams()  {
+    fitcheck(at_probes, probe_d, grip_clearance + jam_oversize, probe_len);
+}
+module gland_seats() { fitcheck(at_gland, gland_d, 0, 8); }
+module gland_jams()  {
+    fitcheck(at_gland, gland_d, grip_clearance + jam_oversize, 8);
+}
 
 // ---------------------------------------------------------------------------
 // Review previews (never printed). pair = the cap closing a tube end; the
