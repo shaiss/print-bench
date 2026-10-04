@@ -225,13 +225,11 @@ module socket_body(clear = ball_xy_clear, collar = true, dome = true) {
     top_rel = dome ? dome_apex_above_center + 2 : rim_above_center + 3;
     difference() {
         union() {
-            // 0.5 mm 45° elephant-foot chamfer at the bed-side tenon
-            // (Jane: 0.3 mm radial recess clearance sits in the squish band).
-            // Then the 45° flare to the ring — that flare is also the Ø14
-            // tenon that seats in the base recess.
-            cylinder(d1 = stem_d - 1.0, d2 = stem_d, h = 0.5);
-            translate([0, 0, 0.5])
-                cylinder(d1 = stem_d, d2 = 2 * ring, h = flare_h - 0.5);
+            // 45-degree flare from the tenon to the ring: the cup floor's
+            // underside would otherwise overhang the tenon (a flat ceiling
+            // over air) — the flare is that ceiling converted to a wall. It
+            // is also the Ø14 tenon that seats in the base recess.
+            cylinder(d1 = stem_d, d2 = 2 * ring, h = flare_h);
             // floor slab + ring, from the flare top to the chamfered top edge
             translate([0, 0, flare_h])
                 chamfered_cylinder(d = 2 * ring, h = floor_t + Rs_ + top_rel,
@@ -274,6 +272,14 @@ module socket_body(clear = ball_xy_clear, collar = true, dome = true) {
         translate([0, 0, -0.01]) cylinder(d = 8.55, h = 4.01, $fn = 6);
         translate([0, 0, -0.01])
             cylinder(d1 = 8.55 + 1.0, d2 = 8.55, h = 0.51, $fn = 6);
+        // 0.5 mm 45° elephant-foot chamfer at the tenon bed (Jane: 0.3 mm
+        // radial recess clearance sits in the squish band). Cut, not a
+        // shortened flare — stealing 0.5 mm of flare_h puts the ring
+        // junction past 45° and the coupon's support area triples.
+        rotate_extrude()
+            polygon([[stem_d/2 - 0.5, -0.02],
+                     [stem_d/2 + 0.02, -0.02],
+                     [stem_d/2, 0.5]]);
     }
 }
 
