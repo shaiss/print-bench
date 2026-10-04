@@ -370,15 +370,21 @@ surfaces studies awaiting a read live in
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):
     each backstop must deny every Bash allow outside an exact review-surface
-    exemption (gh, git, jq, mktemp; the reviewer's also keeps PM triage's
-    `chunk-helper.sh`), always deny the render toolchain (apt, openscad,
-    xvfb-run, prusa-slicer, printcheck, the render/gate/check scripts,
-    session-start.sh) and never deny the review surface (gh/git, the read
-    tools; Write/Edit too for the coach); `--selftest` with a positive and a
-    negative control per rule, run by check.sh. The workflow half — every
-    reviewer ship step in `auto-review.yml` passes its backstop under
-    `dontAsk` — is pinned by
-    `tools/model-registry/tests/test_reviewer_backstop_wiring.py`.
+    exemption (gh, jq, mktemp; the reviewer's also keeps PM triage's
+    `chunk-helper.sh`, the coach's git), always deny the render toolchain
+    (apt, openscad, xvfb-run, prusa-slicer, printcheck, the render/gate/check
+    scripts, session-start.sh) and the gh escape hatches, and never deny the
+    review surface (gh, the read tools; git checkout/add/commit/push and
+    Write/Edit too for the coach). A deny list cannot contain git, so the
+    reviewers get none (`Bash(git:*)` denied; the workflow stages the PR
+    head for Jane and Drik) and the coach's git is fenced to local verbs;
+    `--selftest` with a positive and a negative control per rule, run by
+    check.sh. The workflow half — every reviewer ship step in
+    `auto-review.yml` passes its backstop under `dontAsk` and runs under the
+    git environment lock (`GIT_ALLOW_PROTOCOL=https` plus command-scope
+    config) — is pinned by
+    `tools/model-registry/tests/test_reviewer_backstop_wiring.py` and
+    `test_reviewer_git_containment.py`.
   - `spike-converter-perms-check.sh` — the same drift check for the scheduled
     spike-to-brief converter's own deny backstop
     (`.claude/spike-converter-settings.json`, #245 child C / issue #440), the
