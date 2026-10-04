@@ -78,11 +78,18 @@ gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
 - **Supports:** none. The truss and mock drive print support-free, and the
   ball halves print **pole-down** (see Orientation), which makes the cavity an
   open bowl and keeps every facet and the seam ring's 45° thread flanks
-  support-free.
+  support-free. The halves' printcheck caveats are **by-design underside
+  texture** on the chamfer facets ringing the pole — they sit ~52° off-axis
+  when pole-down and print with slight droop, no support — so **keep
+  auto-supports off**, or the slicer fills the open bowl and welds the stalk
+  boss.
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
   first layer and the seam ring is the top of the print (as the parts render);
   truss segments bottom-chord-down (as modeled); mock drive flat; the seam
   coupon as rendered; core keel flat-bottom-down; plug head-down.
+- **Seam (slicer):** the stock *Aligned* seam stacks a visible z-ridge down the
+  ≥6 mm mating annulus. Paint the seam onto the helical-slot interruption, or set
+  **Back** or **Random**, so the closed join reads as one fine line.
 - **Vitamins for the base:** Ø2 mm steel shot for the core's ballast pockets
   (**≈ 55 g is a starting guess you may need to adjust** — the CoG/tip-over gate
   is not yet run, so stability is unproven; see NOTES.md), filled and plugged

@@ -342,17 +342,19 @@ max error ≤ 3°, every face presented once, and monotone stops.
 
 ## Print orientation & gate status
 
-- Ball halves: pole-down (flat pole pentagon on the bed, seam ring up); the faceted dome has
-  overhangs and the sharp facet edges sample as thin walls (both inherent v0
-  caveats of splitting a faceted ball at the equator, the #602 seam/orientation
-  work). Truss segments: bottom-chord-down (as modelled). Mock-drive gear: flat.
+- Ball halves: **pole-down** — the flat pole pentagon on the bed, the seam ring
+  at the top of the print (see Key decisions: Ball seam). The chamfer facets
+  ringing the pole sample as ~52° overhangs and the sharp facet edges sample as
+  thin walls (both inherent v0 caveats of a faceted ball, tracked to the
+  generator #600, not the seam). Truss segments: bottom-chord-down (as
+  modelled). Mock-drive gear: flat.
 - `gate.sh --slice ovodyo` (CI manifold engine): hours-top/hours-bottom/
-  minutes-top/minutes-bottom **84/100 (PRINTABLE WITH CAVEATS** — dome overhang
-  + thin sampled wall at the facet edges, both #602; watertight, one body — the
+  minutes-top/minutes-bottom **84/100 (PRINTABLE WITH CAVEATS** — near-pole facet
+  overhang + thin sampled wall at the facet edges, both #600; watertight, one body — the
   cut-through numerals do NOT drop a counter and the seam bisects no number),
   base-segment 100/100, base-end 100/100 (with the bored stalk socket),
   mock-drive 100/100; all slice. No CRITICAL, no failure. (Local stable-engine
-  2021.01 scores the halves ~76; the caveats are the seam/orientation ones #602
+  2021.01 scores the halves ~76; the caveats are the facet-generator ones #600
   owns.)
 - Base product half (local stable 2021.01, `gate.sh ovodyo` exit 0): base-end
   100/100 with the feet + nose (flat bed contact on the chords and pads),
@@ -383,10 +385,15 @@ print, same material and profile as the halves.
 - **Too tight / won't start:** raise `seam_tol` by 0.05 and reprint the
   coupon. **Rattles, wobbles, or spins back off:** lower it by 0.05.
 - **First-layer squish** tightens the first groove of a bore printed mouth-down
-  and fattens the ring's foot; both coupon pucks print seam-side up like the
-  halves, so what you feel is what the ball will do. If the puck starts hard
-  but runs free afterwards, that is elephant's foot on the ring's flange —
-  fix the first layer (z-offset / flow) rather than the tolerance.
+  and fattens a ring's foot. The **female** puck prints bore-mouth-down like the
+  top half, so its fit is faithful. The **male** puck, though, stands on a flange
+  *on the bed*, while the production male ring prints at the *top* of the
+  pole-down bottom half — so the male coupon can show a first-flank elephant's
+  foot the ball never gets. If the male starts hard but runs free afterwards,
+  that is coupon-only flange foot: fix the first layer (z-offset / flow), and do
+  **not** loosen `seam_tol` to chase it — prefer the looser-feeling end of a
+  clean seat before locking the value for the halves. (Printing the coupon male
+  top-down like the half is a coupon-fidelity follow-up.)
 - Then render the four halves with the winning value and print them
   pole-down (see Key decisions: Ball seam).
 
