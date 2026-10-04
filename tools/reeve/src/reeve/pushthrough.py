@@ -413,8 +413,12 @@ def run_poll(
     (``approval.classify``/``mode_for``) from its labels and text; only when a
     label that could LOOSEN is present is its applier read
     (``github.list_label_events``) and held to the 👍 bar
-    (``approval.label_actor_trusted``) — a deny is decided before that read,
-    since nothing may loosen a deny.
+    (``approval.label_actor_trusted``) and to the greenlight's own post time
+    (``approval.label_vouches``: a label applied before the greenlight never
+    loosens) — a deny is decided before that read, since nothing may loosen
+    a deny. A standing auto-approve additionally requires the live title and
+    body to hash to the marker's ``text=`` digest (``poll_outcome``'s
+    ``issue_text``), so an edit after the greenlight falls back to asking.
     """
     rules = rules or approval.Rules()
     now = now or datetime.now(timezone.utc)
@@ -434,7 +438,7 @@ def run_poll(
         # fail-closed direction — rather than trusting the marker.
         return greenlight.marker_author_trusted(login, _authorized)
 
-    def _approval_mode(thread: dict[str, Any]) -> tuple[str, frozenset, tuple]:
+    def _approval_mode(thread: dict[str, Any], greenlight_at: str) -> tuple[str, frozenset, tuple]:
         # Untrusted signals first: the text and the labels as-is can only
         # deny or ask, so a deny is final before any label history is read.
         labels = thread.get("labels") or []
@@ -447,10 +451,15 @@ def run_poll(
         # category already pins this thread at ask, whoever applied a label).
         if mode != approval.MODE_DENY and loosening and classification.categories <= rules.auto:
             events = github.list_label_events(repo, token, thread["number"])
-            verified = [
-                label for label in loosening
-                if approval.label_actor_trusted(approval.label_applier(events, label), _authorized)
-            ]
+            verified = []
+            for label in loosening:
+                # A label loosens only when a write-permission human applied
+                # it AT OR AFTER the greenlight — a vouch for the drafted
+                # text, not for whatever the issue said before (#760).
+                applier, applied_at = approval.label_applied(events, label)
+                if (approval.label_vouches(applied_at, greenlight_at)
+                        and approval.label_actor_trusted(applier, _authorized)):
+                    verified.append(label)
             classification = approval.classify(labels, title, body, verified)
             mode, categories = approval.mode_for(classification, rules)
         return mode, categories, classification.evidence
@@ -491,11 +500,12 @@ def run_poll(
                 if _authorized(login):
                     (approvers if content == greenlight.APPROVE_REACTION else overrulers).append(login)
 
-            mode, categories, evidence = _approval_mode(thread)
+            mode, categories, evidence = _approval_mode(thread, info.get("created_at", ""))
             polled = greenlight.poll_outcome(
                 info, approvers, overrulers, decide,
                 mode=mode, categories=categories,
                 grace_elapsed=approval.grace_elapsed(info.get("created_at", ""), now),
+                issue_text=(thread.get("title", ""), thread.get("body", "")),
             )
             if polled["outcome"] == greenlight.OUTCOME_APPROVE:
                 results.append({

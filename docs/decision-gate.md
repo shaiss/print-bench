@@ -312,7 +312,10 @@ deterministic, and the job's first step):
   **no reaction** once a 20-hour 👎 grace window from its post has passed —
   the same sequence as a 👍, arming included, recorded in the ledger as
   `standing-rule:<category>` rather than a person; a 👍 still resolves at once,
-  a 👎 still overrules, a `/decide` still outranks, and a NO still asks. An
+  a 👎 still overrules, a `/decide` still outranks, and a NO still asks. The
+  auto path is bound to the greenlit text: the label must postdate the
+  greenlight and the issue text must still match the marker's `text=` digest,
+  else it asks. An
   `approve_deny` category is human-only: Reeve drafts no greenlight on it and
   the poll never writes to it, not even on a 👍 — only `/decide` resolves it.
   The classification is deliberately one-way: **only a trusted signal
