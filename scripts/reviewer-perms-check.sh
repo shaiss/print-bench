@@ -51,8 +51,10 @@
 #    whatever settings.json allows today, plus both growth-desk MCP servers
 #    (every sibling backstop denies them; a `Bash(mcp__…)` rule denies a
 #    shell command of that name, not the server), plus the gh escape hatches
-#    (alias/extension/config/auth/…, repo/pr checkout/browse) and the coach's
-#    git floor — each present verbatim AND proven to block a representative
+#    (alias/extension/config/auth/…, repo/pr checkout/browse), the coach's
+#    git floor, and the env-lock floor (#777: export/env/unset/set and
+#    bash/sh/dash -c, both `:*` and no-boundary `*` plus the `-*` option
+#    catch-all) — each present verbatim AND proven to block a representative
 #    invocation under Claude Code's word-boundary `:*` matching.
 # 3. Surface guard — no deny may block the review surface: a probe command
 #    per need (gh pr view/diff/comment, gh api; the coach's git diff/log/
@@ -2837,18 +2839,32 @@ REQUIRED_DENIES = [
 # origin --receive-pack=…`) have nothing to execute. Issue #775 closes the
 # option-first, clustered-short, and dest-not-first spellings of those
 # four-verb options with GIT_FLOOR; the option-after-args shape still
-# needs the env lock (or a wrapper). An
-# env-prefixed command
-# (`GIT_ALLOW_PROTOCOL=file git …`) does not start with `git`, so Bash(git:*)
-# never grants it under dontAsk. That lock is pinned by
-# tools/model-registry/tests/test_reviewer_git_containment.py, not here.
+# needs the env lock (or a wrapper). That lock only holds if the
+# agent cannot unset or override GIT_* for a child process. Under dontAsk
+# that used to be incidental (export/env/bash -c were simply un-allowed).
+# ENV_LOCK_FLOOR makes it a named deny so a future additive allow
+# (Bash(env:*), say) cannot wrap `env GIT_ALLOW_PROTOCOL=file git fetch …`
+# around the lock. A bare `VAR=value cmd` prefix is NOT a command token —
+# Claude Code's Bash() matcher never sees it (recorded in --selftest); it
+# stays refused under dontAsk because it is not on the allow list either.
+# The workflow half of the lock is pinned by
+# tools/model-registry/tests/test_reviewer_git_containment.py.
+ENV_LOCK_FLOOR = [
+    {"Bash(export:*)"}, {"Bash(export*)"},
+    {"Bash(env:*)"}, {"Bash(env*)"},
+    {"Bash(unset:*)"}, {"Bash(unset*)"},
+    {"Bash(set:*)"}, {"Bash(set*)"},
+    {"Bash(bash -c:*)"}, {"Bash(bash -c*)"}, {"Bash(bash -*)"},
+    {"Bash(sh -c:*)"}, {"Bash(sh -c*)"}, {"Bash(sh -*)"},
+    {"Bash(dash -c:*)"}, {"Bash(dash -c*)"}, {"Bash(dash -*)"},
+]
 ESCAPE_HATCH_DENIES = [
     {"Bash(gh alias:*)"}, {"Bash(gh extension:*)"}, {"Bash(gh ext:*)"},
     {"Bash(gh config:*)"}, {"Bash(gh codespace:*)"}, {"Bash(gh cs:*)"},
     {"Bash(gh secret:*)"}, {"Bash(gh ssh-key:*)"}, {"Bash(gh gpg-key:*)"},
     {"Bash(gh auth:*)"}, {"Bash(gh workflow:*)"}, {"Bash(gh run:*)"},
     {"Bash(gh repo:*)"}, {"Bash(gh pr checkout:*)"}, {"Bash(gh browse:*)"},
-] + GIT_FLOOR
+] + GIT_FLOOR + ENV_LOCK_FLOOR
 
 # Representative dangerous invocations the deny list must actually BLOCK under
 # Claude Code's real (strict) matching — the negative half of the floor
@@ -3103,6 +3119,16 @@ ESCAPE_PROBES = [
     "gh secret list", "gh ssh-key add k", "gh gpg-key add k",
     "gh auth token", "gh workflow run x", "gh run rerun 1",
     "gh repo clone o/r", "gh pr checkout 1", "gh browse",
+    # Env-lock floor (#777): wrappers that set/unset GIT_* for a child.
+    "env GIT_ALLOW_PROTOCOL=file git fetch origin",
+    "env -u GIT_ALLOW_PROTOCOL git fetch origin",
+    "export GIT_ALLOW_PROTOCOL=file",
+    "unset GIT_ALLOW_PROTOCOL",
+    "set GIT_ALLOW_PROTOCOL=file",
+    "bash -c git fetch origin",
+    "bash -c'git fetch origin'",
+    "sh -c git fetch origin",
+    "dash -c git fetch origin",
 ]
 
 # A tool-rule specifier that scopes nothing — `Read(**)` denies Read outright.
@@ -3216,10 +3242,10 @@ if missing_required:
 if missing_escape:
     ok = False
     sys.stderr.write(
-        f"git/gh escape-hatch floor denies are missing from {backstop_path} "
+        f"git/gh/env-lock escape-hatch floor denies are missing from {backstop_path} "
         f"(the Bash(gh:*) review surface — and the coach's Bash(git:*) — is "
-        f"exempt from coverage, so these command-execution/credential vectors "
-        f"must be denied explicitly or the {kind} inherits them):\n")
+        f"exempt from coverage, so these command-execution/credential/env-lock "
+        f"vectors must be denied explicitly or the {kind} inherits them):\n")
     for alts in missing_escape:
         sys.stderr.write(f"    {' or '.join(alts)}\n")
 if unblocked_escape:
@@ -3312,6 +3338,18 @@ EOF
     "Bash(gh codespace:*)" "Bash(gh cs:*)" "Bash(gh secret:*)" "Bash(gh ssh-key:*)"
     "Bash(gh gpg-key:*)" "Bash(gh auth:*)" "Bash(gh workflow:*)" "Bash(gh run:*)"
     "Bash(gh repo:*)" "Bash(gh pr checkout:*)" "Bash(gh browse:*)"
+  )
+  # Named denies so the job-level GIT_* lock cannot be unset by an additive
+  # allow (issue #777). Both backstops; the coach fixture inherits them from
+  # the reviewer fixture below.
+  local ENV_LOCK_FLOOR=(
+    "Bash(export:*)" "Bash(export*)"
+    "Bash(env:*)" "Bash(env*)"
+    "Bash(unset:*)" "Bash(unset*)"
+    "Bash(set:*)" "Bash(set*)"
+    "Bash(bash -c:*)" "Bash(bash -c*)" "Bash(bash -*)"
+    "Bash(sh -c:*)" "Bash(sh -c*)" "Bash(sh -*)"
+    "Bash(dash -c:*)" "Bash(dash -c*)" "Bash(dash -*)"
   )
   # The coach's git floor (it keeps git, so these are what stand between it
   # and a command-running option).
@@ -5954,9 +5992,12 @@ EOF
     $'Bash(*=*\tgit*)'
     'Bash(git '\''f*)'
   )
-  python3 - "$tmp/reviewer.json" "${GH_FLOOR[@]}" <<'PY2'
+  python3 - "$tmp/reviewer.json" "${GH_FLOOR[@]}" -- "${ENV_LOCK_FLOOR[@]}" <<'PY2'
 import json, sys
-out, *gh = sys.argv[1:]
+args = sys.argv[1:]
+out = args[0]
+sep = args.index("--")
+gh, env_lock = args[1:sep], args[sep + 1:]
 # Wrapper IFS + path/env prefixes: ESCAPE_PROBES include command/env spellings
 # that Bash(git*) never sees. Keep this list aligned with reviewer-settings.json.
 wrappers = [
@@ -5987,7 +6028,7 @@ deny = ["Bash(apt:*)","Bash(apt-get:*)","Bash(openscad:*)","Bash(openscad-nightl
         "Bash(./scripts/check.sh:*)","Bash(scripts/check.sh:*)",
         "Bash(.claude/hooks/session-start.sh:*)","Bash(./.claude/hooks/session-start.sh:*)",
         "mcp__growth_queue","mcp__growth_twitter",
-        *gh, "Bash(git:*)", "Bash(git*)", "Bash(tee:*)", "Write", "Edit", "NotebookEdit",
+        *gh, *env_lock, "Bash(git:*)", "Bash(git*)", "Bash(tee:*)", "Write", "Edit", "NotebookEdit",
         *wrappers]
 json.dump({"permissions": {"deny": deny}}, open(out, "w"))
 PY2
@@ -6112,6 +6153,12 @@ PY
     derive "$C" "$tmp/c.json" deny "-$f"
     expect fail "dropping git floor canary $f fails the check (coach)" "$S" "$tmp/c.json" coach
   done
+  for f in "${ENV_LOCK_FLOOR[@]}"; do
+    derive "$R" "$tmp/r.json" deny "-$f"
+    expect fail "dropping env-lock floor deny $f fails the check (reviewer)" "$S" "$tmp/r.json" reviewer
+    derive "$C" "$tmp/c.json" deny "-$f"
+    expect fail "dropping env-lock floor deny $f fails the check (coach)" "$S" "$tmp/c.json" coach
+  done
   # The strict matcher, not presence alone: with the no-boundary spellings and
   # the global-option catch-all gone, the `:*` rules are still PRESENT but
   # Claude Code's word-boundary match misses the `=` spellings — so the probe
@@ -6140,6 +6187,45 @@ PY
     n=$((n + 1)); echo "ok    selftest: a boundary-only Bash(git -c:*) does not block git -cx=y (strict matcher)"
   else
     n=$((n + 1)); echo "FAIL  selftest: the strict matcher let Bash(git -c:*) cover git -cx=y"; bad=1
+  fi
+  # Issue #777: a bare VAR=value prefix is not a command token. Claude Code's
+  # Bash() matcher never sees `GIT_CONFIG_COUNT=1 git config user.x y`, so no
+  # deny (including Bash(git:*)) blocks it. Record that finding here rather
+  # than putting the string in ESCAPE_PROBES (which would fail the floor).
+  # Under dontAsk the form is still refused because it is not on the allow
+  # list; the env-lock floor covers env/export/bash -c wrappers instead.
+  local prefix_probe="GIT_CONFIG_COUNT=1 git config user.x y"
+  if python3 - "$R" "$C" "$prefix_probe" <<'PY3'
+import json, sys
+reviewer, coach, probe = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def surely_blocks(rule, command):
+    if rule == "Bash":
+        return True
+    if not (rule.startswith("Bash(") and rule.endswith(")")):
+        return False
+    spec = rule[len("Bash("):-1]
+    if spec.endswith(":*"):
+        prefix = spec[:-2]
+        if "*" in prefix:
+            import fnmatch
+            return fnmatch.fnmatchcase(command, prefix) or \
+                fnmatch.fnmatchcase(command, prefix + " *")
+        return command == prefix or command.startswith(prefix + " ")
+    import fnmatch
+    return fnmatch.fnmatchcase(command, spec)
+
+for path in (reviewer, coach):
+    deny = json.load(open(path))["permissions"]["deny"]
+    if any(surely_blocks(d, probe) for d in deny):
+        sys.stderr.write(f"{path} unexpectedly blocks {probe!r}\n")
+        sys.exit(1)
+sys.exit(0)
+PY3
+  then
+    n=$((n + 1)); echo "ok    selftest: bare VAR=value prefix is not a Bash() token (GIT_CONFIG_COUNT=1 git config … unmatched — recorded #777 finding)"
+  else
+    n=$((n + 1)); echo "FAIL  selftest: a backstop deny matched the bare VAR=value prefix; update the #777 finding"; bad=1
   fi
   # And the floor must not cost the real surface: the complete coach backstop
   # (which carries the floor) still passes with its push verbs intact — the
