@@ -31,8 +31,12 @@ Printed **in pairs** (one holder per wall, one pair per rod):
 - `collar-shallow` — the same collar at `engagement_depth=12` (far side of
   the push-in-deep / drop-in-shallow install). Gated and shipped in the
   Release; not on the plate (the plate is the default-depth holder pair).
-- `thread-coupon` / `bore-coupon` — the "print this first" fit checks (see
-  Print settings).
+- `thread-coupon` / `bore-coupon` — the "print this first" fit checks at the
+  default 40 mm rod (see Print settings).
+- `thread-coupon-25` / `bore-coupon-25` — the same coupons at the **25 mm
+  reference** size (CI-gated proof; wrappers
+  `alcove-rod-socket-thread-25-coupon.scad` /
+  `alcove-rod-socket-bore-25-coupon.scad`).
 
 **Deliverable — two objects, never one fused STL.** `boss` and `collar` print as
 **separate parts**, and the one rule is: keep them as two distinct objects in the
@@ -144,9 +148,11 @@ you'll export the fused assembly preview instead of a printable part):
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
 
-Sizes other than the default 40 mm rod are **untested** — the geometry
-scales, but the fits are only proven at 40 mm, and the coupons are the
-proof: print them in your material first and trust them over this page.
+**Proven rod sizes (digital gate):** **40 mm** (default — production parts +
+40 mm coupons) and **25 mm** (reference origin — `thread-coupon-25` /
+`bore-coupon-25` only in this release; no field test yet). Any other barrel
+Ø still needs you to set `rod_d` and print the 40 mm coupon wrappers at that
+override before trusting a boss/collar pair.
 
 ## Assembly & use
 
