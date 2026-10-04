@@ -54,8 +54,9 @@ small ball-head mount.
 - **D3 — Orientation is the clearance decision (doc CC1).** Stem-down. The
   cup's lower hemisphere is then an every-layer-supported bowl; capture cone
   and dome close at ≤ 25° / 15° from vertical; the stud is a vertical
-  cylinder; the hex nut pocket opens *down at the bed* (first-layer hex ring,
-  zero overhang); the only horizontal ceiling is the 2 mm top annulus around
+  cylinder; the M4 nut sits in a side-entry trap with a 1.6 mm floor (the
+  bolt pulls the head, Drik R4); the only horizontal ceiling is the 2 mm
+  top annulus around
   the stud aperture, landing on the dome cone. Printed stud-down, the dome
   becomes a bridge over the whole ball — the design forbids it by geometry.
 - **D4 — ¼″-20 stud = BOSL2 machine threads** (repo rule: BOSL2 for machine
@@ -65,17 +66,14 @@ small ball-head mount.
   style pack's one recorded deviation**: `workshop-utility`'s fastener
   vocabulary is M3; the payload stud is the camera standard, not the family's.
   The base's M4s are the brief's own call, same deviation, same record.
-- **D5 — Head-to-base joint: one M4×8 socket-cap into a printed hex nut
-  pocket.** The pocket opens down at the head's bed (first-layer ring, zero
-  overhang) with a Ø4.5 relief above it so the bolt cannot jack against the
-  cup floor. The base has an underside M4 socket counterbore (plate sits
-  flat) and a 0.6 mm lead-in at the recess *mouth* (wide at the plate top —
-  the 2026-10-04 cone was inverted and lived above the part, Drik R3.2).
-  Recess depth is 2.4 mm (counterbore + 1.6 mm web eat the rest of the 8 mm
-  plate); the 45° flare wedges at ~0.8 mm on the recess rim, and that ring
-  is the bearing. Assemble head-to-base *before* mounting: the centre bolt
-  shares the underside with the mount. Torque path is that rim, not the
-  bolt. M4×16 was a page error — it hits PETG ~5 mm early.
+- **D5 — Head-to-base joint: one M4×8 socket-cap into a captured M4 nut.**
+  Drik R4: an open-bed hex lets the nut walk toward the bolt, so torque
+  clamps nut-to-base and the head floats. The trap is a 1.6 mm floor with
+  Ø4.5 through it, hex pocket + side window at −X (slit is +X), relief to
+  z=8.5. Tightening pulls the nut down against the floor, which is the
+  head. Assemble head-to-base *before* mounting. Recess 2.4 mm, flare
+  wedges at ~0.8 mm, that ring is the bearing. Lift-by-the-head is the
+  acceptance check.
 - **D6 — v1 base = M4 foot plate** (the brief's "one choice, not both").
   Evidence: a plate prints flat with zero tuned fits and mounts to a desk
   edge, a shelf underside or a wall with two M4s; a fixed-width clamp jaw
@@ -227,3 +225,9 @@ it only when you already know the printer.
   counterbore, 2.4 mm recess (c'bore + 1.6 mm web), mouth lead-in flipped,
   Ø4.5 relief above the nut pocket, assemble head-to-base first, preview
   seats at `tenon_seat` 0.8 mm. B5 still the cylindrical tenon.
+- **Drik R4 BLOCK (sha `826cddcc`).** R3.2 length/order/lead-in landed, and
+  walking the M4×8 to the end showed the nut pocket opened toward the bolt:
+  torque clamped nut-to-web, head held only by the flare wedge. Side-entry
+  nut trap with a 1.6 mm floor; lift-by-the-head is the check. M4×8 still
+  the measured length (counterbore floor at 4, nut on the floor at head
+  z=1.6 → base 8.8, 8 mm shank ends at the nut top).

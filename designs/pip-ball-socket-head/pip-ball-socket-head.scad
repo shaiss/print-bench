@@ -36,8 +36,9 @@
 // ORIENTATION IS A CLEARANCE DECISION (doc CC1): the head prints stem-down.
 // The cup's lower hemisphere is then an every-layer-supported bowl; the
 // capture cone and dome close at <= 25 / 15 deg from vertical; the stud is a
-// vertical cylinder; the hex nut pocket opens DOWN at the bed (first-layer hex
-// ring, zero overhang); the only horizontal ceiling anywhere is the top
+// vertical cylinder; the M4 nut sits in a side-entry trap with a 1.6 mm floor
+// (Drik R4: an open-bed pocket lets the nut walk toward the bolt); the only
+// horizontal ceiling anywhere is the top
 // annulus around the stud aperture, 2 mm wide, landing on the dome cone below.
 // Printed upside down (stud down) every one of those inverts into a real
 // overhang and the dome becomes a bridge over the whole ball — don't.
@@ -102,6 +103,12 @@ slit_w = 1.2;
 // How far below the ball centre the slit starts (mm); below it the ring is
 // solid and anchors the socket to the stem
 slit_below_center = 2;
+// M4 nut trap (Drik R4): a 1.6 mm floor under the nut so the bolt pulls the
+// HEAD down. An open-bed pocket lets the nut walk out toward the bolt and
+// the head floats. Side window opposite the slit; nut 3.2 mm, slot 3.6 mm.
+nut_floor = 1.6;
+nut_slot_h = 3.6;
+nut_hex_d = 8.55;
 
 /* [Clamp wings] */
 // Wing pad: thickness across the slit side (mm, X), length out from the ring
@@ -226,7 +233,7 @@ module ball_stud(clear = ball_xy_clear, growth = 0, with_stud = true) {
 }
 
 // The socket body: tenon flare -> cup floor -> ring -> chamfered top, with
-// the cavity cut, the slit, the wings, and the bed-face hex nut pocket.
+// the cavity cut, the slit, the wings, and the side-entry M4 nut trap.
 // `dome = false` gives the coupon cell's open-top ring; `collar = false`
 // omits the slit and wings (the fit checks isolate the joint from them — the
 // wings never reach the cavity, so they cannot grip or collide).
@@ -276,27 +283,26 @@ module socket_body(clear = ball_xy_clear, collar = true, dome = true) {
         if (collar)
             translate([2, -slit_w/2, zc(clear) - slit_below_center])
                 cube([4 * ring, slit_w, top_rel + 4]);
-        // hex nut pocket for the M4 head-to-base bolt, opening DOWN at the
-        // bed — printed as a first-layer hex ring, zero overhang. M4 nut:
-        // 7.0 across flats; a $fn=6 cylinder of d gives across-corners d, so
-        // d = 7.4 / cos(30) ≈ 8.55. The 0.5 mm 45° lead-in at the mouth is
-        // the same courtesy `base()` gives its tenon recess: first-layer
-        // squish otherwise pinches the opening ~0.1–0.2 mm per side and the
-        // nut will not seat flat (Jane R2).
-        translate([0, 0, -0.01]) cylinder(d = 8.55, h = 4.01, $fn = 6);
+        // M4 nut trap: 1.6 mm floor (Ø4.5 through it) so tightening pulls
+        // the nut down against HEAD material, not out the bed (Drik R4).
+        // Hex pocket + side window at -X (the slit is +X). M4 nut is 7.0
+        // across flats; $fn=6 cylinder of d=8.55 is 7.4 AF. Slot 3.6 mm
+        // for a 3.2 mm nut. Relief continues to z=8.5, 0.5 mm under the
+        // cup floor, so an M4×8 cannot jack.
+        translate([0, 0, -0.01]) cylinder(d = 4.5, h = 8.52);
         translate([0, 0, -0.01])
-            cylinder(d1 = 8.55 + 1.0, d2 = 8.55, h = 0.51, $fn = 6);
-        // clearance above the pocket so an M4×8 from the base counterbore
-        // cannot jack against the cup floor (floor is at z = 9). Stops 0.5 mm
-        // short of it (Drik R3.2: M4×16 hit solid PETG).
-        translate([0, 0, 3.99]) cylinder(d = 4.5, h = 4.52);
+            cylinder(d1 = 5.5, d2 = 4.5, h = 0.51);
+        translate([0, 0, nut_floor])
+            cylinder(d = nut_hex_d, h = nut_slot_h, $fn = 6);
+        translate([-4 * ring, -nut_hex_d/2, nut_floor])
+            cube([4 * ring + nut_hex_d/2, nut_hex_d, nut_slot_h]);
     }
 }
 
 // The base: M4 foot plate — two mounting holes through, a centre recess the
 // head's tenon nose seats in, an underside socket-cap counterbore so the
 // plate sits flat on the mount, and a through hole for the M4×8 that pulls
-// the tenon's hex nut down.
+// the tenon's captured hex nut down.
 module base() {
     hd = socket_head("M4");
     difference() {

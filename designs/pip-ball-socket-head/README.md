@@ -36,7 +36,8 @@ separate jobs.
 
 **Hardware (not printed):** 1× M4 × 8 socket-cap bolt + M4 nut (head to
 base — measured: 8 mm plate with a 4 mm underside counterbore, ~0.8 mm
-tenon seat, 4 mm nut pocket, clearance above so the bolt cannot jack).
+tenon seat, nut on a 1.6 mm floor inside the tenon, 8 mm shank ends at the
+nut top).
 2× M4 screws (mounting — machine screws with nuts, or wood screws into a
 desk edge).
 
@@ -109,16 +110,18 @@ Customizer sections; override on the command line with `-D 'ball_xy_clear=0.25'`
 Bolt the head to the base **before** you mount anything. The centre bolt
 comes in from the base's underside, which is also the mounting face.
 
-1. Drop an M4 nut into the hex pocket in the head's tenon from below — the
-   pocket is blind at the top, so the nut has to go in before the head seats
-   (any of the six hex rotations fits).
+1. Slide an M4 nut into the hex window on the tenon (the opening opposite
+   the slit). It sits on a 1.6 mm floor — it cannot fall out the bed. Any of
+   the six hex rotations fits.
 2. Seat the tenon nose in the base's centre recess with the **slit and wings
    clocked toward the desk edge** (~3 o'clock if the two mounting holes sit
    left/right). The 45° flare wedges at about 0.8 mm; that ring is the
    bearing, not a deep shoulder. Pull it down with the **M4 × 8 socket-cap**
-   from underneath into the counterbore so the plate sits flat.
+   from underneath into the counterbore so the plate sits flat. Lift the
+   assembled unit by the head: the base comes with it.
 3. Bolt the assembled unit to the desk edge, shelf underside or wall with
-   two M4s.
+   two M4s. Use hex-drive screws (or drive a Phillips at a slight angle) —
+   a straight #2 driver hits the socket ring.
 4. Thread your camera/light onto the ¼″-20 stud, tilt to aim, pinch the
    wings to lock. ±20° is trim: mount the base pointing roughly right, the
    joint fine-aims from there.
