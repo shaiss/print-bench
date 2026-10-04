@@ -418,6 +418,18 @@ def _edge_treatment(mesh: trimesh.Trimesh, cfg: Config) -> dict:
                     mode["sweep_deg"] = round(float(np.median(arcs)), 1)
         return out
 
+    def rounding_modes(selection: np.ndarray) -> list[dict]:
+        # A 1° "sweep" is a tessellated cone/dome fragment, not a corner.
+        # Left in the rounding vocabulary it becomes a fake 8–13 mm fillet
+        # (implied $fn hundreds) and drowns the family's real 4 mm edges.
+        kept = []
+        for mode in modes_for(selection, sweeps):
+            sw = mode.get("sweep_deg")
+            if sw is not None and sw < 20.0:
+                continue
+            kept.append(mode)
+        return kept
+
     # --- pass 3: edge rounding vs form curvature --------------------------
     # A 15 mm radius can be a generous fillet or it can be the barrel of a
     # capsule, and a style spec that confuses the two hands the next design a
@@ -481,8 +493,8 @@ def _edge_treatment(mesh: trimesh.Trimesh, cfg: Config) -> dict:
         if r_med / local >= 0.35:
             form[idx] = True
 
-    outer = modes_for(usable & convex & ~form, sweeps)
-    inner = modes_for(usable & ~convex & ~form, sweeps)
+    outer = rounding_modes(usable & convex & ~form)
+    inner = rounding_modes(usable & ~convex & ~form)
     form_outer = modes_for(usable & convex & form, sweeps)
     form_inner = modes_for(usable & ~convex & form, sweeps)
 

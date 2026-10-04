@@ -165,11 +165,16 @@ one strip:
 - **D8 — stylelift form classification (resolved 2026-10-04).** The 2026-09-12
   run stopped because `stylelift check` filed the Ø20 ball as the head's
   `corner-radius` (dominant 10.01 mm vs family 4 ±35 %). The ball is the
-  brief's Must-fit, not a fillet. Two detector faults: (1) union-find joined
+  brief's Must-fit, not a fillet. Detector faults: (1) union-find joined
   every usable fold that merely touched, so the sphere and the ¼″-20 thread
   became one region whose turn blew past the closed-form cap; (2) the 0.35
   form-vs-edge bar used the *assembly's* longest extent, so r=10 on a ~46 mm
-  head scored 0.22 and never counted as form. Fix: join folds only when they
-  share a face *and* a radius, and judge the 0.35 bar against the region's
-  own AABB. Proven by `test_a_sphere_on_a_taller_body_is_form_not_a_corner_radius`.
-  Geometry games (breaking the thread, flooding 4 mm rounds) stay refused.
+  head scored 0.22; (3) after the ball was filed as form, tessellated
+  capture-cone/dome fragments still sat in the rounding vocabulary as fake
+  8.5 / 13 mm fillets (sweep ~1°). Fix: join folds only when they share a
+  facet *and* a radius; judge the 0.35 bar against a continuously-turning
+  region's own AABB; drop rounding modes whose sweep is under 20°. Head now
+  measures form r=10.02 and corner-radius 5.04 (in-family 4 ±35). Proven by
+  `test_a_sphere_on_a_taller_body_is_form_not_a_corner_radius`. Hole-vocabulary
+  advisory (hex pocket 8.55 vs family 3.4) is D4, not a fail. Geometry games
+  stay refused.
