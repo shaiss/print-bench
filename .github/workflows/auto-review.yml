@@ -85,7 +85,9 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     and .regen-stamp files AND carries `Preview-Diff: all-noise` (CI's
 #     preview-diff rated every changed image noise) AND the last reviewed
 #     round is current at its parent — the owner's option C on decision
-#     regen-commitback-review-retrigger (issue #470). Any content diff still
+#     regen-commitback-review-retrigger (issue #470) — AND the merge ref this
+#     job checks out carries the same designs/ tree as the PR head (so a
+#     base-branch design change is never skipped). Any content diff still
 #     opens one. `scripts/reviewer-signoff.sh round` decides it, and the
 #     sign-off currency below reads back past exactly those commits, so a
 #     skipped round never leaves the sign-offs stale.
@@ -286,9 +288,11 @@ jobs:
             # and .regen-stamp only, `Preview-Diff: all-noise`, and the stamp
             # current at its parent. The rule and its selftest live in
             # reviewer-signoff.sh, beside the currency key the sign-off status
-            # computes, so the two cannot disagree. Any non-zero exit (ROUND,
-            # or an error) opens the round: fail-closed.
-            if guard="$(scripts/reviewer-signoff.sh round --head "$HEAD_SHA" --stamp "$stamp_sha")"; then
+            # computes, so the two cannot disagree. `--merge HEAD` makes it
+            # refuse to skip when this merge-ref checkout carries a designs/
+            # tree the PR head does not (a base-branch design change). Any
+            # non-zero exit (ROUND, or an error) opens the round: fail-closed.
+            if guard="$(scripts/reviewer-signoff.sh round --head "$HEAD_SHA" --stamp "$stamp_sha" --merge HEAD)"; then
               echo "is_new_round=false" >> "$GITHUB_OUTPUT"
               echo "::notice::${guard#SKIP }"
             else

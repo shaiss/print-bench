@@ -25,13 +25,15 @@
 #       every key the `decide` call compares with this, never with its own
 #       rev-parse, so the posting and the checking side cannot drift.
 #
-#   scripts/reviewer-signoff.sh round --head <sha> --stamp <sha|empty>
+#   scripts/reviewer-signoff.sh round --head <sha> --stamp <sha|empty> [--merge <ref>]
 #       The regen review guard (issue #470): "SKIP <reason>" (exit 0) when
 #       every designs/ change since the last reviewed round (the
 #       AUTO_REVIEW_STAMP sha) is a previews-only, all-noise regen commit-back,
 #       else "ROUND <reason>" (exit 1). auto-review.yml asks it only after its
 #       own diff has already said "designs/ changed", so a SKIP can only turn a
-#       round off, and only for that case.
+#       round off, and only for that case. --merge names the checkout that diff
+#       ran on (the pull_request merge ref): a SKIP also needs its designs/ tree
+#       to equal the head's, so a base-branch design change is still reviewed.
 #
 # Prints exactly one line — "PASS <reason>" (exit 0) or "BLOCK <reason>" (exit 1)
 # — short enough to drop into a GitHub status `description` (<=140 chars). The
@@ -298,11 +300,12 @@ key() {
 
 # round --head SHA --stamp SHA — the regen review guard (see the usage above).
 round() {
-  local head="" stamp=""
+  local head="" stamp="" merge=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --head) head="${2:-}"; shift 2 ;;
       --stamp) stamp="${2:-}"; shift 2 ;;
+      --merge) merge="${2:-}"; shift 2 ;;
       *) echo "reviewer-signoff: unknown arg $1" >&2; return 2 ;;
     esac
   done
@@ -310,6 +313,22 @@ round() {
   if [[ "$SIGNOFF_TRUST_REGEN" != 1 ]]; then
     echo "ROUND regen commit-backs are not trusted on this PR (fork head: no regen job can push there, so a qualifying commit can only be forged)"
     return 1
+  fi
+  # --merge <ref>: the checkout a pull_request run sees is the MERGE ref, and
+  # the caller's `git diff <stamp>..HEAD` is taken there — so a designs/ change
+  # the base branch brought into the merge ref also reads as "designs moved".
+  # The currency walk below only inspects PR-head commits, so it would SKIP on
+  # an all-noise commit-back while that base-branch design change rode in
+  # unreviewed. Skip only when the merge ref and the PR head carry the SAME
+  # designs/ tree; anything else (or an unresolvable ref) opens the round.
+  if [[ -n "$merge" ]]; then
+    local tm thd
+    tm="$(git rev-parse --verify --quiet "${merge}:designs" 2>/dev/null)" || tm=""
+    thd="$(git rev-parse --verify --quiet "${head}:designs" 2>/dev/null)" || thd=""
+    if [[ -z "$tm" || "$tm" != "$thd" ]]; then
+      echo "ROUND the merge ref's designs/ differs from the PR head's (a base-branch design change rides in through the merge) — reviewing"
+      return 1
+    fi
   fi
   local ts="" th="" ks="" kh="" out rc=0
   if [[ -n "$stamp" ]]; then
@@ -667,6 +686,22 @@ NEGCTL-no-stamp|R|~|ROUND
 NEGCTL-stamp-before-the-design-change|R|base|ROUND
 NEGCTL-head-designs-unchanged-since-the-stamp|A|A|ROUND
 ROWS
+  # --merge: the pull_request checkout is the merge ref. A merge ref whose
+  # designs/ tree equals the head's keeps the SKIP; one carrying a base-branch
+  # design change (or an unresolvable merge ref) opens the round.
+  while IFS='|' read -r label mref want; do
+    [[ -n "$label" ]] || continue
+    got="$( (cd "$r" && round --head "$(git rev-parse R)" --stamp "$(git rev-parse A)" --merge "$mref") )" || true
+    if [[ "${got%% *}" == "$want" ]]; then
+      echo "selftest ok    round-git ${label} (${got%% *})"
+    else
+      echo "SELFTEST FAIL  round-git ${label}: wanted ${want}, got '${got}'"; pass=0
+    fi
+  done <<'ROWS'
+merge-ref-bringing-only-docs|Rmdocs|SKIP
+NEGCTL-merge-ref-bringing-a-base-branch-design-change|Rmdesign|ROUND
+NEGCTL-unresolvable-merge-ref|no-such-ref|ROUND
+ROWS
   # The same all-noise commit-back on a fork head opens a round.
   got="$( (cd "$r" && SIGNOFF_TRUST_REGEN=0 round --head "$(git rev-parse R)" --stamp "$(git rev-parse A)") )" || true
   if [[ "${got%% *}" == ROUND ]]; then
@@ -736,5 +771,5 @@ case "${1:-}" in
   decide) shift; decide "$@" ;;
   key) shift; key "$@" ;;
   round) shift; round "$@" ;;
-  *) echo "usage: reviewer-signoff.sh decide <args> | key <commit> | round --head <sha> --stamp <sha> | --selftest" >&2; exit 2 ;;
+  *) echo "usage: reviewer-signoff.sh decide <args> | key <commit> | round --head <sha> --stamp <sha> [--merge <ref>] | --selftest" >&2; exit 2 ;;
 esac
