@@ -235,9 +235,10 @@ def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
         assert len(tools) == 1 and COACH_POST_TOOL in allowed, (
             f"{at} does not allow {COACH_POST_TOOL} — the session would be "
             "denied on its comment write (issue #806)")
-        assert POST_TOOL not in allowed, (
-            f"{at} allows {POST_TOOL} — the coach must not hold the "
-            "reviewers' sign-off tool")
+        for other in {tool for _, tool in POST_JOBS.values()}:
+            assert other not in allowed, (
+                f"{at} allows {other} — the coach must not hold a "
+                "Jane/Drik/PM posting tool")
         for keep in COACH_ALLOWED_KEEP:
             assert keep in allowed, (
                 f"{at} dropped {keep} from --allowedTools — copying Jane's "
