@@ -73,7 +73,8 @@ port_overhang_y = 1.6;
 // Gap between the open-edge skirt top and the board underside (mm)
 skirt_margin = 0.5;
 // Bottom of the GPIO access notch in the +Y wall (mm) — clears the 2x20
-// header (~8.5 above the board)
+// header (~8.5 above the board). Cut size matches gpio_notch_w / gpio_notch_x0
+// below; B7 measured this window, it does not reshape it.
 gpio_notch_bottom = 17.5;
 
 /* [Hardware] */
@@ -123,6 +124,29 @@ echo(str("case outer: ", outer_l, " x ", outer_w, " mm; base ", base_top_z,
 echo(str("board: ", board_l, " x ", board_w, " x ", board_t, ", holes d", board_hole_d,
          " at ", [for (h = pcb_holes(board)) pcb_coord(board, h)]));
 
+// B7 — GPIO notch window vs a 2×20 IDC ribbon housing, notch occupied.
+// The wall cut is 55 × 8.5; those two numbers are the cut (do not "fix"
+// them here). A typical IDC is ~51 × 8 (catalog pin_socket(2p54header,20,2)
+// is 51.3 × 5.0 × 8.5; strain-relief IDC bodies are the wider 8 mm).
+gpio_notch_w  = 55;     // +Y wall cut width (mm) — keep in lockstep with the cube
+gpio_notch_x0 = -37.5;  // cut origin X; 55 mm centred on the 2×20 at x = −10
+idc_len = 51;           // typical 2×20 IDC housing along the header (mm)
+idc_thk = 8;            // typical IDC body through the notch (mm)
+lead_d  = 1.6;          // 28 AWG silicone pair, typical OD (mm)
+gpio_notch_h    = base_top_z - gpio_notch_bottom;            // 8.5 wall opening
+gpio_lip_free_h = (base_top_z - lip_depth) - gpio_notch_bottom; // 6.0 inside lid lip
+gpio_pin_above  = 2p54header[2] - 2p54header[3];            // pin length − below = 8.4
+gpio_pin_top    = board_z + board_t + gpio_pin_above;        // ~16.8
+gpio_comp = [for (c = pcb_components(board))
+    if (c[3] == "2p54header" && c[4] == 20 && c[5] == 2) c][0];
+gpio_xy   = pcb_coord(board, [gpio_comp.x, gpio_comp.y]);    // (−10, 24.5)
+echo(str("B7 GPIO notch: wall ", gpio_notch_w, " x ", gpio_notch_h,
+         " mm; lid-lip inner height ", gpio_lip_free_h,
+         " mm; 2x20 at ", gpio_xy, " pin tops z=", gpio_pin_top,
+         "; IDC envelope ", idc_len, " x ", idc_thk,
+         " mm; leftover width ", gpio_notch_w - idc_len,
+         " mm for fan leads (d=", lead_d, ")"));
+
 // ── Printable geometry ─────────────────────────────────────────────────────
 
 module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts, 4 board standoffs
@@ -157,8 +181,8 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
                 cube([2 * cavity_x_half + 1, wall + 2.5, base_top_z - skirt_top + 1], center = true);
             // GPIO access notch: cut down from the top edge of the +Y wall
             // over the 2x20 header — a notch, not a window, so nothing bridges
-            translate([-37.5, cavity_y_half - 1, gpio_notch_bottom])
-                cube([55, wall + 2, base_top_z - gpio_notch_bottom + 1]);
+            translate([gpio_notch_x0, cavity_y_half - 1, gpio_notch_bottom])
+                cube([gpio_notch_w, wall + 2, base_top_z - gpio_notch_bottom + 1]);
             // vent slots in the +Y wall: 4 slots on a 15 mm pitch, so 3 mm
             // webs separate them and each slot top is a real 12 mm bridge.
             // (Was 5 @ 11.5 mm pitch with a 12 mm slot — 0.5 mm overlap fused
@@ -323,7 +347,42 @@ module fit_pins(dx = 0) {
             cylinder(d = pilot_d - pin_slop, h = standoff_h + 0.5);
 }
 
-part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
+// B7 occupied-notch proof. The 51×8 IDC envelope sits IN the wall notch (the
+// lid-on access window), not on the header in empty cavity: a seated socket
+// lives around the pins (top ~ gpio_pin_top, below the 17.5 lip) and always
+// clears the shell; the unmeasured edge is whether that housing can share
+// the notch with the ASSEMBLY step-7 fan leads with the lid on.
+//
+// Placement: IDC centred on the 55 mm cut (2 mm leftover each side); two
+// Ø1.6 leads stacked in Z in the −X leftover strip, below the lid lip.
+module gpio_idc_envelope() {
+    translate([gpio_notch_x0 + (gpio_notch_w - idc_len) / 2,
+               cavity_y_half - 1,
+               gpio_notch_bottom])
+        cube([idc_len, wall + 2, idc_thk]);
+}
+
+module gpio_fan_leads() {
+    leftover = (gpio_notch_w - idc_len) / 2; // 2 mm with a centred 51 mm IDC
+    lead_x = gpio_notch_x0 + leftover / 2;
+    for (i = [0, 1])
+        translate([lead_x,
+                   cavity_y_half + wall / 2,
+                   gpio_notch_bottom + 1.0 + lead_d / 2 + i * (lead_d + 0.4)])
+            rotate([90, 0, 0])
+                cylinder(d = lead_d, h = wall + 6, center = true);
+}
+
+module gpio_printed() {
+    // +0.05 on the lid: same as fit-lid, so coplanar wall-top contact is not
+    // a false interfere.
+    union() {
+        base();
+        translate([0, 0, 0.05]) lid();
+    }
+}
+
+part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush, fit-gpio-occupied, fit-gpio-leads]
 
 if (part == "assembled") {
     base();
@@ -354,4 +413,12 @@ if (part == "assembled") {
     intersection() { base(); translate([0, 0, 0.05]) lid(); }
 } else if (part == "fit-lid-crush") {
     intersection() { base(); translate([0, 0, -1]) lid(); }  // seated 1 mm low must interfere
+} else if (part == "fit-gpio-occupied") {
+    // IDC envelope + fan leads in the notch ∩ lid-on shell — must interfere:
+    // idc_thk 8 > gpio_lip_free_h 6.0, so the housing hits the lid lip.
+    intersection() { gpio_printed(); union() { gpio_idc_envelope(); gpio_fan_leads(); } }
+} else if (part == "fit-gpio-leads") {
+    // the same two leads, no IDC — empty proves ASSEMBLY step 7 still has a
+    // path out the notch when the housing is not jammed through it
+    intersection() { gpio_printed(); gpio_fan_leads(); }
 }
