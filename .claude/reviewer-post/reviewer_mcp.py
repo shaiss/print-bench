@@ -75,7 +75,9 @@ Jane's and Drik's jobs check out ``pull_request.base.ref`` so this
 file is never the PR's copy. The coach cannot: it git-pushes the PR
 branch, so auto-review.yml overlays ``.claude/reviewer-post/`` (and
 the coach settings/skill) from ``base.sha`` before any agent step.
-Do not spawn this server from a PR-controlled checkout.
+The completeness pin then extracts ``scripts/coach-lock-check.sh``
+from the same base blob AFTER the agent — the workspace copy is
+Write-able. Do not spawn this server from a PR-controlled checkout.
 
 Stdlib only; logs go to stderr so stdout carries nothing but JSON-RPC.
 """

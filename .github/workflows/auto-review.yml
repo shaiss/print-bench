@@ -81,13 +81,15 @@ name: Auto design review (Jane / Drik / PM / coach)
 # same server (REVIEWER_ID=coach). The posting files themselves are
 # restored from pull_request.base.sha before any agent step — Jane/Drik
 # checkout base wholesale; the coach cannot, so a trusted overlay puts
-# reviewer-post / design-coach-settings / the skill back to the base
-# copy (a PR that rewrites the MCP cannot run as the poster).
-# claude-code-action still exits 0 on a denial-only turn, so after any
-# ship step that claims success, `scripts/coach-lock-check.sh` fails
-# the job unless an Actions-bot comment carries the exact server
-# marker `<!-- COACH_LOCK -->` — a substring planted by any other
-# author does not stamp the round complete.
+# reviewer-post / design-coach-settings / the skill / coach-lock-check.sh
+# back to the base copy (a PR that rewrites the MCP cannot run as the
+# poster). claude-code-action still exits 0 on a denial-only turn, so
+# after any ship step that claims success the lock-check step extracts
+# `scripts/coach-lock-check.sh` from base.sha into a temp file (the
+# workspace copy is Write-able) and runs that; it fails the job unless
+# an Actions-bot comment carries the exact server marker
+# `<!-- COACH_LOCK -->` — a substring planted by any other author, or
+# a rewritten workspace script, does not stamp the round complete.
 #
 # Git containment (code-scanning finding on #760). A deny list cannot contain
 # git: a subcommand option no prefix rule sees (`git fetch origin
@@ -1281,7 +1283,8 @@ jobs:
           if git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer_mcp.py" 2>/dev/null \
              && git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer-mcp.json" 2>/dev/null \
              && git cat-file -e "${BASE_SHA}:.claude/design-coach-settings.json" 2>/dev/null \
-             && git cat-file -e "${BASE_SHA}:.claude/skills/design-coach/SKILL.md" 2>/dev/null; then
+             && git cat-file -e "${BASE_SHA}:.claude/skills/design-coach/SKILL.md" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:scripts/coach-lock-check.sh" 2>/dev/null; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -1297,7 +1300,8 @@ jobs:
           git checkout "$BASE_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
-            .claude/skills/design-coach
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Z.AI GLM (chain link 1)
         id: p1
@@ -1445,7 +1449,8 @@ jobs:
         # claude-code-action exits 0 on a denial-only turn (#538/#764/#806).
         # A ship-step success is not a completed coach round unless the
         # marker is on the thread. Fail here so review-stamp cannot mark
-        # the round complete.
+        # the round complete. Extract the pin from base.sha AFTER the
+        # agent (Write/Edit/Bash): the workspace copy is not trusted.
         if: >-
           always()
           && (steps.p1.outcome == 'success'
@@ -1458,7 +1463,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: ./scripts/coach-lock-check.sh ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          CHECK="${RUNNER_TEMP:-/tmp}/coach-lock-check.sh"
+          /usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh" > "$CHECK"
+          chmod +x "$CHECK"
+          /usr/bin/bash "$CHECK" "$PR"
 
       - name: No provider key configured
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'

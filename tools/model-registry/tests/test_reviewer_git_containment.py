@@ -59,6 +59,11 @@ COACH_RESTORE_PATHS = (
     ".claude/reviewer-post",
     ".claude/design-coach-settings.json",
     ".claude/skills/design-coach",
+    "scripts/coach-lock-check.sh",
+)
+COACH_LOCK_CHECK_BLOB = "${BASE_SHA}:scripts/coach-lock-check.sh"
+COACH_LOCK_CHECK_SHOW = (
+    '/usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh"'
 )
 
 
@@ -255,6 +260,11 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     assert 'fetch --no-tags origin "$BASE_SHA"' in ready_run, (
         "auto-review.yml [design-coach] ready step does not fetch the base "
         "SHA when it is not already local")
+    assert COACH_LOCK_CHECK_BLOB in ready_run, (
+        "auto-review.yml [design-coach] ready step no longer probes "
+        "scripts/coach-lock-check.sh on base.sha — a missing-on-base first "
+        "landing would spawn the agent then fail closed on git show, or a "
+        "PR-committed stub would be the pin")
     for n, chunk in enumerate(_ship_chunks(block), 1):
         assert "steps.ready.outputs.ready" in chunk, (
             f"auto-review.yml [design-coach] ship step {n} is not gated on "
@@ -276,6 +286,56 @@ def test_coach_checks_out_full_history():
 
 def test_coach_restores_posting_surface_from_base():
     _assert_coach_restores_posting_surface_from_base(_workflow_text())
+
+
+def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
+    """The completeness pin must not execute the workspace script.
+
+    The coach has Write/Edit/Bash, so a prompt-injected turn (or a design
+    PR that commits a stub) can rewrite ``scripts/coach-lock-check.sh``
+    after the overlay. The check step extracts the blob from base.sha
+    AFTER every ship step and runs that copy under a reset PATH.
+    """
+    block = _without_comments(_job_blocks(text)["design-coach"])
+    steps = _steps(block)
+    last_ship = max(i for i, c in enumerate(steps)
+                    if "uses: anthropics/claude-code-action" in c)
+    show_at = [i for i, c in enumerate(steps) if COACH_LOCK_CHECK_SHOW in c]
+    assert show_at, (
+        "auto-review.yml [design-coach] does not extract "
+        "coach-lock-check.sh from base.sha — a workspace copy the agent "
+        "can rewrite would stamp the round complete (issue #806)")
+    assert show_at[0] > last_ship, (
+        "auto-review.yml [design-coach] extracts coach-lock-check.sh "
+        "BEFORE a ship step — the agent could rewrite the temp copy")
+    check = steps[show_at[0]]
+    assert "uses:" not in check.split("run:", 1)[0], (
+        "lock-check step is not a run step")
+    env = _env_map(check, 8)
+    assert env.get("BASE_SHA") == BASE_SHA, (
+        "auto-review.yml [design-coach] lock-check step does not take "
+        "the PR base sha")
+    assert env.get("PR") == "${{ github.event.pull_request.number }}", (
+        "auto-review.yml [design-coach] lock-check step does not take "
+        "the PR number through env")
+    run = check.split("run:", 1)[1]
+    assert "${{" not in run, (
+        "auto-review.yml [design-coach] lock-check step interpolates an "
+        "expression into its script")
+    assert "./scripts/coach-lock-check.sh" not in run, (
+        "auto-review.yml [design-coach] lock-check still executes the "
+        "workspace script — the completeness pin would be PR-controlled")
+    assert 'export PATH="/usr/bin:/bin:/usr/local/bin"' in run, (
+        "auto-review.yml [design-coach] lock-check does not reset PATH — "
+        "a GITHUB_PATH write from the Bash-capable coach would run a "
+        "stub python3/gh")
+    assert "/usr/bin/bash" in run, (
+        "auto-review.yml [design-coach] lock-check does not invoke the "
+        "extracted script with /usr/bin/bash")
+
+
+def test_coach_lock_check_runs_the_base_copy_after_the_agent():
+    _assert_coach_lock_check_runs_base_copy(_workflow_text())
 
 
 # ── negative controls ─────────────────────────────────────────────────────────
@@ -471,3 +531,34 @@ def test_coach_guard_rejects_a_ship_step_not_gated_on_ready():
         "        if: env.HAS_ZAI == 'true'\n")
     with pytest.raises(AssertionError, match="not gated on"):
         _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_lock_guard_rejects_running_the_workspace_script():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        '          /usr/bin/bash "$CHECK" "$PR"\n',
+        '          ./scripts/coach-lock-check.sh "$PR"\n')
+    with pytest.raises(AssertionError, match="workspace script"):
+        _assert_coach_lock_check_runs_base_copy(tampered)
+
+
+def test_coach_lock_guard_rejects_extracting_before_the_agent():
+    text = _workflow_text()
+    block = _job_blocks(text)["design-coach"]
+    steps = _steps(block)
+    check = next(c for c in steps if COACH_LOCK_CHECK_SHOW in c)
+    first_ship = _ship_chunks(block)[0]
+    moved = block.replace("\n      - " + check, "", 1).replace(
+        first_ship, check + "\n      - " + first_ship, 1)
+    tampered = text.replace(block, moved, 1)
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="BEFORE a ship step"):
+        _assert_coach_lock_check_runs_base_copy(tampered)
+
+
+def test_coach_lock_guard_rejects_dropping_the_base_extract():
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        COACH_LOCK_CHECK_SHOW, "true")
+    with pytest.raises(AssertionError, match="does not extract"):
+        _assert_coach_lock_check_runs_base_copy(tampered)

@@ -47,6 +47,9 @@ POST_CONFIG = ".claude/reviewer-post/reviewer-mcp.json"
 POST_TOOL = "mcp__reviewer__post_review"
 POST_JOBS = {"jane-review": "jane", "drik-review": "drik"}
 COACH_POST_TOOL = "mcp__reviewer__post_coach"
+COACH_LOCK_CHECK_SHOW = (
+    '/usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh"'
+)
 COACH_POST_JOB = "design-coach"
 COACH_ALLOWED_KEEP = ("Write", "Edit", "Bash")
 POST_PR = "${{ github.event.pull_request.number }}"
@@ -209,9 +212,13 @@ def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
     block = _without_comments(_job_blocks(text)[COACH_POST_JOB])
     chunks = _ship_chunks(block)
     assert chunks, "auto-review.yml [design-coach]: no ship step found"
-    assert "scripts/coach-lock-check.sh" in block, (
-        "auto-review.yml [design-coach] has no coach-lock-check.sh step — "
-        "a denial-only turn would still stamp the round complete (issue #806)")
+    assert COACH_LOCK_CHECK_SHOW in block, (
+        "auto-review.yml [design-coach] does not extract coach-lock-check.sh "
+        "from base.sha — a workspace copy the agent can rewrite would stamp "
+        "the round complete (issue #806)")
+    assert "./scripts/coach-lock-check.sh" not in block, (
+        "auto-review.yml [design-coach] still runs the workspace "
+        "coach-lock-check.sh — the completeness pin would be PR-controlled")
     for n, chunk in enumerate(chunks, 1):
         at = f"auto-review.yml [design-coach] ship step {n}"
         args = _claude_args(chunk)[0]
@@ -371,8 +378,7 @@ def test_coach_post_surface_guard_rejects_a_tampered_step(step, old, new, match)
 
 def test_coach_lock_check_step_cannot_be_dropped():
     text = _workflow_text()
-    dropped = text.replace("        run: ./scripts/coach-lock-check.sh "
-                           "${{ github.event.pull_request.number }}\n", "", 1)
+    dropped = text.replace(COACH_LOCK_CHECK_SHOW, "true", 1)
     assert dropped != text, "tamper did not land — the fixture is stale"
     with pytest.raises(AssertionError, match="coach-lock-check"):
         _assert_coach_steps_carry_their_post_surface(dropped)
