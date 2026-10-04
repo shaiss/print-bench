@@ -21,9 +21,14 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 > things are still deliberately simplified and tracked as issues: the base gears
 > *represent* the drive but aren't a real meshing involute differential; there is
 > no reusable space-frame library ([#604](https://github.com/shaiss/print-bench/issues/604)); the slot isn't yet a tunable brand
-> module ([#601](https://github.com/shaiss/print-bench/issues/601)); the CoG/tip-over stability gate is not yet run, so the ≈55 g
-> ballast fill is a starting guess you may need to adjust (see NOTES.md); and
-> there's no committed two-tone reveal render yet ([#600](https://github.com/shaiss/print-bench/issues/600)). See NOTES.md.
+> module ([#601](https://github.com/shaiss/print-bench/issues/601)); the CoG/tip-over
+> check now runs from `ci.cog` as an **advisory WARN** (it does not fail the gate).
+> The first gate emit on tip `d8d9cf5` measured **STABLE** (38.28 mm clearance
+> under solid-mesh PLA 1.24, which over-masses the balls vs 15–20 % infill) —
+> that is one measured tip, not a promise the clock stays STABLE after a later
+> change. ≈55 g of shot remains a **starting fill**; if a run says TIP-RISK,
+> follow the care playbook in NOTES.md rather than treating STABLE as a claim.
+> There's no committed two-tone reveal render yet ([#600](https://github.com/shaiss/print-bench/issues/600)). See NOTES.md.
 
 ![Hero — the whole clock](previews/hero.png)
 
@@ -91,10 +96,15 @@ gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
   ≥6 mm mating annulus. Paint the seam onto the helical-slot interruption, or set
   **Back** or **Random**, so the closed join reads as one fine line.
 - **Vitamins for the base:** Ø2 mm steel shot for the core's ballast pockets
-  (**≈ 55 g is a starting guess you may need to adjust** — the CoG/tip-over gate
-  is not yet run, so stability is unproven; see NOTES.md), filled and plugged
-  **before** the core goes in, plus four Ø5 mm × 1.5 mm hemispherical stick-on
-  silicone bumpers for the foot recesses.
+  (**≈ 55 g is a starting fill you may need to adjust** — `ci.cog` runs the
+  advisory CoG/tip-over check; TIP-RISK is a WARN, not a gate failure). The
+  first emit on tip `d8d9cf5` measured STABLE (38.28 mm clearance); this page
+  still does not claim the clock is STABLE for every future change. If a later
+  sticky or `cog-check.sh` line says **TIP-RISK**, the usable next steps are in
+  NOTES.md **TIP-RISK care** (read that CoG table, add ~5 g split across both
+  pockets if they are not already packed, re-read the WARN — do not change
+  the truss). Fill and plug **before** the core goes in, plus four Ø5 mm ×
+  1.5 mm hemispherical stick-on silicone bumpers for the foot recesses.
 
 ## Parameters
 
