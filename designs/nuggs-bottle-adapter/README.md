@@ -41,11 +41,16 @@ PCO-1881; when unsure, the coupon is the proof.
   off anyway
 - **PETG note:** expect some droop on the 44° funnel ceiling — cosmetic only,
   the flow path is set by the land opening
-- **Print first:** the coupon, and set `bottle_tol` from the ring that grips
-  a real bottle best (see below). The coupon being heavier and slower than
-  the adapter body is intentional: a full throat rehearsal (port stub +
-  bottle rings), not a bug to "fix" (~4 h 57 m / 62.55 g vs the adapter's
-  ~4 h 10 m / 53.16 g)
+- **Print first:** the coupon, in **the same material as the adapter**
+  (PETG vs PLA moves this ladder by about one ring), and set `bottle_tol`
+  from the ring that grips a real bottle best (see below). Rings are marked
+  `15 / 22 / 30 / 38` (`= bottle_tol × 100`). The coupon being heavier and
+  slower than the adapter body is intentional: a full throat rehearsal
+  (port stub + bottle rings), not a bug to "fix" (~4 h 57 m / 62.55 g vs
+  the adapter's ~4 h 10 m / 53.16 g)
+- **Bed:** the coupon strip is ~187 mm — keep it clear of the stock X1/P1
+  front-left exclusion (~18 × 28 mm) on “256” beds. The adapter alone fits
+  smaller beds; the coupon needs ~190 mm+
 
 ## Parameters
 
@@ -65,8 +70,9 @@ override on the command line with `-D 'bottle_tol=0.22'`.
 
 ## Assembly & use
 
-1. Print and check the **coupon** first: screw a washed PCO-1881 bottle into
-   each labelled ring and find the tol that grips without cracking or
+1. Print and check the **coupon** first, in the same filament as the adapter:
+   screw a washed PCO-1881 bottle into each labelled ring (`15 / 22 / 30 / 38`
+   = `bottle_tol` × 100) and find the tol that grips without cracking or
    skipping; put that number in `bottle_tol` and print the adapter.
 2. Screw the bottle into the adapter mouth-down until its lip seats on the
    land (about 1.8 turns from first contact). The bottle's weight rests on
