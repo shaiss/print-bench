@@ -150,7 +150,9 @@ module gb_number_cutter(d = 78, s = "", glyph_h = 11, face_dir = [0, 0, 1], rot 
 module gb_numbers(d = 78, nums = [], glyph_h = 11, depth = 0.8, through = false,
                   wall = 2.0, plaque = 0.94, bridge = 1.3,
                   font = "Liberation Sans:style=Bold", rots = []) {
-  for (i = [0 : min(len(nums), 12) - 1])
+  // Guarded: with nums = [] the range [0 : -1] would iterate -1 and 0 (a
+  // reversed range), and an explicit +1 step still WARNs on 2021.01.
+  if (len(nums) > 0) for (i = [0 : min(len(nums), 12) - 1])
     gb_number_cutter(d, nums[i], glyph_h, gb_icosa_verts()[i],
                      (i < len(rots)) ? rots[i] : 0, depth, through, wall, bridge, font);
 }
