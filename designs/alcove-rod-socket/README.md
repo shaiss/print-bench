@@ -101,9 +101,9 @@ Two such plates fit the 256 × 256 mm P2S bed.
   Its first layer is a thin ~2.2 mm annular rim carrying a 40.6 mm tube, the
   part that can lift; the boss doesn't need it — it prints flange-down on a
   full Ø58.8 disc (the anti-rotation keys are 0.8 mm 45° V-grooves in that
-  disc — inner washer, outer rim, and the lands between still print on
-  the bed). Cheap
-  insurance on the collar rim's own merits (the v1 field failure was *packaging*, not adhesion
+  disc — inner washer, outer rim, and the lands between still print on the
+  bed). Cheap insurance on the collar rim's own merits (the v1 field failure
+  was *packaging*, not adhesion
   — see NOTES.md — so the plate is what fixes that; the brim is separate). A
   per-object collar brim can't reach the ~5.7 mm gap to the boss, so nothing
   bridges. (Brim the *whole plate* instead and the two brims may meet in one
