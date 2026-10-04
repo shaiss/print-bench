@@ -48,6 +48,11 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   island-free by rendering each half and requiring CGAL `Volumes: 2` (a dropped
   counter shows as a third volume). This delivers what was deferred to #601;
   the tunable brand-module `helical_window` + sever-guard stay #601.
+  The through-cutter starts below the spherical cavity across the whole glyph
+  footprint (radius bounded by `glyph_h`), not 1 mm under the plaque centre:
+  the cavity surface falls away off-centre, so the old start left blind skins
+  up to ~1 mm under the outer strokes of every two-digit numeral (5 islands
+  under "12", measured as shell-under-footprint minus the cutter; empty after).
 - **Hollowing:** a spherical cavity at `d/2·_GB_PENT_R − wall` (the pentagon
   plane minus the wall), so the wall is `>= wall` at every pentagon face and
   thicker toward the triangles/vertices — no knife-edge thin spots that a scaled
@@ -66,8 +71,12 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   point (CRITICAL bed contact), so each ball splits in two. The split is
   **pole-up**: the ball is tilted by `atan2(1,PHI)` so a pentagon face sits at
   each ±z pole, which puts the equatorial cut through the triangle band and
-  bisects **no** number face — the top half carries 12/2/4/6/8/10, the bottom
-  1/3/5/7/9/11 (and the minutes equivalents). This fixes the earlier bug where
+  bisects **no** number face. Which numerals land on which half is now set by
+  the tumble stop table (see "Tumble kinematics (N2)"): the top (+z) half
+  carries 2/7/5/9/11/3, the bottom 6/1/8/4/12/10 (minutes: the same stops, so
+  10/35/25/45/55/15 top, 30/05/40/20/00/50 bottom) — the older "even numbers
+  top, odd bottom" wording in ovodyo.scad's seam/dispatch comments predates
+  the table and is stale. This fixes the earlier bug where
   BOTH `hours-half`/`minutes-half` were the same z≥0 dome, so four numbers lived
   on no printable part. Parts are now `hours-top`/`hours-bottom`/`minutes-top`/
   `minutes-bottom`. The halves join on the captive threaded seam below.
@@ -129,7 +138,71 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   full-section and the outer thirds point. Three bolted segments: a constant
   `base-segment` (centre) and two mirror `base-end` wings (tapering, each carrying
   a stalk boss over its motor pod). Both gate 100/100. The reusable
-  `lib/spaceframe.scad` and the red structural core stay #603.
+  `lib/spaceframe.scad` stays #603.
+- **Base product half (#603 item 10 / #604 item 8):** the base becomes a
+  printable product on top of the v0 lattice — same silhouette, four additions.
+  - **Airiness (N3) measured, not asserted.** Solid volume of the printed base
+    (trimesh on the gated STLs) over the bounding box of the assembled base:
+    **before** 21,889 mm³ / 1,110,408 mm³ (383.7 × 78.7 × 36.7) = **1.97 %**;
+    **after** — segment 9,213 + 2 × wing 6,486 + core 32,353 + 2 × plug 92 =
+    **54,713 mm³** / 1,164,911 mm³ (386.6 × 78.7 × 38.3, tip beads and feet
+    included) = **4.70 %** (4.5 % on the charter's 383 × 76 × (34 + 8) box).
+    The 25 % ceiling has 20 points of headroom; the core is a slim keel and the
+    lattice stays the side-view silhouette.
+  - **Red structural core (`base-core`, N4 red = a working part).** A keel
+    120 × 63 × 8.8 mm that seats in the centre segment only, between the bottom
+    chords and under the 9 mm gear line, with a 28 mm trough for the PCB (floor
+    4.6, the PCB underside is 5.2). Its **underside is the negative of the deck
+    lattice**: a diamond channel (46° roof, support-free; inradius strut_d/2 +
+    `core_fit` 0.3) along every cross tie and Warren diagonal of the centre
+    segment, drawn from the same `_BL/_BR` node functions `base_truss` uses —
+    so the sockets ARE the struts and the core can seat in exactly one pose
+    (the Warren zigzag is not 180°-symmetric about the segment centre, and the
+    tie pitch pins x). It is slid in along x through the segment's open end
+    frame, flat-bottom riding on the deck struts, and drops the channel depth
+    onto them when the pattern aligns; the flanks (vertical 2.6 mm skirt, then
+    leaning in to a 48.4 mm top) clear the ridge posts in that raised pose.
+    `core-seat` proves the seated core ∩ segment struts is empty; the control
+    shifts it half a bay so the ties run through the keel (702 facets).
+  - **Ballast (stated assumption, not a claim).** Two sealed pockets, one per
+    rail: floor `core_wall` 1.4 above the bottom, walls 1.4, a 44°-from-vertical
+    inner slope and outer wall (never an overhang from inside), a flat ceiling
+    strip < 5 mm wide (a bridgeable span), and the channels' humps offset by the
+    wall so the cavity keeps >= 1.4 to every socket. Cavity volume (numeric
+    integration of the section minus the humps, 0.1 mm grid): **11.8 cm³** for
+    both pockets. Vitamin: **Ø2 mm steel shot** (chrome-steel bearing balls or
+    #9-size steel shot); at 7.85 g/cm³ × ~0.60 random packing ≈ 4.7 g/cm³ the
+    fill is **≈ 55 g (2 × 28 g)**. Filled through a Ø3.2 port in the +x end
+    face of each pocket (round, so its roof bridges; placed above every socket
+    crest with a full wall under it and clear of the end-bay diagonal's hump),
+    closed by `base-plug` (print two): a Ø5 × 1.2 head proud on the end face,
+    inside the 3.5 mm gap to the segment's end tie, and a 3.3 → 2.7 mm tapered
+    shank that wedges in the 4.2 mm end wall. Fill and plug BEFORE sliding the
+    core in. `pocket-clear` proves the cavity ∩ the core's outer 1.2 mm shell
+    (the section eroded by 1.2 + the sockets grown by 1.2, ends included) is
+    empty; the control raises the ceiling through the roof (156 facets). Whether
+    55 g at z ≈ 5 mm is enough against two ~50 g balls at 124 mm is the
+    **CoG/tip-over gate that is NOT in scope tonight** — this number is an
+    assumption to be measured, never a README stability claim.
+  - **Feet.** Each wing carries two Ø7 pads under its inner-end chord nodes
+    (`_bx(bays)` − 4 in x, `_bw` − 2 in y: hanging below the chord, inboard of
+    its outer face, invisible from the hero camera). The pad bottom is FLUSH
+    with the chord underside (a first cut hung them 1.5 mm below and printcheck
+    rightly reported a 39 mm² bed contact + tip-over: the wing would have
+    printed standing on two pads) and carries a Ø4.9 × 0.7 recess for a
+    **Ø5 mm × 1.5 mm hemispherical stick-on silicone bumper** (vitamin; the
+    recess is kept under 5 mm so its roof is a bridgeable span, 100/100). The
+    base stands on four bumpers 0.8 mm proud; the tips float 0.8 mm.
+  - **Tips.** `base_t` keeps its form; the floor is `tip_nub` 0.01 (was 0.05)
+    and a `tip_d` = 2 × strut_d = Ø5.6 bead at the tip station, bottom flush
+    with the chords, encloses the three converging strut ends — the needle ends
+    in one round nose, no cap, no truncated bay.
+  - **Deliverable = the plate.** `ci.plate` lists the eight production part
+    VALUES (four ball halves, base-segment, base-end, base-core, base-plug);
+    plate.sh merges each value once, so a part printed twice (base-end, base-plug)
+    is listed once and duplicated in the slicer (documented on the page).
+    `plate.sh --check`: 8 separate objects == 8 declared parts. The assembled
+    render stays a preview.
 
 ## v0 simplifications → which issue upgrades each
 
@@ -142,10 +215,135 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
 | Two-tone shown only in preview colour, no committed two-tone reveal render | #600 (two-tone reveal render) |
 | Base drivetrain is a **preview representation** (hand-rolled trapezoidal gears, not involute, not cut to a running fit; no red structural core; not a reusable lib) | #604 (`lib/bevel.scad` real meshing differential + kinematics gate) + #603 (`lib/spaceframe.scad` + red core) |
 | Ball halves key on **loose dowels + glue** (flat butt joint) | #602 (captive threaded/snap mating seam) |
-| Deliverable gated as loose parts; no `ci.plate` | #604 (`ci.plate`/`ci.fusecheck` multi-object 3MF) |
+| ~~Deliverable gated as loose parts; no `ci.plate`~~ done: `ci.plate` → `build/ovodyo-plate.3mf`, 8 objects | (`ci.fusecheck` stays with the seam work) |
 | Ball generator is design-local | #600 (promote to `lib/`, with a `tri_k` guard + facet mate) |
 | No committed style pack / stylelift metrics | #601 (style pack + facet/openness metrics) |
-| No stability/CoG check; balls high on thin stalks | #603 (ballast + CoG/tip-over gate) |
+| Ballast pockets + a stated ≈55 g shot fill exist, but no CoG/tip-over gate proves it is enough | #603 (CoG/tip-over gate) |
+
+## Tumble kinematics (N2)
+
+The charter's soul: a fresh flat face **lands upright** at each stop, not a spin.
+This section is the kinematic model that makes N2 a gate-checkable claim; the
+printed mechanism parts (sun/crown bevels, yoke, hub axle) and the base are the
+other Wave 2 agents' work and use the frames and table defined here.
+
+**No single axis can do it.** The 12 plaque normals are the vertices of an
+icosahedron, an orbit of the icosahedral rotation group, whose elements have
+orders 1, 2, 3 and 5 only — there is no order-12 rotation, so no fixed axis
+carries plaque to plaque twelve times. Cutting the sphere by any axis, at most 5
+plaques share one cone (the ring around a 5-fold axis), so a single rotation
+can present at most 5 of the 12 to a fixed viewer. Two compounded rotations are
+therefore necessary: the **yoke** turning the ball's axle about the vertical and
+the **crown** spinning the ball about that axle — an epicyclic.
+
+**The pole plaques fix the viewer.** The two plaques on the ball's 5-fold axis
+have normals ±the axle, and the yoke keeps the axle horizontal, so those two
+normals only ever sweep the horizontal plane: they can land *exactly* only for a
+**horizontal** presenting direction. That is why F = world +x (the viewer) is
+horizontal; the poles then land with zero error at yoke 90° and 270° (mod 360).
+
+**The mechanism (decided; built by the mechanism agent).** A fixed bevel **sun**
+(`tumble_n_sun` = 12 teeth) at the top of the stator stalk; a yoke turned about
+world +z by the yoke angle φ; the ball's hub axle pole-to-pole (ball-frame +z of
+the pole-up frame) mounted horizontal in the yoke, carrying a bevel **crown**
+(`tumble_n_crown` = 20 teeth) rolling on the fixed sun, so the ball spins about
+its own axle by −ρ·φ, ρ = 12/20 = **3/5**. Sign convention (the one sentence the
+mechanism must match, verbatim from `tumble.scad`): *with the mount
+M = rotate([-90,0,0]) carrying the ball's +z pole axis onto world +y, the crown
+mounted on the +pole side of the hub axle with its teeth facing the ball centre,
+and the fixed sun on the stalk below the ball centre, a yoke rotation of +φ
+about world +z spins the ball about its own +pole axis by −ρ·φ (right-hand sense
+about the +pole direction), so Q(φ) = Rz(φ)·Ry(−ρ·φ)·M (world ← ball).* A crown
+on the −pole side flips the sign, and then the table and every numeral rotation
+change — rerun the derivation, never hand-edit.
+
+**The stop table** (`designs/ovodyo/tumble_stops.py`, stdlib+numpy: the 12
+normals built exactly as the design does — `gb_icosa_verts()` order, then the
+`_pole_up` rotation — posed by M and Q(φ), φ swept over the 5-turn cycle at
+0.25° and every plaque's landing events refined; the 12-stop table with the
+smallest max error, ties at the poles resolved to the earliest yoke angle):
+
+| stop | numeral | face | yoke φ (°) | step (°) | landing error (°) | crown (°) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 12 | 9 | 27.3361 | 54.67 | 1.620 | −16.40 |
+| 1 | 1 | 3 | 90.0000 | 62.66 | 0.000 | −54.00 |
+| 2 | 2 | 0 | 270.0000 | 180.00 | 0.000 | −162.00 |
+| 3 | 3 | 10 | 332.6639 | 62.66 | 1.620 | −199.60 |
+| 4 | 4 | 7 | 387.3361 | 54.67 | 1.620 | −232.40 |
+| 5 | 5 | 4 | 692.6639 | 305.33 | 1.620 | −415.60 |
+| 6 | 6 | 1 | 747.3361 | 54.67 | 1.620 | −448.40 |
+| 7 | 7 | 2 | 1052.6639 | 305.33 | 1.620 | −631.60 |
+| 8 | 8 | 5 | 1107.3361 | 54.67 | 1.620 | −664.40 |
+| 9 | 9 | 6 | 1412.6639 | 305.33 | 1.620 | −847.60 |
+| 10 | 10 | 11 | 1467.3361 | 54.67 | 1.620 | −880.40 |
+| 11 | 11 | 8 | 1772.6639 | 305.33 | 1.620 | −1063.60 |
+
+(step = yoke advance from the previous stop; stop 0's is from stop 11 across the
+cycle wrap.) Max landing error **1.62°** (tolerance 3°); the numeral-up residual
+at those stops is 1.43°. The stops span 1745.3° of yoke; the **cycle closes
+after 5 yoke turns (1800°) = 3 crown turns**, since Rz(1800) = Ry(−1080) = I.
+Every non-pole plaque lands exactly once per cycle (at 360·j ± 27.34°), the two
+pole plaques five times each, so the table is forced up to the choice of pole
+instance. **Crown-angle range over the table (the stalk-gap sweep for the
+mechanism agent):** `tumble_crown_range()` = [−1063.60, −16.40]°, a 1047.2°
+span — more than a turn, so the stalk sweeps the ball's **whole equator** over
+a cycle (the stalk direction in the ball frame is the great circle ⊥ the pole
+axis, parametrised by the crown angle); any stalk gap must be a full ring
+through the triangle band, which is where the seam already runs.
+
+**Why not the reference's uniform 450°/90° index.** Under one epicyclic with a
+horizontal viewer, uniform yoke steps of 90° (or 450° ≡ 90° per turn) alternate
+the presenting direction between the axle line and the transverse plane:
+Q(90k)⁻¹·x is ±the pole axis for odd k (the two pole plaques, again and again)
+and an equatorial direction for even k, where a pole-up dodecahedron has **no**
+plaque normal at all (the rings sit at 63.4° and 116.6° from the pole). So a
+uniform 90° table presents only the two poles, six times each — it cannot land
+12 faces. The reference's numbers describe a different drive; this clone's
+stops are irregular in yoke angle (54.7 / 62.7 / 180 / 305.3° steps) and live in
+firmware as the baked table, which a stepper follows for free.
+
+**Numeral placement follows the table.** `tumble_nums(gb_hours())` reorders the
+numerals to face order (numeral k on face `tumble_face_order()[k]`) and
+`tumble_rots()` clocks each one in-plane so it reads upright at its own stop
+(rotation about the outward normal, CCW seen from outside, computed per stop and
+verified through the very transforms `gb_numbers` applies). `ball_core`'s red
+preview inlay takes the same order and clocking so the two-tone preview matches
+the cuts.
+
+**Gate (`ci.kinematics`, the landing half — the sun/crown mesh rows are the
+mechanism agent's).** Five geometry-true boolean parts in `tumble.scad`, each a
+real CGAL render read by facet count, dispatched by `part=` with `-D stop=k`:
+
+- `landing-flat` — the hours ball **as it ships** posed by Q(φ_k), intersected
+  with a probe slab x ∈ [Rp+ε, Rp+ε+6] inside a 12 mm cylinder about +x
+  (Rp = ball_d/2, ε = 12·sin 3° = 0.63 mm): empty iff the presenting plaque is
+  within 3° of +x (a tilted plaque rises into the slab at the probe's edge).
+  `landing-flat-ctrl` poses 20° past the stop and must hit.
+- `landing-glyph` — the presenting face's through-cut numeral cutter (the exact
+  `gb_number_cutter` the ball subtracts, with its baked rotation) posed at the
+  stop, minus an upright template of the same stencil extruded along +x at the
+  plaque centre with 2D up = world +z, grown 1.0 mm: empty iff the numeral is
+  aligned and unmirrored within ~1 mm (resolves a ~7° roll).
+  `landing-glyph-rolled` (template rolled 30°) and `landing-glyph-mirrored`
+  (template mirrored) must leave material.
+
+Proof renders (OpenSCAD 2021.01 CGAL, `$fn=32`, `./scripts/lineage.sh
+facet-count` on the binary STL; 0 = empty):
+
+| part | stops rendered | facets |
+|---|---|---|
+| `landing-flat` | 0–11 | stop 0: 0; stop 1: 0; stop 2: 0; stop 3: 0; stop 4: 0; stop 5: 0; stop 6: 0; stop 7: 0; stop 8: 0; stop 9: 0; stop 10: in flight at hand-off; stop 11: in flight at hand-off |
+| `landing-flat-ctrl` | 0, 1 | stop 0: in flight at hand-off — must be > 0; stop 1: in flight at hand-off — must be > 0 |
+| `landing-glyph` | 0–11 | 0 at every stop (0,0,0,0,0,0,0,0,0,0,0,0) |
+| `landing-glyph-rolled` | 0, 3 | 698; 348 (> 0, the check can fail) |
+| `landing-glyph-mirrored` | 0, 3 | 334; 178 (> 0, mirroring is caught) |
+
+The rows marked *in flight at hand-off* were still rendering when this commit was cut (the batch ran 2-wide on a shared 4-CPU box at ~65 s per full-ball render); `stops 0–9` of `landing-flat` came back 0. Re-run: `for s in 10 11; do xvfb-run -a openscad --export-format binstl -o build/lf-$s.stl -D 'part="landing-flat"' -D stop=$s designs/ovodyo/ovodyo.scad; ./scripts/lineage.sh facet-count build/lf-$s.stl; done` (and the same with `landing-flat-ctrl` at 0 and 1, which must count > 0).
+
+**Regenerate.** `python3 designs/ovodyo/tumble_stops.py` prints the report and
+the baked block; `--write` splices it into `tumble.scad`; `--check` exits
+non-zero if the committed block drifted from the derivation. The script asserts
+max error ≤ 3°, every face presented once, and monotone stops.
 
 ## Print orientation & gate status
 
@@ -156,13 +354,19 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
   generator #600, not the seam). Truss segments: bottom-chord-down (as
   modelled). Mock-drive gear: flat.
 - `gate.sh --slice ovodyo` (CI manifold engine): hours-top/hours-bottom/
-  minutes-top/minutes-bottom **84/100 (PRINTABLE WITH CAVEATS** — near-pole facet overhang
-  + thin sampled wall at the facet edges, both #602; watertight, one body — the
+  minutes-top/minutes-bottom **84/100 (PRINTABLE WITH CAVEATS** — near-pole facet
+  overhang + thin sampled wall at the facet edges, both #600; watertight, one body — the
   cut-through numerals do NOT drop a counter and the seam bisects no number),
   base-segment 100/100, base-end 100/100 (with the bored stalk socket),
   mock-drive 100/100; all slice. No CRITICAL, no failure. (Local stable-engine
-  2021.01 scores the halves ~76; the caveats are the seam/orientation ones #602
+  2021.01 scores the halves ~76; the caveats are the facet-generator ones #600
   owns.)
+- Base product half (local stable 2021.01, `gate.sh ovodyo` exit 0): base-end
+  100/100 with the feet + nose (flat bed contact on the chords and pads),
+  **base-core 100/100** (flat-bottom-down: every socket roof is a 46° chamfer,
+  the pocket ceilings are < 5 mm bridges, walls >= 1.4), **base-plug 100/100**
+  (head-down). Fit checks: core-seat 0 facets, core-seat-ctrl 702, pocket-clear
+  0, pocket-ctrl 156 (`lineage.sh facet-count`). Plate: 8 objects == 8 parts.
 
 ## Print this first
 
@@ -202,13 +406,23 @@ print, same material and profile as the halves.
 
 Entry `ovodyo.scad` dispatches on `part`: assembled | hours-top | hours-bottom |
 minutes-top | minutes-bottom | hours-ball | minutes-ball | base-segment |
-base-end | mock-drive | base-mech | pod-drive. The `-ball` parts are the full
+base-end | mock-drive | base-mech | pod-drive | landing-flat | landing-flat-ctrl |
+landing-glyph | landing-glyph-rolled | landing-glyph-mirrored | hours-posed. The
+`landing-*` parts are the N2 kinematics booleans (`tumble.scad`, `-D stop=k`,
+gated by `ci.kinematics`); `hours-posed` previews the hours ball at `-D
+yoke_deg=φ` for a viewer at +x (camera `0,0,0,90,0,90,260`). The `-ball` parts are the full
 shells used only in the assembled preview; the `-top`/`-bottom` parts are the
 printable units (pole-up split; `ball_half(hours, top)` builds them). `base-segment`
-is the constant centre truss; `base-end` is a tapering end wing (print two).
+is the constant centre truss; `base-end` is a tapering end wing (print two,
+each with a Ø5.6 nose bead and two bumper feet at its wide end); `base-core` is
+the red ballast keel that seats in the centre segment (`core_body()`, modelled
+in place on z = 0) and `base-plug` its port plug (print two); `core-seat`,
+`core-seat-ctrl`, `pocket-clear`, `pocket-ctrl` are the `ci.fitchecks` parts
+(never printed). `ci.plate` builds the multi-object 3MF deliverable.
 `base-mech` (whole drivetrain) and `pod-drive` (one pod's gear train) are
 PREVIEW-ONLY coloured mechanism — not in `ci.parts`, not printed. The ball's
-faceting is `_GB_TRI_K` in `geodesic-ball.scad`; the numeral stencil ties are
+faceting is `facet` in `ovodyo.scad` (passed as `tri_k`; `_GB_TRI_K` in
+`geodesic-ball.scad` is only the helper's default); the numeral stencil ties are
 `_gb_stencil` (proved island-free by CGAL `Volumes: 2`). Previews are frozen in
 `previews/cameras.conf` (added `base-mech`). NOTE: `--viewall` mis-scales this
 design because the ball's rotated half-space cubes fatten OpenSCAD's preview

@@ -11,12 +11,20 @@
 include <geodesic-ball.scad>  // the faceted numbered-ball generator (#600)
 use <threads-fdm.scad>        // the captive seam's male/female thread pair (#602)
 use <printability.scad>       // chamfered_cylinder for the seam coupon pucks
+include <tumble.scad>         // tumble-to-index kinematics: stop table, frames, landing probes (N2, #607)
 
 /* [What to render] */
 // assembled | hours-top | hours-bottom | minutes-top | minutes-bottom |
 // hours-ball | minutes-ball | base-segment | base-end | mock-drive |
-// base-mech | pod-drive | seam-coupon | seam-fit | seam-fit-ctrl
+// base-mech | pod-drive | seam-coupon | seam-fit | seam-fit-ctrl |
+// landing-flat | landing-flat-ctrl | landing-glyph | landing-glyph-rolled |
+// landing-glyph-mirrored | hours-posed |
+// base-core | base-plug | core-seat | core-seat-ctrl | pocket-clear | pocket-ctrl
 part = "assembled";
+// landing-pose stop index 0..11 (ci.kinematics): the stop the landing-* parts test
+stop = 0;
+// continuous yoke angle (deg) for posed previews (hours-posed)
+yoke_deg = 0;
 
 /* [Overall (from the reference: 383 x 78 x 163 mm)] */
 // Ball outer diameter (mm)
@@ -50,7 +58,7 @@ slot_turns = 0.5;
 /* [Ball seam] */
 // The ball prints in two halves. It is tilted POLE-UP (a pentagon face to each
 // pole) so the equatorial cut runs through the triangle band and bisects NO
-// number face — even numbers land on the top half, odd on the bottom. The two
+// number face — the tumble stop table, not number parity, sets the split. The two
 // halves join on a CAPTIVE THREADED SEAM (#602, lib/threads-fdm.scad): the
 // bottom half grows a short male ring up from its flat seam face just inside
 // the shell, the top half carries the matching female thread cut into an
@@ -92,6 +100,40 @@ truss_w = 76;
 truss_h = 34;
 // Bays per segment
 bays = 4;
+// Wing tips: the last node rounds to a nose of this diameter (<= 2 x strut_d,
+// the needle stays a needle) and the taper floor is small enough that the last
+// station's strut ends sit inside that nose
+tip_d = 2 * strut_d;
+tip_nub = 0.01;
+// Feet (vitamin: 4 x stick-on 5 mm hemispherical silicone bumpers, ~1.5 mm
+// tall): a small flat pad under each wing's inner-end chord node with a shallow
+// recess that locates the bumper. Recess < 5 mm so its roof is a bridgeable span.
+foot_pad_d = 7;
+foot_pad_drop = 0;        // pad bottom below the chord underside: 0 = flush, so the
+                          // wing still prints on its chords; a 1.5 mm bumper stands 0.8 proud
+foot_recess_d = 4.9;
+foot_recess = 0.7;
+// Red structural core ("base-core"): a keel that seats between the centre
+// segment's bottom chords, its underside a diamond-channel NEGATIVE of the deck
+// lattice (every socket is a real strut, placed from the node functions) so it
+// drops onto the deck in exactly one pose; two sealed ballast pockets fill
+// through a plugged port on the +x end face. Top stays under the 9 mm gear
+// line; the PCB sits in the central trough.
+core_len = 120;           // along x (inside the 127 mm centre segment)
+core_w = 63;              // bottom width (between the chords: 76 - struts - slide clearance)
+core_top_hw = 24.2;       // half-width at the top: clears the ridge posts when slid in raised
+core_skirt = 2.6;         // vertical skirt before the flank leans in: taller than the
+                          // socket crests, so every channel exits a vertical face (no cusp)
+core_h = 8.8;             // keel height above the deck plane (< 9 mm shaft line)
+core_trough_w = 28;       // PCB trough width (26 mm PCB + clearance)
+core_trough_z = 4.6;      // trough floor (PCB underside is at 5.2)
+core_wall = 1.4;          // pocket / ceiling / end wall thickness (>= 1.2)
+core_fit = 0.3;           // radial clearance of the strut sockets (mm)
+core_port_d = 3.2;        // ballast fill port bore (mm), on the +x end face (round: a
+                          // <5 mm roof bridges; sits above the socket crests with a full wall)
+core_port_wall = 4.2;     // end wall the port bores through (plug seat)
+plug_head_d = 5;          // plug head (sits proud on the end face, inside the joint gap)
+plug_head_h = 1.2;
 
 /* [Quality] */
 // Iterating: 40. Production: 64+ .
@@ -99,17 +141,21 @@ $fn = 48;
 
 // ---- balls -----------------------------------------------------------------
 
+// Numerals are placed in TUMBLE order (tumble.scad): numeral k lives on the face
+// that presents at stop k, clocked by tumble_rots() so it reads upright there.
 module hours_ball() {
-  geodesic_ball(d = ball_d, nums = gb_hours(), tri_k = facet,
+  geodesic_ball(d = ball_d, nums = tumble_nums(gb_hours()), tri_k = facet,
                 wall = wall, glyph_h = glyph_h, through = numerals_through, bridge = bridge_w,
-                slot = true, slot_width = slot_width, slot_turns = slot_turns);
+                slot = true, slot_width = slot_width, slot_turns = slot_turns,
+                rots = tumble_rots());
 }
 
 module minutes_ball() {
   // opposite-handed slot differentiates it from the hours ball
-  geodesic_ball(d = ball_d, nums = gb_minutes(), tri_k = facet,
+  geodesic_ball(d = ball_d, nums = tumble_nums(gb_minutes()), tri_k = facet,
                 wall = wall, glyph_h = glyph_h, through = numerals_through, bridge = bridge_w,
-                slot = true, slot_width = slot_width, slot_turns = -slot_turns);
+                slot = true, slot_width = slot_width, slot_turns = -slot_turns,
+                rots = tumble_rots());
 }
 
 // Pole-up tilt: bring a pentagon face to each ±z pole so the equatorial split
@@ -265,7 +311,8 @@ module ball_half_seated(hours = true, top = true) {
 
 // One printable HEMISPHERE, POLE-DOWN on the bed: the flat pole pentagon is the
 // first layer, the seam ring is the top of the print. `top` selects the +z half
-// (even numbers, female thread) or the -z half (odd numbers, male ring). Print
+// (numerals 2/7/5/9/11/3, female thread) or the -z half (6/1/8/4/12/10, male
+// ring; the split follows the tumble stop table, not an even/odd rule). Print
 // two halves per ball — a top AND a bottom — to get all 12 numbers. Pole-down
 // is forced by the seam (a ring standing on the seam face cannot print
 // seam-face-down) and is also the overhang-free orientation for a hollow
@@ -469,7 +516,8 @@ module ball_core(nums) {
   color(mech_red) {
     sphere(r = inner_r, $fn = 72);                                // red core, framed by the slot
     intersection() {
-      gb_numbers(ball_d, nums, glyph_h, 0, true, wall, bridge = bridge_w);
+      gb_numbers(ball_d, tumble_nums(nums), glyph_h, 0, true, wall, bridge = bridge_w,
+                 rots = tumble_rots());                            // same tumble order/clocking as the cuts
       gb_faceted_ball(ball_d - 0.8, tri_k = facet);               // inlay, recessed ~0.4 mm (no z-fight)
     }
   }
@@ -491,7 +539,7 @@ base_half = base_L / 2;
 // end segment (so the middle third is full-section and the outer thirds point)
 function base_t(x) =
   (abs(x) <= seg_len / 2) ? 1
-  : max(0.05, 1 - (abs(x) - seg_len / 2) / seg_len);
+  : max(tip_nub, 1 - (abs(x) - seg_len / 2) / seg_len);
 
 function base_h(x) = truss_h * base_t(x);            // ridge height at x
 function _bw(x)    = truss_w / 2 * base_t(x);        // deck half-width at x
@@ -540,19 +588,194 @@ module stalk_boss(x) {
     }
 }
 
+// ---- wing tip, feet -------------------------------------------------------
+
+// The needle's nose: one round node of tip_d at the tip station, enclosing the
+// three shrunken strut ends there (tip_nub keeps them inside it), so the wing
+// ends in a single Ø5.6 bead — no cap, no truncated bay, base_t untouched.
+module tip_nose(x) {
+  // bottom flush with the chord underside, so the wing still prints on its chords
+  translate([x, 0, tip_d / 2 - strut_d / 2]) sphere(d = tip_d, $fn = 24);
+}
+
+// A foot: a small flat pad hanging under a bottom-chord node (inboard of the
+// chord's outer face, so it is invisible from the side/hero and shows only in
+// the bottom-iso view) with a shallow recess that locates a stick-on bumper.
+// `side` = -1 (BL chord) / +1 (BR chord). The pad's top reaches into the chord
+// so it fuses; its bottom is the print's lowest face (flat bed contact).
+module foot_pad(x, side) {
+  h = strut_d / 2 + foot_pad_drop;           // from the deck plane down to the pad bottom
+  translate([x, side * (_bw(x) - 2), 0])
+    difference() {
+      translate([0, 0, -h]) cylinder(d = foot_pad_d, h = h + 0.6, $fn = 32);
+      translate([0, 0, -h - 1]) cylinder(d = foot_recess_d, h = foot_recess + 1, $fn = 32);
+    }
+}
+
+// the two feet of one wing, just inboard of its wide (joint) end
+module wing_feet() {
+  x = _bx(bays) - foot_pad_d / 2 - 0.5;
+  foot_pad(x, -1);
+  foot_pad(x,  1);
+}
+
+// ---- red structural core (base-core) + ballast plug (base-plug) ------------
+// The keel's y–z section: flat bottom, a short vertical skirt, flanks leaning
+// in to core_top_hw, a flat rail top each side and the PCB trough between.
+function _core_sec() = [
+  [-core_w / 2, 0], [core_w / 2, 0], [core_w / 2, core_skirt],
+  [core_top_hw, core_h], [core_trough_w / 2, core_h],
+  [core_trough_w / 2, core_trough_z], [-core_trough_w / 2, core_trough_z],
+  [-core_trough_w / 2, core_h], [-core_top_hw, core_h],
+  [-core_w / 2, core_skirt]
+];
+
+// section -> solid along x, centred; `shrink` erodes the section (and the
+// ends) by that much — the fitcheck's "inside the wall" region.
+module _core_extrude(sec, len, shrink = 0) {
+  rotate([90, 0, 90]) linear_extrude(len - 2 * shrink, center = true)
+    offset(r = -shrink) polygon(sec);
+}
+
+// A 45°-ish diamond (peak up/down, roof just steeper than 45° so it is never
+// an overhang) with horizontal inradius r: the channel section a round strut
+// nests in support-free.
+// (after rotate([0, 90, 0]) the 2D x axis is the world vertical, so the 1.06
+// stretch is applied to x.)
+module _diamond(r) { scale([1.06, 1]) rotate(45) square(2 * r, center = true); }
+
+// One socket: a diamond prism along a deck strut p1->p2 (both at z = 0).
+// r = the strut radius + clearance (+ wall, for the pocket-side hump).
+module _core_socket(p1, p2, r) {
+  v = p2 - p1;
+  translate(p1) rotate([0, 0, atan2(v[1], v[0])]) rotate([0, 90, 0])
+    linear_extrude(norm(v)) _diamond(r);
+}
+
+// every deck strut of the centre segment: the ties and Warren diagonals —
+// the same node functions base_truss draws them from, so the sockets ARE the
+// lattice and the core can seat in one pose only (the zigzag is not 180°-
+// symmetric about the segment centre).
+module _core_sockets(r) {
+  for (i = [bays : 2 * bays]) _core_socket(_BL(i), _BR(i), r);
+  for (i = [bays : 2 * bays - 1])
+    if (i % 2 == 0) _core_socket(_BL(i), _BR(i + 1), r);
+    else            _core_socket(_BR(i), _BL(i + 1), r);
+}
+
+// One ballast pocket (side s = ±1), y–z section: floor at core_wall, a
+// vertical inner wall then a 44°-from-vertical slope out, a vertical outer wall
+// up to the skirt height then a 44.5° slope in (never an overhang from inside),
+// and a flat ceiling strip < 5 mm wide (a bridgeable span). `zc` is the ceiling
+// height (the control raises it through the roof). The socket humps (sockets
+// grown by the wall) are removed so the cavity keeps >= core_wall to every
+// channel. yo1 sits inside the flank eroded by the wall (pocket-clear proves it).
+function _pocket_sec(s, zc) =
+  let (w = core_wall, yi = core_trough_w / 2 + w, zi = zc - 4.0,
+       yo1 = core_top_hw - 0.5, yo0 = yo1 + (zc - core_skirt) * 0.983)
+  [ for (p = [[yi, w], [yo0, w], [yo0, core_skirt], [yo1, zc], [yi + 3.9, zc], [yi, zi]])
+      [s * p[0], p[1]] ];
+
+module _core_pocket(s, zc = core_h - core_wall) {
+  x0 = -core_len / 2 + core_wall;
+  x1 =  core_len / 2 - core_port_wall;
+  difference() {
+    translate([(x0 + x1) / 2, 0, 0])
+      rotate([90, 0, 90]) linear_extrude(x1 - x0, center = true) polygon(_pocket_sec(s, zc));
+    _core_sockets(strut_d / 2 + core_fit + core_wall);
+  }
+}
+module _core_cavity(zc = core_h - core_wall) { _core_pocket(-1, zc); _core_pocket(1, zc); }
+
+// fill port: a round bore along x through the +x end wall into each pocket,
+// placed above every socket crest (a full wall under it) and clear of the
+// end-bay diagonal hump inside the cavity; the plug head sits proud on the end
+// face, inside the 3.5 mm gap to the segment's end tie.
+function _port_y(s) = s * (core_trough_w / 2 + core_wall + 6.6);
+_port_z = 5.75;
+module _core_ports() {
+  for (s = [-1, 1]) translate([core_len / 2, _port_y(s), _port_z])
+    rotate([0, 90, 0]) cylinder(d = core_port_d, h = 2 * core_port_wall + 2, center = true, $fn = 32);
+}
+
+// the printed core: keel body − strut sockets − ballast pockets − ports.
+// Modelled in place (seated pose), flat bottom on z = 0: prints as-is.
+module core_body() {
+  difference() {
+    _core_extrude(_core_sec(), core_len);
+    _core_sockets(strut_d / 2 + core_fit);
+    _core_cavity();
+    _core_ports();
+  }
+}
+
+// the ballast plug (print two): flat head down, a tapered shank that wedges in
+// the port bore. Tip Ø < bore, root Ø slightly > bore.
+module core_plug() {
+  cylinder(d = plug_head_d, h = plug_head_h, $fn = 40);
+  translate([0, 0, plug_head_h])
+    cylinder(d1 = core_port_d + 0.1, d2 = core_port_d - 0.5, h = core_port_wall + 0.3, $fn = 40);
+  // (prints head-down: a cone narrowing upward, no overhang)
+}
+// a plug seated in its port (preview): head on the end face, shank into the bore
+module core_plug_seated(s) {
+  translate([core_len / 2 + plug_head_h, _port_y(s), _port_z]) rotate([0, -90, 0]) core_plug();
+}
+
+// ---- fit checks (ci.fitchecks; dispatch parts, never printed) ------------
+// core-seat: the seated core ∩ the centre segment's struts must be EMPTY (the
+// core nests without cutting a strut). core-seat-ctrl shifts it half a bay so
+// the ties run through the keel — the mandatory negative control.
+module core_seat_check(shift = 0) {
+  intersection() {
+    translate([shift, 0, 0]) core_body();
+    base_segment();
+  }
+}
+// pocket-clear: the ballast cavity ∩ the core's outer 1.2 mm shell wall must be
+// EMPTY (the cavity is fully enclosed, wall >= 1.2 everywhere: outer skin,
+// ends, trough, and every strut channel). pocket-ctrl over-fills the cavity up
+// through the roof so it MUST overlap.
+module _core_shell_wall(t = 1.2) {
+  difference() {
+    difference() { _core_extrude(_core_sec(), core_len); _core_sockets(strut_d / 2 + core_fit); }
+    difference() { _core_extrude(_core_sec(), core_len, shrink = t); _core_sockets(strut_d / 2 + core_fit + t); }
+  }
+}
+module core_pocket_check(overfill = false) {
+  intersection() {
+    _core_cavity(zc = overfill ? core_h - 0.4 : core_h - core_wall);
+    _core_shell_wall();
+  }
+}
+
+// ---- segments ---------------------------------------------------------------
+
 // CENTRE segment (constant section) — the gated representative part
 module base_segment() { base_truss(bays, 2 * bays); }
 
-// one END wing, tapering to a needle point, with its stalk boss over the pod
+// one END wing, tapering to a needle point, with its stalk boss over the pod,
+// its Ø5.6 nose, and the two feet at its wide end
 module base_end() {
   base_truss(0, bays);
   stalk_boss(-ball_spacing / 2);
+  tip_nose(_bx(0));
+  wing_feet();
 }
 
 module full_base() {
   base_truss(0, n_bays);                   // the whole tapered lattice
   stalk_boss(-ball_spacing / 2);
   stalk_boss( ball_spacing / 2);
+  tip_nose(_bx(0));
+  tip_nose(_bx(n_bays));
+  wing_feet();
+  mirror([1, 0, 0]) wing_feet();
+  color(mech_red) {                        // red = working part: the structural core + its plugs
+    core_body();
+    core_plug_seated(-1);
+    core_plug_seated(1);
+  }
 }
 
 // ---- assembled preview -----------------------------------------------------
@@ -582,8 +805,8 @@ module assembled() {
 // ---- dispatch --------------------------------------------------------------
 
 if      (part == "assembled")    assembled();
-else if (part == "hours-top")    ball_half(hours = true,  top = true);   // even numbers + 12
-else if (part == "hours-bottom") ball_half(hours = true,  top = false);  // odd numbers
+else if (part == "hours-top")    ball_half(hours = true,  top = true);   // top half: 2/7/5/9/11/3
+else if (part == "hours-bottom") ball_half(hours = true,  top = false);  // bottom half: 6/1/8/4/12/10
 else if (part == "minutes-top")  ball_half(hours = false, top = true);
 else if (part == "minutes-bottom") ball_half(hours = false, top = false);
 else if (part == "hours-ball")   { hours_ball();   ball_core(gb_hours()); }    // preview (two-tone)
@@ -596,4 +819,18 @@ else if (part == "pod-drive")    pod_drive();              // preview: one pod's
 else if (part == "seam-coupon")  seam_coupon();            // print this first: male ring + female puck
 else if (part == "seam-fit")     seam_fit(false);          // fitcheck: must render EMPTY
 else if (part == "seam-fit-ctrl") seam_fit(true);          // fitcheck control: must interfere
-else assembled();
+// tumble kinematics (N2, ci.kinematics): landing-pose booleans at stop `stop`
+else if (part == "landing-flat")           landing_flat(stop);           // empty: plaque within tol of +x
+else if (part == "landing-flat-ctrl")      landing_flat_ctrl(stop);      // control: 20 deg off, must hit
+else if (part == "landing-glyph")          landing_glyph(stop);          // empty: numeral upright + unmirrored
+else if (part == "landing-glyph-rolled")   landing_glyph_rolled(stop);   // control: template rolled 30 deg
+else if (part == "landing-glyph-mirrored") landing_glyph_mirrored(stop); // control: template mirrored
+else if (part == "hours-posed")            // preview: the hours ball posed at yoke_deg, viewer at +x
+  tumble_pose(yoke_deg) tumble_ball_frame() { hours_ball(); ball_core(gb_hours()); }
+else if (part == "base-core")    core_body();              // red structural core (ballast keel)
+else if (part == "base-plug")    core_plug();              // ballast port plug (print two)
+else if (part == "core-seat")      core_seat_check();               // fitcheck: seated core ∩ segment = empty
+else if (part == "core-seat-ctrl") core_seat_check(shift = base_L / n_bays / 2);  // control: half a bay off → interferes
+else if (part == "pocket-clear")   core_pocket_check();             // fitcheck: cavity ∩ 1.2 mm shell = empty
+else if (part == "pocket-ctrl")    core_pocket_check(overfill = true);  // control: cavity through the roof → interferes
+else assert(false, str("unknown part: ", part));
