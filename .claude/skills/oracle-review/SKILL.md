@@ -120,12 +120,16 @@ live 1-token probe — the ship steps hide their own error, so this is the one
 step that learns the HTTP cause) and branches on the aggregate class:
 
 - **`needs-human`** — the account is out of credit, or the key is invalid /
-  missing. CI cannot fix it, so it is raised **once** through the HITL
-  `needs-decision` gate (`docs/decision-gate.md`): a single deduped tracking
-  issue keyed by a `<!-- oracle-provider-escalation:<chain> -->` marker, carrying
-  a `🚦 DECISION NEEDED` body a maintainer resolves with `/decide`. Every later
-  PR points at that one issue and does **not** re-red — the Oracle stays
-  advisory, so this warns rather than fails.
+  missing. CI cannot fix it, so it is raised through the HITL `needs-decision`
+  gate (`docs/decision-gate.md`) by the **shared, reason-keyed** escalation
+  (`model_registry escalate` — the same tested rule `.github/actions/
+  provider-triage` runs, issue #550): one open issue per classified cause,
+  whose body carries a `<!-- provider-escalation:<reason> -->` marker and a
+  `🚦 DECISION NEEDED` a maintainer resolves with `/decide`, and which every
+  chain exhausting with that reason — the Oracle's included — joins with a
+  detail line rather than a duplicate issue, so one `/decide` resolves the
+  set. Every later PR points at that one issue and does **not** re-red — the
+  Oracle stays advisory, so this warns rather than fails.
 - **`dead`** — a model id the key genuinely cannot serve (#298): an in-repo
   registry defect, so it still reds loudly (fix `.github/models/registry.conf`).
 - **`transient`** / **`servable`** — a retryable outage, or a link that works so

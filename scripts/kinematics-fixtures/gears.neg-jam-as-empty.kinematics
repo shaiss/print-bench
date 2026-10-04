@@ -1,0 +1,6 @@
+# Negative control (selftest: must FAIL): the jamming pair declared as `empty`.
+# The gate must report interference at the first phase it renders.
+steps 4
+sweep kin_phase
+empty mesh-jam
+empty-control mesh-jam

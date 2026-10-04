@@ -2,9 +2,9 @@
 
 The policy tests in ``test_select.py`` cover the pure selector; these cover the
 I/O contract around it — pagination, the fail-loud page cap, and the snapshot
-normalisation (dropping PRs from the issues list, keeping only SHIP-LOCK
-comments). ``_get`` is the single network seam, so every test here monkeypatches
-it and no request leaves the process.
+normalisation (dropping PRs from the issues list, keeping whole comment
+threads: body, createdAt, authorType). ``_get`` is the single network seam, so
+every test here monkeypatches it and no request leaves the process.
 """
 
 from __future__ import annotations
@@ -91,8 +91,13 @@ def test_gather_snapshot_normalizes_and_filters(monkeypatch):
         },
     ]
     comments_payload = [
-        {"body": "🚢 SHIP-LOCK — claimed", "created_at": "2026-08-04T00:00:00Z"},
-        {"body": "just a normal comment", "created_at": "2026-08-05T00:00:00Z"},
+        {"body": "🚢 SHIP-LOCK — claimed", "created_at": "2026-08-04T00:00:00Z",
+         "user": {"login": "bot-pat", "type": "User"}},
+        {"body": "just a normal comment", "created_at": "2026-08-05T00:00:00Z",
+         "user": {"login": "owner", "type": "User"}},
+        {"body": "status update from a workflow", "created_at": "2026-08-06T00:00:00Z",
+         "user": {"login": "github-actions[bot]", "type": "Bot"}},
+        {"body": "author deleted", "created_at": "2026-08-07T00:00:00Z"},
     ]
     pulls_payload = [
         {"number": 20, "head": {"ref": "claude/issue-5-x"}, "body": "Closes #5"},
@@ -120,14 +125,25 @@ def test_gather_snapshot_normalizes_and_filters(monkeypatch):
     issue5 = snap["issues"][0]
     assert issue5["labels"] == ["autonomy-ok", "enhancement"]
     assert issue5["createdAt"] == "2026-08-01T00:00:00Z"
-    # Only the SHIP-LOCK comment is kept, normalised to body/createdAt — the
-    # timestamp matters, it is what stale-lock handling dates.
-    assert issue5["shipLockComments"] == [
-        {"body": "🚢 SHIP-LOCK — claimed", "createdAt": "2026-08-04T00:00:00Z"},
+    # The whole thread is kept, normalised to body/createdAt/authorType — no
+    # marker filtering here, because which prefixes mean a lock, a decline or
+    # a machine post is policy and lives in select.py behind its tests. The
+    # timestamps date stale locks and decline cooldowns; the author type is
+    # the marker-free leg of the run-vs-owner test (a deleted author types
+    # as "", which policy reads as a human).
+    assert issue5["comments"] == [
+        {"body": "🚢 SHIP-LOCK — claimed", "createdAt": "2026-08-04T00:00:00Z",
+         "authorType": "User"},
+        {"body": "just a normal comment", "createdAt": "2026-08-05T00:00:00Z",
+         "authorType": "User"},
+        {"body": "status update from a workflow", "createdAt": "2026-08-06T00:00:00Z",
+         "authorType": "Bot"},
+        {"body": "author deleted", "createdAt": "2026-08-07T00:00:00Z",
+         "authorType": ""},
     ]
-    # A comment-free issue gets an empty lock list — and, the guard that keeps
+    # A comment-free issue gets an empty thread — and, the guard that keeps
     # gather cheap, no comment request is made for it at all.
-    assert snap["issues"][1]["shipLockComments"] == []
+    assert snap["issues"][1]["comments"] == []
     assert not any("/issues/7/comments" in url for url in calls)
     # PRs normalised to number/headRefName/body.
     assert snap["openPRs"] == [{"number": 20, "headRefName": "claude/issue-5-x", "body": "Closes #5"}]

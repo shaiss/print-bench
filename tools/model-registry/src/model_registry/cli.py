@@ -6,6 +6,8 @@
     model-registry show                  # human summary of providers/models/chains
     model-registry smoke <chain>         # live 1-token ping of each configured link
     model-registry classify <chain>      # diagnose an exhausted chain -> one class
+    model-registry escalate <chain> --reason <r> --context <label> --repo <owner/name>
+                                         # raise/join the reason-keyed HITL issue
     model-registry shape <chain> --head <provider> --layout p1,p2,…
                                          # does the chain fit a workflow's walk?
 
@@ -30,6 +32,7 @@ import sys
 from dataclasses import asdict
 from typing import Optional
 
+from . import escalation as escalation_mod
 from . import registry as reg_mod
 from . import smoke as smoke_mod
 from .registry import Registry
@@ -144,12 +147,15 @@ def cmd_classify(args: argparse.Namespace) -> int:
     request, prints the per-link report plus the REASON/CLASS lines to stdout, and
     — when a sink is available — appends `class=<token>` and `reason=<token>` to
     $GITHUB_OUTPUT (the same key=value shape `resolve` uses) so a workflow step
-    reads both without a JSON parse. Exit 0 regardless: the class/reason ARE the
-    signal, not the exit code (a malformed registry or unknown chain still errors
-    via main()).
+    reads both without a JSON parse. When a quota-exhaustion body named its reset
+    time (Z.AI's 1310 "Your limit will reset at <ts>", Anthropic's usage-cap "You
+    will regain access on <date>" — issue #545), a `RESET` line prints and
+    `reset=<timestamp>` is appended too, so the escalation can say *when* the
+    chain comes back. Exit 0 regardless: the class/reason ARE the signal, not the
+    exit code (a malformed registry or unknown chain still errors via main()).
     """
     reg = _load(args)
-    lines, klass, reason = smoke_mod.diagnose_chain(reg, args.chain, os.environ)
+    lines, klass, reason, reset = smoke_mod.diagnose_chain(reg, args.chain, os.environ)
     for line in lines:
         print(line)
     gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
@@ -157,7 +163,33 @@ def cmd_classify(args: argparse.Namespace) -> int:
         with open(gh_output, "a", encoding="utf-8") as fh:
             fh.write(f"class={klass}\n")
             fh.write(f"reason={reason}\n")
+            if reset:
+                fh.write(f"reset={reset}\n")
     return 0
+
+
+def cmd_escalate(args: argparse.Namespace) -> int:
+    """`escalate <chain> --reason R --context L --repo o/n`: raise or join the
+    shared, reason-keyed HITL escalation (issue #550).
+
+    The write half of `classify`: on a needs-human reason this reuses any OPEN
+    `provider-escalation:*` issue whose reason matches — appending the chain's
+    detail line, never a duplicate issue — or files exactly one, carrying the
+    reason-tailored remediation and a decision id shared by every chain on the
+    issue so one `/decide` resolves the set. Advisory on every decided outcome
+    (a `::warning::`, exit 0); exit 1 only on a guard firing or the GitHub API
+    refusing, which are defects rather than outages. The token is read from
+    the env var `--token-env` names (never a value on the command line).
+    """
+    reg = _load(args)
+    token = os.environ.get(args.token_env, "")
+    if not token:
+        print(f"::error::no token in ${args.token_env} — cannot escalate "
+              f"{args.chain}; pass the workflow token via that env var")
+        return 1
+    return escalation_mod.run_escalation(
+        reg, args.chain, args.reason, args.context, args.repo, token,
+        reset=getattr(args, "reset", "") or "")
 
 
 def cmd_shape(args: argparse.Namespace) -> int:
@@ -226,8 +258,32 @@ def build_parser() -> argparse.ArgumentParser:
     p_classify.add_argument("chain", help="the chain id to classify")
     p_classify.add_argument(
         "--gh-output",
-        help="path to append `class=<token>` and `reason=<token>` (defaults to $GITHUB_OUTPUT)")
+        help="path to append `class=<token>` and `reason=<token>` (plus `reset=<ts>` "
+             "when a quota body named one; defaults to $GITHUB_OUTPUT)")
     p_classify.set_defaults(func=cmd_classify)
+
+    p_escalate = sub.add_parser(
+        "escalate",
+        help="raise/join the shared reason-keyed HITL issue for an exhausted "
+             "chain (issue #550)")
+    p_escalate.add_argument("chain", help="the chain id that exhausted")
+    p_escalate.add_argument(
+        "--reason", required=True,
+        help="the classifier's finer cause (billing / quota / auth / no-key — "
+             "the needs-human reasons)")
+    p_escalate.add_argument(
+        "--context", required=True,
+        help="human label for what failed, woven into the issue's detail line")
+    p_escalate.add_argument(
+        "--repo", required=True, help="owner/name of the repository")
+    p_escalate.add_argument(
+        "--token-env", default="GITHUB_TOKEN",
+        help="env var holding the issues:write token (the NAME, never the value)")
+    p_escalate.add_argument(
+        "--reset", default="",
+        help="quota reset timestamp classify extracted (issue #545); woven into "
+             "a freshly filed escalation body when non-empty")
+    p_escalate.set_defaults(func=cmd_escalate)
 
     p_shape = sub.add_parser(
         "shape",

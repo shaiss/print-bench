@@ -310,6 +310,76 @@ the dwell claim stays an engineering assumption until a shelf-months
 FIELD-TEST entry speaks. Expected worst case if it is wrong: the lean eases
 a degree or two, cosmetically, and the flap re-seats on the next fold.
 
+## B4 — planned second print (reprint protocol)
+
+**Protocol only — not a FIELD-TEST entry.** Hold geometry until the print
+speaks. The Field test log below stays real prints only (newest at bottom).
+
+**Context.** The v0.2/v0.3 fixes (hinge: rigid tongue, no residual living
+hinge; `tog_beam_t` 1.3; shine: constant-width dot; greeting: auto-shorten
+when named; `xy_tol` 0.21) are diagnosis-validated from the 2026-08-22 v0.1
+field print but **not yet reprint-validated**. B4 exists to close that.
+
+**Print from.** Current `main` (v0.3 / post-PR #351). PLA, 0.20 mm layers,
+0.4 nozzle, stock-ish profile. Seam Back or scarf. **Coupon first**
+(`pop-fidget-card-coupon.scad`), then the full card only after the coupon
+gate below.
+
+### Phase 1 — coupon checks
+
+Each check maps to a v0.1 failure. Run in order.
+
+| # | Check | v0.1 failure | PASS | FAIL |
+|---|---|---|---|---|
+| C1 | Hinge fold | living hinge crack | tongue rigid; fold is pin only; no crack (first fold may be firm, then frees) | crack / tear / flexure at tongue |
+| C2 | Button snap (5–10×) | stiff PLA at 1.5 | crisp two-state click | mushy / single-stable, **or** still too stiff |
+| C3 | Shine (rotor + bead) | crescent sliced away | constant-width dot visible | missing / collapsed |
+| C4 | Spinner @ `xy_tol` 0.21 | 0.20 slightly tight | frees cleanly; spins without rattle | fused / stiff, **or** rattly |
+| C5 | Slider control | was perfect at 0.25 | glides after shear | fused / binds / falls out (unexpected → **stop**) |
+
+**Coupon gate.** C1–C3 must PASS before printing the full card. C4 FAIL →
+retune on the coupon before the card. C5 FAIL → stop; reopen the slider
+(unexpected at 0.25).
+
+### Phase 2 — full card
+
+Mirror the coupon on full geometry:
+
+| # | Check | Notes |
+|---|---|---|
+| K1 | Hinge fold | same pass/fail as C1 |
+| K2 | Button snap | same as C2 |
+| K3 | Shine | same as C3 |
+| K4 | Spinner @ 0.21 | same as C4 |
+| K5 | Named greeting (optional) | local `-D card_name=...` only — **never commit a real name**; empty default is enough for mechanism proof |
+
+### Pass / fail for the product
+
+- **B4 PASS** — coupon C1–C5 + card K1–K4 (and K5 if run). Append a real
+  FIELD-TEST entry below; then the PM can check B4.
+- **B4 FAIL** — any of C1–C3 or K1–K3. Do **not** promote clearances;
+  reopen the matching mechanism.
+- **B4 PARTIAL** — mechanisms pass but C4/K4 wants a different `xy_tol` —
+  clearance path only (see below).
+
+### `xy_tol` 0.21 → `printer.conf` vs reopen N5
+
+- **Agrees** (free, not rattly) **and** a second agreeing data point →
+  promote as a *candidate* for `printer_xy_tol = 0.21` (or keep
+  design-local). The design default can stay 0.21 either way.
+- **Still tight** → reopen N5; bump design `xy_tol` on coupon evidence; do
+  **not** promote 0.21.
+- **Rattly / loose** → reopen N5 downward; try 0.20 on the coupon before
+  touching `printer.conf`.
+- **Single printer family only** → prefer design-local until a second
+  machine or a coupon sweep.
+
+**Rule:** promote to `printer.conf` only on two agreeing measured points
+(or a coupon sweep). One disagreeing coupon point reopens N5.
+
+**Privacy.** No child's name in any committed file (N3). A named check is
+local `-D` only.
+
 ## Field test log
 
 _Real prints of this design, newest at the bottom. See templates/FIELD-TEST.md

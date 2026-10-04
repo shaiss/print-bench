@@ -20,12 +20,35 @@
 #   designs/<name>/<name>-coupon.scad  "print this first" coupon wrapper;
 #                                  rendered as build/<name>-coupon.stl and
 #                                  gated like any other part
+#   designs/<name>/<name>-*-coupon.scad  additional coupon wrappers (e.g.
+#                                  <name>-nest-coupon.scad, <name>-bore-coupon.scad);
+#                                  each rendered as build/<basename>.stl and
+#                                  gated the same way — so a second print-this-
+#                                  first file cannot ship broken while only a
+#                                  ci.parts -D path stays green
 #   designs/<name>/ci.fitchecks    boolean fit checks between the design's
 #                                  parts: `<part> empty` must render zero
 #                                  facets, `<part> interferes` is the
 #                                  mandatory negative control that must not
 #                                  (proves the check can fail). Never
 #                                  printchecked or sliced
+#   designs/<name>/ci.kinematics   SWEPT fit checks (issue #607): the same
+#                                  boolean parts rendered at every step of a
+#                                  parameter sweep or at every declared
+#                                  landing stop — `empty`/`nonempty` must
+#                                  hold at every step, `empty-control`/
+#                                  `nonempty-control` must break at some
+#                                  step. Format and selftest:
+#                                  scripts/kinematics-check.sh
+#   designs/<name>/ci.cog          CoG / tip-over stability manifest (format:
+#                                  tools/cogcheck): per-part densities,
+#                                  non-printed masses, assembly transforms and
+#                                  a required stability margin, checked
+#                                  against the gate's rendered STLs. A TIP
+#                                  RISK is a WARN (fusecheck precedent); a
+#                                  broken manifest, an unmeasurable mesh, or a
+#                                  manifest part this run never rendered is a
+#                                  FAIL
 #   designs/<name>/derives.conf    lineage of a derivative design: the
 #                                  parent(s) it includes, the parent parts it
 #                                  claims to replace, and any diamond-ok:
@@ -68,6 +91,15 @@ read -ra OSC_ARGS <<<"${OPENSCAD_ARGS:-}"
 # reason to believe derivative_gate below can still fire.
 # shellcheck source=scripts/lineage.sh
 source scripts/lineage.sh
+
+# Sourced for the same reason: the fusecheck runner is
+# scripts/fusecheck-check.sh's fusecheck_gate (called per design below), and
+# that script's --selftest exercises the very function sourced here over
+# committed fixtures — an inline copy would let the seam and its test drift
+# while every check stays green (issue #627). Sourced AFTER lineage.sh, whose
+# lineage_render_binstl the control render needs.
+# shellcheck source=scripts/fusecheck-check.sh
+source scripts/fusecheck-check.sh
 
 fail=0
 
@@ -358,13 +390,17 @@ gate_one() {
     fi
   fi
 
-  # "Print this first" coupon wrapper (repo convention, see CLAUDE.md): a
-  # ≤10-line include-and-override wrapper on the production modules. It is
-  # the first STL a user prints, so it gets the same printcheck + test-slice
-  # treatment as the parts it stands in for.
-  local coupon="designs/${name}/${name}-coupon.scad"
+  # "Print this first" coupon wrappers (repo convention, see CLAUDE.md): a
+  # ≤10-line include-and-override on the production modules. The canonical
+  # <name>-coupon.scad is the hinge/fit tuner; additional <name>-*-coupon.scad
+  # files (nest seat, bore slip, …) are first-class print-this-first wrappers
+  # too and must be gated as files — a ci.parts -D path alone would leave a
+  # broken wrapper shipping green. Each wrapper is the first STL a user opens
+  # for that fit, so it gets the same printcheck + test-slice treatment.
+  local coupon coupon_stl coupon_base already
+  coupon="designs/${name}/${name}-coupon.scad"
   if [[ -f "$coupon" ]]; then
-    local coupon_stl="build/${name}-coupon.stl"
+    coupon_stl="build/${name}-coupon.stl"
     echo "== ${name} (coupon): render =="
     if ! xvfb-run -a "$OPENSCAD_BIN" ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
         -o "$coupon_stl" "$coupon"; then
@@ -374,6 +410,32 @@ gate_one() {
       stls+=("$coupon_stl")
     fi
   fi
+  # Secondary coupons: <name>-<role>-coupon.scad (does not match the canonical
+  # <name>-coupon.scad above). Basename is the STL stem so nest-coupon and
+  # bore-coupon land next to their ci.parts peers when both exist; if ci.parts
+  # already queued the same path, re-render from the WRAPPER (overwrites) and
+  # do not double-enqueue — printcheck then judges the file the user opens.
+  shopt -s nullglob
+  for coupon in designs/${name}/${name}-*-coupon.scad; do
+    shopt -u nullglob
+    coupon_base="$(basename "$coupon" .scad)"
+    coupon_stl="build/${coupon_base}.stl"
+    echo "== ${name} (coupon ${coupon_base}): render =="
+    if ! xvfb-run -a "$OPENSCAD_BIN" ${OSC_ARGS[@]+"${OSC_ARGS[@]}"} \
+        -o "$coupon_stl" "$coupon"; then
+      echo "FAIL  ${name} (coupon ${coupon_base}): render failed"
+      fail=1
+      continue
+    fi
+    already=0
+    for s in ${stls[@]+"${stls[@]}"}; do
+      if [[ "$s" == "$coupon_stl" ]]; then already=1; break; fi
+    done
+    if [[ "$already" -eq 0 ]]; then
+      stls+=("$coupon_stl")
+    fi
+  done
+  shopt -u nullglob
 
   # Boolean fit checks (designs/<name>/ci.fitchecks): each line names a part
   # value that renders a boolean between the design's other parts, plus the
@@ -451,6 +513,24 @@ gate_one() {
     fi
   fi
 
+  # Swept kinematics checks (designs/<name>/ci.kinematics, issue #607): the
+  # fitcheck idea over a parameter sweep. A gear pair that clears at one phase
+  # can jam at another, and an indexed shell that lands flat at stop 0 can
+  # roll at stop 3, so each boolean part is rendered at every step of a sweep
+  # (`sweep <param>` over [0,1)) or at every declared landing stop (`stops
+  # <param> <v1,...>`): `empty`/`nonempty` must hold at EVERY step, and the
+  # mandatory `empty-control`/`nonempty-control` must break at SOME step, or
+  # the checks are unfalsifiable. Parser, sweep and the fixture-backed
+  # --selftest live in scripts/kinematics-check.sh (run by check.sh); this
+  # block only hands it the design's source and manifest. Never printchecked
+  # or sliced, like fitchecks. A design without the manifest is untouched.
+  if [[ -f "designs/${name}/ci.kinematics" ]]; then
+    echo "== ${name}: kinematics (designs/${name}/ci.kinematics) =="
+    if ! ./scripts/kinematics-check.sh "$src" "designs/${name}/ci.kinematics" "$name"; then
+      fail=1
+    fi
+  fi
+
   local args=()
   if [[ -f "designs/${name}/printcheck.args" ]]; then
     # Word-splitting the flag file is intended; `|| true` keeps set -e from
@@ -469,139 +549,14 @@ gate_one() {
     fi
   done
 
-  # Deterministic fuse check (designs/<name>/ci.fusecheck). A print-in-place
-  # mechanism that welds shut still exports watertight and — for a living hinge —
-  # as ONE connected body, so printcheck cannot see it; and a hand-written
-  # interference fitcheck only sees the pose its author intersects, which can be
-  # the wrong one (the first sweetheart-hamster shipped a fitcheck that tested
-  # the CLOSED pose while CI sliced the FLAT pose, and missed a 1378-facet weld
-  # at the hinge). fusecheck answers the un-mis-aimable question on the SLICED
-  # STL, never a -D pose: remove the declared thin-flexure zone(s) and count the
-  # separable bodies that remain — a living hinge that joins the halves only
-  # through its flexure splits into 2, a large-area weld stays 1. Manifest lines
-  # (coordinates in printcheck's rested frame — lowest point at z=0):
-  #   flexure X0,Y0,Z0:X1,Y1,Z1     global, repeatable — faces whose centroid is
-  #                                 inside are dropped before counting
-  #   assert  <stl-basename> <min>  that sliced STL, minus the flexure zones,
-  #                                 must split into >= <min> bodies
-  #   control <part>         <max>  MANDATORY negative control: the KNOWN-FUSED
-  #                                 pose (-D part="<part>", a real dispatch
-  #                                 branch), same flexure zones, must stay <=<max>
-  # A detected fuse (assert bodies < min) is a STRONG WARN, not a hard fail — the
-  # reviewers (Jane/Drik) must consciously sign it off. A broken check is a hard
-  # FAIL: no assert or no control (issue #37 — a check that cannot fail is
-  # worthless), a malformed line, a control part with no dispatch branch, an
-  # assert STL the gate never rendered (a fuse check on an unsliced part proves
-  # nothing), or a control that no longer fuses (an over-large flexure AABB that
-  # would mask a real fuse also splits the fused control, and is caught here).
-  local fusef="designs/${name}/ci.fusecheck"
-  if [[ -f "$fusef" ]]; then
-    local uline ukey uarg1 uarg2 urest
-    local fz_args=() n_assert=0 n_control=0
-    # First pass: collect the global flexure zones (an assert may precede the
-    # flexure line that applies to it, so the zones must be gathered up front).
-    while IFS= read -r uline || [[ -n "$uline" ]]; do
-      uline="${uline%%#*}"
-      ukey="" uarg1="" urest=""
-      read -r ukey uarg1 urest <<<"$uline" || true
-      [[ -z "$ukey" ]] && continue
-      if [[ "$ukey" == "flexure" ]]; then
-        if [[ -z "$uarg1" || -n "$urest" ]]; then
-          echo "FAIL  fusecheck ${name}: malformed flexure line \"${uline}\" — expected 'flexure x0,y0,z0:x1,y1,z1'"
-          fail=1
-          continue
-        fi
-        fz_args+=("--ignore-aabb=${uarg1}")
-      fi
-    done < "$fusef"
-    # Second pass: run the asserts and controls, applying the collected zones.
-    while IFS= read -r uline || [[ -n "$uline" ]]; do
-      uline="${uline%%#*}"
-      ukey="" uarg1="" uarg2="" urest=""
-      read -r ukey uarg1 uarg2 urest <<<"$uline" || true
-      [[ -z "$ukey" ]] && continue
-      case "$ukey" in
-        flexure) : ;;   # gathered in the first pass
-        assert)
-          if [[ -z "$uarg1" || -z "$uarg2" || -n "$urest" \
-                || ! "$uarg2" =~ ^[0-9]+$ ]]; then
-            echo "FAIL  fusecheck ${name}: malformed assert line \"${uline}\" — expected 'assert <stl-basename> <min_bodies>'"
-            fail=1
-            continue
-          fi
-          n_assert=$((n_assert + 1))
-          local astl="build/${uarg1}" matched=0 s
-          for s in ${stls[@]+"${stls[@]}"}; do
-            if [[ "$s" == "$astl" ]]; then matched=1; break; fi
-          done
-          if [[ "$matched" -eq 0 ]]; then
-            echo "FAIL  fusecheck ${name}: assert names ${uarg1}, which the gate never rendered — a fuse check on an unsliced STL proves nothing"
-            fail=1
-            continue
-          fi
-          local ubodies
-          if ! ubodies="$(python3 -m printcheck.fusecheck "$astl" \
-                          ${fz_args[@]+"${fz_args[@]}"})"; then
-            echo "FAIL  fusecheck ${name}: fusecheck failed on ${astl}"
-            fail=1
-            continue
-          fi
-          if [[ "$ubodies" -ge "$uarg2" ]]; then
-            echo "ok    fusecheck ${name}: ${uarg1} splits into ${ubodies} bodies (>= ${uarg2}) once the flexure is removed — the mechanism separates"
-          else
-            echo "warn  fusecheck ${name}: ${uarg1} splits into only ${ubodies} body/bodies (< ${uarg2}) once the flexure is removed — likely FUSED; reviewer signoff required"
-          fi ;;
-        control)
-          if [[ -z "$uarg1" || -z "$uarg2" || -n "$urest" \
-                || ! "$uarg2" =~ ^[0-9]+$ ]]; then
-            echo "FAIL  fusecheck ${name}: malformed control line \"${uline}\" — expected 'control <part> <max_bodies>'"
-            fail=1
-            continue
-          fi
-          # The part must be a real DISPATCH selector, not merely a quoted
-          # string somewhere in the file — a part with no branch renders empty,
-          # counts 0 bodies, and would satisfy any <max> vacuously.
-          if ! [[ "$uarg1" =~ ^[A-Za-z0-9_-]+$ ]] \
-             || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${uarg1}\"" "$src"; then
-            echo "FAIL  fusecheck ${name}: no 'part == \"${uarg1}\"' dispatch branch in ${src} — a control with no branch renders empty and can never fuse"
-            fail=1
-            continue
-          fi
-          n_control=$((n_control + 1))
-          local cstl="build/${name}-${uarg1}.stl"
-          echo "== ${name} (fusecheck control=${uarg1}): render =="
-          if ! lineage_render_binstl "$src" "$cstl" -D "part=\"${uarg1}\""; then
-            echo "FAIL  fusecheck ${name}: control ${uarg1} render failed"
-            fail=1
-            continue
-          fi
-          local cbodies
-          if ! cbodies="$(python3 -m printcheck.fusecheck "$cstl" \
-                          ${fz_args[@]+"${fz_args[@]}"})"; then
-            echo "FAIL  fusecheck ${name}: fusecheck failed on control ${cstl}"
-            fail=1
-            continue
-          fi
-          if [[ "$cbodies" -le "$uarg2" ]]; then
-            echo "ok    fusecheck ${name}: control ${uarg1} stays ${cbodies} body/bodies (<= ${uarg2}) — the known-fused pose still reads fused, so the check can fire"
-          else
-            echo "FAIL  fusecheck ${name}: control ${uarg1} split into ${cbodies} bodies (> ${uarg2}) — the negative control no longer fuses (flexure AABB too large?); the fuse check is unfalsifiable"
-            fail=1
-          fi ;;
-        *)
-          echo "FAIL  fusecheck ${name}: unknown key \"${ukey}\" in \"${uline}\" — use flexure | assert | control"
-          fail=1 ;;
-      esac
-    done < "$fusef"
-    if [[ "$n_assert" -eq 0 ]]; then
-      echo "FAIL  fusecheck ${name}: ci.fusecheck names no 'assert' — a manifest that never checks a sliced part proves nothing about the fit it exists to gate"
-      fail=1
-    fi
-    if [[ "$n_control" -eq 0 ]]; then
-      echo "FAIL  fusecheck ${name}: ci.fusecheck carries no 'control' negative case — without a known-fused pose the fuse check is unfalsifiable"
-      fail=1
-    fi
-  fi
+  # Deterministic fuse check (designs/<name>/ci.fusecheck). The runner is
+  # scripts/fusecheck-check.sh, sourced at the top of this file — one parser,
+  # shared with the --selftest that drives the same function over committed
+  # fixtures so the seam cannot regress while every check stays green
+  # (issue #627). The manifest format, the exit-3/exit-4 verdict mapping and
+  # the hard-fail cases are documented there.
+  fusecheck_gate "$name" "$src" "designs/${name}/ci.fusecheck" \
+    ${stls[@]+"${stls[@]}"}
 
   # Multi-object 3MF plate (designs/<name>/ci.plate). A design whose parts print
   # SEPARATELY (a wall boss + a screw-on collar) has no single sliceable STL:
@@ -621,6 +576,56 @@ gate_one() {
       fi
     else
       echo "WARN  ${name}: ci.plate present but prusa-slicer not on PATH — plate 3MF check skipped"
+    fi
+  fi
+
+  # CoG / tip-over stability (designs/<name>/ci.cog, issue #623). Every gate
+  # above proves the part PRINTS; none of them proves the assembled object
+  # STANDS — two heavy spheres cantilevered high on thin stalks over a low
+  # airy truss slice beautifully, score 100/100, and tip over on a desk bump.
+  # tools/cogcheck measures the assembled object (per-part mass from the
+  # rendered mesh × the manifest's density, non-printed hardware as point
+  # masses, transforms into the standing frame) and compares the CoG's ground
+  # projection against the convex hull of the contact geometry. A TIP-RISK
+  # verdict is a WARN, not a fail — the fusecheck precedent: a tip risk is a
+  # design call to look at, not a gate failure. A broken manifest or
+  # unmeasurable mesh IS a fail (a check that cannot run is not a check), and
+  # so is a manifest naming an STL this run never rendered: a stale build/
+  # artifact from an earlier gate would put a CoG on geometry that did not
+  # ship, which is worse than no CoG at all.
+  if [[ -f "designs/${name}/ci.cog" ]]; then
+    local cogline cogkey cogval cogbad=0
+    while IFS= read -r cogline || [[ -n "$cogline" ]]; do
+      # Same grammar as tools/cogcheck conf.py: strip comments, split on the
+      # first ':', take the field before '|'. IFS whitespace would miss
+      # `part:base.stl` (no space) and `part : base.stl` (space before ':').
+      cogline="${cogline%%#*}"
+      cogline="${cogline#"${cogline%%[![:space:]]*}"}"
+      cogline="${cogline%"${cogline##*[![:space:]]}"}"
+      [[ "$cogline" == *:* ]] || continue
+      cogkey="${cogline%%:*}"
+      cogval="${cogline#*:}"
+      cogkey="${cogkey%"${cogkey##*[![:space:]]}"}"
+      cogkey="${cogkey#"${cogkey%%[![:space:]]*}"}"
+      [[ "$cogkey" == "part" ]] || continue
+      cogval="${cogval%%|*}"
+      cogval="${cogval#"${cogval%%[![:space:]]*}"}"
+      cogval="${cogval%"${cogval##*[![:space:]]}"}"
+      [[ -n "$cogval" ]] || continue
+      local cogstl="build/${cogval}" matched=0 s
+      for s in ${stls[@]+"${stls[@]}"}; do
+        if [[ "$s" == "$cogstl" ]]; then matched=1; break; fi
+      done
+      if [[ "$matched" -eq 0 ]]; then
+        echo "FAIL  cogcheck ${name}: manifest names ${cogval}, which the gate never rendered — a CoG on a stale mesh proves nothing"
+        fail=1
+        cogbad=1
+      fi
+    done < "designs/${name}/ci.cog"
+    if [[ "$cogbad" -eq 0 ]]; then
+      if ! "$(dirname "$0")/cog-check.sh" "$name"; then
+        fail=1
+      fi
     fi
   fi
 
