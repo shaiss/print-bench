@@ -374,8 +374,10 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     `pin_socket` 51.3 × 5.0 × 8.5) **does not pass the lid-on notch**: 8 >
     6.0 at the lip, and even the empty wall is only 0.5 mm over 8 mm. Two
     Ø1.6 28 AWG silicone fan leads still thread the notch (`fit-gpio-leads`
-    empty) when the housing is not in it; leftover width beside a centred
-    51 mm envelope is 4 mm (2 mm/side), which is not the bound. Proof:
+    empty) when the housing is not in it — through the **+X** leftover
+    strip; the −X leftover kisses the −X,+Y lid-screw post. Leftover width
+    beside a centred 51 mm envelope is 4 mm (2 mm/side), which is not the
+    bound. Proof:
     `fit-gpio-occupied` (envelope + leads ∩ lid-on shell) interferes;
     `fit-gpio-leads` empty. The notch cut is unchanged — widening it (and/or
     notching the lid lip) is a follow-up needing PM/eng, not a silent reshape.
