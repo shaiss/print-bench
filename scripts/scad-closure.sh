@@ -13,7 +13,9 @@
 #     # throwaway trees: a branch in an included parent counts, two include
 #     # hops count, a branch nowhere in the closure is refused, a `use` of a
 #     # file that carries the branch does not count, a commented include
-#     # does not count, a cyclic include terminates. Run by check.sh.
+#     # does not count, an echo("include <...>") string is not walked, a
+#     # commented-out `part ==` selector (entry or included parent) is
+#     # refused, a cyclic include terminates. Run by check.sh.
 #
 # WHY NOT catalog.sh's walker: catalog.sh's includes_coupling (issue #517)
 # walks include AND use, because a NUGGS module can `use <nuggs-coupling.scad>`
@@ -55,9 +57,35 @@ closure_strip_comments() {
   ' "$1"
 }
 
+# Blank "..." string literals (line-oriented, like the comment strip).
+# Used only for include-target extraction: an echo("include <x>") is not
+# an include. NOT used for the part== matcher — that selector is itself a
+# quoted string. OpenSCAD strings are double-quoted.
+closure_blank_strings() {
+  awk '
+    {
+      line = $0; out = ""; i = 1; n = length(line); inq = 0
+      while (i <= n) {
+        c = substr(line, i, 1)
+        if (inq) {
+          if (c == "\\" && i < n) { out = out "  "; i += 2; continue }
+          if (c == "\"") { inq = 0; out = out " "; i++; continue }
+          out = out " "; i++; continue
+        }
+        if (c == "\"") { inq = 1; out = out " "; i++; continue }
+        out = out c; i++
+      }
+      print out
+    }
+  '
+}
+
 # Live `include <...>` targets only. `use` is a leaf of this walk (see header).
+# Comments and string literals are stripped first so a commented include or
+# an echo("include <x>") cannot add a file to the traversal.
 closure_include_targets() {
   closure_strip_comments "$1" \
+    | closure_blank_strings \
     | grep -oE 'include[[:space:]]*<[^>]+>' \
     | sed -E 's/^include[[:space:]]*<//; s/>$//' \
     || true
@@ -118,14 +146,18 @@ closure_files() {
 }
 
 # The matcher gate.sh used on the entry file: a real DISPATCH selector, not
-# merely a quoted string anywhere. Scan every file in the include closure.
+# merely a quoted string anywhere. Scan every file in the include closure
+# with comments stripped (kinematics-check.sh's kin_strip_comments move), so
+# a `// if (part == "clear")` in a parent header cannot satisfy an empty
+# fitcheck.
 closure_part_branch() { # <entry.scad> <part>
   local entry="$1" part="$2" f
   [[ "$part" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
   [[ -f "$entry" ]] || return 1
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
-    if grep -Eq "part[[:space:]]*==[[:space:]]*\"${part}\"" "$f"; then
+    if closure_strip_comments "$f" \
+         | grep -Eq "part[[:space:]]*==[[:space:]]*\"${part}\""; then
       return 0
     fi
   done < <(closure_files "$entry")
@@ -140,7 +172,8 @@ closure_selftest() {
   CLOSURE_ROOT="$tmp"
   mkdir -p "$tmp/designs/gp" "$tmp/designs/p" "$tmp/designs/c" \
            "$tmp/designs/plain" "$tmp/designs/useonly" "$tmp/designs/commented" \
-           "$tmp/designs/cycA" "$tmp/designs/cycB"
+           "$tmp/designs/cycA" "$tmp/designs/cycB" \
+           "$tmp/designs/echoed" "$tmp/designs/commented-branch"
 
   printf '%s\n' \
     'part = "assembled";' \
@@ -156,6 +189,10 @@ closure_selftest() {
   printf 'include <../cycB/cycB.scad>\n' >"$tmp/designs/cycA/cycA.scad"
   printf 'include <../cycA/cycA.scad>\nif (part == "fused") cube(1);\n' \
     >"$tmp/designs/cycB/cycB.scad"
+  printf 'echo("include <../gp/gp.scad>");\ncube(1);\n' \
+    >"$tmp/designs/echoed/echoed.scad"
+  printf '// if (part == "fused") cube(1);\ncube(1);\n' \
+    >"$tmp/designs/commented-branch/commented-branch.scad"
 
   ok() { echo "ok    scad-closure selftest: $1"; }
   bad() {
@@ -209,6 +246,28 @@ closure_selftest() {
     ok "a cyclic include terminates and still finds the branch"
   else
     bad "a cyclic include hung or missed the branch"
+  fi
+
+  if closure_part_branch "$tmp/designs/echoed/echoed.scad" fused; then
+    bad "an echo() string that looks like include <parent> was walked"
+  else
+    ok "an echo() string containing include <...> is not walked"
+  fi
+
+  if closure_part_branch "$tmp/designs/commented-branch/commented-branch.scad" fused; then
+    bad "a commented-out part == selector was accepted as dispatch"
+  else
+    ok "a commented-out part == selector is refused"
+  fi
+
+  # The commented selector in an INCLUDED parent (the surface this proof
+  # actually expanded) must also refuse — not only when it sits in the entry.
+  printf 'include <../commented-branch/commented-branch.scad>\n' \
+    >"$tmp/designs/p/via-commented.scad"
+  if closure_part_branch "$tmp/designs/p/via-commented.scad" fused; then
+    bad "a commented selector in an included parent was accepted"
+  else
+    ok "a commented selector in an included parent is refused"
   fi
 
   # Wiring pin: the two proofs this helper exists to serve still call it.
