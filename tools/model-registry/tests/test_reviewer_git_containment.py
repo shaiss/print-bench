@@ -291,6 +291,9 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     assert "${{" not in ready_run, (
         "auto-review.yml [design-coach] ready step interpolates an "
         "expression into its script")
+    assert 'echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"' in ready_run, (
+        "auto-review.yml [design-coach] ready step does not record "
+        "started_at — the lock-check cannot bound the pin to this run")
     assert 'fetch --no-tags origin "$BASE_SHA"' in ready_run, (
         "auto-review.yml [design-coach] ready step does not fetch the base "
         "SHA when it is not already local")

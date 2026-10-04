@@ -12,7 +12,7 @@
 # bytes into its caller body (those jobs share `github-actions[bot]`), or a
 # COACH-LOCK left by an earlier coach run does not count.
 #
-# Live: ./scripts/coach-lock-check.sh <pr-number> [--since <ISO8601>]
+# Live: ./scripts/coach-lock-check.sh <pr-number> --since <ISO8601>
 # Offline: ./scripts/coach-lock-check.sh --selftest
 set -euo pipefail
 
@@ -212,7 +212,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --since)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
-        echo "usage: $0 <pr-number> [--since <ISO8601>] | --selftest" >&2
+        echo "usage: $0 <pr-number> --since <ISO8601> | --selftest" >&2
         exit 2
       fi
       since="$2"
@@ -221,18 +221,18 @@ while [[ $# -gt 0 ]]; do
     --since=*)
       since="${1#--since=}"
       if [[ -z "$since" ]]; then
-        echo "usage: $0 <pr-number> [--since <ISO8601>] | --selftest" >&2
+        echo "usage: $0 <pr-number> --since <ISO8601> | --selftest" >&2
         exit 2
       fi
       shift
       ;;
     -*)
-      echo "usage: $0 <pr-number> [--since <ISO8601>] | --selftest" >&2
+      echo "usage: $0 <pr-number> --since <ISO8601> | --selftest" >&2
       exit 2
       ;;
     *)
       if [[ -n "$pr" ]]; then
-        echo "usage: $0 <pr-number> [--since <ISO8601>] | --selftest" >&2
+        echo "usage: $0 <pr-number> --since <ISO8601> | --selftest" >&2
         exit 2
       fi
       pr="$1"
@@ -242,19 +242,24 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! [[ "$pr" =~ ^[1-9][0-9]*$ ]]; then
-  echo "usage: $0 <pr-number> [--since <ISO8601>] | --selftest" >&2
+  echo "usage: $0 <pr-number> --since <ISO8601> | --selftest" >&2
   exit 2
 fi
 
-if [[ -n "$since" ]]; then
-  # ISO-8601 UTC to the second (YYYY-MM-DDTHH:MM:SSZ) — lexical compare
-  # matches chronological order for this fixed-width form.
-  if ! [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
-    echo "FAIL  coach-lock-check: --since must be UTC ISO8601 to the second (YYYY-MM-DDTHH:MM:SSZ); got ${since}" >&2
-    exit 2
-  fi
-  export COACH_LOCK_SINCE="$since"
+if [[ -z "$since" ]]; then
+  since="${COACH_LOCK_SINCE:-}"
 fi
+if [[ -z "$since" ]]; then
+  echo "FAIL  coach-lock-check: --since <ISO8601> (or COACH_LOCK_SINCE) is required so a lock from an earlier run cannot stamp this round" >&2
+  exit 2
+fi
+# ISO-8601 UTC to the second (YYYY-MM-DDTHH:MM:SSZ) — lexical compare
+# matches chronological order for this fixed-width form.
+if ! [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+  echo "FAIL  coach-lock-check: --since must be UTC ISO8601 to the second (YYYY-MM-DDTHH:MM:SSZ); got ${since}" >&2
+  exit 2
+fi
+export COACH_LOCK_SINCE="$since"
 
 repo="${GITHUB_REPOSITORY:-}"
 if [[ -z "$repo" ]]; then
@@ -262,9 +267,10 @@ if [[ -z "$repo" ]]; then
   exit 2
 fi
 
-# --paginate without --slurp emits one JSON array per page, concatenated.
-# load_comments() accepts that shape and the --slurp shape.
-json="$(gh api --paginate "repos/${repo}/issues/${pr}/comments?per_page=100")"
+# --paginate --slurp wraps each page in an outer array so multi-page
+# threads parse as one JSON document. load_comments() also accepts the
+# concatenated (no --slurp) shape as a belt-and-braces.
+json="$(gh api --paginate --slurp "repos/${repo}/issues/${pr}/comments?per_page=100")"
 if comments_carry_lock <<<"$json"; then
   if [[ -n "${COACH_LOCK_SINCE:-}" ]]; then
     echo "ok    PR #${pr} carries a trusted COACH-LOCK from this run (since ${COACH_LOCK_SINCE})"
