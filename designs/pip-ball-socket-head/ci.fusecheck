@@ -8,10 +8,10 @@
 # reads as fewer bodies and is a STRONG WARN for reviewer signoff.
 assert pip-ball-socket-head-head.stl 2
 
-# The coupon's bodies: four cells, each a socket ring + its free ball
+# The coupon's bodies: four joint cells, each a socket ring + its free ball
 # (the collar cell's slit does not divide the ring — below the slit start the
-# ring is solid) = 2 each.
-assert pip-ball-socket-head-coupon.stl 8
+# ring is solid) = 2 each, plus the ¼″-20 stub pad as a ninth body.
+assert pip-ball-socket-head-coupon.stl 9
 
 # Mandatory negative control: part="fused" drives a grown ball into the
 # socket, welding the head into one solid. It must STAY one body — proving

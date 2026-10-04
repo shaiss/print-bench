@@ -265,8 +265,13 @@ module socket_body(clear = ball_xy_clear, collar = true, dome = true) {
         // hex nut pocket for the M4 head-to-base bolt, opening DOWN at the
         // bed — printed as a first-layer hex ring, zero overhang. M4 nut:
         // 7.0 across flats; a $fn=6 cylinder of d gives across-corners d, so
-        // d = 7.4 / cos(30) ≈ 8.55.
+        // d = 7.4 / cos(30) ≈ 8.55. The 0.5 mm 45° lead-in at the mouth is
+        // the same courtesy `base()` gives its tenon recess: first-layer
+        // squish otherwise pinches the opening ~0.1–0.2 mm per side and the
+        // nut will not seat flat (Jane R2).
         translate([0, 0, -0.01]) cylinder(d = 8.55, h = 4.01, $fn = 6);
+        translate([0, 0, -0.01])
+            cylinder(d1 = 8.55 + 1.0, d2 = 8.55, h = 0.51, $fn = 6);
     }
 }
 
@@ -316,10 +321,12 @@ module pose(a) {
 }
 
 // The fit coupon (part="coupon"): three capture cells sweeping the clearance
-// (0.15 / 0.20 / 0.25 — production = 0.20) plus the slit-collar station. Each
-// cell is the production cavity, open-topped: it tests the break-in fusion at
-// the cup floor, the capture-cone clearance and the rim fit by feel — the
-// dome/aperture sweep is CI's fitcheck_tilt's job, not a thumb's.
+// (0.15 / 0.20 / 0.25 — production = 0.20) plus the slit-collar station plus
+// a short ¼″-20 stub. Each cell is the production cavity, open-topped: it
+// tests the break-in fusion at the cup floor, the capture-cone clearance and
+// the rim fit by feel — the dome/aperture sweep is CI's fitcheck_tilt's job,
+// not a thumb's. The stub is the payload interface a camera body has to
+// accept, so a rejected thread is not a multi-hour head reprint (Jane R2).
 module coupon() {
     clears = [0.15, 0.20, 0.25];
     pitch = 2 * (ball_d/2 + 0.25 + wall) + 8;
@@ -334,6 +341,14 @@ module coupon() {
     translate([3 * pitch, 0, 0]) {
         socket_body(collar = true, dome = false);
         ball_stud(with_stud = false);
+    }
+    // 8 mm ¼″-20 stub on a 12 mm pad — one extra body on the strip
+    translate([4 * pitch, 0, 0]) {
+        cylinder(d = 12, h = 1.6);
+        translate([0, 0, 1.4])
+            screw("1/4-20", length = 8, head = "none",
+                  anchor = BOT, tolerance = "1A",
+                  shaft_undersize = stud_undersize);
     }
 }
 

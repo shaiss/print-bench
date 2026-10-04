@@ -16,6 +16,10 @@ the printed answer to the ubiquitous small ball-head mount.
 
 ![The capture band from the slit side: rim, dome, wings and slit](previews/collar-closeup.png)
 
+*Looking down the slit axis: the left pad can read as a detached capsule because the camera sees the 1.2 mm slot plus the cavity behind it. The wings are one body with the ring (fusecheck: 2 bodies on the sliced head).*
+
+![The same capture band ~30° around Z: pads blending into the ring, rim and dome as the scale neighbour](previews/collar-oblique.png)
+
 ## What you get
 
 Two printed parts, joined by one M4 bolt. Slice the **plate**
@@ -39,6 +43,7 @@ screws (mounting — machine screws with nuts, or wood screws into a desk edge).
 - **Layer height:** 0.2 mm. The break-in fusion at the cup floor and every Z
   gap in the joint are whole-layer numbers.
 - **Infill:** 15–20 % gyroid, 3 perimeters.
+- **Seam:** Scarf (or Back). The default Aligned seam stacks a 0.1–0.2 mm ridge on the ball — the same order as the 0.15–0.25 mm radial clearance — and on the ¼″-20 flank.
 - **Supports: none inside the joint — ever.** An auto-support inside the
   socket welds the ball into it, which is the exact failure this design
   exists to defeat; the capture cone (≤ 25° from vertical) and dome (15°)
@@ -53,18 +58,30 @@ screws (mounting — machine screws with nuts, or wood screws into a desk edge).
 ### Print this first
 
 Slice `pip-ball-socket-head-coupon.scad` (or `build/pip-ball-socket-head-coupon.stl`):
-four cells, one strip. Cells 1–3 sweep the ball-to-socket clearance
-(0.15 / 0.20 / 0.25 mm); twist each ball free — the cell that frees with a
-firm twist and then moves without rattle is your printer's value, set
-`ball_xy_clear` to it. Cell 4 is the slit-collar station: pinch the wings,
-the ball should lock and release. Details in NOTES.md.
+five stations, one strip. Print it in the **same PETG and profile as the head**
+— a leftover-PLA coupon does not transfer. CI's slice of this strip is
+**3 h 31 m / 39.7 g vs the head's 1 h 14 m / 14.7 g**: four production-scale
+balls, not a 20-minute print. Skip it and print the PETG head when you already
+know the printer; print it first when you don't.
+
+Cells 1–3 sweep the ball-to-socket clearance (0.15 / 0.20 / 0.25 mm); work each
+ball free — the cell that frees and then moves without rattle is your
+printer's value, set `ball_xy_clear` to it. If all three cells weld, check
+slicer gap-closing / flow (the 0.15–0.25 mm band straddles the typical 0.2 mm
+gap-close default) before raising `ball_xy_clear`. Cell 4 is the slit-collar
+station: pinch the wings, the ball should lock and release. Cell 5 is an 8 mm
+¼″-20 stub — try it in the camera body before committing to the head. Details
+in NOTES.md.
 
 ### Break-in (first motion)
 
 The ball is deliberately fused to the cup floor by one layer — that is the
-design, not a defect. Grip the head, twist the ball **firmly**: it shears
-with a soft crack, then moves freely. Work it through its full tilt cone a
-dozen times before mounting a payload.
+design, not a defect. In PETG the first motion is more *work it firmly through
+the tilt cone* than a light twist: lever on the **stud** (a metal ¼″-20 nut
+on the thread gives a spanner point), not the wings. It shears with a soft
+crack, then moves. Expect a fuzz or two inside the cup that a dozen cycles
+grind away. Coupon cells are rigid no-slit rings, so they read slightly harder
+to free than the production collar — that is the conservative direction.
 
 ## Parameters
 
@@ -83,10 +100,13 @@ Customizer sections; override on the command line with `-D 'ball_xy_clear=0.25'`
 ## Assembly & use
 
 1. Bolt the `base` to the desk edge, shelf underside or wall with two M4s.
-2. Drop an M4 nut into the hex pocket in the head's tenon (it only fits one
-   way round), seat the tenon in the base's centre recess, and pull it down
-   with the M4 × 16 bolt from underneath. The torque path is the tenon
-   shoulder, not the bolt.
+2. Drop an M4 nut into the hex pocket in the head's tenon from below — the
+   pocket is blind at the top, so the nut has to go in before the head seats
+   (any of the six hex rotations fits). Seat the tenon in the base's centre
+   recess with the **slit and wings clocked toward the desk edge** (~3
+   o'clock if the two mounting holes sit left/right), then pull it down with
+   the M4 × 16 bolt from underneath. The torque path is the tenon shoulder,
+   not the bolt.
 3. Thread your camera/light onto the ¼″-20 stud, tilt to aim, pinch the
    wings to lock.
 

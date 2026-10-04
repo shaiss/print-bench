@@ -34,7 +34,7 @@ look changes beyond `workshop-utility`.
 
 - [ ] `render.sh` clean; `gate.sh --slice` exit 0 including coupon
 - [ ] `ci.fitchecks` empty + both negative controls fire
-- [ ] `ci.fusecheck`: head 2 bodies, coupon 8, fused control stays 1
+- [ ] `ci.fusecheck`: head 2 bodies, coupon 9, fused control stays 1
 - [ ] Every *Must fit / hold* row measured on the export (NOTES G4 table)
 - [ ] Product page passes `readme-gate.sh`; as-printed contact-sheet embedded
 - [ ] Human approves the shape (the merge)
@@ -55,15 +55,17 @@ clearance is the `fitcheck_tilt` gate, not a pretty camera.
 | hero (shots.conf) | head seated, slightly tilted | 35,22 iso | 8a8d91 satin | `demo_tilt=12` |
 | contact-sheet | the as-printed truth (4-view) | default | — | none |
 | tilted-pose | articulation through the dome | cameras.conf | — | `part="head" demo_tilt=15` |
-| collar-closeup | slit, rim, wings | cameras.conf | — | `part="head"` |
+| collar-closeup | slit, rim, wings (slit-axis; captioned) | cameras.conf | — | `part="head"` |
+| collar-oblique | pads blending into the ring | cameras.conf | — | `part="head"` |
 
 ## Backlog, ranked by user value
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | FIELD-TEST: break-in torque + 250 g hold in PETG | The payload number is a target, not a measurement | one print + kitchen scale |
+| B1 | FIELD-TEST: break-in torque + 250 g hold in PETG, plus a 50-cycle count and a 24 h creep clock | The payload number is a target, not a measurement; Jane/Drik R2 named the hold-over-time the kitchen scale still has to record | one print + kitchen scale |
 | B2 | Parameterized shelf-clamp jaw (the v1-not-chosen mount) | Second user; v1 is the M4 foot | new `part` + coupon |
 | B3 | Two-joint articulated arm | Brief's named follow-up | new design SKU |
+| B4 | Smaller coupon cells (cost inversion: strip 3 h 31 m vs head 1 h 14 m) | Round-2 honesty fixed the copy; shrinking geometry waits until a FIELD-TEST says the open-top cells still teach at reduced ball_d | coupon re-tune + fusecheck |
 
 ## Open decisions
 
@@ -81,3 +83,4 @@ clearance is the `fitcheck_tilt` gate, not a pretty camera.
 | 2026-09-12 | Stem-down, stud up | Capture cone/dome print supportless; stud-down bridges the ball |
 | 2026-09-12 | Rim capture, dome sized for the tilted stud | Pinch-cone interferes at height or kills tilt |
 | 2026-10-04 | stylelift files a fused sphere as form | Ø20 ball is a Must-fit, not a 10 mm family fillet |
+| 2026-10-04 | Jane/Drik R2: honest coupon cost, hex-pocket lead-in, ¼″-20 stub, companion collar camera | Page honesty (N4 payload pattern) + freeze-window close-up; no joint geometry change |

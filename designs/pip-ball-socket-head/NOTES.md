@@ -77,10 +77,15 @@ small ball-head mount.
   hard-codes one shelf dimension and needs its own screw mechanism. The clamp
   jaw stays a parameterized v2 (PM backlog), not scope creep here.
 - **D7 — The coupon tests what a thumb can feel; CI tests what it can't.**
-  Coupon cells are open-top (no dome, no stud): break-in fusion at the floor,
-  capture-cone clearance and rim fit are hand-checkable in a 20-minute print.
-  The dome-aperture tilt sweep is not — that is exactly what
-  `fitcheck_tilt` measures on every gate run.
+  Coupon cells are open-top (no dome): break-in fusion at the floor,
+  capture-cone clearance and rim fit are hand-checkable. The dome-aperture
+  tilt sweep is not — that is exactly what `fitcheck_tilt` measures on every
+  gate run. Round-2 honesty: the strip is **not** a 20-minute print. CI's
+  slice is 3 h 31 m / 39.7 g vs the head's 1 h 14 m / 14.7 g (four
+  production-scale balls). The "print this first" cost story is "know the
+  printer before a PETG head," not "this is cheaper than the head." Shrinking
+  the cells is PM backlog B4. Round 2 also adds an 8 mm ¼″-20 stub so a
+  rejected thread is not a head reprint (Jane R2).
 
 ## Print settings
 
@@ -99,24 +104,34 @@ small ball-head mount.
   head); PETG at 3 perimeters prints them, and a support block under the
   wings alone cannot reach the joint.
 - **Infill:** 15–20 % gyroid; perimeters 3 (walls are 2.5 mm ≈ 3× 0.42 line).
-- **First motion (break-in):** grip the head, twist the ball firmly — it
-  shears the one-layer fusion with a soft crack and then moves freely. Work
-  it through its full tilt cone a dozen times. If it will not free, raise
-  `ball_xy_clear` 0.05 and reprint the coupon cell, not the head.
+- **Seam:** Scarf (or Back) — Aligned lands a ridge on the ball of the same
+  order as `ball_xy_clear`.
+- **First motion (break-in):** in PETG, lever on the stud (a metal ¼″-20 nut
+  on the thread is a spanner point), not the wings; work it firmly through
+  the tilt cone. It shears the one-layer fusion with a soft crack and then
+  moves. Coupon cells are rigid no-slit rings and read slightly harder than
+  the production collar. If it will not free, check gap-closing / flow before
+  raising `ball_xy_clear` 0.05.
 
 ### Print this first
 
 `openscad -o coupon.stl designs/pip-ball-socket-head/pip-ball-socket-head-coupon.scad`
-(or slice `build/pip-ball-socket-head-coupon.stl` from `gate.sh`). Four cells,
-one strip:
+(or slice `build/pip-ball-socket-head-coupon.stl` from `gate.sh`). Five
+stations, one strip, **same PETG and profile as the head**. CI slice
+3 h 31 m / 39.7 g (plus the new stub) vs the head's 1 h 14 m / 14.7 g — skip
+it only when you already know the printer.
 
 1. Cells 1–3 sweep the ball-to-socket clearance: 0.15 / 0.20 / 0.25 mm
-   (production = 0.20). Snap-and-twist each ball free; the cell where the ball
-   frees with a firm twist and *then* moves without rattle is your printer's
-   value — set `ball_xy_clear` to it.
+   (production = 0.20). Work each ball free; the cell where the ball
+   frees and *then* moves without rattle is your printer's value — set
+   `ball_xy_clear` to it. If all three weld, check slicer gap-closing / flow
+   before raising clearance.
 2. Cell 4 is the slit-collar station (production clearance): pinch the wings —
    the ball should lock against a firm twist and release when released. If the
    wings bottom out before it grips, `wing_t` is the knob to raise.
+3. Cell 5 is an 8 mm ¼″-20 stub on a 12 mm pad: try it in the camera body
+   before committing to the head (`stud_undersize` in 0.05 steps if it
+   refuses).
 
 ## Session log
 
@@ -145,7 +160,9 @@ one strip:
   2 bodies, the wings fused into the socket body (a detached wing would
   read 3, and fusecheck asserts on the sliced STL every gate run). The
   camera looks down the slit axis: between the wings it sees the 1.2 mm
-  slot plus the cavity behind it, not a 3–5 mm gap.
+  slot plus the cavity behind it, not a 3–5 mm gap. Round 2 keeps that
+  camera frozen and adds `collar-oblique` (~30° around Z) plus a caption
+  so the page does not ask the first-time viewer to reconstruct this.
 - printcheck caveats recorded honestly in README + Print settings: head and
   coupon each flag ~5 % support-needing surface — the wings' external
   undersides (the interior is answered by angle per D1/D3). The supports
@@ -178,3 +195,12 @@ one strip:
   `test_a_sphere_on_a_taller_body_is_form_not_a_corner_radius`. Hole-vocabulary
   advisory (hex pocket 8.55 vs family 3.4) is D4, not a fail. Geometry games
   stay refused.
+- **Round 2 (Jane + Drik, 2026-10-04, PR #811).** PM triage: honest coupon
+  print time (CI 3 h 31 m vs head 1 h 14 m — D7's "20-minute" claim was
+  false); hex-pocket 0.5 mm bed-side lead-in; ¼″-20 stub on the coupon
+  (fusecheck 8 → 9); Scarf seam + gap-close troubleshooting; PETG break-in
+  via the stud; nut-from-below + wing-clock assembly copy; collar-closeup
+  caption plus a new frozen camera `collar-oblique` (~30° around Z — added,
+  never moved). Queued: FIELD-TEST cycle count + PETG 24 h creep (B1);
+  shrinking coupon cells (B4). Declined this round: cable-hung test as a
+  `[hunch]` (rides B1).
