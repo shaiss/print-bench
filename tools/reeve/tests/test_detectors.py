@@ -495,8 +495,11 @@ WRITE_SEAM = "pushthrough.py"
 # greenlight comments live outside this package entirely, in
 # .claude/skills/reeve-greenlight/. cli.py stays in this list because it
 # imports github.py and pushthrough.py lazily, inside the --repo /
-# greenlight-select / greenlight-poll paths only.
-_PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py", "signals.py")
+# greenlight-select / greenlight-poll paths only. approval.py (#446, the
+# standing approval modes) is pure policy the write seam consumes, so it is
+# held here too — the seam may import it only because it can carry nothing.
+_PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py", "signals.py",
+                 "approval.py")
 
 
 def _imports_of(path):
@@ -551,7 +554,10 @@ def test_write_verbs_are_confined_to_the_seam_and_the_seam_is_real():
     # The read side it builds on stays the GET seam; the pure side stays pure.
     assert _imports_of(seam) & {"urllib"} == {"urllib"}
     local_imports = _relative_imports_of(seam.read_text(encoding="utf-8"))
-    assert local_imports <= {"config", "detectors", "greenlight", "github", "report", "signals"}, (
+    # `approval` (#446's standing modes) is held pure by _PURE_MODULES above,
+    # so the seam importing it carries no write verb anywhere.
+    assert local_imports <= {"approval", "config", "detectors", "greenlight", "github",
+                             "report", "signals"}, (
         f"{WRITE_SEAM} imports outside the package's own modules: {sorted(local_imports)}"
     )
 
