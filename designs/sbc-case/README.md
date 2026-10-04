@@ -116,7 +116,11 @@ so what you feel there is what the full parts do.
   untouched — the first real print verifies the card clears the restored rim
   (the planned field test in NOTES). The 2 a.m. reflash needs no tools.
 - **GPIO stays reachable.** A notch in the +Y wall clears the 2×20 header, so
-  jumper wires reach the pins with the lid on.
+  jumper wires reach the pins with the lid on. A full 2×20 IDC ribbon socket
+  (~51 × 8 mm) does **not**: the lid-on window is 55 × 8.5 mm in the wall but
+  only 6.0 mm high inside the lid lip, and the two fan leads that already
+  exit here cannot share that opening with the housing. Seat a ribbon before
+  the lid, or stay on jumpers.
 - **Serviceable where it counts.** The heat-set inserts sit at the two joints
   you ever revisit — the lid and the fan — so opening the case or swapping the
   fan (a sleeve-bearing 40 mm fan is typically a 4–6 year part) never chews a plastic
