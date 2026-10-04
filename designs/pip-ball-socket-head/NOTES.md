@@ -81,7 +81,7 @@ small ball-head mount.
   capture-cone clearance and rim fit are hand-checkable. The dome-aperture
   tilt sweep is not — that is exactly what `fitcheck_tilt` measures on every
   gate run. Round-2 honesty: the strip is **not** a 20-minute print. CI's
-  slice is 3 h 31 m / 39.7 g vs the head's 1 h 14 m / 14.7 g (four
+  slice is 3 h 36 m / 40.1 g vs the head's 1 h 14 m / 12.8 g (four
   production-scale balls). The "print this first" cost story is "know the
   printer before a PETG head," not "this is cheaper than the head." Shrinking
   the cells is PM backlog B4. Round 2 also adds an 8 mm ¼″-20 stub so a
@@ -117,8 +117,8 @@ small ball-head mount.
 
 `openscad -o coupon.stl designs/pip-ball-socket-head/pip-ball-socket-head-coupon.scad`
 (or slice `build/pip-ball-socket-head-coupon.stl` from `gate.sh`). Five
-stations, one strip, **same PETG and profile as the head**. CI slice
-3 h 31 m / 39.7 g (plus the new stub) vs the head's 1 h 14 m / 14.7 g — skip
+stations, one strip, **same PETG and profile as the head**. This gate's slice
+is 3 h 36 m / 40.1 g vs the head's 1 h 14 m / 12.8 g — skip
 it only when you already know the printer.
 
 1. Cells 1–3 sweep the ball-to-socket clearance: 0.15 / 0.20 / 0.25 mm
@@ -196,7 +196,7 @@ it only when you already know the printer.
   advisory (hex pocket 8.55 vs family 3.4) is D4, not a fail. Geometry games
   stay refused.
 - **Round 2 (Jane + Drik, 2026-10-04, PR #811).** PM triage: honest coupon
-  print time (CI 3 h 31 m vs head 1 h 14 m — D7's "20-minute" claim was
+  print time (this gate 3 h 36 m vs head 1 h 14 m — D7's "20-minute" claim was
   false); hex-pocket 0.5 mm bed-side lead-in; ¼″-20 stub on the coupon
   (fusecheck 8 → 9); Scarf seam + gap-close troubleshooting; PETG break-in
   via the stud; nut-from-below + wing-clock assembly copy; collar-closeup

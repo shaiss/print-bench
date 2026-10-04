@@ -65,7 +65,7 @@ clearance is the `fitcheck_tilt` gate, not a pretty camera.
 | B1 | FIELD-TEST: break-in torque + 250 g hold in PETG, plus a 50-cycle count and a 24 h creep clock | The payload number is a target, not a measurement; Jane/Drik R2 named the hold-over-time the kitchen scale still has to record | one print + kitchen scale |
 | B2 | Parameterized shelf-clamp jaw (the v1-not-chosen mount) | Second user; v1 is the M4 foot | new `part` + coupon |
 | B3 | Two-joint articulated arm | Brief's named follow-up | new design SKU |
-| B4 | Smaller coupon cells (cost inversion: strip 3 h 31 m vs head 1 h 14 m) | Round-2 honesty fixed the copy; shrinking geometry waits until a FIELD-TEST says the open-top cells still teach at reduced ball_d | coupon re-tune + fusecheck |
+| B4 | Smaller coupon cells (cost inversion: strip 3 h 36 m vs head 1 h 14 m) | Round-2 honesty fixed the copy; shrinking geometry waits until a FIELD-TEST says the open-top cells still teach at reduced ball_d | coupon re-tune + fusecheck |
 
 ## Open decisions
 

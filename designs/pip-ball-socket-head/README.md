@@ -60,7 +60,7 @@ screws (mounting — machine screws with nuts, or wood screws into a desk edge).
 Slice `pip-ball-socket-head-coupon.scad` (or `build/pip-ball-socket-head-coupon.stl`):
 five stations, one strip. Print it in the **same PETG and profile as the head**
 — a leftover-PLA coupon does not transfer. CI's slice of this strip is
-**3 h 31 m / 39.7 g vs the head's 1 h 14 m / 14.7 g**: four production-scale
+**3 h 36 m / 40.1 g vs the head's 1 h 14 m / 12.8 g**: four production-scale
 balls, not a 20-minute print. Skip it and print the PETG head when you already
 know the printer; print it first when you don't.
 
