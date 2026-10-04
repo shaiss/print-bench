@@ -48,36 +48,45 @@
 # Every check evaluates in whichever mode (sweep or stops, with the current
 # `steps`) was declared most recently above it; a check before any `sweep` or
 # `stops` line is malformed. The swept/stepped parameter must be a plain
-# top-level variable of the entry .scad (the -D override replaces its
-# assignment, exactly like `part`), and the gate CHECKS that it is — an
-# assignment `<param> = …` at top-level scope of the entry file itself
-# (outside any `{…}` module/block, comments stripped) — because a -D of a
-# name the source never assigns at top level binds nothing and OpenSCAD
-# says nothing: the geometry sits at one pose and every check holds at
-# every value (`sweep kin_phse` is a green gate over one frame). Never
-# sweep `$t` — top-level assignments evaluate before a -D'd special
-# variable lands (see animations.conf). A `stops` list is capped at
-# KIN_MAX_STEPS values, the same cap `steps` carries: the render budget is
-# bounded either way. A manifest is validated whole — syntax, the parameter,
-# dispatch branches, the mandatory controls — BEFORE the first render, so a
-# typo never burns render minutes and a structurally unfalsifiable manifest
-# fails without measuring anything. The renders then fail fast: an `empty`
-# check stops at the first step that shows facets, a control stops at the
-# first step that satisfies it (usually the first — a control is cheap by
-# construction).
+# top-level variable of the entry .scad **or a file it includes** (the -D
+# override replaces that assignment, exactly like `part`), and the gate
+# CHECKS that it is — an assignment `<param> = …` at top-level scope of
+# some file in the include closure (outside any `{…}` module/block,
+# comments stripped) — because a -D of a name the source never assigns at
+# top level binds nothing and OpenSCAD says nothing: the geometry sits at
+# one pose and every check holds at every value (`sweep kin_phse` is a
+# green gate over one frame). A nested assignment inside a module still
+# does not count. Never sweep `$t` — top-level assignments evaluate before
+# a -D'd special variable lands (see animations.conf). A `stops` list is
+# capped at KIN_MAX_STEPS values, the same cap `steps` carries: the render
+# budget is bounded either way. A manifest is validated whole — syntax, the
+# parameter, dispatch branches, the mandatory controls — BEFORE the first
+# render, so a typo never burns render minutes and a structurally
+# unfalsifiable manifest fails without measuring anything. The renders then
+# fail fast: an `empty` check stops at the first step that shows facets, a
+# control stops at the first step that satisfies it (usually the first — a
+# control is cheap by construction).
 #
 # Facets, not exit codes, and the same helpers as gate.sh's fitcheck block and
 # mate-check.sh: lineage_render_binstl turns OpenSCAD's "Current top level
 # object is empty" exit 1 into the success it is here, and lineage_facet_count
 # reads the binary STL (absent file = 0). A part whose name has no
-# `part == "<part>"` dispatch branch in the source renders empty and would
-# pass `empty` forever — the typo IS a pass — so the branch is required, the
-# way ci.fitchecks requires it. The matcher demands an identifier boundary
-# before `part`, so `counterpart == "…"` cannot satisfy it. The source is
-# grepped with its `//` and `/* */` comments stripped (kin_strip_comments),
-# so a branch that exists only in the header prose, or a part name quoted
-# in a comment, cannot satisfy it; the same stripped text is what the
-# parameter check above reads.
+# `part == "<part>"` dispatch branch in the entry's include closure
+# renders empty and would pass `empty` forever — the typo IS a pass — so
+# the branch is required, the way ci.fitchecks requires it. The walk is
+# include-only (not `use`: a dispatcher is top-level executable geometry
+# and `use` does not inject it), first-party, cycle-safe — the same shape
+# as scripts/scad-closure.sh (#766). When that helper is on the tree this
+# gate sources it and asks `closure_files`; it does **not** call
+# `closure_part_branch`, whose substring `part ==` match is the
+# `counterpart` false-positive this matcher exists to refuse. The matcher
+# demands an identifier boundary before `part`, so `counterpart == "…"`
+# cannot satisfy it, and each closure file is grepped with its `//` and
+# `/* */` comments stripped (kin_strip_comments), so a branch that exists
+# only in header prose cannot satisfy it. The same stripped-closure text
+# is what the sweep/stops parameter check reads: a -D of a name assigned
+# only in an included parent is a live override, and an include-only
+# child re-shipping the parent's ci.kinematics must not fail that proof.
 #
 # WRONG-GEOMETRY WARNINGS fail the check. lineage_render_binstl returns
 # success on a render whose only complaint is a WARNING, and on the
@@ -113,6 +122,14 @@ export OPENSCADPATH="$PWD/lib:$PWD"
 # safe: everything above lineage.sh's bottom guard is a definition.
 # shellcheck source=scripts/lineage.sh
 source ./scripts/lineage.sh
+
+# Include-closure file list (#766 / #791). Prefer the shared walker when
+# present (PR #794); otherwise the local include-only walk below, so this
+# gate does not wait on that helper landing and does not copy the file.
+# shellcheck source=scripts/scad-closure.sh
+if [[ -f ./scripts/scad-closure.sh ]]; then
+  source ./scripts/scad-closure.sh
+fi
 
 KIN_DEFAULT_STEPS=12
 KIN_MAX_STEPS=64
@@ -176,6 +193,84 @@ kin_declares_var() {
   ' <<<"$1"
 }
 
+# Include-only closure of <entry> (entry first). Same resolve / first-party /
+# cycle-safe rules as scripts/scad-closure.sh; used when that helper is absent.
+kin_closure_files_local() {
+  local entry="$1"
+  [[ -f "$entry" ]] || return 0
+  local f p resolved cand root
+  root="$(realpath -s "$PWD")"
+  entry="$(realpath -s "$entry")"
+  local -a queue=("$entry")
+  local -A seen=()
+  while (( ${#queue[@]} > 0 )); do
+    f="${queue[0]}"
+    queue=("${queue[@]:1}")
+    [[ -n "${seen[$f]:-}" ]] && continue
+    seen["$f"]=1
+    printf '%s\n' "$f"
+    while IFS= read -r p; do
+      [[ -n "$p" ]] || continue
+      resolved=""
+      for cand in "$(dirname "$f")/$p" "${root}/lib/$p" "${root}/$p"; do
+        if [[ -f "$cand" ]]; then resolved="$(realpath -s "$cand")"; break; fi
+      done
+      [[ -n "$resolved" ]] || continue
+      case "$resolved" in
+        "${root}/"*) ;;
+        *) continue ;;
+      esac
+      case "$resolved" in
+        "${root}/lib/"*"/"*) continue ;;
+      esac
+      if [[ -z "${seen[$resolved]:-}" ]]; then
+        queue+=("$resolved")
+      fi
+    done < <(kin_strip_comments "$f" \
+               | grep -oE 'include[[:space:]]*<[^>]+>' \
+               | sed -E 's/^include[[:space:]]*<//; s/>$//' \
+               || true)
+  done
+}
+
+kin_closure_files() {
+  if declare -F closure_files >/dev/null 2>&1; then
+    closure_files "$1"
+  else
+    kin_closure_files_local "$1"
+  fi
+}
+
+# Identifier-boundary `part == "<part>"` in some comment-stripped closure file.
+kin_has_part_branch() {
+  local src="$1" part="$2" f stripped
+  [[ "$part" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+  [[ -f "$src" ]] || return 1
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    stripped="$(kin_strip_comments "$f")"
+    if grep -Eq '(^|[^A-Za-z0-9_$])part[[:space:]]*==[[:space:]]*"'"${part}"'"' <<<"$stripped"; then
+      return 0
+    fi
+  done < <(kin_closure_files "$src")
+  return 1
+}
+
+# Top-level `name = …` in some comment-stripped closure file (the assignment
+# a -D of an include-only child actually replaces).
+kin_declares_var_in_closure() {
+  local src="$1" name="$2" f stripped
+  [[ -f "$src" ]] || return 1
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    stripped="$(kin_strip_comments "$f")"
+    if kin_declares_var "$stripped" "$name"; then
+      return 0
+    fi
+  done < <(kin_closure_files "$src")
+  return 1
+}
+
 # Run one manifest against one source. Prints the ok/FAIL lines, returns 0
 # when every check and control behaved as declared, 1 otherwise. Globals are
 # not touched — the selftest runs this in a subshell per row.
@@ -192,10 +287,6 @@ kin_run() {
     echo "FAIL  kinematics ${label}: manifest ${manifest} not found"
     return 1
   fi
-  # Every grep against the source below reads this, never the raw file.
-  local stripped
-  stripped="$(kin_strip_comments "$src")"
-
   # ---- pass 1: parse + validate the whole manifest before any render ----
   # Each accepted check becomes one record "verb|part|mode|param|values"
   # where values is a space-separated list of -D values.
@@ -227,7 +318,7 @@ kin_run() {
         # the source never assigns binds nothing, silently, and every check
         # then holds at every value over one unmoving pose. The mode is still
         # entered so the checks below are validated in this same pass.
-        if ! kin_declares_var "$stripped" "$a"; then
+        if ! kin_declares_var_in_closure "$src" "$a"; then
           echo "FAIL  kinematics ${label}: sweep parameter \"${a}\" is not a top-level variable of ${src} — a -D of a name the source never assigns binds nothing, so the geometry would sit at one pose and every check would pass vacuously"
           fail=1
         fi
@@ -257,7 +348,7 @@ kin_run() {
           continue
         fi
         # Same rule and same reason as `sweep` above.
-        if ! kin_declares_var "$stripped" "$a"; then
+        if ! kin_declares_var_in_closure "$src" "$a"; then
           echo "FAIL  kinematics ${label}: stops parameter \"${a}\" is not a top-level variable of ${src} — a -D of a name the source never assigns binds nothing, so the geometry would sit at one pose and every check would pass vacuously"
           fail=1
         fi
@@ -273,13 +364,12 @@ kin_run() {
           fail=1
           continue
         fi
-        # A real DISPATCH selector in the source, as ci.fitchecks demands: a
-        # part with no branch renders empty and passes `empty` vacuously.
-        # Grepped with comments stripped, so a branch that exists only in
-        # the header prose cannot satisfy it. Identifier boundary before
-        # `part` so `counterpart == "…"` cannot pass as `part == "…"`.
-        if ! [[ "$a" =~ ^[A-Za-z0-9_-]+$ ]] \
-           || ! grep -Eq '(^|[^A-Za-z0-9_$])part[[:space:]]*==[[:space:]]*"'"${a}"'"' <<<"$stripped"; then
+        # A real DISPATCH selector in the include closure, as ci.fitchecks
+        # demands: a part with no branch renders empty and passes `empty`
+        # vacuously. Comment-stripped, identifier boundary before `part` so
+        # `counterpart == "…"` cannot pass as `part == "…"`. A branch that
+        # lives only in an included parent counts (issue #791).
+        if ! kin_has_part_branch "$src" "$a"; then
           echo "FAIL  kinematics ${label}: no 'part == \"${a}\"' dispatch branch in ${src} — a part with no branch renders empty and passes vacuously"
           fail=1
           continue
@@ -437,6 +527,10 @@ kin_selftest() {
     "landing.neg-no-dispatch.kinematics|fail|no 'part == \"landing-nope\"' dispatch branch"
     "broken.neg-comment-dispatch.kinematics|fail|no 'part == \"broken-in-line-comment\"' dispatch branch;;no 'part == \"broken-in-block-comment\"' dispatch branch"
     "broken.neg-counterpart-dispatch.kinematics|fail|no 'part == \"broken-counterpart-only\"' dispatch branch"
+    # -- include closure (issue #791): dispatch / sweep param inherited via include --
+    "closure-child.kinematics|pass|closure-empty is empty at all 2 stops of stop;;closure-solid is non-empty at all 2 stops of stop;;empty-control closure-solid shows;;nonempty-control closure-empty comes out empty;;2 check(s) and 2 control(s) behave as declared"
+    "closure-child.neg-missing.kinematics|fail|no 'part == \"closure-nope\"' dispatch branch"
+    "closure-child.neg-counterpart.kinematics|fail|no 'part == \"closure-counterpart-only\"' dispatch branch"
     "broken.neg-nested-param.kinematics|fail|sweep parameter \"nested_phase\" is not a top-level variable of"
     "landing.neg-bad-param.kinematics|fail|sweep parameter \"sotp\" is not a top-level variable of;;stops parameter \"sto\" is not a top-level variable of"
     "landing.neg-too-many-stops.kinematics|fail|stops carries 65 values, at most 64 allowed"
@@ -473,6 +567,19 @@ kin_selftest() {
       rc=1
     fi
   done
+  # Entry-file grep is the defect this gate used to have: the child names
+  # none of the parent's branches. If this matches, the fixture drifted and
+  # the include-closure rows no longer prove #791.
+  if grep -Eq 'part[[:space:]]*==[[:space:]]*"(closure-empty|closure-solid|closure-counterpart-only)"' \
+        "${fx}/closure-child.scad" "${fx}/closure-mid.scad"; then
+    echo "FAIL  selftest: closure-child/mid grew a local part == dispatcher — the include-closure rows no longer prove the walk"
+    rc=1
+  elif grep -Eq '(^|[^A-Za-z0-9_$])stop[[:space:]]*=' "${fx}/closure-child.scad"; then
+    echo "FAIL  selftest: closure-child.scad grew a local stop assignment — the include-only param proof no longer holds"
+    rc=1
+  else
+    echo "ok    selftest: closure-child.scad still has no local dispatcher or stop — the inherited rows exercise the include walk"
+  fi
   if (( rc == 0 )); then
     echo "ok    selftest: ${#rows[@]} kinematics rows behave as declared — the gate passes what it must and fires on every control"
   fi

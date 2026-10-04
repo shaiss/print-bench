@@ -1,0 +1,5 @@
+# Structural refusal (selftest: must FAIL before rendering): `closure-nope`
+# is not a dispatch branch anywhere in closure-child.scad's include closure.
+stops stop 0
+empty closure-nope
+empty-control closure-solid

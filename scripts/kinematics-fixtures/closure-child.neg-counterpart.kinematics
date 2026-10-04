@@ -1,0 +1,7 @@
+# Structural refusal (selftest: must FAIL before rendering): the included
+# parent has counterpart == "closure-counterpart-only" but no part == "…"
+# selector for that name. A substring match on "part" would falsely accept
+# it even through the closure walk.
+stops stop 0
+empty closure-counterpart-only
+empty-control closure-solid

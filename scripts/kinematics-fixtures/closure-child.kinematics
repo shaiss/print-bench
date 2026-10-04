@@ -1,0 +1,8 @@
+# Include-closure positive (selftest: must PASS): dispatch and `stop` live
+# two include hops away (closure-child.scad → closure-mid.scad →
+# closure-parent.scad). The entry file names neither.
+stops stop 0,1
+empty closure-empty
+nonempty closure-solid
+empty-control closure-solid
+nonempty-control closure-empty
