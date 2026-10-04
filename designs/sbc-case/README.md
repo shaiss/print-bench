@@ -26,7 +26,8 @@ view lower down shows the green board and gold header pins seated just below the
 ## What you get
 
 - `base` — the tray: floor, skirted cable edges, four board standoffs (generated
-  from `pcb_screw_positions`), four through-bored lid-screw posts
+  from `pcb_screw_positions`), four stepped-seat lid-screw posts (Ø4.0 insert
+  bore over M3 clearance through the floor)
   (~95 × 76 × 26 mm)
 - `lid` — the flat top: register lip (notched around the lid-screw posts),
   Ø37 fan aperture, four insert bosses on the inner face, lid-screw holes
@@ -98,8 +99,9 @@ override on the command line with `-D 'fit_clearance=0.3'`.
 ## Assembly & use
 
 Full bill of materials and step-by-step instructions: [ASSEMBLY.md](ASSEMBLY.md)
-and the exploded view below. The short version: melt the inserts in **flush with
-the post top** (see the exploded view), drop the
+and the exploded view below. The short version: melt the base lid-screw inserts
+in **flush with the post top** — a stepped shoulder in each post stops them
+going deeper (see the exploded view), drop the
 board on (it self-locates on the standoffs), screw it down, seat the lid, bolt
 the fan on blowing into the case.
 
