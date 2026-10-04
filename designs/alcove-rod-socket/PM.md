@@ -73,7 +73,7 @@ the one motion the part really performs — seeded from the hero.
 | ~~B3~~ | ~~Ship the shallow collar as a gated part (`engagement_depth=12` in `ci.parts`, exported with the Release)~~ | **Done** (#631): `collar-shallow` gated via `ci.parts`; plate stays boss+collar; README points at the Release/gated part | — |
 | B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints | one print + NOTES entry |
 | B1 | Witness slot / seat detent ("is the rod fully in?") | brief's optional ask; install confidence — plus vibration insurance: ~730 axial curtain-tugs/yr vs single-digit unthreads, and a steep 2-start lead is what walks loose under cyclic load; nothing on the rod resists a slow unthread. Measured by the proving print's week-of-use seat check; a walked collar promotes B1 to #1 | small geometry + re-gate |
-| B2 | Anti-rotation rib (screwless alternative to `screw_count=2`) | protects drywall anchors from spin torque | small geometry + re-gate |
+| ~~B2~~ | ~~Anti-rotation rib (screwless alternative to `screw_count=2`)~~ | **Done**: eight 0.8 mm 45° radial lands on the boss wall face, default on for `screw_count=1`; omitted at `screw_count=2`. Field bite still waits on the proving print. | — |
 | B5 | Sizes other than 40 (25 mm reference origin) | parameters exist but are untested at other rods — the page now says so outright, so this is the proof, not the disclosure | coupon set per size |
 
 Re-ranked 2026-08-24 per the #379 thread's ruling (Vera's note: the issue
@@ -89,7 +89,7 @@ All four are the brief's own open questions, non-blocking for modeling.
 |---|---|---|
 | Actual rod barrel Ø where it sits | before printing, not modeling | 40.0 given value; bore coupon verifies |
 | Alcove width vs rod length (install gap) | install, not modeling | deep+shallow pair via `engagement_depth` |
-| Mount surface (drywall/wood/masonry) | no | M5 wood screw, recessed; anchor is the user's call |
+| Mount surface (drywall/wood/masonry) | no | M5 wood screw, recessed; anchor is the user's call. B2 ribs bite drywall/paint/wood; tile/masonry → `screw_count=2` |
 | Witness slot wanted? | no | not in v1 (B1) |
 
 ## Decision log
@@ -106,3 +106,4 @@ All four are the brief's own open questions, non-blocking for modeling.
 | 2026-08-24 | Correction: the 3MF cures the *fuse*, not the *spaghetti* | two separate objects re-stacked vertically still print the upper over open air; the plate's side-by-side flat layout is the safe way, and stacking is never a space-saving option |
 | 2026-08-24 | v1 → v2 numbering (not v0.2) | the field-test failure forced a second version before any release shipped: v1 = the frozen geometry, v2 = the packaging fix |
 | 2026-09-12 | Ship `collar-shallow` as a gated part (B3 / #631) | `ci.parts` cannot carry a free-form `-D engagement_depth=12`; dual-`-D` hand-render is the foot-gun the deliverable rules stop. Depth threaded into `collar`/`collar_use`; plate unchanged (boss+collar only) |
+| 2026-10-04 | Anti-rotation ribs on the boss wall face (B2) | Screwless spin-lock for `screw_count=1` so collar torque does not ream a drywall anchor. See NOTES D14. |

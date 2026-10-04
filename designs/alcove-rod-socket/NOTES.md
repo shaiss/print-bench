@@ -99,7 +99,8 @@ default-depth holder pair.
   flush at the *neck's* top face; assert keeps the head below the plane the
   rod bottoms on (rod seats on the collar shoulder, never on the screw).
   `screw_count=2` grows the flange so both off-axis heads clear the neck —
-  the brief's anti-spin option.
+  the brief's anti-spin option. The screwless path for `screw_count=1` is
+  D14's wall-face ribs.
 - **D10 — Style: builds from the `workshop-utility` tokens, does not claim
   the pack (printability wins).** The brief named the pack and the geometry
   uses its tokens (`style_fn` 64 everywhere but the lib-pinned thread helix
@@ -152,6 +153,21 @@ default-depth holder pair.
   stays boss + default collar). No new coupon — thread/bore coupons already
   cover the fits. Default `engagement_depth`, deep geometry, fitchecks, and
   style claim unchanged.
+- **D14 — (B2) Anti-rotation ribs on the boss wall face, on by default for
+  `screw_count=1`.** D9's off-axis pair still grows the flange for heavier
+  installs; this is the screwless path so a single central M5 in a drywall
+  anchor does not spin when the knurled collar is torqued on/off (brief
+  #355; Drik: make the boss resist spin). Eight radial trapezoidal lands,
+  `anti_rotate_h` 0.8 mm (4 layers), `anti_rotate_w` 2.4 mm, 45° flanks,
+  cut as a shallow pocket into the flange's bed/wall face (z≈0) leaving an
+  inner washer and outer rim uncut. Printed flange-down those lands *are*
+  the first layers — no spike below z=0, no new overhang (N4). `screw_count=2`
+  omits the pocket so the ribs never fight the off-axis shanks; the two
+  screws already pin rotation. Toggle `anti_rotate=false` for a flat flange
+  (tile/masonry, where the lands cannot bite). Thread/bore coupons
+  unchanged — they never include the flange. Collar untouched (B1's seat
+  detent lives there). Field confirmation that the bite holds a week's
+  unthread torque waits on the proving print; geometry is otherwise v2.
 
 ## Print settings
 
@@ -224,7 +240,10 @@ M5 in a rated anchor; heavier than that → find a stud, or set
 `screw_count=2`** — the second off-axis screw also pins the boss against
 the spin of unthreading. The cyclic half of this load (~730 axial
 curtain-tugs a year against single-digit unthreads) is charter B1's
-vibration case, not this rating's.
+vibration case, not this rating's. **B2's wall-face ribs** take that same
+unthread torque on `screw_count=1` so the single anchor is not asked to
+resist spin in drywall; they do not change the ~10 kg hung-weight ceiling
+— heavier still wants a stud or `screw_count=2`.
 
 ## Field test log
 
