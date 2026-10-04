@@ -32,10 +32,6 @@ cd "$(dirname "$0")/.."
 PINNED_ACTION_SHA="97c53473391bff1901034d4b454b5bac7ab7a029"
 PINNED_CLI_VERSION="2.1.287"
 
-REVIEWER=".claude/reviewer-settings.json"
-COACH=".claude/design-coach-settings.json"
-AUTO_REVIEW=".github/workflows/auto-review.yml"
-
 python3 - "$PINNED_ACTION_SHA" "$PINNED_CLI_VERSION" "${1:-}" <<'PY'
 import json, os, re, subprocess, sys, textwrap
 from pathlib import Path
