@@ -45,6 +45,7 @@ Frozen once reviewed — add a row, never repurpose one.
 |---|---|---|---|---|
 | product-hero | the printed part, at a glance | hero (low ¾) | orange / satin | — |
 | size-marker | the self-labeling top face — the whole point | high ¾, elevated (`18,58,0.92`) | orange / satin | — |
+| size-sweep | the multi-size strip (B1) — four separate cubes on one plate | low ¾, wide (`25,22,0.42`) | orange / satin | `part="sweep"` |
 
 **AI product stills — tier 1.5 (AI, bare product, disclosed).** The bare cube,
 no scene, image-to-image seeded from a tier-1 render — angle = which render it
@@ -92,6 +93,7 @@ cube; the deterministic turntable GIF stays the motion-true artifact.
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-10-04 | Add tier-1 `size-sweep` studio shot of the B1 strip layout | Drik fitness pass: showroom sold only the 20 mm cube while README owned the strip; charter allows adding a shot row, never repurposing |
 | 2026-09-12 | Ship B1 as four separate cubes on a `ci.plate` 3MF, not a fused strip bar | Each cube is an independent dimensional sample; air-gapping matches the repo's sweep-strip convention and keeps STL/3MF separation honest |
 | 2026-08-08 | Add a high three-quarter `size-marker` studio shot beside the hero | The hero shows the engraved size edge-on; the marker is the product's one trick and deserves a shot that makes it the subject |
 | 2026-08-08 | Add a `bench-calipers` tier-2 lifestyle scene | A cube-with-calipers scene reinforces the calibration use case; cosmetic and disclosed |
