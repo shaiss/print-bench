@@ -48,6 +48,11 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   island-free by rendering each half and requiring CGAL `Volumes: 2` (a dropped
   counter shows as a third volume). This delivers what was deferred to #601;
   the tunable brand-module `helical_window` + sever-guard stay #601.
+  The through-cutter starts below the spherical cavity across the whole glyph
+  footprint (radius bounded by `glyph_h`), not 1 mm under the plaque centre:
+  the cavity surface falls away off-centre, so the old start left blind skins
+  up to ~1 mm under the outer strokes of every two-digit numeral (5 islands
+  under "12", measured as shell-under-footprint minus the cutter; empty after).
 - **Hollowing:** a spherical cavity at `d/2·_GB_PENT_R − wall` (the pentagon
   plane minus the wall), so the wall is `>= wall` at every pentagon face and
   thicker toward the triangles/vertices — no knife-edge thin spots that a scaled

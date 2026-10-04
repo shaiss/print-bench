@@ -130,8 +130,16 @@ module gb_number_cutter(d = 78, s = "", glyph_h = 11, face_dir = [0, 0, 1], rot 
                         font = "Liberation Sans:style=Bold") {
   r = d / 2;
   face_r = r * _GB_PENT_R;                 // the flat pentagon-face plane
-  cut = through ? wall + 2 : depth + 0.2; // how deep the tool reaches
-  z0  = through ? face_r - wall - 1 : face_r - depth;
+  // A through-cut must clear the SPHERICAL cavity across the whole glyph
+  // footprint, not just under the plaque centre: the cavity surface falls away
+  // as sqrt(inner_r^2 - rho^2), so a tool starting 1 mm under the centre left a
+  // blind skin (up to ~1 mm) under the outer strokes of every two-digit
+  // numeral. glyph_h bounds the footprint radius (two digits span ~0.74·h by
+  // ~0.5·h, so rho_max ~0.86·h); the deeper start stays inside the cavity.
+  inner_r = face_r - wall;
+  fp_r = min(glyph_h, inner_r - 0.5);
+  z0  = through ? sqrt(inner_r * inner_r - fp_r * fp_r) - 1 : face_r - depth;
+  cut = (through ? face_r + 1 : face_r + 0.2) - z0;   // how deep the tool reaches
   _gb_align_z_to(face_dir)
     translate([0, 0, z0])
       rotate([0, 0, rot])
