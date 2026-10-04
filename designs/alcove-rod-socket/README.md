@@ -40,22 +40,26 @@ slicer. STL carries no object separation, so exporting the two into a *single*
 STL imports as one fused body and welds them together — v1's field-test failure
 (NOTES.md). Two ways to get the parts, both give the separation:
 
-- **Downloaded a Release:** you get `boss`, `collar`, and `collar-shallow` —
-  import what you need and keep them as separate objects. (No v2 Release is
-  tagged yet — releases are cut on a tag, not on merge — so until one exists,
-  use the clone path below.) The plate is still the default-depth holder pair
-  (`boss` + `collar`); grab `collar-shallow` from the Release for the far side
-  of the push-in-deep / drop-in-shallow install.
-- **Cloned the repo:** `./scripts/plate.sh alcove-rod-socket` bundles the two
-  default-depth parts into one multi-object 3MF
+- **Downloaded a Release (the usual path):** [v2.0](https://github.com/shaiss/print-bench/releases/tag/v2.0)
+  ships the gated per-part STLs — `alcove-rod-socket-boss.stl`,
+  `alcove-rod-socket-collar.stl`, `alcove-rod-socket-collar-shallow.stl`, plus
+  the two coupons (`alcove-rod-socket-coupon.stl`,
+  `alcove-rod-socket-bore-coupon.stl`), a zip, and a checksum manifest. Import
+  what you need and keep them as **separate objects**. The plate is still the
+  default-depth holder pair (`boss` + `collar`); grab `collar-shallow` from
+  the same Release for the far side of the push-in-deep / drop-in-shallow
+  install. There is **no** multi-object plate `.3mf` on that Release (only
+  STLs / zip / manifest) — the plate stays a local build artifact (see the
+  clone path below). That is a tracked follow-up: the platform release-bundle
+  only uploads STLs today.
+- **Cloned the repo (advanced / local):** `./scripts/plate.sh alcove-rod-socket`
+  bundles the two default-depth parts into one multi-object 3MF
   (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file.
   For the far-side shallow collar, run `./scripts/gate.sh alcove-rod-socket`
   (or `--slice`) and take the gated STL at
   `build/alcove-rod-socket-collar-shallow.stl` — that is the printcheck'd
   artifact, not a hand-render. Advanced override only: `-D 'part="collar-shallow"'`
-  if you need to re-export outside the gate. (The 3MF is a local build
-  artifact; it isn't attached to the GitHub Release yet — that's a tracked
-  follow-up.)
+  if you need to re-export outside the gate.
 
 Either way, saving bed space is fine — lay the two parts **side by side and
 flat** (the plate's `--merge` does exactly that). Don't stack them **one on top
@@ -68,10 +72,11 @@ the two holders share the **same boss**; only the far holder's collar differs �
 use `collar-shallow` (`engagement_depth=12`). So a deep+shallow pair is two
 bosses + one default collar + one shallow collar.
 
-**Twice can be one print.** Import both plate objects (or the plate), select
-both → right-click → **Add Duplicate**, then swap one of the two collars for
-`collar-shallow` — so the run is boss ×2, one default collar, one shallow.
-Two such plates fit the 256 × 256 mm P2S bed.
+**Twice can be one print.** Import the boss and default collar STLs from the
+Release (or both objects from a local `plate.sh` 3MF), select both →
+right-click → **Add Duplicate**, then swap one of the two collars for
+`collar-shallow` from the same Release — so the run is boss ×2, one default
+collar, one shallow. Two such pairs fit the 256 × 256 mm P2S bed.
 
 ![The collar in its print orientation](previews/collar-print.png)
 
