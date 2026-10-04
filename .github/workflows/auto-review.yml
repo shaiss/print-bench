@@ -73,6 +73,32 @@ name: Auto design review (Jane / Drik / PM / coach)
 # test_cap_state_wiring.py (the state wiring) and the server's own
 # --selftest, which scripts/check.sh runs.
 #
+# Coach posting (issue #806) is the same exit-0 silence with different
+# containment. The coach still pushes iterations, so its --allowedTools
+# keep Write/Edit/Bash (Jane/Drik's read-only list must not be copied)
+# and its checkout stays the PR (full history) so git push has the
+# branch local. Comments go through mcp__reviewer__post_coach on the
+# same server (REVIEWER_ID=coach). The posting files themselves are
+# restored from pull_request.base.sha before EACH agent step — Jane/Drik
+# checkout base wholesale; the coach cannot, so a trusted overlay puts
+# reviewer-post / design-coach-settings / the skill / coach-lock-check.sh
+# back to the base copy immediately before every chain link (a failed
+# first link with Write/Edit/Bash must not leave a rewritten MCP for
+# the next spawn). The MCP config's command is `/usr/bin/python3`, not
+# PATH `python3`: GITHUB_PATH from a failed Bash link is prepended on
+# later steps, and claude-code-action looks up the command before
+# `--allowedTools` applies. claude-code-action still exits 0 on a
+# denial-only turn, so
+# after any ship step that claims success the lock-check step extracts
+# `scripts/coach-lock-check.sh` from base.sha into a temp file (the
+# workspace copy is Write-able) and runs that; it fails the job unless
+# an Actions-bot comment from *this run* (created_at >= the ready
+# step's started_at) *ends* with the assembled suffix
+# (`<!-- COACH_LOCK -->` immediately before the hardcoded footer) —
+# a substring planted by any other author, a Jane/Drik/PM body that
+# smuggled those bytes, a lock from an earlier coach run, or a
+# rewritten workspace script, does not stamp the round complete.
+#
 # Git containment (code-scanning finding on #760). A deny list cannot contain
 # git: a subcommand option no prefix rule sees (`git fetch origin
 # --upload-pack=<cmd>` runs <cmd> over the local file transport), an exec key
@@ -87,6 +113,9 @@ name: Auto design review (Jane / Drik / PM / coach)
 #   * The coach keeps git checkout/add/commit/push (it pushes its rounds) but
 #     its backstop denies fetch/clone/pull/ls-remote and every global option;
 #     its checkout is full history, so every branch head is already local.
+#     A trusted step then overlays the posting surface from base.sha
+#     immediately before each ship step so the MCP the action spawns is
+#     never the PR's copy (including after a failed earlier link).
 #   * Every reviewer and coach job carries a job-level ENVIRONMENT lock that
 #     holds whatever the option order: GIT_ALLOW_PROTOCOL=https (git refuses
 #     the file/ext/ssh transports, so --upload-pack/--receive-pack/-u have
@@ -458,6 +487,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -479,6 +514,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -500,6 +541,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -523,6 +570,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -547,6 +600,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -572,6 +631,12 @@ jobs:
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -744,6 +809,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -765,6 +836,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -786,6 +863,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -809,6 +892,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -833,6 +922,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -858,6 +953,12 @@ jobs:
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -1343,98 +1444,611 @@ jobs:
           # Full history: every branch head (the PR's included) is local, so
           # the coach loads and pushes its rounds without `git fetch`/`pull`,
           # which its backstop denies (code-scanning finding on #760).
+          # This is the PR merge tree, not Jane's base.ref — the coach
+          # still git-pushes. The posting MCP is overlaid from base
+          # immediately before each ship step, so a PR (or a failed
+          # earlier link) cannot replace the server this job executes.
           fetch-depth: 0
+
+      - name: Check the coach posting surface is on the base branch
+        id: ready
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Stamp before any ship step so the lock-check can refuse a
+          # COACH-LOCK left by an earlier coach run (reopened /
+          # ready_for_review / denial-only turn — issue #806).
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+            echo "::add-mask::${FETCH_AUTH}"
+            git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+              fetch --no-tags origin "$BASE_SHA"
+          fi
+          if git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer_mcp.py" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer-mcp.json" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:.claude/design-coach-settings.json" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:.claude/skills/design-coach/SKILL.md" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:scripts/coach-lock-check.sh" 2>/dev/null; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the coach posting surface is not on the base branch yet (first landing) — skipping the coach rather than running a PR-controlled copy"
+          fi
+
+      - name: Restore the coach posting surface from the base branch (before chain link 1)
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 2)
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
+      - name: Restore the coach posting surface from the base branch (before chain link 3)
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
+
       - name: /design-coach via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 4)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 5)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 6)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1442,16 +2056,119 @@ jobs:
           && steps.p5.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           allowed_bots: cursor
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
 
+
+      - name: Coach posted a COACH-LOCK
+        # claude-code-action exits 0 on a denial-only turn (#538/#764/#806).
+        # A ship-step success is not a completed coach round unless the
+        # marker is on the thread. Fail here so review-stamp cannot mark
+        # the round complete. Extract the pin from base.sha AFTER the
+        # agent (Write/Edit/Bash): the workspace copy is not trusted.
+        if: >-
+          always()
+          && (steps.p1.outcome == 'success'
+              || steps.p2.outcome == 'success'
+              || steps.p3.outcome == 'success'
+              || steps.p4.outcome == 'success'
+              || steps.p5.outcome == 'success'
+              || steps.p6.outcome == 'success')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before the extract.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          export PYTHONNOUSERSITE=1
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE; GIT_DIR/GIT_WORK_TREE would redirect
+          # the trusted extract out of the workspace.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          if [ -z "${SINCE:-}" ]; then
+            echo "::error::SINCE is empty — the ready step did not stamp started_at"
+            exit 1
+          fi
+          CHECK="${RUNNER_TEMP:-/tmp}/coach-lock-check.sh"
+          /usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh" > "$CHECK"
+          chmod +x "$CHECK"
+          /usr/bin/bash "$CHECK" "$PR" --since "$SINCE"
+
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
 
@@ -1461,7 +2178,8 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1479,7 +2197,8 @@ jobs:
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
