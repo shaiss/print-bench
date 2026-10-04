@@ -200,8 +200,13 @@ JQ_THIS_RUN='def stop_trusted:
 # start (UTC ISO-8601 YYYY-MM-DDTHH:MM:SSZ), or empty when the caller has
 # no job window. Prints true/false: a first-line 🚢 DECLINED or 🚦 DECISION
 # NEEDED — the skill's own terminal-stop markers — is this firing's stop.
-#   * claimed — posted strictly after the latest SHIP-LOCK. A decline
-#     posted BEFORE the claim (a previous run's) does not count.
+#   * claimed — posted strictly after the latest SHIP-LOCK, inside the job
+#     window (in_window), and by a trusted author (stop_trusted) — the SAME
+#     gate deferred_indicated's claimed branch applies, so the three markers
+#     share one jq test and cannot drift. A decline posted BEFORE the claim
+#     (a previous run's) does not count; and on a public issue an untrusted
+#     commenter cannot spoof a stop under a live SHIP-LOCK to suppress the
+#     death-withdrawal and leave a ghost lock starving selection.
 #   * claimless — the thread carries no SHIP-LOCK at all: JQ_THIS_RUN's
 #     claimless_stop (latest comment, inside the window, trusted author).
 #     A §1 decline is posted before any claim (the #675 shape: /design-run
@@ -216,9 +221,13 @@ decline_indicated() {  # [run-started-at]
     "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
     latest_lock as $l
     | if $l == null then claimless_stop(startswith($d1) or startswith($d2))
-      else [ .[] | select(.created_at > $l.created_at)
-             | select(fl(.body) | startswith($d1) or startswith($d2)) ]
-           | length > 0
+      else
+        [ .[]
+          | select(.created_at > $l.created_at)
+          | select(in_window)
+          | select(fl(.body) | startswith($d1) or startswith($d2))
+          | select(stop_trusted) ]
+        | length > 0
       end'
 }
 
@@ -559,17 +568,43 @@ EOF
   # BEFORE the claim (a previous run's decline never vouches for this one),
   # the marker mid-line, and a thread with no claim at all.
   cat > "$tmp/declined-after.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(decline_indicated < "$tmp/declined-after.ndjson")" = "true" ] \
-    || st_fail "a DECLINED comment after the claim was not read as a decline"
+    || st_fail "a DECLINED comment after the claim by the owner was not read as a decline"
   cat > "$tmp/decision-after.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚦 DECISION NEEDED — `tol-default-loosen`\n\nparked per the gate", "created_at": "2026-08-02T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
+{"body": "🚦 DECISION NEEDED — `tol-default-loosen`\n\nparked per the gate", "created_at": "2026-08-02T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
 EOF
   [ "$(decline_indicated < "$tmp/decision-after.ndjson")" = "true" ] \
-    || st_fail "a DECISION NEEDED comment after the claim was not read as a decline"
+    || st_fail "a DECISION NEEDED comment after the claim by a Bot was not read as a decline"
+  # Author gate on the CLAIMED branch (Cursor finding on #760): under a live
+  # SHIP-LOCK, a later first-line stop marker by an UNTRUSTED commenter must
+  # NOT read as this run's deliberate stop — otherwise a public-issue spoof
+  # suppresses the death-withdrawal and the ghost lock starves selection.
+  # Both DECLINED and DECISION NEEDED, each the positive fixture above with
+  # only the stop author changed to an outsider.
+  cat > "$tmp/declined-after-attacker.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z", "login": "attacker", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/declined-after-attacker.ndjson")" = "false" ] \
+    || st_fail "an outsider's DECLINED under a live SHIP-LOCK minted a decline (ghost-lock spoof)"
+  cat > "$tmp/decision-after-attacker.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚦 DECISION NEEDED — `tol-default-loosen`\n\nparked per the gate", "created_at": "2026-08-02T00:00:00Z", "login": "attacker", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/decision-after-attacker.ndjson")" = "false" ] \
+    || st_fail "an outsider's DECISION NEEDED under a live SHIP-LOCK minted a decline (ghost-lock spoof)"
+  # …and the claimed branch also fails closed when the stop carries no author
+  # data the fetch could attribute.
+  cat > "$tmp/declined-after-anon.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision", "created_at": "2026-08-02T00:00:00Z"}
+EOF
+  [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/declined-after-anon.ndjson")" = "false" ] \
+    || st_fail "a claimed DECLINED with no login or type was read as a decline"
   cat > "$tmp/declined-before.ndjson" <<'EOF'
 {"body": "🚢 DECLINED — earlier run gave up here", "created_at": "2026-08-01T00:00:00Z"}
 {"body": "🚢 SHIP-LOCK\n\nclaimed afresh", "created_at": "2026-08-02T00:00:00Z"}
@@ -630,7 +665,7 @@ EOF
 EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-followed.ndjson")" = "false" ] \
     || st_fail "a claimless DECLINED that a newer comment followed was still read as this run's stop"
-  echo "ok    selftest: decline detection (after-claim / before-claim / mid-line / no-claim / claimless #675 in-window / prior-window / no-window / at-start / Bot / outsider / anon / followed)"
+  echo "ok    selftest: decline detection (after-claim owner/Bot / claimed outsider / claimed anon / before-claim / mid-line / no-claim / claimless #675 in-window / prior-window / no-window / at-start / Bot / outsider / anon / followed)"
 
   # -- death-marking: our own withdrawal notice is a death, not a decline ---
   cat > "$tmp/our-death.ndjson" <<'EOF'
@@ -958,12 +993,27 @@ STUB
   # Row 3: exit 0 with a DECLINED comment after the claim → declined, nothing
   # posted (the lock is left to age out through the selector's staleness, per
   # the fix's design).
-  e2e_fix declined comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z"},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z"}]'
+  e2e_fix declined comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix declined branches '[]'
   e2e_fix declined pulls '[]'
   e2e declined success
-  grep -qx 'declined=true' "$tmp/declined-out" || st_fail "exit-0 + DECLINED did not emit declined=true"
+  grep -qx 'declined=true' "$tmp/declined-out" || st_fail "exit-0 + DECLINED (by the owner) did not emit declined=true"
   no_posts declined
+
+  # Row 3a (Cursor finding on #760): same shape, but the DECLINED under the
+  # live SHIP-LOCK is an OUTSIDER's — not a stop, so the active lock is a
+  # death and gets withdrawn (declined=false, withdrawn=true, the withdrawal
+  # comment posted). Mirrors the deferatklock control for the decline path:
+  # a public-issue spoof can no longer suppress the death-withdrawal and
+  # strand a ghost lock.
+  e2e_fix declatklock comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z", "user": {"login": "attacker", "type": "User"}}]'
+  e2e_fix declatklock branches '[]'
+  e2e_fix declatklock pulls '[]'
+  e2e declatklock success 2026-09-01T15:00:00Z
+  grep -qx 'declined=false' "$tmp/declatklock-out" || st_fail "an outsider DECLINED after the lock minted a decline (declined=true)"
+  grep -qx 'withdrawn=true' "$tmp/declatklock-out" || st_fail "an outsider DECLINED after the lock was not treated as a dead claim"
+  grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/declatklock-postlog" \
+    || st_fail "the outsider-decline claimed case did not post the withdrawal comment"
 
   # Row 3b: exit 0 with the claim self-withdrawn in the agent's own wording →
   # declined (its §0.6 release), nothing posted.
