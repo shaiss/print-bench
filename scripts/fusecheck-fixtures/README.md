@@ -18,6 +18,13 @@ paths are proven to fire (issue #627).
   must hard-FAIL, never downgrade to a WARN.
 - `fail-malformed.fusecheck` — `max < min` and a non-numeric operand: the line
   itself must FAIL the manifest parse.
+- `closure-mid.scad` / `closure-child.scad` — two-hop `include` of
+  `fixtures.scad` with no local `part ==` dispatcher (the variable-only
+  derivative shape, issue #766).
+- `pass-closure.fusecheck` — `control fused` must pass against the child
+  entry, proving the branch proof walks the include closure.
+- `fail-closure-missing.fusecheck` — `control nope` must FAIL: a branch
+  nowhere in the closure is still refused.
 
 The selftest re-measures the fixtures' body counts with `fusecheck` itself
 before trusting any manifest row — if the geometry ever drifts from the

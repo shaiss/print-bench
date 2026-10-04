@@ -16,7 +16,7 @@ containment is structural, in two halves:
     ``core.hooksPath=/dev/null``, ``core.pager=cat`` via ``GIT_CONFIG_COUNT``),
     computed as the step's EFFECTIVE env (job env, then the step's own, the
     step winning) so a single link that overrides or sheds it fails;
-  - Jane's and Drik's jobs check out ``pull_request.base.ref`` (the
+  - Jane's, Drik's and pm-triage's jobs check out ``pull_request.base.ref`` (the
     posting MCP / settings / skills are never the PR's copy) at
     ``fetch-depth: 0``, then a TRUSTED step fetches the PR head SHA
     (Oracle extraheader auth) and overlays the changed design directories
@@ -44,8 +44,10 @@ CONFIG_LOCK = {
     "core.hooksPath": "/dev/null",
     "core.pager": "cat",
 }
-# The jobs whose reviewer has no git and reviews the PR head's geometry.
-STAGED_JOBS = ("jane-review", "drik-review")
+# The jobs whose reviewer has no git and reviews the PR head's geometry
+# from a base-branch checkout plus a trusted overlay (the posting MCP must
+# not be the PR's copy).
+STAGED_JOBS = ("jane-review", "drik-review", "pm-triage")
 STAGE_MARKER = 'git checkout "$HEAD_SHA" -- "designs/${d}"'
 HEAD_FETCH = 'fetch --no-tags origin "$HEAD_SHA"'
 BASE_REF = "${{ github.event.pull_request.base.ref }}"
