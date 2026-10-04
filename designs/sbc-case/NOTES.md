@@ -79,8 +79,8 @@ NopSCADlib vitamins (the brief's named source), read at build time:
    on ±X can't clear the board footprint in a snug cavity. Widening the cavity
    in Y by one post diameter puts the posts in the walls' corners at
    (±40, ±32.75) — clear of everything, 0.25 mm fused into the wall.
-   Their insert holes are **through-bored** so an M3×10's tip bottoms out in
-   free space below the post, not in plastic.
+   Their insert bores are **stepped** (B4): Ø4.0 melt seat from the top, then
+   M3 clearance through the rest so an M3×10 tip clears below the shoulder.
 7. **Lid prints outer-face-down; the register lip is notched around the four
    lid-screw posts.** The first draft printed lip-face-down and the gate
    rejected it for the reason worth logging: the lip is a *ring*, so the plate
@@ -364,6 +364,15 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
+26. **B4 — stepped insert seat on base lid-screw posts.** `insert_post(...,
+    through=true)` no longer full-height Ø4.0: from the post top, Ø4.0 ×
+    `insert_length(F1BM3)` = 5.8 mm (vitamin), then
+    `2 * screw_clearance_radius(M3_cap_screw)` = 3.3 mm through the rest so an
+    M3×10 tip clears and the insert bottoms on a shoulder instead of sinking past
+    flush. Lid fan bosses unchanged (blind bore + 1.2 mm web, round 13). Proven by
+    `fit-insert-seat` (nominal melt envelope empty) and `fit-insert-sink` (envelope
+    +1 mm deep interferes). Assembly step 1 + README short version updated; the
+    optional shouldered M3 soldering-iron tip clause stays as an assembly aid.
 
 ## Print settings
 
