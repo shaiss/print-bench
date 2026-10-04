@@ -34,6 +34,9 @@ view lower down shows the green board and gold header pins seated just below the
   (~95 × 76 × 2.5 mm plate + 7 mm bosses)
 - `sbc-case-coupon` — two crops of the same case corner that nest; print it
   first to tune the fits (~33 × 76 × 26 mm)
+- `sbc-case-grille-coupon` — a lid-plate crop over the fan bore at the same
+  outer-face-down pose as `lid`; print it to compare `grille_hole_d` /
+  `grille_web` without a full lid (~45 × 45 × 2.5 mm)
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
@@ -140,10 +143,12 @@ so what you feel there is what the full parts do.
   the fan bolts to the outer face and covers the grille). Airflow is reduced
   versus a bare bore (~40 % of the old free area at the default 5.0 / 2.0 mm
   holes and webs). Tune `grille_hole_d` / `grille_web` in the Customizer and
-  **reprint the lid** if your fan needs more pull (for example Ø6 holes on
-  7.6 mm pitch — 1.6 mm webs, ~49 % open — stays above the 1.2 mm web floor).
-  The coupon still proves lip, post, and screw fit only; it does not include the
-  fan-zone grille.
+  **reprint `sbc-case-grille-coupon`** to compare presets on the bench (for
+  example Ø6 holes on 7.6 mm pitch — 1.6 mm webs, ~49 % open — stays above the
+  1.2 mm web floor) before committing to a full `lid` reprint. The grille coupon
+  proves hole size, web width, and printability of the co-planar pattern only —
+  it does **not** measure airflow, thermals, or noise, and the fit coupon still
+  proves register lip, post, and board-pilot fit only (no grille).
 - **Keep it breathing.** The fan still blows *in* through the grille and the
   open-skirted case, so it is an intake for dust too — on an always-on build,
   blow through the grille and the vent row out every few months.

@@ -334,6 +334,17 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
     }
 }
 
+module grille_coupon() { //! fan-zone lid plate at print pose — same grille cut as the full lid, cropped for a fast grille_hole_d / grille_web tune (B12)
+    margin = 4;  // solid plate outside the vitamin bore clip (mm)
+    half = fan_bore_d / 2 + margin;
+    translate([0, 0, lid_top_z]) rotate([180, 0, 0])
+        intersection() {
+            lid();
+            translate([fan_center[0] - half, fan_center[1] - half, base_top_z - 0.01])
+                cube([2 * half, 2 * half, lid_t + 0.02]);
+        }
+}
+
 // ── Boolean fit checks (ci.fitchecks) ───────────────────────────────────────
 // fit-pins: pins at the vitamin's hole positions rise through the standoff
 // pilots — empty proves the standoff pattern is generated from pcb_holes().
@@ -344,7 +355,7 @@ module fit_pins(dx = 0) {
             cylinder(d = pilot_d - pin_slop, h = standoff_h + 0.5);
 }
 
-part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
+part = "assembled"; // [assembled, base, base-board, lid, coupon, grille-coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
 
 if (part == "assembled") {
     base();
@@ -365,6 +376,8 @@ if (part == "assembled") {
     translate([0, 0, lid_top_z]) rotate([180, 0, 0]) lid();
 } else if (part == "coupon") {
     coupon();
+} else if (part == "grille-coupon") {
+    grille_coupon();
 } else if (part == "fit-pins") {
     intersection() { base(); fit_pins(); }
 } else if (part == "fit-pins-shift") {
