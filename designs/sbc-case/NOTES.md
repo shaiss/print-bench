@@ -69,7 +69,9 @@ NopSCADlib vitamins (the brief's named source), read at build time:
    (`fan_bore(fan_type)`). Plate material bounds every opening — no bar across
    the bore span (N4 / outer-face-down print). Measured open area inside the
    bore: **~40 %** of an unobstructed Ø37 disc (~426 mm² vs 1075 mm²); ~60 %
-   of the former free hole is now solid web blocking fingers from the blades.
+   of the former free hole is now solid web closing the case ceiling over the
+   fan bore (the fan sits on the outer face; the grille is not a blade guard
+   from outside).
    Fan screws (M3 dome ×20, washer under each head) pass through the fan frame
    and the plate into the inner bosses — 11 + 2.5 + 5.8 = 19.3 mm of stack, so
    ×20. The bosses hang 7 mm into the cavity at the fan's corner pitch
@@ -372,8 +374,9 @@ NopSCADlib vitamins (the brief's named source), read at build time:
 19. **B11 — co-planar fan grille (2026-10-04).** Replaced the through-bored
     Ø37 lid cut with `fan_grille_cut2d()` — Ø5 holes, 7 mm pitch, 2 mm webs,
     clipped to `fan_bore(fan_type)`. Trade: ~40 % of the unobstructed bore's
-    free area retained (Monte Carlo on the parametric grid); finger reach to
-    spinning blades blocked; dust still enters through the holes (page updated).
+    free area retained (Monte Carlo on the parametric grid); case ceiling closed
+    over the fan bore (not a blade guard from outside); dust still enters through
+    the holes (page updated).
     Boss pitch and M3 fan screws unchanged; grille stays inside the bore circle,
     clear of the corner bosses at 16 mm pitch.
 
@@ -410,8 +413,8 @@ structure proof:
    steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
 3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
    the standoff sample and hold firm.
-4. Only then print `base` (~2h45m) and `lid` (~1h40m) — the head-stamped gate
-   times; your slicer and material may differ.
+4. Only then print `base` (~2h45m) and `lid` (~2h 2m 41s) — the head-stamped
+   gate times on PR #810; your slicer and material may differ.
 
 ## Derivations worth keeping
 
