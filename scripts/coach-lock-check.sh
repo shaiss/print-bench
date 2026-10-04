@@ -14,6 +14,14 @@
 # Offline: ./scripts/coach-lock-check.sh --selftest
 set -euo pipefail
 
+# A prior Bash-capable coach step can write PYTHONPATH/LD_PRELOAD via
+# GITHUB_ENV. Isolated mode ignores those; also drop them in this shell
+# so `gh` is not preloaded either.
+unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+      PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+      DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+export PYTHONNOUSERSITE=1
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -22,8 +30,15 @@ cd "$ROOT"
 MARKER_HTML='<!-- COACH_LOCK -->'
 export MARKER_HTML
 
+# Prefer the system interpreter; -I ignores PYTHONPATH/PYTHONHOME/user site.
+if [[ -x /usr/bin/python3 ]]; then
+  PYTHON3=/usr/bin/python3
+else
+  PYTHON3=python3
+fi
+
 comments_carry_lock() {
-  python3 -c '
+  "$PYTHON3" -I -c '
 import json, os, sys
 
 MARKER = os.environ["MARKER_HTML"]
