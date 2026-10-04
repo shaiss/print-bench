@@ -354,7 +354,9 @@ module fit_pins(dx = 0) {
 // the notch with the ASSEMBLY step-7 fan leads with the lid on.
 //
 // Placement: IDC centred on the 55 mm cut (2 mm leftover each side); two
-// Ø1.6 leads stacked in Z in the −X leftover strip, below the lid lip.
+// Ø1.6 leads stacked in Z in the +X leftover strip, below the lid lip.
+// (The −X leftover sits against the −X,+Y lid-screw post — measured: leads
+// there ∩ the post. The +X leftover is clear of both posts at x = ±40.)
 module gpio_idc_envelope() {
     translate([gpio_notch_x0 + (gpio_notch_w - idc_len) / 2,
                cavity_y_half - 1,
@@ -364,13 +366,13 @@ module gpio_idc_envelope() {
 
 module gpio_fan_leads() {
     leftover = (gpio_notch_w - idc_len) / 2; // 2 mm with a centred 51 mm IDC
-    lead_x = gpio_notch_x0 + leftover / 2;
+    lead_x = gpio_notch_x0 + gpio_notch_w - leftover / 2;
     for (i = [0, 1])
         translate([lead_x,
                    cavity_y_half + wall / 2,
                    gpio_notch_bottom + 1.0 + lead_d / 2 + i * (lead_d + 0.4)])
             rotate([90, 0, 0])
-                cylinder(d = lead_d, h = wall + 6, center = true);
+                cylinder(d = lead_d, h = wall + 2, center = true);
 }
 
 module gpio_printed() {
