@@ -588,7 +588,7 @@ fi
 # invariants a live run cannot show: the sign-off marker is assembled
 # server-side from validated sha/verdict/fuse fields (malformed markers are
 # unpostable), caller-supplied JANE/DRIK_SIGNOFF HTML comments in the body
-# are stripped so one reviewer cannot satisfy the other identity, the marker
+# are refused so one reviewer cannot satisfy the other identity, the marker
 # family follows the trusted REVIEWER_ID env so a Jane session cannot forge a
 # DRIK sign-off, the target PR is pinned to REVIEWER_PR,
 # and the one-post-per-run cap spans the chain walk cross-process — the same

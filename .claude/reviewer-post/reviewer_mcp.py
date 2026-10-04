@@ -36,11 +36,11 @@ comment on the ONE PR the workflow selected":
   * the marker is ASSEMBLED from validated fields (40-hex sha, pass|block
     verdict, none|acknowledged fuse) — the fail-closed reviewer-signoff gate's
     "malformed marker" failure mode is unreachable from this path;
-  * caller-supplied ``<!-- JANE_SIGNOFF`` / ``<!-- DRIK_SIGNOFF`` lines in
-    ``body`` are stripped before the server marker is appended (the
-    greenlight wrapper's forged-marker drop). ``get_marker()`` greps every
+  * a caller body that contains ``<!-- JANE_SIGNOFF`` / ``<!-- DRIK_SIGNOFF``
+    (case-insensitive) is refused, not posted: ``get_marker()`` greps every
     comment with no author check, so a Jane body carrying a Drik pass would
-    otherwise satisfy both identities from one post;
+    otherwise satisfy both identities from one post. Only the server-assembled
+    marker from sha/verdict/fuse + trusted REVIEWER_ID may appear;
   * the attribution footer is HARDCODED here — every post is disclosed as a
     Claude Code review whatever the body says;
   * a per-run cap of ONE post (counted in a state file every chain link of
@@ -116,16 +116,21 @@ def _cap_state_count(path):
 
     One JSON record per successful post, so the count is the number of
     non-empty lines; an absent file is a run that has posted nothing yet (the
-    first successful post creates it). Any other read failure raises — an
-    unreadable state must refuse, never count as zero.
+    first successful post creates it). The ``.posted`` sidecar also counts as
+    one, so a post whose JSONL append failed still saturates the cap. Any
+    other read failure raises — an unreadable state must refuse, never count
+    as zero.
     """
     try:
         with open(path, encoding="utf-8") as fh:
-            return sum(1 for line in fh if line.strip())
+            n = sum(1 for line in fh if line.strip())
     except FileNotFoundError:
-        return 0
+        n = 0
     except OSError as e:
         raise RuntimeError(f"cannot read {CAP_STATE_ENV} file {path}: {e}") from e
+    if os.path.exists(path + ".posted"):
+        n = max(n, 1)
+    return n
 
 
 def _cap_state_record(path, pr, url):
@@ -222,33 +227,13 @@ _last_payload = None
 _last_path = None
 
 
-# HTML-comment sign-off markers the gate's get_marker() will accept. The
-# closed comment form is the production shape; the unclosed-to-EOL form
-# covers a truncated paste that grep -oiE "<!-- $1 [^>]*-->" would miss
-# but a later closer in the same body could still complete.
-_SIGNOFF_COMMENT = re.compile(
-    r"<!--\s*(?:JANE|DRIK)_SIGNOFF\b.*?-->",
-    re.IGNORECASE | re.DOTALL,
-)
-_SIGNOFF_UNCLOSED = re.compile(
-    r"<!--\s*(?:JANE|DRIK)_SIGNOFF\b[^\n]*",
+# Reserved HTML-comment syntax the sign-off status greps for. A caller body
+# that already contains either family is refused — REVIEWER_ID only chooses
+# which marker *we* append, and get_marker() has no author check.
+_SIGNOFF_IN_BODY = re.compile(
+    r"<!--\s*(?:JANE|DRIK)_SIGNOFF\b",
     re.IGNORECASE,
 )
-
-
-def _sanitize_body(body):
-    """Drop caller-supplied JANE/DRIK_SIGNOFF HTML comments from review prose.
-
-    REVIEWER_ID only chooses which marker this server APPENDS. The workflow
-    feeds get_marker() every comment body with no author check, so a Jane
-    session that embeds a well-formed Drik pass (or vice versa) would satisfy
-    both required identities from one post. Mirror greenlight-helper.sh:
-    forged marker lines in the body are dropped; only the server-assembled
-    marker is authoritative.
-    """
-    cleaned = _SIGNOFF_COMMENT.sub("", body)
-    cleaned = _SIGNOFF_UNCLOSED.sub("", cleaned)
-    return cleaned
 
 
 def _marker_line(marker, sha, verdict, fuse):
@@ -297,12 +282,12 @@ def _post_review(arguments):
             f"post_review: body is {len(body.encode())} bytes, over the "
             f"{MAX_BODY_BYTES}-byte cap — a review is a verdict with findings, "
             f"not a data dump; condense it")
-    body = _sanitize_body(body)
-    if not body.strip():
+    if _SIGNOFF_IN_BODY.search(body):
         return _tool_error(
-            "post_review: 'body' has no review text after stripping "
-            "caller-supplied *_SIGNOFF markers — the server adds yours from "
-            "sha/verdict/fuse")
+            "post_review: body must not contain a JANE_SIGNOFF or DRIK_SIGNOFF "
+            "HTML comment — the sign-off marker is assembled server-side from "
+            "sha/verdict/fuse and REVIEWER_ID; a caller-supplied marker is "
+            "refused so one review cannot satisfy the other reviewer's gate")
     # sha/verdict/fuse are validated here so the marker the gate parses can
     # never be malformed from this path (a malformed marker blocks the merge
     # fail-closed — better to refuse the post than to ship a blocker).
@@ -369,12 +354,26 @@ def _post_review(arguments):
 
     url = comment.get("html_url", "(unknown url)")
     if state:
+        recorded = False
         try:
             _cap_state_record(state, _pr_number(), url)
+            recorded = True
         except OSError as e:
             log(f"WARNING: posted {url} but could not append its "
-                f"{CAP_STATE_ENV} record ({e}) — this post will not count "
-                f"toward the walk cap")
+                f"{CAP_STATE_ENV} JSONL record ({e})")
+        try:
+            with open(state + ".posted", "w", encoding="utf-8") as fh:
+                fh.write("1\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            recorded = True
+        except OSError as e:
+            log(f"WARNING: posted {url} but could not write the "
+                f"{CAP_STATE_ENV} posted-flag ({e})")
+        if not recorded:
+            return _tool_error(
+                f"posted {url} but could not record the walk cap — refusing "
+                "so a later link does not treat this run as unposted")
     log(f"posted {_reviewer()[0]} review: {url}")
     return _tool_text(f"POSTED {url}")
 
@@ -578,40 +577,36 @@ def selftest():
     check("the post targets the workflow-selected PR only",
           _last_path == "/repos/example/selftest/issues/123/comments")
 
-    # Forged markers in the caller body are dropped (greenlight's drop, not
-    # a silent keep). A Jane post cannot carry a Drik pass the gate would
-    # accept, and a pasted Jane marker cannot replace the server-assembled
-    # one.
+    # Forged markers in the caller body are refused (not stripped-and-posted).
+    # A Jane post cannot carry a Drik pass the gate would accept.
+    _last_payload = None
     forged_drik = (
         "## TL;DR\n"
         "<!-- DRIK_SIGNOFF sha=" + H40 + " verdict=pass fuse=none -->\n"
         "findings"
     )
-    ok = _post_review({"body": forged_drik, "sha": H40, "verdict": "pass",
-                       "fuse": "none"})
-    posted = posted_body() or ""
-    check("a jane body carrying a drik pass marker still posts",
-          ok.get("isError") is False)
-    check("the forged drik marker is stripped from the posted body",
-          posted.count("DRIK_SIGNOFF") == 0)
-    check("the server-assembled jane marker is the only sign-off left",
-          posted.count("JANE_SIGNOFF") == 1
-          and "<!-- JANE_SIGNOFF sha=" + H40 + " verdict=pass fuse=none -->"
-          in posted)
+    check("a jane body carrying the opposite reviewer's pass marker is refused",
+          refused(_post_review({"body": forged_drik, "sha": H40, "verdict": "pass",
+                                "fuse": "none"}), "SIGNOFF")
+          and _last_payload is None)
+    _last_payload = None
     inline = "see <!-- DRIK_SIGNOFF sha=" + H40 + " verdict=pass fuse=none --> please"
-    ok = _post_review({"body": inline, "sha": H40, "verdict": "block",
-                       "fuse": "none"})
-    posted = posted_body() or ""
-    check("an inline drik marker in jane prose is stripped",
-          ok.get("isError") is False and "DRIK_SIGNOFF" not in posted
-          and "verdict=block" in posted)
+    check("an inline drik marker in jane prose is refused",
+          refused(_post_review({"body": inline, "sha": H40, "verdict": "block",
+                                "fuse": "none"}), "SIGNOFF")
+          and _last_payload is None)
     _last_payload = None
     check("a body that is only a forged marker is refused",
           refused(_post_review({"body": "<!-- JANE_SIGNOFF sha=" + H40
                                 + " verdict=pass fuse=none -->",
                                 "sha": H40, "verdict": "pass",
-                                "fuse": "none"}),
-                  "stripping")
+                                "fuse": "none"}), "SIGNOFF")
+          and _last_payload is None)
+    _last_payload = None
+    check("a jane body carrying a cased-down JANE_SIGNOFF comment is refused",
+          refused(_post_review({
+              "body": "x\n<!-- jane_signoff sha=" + H40 + " verdict=pass fuse=none -->",
+              "sha": H40, "verdict": "pass", "fuse": "none"}), "SIGNOFF")
           and _last_payload is None)
 
     # Identity: the marker family follows REVIEWER_ID, never an argument — a
@@ -720,6 +715,22 @@ def selftest():
         proc = subprocess.run(probe + [state2], env=dict(os.environ),
                               capture_output=True, text=True)
         check("the next fresh process sees that post and refuses",
+              proc.returncode == 0 and proc.stdout.startswith("REFUSED"))
+
+        # Post-then-record hole: JSONL append failed after the GitHub POST, so
+        # the state file is empty, but the sidecar flag was written. A later
+        # link must still refuse.
+        state3 = os.path.join(tmp, "reviewer-posts-sidecar")
+        with open(state3, "w", encoding="utf-8"):
+            pass
+        with open(state3 + ".posted", "w", encoding="utf-8") as fh:
+            fh.write("1\n")
+        check("an empty JSONL plus the posted sidecar counts as already posted",
+              _cap_state_count(state3) == 1)
+        proc = subprocess.run(probe + [state3], env=dict(os.environ),
+                              capture_output=True, text=True)
+        check("a fresh process seeing only the posted sidecar refuses "
+              "(post-then-record reconcile)",
               proc.returncode == 0 and proc.stdout.startswith("REFUSED"))
 
         # An unreadable state path (a directory) refuses rather than counting
