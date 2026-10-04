@@ -1507,6 +1507,14 @@ jobs:
           unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
                 PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
                 DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
           export GIT_ALLOW_PROTOCOL=https
           export GIT_CONFIG_COUNT=4
           export GIT_CONFIG_KEY_0=safe.bareRepository
@@ -1597,6 +1605,14 @@ jobs:
           unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
                 PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
                 DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
           export GIT_ALLOW_PROTOCOL=https
           export GIT_CONFIG_COUNT=4
           export GIT_CONFIG_KEY_0=safe.bareRepository
@@ -1687,6 +1703,14 @@ jobs:
           unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
                 PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
                 DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
           export GIT_ALLOW_PROTOCOL=https
           export GIT_CONFIG_COUNT=4
           export GIT_CONFIG_KEY_0=safe.bareRepository
@@ -1782,6 +1806,14 @@ jobs:
           unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
                 PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
                 DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
           export GIT_ALLOW_PROTOCOL=https
           export GIT_CONFIG_COUNT=4
           export GIT_CONFIG_KEY_0=safe.bareRepository
@@ -1880,6 +1912,14 @@ jobs:
           unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
                 PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
                 DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
           export GIT_ALLOW_PROTOCOL=https
           export GIT_CONFIG_COUNT=4
           export GIT_CONFIG_KEY_0=safe.bareRepository
@@ -1980,6 +2020,14 @@ jobs:
           unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
                 PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
                 DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
           export GIT_ALLOW_PROTOCOL=https
           export GIT_CONFIG_COUNT=4
           export GIT_CONFIG_KEY_0=safe.bareRepository
@@ -2093,6 +2141,13 @@ jobs:
                 PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
                 DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
           export PYTHONNOUSERSITE=1
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE; GIT_DIR/GIT_WORK_TREE would redirect
+          # the trusted extract out of the workspace.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
           export GIT_ALLOW_PROTOCOL=https
           export GIT_CONFIG_COUNT=4
           export GIT_CONFIG_KEY_0=safe.bareRepository

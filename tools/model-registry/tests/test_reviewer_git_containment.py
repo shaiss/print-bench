@@ -243,6 +243,13 @@ def _assert_one_restore_step(restore: str, *, at: str) -> None:
         "sitecustomize into a later python, and LD_PRELOAD would hijack git")
     assert "GIT_ALLOW_PROTOCOL=https" in run, (
         f"{at} does not re-assert the git protocol lock after GITHUB_ENV")
+    assert "unset GIT_CONFIG_PARAMETERS" in run, (
+        f"{at} does not drop GIT_CONFIG_PARAMETERS — a GITHUB_ENV write "
+        "would override the re-exported COUNT/KEY/VALUE lock (Git applies "
+        "PARAMETERS after COUNT)")
+    assert "unset GIT_DIR" in run or "GIT_DIR GIT_WORK_TREE" in run, (
+        f"{at} does not drop GIT_DIR/GIT_WORK_TREE — a GITHUB_ENV write "
+        "would redirect the trusted checkout into an attacker work tree")
     for path in COACH_RESTORE_PATHS:
         assert path in run, (
             f"{at} no longer overlays {path} from base.sha")
@@ -396,6 +403,14 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
     assert "GIT_ALLOW_PROTOCOL=https" in run, (
         "auto-review.yml [design-coach] lock-check does not re-assert "
         "the git protocol lock after GITHUB_ENV")
+    assert "unset GIT_CONFIG_PARAMETERS" in run, (
+        "auto-review.yml [design-coach] lock-check does not drop "
+        "GIT_CONFIG_PARAMETERS — a GITHUB_ENV write would override the "
+        "re-exported COUNT/KEY/VALUE lock")
+    assert "GIT_DIR GIT_WORK_TREE" in run, (
+        "auto-review.yml [design-coach] lock-check does not drop "
+        "GIT_DIR/GIT_WORK_TREE — a GITHUB_ENV write would redirect the "
+        "trusted extract")
     assert '/usr/bin/bash "$CHECK" "$PR" --since "$SINCE"' in run, (
         "auto-review.yml [design-coach] lock-check does not invoke the "
         "extracted script with /usr/bin/bash --since — a stale lock from "
@@ -629,6 +644,17 @@ def test_coach_guard_rejects_restore_inheriting_pythonpath():
         "unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \\\n",
         "true PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \\\n")
     with pytest.raises(AssertionError, match="PYTHONPATH"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_restore_keeping_git_config_parameters():
+    # GIT_CONFIG_PARAMETERS is applied after COUNT/KEY/VALUE, so the
+    # re-exported lock alone is not enough against a GITHUB_ENV plant.
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        "unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \\\n",
+        "true GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \\\n")
+    with pytest.raises(AssertionError, match="GIT_CONFIG_PARAMETERS"):
         _assert_coach_restores_posting_surface_from_base(tampered)
 
 
