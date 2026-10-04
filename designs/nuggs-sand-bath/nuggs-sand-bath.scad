@@ -101,6 +101,12 @@ dish_wall = 2.4;
 // Corner radius of the dish's rounded-rectangle section (mm). Floors that
 // meet walls in a fillet print as one clean seam and sweep clean.
 corner_r = 12;
+// Interior fill-line witness: depth into the dish wall (mm). 0 disables.
+// Sits on the designed fill plane (y_sand), not a new height. In the print
+// pose Y is sideways, so this is a vertical slot — no new overhang.
+fill_mark_d = 0.4;
+// Interior fill-line witness: height along use-up / print-Y (mm).
+fill_mark_h = 0.8;
 
 /* [Quality] */
 // This design's own preset. Iterating: $fa=6/$fs=1.5. Production: $fa=3/$fs=0.8.
@@ -228,6 +234,10 @@ echo(str("nuggs-sand-bath: dish ", dish_w, " mm wide, ", floor_run,
 echo(str("nuggs-sand-bath: lip ", lip_h, " mm, beach flank ",
          atan2(lip_h, flare_run), " deg, rim rake ", rake_ang,
          " deg, print height ", z_far_out - z_tip, " mm"));
+echo(str("nuggs-sand-bath: fill line y_sand = ", y_sand,
+         " mm (", sand_depth, " mm above floor / ", freeboard,
+         " mm below low rim); witness ", fill_mark_d, " x ",
+         fill_mark_h, " mm"));
 
 // ---------------------------------------------------------------------------
 // Welfare and printability asserts. The coupling's guards live in nuggs_cfg();
@@ -293,6 +303,14 @@ assert(floor_run <= 96 ? cap_est_ml <= 262 : true, str(
     "BATH CAPACITY: at the default floor_run = 96 mm, estimated ", cap_est_ml,
     " mL exceeds the ~250 mL brief band (+5%). Shorten floor_run or ",
     "sand_depth."));
+assert(fill_mark_d >= 0 && fill_mark_d <= dish_wall / 2, str(
+    "BATH FILL MARK: fill_mark_d = ", fill_mark_d, " mm must be in [0, ",
+    dish_wall / 2, "] so the witness stays a shallow wall nick, not a ",
+    "through-cut or a chewable shelf."));
+assert(fill_mark_d == 0 || fill_mark_h >= 0.6, str(
+    "BATH FILL MARK: fill_mark_h = ", fill_mark_h, " mm is under one nozzle ",
+    "plus a bit — the groove would vanish in the slice. Raise it or set ",
+    "fill_mark_d = 0."));
 
 // ---------------------------------------------------------------------------
 // Sections
@@ -373,10 +391,32 @@ module nuggs_sand_bath() {
             }
             translate([0, 0, z_wide - 1])      // trough void; no flat far cap —
                 linear_extrude(z_far_out - z_wide + 2) in_2d();  // ramp ends it
+            fill_line_groove();
             mouth_open();
             far_ramp_cut();
         }
     }
+}
+
+// Shallow interior witness at the designed fill plane y = y_sand (sand_depth
+// above the floor, freeboard below the low rim). Only the VERTICAL trough
+// walls (z >= z_wide): in the print pose Y is sideways, so the nick is a
+// vertical slot (all faces nz = 0). Kept off the beach, the staged skirts,
+// the floor fillets and the far ramp so it cannot add an overhang or a
+// chewable ledge the animal reaches from the sand floor. Depth is one
+// extrusion; height is two — visible when pouring, not a snag.
+module fill_line_groove() {
+    if (fill_mark_d > 0)
+        intersection() {
+            translate([-200, y_sand - fill_mark_h / 2, z_wide])
+                cube([400, fill_mark_h, z_far_out - z_wide + 2]);
+            translate([0, 0, z_wide - eps])
+                linear_extrude(z_far_out - z_wide + 4)
+                    difference() {
+                        offset(delta = fill_mark_d) in_2d();
+                        in_2d();
+                    }
+        }
 }
 
 // The open mouth: everything above the raked rim plane, gone. The plane starts

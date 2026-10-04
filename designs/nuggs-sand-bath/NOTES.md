@@ -202,6 +202,16 @@ segments, not rectangles.
 8. **$fa/$fs match the library pin** (`3/0.8`): where this file's tube meets
    the port, mismatched presets split the shell into ~20 bodies under Manifold
    (issue #99, PR #200). Do not "improve" them.
+9. **Fill-line witness groove** (Drik, first-customer review on PR #674): a
+   0.4 × 0.8 mm interior nick on the vertical trough walls, centred on the
+   designed fill plane `y_sand = y_floor_in + sand_depth` (measured −42.00 mm
+   with the defaults: 18 mm above the floor / 15 mm below the low rim — not a
+   new height). In the print pose Y is sideways, so the nick is a vertical
+   slot (nz = 0); it is kept off the beach, the staged skirts, the floor
+   fillets and the far ramp so it cannot add overhang or a chewable ledge at
+   sand-floor height. First fill is the groove, not eyeball + measuring cup.
+   `part = "sandbody"` is unchanged (the groove is in the wall, not the fill
+   solid), so the 245.5 mL mesh audit still holds.
 
 ## Print settings
 
