@@ -88,3 +88,4 @@ clearance is the `fitcheck_tilt` gate, not a pretty camera.
 | 2026-10-04 | Drik R3.2: M4×8 + underside counterbore; recess 2.4 mm; lead-in flipped | M4×16 jacked; mount face hid the bolt; inverted cone was not a chamfer |
 | 2026-10-04 | Drik R4: side-entry nut trap with a 1.6 mm floor | Open-bed hex let the nut walk onto the base web; the bolt never pulled the head |
 | 2026-10-04 | Drik R5: window AF-wide, stops at x = 0 | The previous cube covered the whole hex; the nut spun in a plain slot |
+| 2026-10-04 | Drik R6 pass: keep the two copy nits | "Corner first"; fingertip on the window for the first turns |

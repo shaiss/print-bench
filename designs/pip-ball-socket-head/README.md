@@ -111,17 +111,20 @@ Bolt the head to the base **before** you mount anything. The centre bolt
 comes in from the base's underside, which is also the mounting face.
 
 1. Slide an M4 nut into the hex window on the tenon (the opening opposite
-   the slit), **flats to the window**. Push it home so the far vertex seats
-   in the surviving +X hex. It sits on a 1.6 mm floor — it cannot fall out
-   the bed. If it will not slide, the 7.4 mm slot roof sagged; a light file
-   on the roof, or a 0.2 mm extra on `nut_slot_h`, clears it.
+   the slit), **corner first, flats along the side walls**. Push it home so
+   the far vertex seats in the surviving +X hex. It sits on a 1.6 mm floor
+   — it cannot fall out the bed. If it will not slide, the 7.4 mm slot roof
+   sagged; a light file on the roof, or a 0.2 mm extra on `nut_slot_h`,
+   clears it.
 2. Seat the tenon nose in the base's centre recess with the **slit and wings
    clocked toward the desk edge** (~3 o'clock if the two mounting holes sit
    left/right). The 45° flare wedges at about 0.8 mm; that ring is the
    bearing, not a deep shoulder. Pull it down with an **M4 × 8 or M4 × 10
    socket-cap** from underneath into the counterbore so the plate sits
-   flat. The bolt should torque without holding the nut. Lift the assembled
-   unit by the head: the base comes with it.
+   flat. Keep a fingertip on the window for the first turns so the nut
+   cannot slide back toward the opening. The bolt should torque without
+   holding the nut. Lift the assembled unit by the head: the base comes
+   with it.
 3. Bolt the assembled unit to the desk edge, shelf underside or wall with
    two M4s. Use hex-drive screws (or drive a Phillips at a slight angle) —
    a straight #2 driver hits the socket ring.

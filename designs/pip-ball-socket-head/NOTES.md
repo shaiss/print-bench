@@ -238,3 +238,7 @@ it only when you already know the printer.
   spun in a 8.55 mm slot. Window is now AF-wide (7.4) and stops at x = 0;
   slot 3.8 mm; hardware line is M4×8 or M4×10. Torque-without-holding-the-
   nut plus lift-by-the-head.
+- **Drik R6 PASS (sha `e0bd39a8`).** Nut sits on head material, cannot spin,
+  lands on the bolt axis. Two copy nits landed: "corner first, flats along
+  the side walls"; fingertip on the window for the first turns. B1 and B5
+  still queued; B1 is where the payload-hold claim gets earned.
