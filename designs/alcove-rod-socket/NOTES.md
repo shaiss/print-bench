@@ -204,11 +204,14 @@ parts instead of hand-overriding `rod_d`:
 
 | Part | Wrapper | What it proves |
 |---|---|---|
-| `thread-coupon-25` | `alcove-rod-socket-thread-25-coupon.scad` | printed thread at 25 mm major stack |
-| `bore-coupon-25` | `alcove-rod-socket-bore-25-coupon.scad` | slip bore at `rod_clearance=0.6` |
+| `thread-coupon-25` | `alcove-rod-socket-thread-coupon-25.scad` | printed thread at 25 mm major stack |
+| `bore-coupon-25` | `alcove-rod-socket-bore-coupon-25.scad` | slip bore at `rod_clearance=0.6` → **25.6 mm** Ø |
 
-Same tune flow as the 40 mm coupons (`thread_tol`, `rod_clearance`). Boss /
-collar at 25 mm are **not** shipped in B5 — coupons only.
+Same tune flow as the 40 mm coupons (`thread_tol`, `rod_clearance`). US rods
+sold as 1″ often measure **25.4 mm** — see README (raise `rod_clearance` or
+set `rod_d = 25.4`). Boss / collar at 25 mm are **not** Release-gated in B5;
+after coupons fit, Customizer `rod_d = 25` + `part` boss/collar exports the
+holders (32 flutes auto). Gated `boss-25` / `collar-25` parts are backlog B5b.
 
 ## Hardware: screw length and load rating
 

@@ -74,7 +74,8 @@ the one motion the part really performs — seeded from the hero.
 | B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints | one print + NOTES entry |
 | B1 | Witness slot / seat detent ("is the rod fully in?") | brief's optional ask; install confidence — plus vibration insurance: ~730 axial curtain-tugs/yr vs single-digit unthreads, and a steep 2-start lead is what walks loose under cyclic load; nothing on the rod resists a slow unthread. Measured by the proving print's week-of-use seat check; a walked collar promotes B1 to #1 | small geometry + re-gate |
 | B2 | Anti-rotation rib (screwless alternative to `screw_count=2`) | protects drywall anchors from spin torque | small geometry + re-gate |
-| ~~B5~~ | ~~Sizes other than 40 (25 mm reference origin)~~ | **Done** (#809): gated `thread-coupon-25` + `bore-coupon-25` at fixed 25 mm; knurl flute count caps by OD (NOTES) | — |
+| ~~B5~~ | ~~25 mm reference coupons (thread + bore)~~ | **Done** (#809): gated `thread-coupon-25` + `bore-coupon-25`; knurl flute cap by OD (NOTES) | — |
+| B5b | Gated 25 mm production holders (`boss` / `collar` / `collar-shallow` at fixed 25 mm, Release + plate policy) | coupons prove the size; holders still need Customizer `rod_d=25` export until gated parts ship | ci.parts + README |
 
 Re-ranked 2026-08-24 per the #379 thread's ruling (Vera's note: the issue
 body's order was two rounds stale — the committed order wins). A "B6" appears
