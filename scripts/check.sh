@@ -18,7 +18,11 @@
 #      element and overlapping labels
 #   9. fusecheck selftest (scripts/fusecheck-check.sh --selftest): the
 #      ci.fusecheck bound grammar — legacy, MIN MAX, =N, malformed, exit-4 —
-#      every negative row asserted to fire on committed fixtures (issue #627)
+#      every negative row asserted to fire on committed fixtures (issue #627),
+#      plus the include-closure control proof (issue #766)
+#   9b. scad-closure selftest (scripts/scad-closure.sh --selftest): the
+#      include-closure `part ==` branch proof still finds a parent / two-hop
+#      branch and still refuses a name nowhere in the closure
 # Run before committing. For full STL+PNG output use scripts/render.sh.
 set -euo pipefail
 
@@ -216,6 +220,11 @@ fi
 # the two fixture renders; no skip path — a skipped selftest is exactly the
 # silent green this exists to close, so CI installs printcheck in every job
 # that runs check.sh.
+echo "-- scad-closure selftest: scripts/scad-closure.sh --selftest"
+if ! ./scripts/scad-closure.sh --selftest; then
+  fail=1
+fi
+
 echo "-- fusecheck selftest: scripts/fusecheck-check.sh --selftest"
 if ! ./scripts/fusecheck-check.sh --selftest; then
   fail=1

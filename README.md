@@ -459,6 +459,11 @@ surfaces studies awaiting a read live in
     malformed line, and the exit-4 hard-fail path, over committed fixtures in
     `scripts/fusecheck-fixtures/` whose body counts are re-measured with
     fusecheck itself (issue #627)
+  - `scad-closure.sh` — include-closure walk behind gate.sh's `ci.fitchecks`
+    branch proof and fusecheck-check.sh's control proof (issue #766): a
+    `part == "..."` dispatcher in an included parent counts; a name nowhere
+    in the closure still FAILs; `--selftest` is the negative-control half
+    check.sh runs
   - `cog-check.sh` — proves the assembled object STANDS (issue #623), the
     thing no per-part gate can: reads a `ci.cog` manifest (per-part densities,
     non-printed hardware masses, assembly transforms, a stability margin) and
