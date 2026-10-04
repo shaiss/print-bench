@@ -129,14 +129,16 @@ if kind == "reviewer":
     # design directories are staged by a trusted workflow step before the
     # session starts (auto-review.yml), so nothing a review does needs git.
     POSTURE_DENY = [{"Write"}, {"Edit"}, {"NotebookEdit"}, {"Bash(git:*)"}]
-    # The posting surface (issue #764): the reviewers' ONE write is the
-    # mcp__reviewer__post_review tool, allowed per step by --allowedTools
-    # (never by settings.json, so coverage rule 1 never sees it). A deny of
-    # either spelling — the tool or its server — would silently kill every
-    # sign-off again, so both are protected here.
+    # The posting surface (issues #764 and #772): the reviewers' ONE write is
+    # the mcp__reviewer__post_review tool and the PM triage's is
+    # mcp__reviewer__post_triage, allowed per step by --allowedTools (never
+    # by settings.json, so coverage rule 1 never sees it). A deny of either
+    # spelling — a tool or its server — would silently kill every sign-off /
+    # triage verdict again, so all are protected here.
     NEVER_DENY_TOOLS = [
         "Read", "Grep", "Glob",
         "mcp__reviewer", "mcp__reviewer__post_review",
+        "mcp__reviewer__post_triage",
     ]
     GIT_FLOOR = []
 elif kind == "coach":
@@ -530,10 +532,10 @@ PY2
   done
   derive "$R" "$tmp/r.json" deny "+Read(./.env)"
   expect pass "a path-scoped Read deny passes" "$S" "$tmp/r.json" reviewer
-  # Posting surface (issue #764): denying the reviewers' ONE write — either
-  # spelling, the tool or its server — kills every sign-off again; the check
-  # must catch it.
-  for f in "mcp__reviewer__post_review" "mcp__reviewer"; do
+  # Posting surface (issues #764 and #772): denying a poster's ONE write —
+  # either spelling, a tool or its server — kills every sign-off / triage
+  # verdict again; the check must catch it.
+  for f in "mcp__reviewer__post_review" "mcp__reviewer__post_triage" "mcp__reviewer"; do
     derive "$R" "$tmp/r.json" deny "+$f"
     expect fail "denying the posting surface with $f fails the check" "$S" "$tmp/r.json" reviewer
   done

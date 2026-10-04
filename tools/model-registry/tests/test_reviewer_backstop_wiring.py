@@ -36,16 +36,28 @@ from test_workflow_drift import (
 
 REVIEWER_BACKSTOP = ".claude/reviewer-settings.json"
 COACH_BACKSTOP = ".claude/design-coach-settings.json"
-# The posting surface (issue #764): the Jane/Drik ship steps must also carry
-# the reviewer MCP server and pin its trusted env, or the reviewers relapse
-# into having NO postable write (every round then ends with denials and an
-# exit-0 job that posted nothing — the bug this closes). PM triage and the
-# coach post no sign-off, so they stay on reads only.
+# The posting surface (issues #764 and #772): the Jane/Drik ship steps must
+# also carry the reviewer MCP server and pin its trusted env, or the reviewers
+# relapse into having NO postable write (every round then ends with denials
+# and an exit-0 job that posted nothing — the bug this closes). The pm-triage
+# job carries the same surface for its verdict comments (post_triage, #772),
+# plus the design list that bounds its per-design cap. The coach alone posts
+# no marker, so it stays on reads + its own git round-pushing.
 POST_CONFIG = ".claude/reviewer-post/reviewer-mcp.json"
 POST_TOOL = "mcp__reviewer__post_review"
-POST_JOBS = {"jane-review": "jane", "drik-review": "drik"}
+TRIAGE_TOOL = "mcp__reviewer__post_triage"
+# job → (REVIEWER_ID the step must set, the posting tool it must allow).
+POST_JOBS = {
+    "jane-review": ("jane", POST_TOOL),
+    "drik-review": ("drik", POST_TOOL),
+    "pm-triage": ("pm", TRIAGE_TOOL),
+}
 POST_PR = "${{ github.event.pull_request.number }}"
 POST_STATE = "${{ runner.temp }}/reviewer-posts"
+# The pm-triage per-design cap is bounded by the workflow's changed-designs
+# output — trusted env, exactly like REVIEWER_PR. Keyed by job so a future
+# posting job without a design list simply omits it.
+POST_DESIGNS = {"pm-triage": "${{ needs.design-changes.outputs.changed_designs }}"}
 # job → the deny backstop its ship steps pass. The coach's differs because it
 # pushes iterations (Write/Edit stay allowed); the reviewers are read-only.
 BACKSTOPS = {
@@ -140,13 +152,13 @@ def _step_env(chunk: str) -> dict[str, str]:
 
 
 def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
-    """Every Jane/Drik ship step wires the posting server AND pins its trusted
+    """Every posting ship step wires the posting server AND pins its trusted
     env — the flags prove the tool is loaded and allowed, the env proves the
-    server can know WHICH reviewer and WHICH PR it is posting for. Factored
-    out for the tamper negative controls."""
+    server can know WHICH reviewer, WHICH PR and (pm) WHICH designs it is
+    posting for. Factored out for the tamper negative controls."""
     assert (REPO_ROOT / POST_CONFIG).is_file(), (
         f"{POST_CONFIG} is missing — the reviewers have no postable write")
-    for job, who in POST_JOBS.items():
+    for job, (who, tool) in POST_JOBS.items():
         block = _without_comments(_job_blocks(text)[job])
         for n, chunk in enumerate(_ship_chunks(block), 1):
             at = f"auto-review.yml [{job}] ship step {n}"
@@ -158,14 +170,20 @@ def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
                 f"not at all (issue #764)")
             tools = _flag(args, "--allowedTools")
             allowed = tools[0].strip('"').split(",") if tools else []
-            assert len(tools) == 1 and POST_TOOL in allowed, (
-                f"{at} does not allow {POST_TOOL} — the session would be "
+            assert len(tools) == 1 and tool in allowed, (
+                f"{at} does not allow {tool} — the session would be "
                 f"denied on its only write surface")
+            other = TRIAGE_TOOL if tool == POST_TOOL else POST_TOOL
+            assert other not in allowed, (
+                f"{at} allows {other} alongside {tool} — each family's step "
+                f"must allow only its own tool (the server refuses the "
+                f"cross-identity call; the allow list should not invite it)")
             env = _step_env(chunk)
             assert env.get("REVIEWER_ID") == who, (
                 f"{at} sets REVIEWER_ID={env.get('REVIEWER_ID')!r}, not "
-                f"{who!r} — the env selects the sign-off family (JANE_ vs "
-                f"DRIK_), so a wrong value posts the wrong reviewer's marker")
+                f"{who!r} — the env selects the comment family (JANE_ vs "
+                f"DRIK_ vs PM_), so a wrong value posts the wrong family's "
+                f"marker or is refused outright")
             assert env.get("REVIEWER_PR") == POST_PR, (
                 f"{at} sets REVIEWER_PR={env.get('REVIEWER_PR')!r}, not the "
                 f"workflow's PR — the posting server pins its target to this "
@@ -174,7 +192,15 @@ def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
                 f"{at} sets REVIEWER_POST_STATE="
                 f"{env.get('REVIEWER_POST_STATE')!r}, not the shared "
                 f"{POST_STATE!r} — one path across the chain walk is what "
-                f"makes the one-review cap span the links")
+                f"makes the one-post cap span the links")
+            if job in POST_DESIGNS:
+                assert env.get("REVIEWER_PM_DESIGNS") == POST_DESIGNS[job], (
+                    f"{at} sets REVIEWER_PM_DESIGNS="
+                    f"{env.get('REVIEWER_PM_DESIGNS')!r}, not the workflow's "
+                    f"changed-designs output — the server bounds its "
+                    f"one-verdict-per-design cap by that trusted list; "
+                    f"anything else lets a verdict land for a design this "
+                    f"run was not asked to rule on")
 
 
 def test_every_reviewer_ship_step_carries_the_post_surface():
@@ -264,6 +290,30 @@ def test_wiring_guard_rejects_a_tampered_step(job, step, old, new, match):
     # The state env dropped entirely.
     ("drik-review", -1, "          REVIEWER_POST_STATE: ${{ runner.temp }}"
      "/reviewer-posts\n", "", "REVIEWER_POST_STATE"),
+    # pm-triage (issue #772): same surface, its own family's tool.
+    ("pm-triage", 0, " --mcp-config .claude/reviewer-post/reviewer-mcp.json",
+     "", "--mcp-config"),
+    ("pm-triage", 1,
+     '--allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob"',
+     '--allowedTools "Read,Grep,Glob"', "only write surface"),
+    # The reviewers' tool allowed alongside the pm one: the server refuses
+    # the cross-identity call, but the allow list should not invite it.
+    ("pm-triage", 2,
+     '--allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob"',
+     '--allowedTools "mcp__reviewer__post_triage,mcp__reviewer__post_review,'
+     'Read,Grep,Glob"', "only its own tool"),
+    # REVIEWER_ID crossed: a pm step set up as jane — the server refuses the
+    # call, so the triage posts nothing (the #772 disease, back).
+    ("pm-triage", 3, "REVIEWER_ID: pm", "REVIEWER_ID: jane", "REVIEWER_ID"),
+    # The design list unpinned: the one-verdict-per-design cap loses the
+    # trusted bound that says which designs this run may rule on.
+    ("pm-triage", 4,
+     "REVIEWER_PM_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}",
+     "REVIEWER_PM_DESIGNS: all designs", "REVIEWER_PM_DESIGNS"),
+    # The design env dropped entirely — unattended, the server fails closed.
+    ("pm-triage", 5,
+     "          REVIEWER_PM_DESIGNS: ${{ needs.design-changes.outputs."
+     "changed_designs }}\n", "", "REVIEWER_PM_DESIGNS"),
 ])
 def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
     # NEGATIVE CONTROLS for the posting-surface pin, same discipline.

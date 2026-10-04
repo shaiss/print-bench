@@ -278,10 +278,24 @@ For each design the PR touches:
      change by itself.
 4. **Check the non-negotiables first**: if any finding — or the design as
    reviewed — touches one, that outranks the round and leads the verdict.
-5. **Post ONE comment per design** on the PR:
+5. **Post ONE comment per design** on the PR — through your only write
+   surface, the `mcp__reviewer__post_triage` tool (the workflow's pm-triage
+   job wires it; a multi-line `gh pr comment` is denied under dontAsk, issue
+   #772 — do not try it). The tool takes `body` (your verdict, everything
+   below **except** the marker and footer), `design` (the design name this
+   verdict rules on) and `sha` (the PR head sha); it assembles the
+   `PM_TRIAGE` marker and the attribution footer itself, from those typed
+   arguments — never type either one by hand, and never put any sign-off or
+   triage marker in the body. One post per design per run; the target PR
+   comes from the workflow's env, not from you. The tool assembles
+
+   ```text
+   <!-- PM_TRIAGE design=<name> sha=<head-sha> -->
+   ```
+
+   ahead of your body and the attribution footer after it. The verdict shape:
 
    ```markdown
-   <!-- PM_TRIAGE design=<name> sha=<head-sha> -->
    ## 🧭 PM triage — <name>
    *(charter: designs/<name>/PM.md — or: advisory, no charter to cite)*
 
@@ -293,7 +307,7 @@ For each design the PR touches:
    **Charter follow-up:** <edits the next design session should commit, or none>
    ```
 
-   ending with the repo's attribution footer. Keep it a triage, not a
+   Keep it a triage, not a
    fourth review: no new findings of your own beyond non-negotiable
    violations, and no re-deriving anyone's numbers — CI checked the
    numbers, the reviewers felt the print, you rule on scope and value.

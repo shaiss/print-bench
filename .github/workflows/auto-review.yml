@@ -956,20 +956,82 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # The BASE branch, not the merge ref: this job now wires the posting
+          # MCP server (issue #772), which runs with the job token — so it
+          # must be the reviewed base copy, never a PR's, the same boundary
+          # the Jane/Drik jobs draw (#760). The PM's charter input arrives as
+          # a trusted overlay below.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Check the reviewer posting surface is on the base branch
+        id: ready
+        run: |
+          set -euo pipefail
+          if [ -f .claude/reviewer-post/reviewer_mcp.py ] \
+             && [ -f .claude/reviewer-post/reviewer-mcp.json ] \
+             && [ -f .claude/reviewer-settings.json ] \
+             && grep -q "post_triage" .claude/reviewer-post/reviewer_mcp.py; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the PM triage posting surface (post_triage) is not on the base branch yet (first landing) — skipping the triage rather than running a PR-controlled copy"
+          fi
+
+      # Trusted head staging (code-scanning finding on #760). This job runs
+      # with NO git — .claude/reviewer-settings.json denies Bash(git:*) — so
+      # the PR head's design directories (the PM.md charters §0 loads, above
+      # all) are staged into the BASE checkout here, by workflow code, before
+      # any agent step starts; the /pm session reads them with Read/Grep/Glob.
+      - name: Stage the PR head's design directories (trusted, no agent)
+        if: steps.ready.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
+        run: |
+          set -euo pipefail
+          set -f   # PR-controlled names: no globbing
+          # persist-credentials: false on the BASE branch, so HEAD is not
+          # local. Authenticate this one fetch with the job token (Oracle's
+          # pattern) so staging works on a private repo too.
+          FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${FETCH_AUTH}"
+          git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+            fetch --no-tags origin "$HEAD_SHA"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          for d in $CHANGED_DESIGNS; do
+            if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+              echo "::warning::skipped a changed design directory whose name is not [A-Za-z0-9._-]"
+              continue
+            fi
+            rm -rf -- "designs/${d}"
+            if git cat-file -e "${HEAD_SHA}:designs/${d}" 2>/dev/null; then
+              git checkout "$HEAD_SHA" -- "designs/${d}"
+              echo "staged designs/${d} at ${HEAD_SHA}"
+            else
+              echo "designs/${d} is removed at the PR head; left absent"
+            fi
+          done
 
       - name: /pm triage via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          REVIEWER_PM_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
@@ -984,17 +1046,22 @@ jobs:
 
       - name: /pm triage via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          REVIEWER_PM_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
@@ -1009,17 +1076,22 @@ jobs:
 
       - name: /pm triage via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          REVIEWER_PM_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
@@ -1035,16 +1107,23 @@ jobs:
       - name: /pm triage via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          REVIEWER_PM_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
@@ -1060,17 +1139,24 @@ jobs:
       - name: /pm triage via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          REVIEWER_PM_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
@@ -1086,7 +1172,8 @@ jobs:
       - name: /pm triage via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1094,10 +1181,16 @@ jobs:
           && steps.p5.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          REVIEWER_PM_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
@@ -1111,7 +1204,7 @@ jobs:
             repository content.
 
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping the PM triage for PR #${{ github.event.pull_request.number }}"
 
@@ -1121,7 +1214,8 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
@@ -1139,7 +1233,8 @@ jobs:
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'

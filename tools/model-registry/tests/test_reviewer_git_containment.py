@@ -16,8 +16,9 @@ containment is structural, in two halves:
     ``core.hooksPath=/dev/null``, ``core.pager=cat`` via ``GIT_CONFIG_COUNT``),
     computed as the step's EFFECTIVE env (job env, then the step's own, the
     step winning) so a single link that overrides or sheds it fails;
-  - Jane's and Drik's jobs check out ``pull_request.base.ref`` (the
-    posting MCP / settings / skills are never the PR's copy) at
+  - Jane's, Drik's and the PM triage jobs check out ``pull_request.base.ref``
+    (the posting MCP / settings / skills are never the PR's copy — pm-triage
+    joined the posting surface in #772, so it joins this boundary) at
     ``fetch-depth: 0``, then a TRUSTED step fetches the PR head SHA
     (Oracle extraheader auth) and overlays the changed design directories
     before any agent step;
@@ -45,7 +46,7 @@ CONFIG_LOCK = {
     "core.pager": "cat",
 }
 # The jobs whose reviewer has no git and reviews the PR head's geometry.
-STAGED_JOBS = ("jane-review", "drik-review")
+STAGED_JOBS = ("jane-review", "drik-review", "pm-triage")
 STAGE_MARKER = 'git checkout "$HEAD_SHA" -- "designs/${d}"'
 HEAD_FETCH = 'fetch --no-tags origin "$HEAD_SHA"'
 BASE_REF = "${{ github.event.pull_request.base.ref }}"
@@ -189,7 +190,7 @@ def test_every_reviewer_ship_step_runs_under_the_git_lock():
     _assert_every_ship_step_is_git_locked(_workflow_text())
 
 
-def test_jane_and_drik_get_the_head_staged_by_a_trusted_step():
+def test_jane_drik_and_pm_get_the_head_staged_by_a_trusted_step():
     _assert_head_is_staged_before_the_agent(_workflow_text())
 
 
