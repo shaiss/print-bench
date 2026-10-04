@@ -39,7 +39,12 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     .claude/design-coach-settings.json for the coach; issue #451):
 #     scripts/reviewer-perms-check.sh holds what they deny, and
 #     tools/model-registry/tests/test_reviewer_backstop_wiring.py holds
-#     every ship step here to its backstop.
+#     every ship step here to its backstop. Cursor cloud-agent PRs initiate
+#     this workflow as cursor[bot]; the pinned action defaults allowed_bots
+#     empty and refuses that actor before any review runs (the error names
+#     the slug `cursor`, not `cursor[bot]`). Every ship step sets
+#     `allowed_bots: cursor`. Do not widen to '*' — on a public repo that
+#     lets any GitHub App trigger the action. The deny backstop is unchanged.
 #
 # Posting surface (issue #764). A review body is rich multi-line markdown, and
 # under --permission-mode dontAsk the Bash permission matcher denies any
@@ -457,6 +462,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
@@ -477,6 +483,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
@@ -497,6 +504,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
@@ -519,6 +527,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
@@ -542,6 +551,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
@@ -566,6 +576,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
@@ -737,6 +748,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
@@ -757,6 +769,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
@@ -777,6 +790,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
@@ -799,6 +813,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
@@ -822,6 +837,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
@@ -846,6 +862,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
@@ -1031,6 +1048,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
@@ -1061,6 +1079,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
@@ -1091,6 +1110,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
@@ -1123,6 +1143,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
@@ -1156,6 +1177,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
@@ -1190,6 +1212,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
@@ -1328,6 +1351,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
@@ -1344,6 +1368,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
@@ -1360,6 +1385,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
@@ -1376,6 +1402,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
@@ -1393,6 +1420,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
@@ -1411,6 +1439,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
+          allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /design-coach ${{ github.event.pull_request.number }}
