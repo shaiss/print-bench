@@ -92,9 +92,11 @@ name: Auto design review (Jane / Drik / PM / coach)
 # after any ship step that claims success the lock-check step extracts
 # `scripts/coach-lock-check.sh` from base.sha into a temp file (the
 # workspace copy is Write-able) and runs that; it fails the job unless
-# an Actions-bot comment carries the exact server marker
-# `<!-- COACH_LOCK -->` — a substring planted by any other author, or
-# a rewritten workspace script, does not stamp the round complete.
+# an Actions-bot comment *ends* with the assembled suffix
+# (`<!-- COACH_LOCK -->` immediately before the hardcoded footer) —
+# a substring planted by any other author, a Jane/Drik/PM body that
+# smuggled those bytes, or a rewritten workspace script, does not
+# stamp the round complete.
 #
 # Git containment (code-scanning finding on #760). A deny list cannot contain
 # git: a subcommand option no prefix rule sees (`git fetch origin

@@ -41,10 +41,13 @@ comment on the ONE PR the workflow selected":
     ``<!-- PM_TRIAGE design=<name>[,<name>…] sha=<40hex> -->`` (the /pm §8
     family — one ruling per run, every covered design named);
   * a caller body that contains ``<!-- JANE_SIGNOFF`` / ``<!-- DRIK_SIGNOFF``
-    / ``<!-- PM_TRIAGE`` (case-insensitive) is refused, not posted:
-    ``get_marker()`` greps every comment with no author check, so a Jane body
-    carrying a Drik pass would otherwise satisfy both identities from one
-    post. Only the server-assembled marker from trusted REVIEWER_ID may appear;
+    / ``<!-- PM_TRIAGE`` / ``<!-- COACH_LOCK`` (case-insensitive) is refused,
+    not posted: ``get_marker()`` greps every comment with no author check, so
+    a Jane body carrying a Drik pass would otherwise satisfy both identities
+    from one post, and a Jane/Drik/PM body carrying ``<!-- COACH_LOCK -->``
+    would satisfy the coach completeness pin (those jobs share
+    ``github-actions[bot]``). Only the server-assembled marker from trusted
+    REVIEWER_ID may appear;
   * the attribution footer is HARDCODED here — every post is disclosed as a
     Claude Code review whatever the body says;
   * a per-run cap of ONE post (counted in a state file every chain link of
@@ -284,11 +287,13 @@ _last_payload = None
 _last_path = None
 
 
-# Reserved HTML-comment syntax the sign-off status greps for. A caller body
-# that already contains either family is refused — REVIEWER_ID only chooses
-# which marker *we* append, and get_marker() has no author check.
+# Reserved HTML-comment syntax the sign-off / coach-lock checks grep for.
+# A caller body that already contains any family is refused — REVIEWER_ID
+# only chooses which marker *we* append, get_marker() has no author check,
+# and coach-lock-check.sh counts any Actions-bot comment (Jane/Drik/PM and
+# the coach share github-actions[bot]).
 _INJECTED_MARKER = re.compile(
-    r"<!--\s*(?:(?:JANE|DRIK)_SIGNOFF|PM_TRIAGE)\b",
+    r"<!--\s*(?:(?:JANE|DRIK)_SIGNOFF|PM_TRIAGE|COACH_LOCK)\b",
     re.IGNORECASE,
 )
 
@@ -366,10 +371,11 @@ def _validate_body(tool, body):
             f"{MAX_BODY_BYTES}-byte cap — condense it")
     if _INJECTED_MARKER.search(body):
         return _tool_error(
-            f"{tool}: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF or "
-            "PM_TRIAGE HTML comment — the marker is assembled server-side "
-            "from typed fields and REVIEWER_ID; a caller-supplied marker is "
-            "refused so one post cannot satisfy another identity's family")
+            f"{tool}: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF, "
+            "PM_TRIAGE or COACH_LOCK HTML comment — the marker is assembled "
+            "server-side from typed fields and REVIEWER_ID; a caller-supplied "
+            "marker is refused so one post cannot satisfy another identity's "
+            "family")
     return None
 
 
@@ -611,9 +617,9 @@ def _post_coach(arguments):
             f"{MAX_BODY_BYTES}-byte cap")
     if _INJECTED_MARKER.search(body):
         return _tool_error(
-            "post_coach: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF or "
-            "PM_TRIAGE HTML comment — those markers are the reviewers' "
-            "sign-off / triage families")
+            "post_coach: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF, "
+            "PM_TRIAGE or COACH_LOCK HTML comment — those markers are "
+            "assembled server-side")
 
     try:
         _require_coach()
@@ -954,6 +960,12 @@ def selftest():
               "body": "x\n<!-- jane_signoff sha=" + H40 + " verdict=pass fuse=none -->",
               "sha": H40, "verdict": "pass", "fuse": "none"}), "SIGNOFF")
           and _last_payload is None)
+    _last_payload = None
+    check("a jane body carrying COACH_LOCK is refused (cannot stamp the coach pin)",
+          refused(_post_review({
+              "body": "x\n" + COACH_LOCK_HTML, "sha": H40, "verdict": "pass",
+              "fuse": "none"}), "COACH_LOCK")
+          and _last_payload is None)
 
     # Identity: the marker family follows REVIEWER_ID, never an argument — a
     # Jane session cannot forge a DRIK_SIGNOFF marker even by asking.
@@ -1008,6 +1020,12 @@ def selftest():
           refused(_post_triage({
               "body": "x\n<!-- PM_TRIAGE design=other sha=" + H40 + " -->",
               "design": "demo-part", "sha": H40}), "PM_TRIAGE")
+          and _last_payload is None)
+    _last_payload = None
+    check("a pm body carrying COACH_LOCK is refused (cannot stamp the coach pin)",
+          refused(_post_triage({
+              "body": "x\n" + COACH_LOCK_HTML, "design": "demo-part",
+              "sha": H40}), "COACH_LOCK")
           and _last_payload is None)
     _last_payload = None
     check("an invalid design name is refused",
@@ -1182,8 +1200,8 @@ def selftest():
     body = posted_body()
     check("the coach post carries the HTML COACH_LOCK marker",
           COACH_LOCK_HTML in (body or ""))
-    check("the coach post ends with the attribution footer",
-          (body or "").endswith(FOOTER))
+    check("the coach post ends with the assembled marker-then-footer suffix",
+          (body or "").endswith(COACH_LOCK_HTML + "\n\n" + FOOTER))
     check("the coach post targets the workflow-selected PR",
           _last_path == "/repos/example/selftest/issues/123/comments")
     _last_payload = None
@@ -1200,6 +1218,10 @@ def selftest():
           refused(_post_coach({
               "body": "<!-- JANE_SIGNOFF sha=" + H40
               + " verdict=pass fuse=none -->"}), "SIGNOFF")
+          and _last_payload is None)
+    _last_payload = None
+    check("a coach body carrying a caller-supplied COACH_LOCK is refused",
+          refused(_post_coach({"body": "x\n" + COACH_LOCK_HTML}), "COACH_LOCK")
           and _last_payload is None)
 
     os.environ["GITHUB_RUN_ID"] = "selftest-coach-cap"
