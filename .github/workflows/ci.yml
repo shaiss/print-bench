@@ -201,6 +201,39 @@ jobs:
           # authenticates the clone; the push re-supplies it explicitly.)
           token: ${{ secrets.REGEN_TOKEN || github.token }}
 
+      - name: Fetch the preview-diff cross-check base
+        # preview-diff (issue #470, the measure step below) cross-checks each
+        # design's preview diff against whether its own sources moved since
+        # this commit, and the checkout is depth 1, so the commit has to be
+        # fetched. HERE, before the plan step runs the first line of repo
+        # code: this step holds a token and runs only git, and a step that
+        # runs after the generators could find .git rewritten under it. The
+        # job token, not REGEN_TOKEN: a read-only fetch needs nothing the PAT
+        # adds. Depth 1 — a tree diff needs no history. A failed fetch only
+        # leaves the output empty, which turns the cross-check off and says
+        # so; it never fails this job.
+        id: srcbase
+        if: needs.changes.outputs.regen == 'true'
+        env:
+          FETCH_TOKEN: ${{ github.token }}
+          # The PR's base tip, or on a push the commit the branch moved from.
+          SOURCE_BASE: >-
+            ${{ github.event_name == 'pull_request'
+                && github.event.pull_request.base.sha
+                || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SOURCE_BASE:-}" ] || [ "$SOURCE_BASE" = 0000000000000000000000000000000000000000 ]; then
+            echo "::notice::preview-diff: no source base for this event — the source cross-check is skipped this run"
+            exit 0
+          fi
+          if timeout 120 git fetch --quiet --no-tags --depth=1 \
+               "https://x-access-token:${FETCH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$SOURCE_BASE"; then
+            echo "sha=$SOURCE_BASE" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::preview-diff: could not fetch ${SOURCE_BASE} — the source cross-check is skipped this run"
+          fi
+
       - name: Decide what needs regenerating
         id: plan
         env:
@@ -450,6 +483,46 @@ jobs:
         if: steps.plan.outputs.designs != '' && vars.AI_ANDON_CORD == 'pulled'
         run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — product-page drafting (the one Claude API call in CI) was skipped; previews, animations, product shots and the gallery were regenerated deterministically as usual; no provider API call was made. Release the cord to resume — see docs/andon-cord.md."
 
+      - name: Measure regenerated previews against the committed bytes (advisory)
+        # The faithfulness half of #69 (issue #470): preview-diff classes each
+        # staged preview against HEAD's bytes (noise / content / resized / new
+        # / removed / not-compared, band 1% of pixels) into the job summary,
+        # and warns on a content change to a design whose own sources did not
+        # move since the fetched base. That puts a number behind the "rendering
+        # noise" the commit step below asserts on a default-branch push and on
+        # the loop guard's second pass.
+        #
+        # Its OWN step, never part of the commit step: preview-diff.sh comes
+        # from the PR branch, so this is repo code, and this job's rule is
+        # that repo code never runs in the step that holds PUSH_TOKEN. Unsetting
+        # the variable for one command would not do — a child can read its
+        # parent shell's /proc/<pid>/environ. No secret is in this step's env;
+        # the base it compares against was fetched before any repo code ran.
+        #
+        # Advisory: continue-on-error AND the `|| echo` fallback, so it can
+        # never fail this job, and the timeout keeps it from stalling the push.
+        if: steps.plan.outputs.gallery == 'true'
+        continue-on-error: true
+        env:
+          SOURCE_BASE: ${{ steps.srcbase.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # The commit step's exact staging (idempotent — it stages again).
+          git add -A designs README.md
+          if git diff --cached --quiet; then
+            echo "nothing regenerated — nothing to measure"
+            exit 0
+          fi
+          src_args=()
+          if [ -n "${SOURCE_BASE:-}" ]; then
+            src_args=(--source-base "$SOURCE_BASE")
+          else
+            echo "::notice::preview-diff: no fetched source base — the source cross-check is skipped this run"
+          fi
+          timeout 900 ./scripts/preview-diff.sh --base HEAD ${src_args[@]+"${src_args[@]}"} \
+              --summary "$GITHUB_STEP_SUMMARY" \
+            || echo "::warning::preview-diff could not run — the regenerated previews are unmeasured (advisory, issue #470)"
+
       - name: Commit and push what changed
         id: commit
         env:
@@ -486,7 +559,7 @@ jobs:
             # to fail this required job and red `ci-ok` on every
             # regen-touching push to the default branch. Report the diff for
             # visibility and stop; do not commit or push it.
-            echo "::notice::default-branch push — committed artifacts already arrived fresh via the merged PR; the diff above is cross-runner rendering noise and is not pushed to ${BRANCH} (direct pushes to the default branch are disallowed by the ruleset; this is expected, not a failure)."
+            echo "::notice::default-branch push — committed artifacts already arrived fresh via the merged PR; the diff above is cross-runner rendering noise (the preview-diff table in the job summary measures that claim per file) and is not pushed to ${BRANCH} (direct pushes to the default branch are disallowed by the ruleset; this is expected, not a failure)."
             git reset >/dev/null
             echo "sha=" >> "$GITHUB_OUTPUT"
             exit 0
@@ -498,7 +571,7 @@ jobs:
             # something to fix by pushing again. Report it and stop: the
             # committed artifacts are the first pass's, which the gates in
             # this very run have judged.
-            echo "::warning::Regenerating produced a different result than the regen commit already on this branch, with no source change in between. That means a generator is not reproducible across runners — the files above differ only by rendering noise. Committed artifacts are left as they are; the loop guard stops here rather than pushing again."
+            echo "::warning::Regenerating produced a different result than the regen commit already on this branch, with no source change in between. That means a generator is not reproducible across runners — the files above should differ only by rendering noise, and the preview-diff table in the job summary says whether they do. Committed artifacts are left as they are; the loop guard stops here rather than pushing again."
             echo "sha=" >> "$GITHUB_OUTPUT"
             git reset >/dev/null
             exit 0

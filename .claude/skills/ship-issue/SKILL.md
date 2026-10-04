@@ -30,16 +30,25 @@ workflow did). Section 7 says what changes when nobody is watching.
      `🚢 SHIP-LOCK` is active, and the issue is taken.
      `🚢 SHIP-LOCK WITHDRAWN` is released, and blocks nothing.
      An active claim more than a few hours old with **no**
-     `claude/issue-<N>-*` branch and **no** open PR closing the issue is
-     *stale* — a run that died between posting its lock and pushing a branch
-     must not freeze the issue forever. Take a stale claim over, naming the
-     one you superseded in your own.
+     `claude/issue-<N>-*` branch carrying unmerged work and **no** open PR
+     closing the issue is *stale* — a run that died between posting its lock
+     and pushing a branch must not freeze the issue forever. Take a stale
+     claim over, naming the one you superseded in your own.
    - **an open PR closes it.** Don't grep for `Closes #N`: GitHub honours
      nine keywords — `close`/`closes`/`closed`, `fix`/`fixes`/`fixed`,
      `resolve`/`resolves`/`resolved` — case-insensitively, each optionally
      followed by `:`. Read the issue's linked-PR metadata instead, so
      `Resolved: #38` doesn't read as unclaimed.
-   - a remote branch `claude/issue-<N>-*` already exists
+   - **a remote branch `claude/issue-<N>-*` carrying unmerged work** — at
+     least one commit the default branch lacks (`git rev-list --count
+     origin/<default>..origin/<branch>` > 0, or the compare API's
+     `ahead_by`). A matching branch with **zero** commits ahead is an orphan,
+     not a claim: every commit on it is already on the default branch (a PR
+     closed with head == base, the work landed through another commit), so it
+     blocks nothing — base your work on the default branch as usual. When you
+     cannot tell (the count fails), treat the branch as a claim. The burn's
+     selector (`tools/backlog-burn`) and its lock cleanup
+     (`scripts/routine-lock-cleanup.sh`) read the same rule.
 4. Claim it by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`.
    One per issue, ever. The comment's timestamp is the proof the contract
    predates the diff — that is the whole anti-retrofit mechanism, so post it
@@ -55,12 +64,12 @@ workflow did). Section 7 says what changes when nobody is watching.
    this ever needs to be airtight, push a claim ref first: creating a remote
    branch fails when it already exists, which a comment cannot.)
 6. **Release on a terminal stop.** If this run stops for any reason *before*
-   a `claude/issue-<N>-*` branch or an open closing PR exists — a §1 decline,
-   a parked decision (§8), any stop — **withdraw your claim** the same way
-   (edit the first line to `🚢 SHIP-LOCK WITHDRAWN`). A run that claimed then
-   walked away must not leave the issue frozen until it ages into a stale
-   takeover; the branch/PR is what carries the claim forward once real work
-   exists.
+   a `claude/issue-<N>-*` branch with unmerged work or an open closing PR
+   exists — a §1 decline, a parked decision (§8), any stop — **withdraw your
+   claim** the same way (edit the first line to `🚢 SHIP-LOCK WITHDRAWN`).
+   A run that claimed then walked away must not leave the issue frozen until
+   it ages into a stale takeover; the branch/PR is what carries the claim
+   forward once real work exists.
 
 If the issue is taken, say so and stop. Never work two.
 

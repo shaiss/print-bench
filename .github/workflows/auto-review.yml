@@ -24,8 +24,9 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     PrusaSlicer mid-session, running a duplicate 200 s `gate.sh --slice` and
 #     re-rendering all five previews (Jane's #321 review documents all three).
 #   * The invariant the recast (PR #322) bought: the reviewer jobs' own steps
-#     are checkout/bun/claude-code-action only — nothing installs or runs the
-#     render toolchain. The sessions consume CI's printcheck+slice sticky and
+#     are checkout/bun/claude-code-action only (plus Jane's and Drik's
+#     git-only head-staging step) — nothing installs or runs the render
+#     toolchain. The sessions consume CI's printcheck+slice sticky and
 #     the committed previews instead of re-deriving. Regression signals: a
 #     reviewer job above this envelope; `apt-get` / `openscad` / `xvfb-run` /
 #     `prusa-slicer` / `scripts/gate.sh` / `scripts/render.sh` appearing in a
@@ -33,7 +34,40 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     Caveat: claude-code-action runs the agent with its output hidden, so a
 #     log grep proves the job scaffolding clean, not the session — the wall
 #     time and the review comments are the behavioral evidence. Enforcement
-#     (a deny backstop) is sibling issue #451, not this comment.
+#     is the deny backstop every ship step passes under --permission-mode
+#     dontAsk (.claude/reviewer-settings.json for Jane/Drik/PM triage,
+#     .claude/design-coach-settings.json for the coach; issue #451):
+#     scripts/reviewer-perms-check.sh holds what they deny, and
+#     tools/model-registry/tests/test_reviewer_backstop_wiring.py holds
+#     every ship step here to its backstop.
+#
+# Git containment (code-scanning finding on #760). A deny list cannot contain
+# git: a subcommand option no prefix rule sees (`git fetch origin
+# --upload-pack=<cmd>` runs <cmd> over the local file transport), an exec key
+# in a repo config reached through a PR-committed bare-repository layout, a gh
+# subcommand that spawns git. So, structurally:
+#   * Jane / Drik / PM triage get NO git — their backstop denies Bash(git:*)
+#     outright. Jane and Drik review the PR head's geometry, so a trusted step
+#     in their jobs stages the head's changed design directories into the
+#     checkout before the agent starts (the merge ref at fetch-depth 2 already
+#     holds the head commit, so no fetch and no credential). PM triage reads
+#     the charter from the merge checkout and needs nothing from git.
+#   * The coach keeps git checkout/add/commit/push (it pushes its rounds) but
+#     its backstop denies fetch/clone/pull/ls-remote and every global option;
+#     its checkout is full history, so every branch head is already local.
+#   * Every reviewer and coach job carries a job-level ENVIRONMENT lock that
+#     holds whatever the option order: GIT_ALLOW_PROTOCOL=https (git refuses
+#     the file/ext/ssh transports, so --upload-pack/--receive-pack/-u have
+#     nothing local to run, while the coach's push to origin over https still
+#     works) plus command-scope config via GIT_CONFIG_COUNT —
+#     safe.bareRepository=explicit (no implicit discovery of a bare-repository
+#     layout committed in the PR), core.fsmonitor=false, core.hooksPath=
+#     /dev/null (no hooks run) and core.pager=cat. Command scope outranks any
+#     repo config, and gh's own git calls inherit the lock too. An agent
+#     cannot lift it: an env-prefixed command (`GIT_ALLOW_PROTOCOL=file git
+#     …`) does not start with `git`, so the Bash(git:*) allow never grants it
+#     under dontAsk. The lock and the staging step are pinned by
+#     tools/model-registry/tests/test_reviewer_git_containment.py.
 #
 # Scope guard (prevents spurious runs on backend/infra-only PRs):
 #   * The `design-changes` job checks whether the PR diff contains any file
@@ -262,10 +296,56 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      # Git environment lock (code-scanning finding on #760; see the header).
+      # Job-level so every step inherits it — every chain link of every
+      # provider, and any link added later. Pinned per ship step by
+      # tools/model-registry/tests/test_reviewer_git_containment.py.
+      GIT_ALLOW_PROTOCOL: https
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: safe.bareRepository
+      GIT_CONFIG_VALUE_0: explicit
+      GIT_CONFIG_KEY_1: core.fsmonitor
+      GIT_CONFIG_VALUE_1: "false"
+      GIT_CONFIG_KEY_2: core.hooksPath
+      GIT_CONFIG_VALUE_2: /dev/null
+      GIT_CONFIG_KEY_3: core.pager
+      GIT_CONFIG_VALUE_3: cat
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # The merge ref plus its parents: the PR head (the merge's second
+          # parent) is then local for the staging step below — no fetch.
+          fetch-depth: 2
+
+      # Trusted head staging (code-scanning finding on #760). This reviewer
+      # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
+      # outright — so the PR head's design directories are staged into the
+      # checkout here, by workflow code, before any agent step starts; the
+      # skill reads them with Read/Grep/Glob. The design names come from the
+      # PR's own paths, so they are validated and never globbed before they
+      # reach a path, and never echoed back unvalidated.
+      - name: Stage the PR head's design directories (trusted, no agent)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
+        run: |
+          set -euo pipefail
+          set -f   # PR-controlled names: no globbing
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          for d in $CHANGED_DESIGNS; do
+            if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+              echo "::warning::skipped a changed design directory whose name is not [A-Za-z0-9._-]"
+              continue
+            fi
+            rm -rf -- "designs/${d}"
+            if git cat-file -e "${HEAD_SHA}:designs/${d}" 2>/dev/null; then
+              git checkout "$HEAD_SHA" -- "designs/${d}"
+              echo "staged designs/${d} at ${HEAD_SHA}"
+            else
+              echo "designs/${d} is removed at the PR head; left absent"
+            fi
+          done
 
       - name: /jane-review via Z.AI GLM (chain link 1)
         id: p1
@@ -439,10 +519,56 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      # Git environment lock (code-scanning finding on #760; see the header).
+      # Job-level so every step inherits it — every chain link of every
+      # provider, and any link added later. Pinned per ship step by
+      # tools/model-registry/tests/test_reviewer_git_containment.py.
+      GIT_ALLOW_PROTOCOL: https
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: safe.bareRepository
+      GIT_CONFIG_VALUE_0: explicit
+      GIT_CONFIG_KEY_1: core.fsmonitor
+      GIT_CONFIG_VALUE_1: "false"
+      GIT_CONFIG_KEY_2: core.hooksPath
+      GIT_CONFIG_VALUE_2: /dev/null
+      GIT_CONFIG_KEY_3: core.pager
+      GIT_CONFIG_VALUE_3: cat
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # The merge ref plus its parents: the PR head (the merge's second
+          # parent) is then local for the staging step below — no fetch.
+          fetch-depth: 2
+
+      # Trusted head staging (code-scanning finding on #760). This reviewer
+      # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
+      # outright — so the PR head's design directories are staged into the
+      # checkout here, by workflow code, before any agent step starts; the
+      # skill reads them with Read/Grep/Glob. The design names come from the
+      # PR's own paths, so they are validated and never globbed before they
+      # reach a path, and never echoed back unvalidated.
+      - name: Stage the PR head's design directories (trusted, no agent)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
+        run: |
+          set -euo pipefail
+          set -f   # PR-controlled names: no globbing
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          for d in $CHANGED_DESIGNS; do
+            if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+              echo "::warning::skipped a changed design directory whose name is not [A-Za-z0-9._-]"
+              continue
+            fi
+            rm -rf -- "designs/${d}"
+            if git cat-file -e "${HEAD_SHA}:designs/${d}" 2>/dev/null; then
+              git checkout "$HEAD_SHA" -- "designs/${d}"
+              echo "staged designs/${d} at ${HEAD_SHA}"
+            else
+              echo "designs/${d} is removed at the PR head; left absent"
+            fi
+          done
 
       - name: /drik-review via Z.AI GLM (chain link 1)
         id: p1
@@ -629,6 +755,20 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      # Git environment lock (code-scanning finding on #760; see the header).
+      # Job-level so every step inherits it — every chain link of every
+      # provider, and any link added later. Pinned per ship step by
+      # tools/model-registry/tests/test_reviewer_git_containment.py.
+      GIT_ALLOW_PROTOCOL: https
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: safe.bareRepository
+      GIT_CONFIG_VALUE_0: explicit
+      GIT_CONFIG_KEY_1: core.fsmonitor
+      GIT_CONFIG_VALUE_1: "false"
+      GIT_CONFIG_KEY_2: core.hooksPath
+      GIT_CONFIG_VALUE_2: /dev/null
+      GIT_CONFIG_KEY_3: core.pager
+      GIT_CONFIG_VALUE_3: cat
     steps:
       - uses: actions/checkout@v7
         with:
@@ -875,10 +1015,28 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      # Git environment lock (code-scanning finding on #760; see the header).
+      # Job-level so every step inherits it — every chain link of every
+      # provider, and any link added later. Pinned per ship step by
+      # tools/model-registry/tests/test_reviewer_git_containment.py.
+      GIT_ALLOW_PROTOCOL: https
+      GIT_CONFIG_COUNT: "4"
+      GIT_CONFIG_KEY_0: safe.bareRepository
+      GIT_CONFIG_VALUE_0: explicit
+      GIT_CONFIG_KEY_1: core.fsmonitor
+      GIT_CONFIG_VALUE_1: "false"
+      GIT_CONFIG_KEY_2: core.hooksPath
+      GIT_CONFIG_VALUE_2: /dev/null
+      GIT_CONFIG_KEY_3: core.pager
+      GIT_CONFIG_VALUE_3: cat
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # Full history: every branch head (the PR's included) is local, so
+          # the coach loads and pushes its rounds without `git fetch`/`pull`,
+          # which its backstop denies (code-scanning finding on #760).
+          fetch-depth: 0
 
       - name: /design-coach via Z.AI GLM (chain link 1)
         id: p1

@@ -27,7 +27,9 @@ report lie about coverage.
 The greenlight loop's approval poll (issue #444) reads through this same
 seam and stays GET-only: the parked threads **with their comment ids**
 (``gather_greenlight_poll``), one comment's reactions (``list_reactions``),
-and each reactor's real repository permission (``permission_of``). The
+each reactor's real repository permission (``permission_of``), and — for the
+standing approval modes (#446) — who applied a loosening label
+(``list_label_events``). The
 writes that follow an approved reaction — the label flip, the ledger
 commit, the resolution reply — live in ``pushthrough.py``, never here.
 """
@@ -360,6 +362,11 @@ def gather_greenlight_queue(
                 "title": item["title"],
                 "url": item.get("html_url", ""),
                 "providerEscalation": is_provider_escalation(item.get("body", "")),
+                # The standing approval modes' inputs (#446): the Select step
+                # classifies each issue and drops a deny category before the
+                # cap, so the drafter is never handed a human-only decision.
+                "labels": [lbl.get("name", "") for lbl in item.get("labels", [])],
+                "body": item.get("body") or "",
             }
         )
 
@@ -423,6 +430,31 @@ def list_reactions(repo: str, token: str, comment_id: int) -> list[dict[str, Any
     ]
 
 
+def list_label_events(repo: str, token: str, number: int) -> list[dict[str, Any]]:
+    """One issue's label history: ``[{"event", "label", "actor", "created_at"}]``.
+
+    ``GET /repos/{repo}/issues/{n}/events``, kept to the ``labeled`` /
+    ``unlabeled`` entries. The standing approval modes (#446) read it for
+    exactly one question — *who applied this loosening label* — because a
+    label's mere presence is not authority: ``approval.label_actor_trusted``
+    holds its applier to the bar a 👍 clears. The poll's driver asks only
+    for issues that carry a label that could loosen, so a run with no such
+    label spends no request here.
+    """
+    return [
+        {
+            "event": e.get("event", ""),
+            "label": (e.get("label") or {}).get("name", ""),
+            "actor": (e.get("actor") or {}).get("login", ""),
+            "created_at": e.get("created_at", ""),
+        }
+        for e in _paged(
+            f"{API_ROOT}/repos/{repo}/issues/{number}/events?per_page=100", token
+        )
+        if e.get("event") in ("labeled", "unlabeled")
+    ]
+
+
 def gather_greenlight_poll(repo: str, token: str) -> list[dict[str, Any]]:
     """Every open parked decision's thread, ids intact (issue #444).
 
@@ -447,6 +479,8 @@ def gather_greenlight_poll(repo: str, token: str) -> list[dict[str, Any]]:
                 "title": item["title"],
                 "url": item.get("html_url", ""),
                 "body": item.get("body") or "",
+                # The standing approval modes classify on labels (#446).
+                "labels": [lbl.get("name", "") for lbl in item.get("labels", [])],
             }
         )
 

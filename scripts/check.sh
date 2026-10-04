@@ -564,14 +564,21 @@ if ! ./scripts/reeve-perms-check.sh; then
   fail=1
 fi
 
-	echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
-	if ! ./scripts/reviewer-perms-check.sh --selftest; then
-	  fail=1
-	fi
-	echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
-	if ! ./scripts/reviewer-perms-check.sh; then
-	  fail=1
-	fi
+# Reviewer permission drift (issue #323): the auto-review sessions (Jane,
+# Drik, PM triage, the coach) load .claude/settings.json additively via
+# settingSources=project, so their backstops (.claude/reviewer-settings.json,
+# .claude/design-coach-settings.json) must deny every Bash allow outside the
+# review surface, always deny the render toolchain, and never deny gh/git or
+# the read tools (the coach also keeps Write/Edit). --selftest proves each
+# rule can pass AND fail.
+echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
+if ! ./scripts/reviewer-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
+if ! ./scripts/reviewer-perms-check.sh; then
+  fail=1
+fi
 
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
@@ -751,6 +758,21 @@ fi
 # only thing that would notice a check gone soft. Pure stdlib, no render.
 echo "-- concept-preview selftest: scripts/concept-preview.sh --selftest"
 if ! ./scripts/concept-preview.sh --selftest; then
+  fail=1
+fi
+
+# preview-diff.sh is the regen-faithfulness check (issue #470): the regen
+# job runs it, just before committing, to class each regenerated preview
+# against the committed bytes. It is advisory, so a weakened classifier
+# (always "noise") would leave every run green — the selftest is the only thing
+# that proves the band and the source cross-check still fire. Run
+# unconditionally rather than gated on ImageMagick the way the plate selftest
+# is gated on prusa-slicer: the pure classifier rows need nothing and must run
+# everywhere, and the script skips its own end-to-end half with a notice where
+# ImageMagick is absent (the scad-check jobs, whose cached apt cannot carry it
+# — issue #85).
+echo "-- preview-diff selftest: scripts/preview-diff.sh --selftest"
+if ! ./scripts/preview-diff.sh --selftest; then
   fail=1
 fi
 
