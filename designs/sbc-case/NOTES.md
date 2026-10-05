@@ -364,6 +364,26 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
+27. **B2 — Raspberry Pi 3 B+ board preset (validated).** Vendored NopSCADlib
+    ships `RPI3` (85×56×1.4, holes at the same four corners as `RPI4`) but not
+    RPI5 or Zero 2 W, so B2 lands on the 3 B+ as the lowest-risk extra preset.
+    Case shell dimensions stay derived from the shared outline and the existing
+    `port_overhang_x` / `port_overhang_y` (no per-port cutouts — B1 still
+    deferred). Open-edge port check against the vitamin layout (board plane
+    z = 7 mm, skirt top 6.5 mm, cavity inner +X 45.25 / −Y −36.1 mm):
+    **+X** — stacked USB-A ×2 and RJ45 tips at x ≈ 44.5 mm (0.8 mm inside the
+    +X cavity wall), connector height 15.6 / 13.5 mm vs 17.6 mm headroom above
+    the board (same class as RPI4). **−X** — micro-SD at x ≈ −34.8 mm on the
+    open −X skirt (unchanged). **−Y** — full-size HDMI past the board edge
+    ≈ 2.9 mm, micro-USB power ≈ 2.0 mm, stereo jack ≈ 1.0 mm (all through the
+    open −Y skirt; RPI4's USB-C / micro-HDMI cluster is ≈ 0.5–2.4 mm past the
+    edge). **+Y** — GPIO 2×20 at (−10, 24.5), pin tops z ≈ 16.9 mm below the
+    notch lip at 17.5 mm (unchanged). **Lid** — fan centre (−10, 0) still
+    biases over the SoC; RPI3 SoC sits at (27, −24.6) vs RPI4 at (29.25, 32.5)
+    but both stay under the Ø37 intake. `ci.fitchecks` adds `fit-pins-rpi3` /
+    `fit-pins-rpi3-shift`; default `board_preset = 0` (Pi 4) leaves base/lid/
+    coupon meshes byte-identical to pre-B2. Gate at `-D board_preset=1`: base /
+    lid / coupon printcheck 100/100.
 
 ## Print settings
 
