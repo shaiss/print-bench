@@ -162,7 +162,10 @@ elif kind == "coach":
     # (`printf … > .git/config`, `cat …>`, `/usr/bin/tee`) are not closed by
     # Write/Edit path denies — those fence the file tools only. Closing that
     # needs `--allowedTools` narrowing or a fixed-argument wrapper, not more
-    # argv globs (same residual as unnamed wrappers).
+    # argv globs (same residual as unnamed wrappers). Same limit: reconstructing
+    # the verb so the string never contains `git` (`x=gi; y=t; $x$y fetch …`)
+    # cannot be matched by any `*git*` glob — permission rules see the raw
+    # tool string, not the shell-expanded argv.
     POSTURE_DENY = [{"NotebookEdit"}, {"Edit(./.git/**)"}, {"Write(./.git/**)"}]
     NEVER_DENY_TOOLS = [
         "Read", "Grep", "Glob", "Write", "Edit",
@@ -307,6 +310,10 @@ elif kind == "coach":
         {'Bash(git*&&*)'},
         {'Bash(git*||*)'},
         {'Bash(git*|*)'},
+        {'Bash(*&*git*)'},
+        {'Bash(git*&*)'},
+        {'Bash(git add -*ve)'},
+        {'Bash(git add -*Ne)'},
         {'Bash(*$(*git*)'},
         {'Bash(*`*git*)'},
         {'Bash(*<*git*)'},
@@ -3049,6 +3056,16 @@ ESCAPE_PROBES = [
     "FOO=1\n git add -e file",
     "gh pr view 1; git -c alias.x=!id x",
     "git add designs; id",
+    "gh pr view 1 & git -c alias.x=!id x",
+    "gh pr view&git -c alias.x=!id x",
+    "git status & git rebase --exec id",
+    "git status & git credential fill",
+    "git add -Nve",
+    "git add -fNve",
+    "git add -vNe",
+    "git add -fve",
+    "git add -Anve",
+    "git add -uNve",
     "git add designs && /usr/bin/id",
     "git add designs || id",
     "git add designs | id",
@@ -3346,6 +3363,10 @@ EOF
     'Bash(git*&&*)'
     'Bash(git*||*)'
     'Bash(git*|*)'
+    'Bash(*&*git*)'
+    'Bash(git*&*)'
+    'Bash(git add -*ve)'
+    'Bash(git add -*Ne)'
     'Bash(*$(*git*)'
     'Bash(*`*git*)'
     'Bash(*<*git*)'
@@ -5907,6 +5928,8 @@ EOF
     'Bash(*|*git*)'
     $'Bash(*\n*git*)'
     'Bash(git*;*)'
+    'Bash(*&*git*)'
+    'Bash(git add -*ve)'
     'Bash(git*&&*)'
     'Bash(*$(*git*)'
     'Bash(*`*git*)'
@@ -5954,6 +5977,7 @@ wrappers = [
     "Bash(*;*git*)", "Bash(*&&*git*)", "Bash(*||*git*)", "Bash(*|*git*)",
     "Bash(*\n*git*)",
     "Bash(git*;*)", "Bash(git*&&*)", "Bash(git*||*)", "Bash(git*|*)",
+    "Bash(*&*git*)", "Bash(git*&*)",
     "Bash(*$(*git*)", "Bash(*`*git*)", "Bash(*<*git*)", "Bash(*{*git*)",
 ]
 deny = ["Bash(apt:*)","Bash(apt-get:*)","Bash(openscad:*)","Bash(openscad-nightly:*)",
