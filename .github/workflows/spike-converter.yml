@@ -158,7 +158,6 @@ jobs:
       # triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
-      HAS_OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # The per-run filing cap, enforced by the reused scout MCP server. The
       # extractor emits ONE candidate per firing, so 1 is the structural
       # ceiling — set explicitly (not omitted) so a future widening is a
@@ -213,14 +212,12 @@ jobs:
           esac
           [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
           [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
-          [ "$HAS_OPENROUTER_KEY" = "true" ] && openrouter_key=1 || openrouter_key=0
-          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ] || [ "$openrouter_key" = 1 ]; then key=1; else key=0; fi
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "provider=$provider"
             echo "zai_key_present=$zai_key"
             echo "anthropic_key_present=$anthropic_key"
-            echo "openrouter_key_present=$openrouter_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
@@ -258,7 +255,7 @@ jobs:
           conf_provider="$(backlog-burn config --get provider --path .github/spike-converter.conf)"
           # One layout entry per run step below, in file order.
           python3 -m model_registry shape spike-converter --head "$conf_provider" \
-            --conf .github/spike-converter.conf --layout zai,anthropic,anthropic,openrouter,openrouter
+            --conf .github/spike-converter.conf --layout zai,anthropic,anthropic
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -425,9 +422,9 @@ jobs:
           && github.event.inputs.dry_run != 'true'
           && steps.run_zai_1.outcome != 'success'
           && steps.run_anthropic_2.outcome != 'success'
-        # No longer terminal: OpenRouter links follow; keep continue-on-error.
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over.
         timeout-minutes: 20
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
           # Same walk-spanning cap state as the earlier links (#565).
@@ -438,64 +435,6 @@ jobs:
           github_token: ${{ github.token }}
           show_full_output: "true"
           claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort medium --permission-mode dontAsk --settings .claude/spike-converter-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/spike-converter/converter-helper.sh:*),Bash(./.claude/skills/spike-converter/converter-helper.sh:*),Read,Grep,Glob"
-          prompt: |
-            /spike-converter
-
-            Unattended scheduled run (issue #440): nobody is watching, and there is no human to show a dry-run brief to. Arming this routine — SPIKE_CONVERTER_ENABLED, set by a human after watched attended output — IS the skill's step-4 "the human says file". So run the skill's procedure exactly as written: select the candidate via the wrapper (a printed NONE means stop and say so — quote it and end the run), read the source section it names, check the declined lane, then compose the brief and FILE it with mcp__scout__file_design_brief. SCOUT_MAX_BRIEFS=1 bounds the run to one brief; a human curates what was filed after the fact. Nothing else is yours to do: no labels but the tool's own, no comments elsewhere, no markers added or edited.
-
-      - name: Run via OpenRouter (OSS, chain link 4)
-        id: run_openrouter_4
-        if: >-
-          steps.policy.outputs.enabled == 'true'
-          && steps.policy.outputs.openrouter_key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-          && steps.run_zai_1.outcome != 'success'
-          && steps.run_anthropic_2.outcome != 'success'
-          && steps.run_anthropic_3.outcome != 'success'
-        # No longer terminal: OpenRouter links follow; keep continue-on-error.
-        timeout-minutes: 20
-        continue-on-error: true
-        env:
-          ANTHROPIC_BASE_URL: https://openrouter.ai/api
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
-          GITHUB_TOKEN: ${{ github.token }}
-          # Same walk-spanning cap state as the earlier links (#565).
-          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
-        with:
-          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          github_token: ${{ github.token }}
-          show_full_output: "true"
-          claude_args: --model ${{ steps.chain.outputs.link4_model }} --effort medium --permission-mode dontAsk --settings .claude/spike-converter-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/spike-converter/converter-helper.sh:*),Bash(./.claude/skills/spike-converter/converter-helper.sh:*),Read,Grep,Glob"
-          prompt: |
-            /spike-converter
-
-            Unattended scheduled run (issue #440): nobody is watching, and there is no human to show a dry-run brief to. Arming this routine — SPIKE_CONVERTER_ENABLED, set by a human after watched attended output — IS the skill's step-4 "the human says file". So run the skill's procedure exactly as written: select the candidate via the wrapper (a printed NONE means stop and say so — quote it and end the run), read the source section it names, check the declined lane, then compose the brief and FILE it with mcp__scout__file_design_brief. SCOUT_MAX_BRIEFS=1 bounds the run to one brief; a human curates what was filed after the fact. Nothing else is yours to do: no labels but the tool's own, no comments elsewhere, no markers added or edited.
-
-      - name: Run via OpenRouter (OSS, chain link 5)
-        id: run_openrouter_5
-        if: >-
-          steps.policy.outputs.enabled == 'true'
-          && steps.policy.outputs.openrouter_key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-          && steps.run_zai_1.outcome != 'success'
-          && steps.run_anthropic_2.outcome != 'success'
-          && steps.run_anthropic_3.outcome != 'success'
-          && steps.run_openrouter_4.outcome != 'success'
-        # No longer terminal: OpenRouter links follow; keep continue-on-error.
-        timeout-minutes: 20
-        env:
-          ANTHROPIC_BASE_URL: https://openrouter.ai/api
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
-          GITHUB_TOKEN: ${{ github.token }}
-          # Same walk-spanning cap state as the earlier links (#565).
-          SCOUT_CAP_STATE: ${{ runner.temp }}/scout-briefs
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
-        with:
-          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          github_token: ${{ github.token }}
-          show_full_output: "true"
-          claude_args: --model ${{ steps.chain.outputs.link5_model }} --effort medium --permission-mode dontAsk --settings .claude/spike-converter-settings.json --mcp-config .claude/skills/product-scout/scout-mcp.json --allowedTools "mcp__scout__file_design_brief,Bash(.claude/skills/spike-converter/converter-helper.sh:*),Bash(./.claude/skills/spike-converter/converter-helper.sh:*),Read,Grep,Glob"
           prompt: |
             /spike-converter
 
@@ -513,7 +452,7 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "::notice::dry run — did not invoke /spike-converter"
           else
-            echo "::notice::no key is set for ANY provider in the spike-converter chain (ZAI_KEY for the zai link, ANTHROPIC_API_KEY for the anthropic tail, OPENROUTER_API_KEY for the openrouter tail; head provider '${PROVIDER}') — skipping the unattended /spike-converter run"
+            echo "::notice::no key is set for ANY provider in the spike-converter chain (ZAI_KEY for the zai link, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — skipping the unattended /spike-converter run"
           fi
 
       # No SHIP-LOCK lifecycle here, so the terminal link failing IS the job
@@ -533,13 +472,12 @@ jobs:
           && steps.policy.outputs.enabled == 'true'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || steps.run_openrouter_4.outcome == 'success' && 'success' || steps.run_openrouter_5.outcome == 'success' && 'success' || (steps.run_openrouter_5.outcome == 'skipped' && (steps.run_openrouter_4.outcome == 'skipped' && (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) || steps.run_openrouter_4.outcome) || steps.run_openrouter_5.outcome)) != 'success'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: spike-converter
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the spike converter routine
           escalate: "true"
@@ -558,7 +496,7 @@ jobs:
           # head failed. The terminal link failing fails the job; the "Turn
           # an exhausted walk red" step below covers a walk exhausted with
           # the tail skipped.
-          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || steps.run_openrouter_4.outcome == 'success' && 'success' || steps.run_openrouter_5.outcome == 'success' && 'success' || (steps.run_openrouter_5.outcome == 'skipped' && (steps.run_openrouter_4.outcome == 'skipped' && (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) || steps.run_openrouter_4.outcome) || steps.run_openrouter_5.outcome) }}
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
           # Per-link outcomes + the chain the resolve step emitted, so the
           # summary can name WHICH link served and warn when the head
           # provider fell through (a GLM outage must stay visible even though
@@ -566,22 +504,16 @@ jobs:
           L1: ${{ steps.run_zai_1.outcome }}
           L2: ${{ steps.run_anthropic_2.outcome }}
           L3: ${{ steps.run_anthropic_3.outcome }}
-          L4: ${{ steps.run_openrouter_4.outcome }}
-          L5: ${{ steps.run_openrouter_5.outcome }}
           M1: ${{ steps.chain.outputs.link1_model }}
           M2: ${{ steps.chain.outputs.link2_model }}
           M3: ${{ steps.chain.outputs.link3_model }}
-          M4: ${{ steps.chain.outputs.link4_model }}
-          M5: ${{ steps.chain.outputs.link5_model }}
           P1: ${{ steps.chain.outputs.link1_provider }}
           P2: ${{ steps.chain.outputs.link2_provider }}
           P3: ${{ steps.chain.outputs.link3_provider }}
-          P4: ${{ steps.chain.outputs.link4_provider }}
-          P5: ${{ steps.chain.outputs.link5_provider }}
         run: |
           # Which link served: the first (only) link whose outcome is success.
           served=""
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3; do
             o="L$i"; m="M$i"; p="P$i"
             if [ "${!o}" = "success" ]; then
               served="link $i ${!m} (${!p})"
@@ -619,9 +551,9 @@ jobs:
           && steps.policy.outputs.enabled == 'true'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || steps.run_openrouter_4.outcome == 'success' && 'success' || steps.run_openrouter_5.outcome == 'success' && 'success' || (steps.run_openrouter_5.outcome == 'skipped' && (steps.run_openrouter_4.outcome == 'skipped' && (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) || steps.run_openrouter_4.outcome) || steps.run_openrouter_5.outcome)) != 'success'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
         env:
-          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || steps.run_openrouter_4.outcome == 'success' && 'success' || steps.run_openrouter_5.outcome == 'success' && 'success' || (steps.run_openrouter_5.outcome == 'skipped' && (steps.run_openrouter_4.outcome == 'skipped' && (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) || steps.run_openrouter_4.outcome) || steps.run_openrouter_5.outcome) }}
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
         run: |
           echo "::error::the /spike-converter agent step did not succeed on any link of the spike-converter chain (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
           exit 1

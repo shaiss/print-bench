@@ -252,20 +252,31 @@ text. It also scans every workflow's `with:`/`env:` values for one an unquoted
 ` #` cut short, with inline negative controls for both checks. Its tiny stdlib
 scalar reader is cross-checked against PyYAML wherever PyYAML is importable.
 
-## OpenRouter free OSS tail
+## OpenRouter free OSS tail (scoped)
 
-Every cross-provider walk (the `review` chain and the twelve scheduled
-routines) ends with two OpenRouter links after the Anthropic tail:
+Two free-tier OpenRouter models are declared for a **scoped** last-resort
+tail after Z.AI and Anthropic:
 
 `google/gemma-4-31b-it:free` and
-`nvidia/nemotron-3-super-120b-a12b:free`. Oracle role chains and
-`groomer-narrative` stay vendor-pure and do not walk OpenRouter.
+`nvidia/nemotron-3-super-120b-a12b:free`.
+
+They are **not** on every chain. Free-tier models are weaker against prompt
+injection and may log prompts, so they must not hold write-capable /
+merge-gate authority (Cipher hold on #678). Keel's binding Security ruling
+on #819 further scopes the tail to **labeler only**: the drift guard's
+`OPENROUTER_FREE_TAIL_ALLOWED_CHAINS` is exactly `{labeler}`. Explicitly
+excluded — including former "advisory" write surfaces that file issues,
+post comments, or queue intents: `review`, `scout`, `adoption-assessor`,
+`wright` / `wright-signoff`, `reeve-growth`, `backlog-burn`, `design-run`,
+`chunker`, `spike-converter`, `growth-twitter`, `reeve-greenlight`, and
+every other bypassPermissions / PAT / gate-deciding walk. Oracle role
+chains and `groomer-narrative` stay vendor-pure.
 
 - **Provider:** `[provider:openrouter]` with `base_url = https://openrouter.ai/api`
   (Anthropic-compatible; Claude Code appends `/v1/messages`).
 - **Secret:** `OPENROUTER_API_KEY`. Optional. Without it the OpenRouter steps
-  skip (`openrouter_key_present != 1`) and the walk is Z.AI → Anthropic, as
-  before. Never commit the key:
+  on allowlisted walks skip (`openrouter_key_present != 1`) and those walks
+  are Z.AI → Anthropic. Never commit the key:
 
 ```bash
 gh secret set OPENROUTER_API_KEY --repo shaiss/print-bench
