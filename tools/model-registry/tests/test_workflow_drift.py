@@ -12,9 +12,10 @@ The load-bearing check parses each reviewer job's ordered ship steps and asserts
 * the step at slot k sources `--model … outputs.model{k}` — the slot→model binding,
   so a scrambled reference (slot 1 pulling `model4`) is caught, not just the count;
 * the step's literal `anthropic_api_key: secrets.<X>` is the registry link's secret
-  at that position — so slots 1–3 wire `ZAI_KEY`, slots 4–6 `ANTHROPIC_API_KEY`
-  (the #298 Anthropic tail), and slots 7–8 `OPENROUTER_API_KEY` (the free OSS
-  tail); swapping one is caught;
+  at that position — so slots 1–3 wire `ZAI_KEY` and slots 4–6
+  `ANTHROPIC_API_KEY` (the #298 Anthropic tail); swapping one is caught.
+  (OpenRouter free-tier models are forbidden on the review chain — Cipher
+  hold on #678 — and the free-tail allowlist test enforces that.)
 * the step's `ANTHROPIC_BASE_URL` matches the link's `base_url` exactly — present
   and equal for Z.AI (the Anthropic-compatible endpoint), absent for Anthropic —
   so pointing a slot at the wrong endpoint is caught.
@@ -46,6 +47,19 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "auto-review.yml"
 SCOUT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "product-scout.yml"
 REGISTRY = REPO_ROOT / ".github" / "models" / "registry.conf"
+
+# Chains permitted to carry OpenRouter `:free` model ids. Everything else
+# that resolves a free-tier OpenRouter model is a Cipher-hold regression:
+# free-tier models must not run with bypassPermissions, a PAT, Write/Edit/Bash
+# coach tools, or any merge-gate / sign-off authority (reviewer-signoff,
+# autonomy-ok, wright-signoff). Keep this allowlist explicit and tiny.
+OPENROUTER_FREE_TAIL_ALLOWED_CHAINS = frozenset({
+    "labeler",           # routing labels via label-helper; dontAsk; github.token
+    "scout",             # file_design_brief MCP only; dontAsk; github.token
+    "adoption-assessor", # advisory disposition comment; dontAsk; github.token
+    "wright",            # file_agent_brief MCP only (propose); dontAsk; github.token
+    "reeve-growth",      # queue_growth_post MCP only; dontAsk; github.token
+})
 
 # The reviewer-round jobs that carry the fallback chain — the two reviewer
 # personas, the PM triage gate on their feedback, and the coach. Each has one
@@ -101,6 +115,71 @@ def test_committed_registry_is_valid():
     # A malformed committed registry would fail the resolve step at run time and
     # block every design PR's review — catch it here instead.
     Registry.load(str(REGISTRY))
+
+
+
+def test_openrouter_free_tail_only_on_allowlisted_chains():
+    """Cipher hold on #678: `:free` OpenRouter models stay off write-capable
+    and merge-gate chains. The allowlist is the only place they may appear."""
+    reg = Registry.load(str(REGISTRY))
+    free_re = re.compile(r":free\b")
+    offenders = []
+    for chain_id in sorted(reg.chains):
+        links = reg.resolve(chain_id)
+        free_models = [link.model for link in links if free_re.search(link.model)]
+        if not free_models:
+            continue
+        if chain_id not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS:
+            offenders.append((chain_id, free_models))
+        else:
+            # Allowlisted chains must actually be openrouter-provider links.
+            for link in links:
+                if free_re.search(link.model):
+                    assert link.provider == "openrouter", (
+                        f"allowlisted chain {chain_id!r} has free model "
+                        f"{link.model!r} on provider {link.provider!r}, "
+                        "expected openrouter")
+    assert not offenders, (
+        "OpenRouter :free models appear on non-allowlisted chain(s) "
+        f"{offenders} — remove them or (only with a Security ruling) add "
+        "the chain to OPENROUTER_FREE_TAIL_ALLOWED_CHAINS. Forbidden "
+        "examples: review, wright-signoff, backlog-burn, design-run, "
+        "chunker, spike-converter, growth-twitter, reeve-greenlight.")
+
+
+def test_openrouter_free_tail_allowlist_rejects_review_and_signoff():
+    """NEGATIVE CONTROL: the allowlist must exclude review and wright-signoff
+    even if someone re-adds :free models to those chains in a tampered registry."""
+    assert "review" not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
+    assert "wright-signoff" not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
+    assert "backlog-burn" not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
+    assert "design-run" not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
+    raw = REGISTRY.read_text(encoding="utf-8")
+    # Inject a free model into the review chain and expect the guard to fire.
+    tampered = raw.replace(
+        "[chain:review]\nmodels = glm-5.3, glm-5.2, glm-5.1, claude-opus-4-8, "
+        "claude-sonnet-5, claude-haiku-4-5",
+        "[chain:review]\nmodels = glm-5.3, glm-5.2, glm-5.1, claude-opus-4-8, "
+        "claude-sonnet-5, claude-haiku-4-5, google/gemma-4-31b-it:free",
+        1)
+    assert tampered != raw, "tamper target not found — review chain models line drifted"
+    import tempfile, os
+    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
+        fh.write(tampered)
+        tmp = fh.name
+    try:
+        # Temporarily point REGISTRY... we call Registry.load on the tmp path
+        # and reimplement the check inline against that registry.
+        reg = Registry.load(tmp)
+        free_re = re.compile(r":free\b")
+        offenders = [
+            cid for cid in reg.chains
+            if any(free_re.search(link.model) for link in reg.resolve(cid))
+            and cid not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
+        ]
+        assert "review" in offenders
+    finally:
+        os.unlink(tmp)
 
 
 def test_every_ship_step_is_pinned_to_its_registry_link():
@@ -675,7 +754,7 @@ ROUTINES = {
         workflow="design-run.yml", chain="design-run",
         conf=".github/design-run.conf", job="run",
         resolve_id="chain", prefix="run",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
         gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
         # The SHIP-LOCK routines run the whole skill: no backstop, no
         # allow-list, bypassPermissions on every link.
@@ -685,7 +764,7 @@ ROUTINES = {
         workflow="backlog-burn.yml", chain="backlog-burn",
         conf=".github/backlog-burn.conf", job="burn",
         resolve_id="chain", prefix="ship",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
         gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
         permission_mode="bypassPermissions", backstop=None, mcp_config=None,
         allowed=None),
@@ -693,7 +772,7 @@ ROUTINES = {
         workflow="chunker.yml", chain="chunker",
         conf=".github/chunker.conf", job="chunk",
         resolve_id="chain", prefix="run",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         # The chunker's steps set no --permission-mode (the live value when
         # the row was enrolled — adding dontAsk is a deliberate row edit).
@@ -711,7 +790,9 @@ ROUTINES = {
         allowed="Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"),
     # #544 Part B: the eight formerly single-link routines, one row each —
     # the GLM head (one link, or the sign-off's three), then the two-link
-    # Anthropic tail, then the two-link OpenRouter free OSS tail.
+    # Anthropic tail. A scoped OpenRouter free OSS tail (Cipher hold on
+    # #678) is allowlisted only on non-gate chains — see
+    # OPENROUTER_FREE_TAIL_ALLOWED_CHAINS below.
     "scout": Routine(
         workflow="product-scout.yml", chain="scout",
         conf=".github/product-scout.conf", job="scout",
@@ -728,7 +809,7 @@ ROUTINES = {
         workflow="spike-converter.yml", chain="spike-converter",
         conf=".github/spike-converter.conf", job="convert",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         # Its own backstop, the SCOUT's reused filing server (#439: one
         # filing surface), its own read wrapper.
@@ -754,7 +835,7 @@ ROUTINES = {
         workflow="growth-twitter.yml", chain="growth-twitter",
         conf=".github/growth-twitter.conf", job="drain",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         # Oracle-shaped: no wrapper, the posting tool plus the read-only
         # file tools and nothing else.
@@ -790,7 +871,7 @@ ROUTINES = {
         workflow="wright.yml", chain="wright-signoff",
         conf=".github/wright.conf", job="signoff",
         resolve_id="signoff_chain", prefix="signoff",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/reeve-signoff-settings.json",
         mcp_config=".claude/skills/reeve-signoff/signoff-mcp.json",
@@ -805,7 +886,7 @@ ROUTINES = {
         workflow="reeve.yml", chain="reeve-greenlight",
         conf=".github/reeve.conf", job="greenlight",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/reeve-settings.json",
         mcp_config=None,
@@ -2278,11 +2359,19 @@ def _assert_routine_skip_notice_fires_only_without_any_key(
     assert 'echo "key_present=$key"' in policy[0], (
         f"{workflow}: the policy step no longer emits key_present — the "
         "any-key gate the notice / triage / red steps read is unfilled")
-    assert ('if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ] || [ "$openrouter_key" = 1 ]; '
-            'then key=1; else key=0; fi') in policy[0], (
+    # Derive the either-key expression from this row's layout providers so
+    # OpenRouter-free walks (gate/signoff chains) and allowlisted free-tail
+    # walks share one assertion.
+    providers = list(dict.fromkeys(row.layout))  # unique, file order
+    var = {"zai": "zai_key", "anthropic": "anthropic_key",
+           "openrouter": "openrouter_key"}
+    parts = [f'[ "${var[p]}" = 1 ]' for p in providers]
+    either = 'if ' + ' || '.join(parts) + '; then key=1; else key=0; fi'
+    assert either in policy[0], (
         f"{workflow}: the policy step's key_present is no longer the "
-        "either-key derivation (zai OR anthropic OR openrouter) — a keyless head would "
-        "skip the whole run instead of falling through to the tail")
+        f"either-key derivation for layout {','.join(row.layout)} "
+        f"(expected {either!r}) — a keyless head would skip the whole run "
+        "instead of falling through to the tail")
     notice = [c for c in chunks if _NO_KEY_NOTICE in c]
     assert len(notice) == 1, (
         f"{workflow}: expected exactly one step carrying the no-key notice "
