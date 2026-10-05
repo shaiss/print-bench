@@ -642,6 +642,79 @@ elif kind == "coach":
         {"Bash(git push *:* *)"},
         {"Bash(git push *:**)"},
         {"Bash(git push *:** *)"},
+        {"Bash(git add -ve)"},
+        {"Bash(git add -ve:*)"},
+        {"Bash(git add -ve*)"},
+        {"Bash(git add * -ve)"},
+        {"Bash(git add * -ve *)"},
+        {"Bash(git add -ne)"},
+        {"Bash(git add -ne:*)"},
+        {"Bash(git add -ne*)"},
+        {"Bash(git add * -ne)"},
+        {"Bash(git add * -ne *)"},
+        {"Bash(git add -fe)"},
+        {"Bash(git add -fe:*)"},
+        {"Bash(git add -fe*)"},
+        {"Bash(git add * -fe)"},
+        {"Bash(git add * -fe *)"},
+        {"Bash(git add -Ae)"},
+        {"Bash(git add -Ae:*)"},
+        {"Bash(git add -Ae*)"},
+        {"Bash(git add * -Ae)"},
+        {"Bash(git add * -Ae *)"},
+        {"Bash(git add -Ne)"},
+        {"Bash(git add -Ne:*)"},
+        {"Bash(git add -Ne*)"},
+        {"Bash(git add * -Ne)"},
+        {"Bash(git add * -Ne *)"},
+        {"Bash(git add -ev)"},
+        {"Bash(git add -ev:*)"},
+        {"Bash(git add -ev*)"},
+        {"Bash(git add * -ev)"},
+        {"Bash(git add * -ev *)"},
+        {"Bash(git add -en)"},
+        {"Bash(git add -en:*)"},
+        {"Bash(git add -en*)"},
+        {"Bash(git add * -en)"},
+        {"Bash(git add * -en *)"},
+        {"Bash(git add * -*e)"},
+        {"Bash(git add * -*e *)"},
+        {"Bash(git commit -qe)"},
+        {"Bash(git commit -qe:*)"},
+        {"Bash(git commit -qe*)"},
+        {"Bash(git commit * -qe)"},
+        {"Bash(git commit * -qe *)"},
+        {"Bash(git commit -eq)"},
+        {"Bash(git commit -eq:*)"},
+        {"Bash(git commit -eq*)"},
+        {"Bash(git commit * -eq)"},
+        {"Bash(git commit * -eq *)"},
+        {"Bash(git commit -ne)"},
+        {"Bash(git commit -ne:*)"},
+        {"Bash(git commit -ne*)"},
+        {"Bash(git commit * -ne)"},
+        {"Bash(git commit * -ne *)"},
+        {"Bash(git commit * -*e)"},
+        {"Bash(git commit * -*e *)"},
+        {"Bash(git commit * -*c)"},
+        {"Bash(git commit * -*c *)"},
+        {"Bash(git commit * -*S)"},
+        {"Bash(git commit * -*S *)"},
+        {"Bash(git commit -nS:*)"},
+        {"Bash(git commit -nS*)"},
+        {"Bash(git commit * -nS*)"},
+        {"Bash(git commit -qS:*)"},
+        {"Bash(git commit -qS*)"},
+        {"Bash(git commit * -qS*)"},
+        {"Bash(git commit -vS:*)"},
+        {"Bash(git commit -vS*)"},
+        {"Bash(git commit * -vS*)"},
+        {"Bash(git commit -tS:*)"},
+        {"Bash(git commit -tS*)"},
+        {"Bash(git commit -uS:*)"},
+        {"Bash(git commit -uS*)"},
+        {"Bash(git commit -FS:*)"},
+        {"Bash(git commit -FS*)"},
     ]
 else:
     sys.stderr.write(f"unknown backstop kind {kind!r}\n")
@@ -727,6 +800,8 @@ ESCAPE_PROBES = [
     "git add -e file", "git add -ie", "git add -pue", "git add -ipue",
     "git add -pe file", "git add -ue file", "git add -pea file",
     "git add -iep file", "git add designs -iep", "git add designs -ie",
+    "git add -ve", "git add -ne", "git add designs -ve", "git add -ve file",
+    "git commit --allow-empty -qe", "git commit -nSkey -m x",
     "git checkout --recurse-submodules", "git checkout --recurse-subm",
     "git checkout --recurse", "git checkout --recu",
     "git checkout --rec", "git checkout --re", "git checkout --r",
@@ -1376,6 +1451,79 @@ EOF
     "Bash(git push *:* *)"
     "Bash(git push *:**)"
     "Bash(git push *:** *)"
+    "Bash(git add -ve)"
+    "Bash(git add -ve:*)"
+    "Bash(git add -ve*)"
+    "Bash(git add * -ve)"
+    "Bash(git add * -ve *)"
+    "Bash(git add -ne)"
+    "Bash(git add -ne:*)"
+    "Bash(git add -ne*)"
+    "Bash(git add * -ne)"
+    "Bash(git add * -ne *)"
+    "Bash(git add -fe)"
+    "Bash(git add -fe:*)"
+    "Bash(git add -fe*)"
+    "Bash(git add * -fe)"
+    "Bash(git add * -fe *)"
+    "Bash(git add -Ae)"
+    "Bash(git add -Ae:*)"
+    "Bash(git add -Ae*)"
+    "Bash(git add * -Ae)"
+    "Bash(git add * -Ae *)"
+    "Bash(git add -Ne)"
+    "Bash(git add -Ne:*)"
+    "Bash(git add -Ne*)"
+    "Bash(git add * -Ne)"
+    "Bash(git add * -Ne *)"
+    "Bash(git add -ev)"
+    "Bash(git add -ev:*)"
+    "Bash(git add -ev*)"
+    "Bash(git add * -ev)"
+    "Bash(git add * -ev *)"
+    "Bash(git add -en)"
+    "Bash(git add -en:*)"
+    "Bash(git add -en*)"
+    "Bash(git add * -en)"
+    "Bash(git add * -en *)"
+    "Bash(git add * -*e)"
+    "Bash(git add * -*e *)"
+    "Bash(git commit -qe)"
+    "Bash(git commit -qe:*)"
+    "Bash(git commit -qe*)"
+    "Bash(git commit * -qe)"
+    "Bash(git commit * -qe *)"
+    "Bash(git commit -eq)"
+    "Bash(git commit -eq:*)"
+    "Bash(git commit -eq*)"
+    "Bash(git commit * -eq)"
+    "Bash(git commit * -eq *)"
+    "Bash(git commit -ne)"
+    "Bash(git commit -ne:*)"
+    "Bash(git commit -ne*)"
+    "Bash(git commit * -ne)"
+    "Bash(git commit * -ne *)"
+    "Bash(git commit * -*e)"
+    "Bash(git commit * -*e *)"
+    "Bash(git commit * -*c)"
+    "Bash(git commit * -*c *)"
+    "Bash(git commit * -*S)"
+    "Bash(git commit * -*S *)"
+    "Bash(git commit -nS:*)"
+    "Bash(git commit -nS*)"
+    "Bash(git commit * -nS*)"
+    "Bash(git commit -qS:*)"
+    "Bash(git commit -qS*)"
+    "Bash(git commit * -qS*)"
+    "Bash(git commit -vS:*)"
+    "Bash(git commit -vS*)"
+    "Bash(git commit * -vS*)"
+    "Bash(git commit -tS:*)"
+    "Bash(git commit -tS*)"
+    "Bash(git commit -uS:*)"
+    "Bash(git commit -uS*)"
+    "Bash(git commit -FS:*)"
+    "Bash(git commit -FS*)"
   )
   python3 - "$tmp/reviewer.json" "${GH_FLOOR[@]}" <<'PY2'
 import json, sys
