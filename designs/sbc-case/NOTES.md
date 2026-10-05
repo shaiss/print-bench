@@ -364,6 +364,17 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
+27. **B6 — printed-foot parameter (PM backlog).** `printed_feet` (default
+    `false`) adds four corner cylindrical pads on the exterior bed face via
+    `base_feet()` / `foot_pad()`, with `foot_d`, `foot_h`, and
+    `foot_corner_inset` for sizing. Pads extrude **upward** into the floor slab
+    from z = 0 (coplanar with the rest of the bottom), not downward — downward
+    pads left the centre of the floor bridging in air and printcheck scored
+    67/100 (29 % unsupported); coplanar pads re-gate at 100/100 with
+    `printed_feet = true`. Placement clears the lid-screw posts at
+    (±40, ±32.75) on the floor plane. Default off keeps the stock BOM, renders,
+    and coupon unchanged. Whether printed or adhesive feet actually stop a
+    one-handed cable pull stays a **[hunch]** until B10.
 
 ## Print settings
 
