@@ -146,7 +146,15 @@
       "Bash(*&&*git*)",
       "Bash(*||*git*)",
       "Bash(*|*git*)",
-      "Bash(*\n*git*)"
+      "Bash(*\n*git*)",
+      "Bash(git*;*)",
+      "Bash(git*&&*)",
+      "Bash(git*||*)",
+      "Bash(git*|*)",
+      "Bash(*$(*git*)",
+      "Bash(*`*git*)",
+      "Bash(*<*git*)",
+      "Bash(*{*git*)"
     ]
   }
 }

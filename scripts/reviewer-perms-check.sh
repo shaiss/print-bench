@@ -303,6 +303,14 @@ elif kind == "coach":
         {'Bash(*||*git*)'},
         {'Bash(*|*git*)'},
         {'Bash(*\n*git*)'},
+        {'Bash(git*;*)'},
+        {'Bash(git*&&*)'},
+        {'Bash(git*||*)'},
+        {'Bash(git*|*)'},
+        {'Bash(*$(*git*)'},
+        {'Bash(*`*git*)'},
+        {'Bash(*<*git*)'},
+        {'Bash(*{*git*)'},
         {'Bash(git *<*)'},
         {'Bash(git*<*)'},
         {'Bash(git *>*)'},
@@ -3040,6 +3048,13 @@ ESCAPE_PROBES = [
     "FOO=1\ngit add -e file",
     "FOO=1\n git add -e file",
     "gh pr view 1; git -c alias.x=!id x",
+    "git add designs; id",
+    "git add designs && /usr/bin/id",
+    "git add designs || id",
+    "git add designs | id",
+    "gh pr view $(git -c alias.x=!id x)",
+    "gh pr view `git fetch origin`",
+    "gh pr view <(git fetch origin)",
     "gh pr view && git fetch . --upload-pack=/bin/sh",
     "jq .; git status",
     "mktemp -d; git clone evil",
@@ -3327,6 +3342,14 @@ EOF
     'Bash(*||*git*)'
     'Bash(*|*git*)'
     $'Bash(*\n*git*)'
+    'Bash(git*;*)'
+    'Bash(git*&&*)'
+    'Bash(git*||*)'
+    'Bash(git*|*)'
+    'Bash(*$(*git*)'
+    'Bash(*`*git*)'
+    'Bash(*<*git*)'
+    'Bash(*{*git*)'
     'Bash(git *<*)'
     'Bash(git*<*)'
     'Bash(git *>*)'
@@ -5883,6 +5906,11 @@ EOF
     'Bash(*||*git*)'
     'Bash(*|*git*)'
     $'Bash(*\n*git*)'
+    'Bash(git*;*)'
+    'Bash(git*&&*)'
+    'Bash(*$(*git*)'
+    'Bash(*`*git*)'
+    'Bash(*<*git*)'
     'Bash(git *<*)'
     'Bash(git*<*)'
     'Bash(git *>*)'
@@ -5925,6 +5953,8 @@ wrappers = [
     # string, so FOO=1;git / FOO=1&&git / a leading newline never hit it.
     "Bash(*;*git*)", "Bash(*&&*git*)", "Bash(*||*git*)", "Bash(*|*git*)",
     "Bash(*\n*git*)",
+    "Bash(git*;*)", "Bash(git*&&*)", "Bash(git*||*)", "Bash(git*|*)",
+    "Bash(*$(*git*)", "Bash(*`*git*)", "Bash(*<*git*)", "Bash(*{*git*)",
 ]
 deny = ["Bash(apt:*)","Bash(apt-get:*)","Bash(openscad:*)","Bash(openscad-nightly:*)",
         "Bash(xvfb-run:*)","Bash(prusa-slicer:*)","Bash(printcheck:*)",
