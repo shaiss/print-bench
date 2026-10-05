@@ -141,7 +141,12 @@
       "Bash(env*git*)",
       "Bash(*=* git*)",
       "Bash(*=*\tgit*)",
-      "Bash(*=*  git*)"
+      "Bash(*=*  git*)",
+      "Bash(*;git*)",
+      "Bash(*&&git*)",
+      "Bash(*||git*)",
+      "Bash(*|git*)",
+      "Bash(*\ngit*)"
     ]
   }
 }
