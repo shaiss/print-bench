@@ -135,7 +135,6 @@ jobs:
       # dedup-context, triage, red and skip-notice steps read).
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
-      HAS_OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # The per-run queue cap, enforced by the queue server (queue_mcp.py).
       # With the daily cadence this is drafts/day: 2 → ~14/week, a healthy
       # buffer over Lark's ~7 posts/week without flooding the human's review.
@@ -189,14 +188,12 @@ jobs:
           esac
           [ "$HAS_ZAI_KEY" = "true" ] && zai_key=1 || zai_key=0
           [ "$HAS_ANTHROPIC_KEY" = "true" ] && anthropic_key=1 || anthropic_key=0
-          [ "$HAS_OPENROUTER_KEY" = "true" ] && openrouter_key=1 || openrouter_key=0
-          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ] || [ "$openrouter_key" = 1 ]; then key=1; else key=0; fi
+          if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi
           {
             echo "enabled=$enabled"
             echo "provider=$provider"
             echo "zai_key_present=$zai_key"
             echo "anthropic_key_present=$anthropic_key"
-            echo "openrouter_key_present=$openrouter_key"
             echo "key_present=$key"
           } >> "$GITHUB_OUTPUT"
 
@@ -233,7 +230,7 @@ jobs:
           conf_provider="$(backlog-burn config --get provider --path .github/reeve-growth.conf)"
           # One layout entry per run step below, in file order.
           python3 -m model_registry shape reeve-growth --head "$conf_provider" \
-            --conf .github/reeve-growth.conf --layout zai,anthropic,anthropic,openrouter,openrouter
+            --conf .github/reeve-growth.conf --layout zai,anthropic,anthropic
 
       - name: Note when disabled by committed policy
         if: steps.policy.outputs.enabled != 'true'
@@ -303,15 +300,15 @@ jobs:
       # step's --layout) — the drift guard fails either half shipped alone.
       #
       # Failure model: this routine carries no SHIP-LOCK lifecycle, so the
-      # non-terminal links (1-4) are continue-on-error so a dead id falls
-      # through, and the TERMINAL link (5) keeps none — a total-walk failure
+      # non-terminal links (1-2) are continue-on-error so a dead id falls
+      # through, and the TERMINAL link (3) keeps none — a total-walk failure
       # then fails the step, and the job, exactly as the single step did
       # before the tail existed. The "Turn an exhausted walk red" step at the
       # end covers the one case that rule misses: a walk exhausted with the
       # tail SKIPPED (only ZAI_KEY set, the GLM link dead) has no failed
       # non-coe step to fail the job.
       #
-      # All five steps share the pin, the write permission, the `github_token`,
+      # All three steps share the pin, the write permission, the `github_token`,
       # the queue cap, the same tool surface and the same /reeve-growth prompt.
       #
       # Tool surface (why exactly this, on EVERY link): FILING is the MCP tool
@@ -471,9 +468,9 @@ jobs:
           && github.event.inputs.dry_run != 'true'
           && steps.run_zai_1.outcome != 'success'
           && steps.run_anthropic_2.outcome != 'success'
-        # No longer terminal: OpenRouter links follow; keep continue-on-error.
+        # The TERMINAL link: no continue-on-error, so the last id dying fails
+        # the step (and the job) — the walk is over.
         timeout-minutes: 20
-        continue-on-error: true
         env:
           # Same as links 1 and 2: the queue MCP tool's token plus the SAME
           # GROWTHQ_CAP_STATE path, so a walk that reached here still counts
@@ -490,109 +487,6 @@ jobs:
           claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
           prompt: "/reeve-growth"
 
-      # Same refresh for link 4: link 3 may itself have queued and then died.
-      - name: Refresh the dedup context for chain link 4
-        id: dedup_context_4
-        if: >-
-          steps.policy.outputs.enabled == 'true'
-          && steps.policy.outputs.openrouter_key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-          && steps.run_zai_1.outcome != 'success'
-          && steps.run_anthropic_2.outcome != 'success'
-          && steps.run_anthropic_3.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PYTHONPATH: tools/growth/src
-        run: |
-          set -euo pipefail
-          rm -f .reeve-growth-context/dedup.json .reeve-growth-context/dedup.md
-          if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
-              --out-dir .reeve-growth-context; then
-            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE (or left absent), so the queue tool refuses every filing on this link (fail closed; the next run retries)"
-          fi
-          cat .reeve-growth-context/dedup.md || true
-
-      - name: Run via OpenRouter (OSS, chain link 4)
-        id: run_openrouter_4
-        if: >-
-          steps.policy.outputs.enabled == 'true'
-          && steps.policy.outputs.openrouter_key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-          && steps.run_zai_1.outcome != 'success'
-          && steps.run_anthropic_2.outcome != 'success'
-          && steps.run_anthropic_3.outcome != 'success'
-        timeout-minutes: 20
-        continue-on-error: true
-        env:
-          ANTHROPIC_BASE_URL: https://openrouter.ai/api
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
-          # Same as links 1 and 2: the queue MCP tool's token plus the SAME
-          # GROWTHQ_CAP_STATE path, so a walk that reached here still counts
-          # everything earlier links queued (#567), and the dedup.json the
-          # refresh step above re-wrote.
-          GITHUB_TOKEN: ${{ github.token }}
-          GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
-          GROWTHQ_DEDUP_CONTEXT: ${{ github.workspace }}/.reeve-growth-context/dedup.json
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
-        with:
-          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          github_token: ${{ github.token }}
-          show_full_output: "true"
-          claude_args: --model ${{ steps.chain.outputs.link4_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
-          prompt: "/reeve-growth"
-
-      # Same refresh for link 5: link 4 may itself have queued and then died.
-      - name: Refresh the dedup context for chain link 5
-        id: dedup_context_5
-        if: >-
-          steps.policy.outputs.enabled == 'true'
-          && steps.policy.outputs.openrouter_key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-          && steps.run_zai_1.outcome != 'success'
-          && steps.run_anthropic_2.outcome != 'success'
-          && steps.run_anthropic_3.outcome != 'success'
-          && steps.run_openrouter_4.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PYTHONPATH: tools/growth/src
-        run: |
-          set -euo pipefail
-          rm -f .reeve-growth-context/dedup.json .reeve-growth-context/dedup.md
-          if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
-              --out-dir .reeve-growth-context; then
-            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE (or left absent), so the queue tool refuses every filing on this link (fail closed; the next run retries)"
-          fi
-          cat .reeve-growth-context/dedup.md || true
-
-      - name: Run via OpenRouter (OSS, chain link 5)
-        id: run_openrouter_5
-        if: >-
-          steps.policy.outputs.enabled == 'true'
-          && steps.policy.outputs.openrouter_key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-          && steps.run_zai_1.outcome != 'success'
-          && steps.run_anthropic_2.outcome != 'success'
-          && steps.run_anthropic_3.outcome != 'success'
-          && steps.run_openrouter_4.outcome != 'success'
-        timeout-minutes: 20
-        env:
-          ANTHROPIC_BASE_URL: https://openrouter.ai/api
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
-          # Same as links 1 and 2: the queue MCP tool's token plus the SAME
-          # GROWTHQ_CAP_STATE path, so a walk that reached here still counts
-          # everything earlier links queued (#567), and the dedup.json the
-          # refresh step above re-wrote.
-          GITHUB_TOKEN: ${{ github.token }}
-          GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
-          GROWTHQ_DEDUP_CONTEXT: ${{ github.workspace }}/.reeve-growth-context/dedup.json
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
-        with:
-          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          github_token: ${{ github.token }}
-          show_full_output: "true"
-          claude_args: --model ${{ steps.chain.outputs.link5_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
-          prompt: "/reeve-growth"
-
       - name: Explain a skipped agentic run
         if: >-
           steps.policy.outputs.enabled == 'true'
@@ -605,7 +499,7 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             echo "::notice::dry run — did not invoke /reeve-growth"
           else
-            echo "::notice::no key is set for ANY provider in the reeve-growth chain (ZAI_KEY for the zai link, ANTHROPIC_API_KEY for the anthropic tail, OPENROUTER_API_KEY for the openrouter tail; head provider '${PROVIDER}') — skipping the unattended /reeve-growth run"
+            echo "::notice::no key is set for ANY provider in the reeve-growth chain (ZAI_KEY for the zai link, ANTHROPIC_API_KEY for the anthropic tail; head provider '${PROVIDER}') — skipping the unattended /reeve-growth run"
           fi
 
       # No SHIP-LOCK lifecycle here, so the terminal link failing IS the job
@@ -625,13 +519,12 @@ jobs:
           && steps.policy.outputs.enabled == 'true'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || steps.run_openrouter_4.outcome == 'success' && 'success' || steps.run_openrouter_5.outcome == 'success' && 'success' || (steps.run_openrouter_5.outcome == 'skipped' && (steps.run_openrouter_4.outcome == 'skipped' && (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) || steps.run_openrouter_4.outcome) || steps.run_openrouter_5.outcome)) != 'success'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: reeve-growth
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the reeve-growth routine
           escalate: "true"
@@ -650,7 +543,7 @@ jobs:
           # head failed. The terminal link failing fails the job; the "Turn
           # an exhausted walk red" step below covers a walk exhausted with
           # the tail skipped.
-          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || steps.run_openrouter_4.outcome == 'success' && 'success' || steps.run_openrouter_5.outcome == 'success' && 'success' || (steps.run_openrouter_5.outcome == 'skipped' && (steps.run_openrouter_4.outcome == 'skipped' && (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) || steps.run_openrouter_4.outcome) || steps.run_openrouter_5.outcome) }}
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
           # Per-link outcomes + the chain the resolve step emitted, so the
           # summary can name WHICH link served and warn when the head
           # provider fell through (a GLM outage must stay visible even though
@@ -658,22 +551,16 @@ jobs:
           L1: ${{ steps.run_zai_1.outcome }}
           L2: ${{ steps.run_anthropic_2.outcome }}
           L3: ${{ steps.run_anthropic_3.outcome }}
-          L4: ${{ steps.run_openrouter_4.outcome }}
-          L5: ${{ steps.run_openrouter_5.outcome }}
           M1: ${{ steps.chain.outputs.link1_model }}
           M2: ${{ steps.chain.outputs.link2_model }}
           M3: ${{ steps.chain.outputs.link3_model }}
-          M4: ${{ steps.chain.outputs.link4_model }}
-          M5: ${{ steps.chain.outputs.link5_model }}
           P1: ${{ steps.chain.outputs.link1_provider }}
           P2: ${{ steps.chain.outputs.link2_provider }}
           P3: ${{ steps.chain.outputs.link3_provider }}
-          P4: ${{ steps.chain.outputs.link4_provider }}
-          P5: ${{ steps.chain.outputs.link5_provider }}
         run: |
           # Which link served: the first (only) link whose outcome is success.
           served=""
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3; do
             o="L$i"; m="M$i"; p="P$i"
             if [ "${!o}" = "success" ]; then
               served="link $i ${!m} (${!p})"
@@ -711,9 +598,9 @@ jobs:
           && steps.policy.outputs.enabled == 'true'
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || steps.run_openrouter_4.outcome == 'success' && 'success' || steps.run_openrouter_5.outcome == 'success' && 'success' || (steps.run_openrouter_5.outcome == 'skipped' && (steps.run_openrouter_4.outcome == 'skipped' && (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) || steps.run_openrouter_4.outcome) || steps.run_openrouter_5.outcome)) != 'success'
+          && (steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome)) != 'success'
         env:
-          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || steps.run_openrouter_4.outcome == 'success' && 'success' || steps.run_openrouter_5.outcome == 'success' && 'success' || (steps.run_openrouter_5.outcome == 'skipped' && (steps.run_openrouter_4.outcome == 'skipped' && (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) || steps.run_openrouter_4.outcome) || steps.run_openrouter_5.outcome) }}
+          RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_anthropic_2.outcome == 'success' && 'success' || steps.run_anthropic_3.outcome == 'success' && 'success' || (steps.run_anthropic_3.outcome == 'skipped' && (steps.run_anthropic_2.outcome == 'skipped' && steps.run_zai_1.outcome || steps.run_anthropic_2.outcome) || steps.run_anthropic_3.outcome) }}
         run: |
           echo "::error::the /reeve-growth agent step did not succeed on any link of the reeve-growth chain (walk outcome: ${RUN}); failing the job so the exhaustion is visible"
           exit 1

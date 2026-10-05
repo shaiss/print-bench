@@ -48,17 +48,13 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "auto-review.yml"
 SCOUT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "product-scout.yml"
 REGISTRY = REPO_ROOT / ".github" / "models" / "registry.conf"
 
-# Chains permitted to carry OpenRouter `:free` model ids. Everything else
-# that resolves a free-tier OpenRouter model is a Cipher-hold regression:
-# free-tier models must not run with bypassPermissions, a PAT, Write/Edit/Bash
-# coach tools, or any merge-gate / sign-off authority (reviewer-signoff,
-# autonomy-ok, wright-signoff). Keep this allowlist explicit and tiny.
+# Chains permitted to carry OpenRouter `:free` model ids. Keel binding
+# Security ruling on #819: LABELER-ONLY. Everything else that resolves a
+# free-tier OpenRouter model is a Cipher-hold regression — including
+# "advisory" write surfaces that file issues, post comments, or queue
+# intents (scout, adoption-assessor, wright propose, reeve-growth).
 OPENROUTER_FREE_TAIL_ALLOWED_CHAINS = frozenset({
-    "labeler",           # routing labels via label-helper; dontAsk; github.token
-    "scout",             # file_design_brief MCP only; dontAsk; github.token
-    "adoption-assessor", # advisory disposition comment; dontAsk; github.token
-    "wright",            # file_agent_brief MCP only (propose); dontAsk; github.token
-    "reeve-growth",      # queue_growth_post MCP only; dontAsk; github.token
+    "labeler",  # routing labels via label-helper; dontAsk; github.token — ONLY
 })
 
 # The reviewer-round jobs that carry the fallback chain — the two reviewer
@@ -143,43 +139,74 @@ def test_openrouter_free_tail_only_on_allowlisted_chains():
         "OpenRouter :free models appear on non-allowlisted chain(s) "
         f"{offenders} — remove them or (only with a Security ruling) add "
         "the chain to OPENROUTER_FREE_TAIL_ALLOWED_CHAINS. Forbidden "
-        "examples: review, wright-signoff, backlog-burn, design-run, "
-        "chunker, spike-converter, growth-twitter, reeve-greenlight.")
+        "examples: review, scout, wright, reeve-growth, adoption-assessor, "
+        "wright-signoff, backlog-burn, design-run, chunker, "
+        "spike-converter, growth-twitter, reeve-greenlight.")
 
 
-def test_openrouter_free_tail_allowlist_rejects_review_and_signoff():
-    """NEGATIVE CONTROL: the allowlist must exclude review and wright-signoff
-    even if someone re-adds :free models to those chains in a tampered registry."""
-    assert "review" not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
-    assert "wright-signoff" not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
-    assert "backlog-burn" not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
-    assert "design-run" not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
+def test_openrouter_free_tail_allowlist_rejects_non_labeler_chains():
+    """NEGATIVE CONTROL (Keel labeler-only ruling on #819): the allowlist is
+    exactly {labeler}. Re-adding :free to scout / wright / reeve-growth /
+    adoption-assessor / review must make those chains offenders."""
+    assert OPENROUTER_FREE_TAIL_ALLOWED_CHAINS == frozenset({"labeler"})
+    forbidden = (
+        "review", "wright-signoff", "backlog-burn", "design-run",
+        "scout", "wright", "reeve-growth", "adoption-assessor",
+        "spike-converter", "growth-twitter", "chunker", "reeve-greenlight",
+    )
+    for cid in forbidden:
+        assert cid not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS, cid
+
     raw = REGISTRY.read_text(encoding="utf-8")
-    # Inject a free model into the review chain and expect the guard to fire.
-    tampered = raw.replace(
-        "[chain:review]\nmodels = glm-5.3, glm-5.2, glm-5.1, claude-opus-4-8, "
-        "claude-sonnet-5, claude-haiku-4-5",
-        "[chain:review]\nmodels = glm-5.3, glm-5.2, glm-5.1, claude-opus-4-8, "
-        "claude-sonnet-5, claude-haiku-4-5, google/gemma-4-31b-it:free",
-        1)
-    assert tampered != raw, "tamper target not found — review chain models line drifted"
+    injections = {
+        "review": (
+            "[chain:review]\nmodels = glm-5.3, glm-5.2, glm-5.1, claude-opus-4-8, "
+            "claude-sonnet-5, claude-haiku-4-5",
+            "[chain:review]\nmodels = glm-5.3, glm-5.2, glm-5.1, claude-opus-4-8, "
+            "claude-sonnet-5, claude-haiku-4-5, google/gemma-4-31b-it:free",
+        ),
+        "scout": (
+            "[chain:scout]\nmodels = glm-5.2, claude-sonnet-5, claude-haiku-4-5",
+            "[chain:scout]\nmodels = glm-5.2, claude-sonnet-5, claude-haiku-4-5, "
+            "google/gemma-4-31b-it:free",
+        ),
+        "wright": (
+            "[chain:wright]\nmodels = glm-5.2, claude-sonnet-5, claude-haiku-4-5",
+            "[chain:wright]\nmodels = glm-5.2, claude-sonnet-5, claude-haiku-4-5, "
+            "google/gemma-4-31b-it:free",
+        ),
+        "reeve-growth": (
+            "[chain:reeve-growth]\nmodels = glm-5.3, claude-sonnet-5, claude-haiku-4-5",
+            "[chain:reeve-growth]\nmodels = glm-5.3, claude-sonnet-5, claude-haiku-4-5, "
+            "google/gemma-4-31b-it:free",
+        ),
+        "adoption-assessor": (
+            "[chain:adoption-assessor]\nmodels = glm-5.3, claude-sonnet-5, claude-haiku-4-5",
+            "[chain:adoption-assessor]\nmodels = glm-5.3, claude-sonnet-5, "
+            "claude-haiku-4-5, google/gemma-4-31b-it:free",
+        ),
+    }
     import tempfile, os
-    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
-        fh.write(tampered)
-        tmp = fh.name
-    try:
-        # Temporarily point REGISTRY... we call Registry.load on the tmp path
-        # and reimplement the check inline against that registry.
-        reg = Registry.load(tmp)
-        free_re = re.compile(r":free\b")
-        offenders = [
-            cid for cid in reg.chains
-            if any(free_re.search(link.model) for link in reg.resolve(cid))
-            and cid not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
-        ]
-        assert "review" in offenders
-    finally:
-        os.unlink(tmp)
+    for chain_id, (needle, repl) in injections.items():
+        tampered = raw.replace(needle, repl, 1)
+        assert tampered != raw, f"tamper target not found for {chain_id}"
+        with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
+            fh.write(tampered)
+            tmp = fh.name
+        try:
+            reg = Registry.load(tmp)
+            free_re = re.compile(r":free\b")
+            offenders = [
+                cid for cid in reg.chains
+                if any(free_re.search(link.model) for link in reg.resolve(cid))
+                and cid not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
+            ]
+            assert chain_id in offenders, (
+                f"injecting :free into {chain_id} did not make it an offender "
+                f"(offenders={offenders}); allowlist weakened")
+        finally:
+            os.unlink(tmp)
+
 
 
 def test_every_ship_step_is_pinned_to_its_registry_link():
@@ -790,14 +817,14 @@ ROUTINES = {
         allowed="Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"),
     # #544 Part B: the eight formerly single-link routines, one row each —
     # the GLM head (one link, or the sign-off's three), then the two-link
-    # Anthropic tail. A scoped OpenRouter free OSS tail (Cipher hold on
-    # #678) is allowlisted only on non-gate chains — see
+    # Anthropic tail. The OpenRouter free OSS tail is labeler-only
+    # (Keel binding Security ruling on #819) — see
     # OPENROUTER_FREE_TAIL_ALLOWED_CHAINS below.
     "scout": Routine(
         workflow="product-scout.yml", chain="scout",
         conf=".github/product-scout.conf", job="scout",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/scout-settings.json",
         mcp_config=".claude/skills/product-scout/scout-mcp.json",
@@ -823,7 +850,7 @@ ROUTINES = {
         workflow="adoption-assessor.yml", chain="adoption-assessor",
         conf=".github/adoption-assessor.conf", job="assess",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/adoption-assessor-settings.json",
         mcp_config=".claude/skills/adoption-assessor/assessor-mcp.json",
@@ -846,7 +873,7 @@ ROUTINES = {
         workflow="reeve-growth.yml", chain="reeve-growth",
         conf=".github/reeve-growth.conf", job="reeve-growth",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/reeve-growth-settings.json",
         mcp_config=".claude/skills/growth-queue/queue-mcp.json",
@@ -859,7 +886,7 @@ ROUTINES = {
         workflow="wright.yml", chain="wright",
         conf=".github/wright.conf", job="propose",
         resolve_id="propose_chain", prefix="propose",
-        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
+        layout=("zai", "anthropic", "anthropic"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/wright-settings.json",
         mcp_config=".claude/skills/wright/wright-mcp.json",
