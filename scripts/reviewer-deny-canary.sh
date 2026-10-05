@@ -306,8 +306,19 @@ def run_probes(extracted_js: str | None, label: str) -> None:
             )
         else:
             print(f"ok    {family}: {rule} refuses {probe!r}")
-    # Boundary: git:* must not swallow gitk
-    if rule_refuses(*BOUNDARY_NEG[:2]):
+    # Boundary: git:* must not swallow gitk. Live mode must eval this on
+    # the extracted matcher too — a CLI that widens `:*` into a plain
+    # prefix would still look green if only the Python transcription ran.
+    neg_py = rule_refuses(*BOUNDARY_NEG[:2])
+    neg = neg_py
+    if extracted_js is not None:
+        neg = node_eval(extracted_js, *BOUNDARY_NEG[:2])
+        if neg != neg_py:
+            failed.append(
+                f"{BOUNDARY_NEG[2]}: python/node disagree on boundary negative "
+                f"(py={neg_py} node={neg})"
+            )
+    if neg:
         failed.append(
             f"{BOUNDARY_NEG[2]}: {BOUNDARY_NEG[0]} incorrectly refuses "
             f"{BOUNDARY_NEG[1]!r} (not a word-boundary prefix)"
@@ -325,9 +336,9 @@ def fake_binary(js: str) -> bytes:
 
 def selftest() -> None:
     n = 0
-    check_pin()
-    n += 1
-    print("ok    selftest: auto-review.yml pin matches PINNED_ACTION_SHA")
+    # Pin-SHA sync is live()-only. Putting it here would make a pin bump
+    # fail required scad-check / ci-ok (workflow edits select those jobs),
+    # even though the live canary is documented as not a required check.
     check_rules_present()
     n += 1
     print("ok    selftest: committed backstops still carry the three families")
