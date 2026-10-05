@@ -15,9 +15,32 @@
 #       --andon true|false             is the AI andon cord pulled (reviews bypassed)?
 #       --jane "<marker or empty>"     the last JANE_SIGNOFF marker line
 #       --drik "<marker or empty>"     the last DRIK_SIGNOFF marker line
-#       --tree-current <treesha>       git rev-parse HEAD:designs (current design tree)
-#       --jane-tree <treesha|empty>    git rev-parse <jane-sha>:designs (empty if gone)
-#       --drik-tree <treesha|empty>    git rev-parse <drik-sha>:designs
+#       --tree-current <key>           reviewer-signoff.sh key <head>  (currency key)
+#       --jane-tree <key|empty>        reviewer-signoff.sh key <jane-sha> (empty if gone)
+#       --drik-tree <key|empty>        reviewer-signoff.sh key <drik-sha>
+#
+#   scripts/reviewer-signoff.sh key <commit>
+#       Print the sign-off CURRENCY KEY of <commit> (see CURRENCY below), or
+#       nothing and exit 1 when it cannot be resolved. auto-review.yml computes
+#       every key the `decide` call compares with this, never with its own
+#       rev-parse, so the posting and the checking side cannot drift.
+#
+#   scripts/reviewer-signoff.sh fuse-warn
+#       Read a PR comment body on stdin; print `true` or `false`. True only
+#       when the body IS the printcheck gate sticky (starts with
+#       `<!-- printcheck-gate-report -->`) AND it carries the fusecheck
+#       STRONG WARN phrase gate-summary.py writes. A mention of the marker
+#       or of "STRONG WARN" in reviewer prose is false (PR #634).
+#
+#   scripts/reviewer-signoff.sh round --head <sha> --stamp <sha|empty> [--merge <ref>]
+#       The regen review guard (issue #470): "SKIP <reason>" (exit 0) when
+#       every designs/ change since the last reviewed round (the
+#       AUTO_REVIEW_STAMP sha) is a previews-only, all-noise regen commit-back,
+#       else "ROUND <reason>" (exit 1). auto-review.yml asks it only after its
+#       own diff has already said "designs/ changed", so a SKIP can only turn a
+#       round off, and only for that case. --merge names the checkout that diff
+#       ran on (the pull_request merge ref): a SKIP also needs its designs/ tree
+#       to equal the head's, so a base-branch design change is still reviewed.
 #
 # Prints exactly one line — "PASS <reason>" (exit 0) or "BLOCK <reason>" (exit 1)
 # — short enough to drop into a GitHub status `description` (<=140 chars). The
@@ -44,12 +67,56 @@
 # read it in the sticky gate report and addressed it), else `none`.
 #
 # CURRENCY (why sign-offs survive a non-design push): a sign-off is current when
-# its sha IS the head, OR the design tree at its sha equals the current design
-# tree — so a later push that touches only docs/CI (which advances the head sha
+# its sha IS the head, OR the currency key at its sha equals the key at the
+# head — so a later push that touches only docs/CI (which advances the head sha
 # but changes no designs/ file) does NOT strand a reviewed PR, matching
-# auto-review.yml's own is_new_round dedup. A design change moves the tree and
+# auto-review.yml's own is_new_round dedup. A design change moves the key and
 # correctly invalidates the sign-off.
+#
+# The KEY is the designs/ tree, read back past the regen commit-backs that the
+# owner ruled need no new review (issue #470, decision
+# regen-commitback-review-retrigger, option C): walk <commit>'s first-parent
+# line over the commits that changed designs/, skip every QUALIFYING commit-back,
+# and take the designs/ tree of the first commit that is not one. Qualifying
+# means all of: one parent; ci.yml's regen subject and bot author (how ci.yml's
+# loop guard recognises its own commit); exactly one `Preview-Diff: all-noise`
+# trailer (the regen job writes it only when preview-diff rated every staged
+# preview noise); and a diff that touches nothing but
+# designs/<n>/previews/<file>.png|.gif and designs/<n>/previews/.regen-stamp —
+# not a previews/*.conf, not CAMERAS.md, not a README, nothing outside designs/.
+# So a sign-off stays current across an all-noise, previews-only commit-back and
+# goes stale on a content-class one, a hand edit, or a forged trailer on a
+# commit that also touches a source. With no qualifying commit on the line the
+# key IS the designs/ tree, today's rule unchanged. Whatever the walk crosses,
+# two equal keys mean the two trees differ only in preview images and stamps
+# that all-noise commit-backs changed; stopping early (the walk cap) only makes
+# a key more conservative.
 set -euo pipefail
+
+# The regen commit-back's identity. ci.yml writes it (REGEN_SUBJECT, the bot
+# identity it commits as, the Preview-Diff trailer); the selftest's drift pin
+# fails if ci.yml stops writing exactly these, because drift here would
+# silently turn the guard off (fail-closed: every commit-back opens a round).
+REGEN_SUBJECT="CI: regenerate previews and product pages"
+REGEN_AUTHOR="41898282+github-actions[bot]@users.noreply.github.com"
+REGEN_TRAILER="Preview-Diff"
+# How many designs/-changing commits the key walk reads back past at most.
+# Commit-backs cannot chain (the loop guard allows one per push), so a real
+# line meets one or two; past the cap the key is the raw tree (conservative).
+KEY_WALK_MAX=50
+# Whether a regen commit-back may be trusted at all on this PR. The subject,
+# bot author email and Preview-Diff trailer are plain commit text, so they
+# prove nothing by themselves; what makes them trustworthy on a same-repo PR is
+# that only trusted pushers can write there (docs/actions-security.md). On a
+# fork PR no regen job can push (CI cannot write a fork), so a commit that
+# looks like a commit-back can only be forged: auto-review.yml sets this to 0
+# for a fork head, and then key is the raw tree and round always opens.
+SIGNOFF_TRUST_REGEN="${SIGNOFF_TRUST_REGEN:-1}"
+# The printcheck sticky CI posts (ci.yml) and the fusecheck cell
+# gate-summary.py writes into it. fuse-warn matches these literals, never a
+# substring of "No fusecheck STRONG WARN". The selftest pins both producers.
+PRINTCHECK_STICKY_MARKER="<!-- printcheck-gate-report -->"
+FUSECHECK_STRONG_WARN="**STRONG WARN — reviewer signoff required.**"
 
 # --- field extraction (pure string ops; no git, no network) -----------------
 # Echo the value of `<key>=<value>` inside a marker string, or empty. Values are
@@ -87,6 +154,27 @@ _review_problem() {
     printf '%s has not acknowledged the fusecheck STRONG WARN' "$who"; return
   fi
   printf ''
+}
+
+# _fuse_warn_live BODY — echo true only for the real printcheck sticky carrying
+# the fusecheck STRONG WARN cell. Fail-closed on a real warn: the exact
+# gate-summary.py phrase is required (a "No fusecheck STRONG WARN" line cannot
+# match it). A body that merely *mentions* the sticky marker is not a sticky.
+_fuse_warn_live() {
+  local body="$1"
+  if [[ "$body" != "${PRINTCHECK_STICKY_MARKER}"* ]]; then
+    echo false; return 0
+  fi
+  if [[ "$body" == *"${FUSECHECK_STRONG_WARN}"* ]]; then
+    echo true; return 0
+  fi
+  echo false
+}
+
+fuse_warn() {
+  local body
+  body="$(cat)"
+  _fuse_warn_live "$body"
 }
 
 decide() {
@@ -141,6 +229,155 @@ decide() {
     echo "PASS Jane and Drik signed off and acknowledged the fuse warn"; return 0
   fi
   echo "PASS Jane and Drik signed off on this design"; return 0
+}
+
+# --- the regen commit-back rule (issue #470): pure, then git -----------------
+
+# _derived_path PATH — 0 when PATH is a regen OUTPUT the guard may skip review
+# for: a preview image directly under designs/<n>/previews/ (exactly the files
+# preview-diff.sh measures, so an all-noise verdict covers every one of them)
+# or the design's .regen-stamp. Inputs that live beside them — cameras.conf
+# and the other previews/*.conf manifests, CAMERAS.md — are not outputs.
+_derived_path() {
+  [[ "$1" =~ ^designs/[^/]+/previews/([^/]+\.(png|gif)|\.regen-stamp)$ ]]
+}
+
+# _regen_problem PARENTS SUBJECT AUTHOR TRAILERS PATHS — pure. Echo empty when
+# the commit is a qualifying commit-back, else a short reason. TRAILERS is the
+# newline-separated Preview-Diff values, PATHS the newline-separated paths the
+# commit changes against its parent.
+_regen_problem() {
+  local parents="$1" subject="$2" author="$3" trailers="$4" paths="$5" p
+  if [[ "$parents" != 1 ]]; then
+    printf 'not a single-parent commit'; return
+  fi
+  if [[ "$subject" != "$REGEN_SUBJECT" || "$author" != "$REGEN_AUTHOR" ]]; then
+    printf 'not a regen commit-back'; return
+  fi
+  if [[ "$trailers" != "all-noise" ]]; then
+    trailers="${trailers//$'\n'/, }"
+    printf 'preview-diff did not rate every changed preview noise (%s: %s)' \
+      "$REGEN_TRAILER" "${trailers:-absent}"; return
+  fi
+  if [[ -z "$paths" ]]; then
+    printf 'changes nothing'; return
+  fi
+  while IFS= read -r p; do
+    if ! _derived_path "$p"; then
+      printf 'touches %s, which is not a derived preview output' "$p"; return
+    fi
+  done <<<"$paths"
+  printf ''
+}
+
+# _round_verdict STAMP TREE_STAMP TREE_HEAD KEY_STAMP KEY_HEAD — pure. Prints
+# "SKIP <reason>" (return 0) or "ROUND <reason>" (return 1).
+_round_verdict() {
+  local stamp="$1" ts="$2" th="$3" ks="$4" kh="$5"
+  if [[ -z "$stamp" ]]; then
+    echo "ROUND no completed review round on record"; return 1
+  fi
+  if [[ -z "$ts" || -z "$th" || -z "$ks" || -z "$kh" ]]; then
+    echo "ROUND cannot resolve the design tree at the stamp or the head"; return 1
+  fi
+  if [[ "$ts" == "$th" ]]; then
+    # The PR head's designs/ did not move; whatever the caller's merge-ref diff
+    # saw came from the base branch, not from a commit-back. Not ours to skip.
+    echo "ROUND designs/ is unchanged on the PR head since ${stamp:0:8}; not a regen commit-back"; return 1
+  fi
+  if [[ "$ks" != "$kh" ]]; then
+    echo "ROUND design content changed since the reviewed round ${stamp:0:8}"; return 1
+  fi
+  echo "SKIP every designs/ change since the reviewed round ${stamp:0:8} is a previews-only regen commit-back that preview-diff rated all-noise (issue #470) — no new round; sign-off currency carries across it"
+  return 0
+}
+
+# _commit_problem SHA — gather one commit's facts with git and judge them.
+_commit_problem() {
+  local c="$1" line parents subject author trailers paths
+  line="$(git rev-list --parents -n 1 "$c" 2>/dev/null)" || { printf 'unresolvable commit'; return; }
+  read -ra parents <<<"$line"
+  subject="$(git log -1 --format=%s "$c")" || { printf 'unreadable commit'; return; }
+  author="$(git log -1 --format=%ae "$c")" || { printf 'unreadable commit'; return; }
+  trailers="$(git log -1 --format="%(trailers:key=${REGEN_TRAILER},valueonly)" "$c")" \
+    || { printf 'unreadable commit'; return; }
+  paths=""
+  if [[ "${#parents[@]}" == 2 ]]; then
+    paths="$(git diff-tree --no-commit-id --name-only -r --no-renames "$c")" \
+      || { printf 'unreadable commit'; return; }
+  fi
+  _regen_problem "$(( ${#parents[@]} - 1 ))" "$subject" "$author" "$trailers" "$paths"
+}
+
+# key COMMIT — the sign-off currency key (see CURRENCY at the top).
+key() {
+  local c="${1:-}" list x
+  git rev-parse --verify --quiet "${c}^{commit}" >/dev/null || return 1
+  if [[ "$SIGNOFF_TRUST_REGEN" != 1 ]]; then
+    git rev-parse --verify --quiet "${c}:designs"; return
+  fi
+  # --first-parent with a pathspec compares each commit to its FIRST parent
+  # only, so a merge that brought designs/ changes in is listed (and, having two
+  # parents, is an anchor) while one that brought none is not.
+  list="$(git rev-list --first-parent --max-count="$KEY_WALK_MAX" "$c" -- designs)" || return 1
+  while IFS= read -r x; do
+    [[ -n "$x" ]] || continue
+    if [[ -n "$(_commit_problem "$x")" ]]; then
+      git rev-parse --verify --quiet "${x}:designs"; return
+    fi
+  done <<<"$list"
+  # Nothing but qualifying commit-backs within the cap: no anchor found, so
+  # fall back to the raw tree — the conservative side.
+  git rev-parse --verify --quiet "${c}:designs"
+}
+
+# round --head SHA --stamp SHA — the regen review guard (see the usage above).
+round() {
+  local head="" stamp="" merge=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --head) head="${2:-}"; shift 2 ;;
+      --stamp) stamp="${2:-}"; shift 2 ;;
+      --merge) merge="${2:-}"; shift 2 ;;
+      *) echo "reviewer-signoff: unknown arg $1" >&2; return 2 ;;
+    esac
+  done
+  [[ -n "$head" ]] || { echo "reviewer-signoff: round needs --head" >&2; return 2; }
+  if [[ "$SIGNOFF_TRUST_REGEN" != 1 ]]; then
+    echo "ROUND regen commit-backs are not trusted on this PR (fork head: no regen job can push there, so a qualifying commit can only be forged)"
+    return 1
+  fi
+  # --merge <ref>: the checkout a pull_request run sees is the MERGE ref, and
+  # the caller's `git diff <stamp>..HEAD` is taken there — so a designs/ change
+  # the base branch brought into the merge ref also reads as "designs moved".
+  # The currency walk below only inspects PR-head commits, so it would SKIP on
+  # an all-noise commit-back while that base-branch design change rode in
+  # unreviewed. Skip only when the merge ref and the PR head carry the SAME
+  # designs/ tree; anything else (or an unresolvable ref) opens the round.
+  if [[ -n "$merge" ]]; then
+    local tm thd
+    tm="$(git rev-parse --verify --quiet "${merge}:designs" 2>/dev/null)" || tm=""
+    thd="$(git rev-parse --verify --quiet "${head}:designs" 2>/dev/null)" || thd=""
+    if [[ -z "$tm" || "$tm" != "$thd" ]]; then
+      echo "ROUND the merge ref's designs/ differs from the PR head's (a base-branch design change rides in through the merge) — reviewing"
+      return 1
+    fi
+  fi
+  local ts="" th="" ks="" kh="" out rc=0
+  if [[ -n "$stamp" ]]; then
+    ts="$(git rev-parse --verify --quiet "${stamp}:designs" 2>/dev/null)" || ts=""
+    ks="$(key "$stamp" 2>/dev/null)" || ks=""
+  fi
+  th="$(git rev-parse --verify --quiet "${head}:designs" 2>/dev/null)" || th=""
+  kh="$(key "$head" 2>/dev/null)" || kh=""
+  out="$(_round_verdict "$stamp" "$ts" "$th" "$ks" "$kh")" || rc=$?
+  if [[ "$rc" != 0 && "$out" == "ROUND design content changed"* ]]; then
+    # Say which side of the rule the head fell on, so a commit-back that did
+    # not qualify (a content verdict, a source in the diff) is legible.
+    local hp; hp="$(_commit_problem "$head")"
+    out="${out} (head ${head:0:8}: ${hp:-a qualifying commit-back})"
+  fi
+  echo "$out"; return "$rc"
 }
 
 # --- selftest: the decision table, each row with its negative control --------
@@ -280,6 +517,14 @@ selftest() {
     --no-auto-review true --override false --fuse-warn false --andon true \
     --jane "" --drik "" --tree-current "$T" --jane-tree "" --drik-tree ""
 
+  # Fuse-warn sticky selection (PR #634): the real gate sticky, then the
+  # negation-in-prose and mention-of-marker negatives. Pin auto-review.yml
+  # and gate-summary.py so YAML cannot drift back to contains()+grep.
+  selftest_fuse_warn
+
+  # THE REGEN COMMIT-BACK RULE (issue #470) — pure tables, then real git.
+  selftest_regen
+
   if [[ "$pass" == 1 ]]; then
     echo "ok    reviewer-signoff --selftest: the sign-off gate passes clean and fails closed"
     return 0
@@ -288,8 +533,401 @@ selftest() {
   return 1
 }
 
+# selftest_regen — sets the caller's `pass` to 0 on any wrong row.
+selftest_regen() {
+  local P="designs/d/previews"
+  local label parents subj auth trl paths want got stamp
+  # (a) _regen_problem: the qualifying commit-back, then a negative control per
+  #     condition. Fields: label|parents|subject|author|trailers|paths, with
+  #     S/B standing for the real subject/author, "~" for an empty field, ","
+  #     separating paths and ";" separating trailer values.
+  while IFS='|' read -r label parents subj auth trl paths want; do
+    [[ -n "$label" ]] || continue
+    [[ "$subj" == S ]] && subj="$REGEN_SUBJECT"
+    [[ "$auth" == B ]] && auth="$REGEN_AUTHOR"
+    [[ "$trl" == "~" ]] && trl=""
+    [[ "$paths" == "~" ]] && paths=""
+    got="$(_regen_problem "$parents" "$subj" "$auth" "${trl//;/$'\n'}" "${paths//,/$'\n'}")"
+    if [[ ( "$want" == ok && -z "$got" ) || ( "$want" == no && -n "$got" ) ]]; then
+      echo "selftest ok    regen ${label} (${got:-qualifies})"
+    else
+      echo "SELFTEST FAIL  regen ${label}: wanted ${want}, got '${got:-qualifies}'"; pass=0
+    fi
+  done <<ROWS
+previews-and-stamp|1|S|B|all-noise|$P/a.png,$P/.regen-stamp|ok
+stamp-only|1|S|B|all-noise|$P/.regen-stamp|ok
+gif|1|S|B|all-noise|$P/spin.gif|ok
+NEGCTL-merge|2|S|B|all-noise|$P/a.png|no
+NEGCTL-subject|1|Update design: d|B|all-noise|$P/a.png|no
+NEGCTL-author|1|S|someone@example.invalid|all-noise|$P/a.png|no
+NEGCTL-no-trailer|1|S|B|~|$P/a.png|no
+NEGCTL-content-trailer|1|S|B|content|$P/a.png|no
+NEGCTL-two-trailers|1|S|B|all-noise;all-noise|$P/a.png|no
+NEGCTL-empty-diff|1|S|B|all-noise|~|no
+NEGCTL-scad-beside-previews|1|S|B|all-noise|$P/a.png,designs/d/d.scad|no
+NEGCTL-cameras-conf|1|S|B|all-noise|$P/cameras.conf|no
+NEGCTL-CAMERAS-md|1|S|B|all-noise|$P/CAMERAS.md|no
+NEGCTL-design-readme|1|S|B|all-noise|$P/a.png,designs/d/README.md|no
+NEGCTL-root-readme|1|S|B|all-noise|$P/a.png,README.md|no
+NEGCTL-nested-preview|1|S|B|all-noise|$P/sub/a.png|no
+NEGCTL-uppercase-ext|1|S|B|all-noise|$P/A.PNG|no
+ROWS
+
+  # (b) _round_verdict: SKIP, then a negative control per condition.
+  local ts th ks kh
+  while IFS='|' read -r label stamp ts th ks kh want; do
+    [[ -n "$label" ]] || continue
+    [[ "$stamp" == "~" ]] && stamp=""
+    [[ "$kh" == "~" ]] && kh=""
+    got="$(_round_verdict "$stamp" "$ts" "$th" "$ks" "$kh")" || true
+    if [[ "${got%% *}" == "$want" ]]; then
+      echo "selftest ok    round ${label} (${got})"
+    else
+      echo "SELFTEST FAIL  round ${label}: wanted ${want}, got '${got}'"; pass=0
+    fi
+  done <<'ROWS'
+noise-commit-back|s0|t1|t2|k1|k1|SKIP
+NEGCTL-no-stamp|~|t1|t2|k1|k1|ROUND
+NEGCTL-unresolvable-key|s0|t1|t2|k1|~|ROUND
+NEGCTL-head-tree-unchanged|s0|t1|t1|k1|k1|ROUND
+NEGCTL-key-moved|s0|t1|t2|k1|k2|ROUND
+ROWS
+
+  selftest_regen_git
+  selftest_regen_drift
+}
+
+# selftest_regen_git — the rule against real commits in a throwaway repo, fed
+# through `key`, `round` and `decide` exactly as auto-review.yml does.
+selftest_regen_git() {
+  local r
+  r="$(mktemp -d)"
+  # shellcheck disable=SC2064  # expand $r now: it is local to this function
+  trap "rm -rf '$r'; trap - RETURN" RETURN
+  local d="designs/d" p="designs/d/previews"
+  (
+    cd "$r" || exit 1
+    g() { git "$@"; }
+    g init -q
+    g config user.name selftest
+    g config user.email selftest@example.invalid
+    g config commit.gpgsign false
+    as_bot() {
+      GIT_AUTHOR_NAME="github-actions[bot]" GIT_AUTHOR_EMAIL="$REGEN_AUTHOR" "$@"
+    }
+    mkdir -p "$p" docs
+    echo "cube(10);" > "$d/d.scad"
+    echo "iso | 0,0,0,55,0,25,140" > "$p/cameras.conf"
+    echo "# iso" > "$p/CAMERAS.md"
+    echo "png-0" > "$p/a.png"
+    echo "stamp-0" > "$p/.regen-stamp"
+    echo "docs" > docs/x.md
+    echo "readme" > README.md
+    g add -A && g commit -qm base && g tag base
+    # A — the author's design change, the round the sign-offs are on.
+    echo "cube(12);" > "$d/d.scad"; g commit -qam A && g tag A
+    # R — the all-noise, previews-only commit-back.
+    echo "png-1" > "$p/a.png"; echo "stamp-1" > "$p/.regen-stamp"
+    as_bot g commit -qam "$REGEN_SUBJECT" -m "$REGEN_TRAILER: all-noise" && g tag R
+    # D — a docs-only push after it; E — a design push after that.
+    echo "more docs" >> docs/x.md; g commit -qam D && g tag D
+    echo "cube(14);" > "$d/d.scad"; g commit -qam E && g tag E
+    # The negatives, each one commit off A.
+    variant() {  # variant <tag> <bot|human> <trailer|-> <file>...
+      local tag="$1" who="$2" trl="$3"; shift 3
+      g checkout -q -B "v-$tag" A
+      local f; for f in "$@"; do echo "$tag" >> "$f"; done
+      local msg=(-m "$REGEN_SUBJECT"); [[ "$trl" != - ]] && msg+=(-m "$REGEN_TRAILER: $trl")
+      if [[ "$who" == bot ]]; then as_bot g commit -qa "${msg[@]}"; else g commit -qa "${msg[@]}"; fi
+      g tag "$tag"
+    }
+    variant Rcontent bot content "$p/a.png" "$p/.regen-stamp"
+    variant Rforged bot all-noise "$p/a.png" "$d/d.scad"
+    variant Rconf bot all-noise "$p/a.png" "$p/cameras.conf"
+    variant Rhuman human all-noise "$p/a.png"
+    variant Rbare bot - "$p/a.png"
+    variant Hconf human - "$p/cameras.conf"
+    variant Rstamp bot all-noise "$p/.regen-stamp"
+    variant Rreadme bot all-noise "$p/a.png" README.md
+    # A merge of the base branch into R: one that brings a designs/ change and
+    # one that brings only docs.
+    g checkout -q -B main base
+    echo "docs on main" > docs/y.md; g add -A; g commit -qm "main docs" && g tag Mdocs
+    g checkout -q -B v-mdocs R; g merge -q --no-edit Mdocs && g tag Rmdocs
+    g checkout -q main; mkdir -p designs/e; echo "e" > designs/e/e.scad; g add -A
+    g commit -qm "main design" && g tag Mdesign
+    g checkout -q -B v-mdesign R; g merge -q --no-edit Mdesign && g tag Rmdesign
+  ) >/dev/null 2>&1 || { echo "SELFTEST FAIL  regen-git: could not build the fixture repo"; pass=0; return; }
+
+  local kA got want label tag stamp
+  kA="$(git -C "$r" rev-parse "A:designs")"
+  _k() { (cd "$r" && key "$(git rev-parse "$1")"); }
+  # key: current (== key(A)) or stale, per head.
+  while IFS='|' read -r label tag want; do
+    [[ -n "$label" ]] || continue
+    got=stale; [[ "$(_k "$tag")" == "$kA" ]] && got=current
+    if [[ "$got" == "$want" ]]; then
+      echo "selftest ok    key ${label} (${got})"
+    else
+      echo "SELFTEST FAIL  key ${label}: wanted ${want}, got ${got}"; pass=0
+    fi
+  done <<'ROWS'
+signed-commit-itself|A|current
+all-noise-previews-only-commit-back|R|current
+docs-push-after-the-commit-back|D|current
+stamp-only-commit-back|Rstamp|current
+docs-only-merge-after-the-commit-back|Rmdocs|current
+NEGCTL-design-push-after-the-commit-back|E|stale
+NEGCTL-content-commit-back|Rcontent|stale
+NEGCTL-forged-trailer-also-touching-the-scad|Rforged|stale
+NEGCTL-commit-back-touching-cameras-conf|Rconf|stale
+NEGCTL-human-authored-all-noise-trailer|Rhuman|stale
+NEGCTL-commit-back-without-a-trailer|Rbare|stale
+NEGCTL-hand-edit-to-a-preview-conf|Hconf|stale
+NEGCTL-commit-back-touching-the-root-readme|Rreadme|stale
+NEGCTL-merge-bringing-a-design-change|Rmdesign|stale
+NEGCTL-the-base-before-the-signed-commit|base|stale
+ROWS
+  # A fork head trusts no commit-back: R (current above) must go stale.
+  got=stale; [[ "$( (cd "$r" && SIGNOFF_TRUST_REGEN=0 key "$(git rev-parse R)") )" == "$kA" ]] && got=current
+  if [[ "$got" == stale ]]; then
+    echo "selftest ok    key NEGCTL-fork-head-trusts-no-commit-back (stale)"
+  else
+    echo "SELFTEST FAIL  key NEGCTL-fork-head-trusts-no-commit-back: wanted stale, got current"; pass=0
+  fi
+  local kbad
+  kbad="$( (cd "$r" && key no-such-ref) 2>/dev/null)" && kbad="resolved:$kbad" || kbad=""
+  if [[ -z "$kbad" ]]; then
+    echo "selftest ok    key NEGCTL-unresolvable-commit (empty, exit 1)"
+  else
+    echo "SELFTEST FAIL  key NEGCTL-unresolvable-commit: ${kbad}"; pass=0
+  fi
+
+  # round: the guard auto-review.yml asks, with the stamp on A.
+  while IFS='|' read -r label tag stamp want; do
+    [[ -n "$label" ]] || continue
+    local hs ss=""
+    hs="$(git -C "$r" rev-parse "$tag")"
+    [[ "$stamp" != "~" ]] && ss="$(git -C "$r" rev-parse "$stamp")"
+    got="$( (cd "$r" && round --head "$hs" --stamp "$ss") )" || true
+    if [[ "${got%% *}" == "$want" ]]; then
+      echo "selftest ok    round-git ${label} (${got%% *})"
+    else
+      echo "SELFTEST FAIL  round-git ${label}: wanted ${want}, got '${got}'"; pass=0
+    fi
+  done <<'ROWS'
+all-noise-commit-back|R|A|SKIP
+docs-push-after-a-skipped-commit-back|D|A|SKIP
+NEGCTL-content-commit-back|Rcontent|A|ROUND
+NEGCTL-forged-trailer-also-touching-the-scad|Rforged|A|ROUND
+NEGCTL-no-stamp|R|~|ROUND
+NEGCTL-stamp-before-the-design-change|R|base|ROUND
+NEGCTL-head-designs-unchanged-since-the-stamp|A|A|ROUND
+ROWS
+  # --merge: the pull_request checkout is the merge ref. A merge ref whose
+  # designs/ tree equals the head's keeps the SKIP; one carrying a base-branch
+  # design change (or an unresolvable merge ref) opens the round.
+  while IFS='|' read -r label mref want; do
+    [[ -n "$label" ]] || continue
+    got="$( (cd "$r" && round --head "$(git rev-parse R)" --stamp "$(git rev-parse A)" --merge "$mref") )" || true
+    if [[ "${got%% *}" == "$want" ]]; then
+      echo "selftest ok    round-git ${label} (${got%% *})"
+    else
+      echo "SELFTEST FAIL  round-git ${label}: wanted ${want}, got '${got}'"; pass=0
+    fi
+  done <<'ROWS'
+merge-ref-bringing-only-docs|Rmdocs|SKIP
+NEGCTL-merge-ref-bringing-a-base-branch-design-change|Rmdesign|ROUND
+NEGCTL-unresolvable-merge-ref|no-such-ref|ROUND
+ROWS
+  # The same all-noise commit-back on a fork head opens a round.
+  got="$( (cd "$r" && SIGNOFF_TRUST_REGEN=0 round --head "$(git rev-parse R)" --stamp "$(git rev-parse A)") )" || true
+  if [[ "${got%% *}" == ROUND ]]; then
+    echo "selftest ok    round-git NEGCTL-fork-head-all-noise-commit-back (ROUND)"
+  else
+    echo "SELFTEST FAIL  round-git NEGCTL-fork-head-all-noise-commit-back: wanted ROUND, got '${got}'"; pass=0
+  fi
+
+  # decide, fed the keys the way auto-review.yml feeds them: Jane and Drik
+  # signed A; the head has moved on to <tag>.
+  local H JA DA
+  JA="<!-- JANE_SIGNOFF sha=$(git -C "$r" rev-parse A) verdict=pass fuse=none -->"
+  DA="<!-- DRIK_SIGNOFF sha=$(git -C "$r" rev-parse A) verdict=pass fuse=none -->"
+  while IFS='|' read -r label tag want; do
+    [[ -n "$label" ]] || continue
+    H="$(git -C "$r" rev-parse "$tag")"
+    _expect "regen ${label}" "$want" -- --head "$H" --designs-changed true \
+      --no-auto-review false --override false --fuse-warn false \
+      --jane "$JA" --drik "$DA" --tree-current "$(_k "$tag")" \
+      --jane-tree "$kA" --drik-tree "$kA"
+  done <<'ROWS'
+signoff-carries-across-an-all-noise-commit-back|R|PASS
+NEGCTL-content-commit-back-stales-the-signoff|Rcontent|BLOCK
+NEGCTL-hand-edit-to-a-preview-conf-stales-the-signoff|Hconf|BLOCK
+NEGCTL-forged-trailer-on-a-scad-commit-stales-the-signoff|Rforged|BLOCK
+ROWS
+}
+
+# selftest_regen_drift — ci.yml must still write the commit-back this script
+# recognises. A drift would not fail open (no commit would qualify, so every
+# commit-back reopens review), but it would switch the owner's ruling off
+# silently. The negative control runs the same pin on a copy with the trailer
+# line removed, and must fail.
+_regen_pin() {  # _regen_pin <ci.yml> — prints the first missing literal
+  local f="$1" lit
+  for lit in \
+    "REGEN_SUBJECT: \"${REGEN_SUBJECT}\"" \
+    "git config user.email \"${REGEN_AUTHOR}\"" \
+    "-m \"${REGEN_TRAILER}: \${PREVIEW_VERDICT}\"" \
+    "PREVIEW-DIFF-VERDICT"; do
+    grep -qF -- "$lit" "$f" || { printf '%s' "$lit"; return 1; }
+  done
+}
+selftest_regen_drift() {
+  local ci miss tmp
+  ci="$(dirname "$0")/../.github/workflows/ci.yml"
+  if [[ ! -f "$ci" ]]; then
+    echo "SELFTEST FAIL  regen-drift: $ci not found"; pass=0; return
+  fi
+  if miss="$(_regen_pin "$ci")"; then
+    echo "selftest ok    regen-drift ci.yml writes the commit-back this script recognises"
+  else
+    echo "SELFTEST FAIL  regen-drift: ci.yml no longer contains: ${miss}"; pass=0
+  fi
+  tmp="$(mktemp)"
+  grep -vF -- "-m \"${REGEN_TRAILER}: \${PREVIEW_VERDICT}\"" "$ci" > "$tmp" || true
+  if _regen_pin "$tmp" >/dev/null; then
+    echo "SELFTEST FAIL  regen-drift NEGCTL: the pin passed a ci.yml with no trailer line"; pass=0
+  else
+    echo "selftest ok    regen-drift NEGCTL a ci.yml that stopped writing the trailer fails the pin"
+  fi
+  rm -f "$tmp"
+}
+
+# selftest_fuse_warn — the #634 false-positive: Drik quoting the sticky
+# marker and writing "No fusecheck STRONG WARN" must not set fuse_warn, while
+# the real gate-summary cell still must. Also pin auto-review.yml to startswith
+# + this subcommand, and gate-summary.py to the phrase this matcher keys on.
+selftest_fuse_warn() {
+  local label want got body
+  _expect_fuse() {
+    label="$1" want="$2" body="$3"
+    got="$(_fuse_warn_live "$body")"
+    if [[ "$got" == "$want" ]]; then
+      echo "selftest ok    fuse-warn ${label} (${got})"
+    else
+      echo "SELFTEST FAIL  fuse-warn ${label}: wanted ${want}, got ${got}"; pass=0
+    fi
+  }
+
+  _expect_fuse sticky-strong-warn true \
+"${PRINTCHECK_STICKY_MARKER}
+### Fusecheck (separable bodies)
+| Design | Result |
+|---|---|
+| \`pip\` | ⚠️ ${FUSECHECK_STRONG_WARN} 2 bodies, want >= 3 |"
+
+  _expect_fuse sticky-printable-no-warn false \
+"${PRINTCHECK_STICKY_MARKER}
+| Part | Result |
+| \`cube\` | PRINTABLE 100/100 |"
+
+  # Reproduction: last comment matching contains("printcheck-gate-report")
+  # was Drik's sign-off, which names the sticky and the STRONG WARN in a
+  # negation. Must stay false.
+  _expect_fuse drik-prose-negation false \
+"Looked at the sticky \`${PRINTCHECK_STICKY_MARKER}\`.
+No fusecheck STRONG WARN → fuse none
+<!-- DRIK_SIGNOFF sha=0d1dcfac77f9b5478a5393cbc503c6241f552527 verdict=pass fuse=none -->"
+
+  _expect_fuse mention-plus-real-phrase-but-not-sticky false \
+"citing ${PRINTCHECK_STICKY_MARKER}
+also quoting ${FUSECHECK_STRONG_WARN} in a review"
+
+  _expect_fuse empty false ""
+
+  # Fail-closed: a sticky that also contains the negation still trips, because
+  # the real warn cell is present.
+  _expect_fuse sticky-warn-and-negation-prose true \
+"${PRINTCHECK_STICKY_MARKER}
+No fusecheck STRONG WARN is not the cell.
+| \`pip\` | ⚠️ ${FUSECHECK_STRONG_WARN} fused |"
+
+  # stdin path auto-review.yml uses
+  got="$(printf '%s' "${PRINTCHECK_STICKY_MARKER}"$'\n'"${FUSECHECK_STRONG_WARN}" | fuse_warn)"
+  if [[ "$got" == true ]]; then
+    echo "selftest ok    fuse-warn stdin-sticky-warn (true)"
+  else
+    echo "SELFTEST FAIL  fuse-warn stdin-sticky-warn: wanted true, got ${got}"; pass=0
+  fi
+  got="$(printf '%s' "No fusecheck STRONG WARN ${PRINTCHECK_STICKY_MARKER}" | fuse_warn)"
+  if [[ "$got" == false ]]; then
+    echo "selftest ok    fuse-warn stdin-drik-prose (false)"
+  else
+    echo "SELFTEST FAIL  fuse-warn stdin-drik-prose: wanted false, got ${got}"; pass=0
+  fi
+
+  selftest_fuse_warn_drift
+}
+
+_fuse_warn_yaml_pin() {  # _fuse_warn_yaml_pin <auto-review.yml>
+  local f="$1" lit
+  for lit in \
+    'startswith("<!-- printcheck-gate-report -->")' \
+    'scripts/reviewer-signoff.sh fuse-warn'; do
+    grep -qF -- "$lit" "$f" || { printf '%s' "$lit"; return 1; }
+  done
+  # The two #634 bugs: contains() last picks a reviewer mention; grep of
+  # "STRONG WARN" matches "No fusecheck STRONG WARN".
+  if grep -qF 'contains("printcheck-gate-report")' "$f"; then
+    printf '%s' 'contains("printcheck-gate-report")'; return 1
+  fi
+  if grep -qE 'grep[[:space:]]+-qi[[:space:]]+"STRONG WARN"' "$f"; then
+    printf '%s' 'grep -qi "STRONG WARN"'; return 1
+  fi
+}
+
+selftest_fuse_warn_drift() {
+  local wf gs miss tmp
+  wf="$(dirname "$0")/../.github/workflows/auto-review.yml"
+  gs="$(dirname "$0")/../scripts/gate-summary.py"
+  if [[ ! -f "$wf" ]]; then
+    echo "SELFTEST FAIL  fuse-warn-drift: $wf not found"; pass=0; return
+  fi
+  if [[ ! -f "$gs" ]]; then
+    echo "SELFTEST FAIL  fuse-warn-drift: $gs not found"; pass=0; return
+  fi
+  if grep -qF -- "${FUSECHECK_STRONG_WARN}" "$gs"; then
+    echo "selftest ok    fuse-warn-drift gate-summary.py still writes the STRONG WARN cell"
+  else
+    echo "SELFTEST FAIL  fuse-warn-drift: gate-summary.py no longer writes: ${FUSECHECK_STRONG_WARN}"; pass=0
+  fi
+  if miss="$(_fuse_warn_yaml_pin "$wf")"; then
+    echo "selftest ok    fuse-warn-drift auto-review.yml selects the sticky via startswith + fuse-warn"
+  else
+    echo "SELFTEST FAIL  fuse-warn-drift: auto-review.yml pin: ${miss}"; pass=0
+  fi
+  tmp="$(mktemp)"
+  sed 's/startswith("<!-- printcheck-gate-report -->")/contains("printcheck-gate-report")/' "$wf" > "$tmp"
+  if _fuse_warn_yaml_pin "$tmp" >/dev/null; then
+    echo "SELFTEST FAIL  fuse-warn-drift NEGCTL: pin passed a YAML that used contains()"; pass=0
+  else
+    echo "selftest ok    fuse-warn-drift NEGCTL a YAML that reverted to contains() fails the pin"
+  fi
+  grep -vF 'scripts/reviewer-signoff.sh fuse-warn' "$wf" > "$tmp" || true
+  if _fuse_warn_yaml_pin "$tmp" >/dev/null; then
+    echo "SELFTEST FAIL  fuse-warn-drift NEGCTL: pin passed a YAML with no fuse-warn call"; pass=0
+  else
+    echo "selftest ok    fuse-warn-drift NEGCTL a YAML that dropped fuse-warn fails the pin"
+  fi
+  rm -f "$tmp"
+}
+
 case "${1:-}" in
   --selftest) selftest ;;
   decide) shift; decide "$@" ;;
-  *) echo "usage: reviewer-signoff.sh decide <args> | --selftest" >&2; exit 2 ;;
+  key) shift; key "$@" ;;
+  round) shift; round "$@" ;;
+  fuse-warn) fuse_warn ;;
+  *) echo "usage: reviewer-signoff.sh decide <args> | key <commit> | round --head <sha> --stamp <sha> [--merge <ref>] | fuse-warn | --selftest" >&2; exit 2 ;;
 esac

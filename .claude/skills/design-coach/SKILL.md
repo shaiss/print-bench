@@ -54,6 +54,21 @@ preview, or CI's posted output on the new head. Evidence, not re-derivation.
    PR, ever). Subscribe with `subscribe_pr_activity`. This session coaches
    this PR only, until merge or close — never a second one.
 
+   **How to post (issue #806).** A multi-line `gh pr comment --body "…"` is
+   denied under `--permission-mode dontAsk` no matter how it is quoted — the
+   same hole that left Jane/Drik posting nothing (#764). In the auto-review
+   job, post **every** GitHub comment through **`mcp__reviewer__post_coach`**
+   (JSON `body` argument: tables, pipes, newlines are fine). The tool appends
+   `<!-- COACH_LOCK -->` and the attribution footer; start the kickoff body
+   with `🎓 COACH-LOCK`. Do not use `gh pr comment` there.
+
+   Attended, outside that job, the fallback that also passes the matcher is
+   two steps: `Write` the markdown to a file, then a **single-line**
+   `gh pr comment --body-file <that-file>`. Never `--body` with embedded
+   newlines. Git checkout/add/commit/push stay available for iterations —
+   comments and pushes are different surfaces; do not copy Jane's
+   read-only allow-list onto this session.
+
 ## 1. The bar
 
 The deliverable standard is **a stranger's first print succeeds**, not clean
@@ -69,9 +84,13 @@ mechanism earns its place.
 
 ## 2. Evidence, never re-derivation
 
-Before accepting any round: fetch the branch and load it into the working
-tree (`git checkout <sha> -- designs/<name>`, keep your own branch clean) so
-you read the diff and the geometry that will merge. Then judge the round
+Before accepting any round: load the branch into the working tree
+(`git checkout <sha> -- designs/<name>`, keep your own branch clean) so you
+read the diff and the geometry that will merge. In the auto-review job the
+checkout is full history — every branch head is already local — and your
+backstop denies `git fetch`/`pull`/`clone`/`ls-remote` and every git global
+option (`-c`, `-C`, `--git-dir`, …); a head pushed after the job started is
+read through `gh pr diff` / `gh api` (contents at that ref), never fetched. Then judge the round
 against evidence already on the record: the diff, the committed previews,
 and CI's sticky comment on the new head. A task closes when its fix is
 visible in one of those, and a thread resolves the same way — resolve your
@@ -156,7 +175,8 @@ Squash-merge titled `Add design: <name> (#N)` or
 arc. Report the merge to whoever commissioned the coaching. The lock dies
 with the PR.
 
-Every GitHub post ends with the attribution footer:
+Every GitHub post ends with the attribution footer (the `post_coach` tool
+adds this itself — do not duplicate it):
 
 ```text
 ---
