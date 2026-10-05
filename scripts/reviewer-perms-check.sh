@@ -2890,8 +2890,19 @@ with open(src) as fh:
     data = json.load(fh)
 rules = data.setdefault("permissions", {}).setdefault(key, [])
 for edit in edits:
-    op, rule = edit[:1], edit[1:]
+    # Ops: +rule (idempotent append), ++rule (force-append, for the
+    # duplicate-deny negative control), -rule (remove one).
+    if edit.startswith("++"):
+        op, rule = "++", edit[2:]
+    else:
+        op, rule = edit[:1], edit[1:]
     if op == "+":
+        # Idempotent: coach_edits add the full GIT_FLOOR onto a reviewer
+        # fixture that already carries the wrapper/path/env subset, and a
+        # duplicate deny fails the check.
+        if rule not in rules:
+            rules.append(rule)
+    elif op == "++":
         rules.append(rule)
     elif op == "-" and rule in rules:
         rules[:] = [r for r in rules if r != rule]
@@ -5272,6 +5283,21 @@ EOF
   python3 - "$tmp/reviewer.json" "${GH_FLOOR[@]}" <<'PY2'
 import json, sys
 out, *gh = sys.argv[1:]
+# Wrapper IFS + path/env prefixes: ESCAPE_PROBES include command/env spellings
+# that Bash(git*) never sees. Keep this list aligned with reviewer-settings.json.
+wrappers = [
+    "Bash(command*git*)", "Bash(command -p*git*)", "Bash(command --*git*)",
+    "Bash(command git*)", "Bash(command -p git*)", "Bash(command -- git*)",
+    "Bash(command -v git*)", "Bash(command -p -- git*)",
+    "Bash(env*git*)", "Bash(env git*)", "Bash(env -i git*)", "Bash(env -u git*)",
+    "Bash(env * git*)", "Bash(env -u * git*)", "Bash(env -i * git*)",
+    "Bash(/usr/bin/env*git*)", "Bash(/bin/env*git*)", "Bash(*/env*git*)",
+    "Bash(/usr/bin/env git*)", "Bash(/bin/env git*)", "Bash(*/env git*)",
+    "Bash(*env git*)",
+    "Bash(/usr/bin/git*)", "Bash(/bin/git*)", "Bash(/usr/local/bin/git*)",
+    "Bash(*/bin/git*)", "Bash(*/git*)",
+    "Bash(GIT_*)", "Bash(GIT_*:*)",
+]
 deny = ["Bash(apt:*)","Bash(apt-get:*)","Bash(openscad:*)","Bash(openscad-nightly:*)",
         "Bash(xvfb-run:*)","Bash(prusa-slicer:*)","Bash(printcheck:*)",
         "Bash(./scripts/gate.sh:*)","Bash(scripts/gate.sh:*)",
@@ -5279,7 +5305,8 @@ deny = ["Bash(apt:*)","Bash(apt-get:*)","Bash(openscad:*)","Bash(openscad-nightl
         "Bash(./scripts/check.sh:*)","Bash(scripts/check.sh:*)",
         "Bash(.claude/hooks/session-start.sh:*)","Bash(./.claude/hooks/session-start.sh:*)",
         "mcp__growth_queue","mcp__growth_twitter",
-        *gh, "Bash(git:*)", "Bash(git*)", "Bash(tee:*)", "Write", "Edit", "NotebookEdit"]
+        *gh, "Bash(git:*)", "Bash(git*)", "Bash(tee:*)", "Write", "Edit", "NotebookEdit",
+        *wrappers]
 json.dump({"permissions": {"deny": deny}}, open(out, "w"))
 PY2
   local coach_edits=(-Write -Edit "-Bash(git:*)" "-Bash(git*)" "+Edit(./.git/**)" "+Write(./.git/**)"
@@ -5364,8 +5391,8 @@ PY2
   # Growth servers: the old Bash(mcp__…) spelling denies a shell command.
   derive "$R" "$tmp/r.json" deny -mcp__growth_queue "+Bash(mcp__growth_queue:*)"
   expect fail "a growth-server deny spelled as a Bash rule fails the check" "$S" "$tmp/r.json" reviewer
-  # Hygiene: a duplicated rule.
-  derive "$C" "$tmp/c.json" deny "+Bash(./scripts/gate.sh:*)"
+  # Hygiene: a duplicated rule (force-append; plain + is idempotent).
+  derive "$C" "$tmp/c.json" deny "++Bash(./scripts/gate.sh:*)"
   expect fail "a duplicate deny rule fails the check" "$S" "$tmp/c.json" coach
 
   # Escape-hatch floor: dropping ANY one of the gh denies must fail the check
