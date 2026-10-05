@@ -365,16 +365,18 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
 27. **B6 — printed-foot parameter (PM backlog).** `printed_feet` (default
-    `false`) adds four corner cylindrical pads on the exterior bed face via
-    `base_feet()` / `foot_pad()`, with `foot_d`, `foot_h`, and
-    `foot_corner_inset` for sizing. Pads extrude **upward** into the floor slab
-    from z = 0 (coplanar with the rest of the bottom), not downward — downward
-    pads left the centre of the floor bridging in air and printcheck scored
-    67/100 (29 % unsupported); coplanar pads re-gate at 100/100 with
-    `printed_feet = true`. Placement clears the lid-screw posts at
-    (±40, ±32.75) on the floor plane. Default off keeps the stock BOM, renders,
-    and coupon unchanged. Whether printed or adhesive feet actually stop a
-    one-handed cable pull stays a **[hunch]** until B10.
+    `false`) enables four corner **blind sockets** in the base bed face via
+    `base_foot_sockets()` (`foot_socket_d` 8 mm, `foot_socket_depth` 1 mm,
+    `foot_corner_inset`) and a separate printable **`foot`** part (`foot()`:
+    tread `foot_tread_d` × `foot_protrusion` below the floor, plug
+    `foot_plug_d()` × `foot_socket_depth` into the socket). One-piece downward
+    pads scored printcheck **67/100** (floor bridged between pads); coplanar
+    upward pads (R1) added no geometry below z = 0 (Drik R1 fail on PR #818).
+    R2 keeps the floor-down base support-free and puts real tread below the bed
+    plane. Print four feet (TPU preferred; PLA/PETG with tuned
+    `foot_fit_clearance`), press or glue into sockets. Placement clears the
+    lid-screw posts at (±40, ±32.75). Default off keeps stock BOM, renders, and
+    coupon unchanged. Anti-walk benefit stays a **[hunch]** until B10.
 
 ## Print settings
 

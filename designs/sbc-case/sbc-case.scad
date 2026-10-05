@@ -77,14 +77,20 @@ skirt_margin = 0.5;
 gpio_notch_bottom = 17.5;
 
 /* [Feet] */
-// Optional printed feet on the base bed face (no adhesive dots). Default off so
-// the stock BOM and default render stay on adhesive rubber feet (PM.md B6).
+// Optional printed feet: blind sockets in the base + separate foot parts (no
+// adhesive dots). Default off so the stock BOM, renders and coupon stay on
+// adhesive rubber feet (PM.md B6).
 printed_feet = false;
-// Foot pad diameter (mm) — keep >= 0.8 mm printable
-foot_d = 8;
-// Foot pad height (mm), extruded upward into the floor slab from the bed face
-// at z = 0 — keeps the whole bottom on one plane so the base stays support-free
-foot_h = 2;
+// Blind socket diameter in the base bed face (mm) — keep >= 0.8 mm printable
+foot_socket_d = 8;
+// Blind socket depth into the floor slab from z = 0 (mm); keep <= floor_t
+foot_socket_depth = 1.0;
+// How far each foot tread stands below the base bed face when installed (mm)
+foot_protrusion = 2;
+// Tread diameter on the separate foot part (mm)
+foot_tread_d = 10;
+// Radial clearance: plug_d = foot_socket_d - 2·clearance (mm); tune on a foot
+foot_fit_clearance = 0.12;
 // Foot-centre inset from the outer shell edge along X and Y (mm); clears the
 // four lid-screw posts at (±40, ±32.75) on the floor plane
 foot_corner_inset = 12;
@@ -180,6 +186,7 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
             for (i = [-1.5, -0.5, 0.5, 1.5])
                 translate([i * 15, cavity_y_half + wall / 2, 12])
                     vent_slot();
+            base_foot_sockets();
         }
         // four lid-screw posts with through insert holes (through so an M3x10
         // bottoms out in free space, not in plastic)
@@ -190,7 +197,6 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
         translate([0, 0, board_z])
             pcb_screw_positions(board)
                 standoff();
-        base_feet();
     }
 }
 
@@ -271,16 +277,29 @@ module vent_slot() { //! one stadium vent through the +Y wall
             rounded_square([12, 4.5], r = 2.2, center = true);
 }
 
-module foot_pad() { //! one cylindrical foot pad on the bed face (z = 0), merged into the floor
-    cylinder(d = foot_d, h = foot_h + 0.01);
-}
+function foot_plug_d() = foot_socket_d - 2 * foot_fit_clearance;
 
-module base_feet() { //! four corner feet on the floor exterior — only when enabled
+function foot_centre(sx, sy) = [
+    sx * (outer_l / 2 - foot_corner_inset),
+    sy * (outer_w / 2 - foot_corner_inset)
+];
+
+module base_foot_sockets() { //! blind cylindrical pockets in the bed face — only when enabled
     if (printed_feet)
         for (sx = [-1, 1], sy = [-1, 1])
-            translate([sx * (outer_l / 2 - foot_corner_inset),
-                         sy * (outer_w / 2 - foot_corner_inset), 0])
-                foot_pad();
+            translate(foot_centre(sx, sy))
+                translate([0, 0, -0.01])
+                    cylinder(d = foot_socket_d, h = foot_socket_depth + 0.02);
+}
+
+module foot() { //! one press-/glue-in foot: tread below the floor, plug into the socket
+    plug_d = foot_plug_d();
+    union() {
+        // tread prints on the bed; when installed it hangs below z = 0 on the base
+        cylinder(d = foot_tread_d, h = foot_protrusion);
+        translate([0, 0, foot_protrusion])
+            cylinder(d = plug_d, h = foot_socket_depth + 0.01);
+    }
 }
 
 // ── Vitamins at their assembled positions (default render) ─
@@ -349,7 +368,7 @@ module fit_pins(dx = 0) {
             cylinder(d = pilot_d - pin_slop, h = standoff_h + 0.5);
 }
 
-part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
+part = "assembled"; // [assembled, base, base-board, lid, coupon, foot, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
 
 if (part == "assembled") {
     base();
@@ -370,6 +389,8 @@ if (part == "assembled") {
     translate([0, 0, lid_top_z]) rotate([180, 0, 0]) lid();
 } else if (part == "coupon") {
     coupon();
+} else if (part == "foot") {
+    foot();
 } else if (part == "fit-pins") {
     intersection() { base(); fit_pins(); }
 } else if (part == "fit-pins-shift") {
