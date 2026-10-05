@@ -171,7 +171,7 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     the label: it overrides a keyed, unlabeled round without touching them.
 #
 # Provider fallback chain (per reviewer job):
-#   Z.AI GLM 5.3 → GLM 5.2 → GLM 5.1 → Anthropic Opus 4.8 → Sonnet 5 → Haiku 4.5.
+#   Z.AI GLM 5.3 → GLM 5.2 → GLM 5.1 → Anthropic Opus 4.8 → Sonnet 5 → Haiku 4.5 → OpenRouter Gemma 4 31B → Nemotron 3 Super.
 #   The first provider that succeeds wins; the rest are skipped. The job fails
 #   only when every *configured* provider failed. The order and model ids come
 #   from .github/models/registry.conf's `review` chain (issue #206); the
@@ -236,6 +236,8 @@ jobs:
       model4: ${{ steps.chain.outputs.link4_model }}
       model5: ${{ steps.chain.outputs.link5_model }}
       model6: ${{ steps.chain.outputs.link6_model }}
+      model7: ${{ steps.chain.outputs.link7_model }}
+      model8: ${{ steps.chain.outputs.link8_model }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -378,7 +380,7 @@ jobs:
     runs-on: ubuntu-latest
     # Provider fallback chain, sourced from .github/models/registry.conf's
     # `review` chain (issue #206). The order + model ids arrive as the
-    # design-changes job's model1..model6 outputs — swapping or reordering a
+    # design-changes job's model1..model8 outputs — swapping or reordering a
     # model within a provider is a registry edit, not a change here. Each ship
     # step keeps its provider's secret wiring LITERAL (the Actions constraint),
     # so the slot→provider shape (slots 1–3 Z.AI, slots 4–6 Anthropic) is pinned
@@ -390,6 +392,8 @@ jobs:
     #   * model4..model6  Anthropic (secrets.ANTHROPIC_API_KEY; the Anthropic tail
     #                     is a chain of ids, issue #298, so one unservable id
     #                     can't kill the backstop)
+    #   * model7..model8  OpenRouter (secrets.OPENROUTER_API_KEY; free OSS tail —
+    #                     optional; without the key these two steps skip)
     # Each attempt is continue-on-error and gated on the previous ones NOT having
     # succeeded, so the first success short-circuits the rest. A final gate step
     # fails the job only when every *configured* provider failed. With neither
@@ -398,6 +402,7 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # Git environment lock (code-scanning finding on #760; see the header).
       # Job-level so every step inherits it — every chain link of every
       # provider, and any link added later. Pinned per ship step by
@@ -645,10 +650,79 @@ jobs:
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
+      - name: /jane-review via OpenRouter (chain link 7)
+        id: p7
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model7 }}
+          prompt: >-
+            /jane-review ${{ github.event.pull_request.number }}
+
+      - name: /jane-review via OpenRouter (chain link 8)
+        id: p8
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model8 }}
+          prompt: >-
+            /jane-review ${{ github.event.pull_request.number }}
+
       - name: No provider key configured
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true' && env.HAS_OPENROUTER != 'true'
         run: |
-          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /jane-review for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::Neither ZAI_KEY, ANTHROPIC_API_KEY, nor OPENROUTER_API_KEY is set — skipping /jane-review for PR #${{ github.event.pull_request.number }}"
 
       # The chain failed on every link. Recover WHY (the ship steps hide their
       # provider error) and route it: billing / out-of-tokens / bad key escalate
@@ -660,18 +734,21 @@ jobs:
         id: triage
         if: >-
           steps.ready.outputs.ready == 'true'
-          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "true"
@@ -679,13 +756,15 @@ jobs:
       - name: Every configured provider failed
         if: >-
           steps.ready.outputs.ready == 'true'
-          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
@@ -720,6 +799,7 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # Git environment lock (code-scanning finding on #760; see the header).
       # Job-level so every step inherits it — every chain link of every
       # provider, and any link added later. Pinned per ship step by
@@ -967,10 +1047,79 @@ jobs:
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
+      - name: /drik-review via OpenRouter (chain link 7)
+        id: p7
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model7 }}
+          prompt: >-
+            /drik-review ${{ github.event.pull_request.number }}
+
+      - name: /drik-review via OpenRouter (chain link 8)
+        id: p8
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model8 }}
+          prompt: >-
+            /drik-review ${{ github.event.pull_request.number }}
+
       - name: No provider key configured
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true' && env.HAS_OPENROUTER != 'true'
         run: |
-          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::Neither ZAI_KEY, ANTHROPIC_API_KEY, nor OPENROUTER_API_KEY is set — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
 
       # Classify-only (escalate: 'false'): the Jane review job carries the single
       # escalation for the shared review chain, so a parallel exhaustion here does
@@ -979,18 +1128,21 @@ jobs:
         id: triage
         if: >-
           steps.ready.outputs.ready == 'true'
-          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "false"
@@ -998,13 +1150,15 @@ jobs:
       - name: Every configured provider failed
         if: >-
           steps.ready.outputs.ready == 'true'
-          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
@@ -1055,6 +1209,7 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # Git environment lock (code-scanning finding on #760; see the header).
       # Job-level so every step inherits it — every chain link of every
       # provider, and any link added later. Pinned per ship step by
@@ -1333,10 +1488,91 @@ jobs:
             blocking binary fork through the §7 HITL gate — add the
             needs-decision label; never push or edit repository content.
 
+      - name: /pm triage via OpenRouter (chain link 7)
+        id: p7
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model7 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
+            reviewer-feedback triage (skill §8) for PR
+            #${{ github.event.pull_request.number }}: Jane and Drik have posted
+            their tagged feedback on this PR. For each design named above
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
+
+      - name: /pm triage via OpenRouter (chain link 8)
+        id: p8
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model8 }}
+          prompt: >-
+            /pm ${{ needs.design-changes.outputs.changed_designs }} —
+            reviewer-feedback triage (skill §8) for PR
+            #${{ github.event.pull_request.number }}: Jane and Drik have posted
+            their tagged feedback on this PR. For each design named above
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
+
       - name: No provider key configured
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true' && env.HAS_OPENROUTER != 'true'
         run: |
-          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping the PM triage for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::Neither ZAI_KEY, ANTHROPIC_API_KEY, nor OPENROUTER_API_KEY is set — skipping the PM triage for PR #${{ github.event.pull_request.number }}"
 
       # Classify-only (escalate: 'false'): the Jane review job owns the single
       # escalation for the shared review chain; this reuses the cause for its
@@ -1345,18 +1581,21 @@ jobs:
         id: triage
         if: >-
           steps.ready.outputs.ready == 'true'
-          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "false"
@@ -1364,13 +1603,15 @@ jobs:
       - name: Every configured provider failed
         if: >-
           steps.ready.outputs.ready == 'true'
-          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
@@ -1423,6 +1664,7 @@ jobs:
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # Git environment lock (code-scanning finding on #760; see the header).
       # Job-level so every step inherits it — every chain link of every
       # provider, and any link added later. Pinned per ship step by
@@ -2094,6 +2336,234 @@ jobs:
             /design-coach ${{ github.event.pull_request.number }}
 
 
+      - name: Restore the coach posting surface from the base branch (before chain link 7)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
+
+      - name: /design-coach via OpenRouter (chain link 7)
+        id: p7
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model7 }}
+          prompt: >-
+            /design-coach ${{ github.event.pull_request.number }}
+
+      - name: Restore the coach posting surface from the base branch (before chain link 8)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
+
+      - name: /design-coach via OpenRouter (chain link 8)
+        id: p8
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_OPENROUTER == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+          && steps.p5.outcome != 'success'
+          && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model8 }}
+          prompt: >-
+            /design-coach ${{ github.event.pull_request.number }}
+
       - name: Coach posted a COACH-LOCK
         # claude-code-action exits 0 on a denial-only turn (#538/#764/#806).
         # A ship-step success is not a completed coach round unless the
@@ -2107,7 +2577,9 @@ jobs:
               || steps.p3.outcome == 'success'
               || steps.p4.outcome == 'success'
               || steps.p5.outcome == 'success'
-              || steps.p6.outcome == 'success')
+              || steps.p6.outcome == 'success'
+              || steps.p7.outcome == 'success'
+              || steps.p8.outcome == 'success')
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
@@ -2168,9 +2640,9 @@ jobs:
           /usr/bin/bash "$CHECK" "$PR" --since "$SINCE"
 
       - name: No provider key configured
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true' && env.HAS_OPENROUTER != 'true'
         run: |
-          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
+          echo "::notice::Neither ZAI_KEY, ANTHROPIC_API_KEY, nor OPENROUTER_API_KEY is set — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
 
       # Classify-only (escalate: 'false'): the Jane review job owns the single
       # escalation for the shared review chain; this reuses the cause for its
@@ -2179,18 +2651,21 @@ jobs:
         id: triage
         if: >-
           steps.ready.outputs.ready == 'true'
-          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-key: ${{ secrets.OPENROUTER_API_KEY }}
           github-token: ${{ github.token }}
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "false"
@@ -2198,13 +2673,15 @@ jobs:
       - name: Every configured provider failed
         if: >-
           steps.ready.outputs.ready == 'true'
-          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true' || env.HAS_OPENROUTER == 'true')
           && steps.p1.outcome != 'success'
           && steps.p2.outcome != 'success'
           && steps.p3.outcome != 'success'
           && steps.p4.outcome != 'success'
           && steps.p5.outcome != 'success'
           && steps.p6.outcome != 'success'
+          && steps.p7.outcome != 'success'
+          && steps.p8.outcome != 'success'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
