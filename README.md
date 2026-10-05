@@ -395,9 +395,9 @@ surfaces studies awaiting a read live in
     head for Jane and Drik) and the coach's git is fenced to local verbs
     (global options plus the four-verb option floor from #775: editor,
     gpg-sign, receive-pack/exec, recurse-submodules, repo at shortest
-    unique prefixes `--e`/`--g`/`--rece`/`--recu`/`--rep`, URL/path dest
-    including dest-not-first and scp-like `host:path` with or without a
-    refspec, mid-token and end-of-argv clustered `-e`/`-c`/`-S` shorts,
+    unique prefixes `--e`/`--g`/`--r`/`--rece`/`--recu`/`--rep`, URL/path dest
+    including dest-not-first and scp-like `host:path` (`*:**`), enumerated
+    clustered `-e`/`-c`/`-S` shorts (`*` only — Claude Code has no `?`),
     and `git remote` retarget);
     `--selftest` with a positive and a negative control per rule, run by
     check.sh. The workflow half — every reviewer ship step in
