@@ -374,6 +374,13 @@ surfaces studies awaiting a read live in
     shell surface, whose `--selftest` pins every post-greenlight refusal and
     the assembled comment shape — marker, `GREENLIGHT: YES|NO|ROUTE` verdict
     line, reasoning, wrapper-appended approval footer) must never be denied
+  - `coach-lock-check.sh` — fails a design-coach round that posted no
+    trusted COACH-LOCK (an Actions-bot comment that *ends* with the
+    assembled `<!-- COACH_LOCK -->` + footer suffix, created at or
+    after `--since` — a Jane/Drik/PM family comment that smuggled
+    the HTML does not count; those jobs share github-actions[bot];
+    a lock from an earlier coach run does not either; claude-code-action
+    exits 0 on a denial-only turn; issue #806)
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):
@@ -459,6 +466,11 @@ surfaces studies awaiting a read live in
     malformed line, and the exit-4 hard-fail path, over committed fixtures in
     `scripts/fusecheck-fixtures/` whose body counts are re-measured with
     fusecheck itself (issue #627)
+  - `scad-closure.sh` — include-closure walk behind gate.sh's `ci.fitchecks`
+    branch proof and fusecheck-check.sh's control proof (issue #766): a
+    `part == "..."` dispatcher in an included parent counts; a name nowhere
+    in the closure still FAILs; `--selftest` is the negative-control half
+    check.sh runs
   - `cog-check.sh` — proves the assembled object STANDS (issue #623), the
     thing no per-part gate can: reads a `ci.cog` manifest (per-part densities,
     non-printed hardware masses, assembly transforms, a stability margin) and
