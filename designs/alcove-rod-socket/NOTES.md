@@ -212,10 +212,14 @@ the plain parts — see README for inch-rod and retune paths).
 | `collar-25` | `alcove-rod-socket-collar-25.scad` | production deep collar (28 mm engagement) |
 | `collar-shallow-25` | `alcove-rod-socket-collar-shallow-25.scad` | far-side shallow collar (12 mm) |
 
-Same tune flow as 40 mm. If the bore coupon settles on a `rod_clearance` other
-than 0.6, the holder bore must match — use the plain `boss` / `collar` /
-`collar-shallow` parts with `rod_d = 25` and your tuned `rod_clearance` (the
-gated `*-25` holders stay at 0.6 until a future pinned export exists).
+Same tune flow as 40 mm. The gated `*-25` holders assume default **`thread_tol`**
+(0.3) and **`rod_clearance`** (0.6). If either coupon settles elsewhere, use
+plain `boss` / `collar` / `collar-shallow` with `rod_d = 25` and your tuned
+`thread_tol` / `rod_clearance` (the gated `*-25` exports stay pinned to defaults
+until a future pinned export exists). Gated **`boss-25`** is **`screw_count=1`**
+only; heavy closet installs need plain **`boss`** with `rod_d = 25` and
+`screw_count = 2` (or a stud). At 25 mm the boss flange is about **Ø43.8**
+(vs Ø58.8 at 40 mm).
 
 **Field question (Drik / #812):** at 25 mm the collar OD is **39 mm** and the
 auto-capped grip is **32 flutes** (tighter pitch than 40 mm / 36). Wet-hand

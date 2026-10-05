@@ -1,9 +1,11 @@
 # Alcove rod socket
 
-A parametric, two-part screw-together end socket for a 40 mm curtain or
-closet rod that spans a recess or alcove. A wall boss screws flat to each
-facing wall; the rod's ends plug into knurled collars that hand-thread onto
-the bosses. Curtains down for washing = unthread two collars, no tools.
+A parametric, two-part screw-together end socket for curtain or closet rods
+that span a recess or alcove. Default **40 mm** is fit-proven in the field;
+a **25 mm** reference set is CI-gated (not field-tested on a real rod yet —
+see *What you get*). A wall boss screws flat to each facing wall; the rod's
+ends plug into knurled collars that hand-thread onto the bosses. Curtains
+down for washing = unthread two collars, no tools.
 
 > **v2** — ships the separable multi-object plate deliverable. v1 (#361)
 > printed **fused** in the field (a single STL of the two parts slices as one
@@ -22,10 +24,11 @@ the bosses. Curtains down for washing = unthread two collars, no tools.
 
 Printed **in pairs** (one holder per wall, one pair per rod):
 
-- `boss` — the wall plate: Ø58.8 × 18 mm disc with a countersunk M5 screw
-  hole and an external printed thread (an optional second off-axis screw
-  setting, `screw_count=2`, grows the flange for heavier installs — a hung
-  pair over ~10 kg; see Assembly).
+- `boss` — the wall plate: Ø58.8 × 18 mm disc at default **40 mm** `rod_d`
+  (about **Ø43.8** at **25 mm**), countersunk M5 screw hole and an external
+  printed thread (an optional second off-axis screw setting, `screw_count=2`,
+  grows the flange for heavier installs — a hung pair over ~10 kg; see
+  Assembly). Gated **`boss-25`** is single-screw only (`screw_count=1`).
 - `collar` — the rod socket: Ø54 × 40.6 mm knurled tube, internal printed
   thread below, Ø40.6 rod bore above (default `engagement_depth=28`).
 - `collar-shallow` — the same collar at `engagement_depth=12` (far side of
@@ -49,7 +52,9 @@ STL imports as one fused body and welds them together — v1's field-test failur
 (NOTES.md). Two ways to get the parts, both give the separation:
 
 - **Downloaded a Release:** you get `boss`, `collar`, and `collar-shallow` —
-  import what you need and keep them as separate objects. (No v2 Release is
+  or the gated **`boss-25`**, **`collar-25`**, and **`collar-shallow-25`**
+  trio for a **25.0 mm** reference rod — import what you need and keep them
+  as separate objects. (No v2 Release is
   tagged yet — releases are cut on a tag, not on merge — so until one exists,
   use the clone path below.) The plate is still the default-depth holder pair
   (`boss` + `collar`); grab `collar-shallow` from the Release for the far side
@@ -127,9 +132,16 @@ Two such plates fit the 256 × 256 mm P2S bed.
 | `thread-coupon` / `bore-coupon` | default **40 mm** rod (fit-proven size) |
 | `thread-coupon-25` / `bore-coupon-25` | **25.0 mm** reference (CI-gated; not field-tested yet) |
 
-**25 mm and both coupons fit?** Download the gated **`boss-25`**, **`collar-25`**
-(and **`collar-shallow-25`** for the deep+shallow install) — same separable-object
-rules as the 40 mm parts. Grip auto-caps to **32** flutes at this collar OD.
+**25 mm and both coupons fit at defaults?** The gated `*-25` downloads pin
+`rod_d = 25.0` and ship at default **`thread_tol`** (0.3) and **`rod_clearance`**
+(0.6). If you tuned either coupon away from those values, export plain
+**`boss`** / **`collar`** / **`collar-shallow`** with `rod_d = 25` (or your
+measured barrel) and your tuned tolerances — same separable-object rules as the
+40 mm parts. When defaults match, download **`boss-25`**, **`collar-25`**
+(and **`collar-shallow-25`** for the deep+shallow install). Grip auto-caps to
+**32** flutes at this collar OD. **`boss-25`** is **`screw_count=1`** only;
+heavier closet loads want plain **`boss`** with `rod_d = 25` and
+`screw_count = 2` (or screw into a stud).
 
 The gate scores the boss / collar / collar-shallow / thread-coupon set with
 the same thin-wall warning pattern (tessellated thread crests and knurl
