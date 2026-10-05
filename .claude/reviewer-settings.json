@@ -103,6 +103,7 @@
       "Bash(gh workflow:*)",
       "Bash(gh run:*)",
       "Bash(git:*)",
+      "Bash(git*)",
       "Bash(gh repo:*)",
       "Bash(gh pr checkout:*)",
       "Bash(gh browse:*)",

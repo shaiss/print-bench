@@ -397,8 +397,9 @@ surfaces studies awaiting a read live in
     gpg-sign, template/squash, receive-pack/exec, recurse-submodules, repo
     at shortest unique prefixes `--e`/`--g`/`--te`/`--sq`/`--r`/`--rece`/
     `--recu`/`--rep`, URL/path dest including dest-not-first and scp-like
-    `host:path` (`*:**`) with no required space after the verb so IFS TAB
-    splits match, enumerated clustered `-e`/`-c`/`-S` shorts (`*` only —
+    `host:path` (`*:**`) with no required space after the verb so IFS TAB/double-space
+    splits match, plus plumbing send-pack/http-push/fetch-pack/http-fetch
+    and --fixup/--fix, enumerated clustered `-e`/`-c`/`-S` shorts (`*` only —
     Claude Code has no `?`) plus explicit TAB twins for short option-first
     stems, and `git remote` retarget);
     `--selftest` with a positive and a negative control per rule, run by
