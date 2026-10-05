@@ -444,11 +444,12 @@ surfaces studies awaiting a read live in
     required check never strands a PR it wasn't meant to gate. All the policy
     lives here behind a `--selftest` with a negative control per row
   - `reviewer-posted.sh` — the reviewer-outcome reader `auto-review.yml`'s
-    chain walk and round stamp key on (issue #762): did THIS reviewer's
-    MCP-assembled sign-off marker for THIS head sha land from
+    chain walk and round stamp key on (issues #762 / #770): did THIS
+    reviewer's MCP-assembled per-head marker for THIS head sha land from
     `github-actions[bot]` (the posting identity `.claude/reviewer-post/
-    reviewer_mcp.py` uses via `GITHUB_TOKEN`), ending with the server-
-    assembled marker-then-footer suffix, optionally scoped to this run with
+    reviewer_mcp.py` uses via `GITHUB_TOKEN`) — `JANE`/`DRIK_SIGNOFF`,
+    `PM_TRIAGE_DONE`, or `COACH_DONE` — ending with the server-assembled
+    marker-then-footer suffix, optionally scoped to this run with
     `--since`? claude-code-action exits 0 whenever the agent ends its turn
     without an API error, so an exit-0 link that posted nothing used to win
     the chain walk and be stamped a completed round (PRs #755/#756); a

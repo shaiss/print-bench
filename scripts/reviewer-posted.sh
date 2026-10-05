@@ -28,15 +28,16 @@
 #      coach-lock-check pattern), so a lock from an earlier run on the same
 #      head cannot short-circuit a fresh chain walk.
 #
-# The marker shape is the one the reviewer MCP emits and
-# `reviewer-signoff` already keys on —
+# The marker shapes are the ones the reviewer MCP emits —
 #   <!-- JANE_SIGNOFF sha=<40hex> verdict=pass|block fuse=none|acknowledged -->
 #   <!-- DRIK_SIGNOFF sha=<40hex> verdict=pass|block fuse=none|acknowledged -->
+#   <!-- PM_TRIAGE_DONE sha=<40hex> -->   (issue #770; PM_TRIAGE stays for §8)
+#   <!-- COACH_DONE sha=<40hex> -->       (issue #770; COACH_LOCK stays for #806)
 # — exact family spelling (the MCP never case-folds), with the hardcoded
 # Claude Code footer byte-identical to reviewer_mcp.py's FOOTER.
 #
 # Usage:
-#   scripts/reviewer-posted.sh check --pr <N> --sha <40hex> --reviewer jane|drik
+#   scripts/reviewer-posted.sh check --pr <N> --sha <40hex> --reviewer jane|drik|pm|coach
 #       [--repo <owner/name>] [--comments-file <path>] [--since <ISO8601>]
 #     Prints `true` or `false` (exit 0 either way — a clean negative is a
 #     decision, not an error) and, when $GITHUB_OUTPUT is set, appends
@@ -55,11 +56,11 @@
 #     what the posting surface emits.
 #
 # Consumers: auto-review.yml — the per-link artifact checks after each
-# Jane/Drik ship step (the chain walk's fall-through key), and the review
-# stamp's confirmation before a round is called complete. pm-triage and the
-# design coach keep their exit-code walks: no per-head completion marker is
-# defined for either (the PM's PM_TRIAGE markers are per-design verdicts, the
-# coach's COACH-LOCK is a dedupe lock, not a completion signal).
+# Jane/Drik/pm-triage/design-coach ship step (the chain walk's fall-through
+# key), and the review stamp's confirmation before a round is called
+# complete. Issue #770 closed the exit-code hole for pm-triage and the
+# design coach with per-head completion markers (PM_TRIAGE_DONE / COACH_DONE)
+# that this script reads the same way it reads JANE/DRIK_SIGNOFF.
 set -euo pipefail
 
 # A prior Bash-capable coach/reviewer step can write PYTHONPATH/LD_PRELOAD
@@ -88,7 +89,7 @@ export REVIEWER_FOOTER
 usage() {  # [message]
   [ $# -eq 0 ] || echo "reviewer-posted: $*" >&2
   cat >&2 <<'EOF'
-usage: scripts/reviewer-posted.sh check --pr <N> --sha <40hex> --reviewer jane|drik
+usage: scripts/reviewer-posted.sh check --pr <N> --sha <40hex> --reviewer jane|drik|pm|coach
            [--repo <owner/name>] [--comments-file <path>] [--since <ISO8601>]
        scripts/reviewer-posted.sh --selftest
 EOF
@@ -108,18 +109,24 @@ FAMILY = os.environ["REVIEWER_FAMILY"]
 SINCE = os.environ.get("REVIEWER_SINCE", "").strip()
 BOT = "github-actions"
 
-# Exact MCP-assembled suffixes for THIS family + sha. verdict/fuse are the
-# closed sets reviewer_mcp.py validates before posting — anything else is
-# not an MCP post. Case-sensitive family: the MCP emits uppercase.
-# post_review assembles `{body}\n\n{marker}\n\n{FOOTER}`; a sibling
-# Actions-bot post always ends with its OWN family marker before the same
-# footer, so a planted cross-family marker in the caller body cannot be
-# the suffix (coach-lock-check.sh'\''s reason for requiring the suffix).
-SUFFIXES = tuple(
-    f"<!-- {FAMILY} sha={SHA} verdict={v} fuse={f} -->\n\n{FOOTER}"
-    for v in ("pass", "block")
-    for f in ("none", "acknowledged")
-)
+# Exact MCP-assembled suffixes for THIS family + sha. Case-sensitive
+# family: the MCP emits uppercase. Jane/Drik carry verdict/fuse (the
+# closed sets reviewer_mcp.py validates); pm/coach completion markers
+# (issue #770) are sha-only. post_* assembles `{body}\n\n{marker}\n\n{FOOTER}`
+# (pm/coach may put a sibling marker ahead of the completion one); a
+# sibling Actions-bot post always ends with its OWN family marker before
+# the same footer, so a planted cross-family marker in the caller body
+# cannot be the suffix (coach-lock-check.sh'\''s reason for requiring
+# the suffix).
+if FAMILY.endswith("_SIGNOFF"):
+    SUFFIXES = tuple(
+        f"<!-- {FAMILY} sha={SHA} verdict={v} fuse={f} -->\n\n{FOOTER}"
+        for v in ("pass", "block")
+        for f in ("none", "acknowledged")
+    )
+else:
+    # PM_TRIAGE_DONE / COACH_DONE — one shape, no verdict/fuse.
+    SUFFIXES = (f"<!-- {FAMILY} sha={SHA} -->\n\n{FOOTER}",)
 
 
 def is_actions_bot(comment):
@@ -209,8 +216,10 @@ check() {
   done
   # A typo'd reviewer or a bad sha must fail loud here, not match nothing and
   # read as "not served" — that would burn all six chain links on a typo.
-  [[ "$reviewer" == "jane" || "$reviewer" == "drik" ]] \
-    || usage "--reviewer must be jane or drik (got: ${reviewer:-empty})"
+  case "$reviewer" in
+    jane|drik|pm|coach) ;;
+    *) usage "--reviewer must be jane, drik, pm or coach (got: ${reviewer:-empty})" ;;
+  esac
   [[ "$pr" =~ ^[0-9]+$ ]] || usage "--pr must be a number (got: ${pr:-empty})"
   [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || usage "--sha must be 40 hex chars (got: ${sha:-empty})"
   if [[ -n "$since" ]]; then
@@ -235,7 +244,11 @@ check() {
 
   local verdict
   export REVIEWER_SHA="$sha"
-  export REVIEWER_FAMILY="${reviewer^^}_SIGNOFF"
+  case "$reviewer" in
+    jane|drik) export REVIEWER_FAMILY="${reviewer^^}_SIGNOFF" ;;
+    pm)        export REVIEWER_FAMILY="PM_TRIAGE_DONE" ;;
+    coach)     export REVIEWER_FAMILY="COACH_DONE" ;;
+  esac
   if [[ -n "$since" ]]; then
     export REVIEWER_SINCE="$since"
   else
@@ -290,9 +303,21 @@ jane = f'<!-- JANE_SIGNOFF sha={HEAD} verdict=pass fuse=none -->'
 jane_stale = f'<!-- JANE_SIGNOFF sha={OLD} verdict=pass fuse=none -->'
 jane_ack = f'<!-- JANE_SIGNOFF sha={HEAD} verdict=pass fuse=acknowledged -->'
 drik = f'<!-- DRIK_SIGNOFF sha={HEAD} verdict=block fuse=none -->'
+pm_done = f'<!-- PM_TRIAGE_DONE sha={HEAD} -->'
+pm_done_stale = f'<!-- PM_TRIAGE_DONE sha={OLD} -->'
+# Full MCP PM post: per-design marker then completion marker (DONE last).
+pm_full = (
+    f'<!-- PM_TRIAGE design=demo sha={HEAD} -->\\n\\n'
+    f'<!-- PM_TRIAGE_DONE sha={HEAD} -->'
+)
+coach_done = f'<!-- COACH_DONE sha={HEAD} -->'
+coach_full = (
+    f'<!-- COACH_LOCK -->\\n\\n'
+    f'<!-- COACH_DONE sha={HEAD} -->'
+)
 bot = {'login': 'github-actions[bot]', 'type': 'Bot'}
 def mcp(body_text, marker, user=None, created='2026-10-05T12:00:01Z'):
-    c = {'body': body_text.rstrip() + '\n\n' + marker + '\n\n' + FOOTER,
+    c = {'body': body_text.rstrip() + '\\n\\n' + marker + '\\n\\n' + FOOTER,
          'user': user if user is not None else bot}
     if created is not None:
         c['created_at'] = created
@@ -308,12 +333,17 @@ with open(sys.argv[1], 'w', encoding='utf-8') as fh:
 
   mkfix "$tmp/posted" "[mcp('Jane here — clean print call.', jane)]"
   mkfix "$tmp/graphql" \
-    "[{'body': 'Jane here.\n\n' + jane + '\n\n' + FOOTER, 'user': {'login': 'github-actions'}, 'created_at': '2026-10-05T12:00:01Z'}]"
+    "[{'body': 'Jane here.\\n\\n' + jane + '\\n\\n' + FOOTER, 'user': {'login': 'github-actions'}, 'created_at': '2026-10-05T12:00:01Z'}]"
   mkfix "$tmp/stale" "[mcp('Jane here.', jane_stale)]"
   mkfix "$tmp/silent" \
-    "[{'body': 'Jane looked, found nothing to say.\n\n' + FOOTER, 'user': bot}]"
+    "[{'body': 'Jane looked, found nothing to say.\\n\\n' + FOOTER, 'user': bot}]"
   mkfix "$tmp/drik" "[mcp('Drik here.', drik)]"
   mkfix "$tmp/both" "[mcp('Drik.', drik), mcp('Jane.', jane_ack)]"
+  mkfix "$tmp/pm" "[mcp('PM triage.', pm_full)]"
+  mkfix "$tmp/pm-done-only" "[mcp('PM triage.', pm_done)]"
+  mkfix "$tmp/pm-stale" "[mcp('PM triage.', pm_done_stale)]"
+  mkfix "$tmp/coach" "[mcp('Coach kickoff.', coach_full)]"
+  mkfix "$tmp/coach-done-only" "[mcp('Coach.', coach_done)]"
   mkfix "$tmp/malformed" \
     "[{'body': 'x\n\n<!-- JANE_SIGNOFF verdict=pass fuse=none -->\n\n' + FOOTER, 'user': bot}]"
   mkfix "$tmp/impostor" \
@@ -355,6 +385,30 @@ with open(sys.argv[1], 'w', encoding='utf-8') as fh:
     true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/both"
   row "empty thread → not served" \
     false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/empty"
+  # Issue #770: pm / coach completion markers.
+  row "pm full MCP post (PM_TRIAGE + PM_TRIAGE_DONE) serves pm" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer pm --comments-file "$tmp/pm"
+  row "pm DONE-only suffix also serves pm" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer pm --comments-file "$tmp/pm-done-only"
+  row "pm DONE for an older head is stale" \
+    false "$0" check --pr 1 --sha "$head" --reviewer pm --comments-file "$tmp/pm-stale"
+  row "pm marker does not serve jane" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/pm"
+  row "jane marker does not serve pm" \
+    false "$0" check --pr 1 --sha "$head" --reviewer pm --comments-file "$tmp/posted"
+  row "coach full MCP post (COACH_LOCK + COACH_DONE) serves coach" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer coach --comments-file "$tmp/coach"
+  row "coach DONE-only suffix also serves coach" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer coach --comments-file "$tmp/coach-done-only"
+  row "coach marker does not serve pm" \
+    false "$0" check --pr 1 --sha "$head" --reviewer pm --comments-file "$tmp/coach"
+  mkfix "$tmp/planted-pm-human" "[mcp('plant', pm_done, user={'login': 'attacker'})]"
+  row "human-planted PM_TRIAGE_DONE is ignored" \
+    false "$0" check --pr 1 --sha "$head" --reviewer pm --comments-file "$tmp/planted-pm-human"
+  mkfix "$tmp/planted-coach-cursor" \
+    "[mcp('plant', coach_done, user={'login': 'cursor[bot]', 'type': 'Bot'})]"
+  row "cursor[bot]-planted COACH_DONE is ignored" \
+    false "$0" check --pr 1 --sha "$head" --reviewer coach --comments-file "$tmp/planted-coach-cursor"
 
   # Security: planted markers from other authors / non-MCP shapes.
   row "human-planted marker+footer is ignored" \
@@ -426,6 +480,7 @@ json.dump(pages, open(os.environ["OUT"], "w", encoding="utf-8"))
   # The refusal rows — a typo or a bad sha must fail loud, never read as a
   # clean "not served" (that would burn the whole chain walk on a typo).
   refuses "typo'd reviewer refused" "$0" check --pr 1 --sha "$head" --reviewer jan --comments-file "$tmp/posted"
+  refuses "unknown reviewer refused" "$0" check --pr 1 --sha "$head" --reviewer vera --comments-file "$tmp/posted"
   refuses "short sha refused"       "$0" check --pr 1 --sha abc123 --reviewer jane --comments-file "$tmp/posted"
   refuses "non-numeric pr refused"  "$0" check --pr abc --sha "$head" --reviewer jane --comments-file "$tmp/posted"
   refuses "bad --since refused"     "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted" --since yesterday

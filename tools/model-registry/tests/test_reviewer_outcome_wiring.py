@@ -7,20 +7,21 @@ reviewer had posted — the walk skipped later links (an exit-0 link reads as
 the win) and the stamp trusted the green job results. The #538 lesson
 applied to the review pipeline: derive the outcome from what landed.
 
+Issue #770: the same hole applied to pm-triage and design-coach (they kept
+exit-code walks in #762 because no per-head completion marker existed).
+Both now emit PM_TRIAGE_DONE / COACH_DONE and walk on ``served`` like
+Jane/Drik.
+
 Both halves of the fix are pinned here:
 
-* every Jane/Drik ship step is followed by an artifact check
+* every Jane/Drik/pm/coach ship step is followed by an artifact check
   (``scripts/reviewer-posted.sh``) reading the only evidence that counts —
-  an Actions-bot MCP-assembled sign-off marker for THIS head sha from this
+  an Actions-bot MCP-assembled per-head marker for THIS head sha from this
   run (``--since``) — and link k>=2 plus the two exhaustion gates key on
   ``steps.vN.outputs.served``, never on ``.outcome``;
-* the round stamp artifact-confirms BOTH reviewers before advancing the
-  reviewed-SHA — green jobs without markers are stamped incomplete.
-
-pm-triage and design-coach keep their exit-code walks on purpose (the PM's
-PM_TRIAGE markers are per-design verdicts, not one per-head completion
-marker; the coach's COACH-LOCK is a dedupe lock), and that boundary is
-pinned too — so a half-migration is caught in either direction.
+* the round stamp artifact-confirms BOTH Jane and Drik reviewers before
+  advancing the reviewed-SHA — green jobs without markers are stamped
+  incomplete.
 
 Every pin has a tamper negative control below, derived from the live
 workflow text, proving it can fail. Kept out of test_workflow_drift.py (it
@@ -42,11 +43,14 @@ from test_workflow_drift import (
     _workflow_text,
 )
 
-# The two jobs whose reviewers emit one per-head sign-off marker — the only
-# ones an artifact check can key on (issue #762 covers Jane/Drik).
-ARTIFACT_JOBS = {"jane-review": "jane", "drik-review": "drik"}
-# The jobs that deliberately keep the exit-code walk.
-EXIT_CODE_JOBS = ("pm-triage", "design-coach")
+# Jobs whose reviewers emit one per-head completion marker — the ones an
+# artifact check can key on (issue #762 Jane/Drik; issue #770 pm/coach).
+ARTIFACT_JOBS = {
+    "jane-review": "jane",
+    "drik-review": "drik",
+    "pm-triage": "pm",
+    "design-coach": "coach",
+}
 ARTIFACT_SCRIPT = "scripts/reviewer-posted.sh check"
 # The stamp's served guard, verbatim — the reviewed-SHA advances only inside.
 STAMP_GUARD = 'if [ "$jane_served" = "true" ] && [ "$drik_served" = "true" ]; then'
@@ -75,7 +79,7 @@ def _if_condition(chunk: str) -> str:
 
 
 def _assert_every_link_is_artifact_checked(text: str) -> None:
-    """Each Jane/Drik ship step is followed by its artifact check (id vN,
+    """Each artifact-walk ship step is followed by its artifact check (id vN,
     the right reviewer, and an `if` that fires exactly when the link ran).
     Factored out so the negative controls can run it against tampered text."""
     blocks = _job_blocks(text)
@@ -98,7 +102,7 @@ def _assert_every_link_is_artifact_checked(text: str) -> None:
                     f"auto-review.yml [{job}]: the link-{n} ship step is not "
                     f"followed by its artifact check ({needle!r} missing) — an "
                     "exit-0 link that posts nothing would read as the win "
-                    "(issue #762)")
+                    "(issues #762/#770)")
 
 
 def _assert_walk_keys_on_served_outputs(text: str) -> None:
@@ -111,7 +115,7 @@ def _assert_walk_keys_on_served_outputs(text: str) -> None:
             assert ".outcome" not in cond, (
                 f"auto-review.yml [{job}] link {n}: the walk still keys on an "
                 f"exit code ({cond!r}) — an exit-0 link that posts nothing "
-                "reads as success and skips the rest (issue #762)")
+                "reads as success and skips the rest (issues #762/#770)")
             if n == 1:
                 continue
             for earlier in range(1, n):
@@ -119,12 +123,13 @@ def _assert_walk_keys_on_served_outputs(text: str) -> None:
                 assert needle in cond, (
                     f"auto-review.yml [{job}] link {n}: not gated on {needle} — "
                     "it would run even after an earlier link delivered, or "
-                    "skip after one that exited 0 without posting (issue #762)")
+                    "skip after one that exited 0 without posting "
+                    "(issues #762/#770)")
 
 
 def _assert_exhaustion_gates_key_on_the_artifact(text: str) -> None:
-    """The provider-triage and red-exhaustion steps in Jane/Drik fire when no
-    link DELIVERED (all six `served` legs), and the exit-code needle is gone
+    """The provider-triage and red-exhaustion steps fire when no link
+    DELIVERED (all six `served` legs), and the exit-code needle is gone
     from those job bodies entirely."""
     blocks = _job_blocks(text)
     for job in ARTIFACT_JOBS:
@@ -132,7 +137,7 @@ def _assert_exhaustion_gates_key_on_the_artifact(text: str) -> None:
         assert not re.search(r"steps\.p\d+\.outcome != 'success'", body), (
             f"auto-review.yml [{job}]: the exit-code walk is back — exhaustion "
             "must mean 'no link delivered the review', not 'no link exited 0' "
-            "(issue #762)")
+            "(issues #762/#770)")
         gates = [c for c in _steps(blocks[job])
                  if "uses: ./.github/actions/provider-triage" in c
                  or re.search(r"^          exit 1$", c, re.MULTILINE)]
@@ -146,26 +151,11 @@ def _assert_exhaustion_gates_key_on_the_artifact(text: str) -> None:
                 assert needle in cond, (
                     f"auto-review.yml [{job}] exhaustion gate: missing {needle} "
                     "— a chain where every link exits 0 without posting would "
-                    "slip past the red path (issue #762)")
+                    "slip past the red path (issues #762/#770)")
             assert ".outcome" not in cond, (
                 f"auto-review.yml [{job}] exhaustion gate keys on an exit code "
                 f"({cond!r}) — exit-0-without-posting is not exhaustion under "
-                "that rule, and the round would look served (issue #762)")
-
-
-def _assert_exit_code_jobs_stay_exit_code(text: str) -> None:
-    """pm-triage and design-coach keep the exit-code walk Jane/Drik dropped,
-    and are not half-wired to the artifact reader."""
-    blocks = _job_blocks(text)
-    for job in EXIT_CODE_JOBS:
-        body = _without_comments(blocks[job])
-        assert "steps.p1.outcome != 'success'" in body, (
-            f"auto-review.yml [{job}] lost the exit-code walk — migrating it "
-            "needs a per-head completion marker defined first (issue #762 "
-            "covers Jane/Drik only; update this pin in the same PR)")
-        assert "reviewer-posted.sh" not in body, (
-            f"auto-review.yml [{job}] half-migrated: it runs the artifact "
-            "reader without the walk keyed on it")
+                "that rule, and the round would look served (issues #762/#770)")
 
 
 def _at(run: str, needle: str) -> int:
@@ -204,7 +194,7 @@ def _assert_stamp_confirms_both_markers(text: str) -> None:
             f"the artifact-miss branch no longer surfaces the miss ({needle!r})")
 
 
-def test_every_jane_and_drik_link_is_followed_by_its_artifact_check():
+def test_every_artifact_walk_link_is_followed_by_its_artifact_check():
     _assert_every_link_is_artifact_checked(_workflow_text())
 
 
@@ -216,8 +206,22 @@ def test_exhaustion_gates_key_on_the_artifact():
     _assert_exhaustion_gates_key_on_the_artifact(_workflow_text())
 
 
-def test_pm_and_coach_keep_their_exit_code_walks():
-    _assert_exit_code_jobs_stay_exit_code(_workflow_text())
+def test_pm_and_coach_are_on_the_artifact_walk():
+    """Issue #770: the exit-code boundary pin is gone — both jobs walk on
+    served outputs and run the artifact reader."""
+    text = _workflow_text()
+    blocks = _job_blocks(text)
+    for job, reviewer in (("pm-triage", "pm"), ("design-coach", "coach")):
+        body = _without_comments(blocks[job])
+        assert "steps.p1.outcome != 'success'" not in body, (
+            f"auto-review.yml [{job}] still keys on exit codes — issue #770 "
+            "migrated it to the artifact walk")
+        assert "reviewer-posted.sh" in body, (
+            f"auto-review.yml [{job}] lost the artifact reader")
+        assert f"--reviewer {reviewer}" in body, (
+            f"auto-review.yml [{job}] does not check --reviewer {reviewer}")
+        assert "steps.v1.outputs.served != 'true'" in body, (
+            f"auto-review.yml [{job}] walk does not key on served outputs")
 
 
 def test_the_stamp_confirms_both_markers_before_advancing_the_sha():
@@ -239,6 +243,11 @@ def test_the_artifact_reader_exists_and_carries_its_selftest():
         assert needle in body, (
             f"scripts/reviewer-posted.sh lost its author-binding pin "
             f"({needle!r}) — a planted marker would satisfy the walk/stamp")
+    # Issue #770 vocabulary: pm and coach completion markers.
+    for needle in ("PM_TRIAGE_DONE", "COACH_DONE", "jane|drik|pm|coach"):
+        assert needle in body, (
+            f"scripts/reviewer-posted.sh lost its #770 vocabulary pin "
+            f"({needle!r})")
 
 
 # ── negative controls ─────────────────────────────────────────────────────────
@@ -295,11 +304,37 @@ def test_check_guard_rejects_a_check_without_since():
         _assert_every_link_is_artifact_checked(tampered)
 
 
+def test_check_guard_rejects_a_dropped_pm_artifact_check():
+    # NEGATIVE CONTROL: drop PM's link-1 artifact check — the #770 hole.
+    tampered = _drop_step(_workflow_text(), "pm-triage", "id: v1")
+    with pytest.raises(AssertionError, match="artifact check"):
+        _assert_every_link_is_artifact_checked(tampered)
+
+
+def test_check_guard_rejects_a_dropped_coach_artifact_check():
+    # NEGATIVE CONTROL: drop coach's link-2 artifact check.
+    tampered = _drop_step(_workflow_text(), "design-coach", "id: v2")
+    with pytest.raises(AssertionError, match="artifact check"):
+        _assert_every_link_is_artifact_checked(tampered)
+
+
 def test_walk_guard_rejects_a_link_reverted_to_exit_codes():
     # NEGATIVE CONTROL: link 2 back on the exit code — exactly the #755/#756
     # defect (an exit-0 silent link stops the walk).
     tampered = _job_replace(
         _workflow_text(), "drik-review",
+        "if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' "
+        "&& steps.v1.outputs.served != 'true'",
+        "if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' "
+        "&& steps.p1.outcome != 'success'")
+    with pytest.raises(AssertionError, match="still keys on an exit code"):
+        _assert_walk_keys_on_served_outputs(tampered)
+
+
+def test_walk_guard_rejects_a_pm_link_reverted_to_exit_codes():
+    # NEGATIVE CONTROL: PM link 2 back on exit codes (issue #770 regression).
+    tampered = _job_replace(
+        _workflow_text(), "pm-triage",
         "if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' "
         "&& steps.v1.outputs.served != 'true'",
         "if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' "
@@ -345,28 +380,18 @@ def test_exhaustion_guard_rejects_the_needle_surviving_anywhere():
         _assert_exhaustion_gates_key_on_the_artifact(tampered)
 
 
-def test_exit_code_guard_rejects_a_migrated_pm_walk():
-    # NEGATIVE CONTROL: the PM's walk silently switched to served outputs —
-    # the boundary pin must notice (a marker contract has to land with it).
-    # Every occurrence, or the needle survives in a later link's condition.
+def test_pm_coach_guard_rejects_an_exit_code_regression():
+    # NEGATIVE CONTROL: PM walk silently reverted to exit codes after #770.
     tampered = _job_replace(
         _workflow_text(), "pm-triage",
-        "steps.p1.outcome != 'success'",
-        "steps.v1.outputs.served != 'true'", count=-1)
-    with pytest.raises(AssertionError, match="lost the exit-code walk"):
-        _assert_exit_code_jobs_stay_exit_code(tampered)
-
-
-def test_exit_code_guard_rejects_a_half_migrated_pm_job():
-    # NEGATIVE CONTROL: the PM job runs the artifact reader while its walk
-    # still keys on exit codes — half a migration is worse than none.
-    tampered = _job_replace(
-        _workflow_text(), "pm-triage",
-        "    steps:\n      - uses: actions/checkout@v7",
-        "    steps:\n      - run: scripts/reviewer-posted.sh check\n"
-        "      - uses: actions/checkout@v7")
-    with pytest.raises(AssertionError, match="half-migrated"):
-        _assert_exit_code_jobs_stay_exit_code(tampered)
+        "steps.v1.outputs.served != 'true'",
+        "steps.p1.outcome != 'success'", count=-1)
+    blocks = _job_blocks(tampered)
+    body = _without_comments(blocks["pm-triage"])
+    with pytest.raises(AssertionError, match="still keys on exit codes"):
+        assert "steps.p1.outcome != 'success'" not in body, (
+            "auto-review.yml [pm-triage] still keys on exit codes — issue #770 "
+            "migrated it to the artifact walk")
 
 
 def test_stamp_guard_rejects_a_one_reviewer_confirmation():
