@@ -15,8 +15,8 @@ tunes its whole welfare envelope with two numbers.
 - `vent-cap` — the lattice cap. **Ø94.9 mm** across the coupling ring, **51 mm**
   tip-to-crown (41 mm of that above the port face), 80 mm bore. ~30 g in PETG
   at 15 % infill (slice-measured).
-- `vent-cap-solid` — the closed variant (`lattice=false`): the same 45° cone
-  run to a solid tip, **65 mm** tall. Maximum light block-out, minimum airflow.
+- `vent-cap-solid` — the closed variant: the same 45° cone run to a solid
+  tip, **65 mm** tall (gated export 64.7 mm). See **Solid variant** below.
 - `coupon` — the print-this-first plate: a port stub to tune `port_tol` with,
   beside a flat gauge of the dome's own cell. See the README in
   [`NOTES.md`](NOTES.md) for the tuning steps.
@@ -24,6 +24,21 @@ tunes its whole welfare envelope with two numbers.
 The cap is one printed part. Its port face is every `nuggs_cfg()` default, so
 it mates with the straight, the elbow, the den, the turnaround — any module on
 the standard.
+
+## Solid variant
+
+The photos are the breathing lattice. The same file also ships a **closed**
+cap — pick it when you want to terminate a run dead rather than breathing
+(dark nesting, light blocked, almost no airflow). Same 45° cone, no crown
+bridge; physics makes it taller, **65 mm** tip-to-crown versus the lattice's
+51 mm.
+
+CI gates and slices it as `vent-cap-solid`
+(`build/nuggs-vent-cap-vent-cap-solid.stl`). In the Customizer, set `lattice`
+to false; on the command line, `-D lattice=false` or
+`-D 'part="vent-cap-solid"'`. **Use & care below applies to this cone too**,
+including family **N7** (hand-wash ≤ 50 °C, never a dishwasher) — a closed
+tip traps more humid air than the lattice.
 
 ![The lattice from above: crown disc, 15 spokes, 38 ribs](previews/lattice-top.png)
 
@@ -64,12 +79,13 @@ grouped in Customizer sections; override on the command line with
   (0.30 is the standard's default and has never been measured on a printer).
 - **Clocking:** any quarter-turn position seats; the port is genderless like
   the rest of the system.
-- **Condensation and wash (family N7):** a breathing cap still traps humid
-  air at the dome's crown. In humid rooms, pull and dry the cap weekly, and
-  keep bedding off the dome's underside. When you wash it, hand-wash the cap
-  (NUGGS family **N7**): ≤ 50 °C only, mild unscented dish soap is fine, rinse
-  and dry fully — **never a dishwasher** (the heated dry cycle exceeds even
-  PETG, and a warped port is a narrowed bore).
+- **Condensation and wash (family N7):** both the lattice and the solid
+  variant trap humid air at the tip — the closed cone more so. In humid
+  rooms, pull and dry the cap weekly, and keep bedding off the dome's
+  underside. When you wash it, hand-wash either cap (NUGGS family **N7**):
+  ≤ 50 °C only, mild unscented dish soap is fine, rinse and dry fully —
+  **never a dishwasher** (the heated dry cycle exceeds even PETG, and a
+  warped port is a narrowed bore).
 - **Airflow:** the lattice holds ≥ 30 % open area by construction. If a keeper
   reports stuffiness, the lever is `aperture_max` (within the welfare ceiling)
   — never thinner strands.

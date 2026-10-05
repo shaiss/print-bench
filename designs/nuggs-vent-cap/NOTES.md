@@ -187,6 +187,11 @@ cell at production pitch.
    printcheck and the test-slice; what only your printer can tell you is in
    the coupon.
 
+The coupon **intentionally has no product-page photo** until a proving print
+exists (Drik, PR #636). Hero / contact-sheet / lattice-top / cutaway stay the
+showroom; do not "fix" the missing coupon face with a studio render of the
+plate. A real print photo is the artifact that belongs there.
+
 ## Decisions log
 
 - 2026-09-12: Design opened from the brief (issue #592). Dome architecture
@@ -194,5 +199,8 @@ cell at production pitch.
   borrowed verbatim from `lib/nuggs-coupling-mates.conf` and the archived
   `designs/nuggs` coupon. All open questions from the brief were
   non-blocking; the assumed rows above carry the stated defaults.
+- 2026-10-05: Coupon stays off the product page until a proving print exists
+  — no render-of-the-plate as a stand-in (PR #636 Drik nit). No `PM.md` on
+  this design; the hold lives here.
 
 ## Field test log
