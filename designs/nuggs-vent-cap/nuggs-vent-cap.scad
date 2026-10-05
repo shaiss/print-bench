@@ -323,34 +323,32 @@ module cap_cutaway() {
 
 // ---------------------------------------------------------------------------
 // Print-this-first coupon: the production port stub (every NUGGS module tunes
-// port_tol on it) beside a flat gauge of the dome's own cell, at production
-// pitch. Caliper the gauge's strands (strand_w) and openings (<= aperture_max)
-// before committing to the full cap; the dome's print behaviour itself is
+// port_tol on it) beside ONE on-slope lattice cell at production pitch —
+// strand bars of strand_w around an aperture_max opening. Not a multi-cell
+// puck: two proofs on one plate, both from the production modules (no copied
+// geometry). Caliper strand_w and the opening (<= aperture_max) before
+// committing to the full cap; the dome's print behaviour itself is
 // printcheck's and the test-slice's to gate. See NOTES.md "Print this first".
 // ---------------------------------------------------------------------------
 module lattice_gauge() {
-    intersection() {
-        cylinder(r = 3.5 * slope_pitch, h = strand_w);
-        union() {
-            for (i = [0 : n_rib - 1])
-                rotate([0, 0, i * 360 / n_rib])
-                    translate([-strand_w / 2, -4 * slope_pitch, -1])
-                        cube([strand_w, 8 * slope_pitch, strand_w + 2]);
-            for (j = [0 : 3])
-                difference() {
-                    cylinder(r = strand_w / 2 + j * slope_pitch,
-                             h = strand_w + 2, center = true);
-                    translate([0, 0, -1])
-                        cylinder(r = -strand_w / 2 + j * slope_pitch,
-                                 h = strand_w + 4, center = true);
-                }
-        }
+    // One production cell: outer = slope_pitch + strand_w so the free
+    // opening is exactly aperture_max on both axes (slope_pitch =
+    // aperture_max + strand_w, the dome's on-slope cell pitch).
+    outer = slope_pitch + strand_w;
+    difference() {
+        cube([outer, outer, strand_w]);
+        translate([strand_w, strand_w, -1])
+            cube([aperture_max, aperture_max, strand_w + 2]);
     }
 }
 
 module vent_cap_coupon() {
-    translate([-(r_crown_out + 6 + ro), 0, 0]) nuggs_neck(cfg_d(), z_top + 8);
-    translate([r_crown_out + 6 + ro, 0, 0]) lattice_gauge();
+    cell = slope_pitch + strand_w;
+    // Stub at the origin; one cell just outside the coupling ring OD
+    // (ro + lug_r), not the tube OD — a gap inside the lugs would weld the
+    // cell to the ring and collapse the two-body plate.
+    nuggs_neck(cfg_d(), z_top + 8);
+    translate([ro + lug_r + 4, -cell / 2, 0]) lattice_gauge();
 }
 
 // ---------------------------------------------------------------------------

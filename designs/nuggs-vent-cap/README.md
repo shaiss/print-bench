@@ -18,8 +18,8 @@ tunes its whole welfare envelope with two numbers.
 - `vent-cap-solid` — the closed variant: the same 45° cone run to a solid
   tip, **65 mm** tall (gated export 64.7 mm). See **Solid variant** below.
 - `coupon` — the print-this-first plate: a port stub to tune `port_tol` with,
-  beside a flat gauge of the dome's own cell. See the README in
-  [`NOTES.md`](NOTES.md) for the tuning steps.
+  beside one lattice cell at production pitch (caliper `strand_w` and the
+  opening). See [`NOTES.md`](NOTES.md) for the tuning steps.
 
 The cap is one printed part. Its port face is every `nuggs_cfg()` default, so
 it mates with the straight, the elbow, the den, the turnaround — any module on

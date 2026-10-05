@@ -171,18 +171,19 @@ No supports, no brim. PLA or PETG; PETG for gnaw durability.
 
 The coupon (`build/nuggs-vent-cap-coupon.stl`, `part="coupon"` in
 `nuggs-vent-cap-coupon.scad`) is **two pieces on one plate**: the production
-port stub (`nuggs_neck` at `z_top + 8`) and a flat gauge of the dome's own
-cell at production pitch.
+port stub (`nuggs_neck` at `z_top + 8`) and **one** on-slope lattice cell at
+production pitch (`slope_pitch = aperture_max + strand_w`) — not a multi-cell
+puck. Both come from the production modules; nothing is copied.
 
 1. **Tune `port_tol`.** Print the stub, offer it to the module it must mate
    with (or another NUGGS port you have). Clicks in with a firm quarter-turn
    and no rock → done. Too tight: +0.05 on `port_tol`, reprint. Loose enough
    to rattle: −0.05. The 0.30 default is the standard's, **unmeasured on any
    printer** — the library's own header warns not to trust it blind.
-2. **Caliper the gauge.** Strands should measure ~1.2 mm (under ~1.0 means
+2. **Caliper the one cell.** Strands should measure ~1.2 mm (under ~1.0 means
    your printer is under-extruding — raise `strand_w` to 1.6, not the flow).
-   Openings should measure ≤ 6.0 mm; if they measure over, the welfare ceiling
-   is breached — shrink `aperture_max` by the overshoot.
+   The opening should measure ≤ 6.0 mm; if it measures over, the welfare
+   ceiling is breached — shrink `aperture_max` by the overshoot.
 3. Only then print the cap. The dome's print behaviour itself is gated by
    printcheck and the test-slice; what only your printer can tell you is in
    the coupon.
@@ -202,5 +203,8 @@ plate. A real print photo is the artifact that belongs there.
 - 2026-10-05: Coupon stays off the product page until a proving print exists
   — no render-of-the-plate as a stand-in (PR #636 Drik nit). No `PM.md` on
   this design; the hold lives here.
+- 2026-10-05: Coupon slimmed to port stub + one production-pitch cell
+  (Nadia/Keel eng step on PR #636). Multi-cell puck dropped — charter
+  coverage is `port_tol` dial + caliper of `strand_w` / opening only.
 
 ## Field test log
