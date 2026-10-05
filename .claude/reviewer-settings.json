@@ -138,7 +138,10 @@
       "Bash(/usr/bin/env*git*)",
       "Bash(/bin/env*git*)",
       "Bash(*/env*git*)",
-      "Bash(env*git*)"
+      "Bash(env*git*)",
+      "Bash(*=* git*)",
+      "Bash(*=*\tgit*)",
+      "Bash(*=*  git*)"
     ]
   }
 }
