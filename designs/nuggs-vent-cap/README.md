@@ -31,7 +31,8 @@ The photos are the breathing lattice. The same file also ships a **closed**
 cap — pick it when you want to terminate a run dead rather than breathing
 (dark nesting, light blocked, almost no airflow). Same 45° cone, no crown
 bridge; physics makes it taller, **65 mm** tip-to-crown versus the lattice's
-51 mm.
+51 mm — about **4 h / ~57 g** versus the lattice's **2 h 48 m / ~30 g**
+(slice-measured), roughly double the plastic.
 
 CI gates and slices it as `vent-cap-solid`
 (`build/nuggs-vent-cap-vent-cap-solid.stl`). In the Customizer, set `lattice`
