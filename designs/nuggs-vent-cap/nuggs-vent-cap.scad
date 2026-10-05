@@ -48,10 +48,12 @@ use <nuggs-coupling.scad>
 
 /* [What to render] */
 // vent-cap = the printable lattice cap; vent-cap-solid = the closed variant
-// (lattice=false, taller by physics); coupon = print-this-first stub;
-// cutaway = section on the port-axis plane; mates / mates-ctrl / bore-clean =
-// the ci.fitchecks booleans (never printed)
-part = "vent-cap";  // [vent-cap, vent-cap-solid, coupon, cutaway, mates, mates-ctrl, bore-clean]
+// (lattice=false, taller by physics); coupon = print-this-first plate
+// (stub + cell); coupon-cell = the lattice cell alone (owners who already
+// dialed port_tol); cutaway = section on the port-axis plane; mates /
+// mates-ctrl / bore-clean / bore-clean-solid = the ci.fitchecks booleans
+// (never printed)
+part = "vent-cap";  // [vent-cap, vent-cap-solid, coupon, coupon-cell, cutaway, mates, mates-ctrl, bore-clean, bore-clean-solid]
 
 /* [The NUGGS standard - change these and nothing you already printed fits] */
 // Every value here is a nuggs_cfg() default: this module inherits the standard
@@ -235,16 +237,17 @@ module dome_outer_profile() {
              [r_crown_out, dome_top_z], [0, dome_top_z]]);
 }
 
-// The dome's meridian slabs (vertical planes through the axis, strand_w wide)
-// and latitude bands (horizontal slabs, pitch_v apart so the on-slope opening
-// between bands is aperture_max). Intersected with the shell they leave the
-// woven cone: ribs that climb at 45 deg and bands that tie them.
+// The dome's meridian slabs (half-length radial rays from the axis, strand_w
+// wide — one ray per iteration, never a full-diameter slab that doubles when
+// n_rib is odd) and latitude bands (horizontal slabs, pitch_v apart so the
+// on-slope opening between bands is aperture_max). Intersected with the shell
+// they leave the woven cone: ribs that climb at 45 deg and bands that tie them.
 module dome_grid() {
     union() {
         for (i = [0 : n_rib - 1])
             rotate([0, 0, i * 360 / n_rib])
-                translate([-strand_w / 2, -(ro + 2), z_spring - 1])
-                    cube([strand_w, 2 * (ro + 2), dome_top_z - z_spring + 2]);
+                translate([-strand_w / 2, 0, z_spring - 1])
+                    cube([strand_w, ro + 2, dome_top_z - z_spring + 2]);
         // bands start half a strand below z_spring so band 0 straddles the
         // shell's bottom plane instead of sharing it (same pitch above)
         for (k = [0 : floor((dome_top_z - z_spring) / pitch_v)])
@@ -271,10 +274,12 @@ module crown_disc() {
         translate([0, 0, z_disc])
             cylinder(r = r_disc, h = strand_w);
         union() {
+            // Half-length radial spokes — same grammar as dome_grid ribs:
+            // one spoke per iteration so an odd n_web cannot double the count.
             for (i = [0 : n_web - 1])
                 rotate([0, 0, i * 360 / n_web])
-                    translate([-strand_w / 2, -r_crown_out - 1, z_disc - 1])
-                        cube([strand_w, 2 * r_crown_out + 2, strand_w + 2]);
+                    translate([-strand_w / 2, 0, z_disc - 1])
+                        cube([strand_w, r_crown_out + 1, strand_w + 2]);
             for (j = [0 : floor((r_crown_out - strand_w / 2) / slope_pitch)])
                 translate([0, 0, z_disc + strand_w / 2])
                     difference() {
@@ -302,12 +307,25 @@ module vent_cap(lattice_on = lattice) {
             crown_disc();
         } else {
             // The solid variant: the same 45 deg cone run all the way to the
-            // axis. Support-free like the lattice shell — more blocked, no
-            // crown bridge — and taller, because rise >= radius (see header).
-            rotate_extrude()
-                polygon([[0, z_spring], [ro - seat_clear, z_spring],
-                         [ro - seat_clear, z_spring + seat_clear],
-                         [0, z_spring + ro]]);
+            // axis, as a HOLLOW shell closed only near the tip. A filled cone
+            // would put a flat disk at z_spring across the bore — an
+            // unsupported ceiling the lattice never has. Difference the
+            // outer solid against the underside 45 deg cavity (r + z =
+            // dome_c_in); the tip plug left between dome_c_in and
+            // dome_c_out is strand_w·√2 along the axis — the same shell
+            // thickness as the lattice. Support-free, more blocked, no crown
+            // bridge — and taller, because rise >= radius (see header).
+            difference() {
+                rotate_extrude()
+                    polygon([[0, z_spring], [ro - seat_clear, z_spring],
+                             [ro - seat_clear, z_spring + seat_clear],
+                             [0, z_spring + ro]]);
+                rotate_extrude()
+                    polygon([[0, z_spring - 1],
+                             [dome_c_in - z_spring, z_spring - 1],
+                             [dome_c_in - z_spring, z_spring],
+                             [0, dome_c_in]]);
+            }
         }
     }
 }
@@ -390,10 +408,11 @@ module fit_mates_ctrl() {
 // (z_tip .. z_top, the bore the coupling contract is about) must find nothing —
 // the neck's cut ran and no cutter leaked material into the passage. Scoped to
 // the throat on purpose: above z_top the dome fills the bore BY DESIGN, so a
-// whole-cap probe would fail on the feature, not the defect.
-module fit_bore_clean() {
+// whole-cap probe would fail on the feature, not the defect. lattice_on
+// selects which variant is probed — both claim a clean throat.
+module fit_bore_clean(lattice_on = lattice) {
     intersection() {
-        vent_cap();
+        vent_cap(lattice_on = lattice_on);
         translate([0, 0, (nuggs_z_tip(cfg_d()) + z_top) / 2])
             cylinder(r = ri - 0.5, h = z_top - nuggs_z_tip(cfg_d()), center = true);
     }
@@ -406,8 +425,10 @@ module fit_bore_clean() {
 if (part == "vent-cap") vent_cap();
 else if (part == "vent-cap-solid") vent_cap(lattice_on = false);
 else if (part == "coupon") vent_cap_coupon();
+else if (part == "coupon-cell") lattice_gauge();
 else if (part == "cutaway") cap_cutaway();
 else if (part == "mates") fit_mates();
 else if (part == "mates-ctrl") fit_mates_ctrl();
 else if (part == "bore-clean") fit_bore_clean();
+else if (part == "bore-clean-solid") fit_bore_clean(lattice_on = false);
 else assert(false, str("unknown part: ", part));

@@ -82,7 +82,12 @@ Both dome surfaces are lines of constant `r + z` — 45° in the r–z plane:
   widest radius the grid reaches — the tube OD `ro` at the spring rim, the
   worst case for any `wall` — and an assert holds the built chord there
   (`rib_gap_max` = 5.80 mm) under `aperture_max`;
-  `n_web = 15` crown spokes from the chord bound at the rim.
+  `n_web = 15` crown spokes from the chord bound at the rim. Ribs and crown
+  spokes are **half-length radial slabs** (axis → rim), one ray per iteration:
+  a full-diameter slab doubles the count whenever `n_rib`/`n_web` is odd
+  (dwarf settings `aperture_max=5`/`strand_w=1.6` hit `n_rib=41` and would
+  shrink spring-rim openings to ~1.65 mm while the open-area assert still
+  read the intended single-ray pitch).
 - **Open area**: the on-slope cell fraction is
   `(aperture/ (aperture+strand))² = 0.694` — well over the 30 % floor, and
   asserted so a knob pairing that chokes the vent fails loudly.
@@ -138,20 +143,27 @@ renders empty, the positive check proves nothing.
 ### The solid variant costs one boolean — and it is taller by physics
 
 `lattice=false` (`part="vent-cap-solid"`) runs the same 45° cone all the way to
-the axis: support-free like the lattice shell (never past 45°), more blocked,
-no crown bridge — and it **cannot** respect the 40 mm length budget, because
-closing 40 mm of radius continuously needs 40 mm of rise. It ends where the
-geometry puts it (tip at `z_spring + ro` = 54.7 mm), not where the lattice cap
-does. It ships because the brief called it "cheap either way", and it is: one
+the axis as a **hollow shell** closed only near the tip: the outer solid is
+differenced against the underside 45° cavity (`r + z = dome_c_in`), leaving a
+tip plug of thickness `strand_w·√2` along the axis — the same shell thickness
+as the lattice. A filled cone would put a flat disk at `z_spring` across the
+bore, an unsupported ceiling the lattice never has; the hollow form is
+support-free like the lattice shell (never past 45°), more blocked, no crown
+bridge — and it **cannot** respect the 40 mm length budget, because closing
+40 mm of radius continuously needs 40 mm of rise. It ends where the geometry
+puts it (tip at `z_spring + ro` = 54.7 mm), not where the lattice cap does.
+It ships because the brief called it "cheap either way", and it is: one
 boolean, no second geometry path to maintain. Owners who want maximum light
-block-out (darkness for nesting) over airflow take the taller cap.
+block-out (darkness for nesting) over airflow take the taller cap. The
+`bore-clean-solid` fitcheck proves the hollow solid still leaves the throat
+clear (same probe as the lattice).
 
-Printcheck puts a number on what the lattice buys: the lattice variant's
-unbridgeable downward-facing surface is **1 %** of the part (its 45° strands
-are all sub-5 mm bridges), while the solid variant's smooth 45° face — sitting
-*exactly at* the doctrine's limit — is **17 %** (printcheck counts the limit
-itself as overhang, stricter than the slicer rule-of-thumb). The lattice isn't
-just the airflow option: it is the one with support margin.
+Printcheck on the filled cone used to put a number on what the lattice buys:
+the lattice's unbridgeable downward-facing surface is **1 %** of the part
+(its 45° strands are all sub-5 mm bridges), while the filled solid's flat
+disk at `z_spring` plus its smooth 45° face sat at **17 %**. Hollowing the
+solid (this tip) drops that ceiling; the lattice remains the airflow option
+and the one with support margin on its bridged crown.
 
 ## Print orientation
 
@@ -174,7 +186,9 @@ The coupon (`build/nuggs-vent-cap-coupon.stl`, `part="coupon"` in
 port stub (`nuggs_neck` at `z_top + 8`) and **one** flat cell printed on the
 bed at the dome's on-slope pitch (`slope_pitch = aperture_max + strand_w`) —
 not a multi-cell puck. Both come from the production modules; nothing is
-copied.
+copied. Owners who already dialed `port_tol` on another NUGGS module can skip
+the stub and print only the cell: `part="coupon-cell"` (same production
+`lattice_gauge()`, no copied geometry).
 
 1. **Tune `port_tol`.** Print the stub, offer it to the module it must mate
    with (or another NUGGS port you have). Clicks in with a firm quarter-turn
@@ -215,5 +229,11 @@ plate. A real print photo is the artifact that belongs there.
   on the Parts line, when the stub can be skipped, "flat cell on the bed
   at the dome's on-slope pitch", and caliper the opening at the top face
   not the base. Stub height and empty field-test log left alone.
+- 2026-10-05: CodeRabbit on 25f41e8 — three findings verified and fixed:
+  (1) solid cone hollowed (open underside + tip plug) so the support-free
+  claim holds; `bore-clean-solid` fitcheck added; (2) rib/web slabs made
+  half-length so odd counts (dwarf 5/1.6 → n_rib=41) no longer double the
+  rays; (3) `part="coupon-cell"` exposes the cell-only print the README
+  already described.
 
 ## Field test log
