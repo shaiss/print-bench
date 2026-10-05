@@ -329,9 +329,10 @@ strip_x1    = ring_col_x[1] + throat_or(max(coupon_tols)) + 6.4;
 strip_y     = 47;    // half-width; +1 mm so size-8 Bold does not notch the long edge
 // Integer labels (tol×100) in Bold: size-4 default-sans strokes were ~one
 // extrusion width and printed as mush. Size 8 Bold is ~two line widths.
-// Centres at ±(strip_y-4.5) = ±42.5: outboard of the largest ring OD
-// (~38.1, outer y ≈ ±40.05) with ~4.5 mm to the ±47 edge — the size-8
-// em box is ~4 mm half-height, so it no longer clips (Drik, PR #813).
+// Centres at ±(strip_y-4.5) = ±42.5: outboard of the largest ring's outer
+// edge at y ≈ ±38.1 (row ±21 + throat_or(0.38) = 17.08; OD ≈ 34.2) with
+// ~4.5 mm to the ±47 edge — the size-8 em box is ~4 mm half-height, so
+// it clears the ring (~0.4 mm) and no longer clips the edge (Drik, PR #813).
 coupon_label_size = 8;
 coupon_label_font = "Liberation Sans:style=Bold";
 coupon_label_cut  = 0.6;   // engraving depth, mm (≥ two 0.2 mm layers)
