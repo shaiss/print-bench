@@ -13,7 +13,8 @@ The load-bearing check parses each reviewer job's ordered ship steps and asserts
   so a scrambled reference (slot 1 pulling `model4`) is caught, not just the count;
 * the step's literal `anthropic_api_key: secrets.<X>` is the registry link's secret
   at that position — so slots 1–3 wire `ZAI_KEY`, slots 4–6 `ANTHROPIC_API_KEY`
-  (the #298 Anthropic tail), and swapping one is caught;
+  (the #298 Anthropic tail), and slots 7–8 `OPENROUTER_API_KEY` (the free OSS
+  tail); swapping one is caught;
 * the step's `ANTHROPIC_BASE_URL` matches the link's `base_url` exactly — present
   and equal for Z.AI (the Anthropic-compatible endpoint), absent for Anthropic —
   so pointing a slot at the wrong endpoint is caught.
@@ -674,7 +675,7 @@ ROUTINES = {
         workflow="design-run.yml", chain="design-run",
         conf=".github/design-run.conf", job="run",
         resolve_id="chain", prefix="run",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
         # The SHIP-LOCK routines run the whole skill: no backstop, no
         # allow-list, bypassPermissions on every link.
@@ -684,7 +685,7 @@ ROUTINES = {
         workflow="backlog-burn.yml", chain="backlog-burn",
         conf=".github/backlog-burn.conf", job="burn",
         resolve_id="chain", prefix="ship",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
         permission_mode="bypassPermissions", backstop=None, mcp_config=None,
         allowed=None),
@@ -692,7 +693,7 @@ ROUTINES = {
         workflow="chunker.yml", chain="chunker",
         conf=".github/chunker.conf", job="chunk",
         resolve_id="chain", prefix="run",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         # The chunker's steps set no --permission-mode (the live value when
         # the row was enrolled — adding dontAsk is a deliberate row edit).
@@ -703,19 +704,19 @@ ROUTINES = {
         workflow="labeler.yml", chain="labeler",
         conf=".github/labeler.conf", job="label",
         resolve_id="chain", prefix="run",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/labeler-settings.json",
         mcp_config=None,
         allowed="Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"),
     # #544 Part B: the eight formerly single-link routines, one row each —
     # the GLM head (one link, or the sign-off's three), then the two-link
-    # Anthropic tail. The scout was the template.
+    # Anthropic tail, then the two-link OpenRouter free OSS tail.
     "scout": Routine(
         workflow="product-scout.yml", chain="scout",
         conf=".github/product-scout.conf", job="scout",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic"),
+        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/scout-settings.json",
         mcp_config=".claude/skills/product-scout/scout-mcp.json",
@@ -727,7 +728,7 @@ ROUTINES = {
         workflow="spike-converter.yml", chain="spike-converter",
         conf=".github/spike-converter.conf", job="convert",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic"),
+        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         # Its own backstop, the SCOUT's reused filing server (#439: one
         # filing surface), its own read wrapper.
@@ -741,7 +742,7 @@ ROUTINES = {
         workflow="adoption-assessor.yml", chain="adoption-assessor",
         conf=".github/adoption-assessor.conf", job="assess",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic"),
+        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/adoption-assessor-settings.json",
         mcp_config=".claude/skills/adoption-assessor/assessor-mcp.json",
@@ -753,7 +754,7 @@ ROUTINES = {
         workflow="growth-twitter.yml", chain="growth-twitter",
         conf=".github/growth-twitter.conf", job="drain",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic"),
+        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         # Oracle-shaped: no wrapper, the posting tool plus the read-only
         # file tools and nothing else.
@@ -764,7 +765,7 @@ ROUTINES = {
         workflow="reeve-growth.yml", chain="reeve-growth",
         conf=".github/reeve-growth.conf", job="reeve-growth",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic"),
+        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/reeve-growth-settings.json",
         mcp_config=".claude/skills/growth-queue/queue-mcp.json",
@@ -777,7 +778,7 @@ ROUTINES = {
         workflow="wright.yml", chain="wright",
         conf=".github/wright.conf", job="propose",
         resolve_id="propose_chain", prefix="propose",
-        layout=("zai", "anthropic", "anthropic"),
+        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/wright-settings.json",
         mcp_config=".claude/skills/wright/wright-mcp.json",
@@ -789,7 +790,7 @@ ROUTINES = {
         workflow="wright.yml", chain="wright-signoff",
         conf=".github/wright.conf", job="signoff",
         resolve_id="signoff_chain", prefix="signoff",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/reeve-signoff-settings.json",
         mcp_config=".claude/skills/reeve-signoff/signoff-mcp.json",
@@ -804,7 +805,7 @@ ROUTINES = {
         workflow="reeve.yml", chain="reeve-greenlight",
         conf=".github/reeve.conf", job="greenlight",
         resolve_id="chain", prefix="run",
-        layout=("zai", "anthropic", "anthropic"),
+        layout=("zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/reeve-settings.json",
         mcp_config=None,
@@ -934,7 +935,9 @@ ANDON_EXPLAIN_LEG = "vars.AI_ANDON_CORD == 'pulled'"
 # Anthropic tail wires CLAUDE_KEY, a historical alias — without it that tail
 # would be invisible). So a NEW registry provider's secret enrols its
 # spenders the moment the stanza lands, with no edit here.
-_LITERAL_PROVIDER_SECRETS = frozenset({"ANTHROPIC_API_KEY", "ZAI_KEY", "CLAUDE_KEY"})
+_LITERAL_PROVIDER_SECRETS = frozenset({
+    "ANTHROPIC_API_KEY", "ZAI_KEY", "CLAUDE_KEY", "OPENROUTER_API_KEY",
+})
 _ALIAS_MARKER_RE = re.compile(r"registry-secret-alias:\s*(\w+)=(\w+)")
 
 
@@ -1994,10 +1997,16 @@ def test_ship_step_pin_rejects_a_tail_step_rewired_to_the_other_provider():
 
 
 def _without_anthropic_tail(text: str, row: Routine) -> str:
-    """A copy of a routine workflow with its Anthropic tail steps deleted —
-    a workflow that reads only ONE provider's steps against a mixed chain."""
+    """A copy of a routine workflow with every non-head-provider tail step
+    deleted — a walk that keeps only the GLM links against a mixed chain
+    (Anthropic + OpenRouter tails removed)."""
     out = text
-    for link in (4, 5):
+    # Delete from the end so earlier link numbers stay stable while we chop.
+    links = sorted(
+        s["link"] for s in _routine_ship_steps(
+            _routine_job_text(out, row), row.resolve_id)
+        if s["link"] and s["link"] > 3)
+    for link in reversed(links):
         chunk = _tail_step_chunk(out, row, link)
         out = out.replace("\n      - " + chunk, "", 1)
     assert out != text
@@ -2005,9 +2014,9 @@ def _without_anthropic_tail(text: str, row: Routine) -> str:
 
 
 def test_ship_step_pin_rejects_a_workflow_carrying_one_providers_steps_only():
-    # NEGATIVE CONTROL (iii): delete the Anthropic tail from a copy of
-    # labeler.yml so it walks only the GLM steps against the mixed chain —
-    # the one-step-per-link count must fail (links 4 and 5 have no step).
+    # NEGATIVE CONTROL (iii): delete the Anthropic + OpenRouter tails from a
+    # copy of labeler.yml so it walks only the GLM steps against the mixed
+    # chain — the one-step-per-link count must fail (links 4..N have no step).
     row = ROUTINES["labeler"]
     tampered = _without_anthropic_tail(_routine_text(row.workflow), row)
     reg = Registry.load(str(REGISTRY))
@@ -2269,10 +2278,10 @@ def _assert_routine_skip_notice_fires_only_without_any_key(
     assert 'echo "key_present=$key"' in policy[0], (
         f"{workflow}: the policy step no longer emits key_present — the "
         "any-key gate the notice / triage / red steps read is unfilled")
-    assert ('if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; '
-            'else key=0; fi') in policy[0], (
+    assert ('if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ] || [ "$openrouter_key" = 1 ]; '
+            'then key=1; else key=0; fi') in policy[0], (
         f"{workflow}: the policy step's key_present is no longer the "
-        "either-key derivation (zai OR anthropic) — a keyless head would "
+        "either-key derivation (zai OR anthropic OR openrouter) — a keyless head would "
         "skip the whole run instead of falling through to the tail")
     notice = [c for c in chunks if _NO_KEY_NOTICE in c]
     assert len(notice) == 1, (
@@ -2316,7 +2325,8 @@ def test_skip_notice_guard_rejects_a_head_only_key_present_derivation():
     # alone — the whole run would skip on a keyless head, tail or no tail.
     row = ROUTINES["labeler"]
     text = _routine_text(row.workflow)
-    either = 'if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi'
+    either = ('if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ] || [ "$openrouter_key" = 1 ]; '
+              'then key=1; else key=0; fi')
     assert either in text, "tamper target not found — the fixture is stale"
     tampered = text.replace(either, 'if [ "$zai_key" = 1 ]; then key=1; else key=0; fi', 1)
     with pytest.raises(AssertionError, match="either-key derivation"):
@@ -3390,8 +3400,8 @@ def test_provider_triage_action_declares_the_io_its_callers_use():
     # callers depend on (the classify chain input, both provider keys, the token,
     # the escalate switch, and the class/reason outputs the callers read).
     action = TRIAGE_ACTION.read_text(encoding="utf-8")
-    for decl in ("chain:", "zai-key:", "anthropic-key:", "github-token:",
-                 "context:", "escalate:"):
+    for decl in ("chain:", "zai-key:", "anthropic-key:", "openrouter-key:",
+                 "github-token:", "context:", "escalate:"):
         assert decl in action, f"provider-triage no longer declares input {decl!r}"
     assert re.search(r"^outputs:", action, re.MULTILINE), "provider-triage lost its outputs block"
     for out in ("class:", "reason:"):

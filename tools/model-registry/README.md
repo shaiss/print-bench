@@ -251,3 +251,29 @@ the chain. The test holds every provider-triage `context:` to its raw source
 text. It also scans every workflow's `with:`/`env:` values for one an unquoted
 ` #` cut short, with inline negative controls for both checks. Its tiny stdlib
 scalar reader is cross-checked against PyYAML wherever PyYAML is importable.
+
+## OpenRouter free OSS tail
+
+Every cross-provider walk (the `review` chain and the twelve scheduled
+routines) ends with two OpenRouter links after the Anthropic tail:
+
+`google/gemma-4-31b-it:free` and
+`nvidia/nemotron-3-super-120b-a12b:free`. Oracle role chains and
+`groomer-narrative` stay vendor-pure and do not walk OpenRouter.
+
+- **Provider:** `[provider:openrouter]` with `base_url = https://openrouter.ai/api`
+  (Anthropic-compatible; Claude Code appends `/v1/messages`).
+- **Secret:** `OPENROUTER_API_KEY`. Optional. Without it the OpenRouter steps
+  skip (`openrouter_key_present != 1`) and the walk is Z.AI → Anthropic, as
+  before. Never commit the key:
+
+```bash
+gh secret set OPENROUTER_API_KEY --repo shaiss/print-bench
+```
+
+`model-smoke.yml` and `.github/actions/provider-triage` pass
+`OPENROUTER_API_KEY` into `model_registry smoke` / `classify` the same way they
+pass `ZAI_KEY` and `ANTHROPIC_API_KEY`. A missing OpenRouter secret is a skip,
+not a fail: smoke reports `secret OPENROUTER_API_KEY not set` for those links.
+Free-tier endpoints throttle; they are a last resort, not a funded replacement.
+
