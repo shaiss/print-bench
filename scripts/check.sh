@@ -704,6 +704,20 @@ if ! ./scripts/reviewer-signoff.sh --selftest; then
   fail=1
 fi
 
+# reviewer-posted artifact check (scripts/reviewer-posted.sh, issue #762): the
+# reviewer-outcome reader auto-review.yml's chain walk and round stamp key on —
+# did THIS reviewer's MCP-assembled sign-off for THIS head sha land from
+# github-actions[bot] (author+suffix bound, discussion_r4185453576)? An exit-0
+# reviewer link that posted nothing used to read as success and was stamped a
+# completed round (#755/#756), so the selftest is the only thing that proves
+# the reader still passes a trusted MCP post, still rejects a planted/wrong-
+# author/stale-sha/silent/impostor one, and still refuses (rather than
+# answering `false`) a typo'd reviewer or sha.
+echo "-- reviewer-posted selftest: scripts/reviewer-posted.sh --selftest"
+if ! ./scripts/reviewer-posted.sh --selftest; then
+  fail=1
+fi
+
 # vercel-ignore-build selftest (scripts/vercel-ignore-build.sh --selftest): the
 # Vercel "Ignored Build Step" gate decides whether a preview deployment is worth
 # building from the changed-file list alone. The classifier is a pure function
