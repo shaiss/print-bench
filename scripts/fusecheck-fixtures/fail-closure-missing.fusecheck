@@ -1,0 +1,5 @@
+# Fusecheck fixture (scripts/fusecheck-check.sh --selftest, issue #766):
+# `nope` is not a dispatch branch anywhere in closure-child.scad's include
+# closure. The control proof must FAIL loudly (the refusal half).
+assert fusecheck-fixtures-separable.stl 2
+control nope 1
