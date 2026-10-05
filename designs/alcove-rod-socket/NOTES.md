@@ -197,21 +197,34 @@ production modules — what you print *is* what ships.
 Measure the pole with calipers first and set `rod_d` to the *barrel* reading
 (where the socket sits), not the finial/ring size.
 
-### 25 mm reference coupons (B5 / #809)
+### 25 mm reference size (B5 / B5b)
 
-For a **25 mm** closet-rod reference (brief origin size), print these gated
-parts instead of hand-overriding `rod_d`:
+For a **25.0 mm** closet-rod reference, print the gated coupons first, then
+the gated holders. Every `*-25` part pins `rod_d` at **25.0** in the geometry
+(`rod_clearance` still defaults to 0.6 unless you change it in Customizer on
+the plain parts — see README for inch-rod and retune paths).
 
-| Part | Wrapper | What it proves |
+| Part | Wrapper | Role |
 |---|---|---|
-| `thread-coupon-25` | `alcove-rod-socket-thread-coupon-25.scad` | printed thread at 25 mm major stack |
-| `bore-coupon-25` | `alcove-rod-socket-bore-coupon-25.scad` | slip bore at `rod_clearance=0.6` → **25.6 mm** Ø |
+| `thread-coupon-25` | `alcove-rod-socket-thread-coupon-25.scad` | tune `thread_tol` at 25 mm |
+| `bore-coupon-25` | `alcove-rod-socket-bore-coupon-25.scad` | tune `rod_clearance` → **25.6 mm** bore at default |
+| `boss-25` | `alcove-rod-socket-boss-25.scad` | production wall boss (CI-gated; not field-tested yet) |
+| `collar-25` | `alcove-rod-socket-collar-25.scad` | production deep collar (28 mm engagement) |
+| `collar-shallow-25` | `alcove-rod-socket-collar-shallow-25.scad` | far-side shallow collar (12 mm) |
 
-Same tune flow as the 40 mm coupons (`thread_tol`, `rod_clearance`). US rods
-sold as 1″ often measure **25.4 mm** — see README (raise `rod_clearance` or
-set `rod_d = 25.4`). Boss / collar at 25 mm are **not** Release-gated in B5;
-after coupons fit, Customizer `rod_d = 25` + `part` boss/collar exports the
-holders (32 flutes auto). Gated `boss-25` / `collar-25` parts are backlog B5b.
+Same tune flow as 40 mm. The gated `*-25` holders assume default **`thread_tol`**
+(0.3) and **`rod_clearance`** (0.6). If either coupon settles elsewhere, use
+plain `boss` / `collar` / `collar-shallow` with `rod_d = 25` and your tuned
+`thread_tol` / `rod_clearance` (the gated `*-25` exports stay pinned to defaults
+until a future pinned export exists). Gated **`boss-25`** is **`screw_count=1`**
+only; heavy closet installs need plain **`boss`** with `rod_d = 25` and
+`screw_count = 2` (or a stud). At 25 mm the boss flange is about **Ø43.8**
+(vs Ø58.8 at 40 mm).
+
+**Field question (Drik / #812):** at 25 mm the collar OD is **39 mm** and the
+auto-capped grip is **32 flutes** (tighter pitch than 40 mm / 36). Wet-hand
+grip vs the 40 mm collar is unknown — do not retune `knurl_flutes` without a
+print report.
 
 ## Hardware: screw length and load rating
 
