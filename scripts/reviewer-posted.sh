@@ -9,36 +9,50 @@
 # routine-lock-cleanup.sh (#538) does for the ship routines: did a review
 # comment carrying that reviewer's sign-off marker for THIS head sha land?
 #
-# The marker is the one the reviewer skills emit as the last line of their PR
-# comment (.claude/skills/{jane,drik}-review/SKILL.md) and the
-# `reviewer-signoff` status already keys on —
+# Trust boundary (the MEDIUM finding on PR #771 / discussion_r4185453576):
+# a planted `<!-- JANE_SIGNOFF … -->` / `<!-- DRIK_SIGNOFF … -->` substring
+# from any other author must NOT count. The only writer of those markers is
+# `.claude/reviewer-post/reviewer_mcp.py`, which posts via the workflow's
+# `GITHUB_TOKEN` as `github-actions[bot]` (GraphQL login `github-actions`)
+# to `POST /repos/.../issues/{REVIEWER_PR}/comments`, assembling
+#   {caller body}\n\n{marker}\n\n{FOOTER}
+# server-side. So a served verdict requires ALL of:
+#   1. an Actions-bot author (the MCP posting identity — sibling pin:
+#      coach-lock-check.sh);
+#   2. the body *ends* with the MCP-assembled marker-then-footer suffix for
+#      THIS reviewer and THIS head sha (a Jane/Drik/PM sibling that shares
+#      github-actions[bot] always ends with its OWN family marker, so a
+#      planted cross-family marker in the caller body cannot be the suffix —
+#      the same reason coach-lock-check requires the suffix, not a substring);
+#   3. when `--since` is set, `created_at >= since` (this run/round — the
+#      coach-lock-check pattern), so a lock from an earlier run on the same
+#      head cannot short-circuit a fresh chain walk.
+#
+# The marker shape is the one the reviewer MCP emits and
+# `reviewer-signoff` already keys on —
 #   <!-- JANE_SIGNOFF sha=<40hex> verdict=pass|block fuse=none|acknowledged -->
 #   <!-- DRIK_SIGNOFF sha=<40hex> verdict=pass|block fuse=none|acknowledged -->
-# — read here with the SAME case-insensitive marker-then-sha two-step the
-# signoff-status job uses, so the two readers can never disagree about what
-# counts as posted. A marker for an older head sha does not count: rounds are
-# per-push, so a marker naming this sha is the only evidence a review of this
-# commit exists.
+# — exact family spelling (the MCP never case-folds), with the hardcoded
+# Claude Code footer byte-identical to reviewer_mcp.py's FOOTER.
 #
 # Usage:
 #   scripts/reviewer-posted.sh check --pr <N> --sha <40hex> --reviewer jane|drik
-#       [--repo <owner/name>] [--bodies-file <path>]
+#       [--repo <owner/name>] [--comments-file <path>] [--since <ISO8601>]
 #     Prints `true` or `false` (exit 0 either way — a clean negative is a
 #     decision, not an error) and, when $GITHUB_OUTPUT is set, appends
-#     `served=<value>` to it. --bodies-file drives the core over a snapshot
-#     of the PR's comment/review bodies instead of the live thread (the
-#     selftest's seam); live mode needs GH_TOKEN and reads all three places a
-#     marker can land (issue comments, PR review bodies, review line comments
-#     — the signoff-status job's own three sources).
+#     `served=<value>` to it. --comments-file drives the core over a JSON
+#     snapshot of issue comments (the selftest's seam); live mode needs
+#     GH_TOKEN and reads ONLY issue comments — the MCP's sole write target.
 #     Exit 1 = the artifact read itself failed: a check that cannot read must
 #     fail loud, never guess — a silent `false` here would fail the walk open.
 #
 #   scripts/reviewer-posted.sh --selftest
-#     The decision rows (posted / not posted / wrong sha / malformed /
-#     case-folded marker / marker in a review body) plus the refusal rows
-#     (typo'd reviewer, bad sha, live mode without GH_TOKEN) and a drift pin
-#     against the marker literals the two skills actually document — so this
-#     script cannot quietly stop matching the format the reviewers emit.
+#     The decision rows (posted / not posted / wrong sha / wrong author /
+#     planted suffix / sibling family / stale-since / malformed) plus the
+#     refusal rows (typo'd reviewer, bad sha, live mode without GH_TOKEN)
+#     and a drift pin against the MCP's FOOTER + the marker literals the
+#     two skills document — so this script cannot quietly stop matching
+#     what the posting surface emits.
 #
 # Consumers: auto-review.yml — the per-link artifact checks after each
 # Jane/Drik ship step (the chain walk's fall-through key), and the review
@@ -48,50 +62,148 @@
 # coach's COACH-LOCK is a dedupe lock, not a completion signal).
 set -euo pipefail
 
+# A prior Bash-capable coach/reviewer step can write PYTHONPATH/LD_PRELOAD
+# via GITHUB_ENV. Isolated mode ignores those; also drop them in this shell
+# so `gh` is not preloaded either (coach-lock-check.sh's belt).
+unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+      PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+      DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+export PYTHONNOUSERSITE=1
+
 cd "$(dirname "$0")/.."
+
+# Prefer the system interpreter; -I ignores PYTHONPATH/PYTHONHOME/user site.
+if [[ -x /usr/bin/python3 ]]; then
+  PYTHON3=/usr/bin/python3
+else
+  PYTHON3=python3
+fi
+
+# Byte-identical to reviewer_mcp.py FOOTER — the MCP always appends this
+# after the server-assembled marker. A planted marker without this exact
+# footer is not an MCP post.
+REVIEWER_FOOTER=$'---\n_Generated by [Claude Code](https://claude.ai/code)_'
+export REVIEWER_FOOTER
 
 usage() {  # [message]
   [ $# -eq 0 ] || echo "reviewer-posted: $*" >&2
   cat >&2 <<'EOF'
 usage: scripts/reviewer-posted.sh check --pr <N> --sha <40hex> --reviewer jane|drik
-           [--repo <owner/name>] [--bodies-file <path>]
+           [--repo <owner/name>] [--comments-file <path>] [--since <ISO8601>]
        scripts/reviewer-posted.sh --selftest
 EOF
   exit 2
 }
 
-# The pure core: does the bodies text carry this reviewer's sign-off marker
-# naming this sha? Marker first (case-insensitive, `[^>]*-->` so the match is
-# the whole marker — the signoff-status job's own expression), then the sha
-# inside what that matched. One line per marker (the skills put it on its own
-# line), which is what makes the two greps compose.
-served_from_bodies() {  # $1 = bodies text, $2 = sha, $3 = reviewer
-  local prefix="${3^^}_SIGNOFF"
-  if grep -oiE "<!-- ${prefix} [^>]*-->" <<<"$1" | grep -qiF "sha=$2"; then
-    printf 'true'
-  else
-    printf 'false'
-  fi
+# The pure core: does the comments JSON carry an Actions-bot issue comment
+# whose body ends with the MCP-assembled marker-then-footer suffix for this
+# reviewer + sha (and, when SINCE is set, created_at >= SINCE)?
+served_from_comments() {  # stdin = comments JSON; env: REVIEWER_SHA, REVIEWER_FAMILY, REVIEWER_SINCE?, REVIEWER_FOOTER
+  "$PYTHON3" -I -c '
+import json, os, sys
+
+FOOTER = os.environ["REVIEWER_FOOTER"]
+SHA = os.environ["REVIEWER_SHA"]
+FAMILY = os.environ["REVIEWER_FAMILY"]
+SINCE = os.environ.get("REVIEWER_SINCE", "").strip()
+BOT = "github-actions"
+
+# Exact MCP-assembled suffixes for THIS family + sha. verdict/fuse are the
+# closed sets reviewer_mcp.py validates before posting — anything else is
+# not an MCP post. Case-sensitive family: the MCP emits uppercase.
+# post_review assembles `{body}\n\n{marker}\n\n{FOOTER}`; a sibling
+# Actions-bot post always ends with its OWN family marker before the same
+# footer, so a planted cross-family marker in the caller body cannot be
+# the suffix (coach-lock-check.sh'\''s reason for requiring the suffix).
+SUFFIXES = tuple(
+    f"<!-- {FAMILY} sha={SHA} verdict={v} fuse={f} -->\n\n{FOOTER}"
+    for v in ("pass", "block")
+    for f in ("none", "acknowledged")
+)
+
+
+def is_actions_bot(comment):
+    """REST login is github-actions[bot]; GraphQL is github-actions."""
+    user = comment.get("user") or {}
+    login = (user.get("login") or "").strip().lower()
+    if login.endswith("[bot]"):
+        login = login[:-5]
+    return login == BOT
+
+
+def load_comments(raw):
+    """Decode `gh api --paginate` output into one comment list.
+
+    One page is a JSON array. Multiple pages are either concatenated arrays
+    (default --paginate) or an outer array of page arrays (--slurp). Either
+    way every comment must be visible — a marker on page 2 must still count.
+    """
+    raw = raw.strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        idx = 0
+        out = []
+        while idx < len(raw):
+            while idx < len(raw) and raw[idx].isspace():
+                idx += 1
+            if idx >= len(raw):
+                break
+            obj, end = decoder.raw_decode(raw, idx)
+            if isinstance(obj, list):
+                out.extend(obj)
+            else:
+                out.append(obj)
+            idx = end
+        return out
+    if isinstance(data, list):
+        if data and all(isinstance(p, list) for p in data):
+            return [c for page in data for c in page]
+        return data
+    return [data]
+
+
+def ends_with_mcp_suffix(body):
+    return any(body.endswith(s) for s in SUFFIXES)
+
+
+raw = sys.stdin.read()
+for c in load_comments(raw):
+    if not is_actions_bot(c):
+        continue
+    body = c.get("body") or ""
+    if not ends_with_mcp_suffix(body):
+        continue
+    if SINCE:
+        created = (c.get("created_at") or "").strip()
+        if not created or created < SINCE:
+            continue
+    print("true")
+    raise SystemExit(0)
+print("false")
+'
 }
 
-# The live thread read: the three sources a marker can land in, in the order
-# the signoff-status job reads them. Any gh failure aborts the function, and
-# the caller turns that into exit 1 — an unreadable thread is never a `false`.
-gh_bodies() {  # $1 = owner/name, $2 = PR number
-  gh api --paginate "/repos/$1/issues/$2/comments" --jq '.[].body'
-  gh api --paginate "/repos/$1/pulls/$2/reviews"   --jq '.[].body'
-  gh api --paginate "/repos/$1/pulls/$2/comments"  --jq '.[].body'
+# The live thread read: ONLY issue comments — the MCP's sole write target
+# (POST /issues/{n}/comments). Review bodies and line comments are out of
+# scope; a planted marker there cannot satisfy the walk/stamp.
+gh_comments() {  # $1 = owner/name, $2 = PR number
+  gh api --paginate --slurp "/repos/$1/issues/$2/comments?per_page=100"
 }
 
 check() {
-  local reviewer="" pr="" sha="" repo="${GITHUB_REPOSITORY:-}" bodies_file=""
+  local reviewer="" pr="" sha="" repo="${GITHUB_REPOSITORY:-}" comments_file="" since=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --pr) pr="${2:?}"; shift 2 ;;
       --sha) sha="${2:?}"; shift 2 ;;
       --reviewer) reviewer="${2:?}"; shift 2 ;;
       --repo) repo="${2:?}"; shift 2 ;;
-      --bodies-file) bodies_file="${2:?}"; shift 2 ;;
+      --comments-file) comments_file="${2:?}"; shift 2 ;;
+      --since) since="${2:?}"; shift 2 ;;
       *) usage "unknown option: $1" ;;
     esac
   done
@@ -101,22 +213,35 @@ check() {
     || usage "--reviewer must be jane or drik (got: ${reviewer:-empty})"
   [[ "$pr" =~ ^[0-9]+$ ]] || usage "--pr must be a number (got: ${pr:-empty})"
   [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || usage "--sha must be 40 hex chars (got: ${sha:-empty})"
+  if [[ -n "$since" ]]; then
+    # ISO-8601 UTC to the second — lexical compare matches chronological
+    # order for this fixed-width form (coach-lock-check.sh's rule).
+    [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
+      || usage "--since must be UTC ISO8601 to the second (YYYY-MM-DDTHH:MM:SSZ); got ${since}"
+  fi
 
-  local bodies
-  if [[ -n "$bodies_file" ]]; then
-    bodies="$(cat -- "$bodies_file")"
+  local comments
+  if [[ -n "$comments_file" ]]; then
+    comments="$(cat -- "$comments_file")"
   else
     command -v gh >/dev/null 2>&1 || { echo "reviewer-posted: gh is not installed" >&2; exit 1; }
     [[ -n "${GH_TOKEN:-}" ]] || { echo "reviewer-posted: GH_TOKEN is not set (live check needs it)" >&2; exit 1; }
     [[ -n "$repo" ]] || usage "--repo is required in live mode (or set GITHUB_REPOSITORY)"
-    if ! bodies="$(gh_bodies "$repo" "$pr")"; then
-      echo "reviewer-posted: could not read PR #$pr's comments/reviews" >&2
+    if ! comments="$(gh_comments "$repo" "$pr")"; then
+      echo "reviewer-posted: could not read PR #$pr's issue comments" >&2
       exit 1
     fi
   fi
 
   local verdict
-  verdict="$(served_from_bodies "$bodies" "$sha" "$reviewer")"
+  export REVIEWER_SHA="$sha"
+  export REVIEWER_FAMILY="${reviewer^^}_SIGNOFF"
+  if [[ -n "$since" ]]; then
+    export REVIEWER_SINCE="$since"
+  else
+    unset REVIEWER_SINCE || true
+  fi
+  verdict="$(served_from_comments <<<"$comments")"
   printf '%s\n' "$verdict"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf 'served=%s\n' "$verdict" >>"$GITHUB_OUTPUT"
@@ -130,7 +255,7 @@ selftest() {
   local fail=0
   ok()  { echo "selftest ok    $1"; }
   bad() { echo "selftest FAIL  $1"; fail=1; }
-  # row <label> <expected> <script-args...>: run the real CLI over a bodies
+  # row <label> <expected> <script-args...>: run the real CLI over a comments
   # snapshot and compare the printed verdict.
   row() {
     local label="$1" want="$2" got rc=0
@@ -150,46 +275,185 @@ selftest() {
 
   local head="0123456789abcdef0123456789abcdef01234567"
   local old="fedcba9876543210fedcba9876543210fedcba98"
+  local footer=$'---\n_Generated by [Claude Code](https://claude.ai/code)_'
 
-  printf 'Jane here — clean print call.\n<!-- JANE_SIGNOFF sha=%s verdict=pass fuse=none -->\n' "$head" >"$tmp/posted"
-  printf 'Jane here — clean print call.\n<!-- JANE_SIGNOFF sha=%s verdict=pass fuse=none -->\n' "$old" >"$tmp/stale"
-  printf 'Jane looked, found nothing to say.\n' >"$tmp/silent"
-  printf 'review body\n<!-- DRIK_SIGNOFF sha=%s verdict=block fuse=none -->\nline comment\n<!-- JANE_SIGNOFF sha=%s verdict=pass fuse=acknowledged -->\n' "$head" "$head" >"$tmp/review"
-  printf '<!-- jane_signoff SHA=%s verdict=pass fuse=none -->\n' "$head" >"$tmp/folded"
-  printf '<!-- JANE_SIGNOFF verdict=pass fuse=none -->\n' >"$tmp/malformed"
-  printf 'unrelated text mentioning JANE_SIGNOFF and sha=%s separately\n' "$head" >"$tmp/impostor"
+  # Build comment fixtures via Python so the MCP footer newlines stay valid JSON.
+  mkfix() {  # $1 = path, remaining = python expr producing the comments list
+    local path="$1"; shift
+    REVIEWER_FOOTER="$footer" HEAD_SHA="$head" OLD_SHA="$old" \
+      "$PYTHON3" -I -c "
+import json, os, sys
+FOOTER = os.environ['REVIEWER_FOOTER']
+HEAD = os.environ['HEAD_SHA']
+OLD = os.environ['OLD_SHA']
+jane = f'<!-- JANE_SIGNOFF sha={HEAD} verdict=pass fuse=none -->'
+jane_stale = f'<!-- JANE_SIGNOFF sha={OLD} verdict=pass fuse=none -->'
+jane_ack = f'<!-- JANE_SIGNOFF sha={HEAD} verdict=pass fuse=acknowledged -->'
+drik = f'<!-- DRIK_SIGNOFF sha={HEAD} verdict=block fuse=none -->'
+bot = {'login': 'github-actions[bot]', 'type': 'Bot'}
+def mcp(body_text, marker, user=None, created='2026-10-05T12:00:01Z'):
+    c = {'body': body_text.rstrip() + '\n\n' + marker + '\n\n' + FOOTER,
+         'user': user if user is not None else bot}
+    if created is not None:
+        c['created_at'] = created
+    return c
+comments = $*
+with open(sys.argv[1], 'w', encoding='utf-8') as fh:
+    if isinstance(comments, str):
+        fh.write(comments)
+    else:
+        json.dump(comments, fh)
+" "$path"
+  }
 
-  # The served rows — the workflow's four outcomes, through the real CLI.
-  row "posted for this head → served"          true  "$0" check --pr 1 --sha "$head" --reviewer jane --bodies-file "$tmp/posted"
-  row "no marker at all → not served"          false "$0" check --pr 1 --sha "$head" --reviewer jane --bodies-file "$tmp/silent"
-  row "marker names an older head → stale"     false "$0" check --pr 1 --sha "$head" --reviewer jane --bodies-file "$tmp/stale"
-  row "marker in a review/line-comment body"   true  "$0" check --pr 1 --sha "$head" --reviewer jane --bodies-file "$tmp/review"
-  row "case-folded marker still matches"       true  "$0" check --pr 1 --sha "$head" --reviewer jane --bodies-file "$tmp/folded"
-  row "marker without a sha field → unserved"  false "$0" check --pr 1 --sha "$head" --reviewer jane --bodies-file "$tmp/malformed"
-  row "sha outside a marker does not count"    false "$0" check --pr 1 --sha "$head" --reviewer jane --bodies-file "$tmp/impostor"
-  row "drik marker serves drik"                true  "$0" check --pr 1 --sha "$head" --reviewer drik  --bodies-file "$tmp/review"
-  row "jane marker does not serve drik"        false "$0" check --pr 1 --sha "$head" --reviewer drik  --bodies-file "$tmp/posted"
+  mkfix "$tmp/posted" "[mcp('Jane here — clean print call.', jane)]"
+  mkfix "$tmp/graphql" \
+    "[{'body': 'Jane here.\n\n' + jane + '\n\n' + FOOTER, 'user': {'login': 'github-actions'}, 'created_at': '2026-10-05T12:00:01Z'}]"
+  mkfix "$tmp/stale" "[mcp('Jane here.', jane_stale)]"
+  mkfix "$tmp/silent" \
+    "[{'body': 'Jane looked, found nothing to say.\n\n' + FOOTER, 'user': bot}]"
+  mkfix "$tmp/drik" "[mcp('Drik here.', drik)]"
+  mkfix "$tmp/both" "[mcp('Drik.', drik), mcp('Jane.', jane_ack)]"
+  mkfix "$tmp/malformed" \
+    "[{'body': 'x\n\n<!-- JANE_SIGNOFF verdict=pass fuse=none -->\n\n' + FOOTER, 'user': bot}]"
+  mkfix "$tmp/impostor" \
+    "[{'body': f'unrelated text mentioning JANE_SIGNOFF and sha={HEAD} separately\n\n' + FOOTER, 'user': bot}]"
+  # THE SECURITY ROWS: planted markers from other authors / wrong shape.
+  mkfix "$tmp/planted-human" "[mcp('plant', jane, user={'login': 'attacker'})]"
+  mkfix "$tmp/planted-cursor" \
+    "[mcp('plant', jane, user={'login': 'cursor[bot]', 'type': 'Bot'})]"
+  mkfix "$tmp/no-footer" \
+    "[{'body': 'Jane.\n\n' + jane, 'user': bot}]"
+  mkfix "$tmp/no-author" \
+    "[{'body': 'Jane.\n\n' + jane + '\n\n' + FOOTER}]"
+  # Sibling Actions-bot post that planted JANE_SIGNOFF before its own Drik
+  # marker — body ends with DRIK suffix, so it must NOT serve jane.
+  mkfix "$tmp/sibling-plant" \
+    "[{'body': 'x\n\n' + jane + '\n\n' + drik + '\n\n' + FOOTER, 'user': bot}]"
+  mkfix "$tmp/casefold" \
+    "[{'body': f'x\n\n<!-- jane_signoff sha={HEAD} verdict=pass fuse=none -->\n\n' + FOOTER, 'user': bot}]"
+  printf '%s\n' '[]' >"$tmp/empty"
+
+  # The served rows — through the real CLI.
+  row "Actions-bot MCP-shaped post for this head → served" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted"
+  row "GraphQL github-actions login still serves" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/graphql"
+  row "no marker at all → not served" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/silent"
+  row "marker names an older head → stale" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/stale"
+  row "marker without a sha field → unserved" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/malformed"
+  row "sha outside a marker does not count" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/impostor"
+  row "drik marker serves drik" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer drik --comments-file "$tmp/drik"
+  row "jane marker does not serve drik" \
+    false "$0" check --pr 1 --sha "$head" --reviewer drik --comments-file "$tmp/posted"
+  row "fuse=acknowledged MCP suffix still serves" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/both"
+  row "empty thread → not served" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/empty"
+
+  # Security: planted markers from other authors / non-MCP shapes.
+  row "human-planted marker+footer is ignored" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/planted-human"
+  row "cursor[bot]-planted marker+footer is ignored" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/planted-cursor"
+  row "Actions-bot marker without MCP footer is ignored" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/no-footer"
+  row "marker with no author is ignored" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/no-author"
+  row "sibling Actions-bot plant (Drik suffix, Jane in body) does not serve jane" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/sibling-plant"
+  row "case-folded marker is not an MCP post" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/casefold"
+  # A human plant must not hide a later genuine MCP post.
+  mkfix "$tmp/plant-then-real" \
+    "[mcp('plant', jane, user={'login': 'attacker'}), mcp('real', jane)]"
+  row "a human plant does not hide a later genuine MCP post" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/plant-then-real"
+
+  # --since (this-run scope), coach-lock-check pattern.
+  row "lock created after --since passes" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted" \
+    --since 2026-10-05T12:00:00Z
+  row "lock created at exactly --since passes" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted" \
+    --since 2026-10-05T12:00:01Z
+  row "lock from an earlier run fails under --since" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted" \
+    --since 2026-10-05T12:00:02Z
+  mkfix "$tmp/no-created" "[mcp('Jane.', jane, created=None)]"
+  row "lock missing created_at fails under --since" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/no-created" \
+    --since 2026-10-05T12:00:00Z
+
+  # Pagination shapes (coach-lock-check belt).
+  OUT="$tmp/pages" REVIEWER_FOOTER="$footer" HEAD_SHA="$head" "$PYTHON3" -I -c '
+import json, os
+FOOTER = os.environ["REVIEWER_FOOTER"]
+HEAD = os.environ["HEAD_SHA"]
+jane = f"<!-- JANE_SIGNOFF sha={HEAD} verdict=pass fuse=none -->"
+bot = {"login": "github-actions[bot]"}
+page1 = [{"body": "page1", "user": bot}]
+page2 = [{"body": "Jane.\n\n" + jane + "\n\n" + FOOTER, "user": bot}]
+open(os.environ["OUT"], "w", encoding="utf-8").write(
+    json.dumps(page1) + json.dumps(page2))
+'
+  row "concatenated paginated page arrays still find the marker" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/pages"
+  OUT="$tmp/slurp" REVIEWER_FOOTER="$footer" HEAD_SHA="$head" "$PYTHON3" -I -c '
+import json, os
+FOOTER = os.environ["REVIEWER_FOOTER"]
+HEAD = os.environ["HEAD_SHA"]
+jane = f"<!-- JANE_SIGNOFF sha={HEAD} verdict=pass fuse=none -->"
+bot = {"login": "github-actions[bot]"}
+pages = [[{"body": "page1", "user": bot}],
+         [{"body": "Jane.\n\n" + jane + "\n\n" + FOOTER, "user": bot}]]
+json.dump(pages, open(os.environ["OUT"], "w", encoding="utf-8"))
+'
+  row "slurped page arrays still find the marker" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/slurp"
 
   # $GITHUB_OUTPUT wiring: the same verdict lands as served=<value>.
   GITHUB_OUTPUT="$tmp/gh-output" \
-    "$0" check --pr 1 --sha "$head" --reviewer jane --bodies-file "$tmp/posted" >/dev/null
+    "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted" >/dev/null
   if grep -qx 'served=true' "$tmp/gh-output" 2>/dev/null; then ok "GITHUB_OUTPUT gets served=<verdict>"
   else bad "GITHUB_OUTPUT gets served=<verdict> (got: $(cat "$tmp/gh-output" 2>/dev/null))"; fi
 
   # The refusal rows — a typo or a bad sha must fail loud, never read as a
   # clean "not served" (that would burn the whole chain walk on a typo).
-  refuses "typo'd reviewer refused" "$0" check --pr 1 --sha "$head" --reviewer jan --bodies-file "$tmp/posted"
-  refuses "short sha refused"       "$0" check --pr 1 --sha abc123 --reviewer jane --bodies-file "$tmp/posted"
-  refuses "non-numeric pr refused"  "$0" check --pr abc --sha "$head" --reviewer jane --bodies-file "$tmp/posted"
+  refuses "typo'd reviewer refused" "$0" check --pr 1 --sha "$head" --reviewer jan --comments-file "$tmp/posted"
+  refuses "short sha refused"       "$0" check --pr 1 --sha abc123 --reviewer jane --comments-file "$tmp/posted"
+  refuses "non-numeric pr refused"  "$0" check --pr abc --sha "$head" --reviewer jane --comments-file "$tmp/posted"
+  refuses "bad --since refused"     "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted" --since yesterday
   # Live mode without a token must fail loud (fail-closed read, not a guess).
   rc=0
   GH_TOKEN="" "$0" check --pr 1 --sha "$head" --reviewer jane >"$tmp/stdout" 2>"$tmp/stderr" || rc=$?
   if [[ "$rc" -ne 0 ]] && [[ -s "$tmp/stderr" ]]; then ok "live check without GH_TOKEN refuses"
   else bad "live check without GH_TOKEN refuses (rc=$rc)"; fi
 
+  # Drift pin: the footer this script requires is the one the MCP appends.
+  local mcp_footer
+  mcp_footer="$("$PYTHON3" -I -c '
+import ast, pathlib
+src = pathlib.Path(".claude/reviewer-post/reviewer_mcp.py").read_text(encoding="utf-8")
+mod = ast.parse(src)
+for node in mod.body:
+    if isinstance(node, ast.Assign):
+        for t in node.targets:
+            if isinstance(t, ast.Name) and t.id == "FOOTER":
+                print(ast.literal_eval(node.value))
+                raise SystemExit(0)
+raise SystemExit("FOOTER not found")
+')"
+  if [[ "$mcp_footer" == "$footer" ]]; then ok "FOOTER matches reviewer_mcp.py"
+  else bad "FOOTER drifted from reviewer_mcp.py (script=$footer mcp=$mcp_footer)"; fi
+
   # Drift pin: the marker literals this script matches are the ones the two
-  # reviewer skills tell their agents to emit. If a skill rewords its marker,
-  # this fails — the artifact check would silently stop seeing real reviews.
+  # reviewer skills tell their agents to emit.
   local skill marker_lit
   for skill in jane drik; do
     marker_lit="$(grep -oE "<!-- ${skill^^}_SIGNOFF sha=<[^>]*>" ".claude/skills/${skill}-review/SKILL.md" | head -1)"
@@ -198,7 +462,7 @@ selftest() {
   done
 
   if [[ "$fail" -eq 0 ]]; then
-    echo "ok    reviewer-posted --selftest: the artifact check passes a posted marker and refuses everything else"
+    echo "ok    reviewer-posted --selftest: the artifact check passes a trusted MCP post and refuses planted/wrong-author markers"
   else
     echo "FAIL  reviewer-posted --selftest: a decision row was wrong"
   fi

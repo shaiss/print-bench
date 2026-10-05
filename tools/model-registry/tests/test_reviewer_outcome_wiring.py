@@ -11,9 +11,9 @@ Both halves of the fix are pinned here:
 
 * every Jane/Drik ship step is followed by an artifact check
   (``scripts/reviewer-posted.sh``) reading the only evidence that counts —
-  the reviewer's sign-off marker for THIS head sha — and link k>=2 plus the
-  two exhaustion gates key on ``steps.vN.outputs.served``, never on
-  ``.outcome``;
+  an Actions-bot MCP-assembled sign-off marker for THIS head sha from this
+  run (``--since``) — and link k>=2 plus the two exhaustion gates key on
+  ``steps.vN.outputs.served``, never on ``.outcome``;
 * the round stamp artifact-confirms BOTH reviewers before advancing the
   reviewed-SHA — green jobs without markers are stamped incomplete.
 
@@ -90,6 +90,8 @@ def _assert_every_link_is_artifact_checked(text: str) -> None:
             check = steps[at + 1]
             for needle in (f"id: v{n}", ARTIFACT_SCRIPT,
                            f"--reviewer {reviewer}",
+                           '--since "$SINCE"',
+                           "SINCE: ${{ steps.ready.outputs.started_at }}",
                            f"steps.p{n}.outcome == 'success' || "
                            f"steps.p{n}.outcome == 'failure'"):
                 assert needle in check, (
@@ -193,6 +195,10 @@ def _assert_stamp_confirms_both_markers(text: str) -> None:
         "the sha-carrying stamp is not inside the served guard — a green "
         "round with no review would advance the reviewed-SHA and silently "
         "strand the PR from re-review (issue #762)")
+    assert '--since "$SINCE"' in run and "SINCE:" in block, (
+        "review-stamp no longer scopes the artifact check to this run "
+        "(--since) — a planted or stale marker could advance the SHA "
+        "(discussion_r4185453576)")
     for needle in ("::warning::auto-review incomplete", "issue #762"):
         assert needle in run, (
             f"the artifact-miss branch no longer surfaces the miss ({needle!r})")
@@ -224,8 +230,15 @@ def test_the_artifact_reader_exists_and_carries_its_selftest():
     script = REPO_ROOT / "scripts" / "reviewer-posted.sh"
     assert script.is_file(), "scripts/reviewer-posted.sh is missing"
     body = script.read_text(encoding="utf-8")
-    assert "--selftest" in body and "served_from_bodies" in body, (
+    assert "--selftest" in body and "served_from_comments" in body, (
         "scripts/reviewer-posted.sh lost its selftest or its pure core")
+    # Trust boundary (discussion_r4185453576): planted markers from other
+    # authors must not count — the reader binds to the MCP posting identity.
+    for needle in ("github-actions", "REVIEWER_FOOTER", "planted-human",
+                   "cursor[bot]", "is_actions_bot"):
+        assert needle in body, (
+            f"scripts/reviewer-posted.sh lost its author-binding pin "
+            f"({needle!r}) — a planted marker would satisfy the walk/stamp")
 
 
 # ── negative controls ─────────────────────────────────────────────────────────
@@ -261,9 +274,24 @@ def test_check_guard_rejects_a_check_reading_the_other_reviewer():
     # answer 'served' off the wrong reviewer's comment.
     tampered = _job_replace(
         _workflow_text(), "jane-review",
-        '--sha "$HEAD_SHA" --reviewer jane)"\n          echo "link 2 artifact',
-        '--sha "$HEAD_SHA" --reviewer drik)"\n          echo "link 2 artifact')
+        '--sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"\n'
+        '          echo "link 2 artifact',
+        '--sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"\n'
+        '          echo "link 2 artifact')
     with pytest.raises(AssertionError, match="--reviewer jane"):
+        _assert_every_link_is_artifact_checked(tampered)
+
+
+def test_check_guard_rejects_a_check_without_since():
+    # NEGATIVE CONTROL: drop --since from Jane's link-1 check — a stale
+    # marker from an earlier run could short-circuit the walk.
+    tampered = _job_replace(
+        _workflow_text(), "jane-review",
+        '--sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"\n'
+        '          echo "link 1 artifact',
+        '--sha "$HEAD_SHA" --reviewer jane)"\n'
+        '          echo "link 1 artifact')
+    with pytest.raises(AssertionError, match="--since"):
         _assert_every_link_is_artifact_checked(tampered)
 
 
