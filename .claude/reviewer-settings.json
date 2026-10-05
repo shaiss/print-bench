@@ -131,7 +131,14 @@
       "Bash(command -- git*)",
       "Bash(command -p -- git*)",
       "Bash(command -v git*)",
-      "Bash(*env git*)"
+      "Bash(*env git*)",
+      "Bash(command*git*)",
+      "Bash(command -p*git*)",
+      "Bash(command --*git*)",
+      "Bash(/usr/bin/env*git*)",
+      "Bash(/bin/env*git*)",
+      "Bash(*/env*git*)",
+      "Bash(env*git*)"
     ]
   }
 }

