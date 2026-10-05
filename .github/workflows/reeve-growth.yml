@@ -303,15 +303,15 @@ jobs:
       # step's --layout) — the drift guard fails either half shipped alone.
       #
       # Failure model: this routine carries no SHIP-LOCK lifecycle, so the
-      # non-terminal links (1-2) are continue-on-error so a dead id falls
-      # through, and the TERMINAL link (3) keeps none — a total-walk failure
+      # non-terminal links (1-4) are continue-on-error so a dead id falls
+      # through, and the TERMINAL link (5) keeps none — a total-walk failure
       # then fails the step, and the job, exactly as the single step did
       # before the tail existed. The "Turn an exhausted walk red" step at the
       # end covers the one case that rule misses: a walk exhausted with the
       # tail SKIPPED (only ZAI_KEY set, the GLM link dead) has no failed
       # non-coe step to fail the job.
       #
-      # All three steps share the pin, the write permission, the `github_token`,
+      # All five steps share the pin, the write permission, the `github_token`,
       # the queue cap, the same tool surface and the same /reeve-growth prompt.
       #
       # Tool surface (why exactly this, on EVERY link): FILING is the MCP tool
@@ -490,6 +490,28 @@ jobs:
           claude_args: --model ${{ steps.chain.outputs.link3_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
           prompt: "/reeve-growth"
 
+      # Same refresh for link 4: link 3 may itself have queued and then died.
+      - name: Refresh the dedup context for chain link 4
+        id: dedup_context_4
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.openrouter_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_anthropic_2.outcome != 'success'
+          && steps.run_anthropic_3.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: tools/growth/src
+        run: |
+          set -euo pipefail
+          rm -f .reeve-growth-context/dedup.json .reeve-growth-context/dedup.md
+          if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
+              --out-dir .reeve-growth-context; then
+            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE (or left absent), so the queue tool refuses every filing on this link (fail closed; the next run retries)"
+          fi
+          cat .reeve-growth-context/dedup.md || true
+
       - name: Run via OpenRouter (OSS, chain link 4)
         id: run_openrouter_4
         if: >-
@@ -499,7 +521,6 @@ jobs:
           && steps.run_zai_1.outcome != 'success'
           && steps.run_anthropic_2.outcome != 'success'
           && steps.run_anthropic_3.outcome != 'success'
-        # No longer terminal: OpenRouter links follow; keep continue-on-error.
         timeout-minutes: 20
         continue-on-error: true
         env:
@@ -520,6 +541,29 @@ jobs:
           claude_args: --model ${{ steps.chain.outputs.link4_model }} --effort medium --permission-mode dontAsk --settings .claude/reeve-growth-settings.json --mcp-config .claude/skills/growth-queue/queue-mcp.json --allowedTools "mcp__growth_queue__queue_growth_post,Read,Grep,Glob"
           prompt: "/reeve-growth"
 
+      # Same refresh for link 5: link 4 may itself have queued and then died.
+      - name: Refresh the dedup context for chain link 5
+        id: dedup_context_5
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.policy.outputs.openrouter_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.run_zai_1.outcome != 'success'
+          && steps.run_anthropic_2.outcome != 'success'
+          && steps.run_anthropic_3.outcome != 'success'
+          && steps.run_openrouter_4.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: tools/growth/src
+        run: |
+          set -euo pipefail
+          rm -f .reeve-growth-context/dedup.json .reeve-growth-context/dedup.md
+          if ! python3 -m growth dedup-context --repo "$GITHUB_REPOSITORY" \
+              --out-dir .reeve-growth-context; then
+            echo "::warning::could not assemble the reeve-growth dedup context — it is written marked UNAVAILABLE (or left absent), so the queue tool refuses every filing on this link (fail closed; the next run retries)"
+          fi
+          cat .reeve-growth-context/dedup.md || true
+
       - name: Run via OpenRouter (OSS, chain link 5)
         id: run_openrouter_5
         if: >-
@@ -530,7 +574,6 @@ jobs:
           && steps.run_anthropic_2.outcome != 'success'
           && steps.run_anthropic_3.outcome != 'success'
           && steps.run_openrouter_4.outcome != 'success'
-        # No longer terminal: OpenRouter links follow; keep continue-on-error.
         timeout-minutes: 20
         env:
           ANTHROPIC_BASE_URL: https://openrouter.ai/api
