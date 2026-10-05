@@ -91,9 +91,14 @@ foot_protrusion = 2;
 foot_tread_d = 10;
 // Radial clearance: plug_d = foot_socket_d - 2·clearance (mm); tune on a foot
 foot_fit_clearance = 0.12;
-// Foot-centre inset from the outer shell edge along X and Y (mm); clears the
-// four lid-screw posts at (±40, ±32.75) on the floor plane
+// Foot-centre inset from the outer shell edge along X and Y (mm); starting
+// point before standoff/post clearance nudge (see foot_centre())
 foot_corner_inset = 12;
+// Minimum solid between a socket and a standoff boss or lid-screw post (mm)
+foot_feature_margin = 0.5;
+// Bed-face flare cut into each socket mouth (mm radial) — counters first-layer
+// elephant foot pinching the 0.12 mm plug clearance; only when printed_feet
+foot_socket_mouth_chamfer = 0.2;
 
 /* [Hardware] */
 // Heat-set insert for every M3 boss (lid screws, fan screws)
@@ -279,17 +284,39 @@ module vent_slot() { //! one stadium vent through the +Y wall
 
 function foot_plug_d() = foot_socket_d - 2 * foot_fit_clearance;
 
-function foot_centre(sx, sy) = [
-    sx * (outer_l / 2 - foot_corner_inset),
-    sy * (outer_w / 2 - foot_corner_inset)
-];
+function foot_clear_r_boss() = standoff_d / 2 + foot_socket_d / 2 + foot_feature_margin;
+
+// Corner inset, then — on the −X corners only — shift +X until every board
+// standoff boss clears the socket (measured: inset (−35.25, ±26.1) overlapped
+// the RPI4 bosses at (−39, ±24.5) by ~3.4 mm in plan). +X corners and Y stay
+// on the inset; lid-screw posts at (±40, ±32.75) already clear at the inset.
+function foot_centre(sx, sy) =
+    let(fy = sy * (outer_w / 2 - foot_corner_inset),
+        fx0 = sx * (outer_l / 2 - foot_corner_inset),
+        min_b = foot_clear_r_boss(),
+        fx = sx == -1 ?
+            max([fx0,
+                for (h = pcb_holes(board))
+                    let(p = pcb_coord(board, h),
+                        dy = fy - p[1],
+                        sep2 = min_b * min_b - dy * dy)
+                    if (p[0] < -1 && sep2 > 0.01)
+                        p[0] + sqrt(sep2)
+            ]) : fx0)
+    [fx, fy];
 
 module base_foot_sockets() { //! blind cylindrical pockets in the bed face — only when enabled
     if (printed_feet)
         for (sx = [-1, 1], sy = [-1, 1])
             translate(foot_centre(sx, sy))
-                translate([0, 0, -0.01])
-                    cylinder(d = foot_socket_d, h = foot_socket_depth + 0.02);
+                union() {
+                    // mouth flare at the bed face (z = 0): wider opening, same pocket depth
+                    translate([0, 0, -0.01])
+                        cylinder(d1 = foot_socket_d + 2 * foot_socket_mouth_chamfer, d2 = foot_socket_d,
+                                 h = foot_socket_mouth_chamfer + 0.01);
+                    translate([0, 0, foot_socket_mouth_chamfer])
+                        cylinder(d = foot_socket_d, h = foot_socket_depth - foot_socket_mouth_chamfer + 0.02);
+                }
 }
 
 module foot() { //! one press-/glue-in foot: tread below the floor, plug into the socket
