@@ -1,11 +1,14 @@
 # sbc-case — vented Raspberry Pi 4 case with fan mount
 
-A two-piece FDM case for the Raspberry Pi 4 (and other NopSCADlib-catalogued
-SBCs) with a 40 mm intake fan, heat-set inserts at every repeated-assembly
-point, and cable access through open skirted edges — no connectors ever fight
-a tight hole. The standoff pattern is generated from the board's own mounting
-hole list at build time, so pointing `board` at another PCB re-places the
-standoffs automatically.
+A two-piece FDM case for the Raspberry Pi 4 (primary target) with a 40 mm
+intake fan, heat-set inserts at every repeated-assembly point, and cable access
+through open skirted edges — no connectors ever fight a tight hole. The standoff
+pattern is generated from the board's own mounting hole list at build time.
+The Customizer also offers a **validated Raspberry Pi 3 B+** preset (same
+85×56 mm outline and mounting holes as the Pi 4 in the vendored NopSCADlib
+catalog); set `board_preset` to *Raspberry Pi 3 B+* or pass
+`-D board_preset=1` / `-D board=RPI3` on the command line. There is no Pi 5 or
+Zero 2 W vitamin in the vendored tree yet.
 
 ![Product shot](previews/product-hero.png)
 
@@ -83,7 +86,8 @@ The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `board` | `RPI4` | NopSCADlib board type — standoffs follow its hole list |
+| `board_preset` | Raspberry Pi 4 | Customizer board choice — sets the NopSCADlib `board` constant (Pi 4 or Pi 3 B+) |
+| `board` | `RPI4` | NopSCADlib pcb type (derived from `board_preset`; override with `-D board=…`) — standoffs follow `pcb_holes(board)` |
 | `fit_clearance` | 0.25 mm | lid register lip vs cavity wall; tune on the coupon |
 | `standoff_h` | 5 mm | board standoff height (4–6 per the brief) |
 | `interior_h` | 24 mm | interior height; sized over the tallest RPI4 connector |
