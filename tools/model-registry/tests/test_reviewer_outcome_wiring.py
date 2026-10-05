@@ -51,7 +51,7 @@ ARTIFACT_SCRIPT = "scripts/reviewer-posted.sh check"
 # The stamp's served guard, verbatim — the reviewed-SHA advances only inside.
 STAMP_GUARD = 'if [ "$jane_served" = "true" ] && [ "$drik_served" = "true" ]; then'
 STAMP_SHA = "AUTO_REVIEW_STAMP sha=${HEAD_SHA}"
-LINKS = 8
+LINKS = 6
 
 
 def _steps(block: str) -> list[str]:
@@ -124,7 +124,7 @@ def _assert_walk_keys_on_served_outputs(text: str) -> None:
 
 def _assert_exhaustion_gates_key_on_the_artifact(text: str) -> None:
     """The provider-triage and red-exhaustion steps in Jane/Drik fire when no
-    link DELIVERED (all eight `served` legs), and the exit-code needle is gone
+    link DELIVERED (all six `served` legs), and the exit-code needle is gone
     from those job bodies entirely."""
     blocks = _job_blocks(text)
     for job in ARTIFACT_JOBS:
@@ -321,9 +321,9 @@ def test_exhaustion_guard_rejects_an_exit_code_gate():
     # NEGATIVE CONTROL: the triage leg back on exit codes — a chain where
     # every link exits 0 without posting never reaches the red path.
     served = "\n".join(
-        f"          && steps.v{n}.outputs.served != 'true'" for n in range(1, 9))
+        f"          && steps.v{n}.outputs.served != 'true'" for n in range(1, 7))
     outcomes = "\n".join(
-        f"          && steps.p{n}.outcome != 'success'" for n in range(1, 9))
+        f"          && steps.p{n}.outcome != 'success'" for n in range(1, 7))
     tampered = _job_replace(_workflow_text(), "jane-review",
                             served, outcomes)
     with pytest.raises(AssertionError, match="exit-code walk is back"):
