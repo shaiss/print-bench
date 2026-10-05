@@ -26,5 +26,3 @@
 6. Close the case with 4 M3 cap screws through the lid into the base posts.
 7. Bolt the 40 mm fan to the lid bosses with 4 M3 dome screws, washer under each head, airflow blowing into the case; route its leads out through the GPIO notch to the Pi's fan header (follows temperature — quieter at night) or to a 5 V + GND pin pair (runs constant). The fan mounts to the lid but its lead plugs into the board, so for any later lid-off service, unplug the fan lead at the header before lifting the lid — otherwise the lid dangles by two wires.
 
-**Feet (optional):** the default build expects four adhesive rubber feet on the exterior floor (see README). If you sliced the `base` with `printed_feet = true`, the four corner pads are already in the plastic — skip the adhesive dots. Whether either option actually stops a one-handed cable pull is still to be checked on the first real print (B10 field test).
-
