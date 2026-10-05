@@ -467,14 +467,15 @@ def test_lock_guard_rejects_one_link_overriding_the_protocol():
 
 
 def test_lock_guard_rejects_the_tail_link_shedding_its_config():
-    # NEGATIVE CONTROL: the terminal Anthropic coach link weakens its own
-    # step-level re-pin of the git lock (coach ships re-pin GIT_CONFIG_*
-    # against GITHUB_ENV; dropping the count here must fail the guard).
+    # NEGATIVE CONTROL: the terminal coach link (OpenRouter free OSS, or
+    # Anthropic Haiku when OpenRouter is absent) weakens its own step-level
+    # re-pin of the git lock (coach ships re-pin GIT_CONFIG_* against
+    # GITHUB_ENV; dropping the count here must fail the guard).
     tampered = _step_replace(
         _workflow_text(), "design-coach", -1,
         '          GIT_CONFIG_COUNT: "4"\n',
         '          GIT_CONFIG_COUNT: "0"\n')
-    with pytest.raises(AssertionError, match="ship step 6 runs without"):
+    with pytest.raises(AssertionError, match=r"ship step \d+ runs without"):
         _assert_every_ship_step_is_git_locked(tampered)
 
 
