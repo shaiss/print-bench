@@ -162,8 +162,10 @@ Printcheck on the filled cone used to put a number on what the lattice buys:
 the lattice's unbridgeable downward-facing surface is **1 %** of the part
 (its 45° strands are all sub-5 mm bridges), while the filled solid's flat
 disk at `z_spring` plus its smooth 45° face sat at **17 %**. Hollowing the
-solid (this tip) drops that ceiling; the lattice remains the airflow option
-and the one with support margin on its bridged crown.
+solid (this tip) drops that ceiling — sticky printcheck on the hollow solid
+is **100/100** with no findings, while the lattice stays **84/100** (its
+bridged crown still carries the 1 % overhang caveat). The lattice remains
+the airflow option; the hollow solid is now the cleaner print.
 
 ## Print orientation
 

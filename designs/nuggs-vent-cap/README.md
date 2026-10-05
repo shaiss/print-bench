@@ -39,7 +39,7 @@ cap — pick it when you want to terminate a run dead rather than breathing
 shell closed near the tip (open underside so it prints support-free like the
 lattice — no flat disk across the bore), no crown bridge; physics makes it
 taller, **65 mm** tip-to-crown versus the lattice's 51 mm — about **2 h 42 m / ~35 g**
-versus the lattice's **2 h 48 m / ~30 g** (slice-measured). Hollowing the cone
+versus the lattice's **2 h 47 m / ~30 g** (slice-measured). Hollowing the cone
 (open underside) cuts the filled-cone plastic roughly in half while keeping
 the support-free claim.
 
