@@ -636,6 +636,8 @@ elif kind == "coach":
         {"Bash(git p*'*)"},
         {"Bash(git p*\"*)"},
         {"Bash(git p*\\*)"},
+        {"Bash(git a*\\*)"},
+        {"Bash(git c*\\*)"},
         {"Bash(git 'p*)"},
         {"Bash(git \"p*)"},
         {"Bash(git pul*'*)"},
@@ -1763,6 +1765,25 @@ elif kind == "coach":
         {"Bash(git init*)"},
         {"Bash(git*init:*)"},
         {"Bash(git*init*)"},
+        {"Bash(git ap*'*)"},
+        {"Bash(git ap*\"*)"},
+        {"Bash(git ap*\\*)"},
+        {"Bash(git 'ap*)"},
+        {"Bash(git \"ap*)"},
+        {"Bash(git \\ap*)"},
+        {"Bash(git a'm'*)"},
+        {"Bash(git a\"m\"*)"},
+        {"Bash(git 'am'*)"},
+        {"Bash(git \"am\"*)"},
+        {"Bash(git \\am*)"},
+        {"Bash(git ini*'*)"},
+        {"Bash(git ini*\"*)"},
+        {"Bash(git ini*\\*)"},
+        {"Bash(git in'*)"},
+        {"Bash(git in\"*)"},
+        {"Bash(git 'ini*)"},
+        {"Bash(git \"ini*)"},
+        {"Bash(git \\ini*)"},
         {"Bash(git add '-e'*)"},
         {"Bash(git add '-e':*)"},
         {"Bash(git*add*'-e'*)"},
@@ -2781,6 +2802,20 @@ ESCAPE_PROBES = [
     "git -C . am evil.mbox",
     "git init --separate-git-dir=/tmp/evil .",
     "git\tinit /tmp/evil",
+    # Quote-/backslash-split apply/am/init (contiguous-verb globs miss).
+    "git ap'ply' --unsafe-paths x.patch",
+    "git appl'y' --unsafe-paths x.patch",
+    "git a'm' evil.mbox",
+    "git 'am' evil.mbox",
+    "git ini't' --separate-git-dir=/tmp/evil .",
+    "git \\am evil.mbox",
+    # Backslash-escaped four-verb options (add/commit/checkout; push has p*\\*).
+    "git add \\-e file",
+    "git add --\\edit file",
+    "git commit --\\edit",
+    "git commit -\\e",
+    "git commit --\\gpg-sign=id",
+    "git checkout --\\recurse-submodules",
     # Quoted option-first flags.
     "git add '-e' file",
     "git add \"-e\" file",
@@ -3381,6 +3416,8 @@ EOF
     'Bash(git p*'\''*)'
     $'Bash(git p*\"*)'
     $'Bash(git p*\\*)'
+    $'Bash(git a*\\*)'
+    $'Bash(git c*\\*)'
     'Bash(git '\''p*)'
     $'Bash(git \"p*)'
     'Bash(git pul*'\''*)'
@@ -4508,6 +4545,25 @@ EOF
     "Bash(git init*)"
     "Bash(git*init:*)"
     "Bash(git*init*)"
+    'Bash(git ap*'\''*)'
+    $'Bash(git ap*\"*)'
+    $'Bash(git ap*\\*)'
+    'Bash(git '\''ap*)'
+    $'Bash(git \"ap*)'
+    $'Bash(git \\ap*)'
+    'Bash(git a'\''m'\''*)'
+    $'Bash(git a\"m\"*)'
+    'Bash(git '\''am'\''*)'
+    $'Bash(git \"am\"*)'
+    $'Bash(git \\am*)'
+    'Bash(git ini*'\''*)'
+    $'Bash(git ini*\"*)'
+    $'Bash(git ini*\\*)'
+    'Bash(git in'\''*)'
+    $'Bash(git in\"*)'
+    'Bash(git '\''ini*)'
+    $'Bash(git \"ini*)'
+    $'Bash(git \\ini*)'
     'Bash(git add '\''-e'\''*)'
     'Bash(git add '\''-e'\'':*)'
     'Bash(git*add*'\''-e'\''*)'
@@ -5372,6 +5428,11 @@ EOF
     $'Bash(git\tam*)'
     "Bash(git init:*)"
     "Bash(git*init*)"
+    'Bash(git ap*'\''*)'
+    'Bash(git a'\''m'\''*)'
+    'Bash(git ini*'\''*)'
+    $'Bash(git a*\\*)'
+    $'Bash(git c*\\*)'
     'Bash(git add '\''-e'\''*)'
     $'Bash(git add \"-e\"*)'
     'Bash(git add --'\''edit'\''*)'
