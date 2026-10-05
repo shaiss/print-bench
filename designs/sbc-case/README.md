@@ -36,10 +36,12 @@ view lower down shows the green board and gold header pins seated just below the
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
-cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan, and four
-adhesive rubber feet. The screws come out of one standard **M2.5 / M3
-assortment**; add one bag of **M3 heat-set inserts**, that single fan, and a
-strip of **adhesive feet** — **four carts, not five** separate hardware orders.
+cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan, and either
+four **adhesive rubber feet** (default) or **printed feet** you enable in the
+Customizer (`printed_feet = true` — no extra BOM line). The screws come out of
+one standard **M2.5 / M3 assortment**; add one bag of **M3 heat-set inserts**,
+that single fan, and a strip of **adhesive feet** unless you print the feet —
+**four carts, not five** separate hardware orders when you use adhesive dots.
 
 ## Print settings
 
@@ -72,8 +74,14 @@ strip of **adhesive feet** — **four carts, not five** separate hardware orders
   nests the lid and base crops on one plate? A **global** elephant-foot setting is
   fine — the base crop's fit is a vertical cavity wall the compensation never
   touches, and its floor-and-skirt footprint hides the 0.1–0.2 mm shave.
-- **Feet:** stick four **adhesive rubber feet** on the floor — the case sits on
-  a flat base, and feet keep it from walking when you plug a cable in one-handed.
+- **Feet:** by default, stick four **adhesive rubber feet** on the floor — the
+  case sits on a flat base, and feet are meant to keep it from walking when you
+  plug a cable in one-handed (that grip is a **[hunch]** until the B10 field
+  test logs a real print). Or set **`printed_feet = true`** in the Customizer
+  before you slice the `base`: four corner pads merge into the exterior bottom
+  on the same bed plane (support-free with the rest of the base); they add a
+  little tread at the corners but do not change the default BOM or the stock
+  renders.
 
 The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 
@@ -91,6 +99,8 @@ The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 | `fan_center` | (−10, 0) mm | fan position; biased toward the SoC |
 | `board_clr` | 0.75 mm | board-to-wall clearance |
 | `wall` / `floor_t` / `lid_t` | 2.0 / 2.0 / 2.5 mm | shell thicknesses |
+| `printed_feet` | `false` | four corner foot pads on the base bed face (no adhesive dots) |
+| `foot_d` / `foot_h` / `foot_corner_inset` | 8 / 2 / 12 mm | printed-foot size and corner placement |
 
 All parameters are at the top of `sbc-case.scad` in Customizer sections;
 override on the command line with `-D 'fit_clearance=0.3'`.

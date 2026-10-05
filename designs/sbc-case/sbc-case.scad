@@ -76,6 +76,19 @@ skirt_margin = 0.5;
 // header (~8.5 above the board)
 gpio_notch_bottom = 17.5;
 
+/* [Feet] */
+// Optional printed feet on the base bed face (no adhesive dots). Default off so
+// the stock BOM and default render stay on adhesive rubber feet (PM.md B6).
+printed_feet = false;
+// Foot pad diameter (mm) — keep >= 0.8 mm printable
+foot_d = 8;
+// Foot pad height (mm), extruded upward into the floor slab from the bed face
+// at z = 0 — keeps the whole bottom on one plane so the base stays support-free
+foot_h = 2;
+// Foot-centre inset from the outer shell edge along X and Y (mm); clears the
+// four lid-screw posts at (±40, ±32.75) on the floor plane
+foot_corner_inset = 12;
+
 /* [Hardware] */
 // Heat-set insert for every M3 boss (lid screws, fan screws)
 insert_type = F1BM3;
@@ -177,6 +190,7 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
         translate([0, 0, board_z])
             pcb_screw_positions(board)
                 standoff();
+        base_feet();
     }
 }
 
@@ -255,6 +269,18 @@ module vent_slot() { //! one stadium vent through the +Y wall
     rotate([90, 0, 0])
         linear_extrude(wall + 2, center = true)
             rounded_square([12, 4.5], r = 2.2, center = true);
+}
+
+module foot_pad() { //! one cylindrical foot pad on the bed face (z = 0), merged into the floor
+    cylinder(d = foot_d, h = foot_h + 0.01);
+}
+
+module base_feet() { //! four corner feet on the floor exterior — only when enabled
+    if (printed_feet)
+        for (sx = [-1, 1], sy = [-1, 1])
+            translate([sx * (outer_l / 2 - foot_corner_inset),
+                         sy * (outer_w / 2 - foot_corner_inset), 0])
+                foot_pad();
 }
 
 // ── Vitamins at their assembled positions (default render) ─
