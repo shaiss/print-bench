@@ -158,7 +158,7 @@ elif kind == "coach":
     # NotebookEdit, plus Write/Edit into .git/ itself: the coach's file tools
     # stay usable on the tree, but a written .git/config could bind an exec
     # key (an alias, diff.external, a pager.<cmd>) the env lock does not pin.
-    POSTURE_DENY = [{"NotebookEdit"}, {"Edit(./.git/**)"}]
+    POSTURE_DENY = [{"NotebookEdit"}, {"Edit(./.git/**)"}, {"Write(./.git/**)"}]
     NEVER_DENY_TOOLS = [
         "Read", "Grep", "Glob", "Write", "Edit",
         "mcp__reviewer", "mcp__reviewer__post_coach",
@@ -1511,6 +1511,170 @@ elif kind == "coach":
         {"Bash(git*commit\t-eF)"},
         {"Bash(git commit * -eF)"},
         {"Bash(git commit * -eF *)"},
+        {"Bash(git commit -oe:*)"},
+        {"Bash(git commit -oe*)"},
+        {"Bash(git commit -oe)"},
+        {"Bash(git commit\t-oe:*)"},
+        {"Bash(git commit\t-oe*)"},
+        {"Bash(git commit\t-oe)"},
+        {"Bash(git*commit -oe:*)"},
+        {"Bash(git*commit -oe*)"},
+        {"Bash(git*commit -oe)"},
+        {"Bash(git*commit\t-oe:*)"},
+        {"Bash(git*commit\t-oe*)"},
+        {"Bash(git*commit\t-oe)"},
+        {"Bash(git commit * -oe)"},
+        {"Bash(git commit * -oe *)"},
+        {"Bash(git commit -eo:*)"},
+        {"Bash(git commit -eo*)"},
+        {"Bash(git commit -eo)"},
+        {"Bash(git commit\t-eo:*)"},
+        {"Bash(git commit\t-eo*)"},
+        {"Bash(git commit\t-eo)"},
+        {"Bash(git*commit -eo:*)"},
+        {"Bash(git*commit -eo*)"},
+        {"Bash(git*commit -eo)"},
+        {"Bash(git*commit\t-eo:*)"},
+        {"Bash(git*commit\t-eo*)"},
+        {"Bash(git*commit\t-eo)"},
+        {"Bash(git commit * -eo)"},
+        {"Bash(git commit * -eo *)"},
+        {"Bash(git commit -pS:*)"},
+        {"Bash(git commit -pS*)"},
+        {"Bash(git commit -pS)"},
+        {"Bash(git commit\t-pS:*)"},
+        {"Bash(git commit\t-pS*)"},
+        {"Bash(git commit\t-pS)"},
+        {"Bash(git*commit -pS:*)"},
+        {"Bash(git*commit -pS*)"},
+        {"Bash(git*commit -pS)"},
+        {"Bash(git*commit\t-pS:*)"},
+        {"Bash(git*commit\t-pS*)"},
+        {"Bash(git*commit\t-pS)"},
+        {"Bash(git commit * -pS)"},
+        {"Bash(git commit * -pS *)"},
+        {"Bash(git commit -oS:*)"},
+        {"Bash(git commit -oS*)"},
+        {"Bash(git commit -oS)"},
+        {"Bash(git commit\t-oS:*)"},
+        {"Bash(git commit\t-oS*)"},
+        {"Bash(git commit\t-oS)"},
+        {"Bash(git*commit -oS:*)"},
+        {"Bash(git*commit -oS*)"},
+        {"Bash(git*commit -oS)"},
+        {"Bash(git*commit\t-oS:*)"},
+        {"Bash(git*commit\t-oS*)"},
+        {"Bash(git*commit\t-oS)"},
+        {"Bash(git commit * -oS)"},
+        {"Bash(git commit * -oS *)"},
+        {"Bash(git*add*\t*-e:*)"},
+        {"Bash(git*add*\t*-e*)"},
+        {"Bash(git*add*\t*-e)"},
+        {"Bash(git*add*\t*-pe:*)"},
+        {"Bash(git*add*\t*-pe*)"},
+        {"Bash(git*add*\t*-pe)"},
+        {"Bash(git*add*\t*-ue:*)"},
+        {"Bash(git*add*\t*-ue*)"},
+        {"Bash(git*add*\t*-ue)"},
+        {"Bash(git*add*\t*-ie:*)"},
+        {"Bash(git*add*\t*-ie*)"},
+        {"Bash(git*add*\t*-ie)"},
+        {"Bash(git*add*\t*-ve:*)"},
+        {"Bash(git*add*\t*-ve*)"},
+        {"Bash(git*add*\t*-ve)"},
+        {"Bash(git*add*\t*-ne:*)"},
+        {"Bash(git*add*\t*-ne*)"},
+        {"Bash(git*add*\t*-ne)"},
+        {"Bash(git*add*\t*-c:*)"},
+        {"Bash(git*add*\t*-c*)"},
+        {"Bash(git*add*\t*-c)"},
+        {"Bash(git*add*\t*-S:*)"},
+        {"Bash(git*add*\t*-S*)"},
+        {"Bash(git*add*\t*-S)"},
+        {"Bash(git*commit*\t*-e:*)"},
+        {"Bash(git*commit*\t*-e*)"},
+        {"Bash(git*commit*\t*-e)"},
+        {"Bash(git*commit*\t*-c:*)"},
+        {"Bash(git*commit*\t*-c*)"},
+        {"Bash(git*commit*\t*-c)"},
+        {"Bash(git*commit*\t*-S:*)"},
+        {"Bash(git*commit*\t*-S*)"},
+        {"Bash(git*commit*\t*-S)"},
+        {"Bash(git*commit*\t*-t:*)"},
+        {"Bash(git*commit*\t*-t*)"},
+        {"Bash(git*commit*\t*-t)"},
+        {"Bash(git*commit*\t*-oe:*)"},
+        {"Bash(git*commit*\t*-oe*)"},
+        {"Bash(git*commit*\t*-oe)"},
+        {"Bash(git*commit*\t*-ve:*)"},
+        {"Bash(git*commit*\t*-ve*)"},
+        {"Bash(git*commit*\t*-ve)"},
+        {"Bash(git*commit*\t*-se:*)"},
+        {"Bash(git*commit*\t*-se*)"},
+        {"Bash(git*commit*\t*-se)"},
+        {"Bash(git*commit*\t*-ue:*)"},
+        {"Bash(git*commit*\t*-ue*)"},
+        {"Bash(git*commit*\t*-ue)"},
+        {"Bash(git*commit*\t*-pe:*)"},
+        {"Bash(git*commit*\t*-pe*)"},
+        {"Bash(git*commit*\t*-pe)"},
+        {"Bash(git*commit*\t*-ae:*)"},
+        {"Bash(git*commit*\t*-ae*)"},
+        {"Bash(git*commit*\t*-ae)"},
+        {"Bash(git*commit*\t*-qe:*)"},
+        {"Bash(git*commit*\t*-qe*)"},
+        {"Bash(git*commit*\t*-qe)"},
+        {"Bash(git*commit*\t*-ne:*)"},
+        {"Bash(git*commit*\t*-ne*)"},
+        {"Bash(git*commit*\t*-ne)"},
+        {"Bash(/usr/bin/git*)"},
+        {"Bash(/bin/git*)"},
+        {"Bash(/usr/local/bin/git*)"},
+        {"Bash(*/bin/git*)"},
+        {"Bash(*/git*)"},
+        {"Bash(command git*)"},
+        {"Bash(command -p git*)"},
+        {"Bash(env git*)"},
+        {"Bash(env -i git*)"},
+        {"Bash(env -u git*)"},
+        {"Bash(GIT_*:*)"},
+        {"Bash(GIT_*)"},
+        {"Bash(git checkout-index:*)"},
+        {"Bash(git checkout-index*)"},
+        {"Bash(git*checkout-index:*)"},
+        {"Bash(git*checkout-index*)"},
+        {"Bash(git worktree:*)"},
+        {"Bash(git worktree*)"},
+        {"Bash(git*worktree:*)"},
+        {"Bash(git*worktree*)"},
+        {"Bash(git switch:*)"},
+        {"Bash(git switch*)"},
+        {"Bash(git*switch:*)"},
+        {"Bash(git*switch*)"},
+        {"Bash(git restore:*)"},
+        {"Bash(git restore*)"},
+        {"Bash(git*restore:*)"},
+        {"Bash(git*restore*)"},
+        {"Bash(git switch*--r:*)"},
+        {"Bash(git*switch*--r:*)"},
+        {"Bash(git switch*--r*)"},
+        {"Bash(git*switch*--r*)"},
+        {"Bash(git switch*--recurse:*)"},
+        {"Bash(git*switch*--recurse:*)"},
+        {"Bash(git switch*--recurse*)"},
+        {"Bash(git*switch*--recurse*)"},
+        {"Bash(git restore*--r:*)"},
+        {"Bash(git*restore*--r:*)"},
+        {"Bash(git restore*--r*)"},
+        {"Bash(git*restore*--r*)"},
+        {"Bash(git restore*--recurse:*)"},
+        {"Bash(git*restore*--recurse:*)"},
+        {"Bash(git restore*--recurse*)"},
+        {"Bash(git*restore*--recurse*)"},
+        {"Bash(git web--browse:*)"},
+        {"Bash(git web--browse*)"},
+        {"Bash(git*web--browse:*)"},
+        {"Bash(git*web--browse*)"},
     ]
 else:
     sys.stderr.write(f"unknown backstop kind {kind!r}\n")
@@ -3142,36 +3306,192 @@ EOF
     $'Bash(git*commit\t-eF)'
     "Bash(git commit * -eF)"
     "Bash(git commit * -eF *)"
+    "Bash(git commit -oe:*)"
+    "Bash(git commit -oe*)"
+    "Bash(git commit -oe)"
+    $'Bash(git commit\t-oe:*)'
+    $'Bash(git commit\t-oe*)'
+    $'Bash(git commit\t-oe)'
+    "Bash(git*commit -oe:*)"
+    "Bash(git*commit -oe*)"
+    "Bash(git*commit -oe)"
+    $'Bash(git*commit\t-oe:*)'
+    $'Bash(git*commit\t-oe*)'
+    $'Bash(git*commit\t-oe)'
+    "Bash(git commit * -oe)"
+    "Bash(git commit * -oe *)"
+    "Bash(git commit -eo:*)"
+    "Bash(git commit -eo*)"
+    "Bash(git commit -eo)"
+    $'Bash(git commit\t-eo:*)'
+    $'Bash(git commit\t-eo*)'
+    $'Bash(git commit\t-eo)'
+    "Bash(git*commit -eo:*)"
+    "Bash(git*commit -eo*)"
+    "Bash(git*commit -eo)"
+    $'Bash(git*commit\t-eo:*)'
+    $'Bash(git*commit\t-eo*)'
+    $'Bash(git*commit\t-eo)'
+    "Bash(git commit * -eo)"
+    "Bash(git commit * -eo *)"
+    "Bash(git commit -pS:*)"
+    "Bash(git commit -pS*)"
+    "Bash(git commit -pS)"
+    $'Bash(git commit\t-pS:*)'
+    $'Bash(git commit\t-pS*)'
+    $'Bash(git commit\t-pS)'
+    "Bash(git*commit -pS:*)"
+    "Bash(git*commit -pS*)"
+    "Bash(git*commit -pS)"
+    $'Bash(git*commit\t-pS:*)'
+    $'Bash(git*commit\t-pS*)'
+    $'Bash(git*commit\t-pS)'
+    "Bash(git commit * -pS)"
+    "Bash(git commit * -pS *)"
+    "Bash(git commit -oS:*)"
+    "Bash(git commit -oS*)"
+    "Bash(git commit -oS)"
+    $'Bash(git commit\t-oS:*)'
+    $'Bash(git commit\t-oS*)'
+    $'Bash(git commit\t-oS)'
+    "Bash(git*commit -oS:*)"
+    "Bash(git*commit -oS*)"
+    "Bash(git*commit -oS)"
+    $'Bash(git*commit\t-oS:*)'
+    $'Bash(git*commit\t-oS*)'
+    $'Bash(git*commit\t-oS)'
+    "Bash(git commit * -oS)"
+    "Bash(git commit * -oS *)"
+    $'Bash(git*add*\t*-e:*)'
+    $'Bash(git*add*\t*-e*)'
+    $'Bash(git*add*\t*-e)'
+    $'Bash(git*add*\t*-pe:*)'
+    $'Bash(git*add*\t*-pe*)'
+    $'Bash(git*add*\t*-pe)'
+    $'Bash(git*add*\t*-ue:*)'
+    $'Bash(git*add*\t*-ue*)'
+    $'Bash(git*add*\t*-ue)'
+    $'Bash(git*add*\t*-ie:*)'
+    $'Bash(git*add*\t*-ie*)'
+    $'Bash(git*add*\t*-ie)'
+    $'Bash(git*add*\t*-ve:*)'
+    $'Bash(git*add*\t*-ve*)'
+    $'Bash(git*add*\t*-ve)'
+    $'Bash(git*add*\t*-ne:*)'
+    $'Bash(git*add*\t*-ne*)'
+    $'Bash(git*add*\t*-ne)'
+    $'Bash(git*add*\t*-c:*)'
+    $'Bash(git*add*\t*-c*)'
+    $'Bash(git*add*\t*-c)'
+    $'Bash(git*add*\t*-S:*)'
+    $'Bash(git*add*\t*-S*)'
+    $'Bash(git*add*\t*-S)'
+    $'Bash(git*commit*\t*-e:*)'
+    $'Bash(git*commit*\t*-e*)'
+    $'Bash(git*commit*\t*-e)'
+    $'Bash(git*commit*\t*-c:*)'
+    $'Bash(git*commit*\t*-c*)'
+    $'Bash(git*commit*\t*-c)'
+    $'Bash(git*commit*\t*-S:*)'
+    $'Bash(git*commit*\t*-S*)'
+    $'Bash(git*commit*\t*-S)'
+    $'Bash(git*commit*\t*-t:*)'
+    $'Bash(git*commit*\t*-t*)'
+    $'Bash(git*commit*\t*-t)'
+    $'Bash(git*commit*\t*-oe:*)'
+    $'Bash(git*commit*\t*-oe*)'
+    $'Bash(git*commit*\t*-oe)'
+    $'Bash(git*commit*\t*-ve:*)'
+    $'Bash(git*commit*\t*-ve*)'
+    $'Bash(git*commit*\t*-ve)'
+    $'Bash(git*commit*\t*-se:*)'
+    $'Bash(git*commit*\t*-se*)'
+    $'Bash(git*commit*\t*-se)'
+    $'Bash(git*commit*\t*-ue:*)'
+    $'Bash(git*commit*\t*-ue*)'
+    $'Bash(git*commit*\t*-ue)'
+    $'Bash(git*commit*\t*-pe:*)'
+    $'Bash(git*commit*\t*-pe*)'
+    $'Bash(git*commit*\t*-pe)'
+    $'Bash(git*commit*\t*-ae:*)'
+    $'Bash(git*commit*\t*-ae*)'
+    $'Bash(git*commit*\t*-ae)'
+    $'Bash(git*commit*\t*-qe:*)'
+    $'Bash(git*commit*\t*-qe*)'
+    $'Bash(git*commit*\t*-qe)'
+    $'Bash(git*commit*\t*-ne:*)'
+    $'Bash(git*commit*\t*-ne*)'
+    $'Bash(git*commit*\t*-ne)'
+    "Bash(/usr/bin/git*)"
+    "Bash(/bin/git*)"
+    "Bash(/usr/local/bin/git*)"
+    "Bash(*/bin/git*)"
+    "Bash(*/git*)"
+    "Bash(command git*)"
+    "Bash(command -p git*)"
+    "Bash(env git*)"
+    "Bash(env -i git*)"
+    "Bash(env -u git*)"
+    "Bash(GIT_*:*)"
+    "Bash(GIT_*)"
+    "Bash(git checkout-index:*)"
+    "Bash(git checkout-index*)"
+    "Bash(git*checkout-index:*)"
+    "Bash(git*checkout-index*)"
+    "Bash(git worktree:*)"
+    "Bash(git worktree*)"
+    "Bash(git*worktree:*)"
+    "Bash(git*worktree*)"
+    "Bash(git switch:*)"
+    "Bash(git switch*)"
+    "Bash(git*switch:*)"
+    "Bash(git*switch*)"
+    "Bash(git restore:*)"
+    "Bash(git restore*)"
+    "Bash(git*restore:*)"
+    "Bash(git*restore*)"
+    "Bash(git switch*--r:*)"
+    "Bash(git*switch*--r:*)"
+    "Bash(git switch*--r*)"
+    "Bash(git*switch*--r*)"
+    "Bash(git switch*--recurse:*)"
+    "Bash(git*switch*--recurse:*)"
+    "Bash(git switch*--recurse*)"
+    "Bash(git*switch*--recurse*)"
+    "Bash(git restore*--r:*)"
+    "Bash(git*restore*--r:*)"
+    "Bash(git restore*--r*)"
+    "Bash(git*restore*--r*)"
+    "Bash(git restore*--recurse:*)"
+    "Bash(git*restore*--recurse:*)"
+    "Bash(git restore*--recurse*)"
+    "Bash(git*restore*--recurse*)"
+    "Bash(git web--browse:*)"
+    "Bash(git web--browse*)"
+    "Bash(git*web--browse:*)"
+    "Bash(git*web--browse*)"
   )
   local GIT_FLOOR_CANARY=(
+    "Bash(git commit -oe:*)"
+    "Bash(git commit -pS*)"
+    "Bash(git commit -oS*)"
+    $'Bash(git*add*\t*-e:*)'
+    $'Bash(git*commit*\t*-e:*)'
+    "Bash(/usr/bin/git*)"
+    "Bash(command git*)"
+    "Bash(env git*)"
+    "Bash(GIT_*:*)"
+    "Bash(git checkout-index:*)"
+    "Bash(git worktree:*)"
+    "Bash(git switch:*)"
+    "Bash(git restore:*)"
+    "Bash(git web--browse:*)"
     "Bash(git*push*https*)"
-    "Bash(git*push*:**)"
-    "Bash(git*add -e:*)"
-    $'Bash(git add\t -e:*)'
-    $'Bash(git add \t-e:*)'
-    "Bash(git*-c:*)"
-    "Bash(git  -*)"
-    $'Bash(git\t-*)'
     "Bash(git send-pack:*)"
-    "Bash(git send-pack*)"
-    "Bash(git http-push:*)"
-    "Bash(git fetch-pack:*)"
-    "Bash(git http-fetch:*)"
-    "Bash(git commit*--fix:*)"
     "Bash(git commit*--fix*)"
-    "Bash(git commit -at:*)"
-    "Bash(git commit -qt:*)"
-    "Bash(git commit -ve:*)"
-    "Bash(git commit -se:*)"
-    "Bash(git commit -ue:*)"
-    "Bash(git commit -me:*)"
-    "Bash(git commit -pe:*)"
     "Bash(git -*)"
-    "Bash(git push*https*)"
-    "Bash(git add -e:*)"
-    "Bash(git commit*--te:*)"
-    "Bash(git commit*--sq:*)"
     "Bash(git remote*)"
+    "Bash(git add -e:*)"
   )
   python3 - "$tmp/reviewer.json" "${GH_FLOOR[@]}" <<'PY2'
 import json, sys
@@ -3186,7 +3506,7 @@ deny = ["Bash(apt:*)","Bash(apt-get:*)","Bash(openscad:*)","Bash(openscad-nightl
         *gh, "Bash(git:*)", "Bash(git*)", "Bash(tee:*)", "Write", "Edit", "NotebookEdit"]
 json.dump({"permissions": {"deny": deny}}, open(out, "w"))
 PY2
-  local coach_edits=(-Write -Edit "-Bash(git:*)" "-Bash(git*)" "+Edit(./.git/**)"
+  local coach_edits=(-Write -Edit "-Bash(git:*)" "-Bash(git*)" "+Edit(./.git/**)" "+Write(./.git/**)"
     "+Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)"
     "+Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)")
   for f in "${GIT_FLOOR[@]}"; do coach_edits+=("+$f"); done
@@ -3260,6 +3580,8 @@ PY2
   expect fail "a coach backstop that wildcard-denies Write fails the check" "$S" "$tmp/c.json" coach
   derive "$C" "$tmp/c.json" deny "-Edit(./.git/**)"
   expect fail "a coach backstop that lets Edit reach .git/ fails the check" "$S" "$tmp/c.json" coach
+  derive "$C" "$tmp/c.json" deny "-Write(./.git/**)"
+  expect fail "a coach backstop that lets Write reach .git/ fails the check" "$S" "$tmp/c.json" coach
   # The surfaces are per-backstop: the coach has no use for chunk-helper.
   derive "$C" "$tmp/c.json" deny "-Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)"
   expect fail "a coach backstop leaving chunk-helper undenied fails the check" "$S" "$tmp/c.json" coach
