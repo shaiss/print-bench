@@ -19,7 +19,10 @@ tunes its whole welfare envelope with two numbers.
   tip, **65 mm** tall (gated export 64.7 mm). See **Solid variant** below.
 - `coupon` — the print-this-first plate: a port stub to tune `port_tol` with,
   beside one lattice cell at production pitch (caliper `strand_w` and the
-  opening). See [`NOTES.md`](NOTES.md) for the tuning steps.
+  opening). About **2 h 18 m / ~30 g** (slice-measured), about the same as
+  the lattice cap. If you've already dialed `port_tol` on another NUGGS
+  module on this printer, reuse that value and print just the cell. See
+  [`NOTES.md`](NOTES.md) for the tuning steps.
 
 The cap is one printed part. Its port face is every `nuggs_cfg()` default, so
 it mates with the straight, the elbow, the den, the turnaround — any module on

@@ -171,9 +171,10 @@ No supports, no brim. PLA or PETG; PETG for gnaw durability.
 
 The coupon (`build/nuggs-vent-cap-coupon.stl`, `part="coupon"` in
 `nuggs-vent-cap-coupon.scad`) is **two pieces on one plate**: the production
-port stub (`nuggs_neck` at `z_top + 8`) and **one** on-slope lattice cell at
-production pitch (`slope_pitch = aperture_max + strand_w`) — not a multi-cell
-puck. Both come from the production modules; nothing is copied.
+port stub (`nuggs_neck` at `z_top + 8`) and **one** flat cell printed on the
+bed at the dome's on-slope pitch (`slope_pitch = aperture_max + strand_w`) —
+not a multi-cell puck. Both come from the production modules; nothing is
+copied.
 
 1. **Tune `port_tol`.** Print the stub, offer it to the module it must mate
    with (or another NUGGS port you have). Clicks in with a firm quarter-turn
@@ -183,7 +184,11 @@ puck. Both come from the production modules; nothing is copied.
 2. **Caliper the one cell.** Strands should measure ~1.2 mm (under ~1.0 means
    your printer is under-extruding — raise `strand_w` to 1.6, not the flow).
    The opening should measure ≤ 6.0 mm; if it measures over, the welfare
-   ceiling is breached — shrink `aperture_max` by the overshoot.
+   ceiling is breached — shrink `aperture_max` by the overshoot. Measure the
+   opening at the top face, not the base: first-layer squish narrows the
+   opening at its base, and the dome's openings are printed well above the
+   first layer, so a base reading can look small and hide a dome that's
+   over 6.0 mm.
 3. Only then print the cap. The dome's print behaviour itself is gated by
    printcheck and the test-slice; what only your printer can tell you is in
    the coupon.
@@ -206,5 +211,9 @@ plate. A real print photo is the artifact that belongs there.
 - 2026-10-05: Coupon slimmed to port stub + one production-pitch cell
   (Nadia/Keel eng step on PR #636). Multi-cell puck dropped — charter
   coverage is `port_tol` dial + caliper of `strand_w` / opening only.
+- 2026-10-05: Docs-only fold of Drik R4 nits (PR #636): coupon slice cost
+  on the Parts line, when the stub can be skipped, "flat cell on the bed
+  at the dome's on-slope pitch", and caliper the opening at the top face
+  not the base. Stub height and empty field-test log left alone.
 
 ## Field test log

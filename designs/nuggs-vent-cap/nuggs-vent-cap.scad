@@ -323,12 +323,13 @@ module cap_cutaway() {
 
 // ---------------------------------------------------------------------------
 // Print-this-first coupon: the production port stub (every NUGGS module tunes
-// port_tol on it) beside ONE on-slope lattice cell at production pitch —
-// strand bars of strand_w around an aperture_max opening. Not a multi-cell
-// puck: two proofs on one plate, both from the production modules (no copied
-// geometry). Caliper strand_w and the opening (<= aperture_max) before
-// committing to the full cap; the dome's print behaviour itself is
-// printcheck's and the test-slice's to gate. See NOTES.md "Print this first".
+// port_tol on it) beside one flat cell printed on the bed at the dome's
+// on-slope pitch — strand bars of strand_w around an aperture_max opening.
+// Not a multi-cell puck: two proofs on one plate, both from the production
+// modules (no copied geometry). Caliper strand_w and the opening
+// (<= aperture_max) before committing to the full cap; the dome's print
+// behaviour itself is printcheck's and the test-slice's to gate. See
+// NOTES.md "Print this first".
 // ---------------------------------------------------------------------------
 module lattice_gauge() {
     // One production cell: outer = slope_pitch + strand_w so the free
