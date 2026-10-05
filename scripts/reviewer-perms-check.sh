@@ -1784,6 +1784,170 @@ elif kind == "coach":
         {"Bash(git 'ini*)"},
         {"Bash(git \"ini*)"},
         {"Bash(git \\ini*)"},
+        {"Bash(git a'dd'*)"},
+        {'Bash(git a"dd"*)'},
+        {"Bash(git a''dd*)"},
+        {'Bash(git a""dd*)'},
+        {"Bash(git ad'd'*)"},
+        {'Bash(git ad"d"*)'},
+        {"Bash(git ad''d*)"},
+        {'Bash(git ad""d*)'},
+        {"Bash(git 'add'*)"},
+        {'Bash(git "add"*)'},
+        {'Bash(git \\add*)'},
+        {"Bash(git c'ommit'*)"},
+        {"Bash(git c''ommit*)"},
+        {'Bash(git c"ommit"*)'},
+        {'Bash(git c""ommit*)'},
+        {"Bash(git co'mmit'*)"},
+        {"Bash(git co''mmit*)"},
+        {'Bash(git co"mmit"*)'},
+        {'Bash(git co""mmit*)'},
+        {"Bash(git com'mit'*)"},
+        {"Bash(git com''mit*)"},
+        {'Bash(git com"mit"*)'},
+        {'Bash(git com""mit*)'},
+        {"Bash(git comm'it'*)"},
+        {"Bash(git comm''it*)"},
+        {'Bash(git comm"it"*)'},
+        {'Bash(git comm""it*)'},
+        {"Bash(git commi't'*)"},
+        {"Bash(git commi''t*)"},
+        {'Bash(git commi"t"*)'},
+        {'Bash(git commi""t*)'},
+        {"Bash(git 'commit'*)"},
+        {'Bash(git "commit"*)'},
+        {'Bash(git \\commit*)'},
+        {"Bash(git c'heckout'*)"},
+        {"Bash(git c''heckout*)"},
+        {'Bash(git c"heckout"*)'},
+        {'Bash(git c""heckout*)'},
+        {"Bash(git ch'eckout'*)"},
+        {"Bash(git ch''eckout*)"},
+        {'Bash(git ch"eckout"*)'},
+        {'Bash(git ch""eckout*)'},
+        {"Bash(git che'ckout'*)"},
+        {"Bash(git che''ckout*)"},
+        {'Bash(git che"ckout"*)'},
+        {'Bash(git che""ckout*)'},
+        {"Bash(git chec'kout'*)"},
+        {"Bash(git chec''kout*)"},
+        {'Bash(git chec"kout"*)'},
+        {'Bash(git chec""kout*)'},
+        {"Bash(git check'out'*)"},
+        {"Bash(git check''out*)"},
+        {'Bash(git check"out"*)'},
+        {'Bash(git check""out*)'},
+        {"Bash(git checko'ut'*)"},
+        {"Bash(git checko''ut*)"},
+        {'Bash(git checko"ut"*)'},
+        {'Bash(git checko""ut*)'},
+        {"Bash(git checkou't'*)"},
+        {"Bash(git checkou''t*)"},
+        {'Bash(git checkou"t"*)'},
+        {'Bash(git checkou""t*)'},
+        {"Bash(git 'checkout'*)"},
+        {'Bash(git "checkout"*)'},
+        {'Bash(git \\checkout*)'},
+        {"Bash(git a''m*)"},
+        {'Bash(git a""m*)'},
+        {"Bash(git i''nit*)"},
+        {'Bash(git i""nit*)'},
+        {"Bash(git add '-*e'*)"},
+        {'Bash(git add "-*e"*)'},
+        {"Bash(git add '-*e':*)"},
+        {'Bash(git add "-*e":*)'},
+        {"Bash(git*add*'-*e'*)"},
+        {'Bash(git*add*"-*e"*)'},
+        {"Bash(git add -'e'*)"},
+        {'Bash(git add -"e"*)'},
+        {"Bash(git*add*-'e'*)"},
+        {'Bash(git*add*-"e"*)'},
+        {"Bash(git add --'e*)"},
+        {'Bash(git add --"e*)'},
+        {"Bash(git*add*--'e*)"},
+        {'Bash(git*add*--"e*)'},
+        {"Bash(git commit '-*e'*)"},
+        {'Bash(git commit "-*e"*)'},
+        {"Bash(git commit '-*S'*)"},
+        {'Bash(git commit "-*S"*)'},
+        {"Bash(git commit '-S*'*)"},
+        {'Bash(git commit "-S*"*)'},
+        {"Bash(git*commit*'-*e'*)"},
+        {'Bash(git*commit*"-*e"*)'},
+        {"Bash(git*commit*'-*S'*)"},
+        {'Bash(git*commit*"-*S"*)'},
+        {"Bash(git*commit*'-S*'*)"},
+        {'Bash(git*commit*"-S*"*)'},
+        {"Bash(git commit -'e'*)"},
+        {'Bash(git commit -"e"*)'},
+        {"Bash(git commit -'S'*)"},
+        {'Bash(git commit -"S"*)'},
+        {"Bash(git commit --'e*)"},
+        {'Bash(git commit --"e*)'},
+        {"Bash(git commit --'g*)"},
+        {'Bash(git commit --"g*)'},
+        {"Bash(git commit --'ree*)"},
+        {'Bash(git commit --"ree*)'},
+        {"Bash(git*commit*--'e*)"},
+        {'Bash(git*commit*--"e*)'},
+        {"Bash(git*commit*--'g*)"},
+        {'Bash(git*commit*--"g*)'},
+        {"Bash(git*commit*--'ree*)"},
+        {'Bash(git*commit*--"ree*)'},
+        {"Bash(git checkout --'r*)"},
+        {'Bash(git checkout --"r*)'},
+        {"Bash(git*checkout*--'r*)"},
+        {'Bash(git*checkout*--"r*)'},
+        {'Bash(git add -*pe)'},
+        {'Bash(git add -*pe:*)'},
+        {'Bash(git add -*pe *)'},
+        {'Bash(git add * -*pe)'},
+        {'Bash(git add * -*pe *)'},
+        {'Bash(git*add*-*pe)'},
+        {'Bash(git*add*-*pe:*)'},
+        {'Bash(git add -*ie)'},
+        {'Bash(git add -*ie:*)'},
+        {'Bash(git add -*ie *)'},
+        {'Bash(git add * -*ie)'},
+        {'Bash(git add * -*ie *)'},
+        {'Bash(git*add*-*ie)'},
+        {'Bash(git*add*-*ie:*)'},
+        {'Bash(git add -*ue)'},
+        {'Bash(git add -*ue:*)'},
+        {'Bash(git add -*ue *)'},
+        {'Bash(git add * -*ue)'},
+        {'Bash(git add * -*ue *)'},
+        {'Bash(git*add*-*ue)'},
+        {'Bash(git*add*-*ue:*)'},
+        {'Bash(git commit -*ae)'},
+        {'Bash(git commit -*ae:*)'},
+        {'Bash(git commit -*ae *)'},
+        {'Bash(git commit * -*ae)'},
+        {'Bash(git commit * -*ae *)'},
+        {'Bash(git*commit*-*ae)'},
+        {'Bash(git*commit*-*ae:*)'},
+        {'Bash(git commit -*ac)'},
+        {'Bash(git commit -*ac:*)'},
+        {'Bash(git commit -*ac *)'},
+        {'Bash(git commit * -*ac)'},
+        {'Bash(git commit * -*ac *)'},
+        {'Bash(git*commit*-*ac)'},
+        {'Bash(git*commit*-*ac:*)'},
+        {'Bash(git commit -*aS)'},
+        {'Bash(git commit -*aS:*)'},
+        {'Bash(git commit -*aS *)'},
+        {'Bash(git commit * -*aS)'},
+        {'Bash(git commit * -*aS *)'},
+        {'Bash(git*commit*-*aS)'},
+        {'Bash(git*commit*-*aS:*)'},
+        {'Bash(git commit -*sS)'},
+        {'Bash(git commit -*sS:*)'},
+        {'Bash(git commit -*sS *)'},
+        {'Bash(git commit * -*sS)'},
+        {'Bash(git commit * -*sS *)'},
+        {'Bash(git*commit*-*sS)'},
+        {'Bash(git*commit*-*sS:*)'},
         {"Bash(git add '-e'*)"},
         {"Bash(git add '-e':*)"},
         {"Bash(git*add*'-e'*)"},
@@ -2816,6 +2980,32 @@ ESCAPE_PROBES = [
     "git commit -\\e",
     "git commit --\\gpg-sign=id",
     "git checkout --\\recurse-submodules",
+    "git a'dd' -e file",
+    "git 'add' -e file",
+    "git a''dd -e file",
+    "git c'ommit' --edit",
+    "git ch'eckout' --recurse-submodules",
+    "git a''m --unsafe-paths x",
+    "git i''nit /tmp/x",
+    "git add '-pe' file",
+    "git add '-ie' file",
+    "git add '-pue' file",
+    "git add \"-pe\" file",
+    "git commit '-ae'",
+    "git commit '-aS' -m x",
+    "git commit '-Skey' -m x",
+    "git add --'ed' file",
+    "git commit --'ed'",
+    "git commit --'gp'=id",
+    "git commit --'ree'=HEAD",
+    "git add -'e' file",
+    "git add -fpe",
+    "git add -Npe",
+    "git add -vpe",
+    "git add -Ape",
+    "git add -npe",
+    "git add '-Npe'",
+    "git commit -qae",
     # Quoted option-first flags.
     "git add '-e' file",
     "git add \"-e\" file",
@@ -3418,6 +3608,14 @@ EOF
     $'Bash(git p*\\*)'
     $'Bash(git a*\\*)'
     $'Bash(git c*\\*)'
+    'Bash(git a'\''dd'\''*)'
+    'Bash(git c'\''ommit'\''*)'
+    'Bash(git ch'\''eckout'\''*)'
+    'Bash(git a'\'''\''m*)'
+    'Bash(git add '\''-*e'\''*)'
+    'Bash(git add --'\''e*)'
+    "Bash(git add -*pe)"
+    "Bash(git commit -*ae)"
     'Bash(git '\''p*)'
     $'Bash(git \"p*)'
     'Bash(git pul*'\''*)'
@@ -4564,6 +4762,170 @@ EOF
     'Bash(git '\''ini*)'
     $'Bash(git \"ini*)'
     $'Bash(git \\ini*)'
+    'Bash(git a'\''dd'\''*)'
+    $'Bash(git a"dd"*)'
+    'Bash(git a'\'''\''dd*)'
+    $'Bash(git a""dd*)'
+    'Bash(git ad'\''d'\''*)'
+    $'Bash(git ad"d"*)'
+    'Bash(git ad'\'''\''d*)'
+    $'Bash(git ad""d*)'
+    'Bash(git '\''add'\''*)'
+    $'Bash(git "add"*)'
+    $'Bash(git \\add*)'
+    'Bash(git c'\''ommit'\''*)'
+    'Bash(git c'\'''\''ommit*)'
+    $'Bash(git c"ommit"*)'
+    $'Bash(git c""ommit*)'
+    'Bash(git co'\''mmit'\''*)'
+    'Bash(git co'\'''\''mmit*)'
+    $'Bash(git co"mmit"*)'
+    $'Bash(git co""mmit*)'
+    'Bash(git com'\''mit'\''*)'
+    'Bash(git com'\'''\''mit*)'
+    $'Bash(git com"mit"*)'
+    $'Bash(git com""mit*)'
+    'Bash(git comm'\''it'\''*)'
+    'Bash(git comm'\'''\''it*)'
+    $'Bash(git comm"it"*)'
+    $'Bash(git comm""it*)'
+    'Bash(git commi'\''t'\''*)'
+    'Bash(git commi'\'''\''t*)'
+    $'Bash(git commi"t"*)'
+    $'Bash(git commi""t*)'
+    'Bash(git '\''commit'\''*)'
+    $'Bash(git "commit"*)'
+    $'Bash(git \\commit*)'
+    'Bash(git c'\''heckout'\''*)'
+    'Bash(git c'\'''\''heckout*)'
+    $'Bash(git c"heckout"*)'
+    $'Bash(git c""heckout*)'
+    'Bash(git ch'\''eckout'\''*)'
+    'Bash(git ch'\'''\''eckout*)'
+    $'Bash(git ch"eckout"*)'
+    $'Bash(git ch""eckout*)'
+    'Bash(git che'\''ckout'\''*)'
+    'Bash(git che'\'''\''ckout*)'
+    $'Bash(git che"ckout"*)'
+    $'Bash(git che""ckout*)'
+    'Bash(git chec'\''kout'\''*)'
+    'Bash(git chec'\'''\''kout*)'
+    $'Bash(git chec"kout"*)'
+    $'Bash(git chec""kout*)'
+    'Bash(git check'\''out'\''*)'
+    'Bash(git check'\'''\''out*)'
+    $'Bash(git check"out"*)'
+    $'Bash(git check""out*)'
+    'Bash(git checko'\''ut'\''*)'
+    'Bash(git checko'\'''\''ut*)'
+    $'Bash(git checko"ut"*)'
+    $'Bash(git checko""ut*)'
+    'Bash(git checkou'\''t'\''*)'
+    'Bash(git checkou'\'''\''t*)'
+    $'Bash(git checkou"t"*)'
+    $'Bash(git checkou""t*)'
+    'Bash(git '\''checkout'\''*)'
+    $'Bash(git "checkout"*)'
+    $'Bash(git \\checkout*)'
+    'Bash(git a'\'''\''m*)'
+    $'Bash(git a""m*)'
+    'Bash(git i'\'''\''nit*)'
+    $'Bash(git i""nit*)'
+    'Bash(git add '\''-*e'\''*)'
+    $'Bash(git add "-*e"*)'
+    'Bash(git add '\''-*e'\'':*)'
+    $'Bash(git add "-*e":*)'
+    'Bash(git*add*'\''-*e'\''*)'
+    $'Bash(git*add*"-*e"*)'
+    'Bash(git add -'\''e'\''*)'
+    $'Bash(git add -"e"*)'
+    'Bash(git*add*-'\''e'\''*)'
+    $'Bash(git*add*-"e"*)'
+    'Bash(git add --'\''e*)'
+    $'Bash(git add --"e*)'
+    'Bash(git*add*--'\''e*)'
+    $'Bash(git*add*--"e*)'
+    'Bash(git commit '\''-*e'\''*)'
+    $'Bash(git commit "-*e"*)'
+    'Bash(git commit '\''-*S'\''*)'
+    $'Bash(git commit "-*S"*)'
+    'Bash(git commit '\''-S*'\''*)'
+    $'Bash(git commit "-S*"*)'
+    'Bash(git*commit*'\''-*e'\''*)'
+    $'Bash(git*commit*"-*e"*)'
+    'Bash(git*commit*'\''-*S'\''*)'
+    $'Bash(git*commit*"-*S"*)'
+    'Bash(git*commit*'\''-S*'\''*)'
+    $'Bash(git*commit*"-S*"*)'
+    'Bash(git commit -'\''e'\''*)'
+    $'Bash(git commit -"e"*)'
+    'Bash(git commit -'\''S'\''*)'
+    $'Bash(git commit -"S"*)'
+    'Bash(git commit --'\''e*)'
+    $'Bash(git commit --"e*)'
+    'Bash(git commit --'\''g*)'
+    $'Bash(git commit --"g*)'
+    'Bash(git commit --'\''ree*)'
+    $'Bash(git commit --"ree*)'
+    'Bash(git*commit*--'\''e*)'
+    $'Bash(git*commit*--"e*)'
+    'Bash(git*commit*--'\''g*)'
+    $'Bash(git*commit*--"g*)'
+    'Bash(git*commit*--'\''ree*)'
+    $'Bash(git*commit*--"ree*)'
+    'Bash(git checkout --'\''r*)'
+    $'Bash(git checkout --"r*)'
+    'Bash(git*checkout*--'\''r*)'
+    $'Bash(git*checkout*--"r*)'
+    "Bash(git add -*pe)"
+    "Bash(git add -*pe:*)"
+    "Bash(git add -*pe *)"
+    "Bash(git add * -*pe)"
+    "Bash(git add * -*pe *)"
+    "Bash(git*add*-*pe)"
+    "Bash(git*add*-*pe:*)"
+    "Bash(git add -*ie)"
+    "Bash(git add -*ie:*)"
+    "Bash(git add -*ie *)"
+    "Bash(git add * -*ie)"
+    "Bash(git add * -*ie *)"
+    "Bash(git*add*-*ie)"
+    "Bash(git*add*-*ie:*)"
+    "Bash(git add -*ue)"
+    "Bash(git add -*ue:*)"
+    "Bash(git add -*ue *)"
+    "Bash(git add * -*ue)"
+    "Bash(git add * -*ue *)"
+    "Bash(git*add*-*ue)"
+    "Bash(git*add*-*ue:*)"
+    "Bash(git commit -*ae)"
+    "Bash(git commit -*ae:*)"
+    "Bash(git commit -*ae *)"
+    "Bash(git commit * -*ae)"
+    "Bash(git commit * -*ae *)"
+    "Bash(git*commit*-*ae)"
+    "Bash(git*commit*-*ae:*)"
+    "Bash(git commit -*ac)"
+    "Bash(git commit -*ac:*)"
+    "Bash(git commit -*ac *)"
+    "Bash(git commit * -*ac)"
+    "Bash(git commit * -*ac *)"
+    "Bash(git*commit*-*ac)"
+    "Bash(git*commit*-*ac:*)"
+    "Bash(git commit -*aS)"
+    "Bash(git commit -*aS:*)"
+    "Bash(git commit -*aS *)"
+    "Bash(git commit * -*aS)"
+    "Bash(git commit * -*aS *)"
+    "Bash(git*commit*-*aS)"
+    "Bash(git*commit*-*aS:*)"
+    "Bash(git commit -*sS)"
+    "Bash(git commit -*sS:*)"
+    "Bash(git commit -*sS *)"
+    "Bash(git commit * -*sS)"
+    "Bash(git commit * -*sS *)"
+    "Bash(git*commit*-*sS)"
+    "Bash(git*commit*-*sS:*)"
     'Bash(git add '\''-e'\''*)'
     'Bash(git add '\''-e'\'':*)'
     'Bash(git*add*'\''-e'\''*)'
@@ -5433,6 +5795,14 @@ EOF
     'Bash(git ini*'\''*)'
     $'Bash(git a*\\*)'
     $'Bash(git c*\\*)'
+    'Bash(git a'\''dd'\''*)'
+    'Bash(git c'\''ommit'\''*)'
+    'Bash(git ch'\''eckout'\''*)'
+    "Bash(git a''m*)"
+    "Bash(git add '-*e'*)"
+    "Bash(git add --'e*)"
+    "Bash(git add -*pe)"
+    "Bash(git commit -*ae)"
     'Bash(git add '\''-e'\''*)'
     $'Bash(git add \"-e\"*)'
     'Bash(git add --'\''edit'\''*)'
