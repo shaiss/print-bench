@@ -387,7 +387,9 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     (`sbc-case-grille-coupon.scad` → `part="grille-coupon"`): `lid()` at print
     pose, intersected with a 45 × 45 mm plate crop centred on `fan_center` (Ø37
     bore + 4 mm margin). The z crop spans only `lid_t` on the plate slab, so the
-    four fan through-holes at `fan_pitch` (32 mm) stay in; the inner insert
+    four fan through-holes on **32 mm hole-to-hole spacing** stay in (`fan_pitch`
+    = `fan_hole_pitch(fan_type)` is **16 mm** from `fan_center` along each axis,
+    so opposite holes are 32 mm apart — see `sbc-case.scad`); the inner insert
     bosses (7 mm below the plate) are clipped out — plate-only, not a miniature
     lid. Proves hole/web printability and visual open area; not airflow or
     thermals.
@@ -425,8 +427,8 @@ structure proof:
    steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
 3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
    the standoff sample and hold firm.
-4. Only then print `base` (~2h 46m 37s) and `lid` (~2h 2m 41s) — printcheck
-   sticky on PR #810 tip `4f166d50`; your slicer and material may differ.
+4. Only then print `base` (~2h 46m 41s) and `lid` (~2h 2m 41s) — printcheck
+   sticky on PR #815 tip `832e776b`; your slicer and material may differ.
 
 **Grille presets (optional, B12):** if you are weighing `grille_hole_d` /
 `grille_web` (PM open decision — Ø5 / 7 mm vs Ø6 / 7.6 mm), print
@@ -439,8 +441,8 @@ grille-coupon`** — the Customizer on the wrapper file does not show them. Comp
 hole size and web feel on the bench; you can also hold a 40 mm fan on the coupon
 and nut through the screw holes to check pattern and frame coverage. It does
 **not** measure airflow, thermals, or fan noise. When a preset wins, reprint the
-full `lid`. Gate slice on this branch:
-~39m 9s, ~4.59 g (PrusaSlicer test profile; your slicer may differ).
+full `lid`. Gate slice on PR #815 tip `832e776b` (printcheck sticky):
+~39m 16s, ~4.60 g (PrusaSlicer test profile; your slicer and material may differ).
 
 ## Derivations worth keeping
 
