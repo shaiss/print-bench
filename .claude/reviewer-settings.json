@@ -121,7 +121,17 @@
       "Bash(gh browse:*)",
       "Write",
       "Edit",
-      "NotebookEdit"
+      "NotebookEdit",
+      "Bash(/usr/bin/env git*)",
+      "Bash(/bin/env git*)",
+      "Bash(*/env git*)",
+      "Bash(env * git*)",
+      "Bash(env -u * git*)",
+      "Bash(env -i * git*)",
+      "Bash(command -- git*)",
+      "Bash(command -p -- git*)",
+      "Bash(command -v git*)",
+      "Bash(*env git*)"
     ]
   }
 }

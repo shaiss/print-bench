@@ -1675,6 +1675,16 @@ elif kind == "coach":
         {"Bash(git web--browse*)"},
         {"Bash(git*web--browse:*)"},
         {"Bash(git*web--browse*)"},
+        {"Bash(/usr/bin/env git*)"},
+        {"Bash(/bin/env git*)"},
+        {"Bash(*/env git*)"},
+        {"Bash(env * git*)"},
+        {"Bash(env -u * git*)"},
+        {"Bash(env -i * git*)"},
+        {"Bash(command -- git*)"},
+        {"Bash(command -p -- git*)"},
+        {"Bash(command -v git*)"},
+        {"Bash(*env git*)"},
     ]
 else:
     sys.stderr.write(f"unknown backstop kind {kind!r}\n")
@@ -3470,27 +3480,28 @@ EOF
     "Bash(git web--browse*)"
     "Bash(git*web--browse:*)"
     "Bash(git*web--browse*)"
+    "Bash(/usr/bin/env git*)"
+    "Bash(/bin/env git*)"
+    "Bash(*/env git*)"
+    "Bash(env * git*)"
+    "Bash(env -u * git*)"
+    "Bash(env -i * git*)"
+    "Bash(command -- git*)"
+    "Bash(command -p -- git*)"
+    "Bash(command -v git*)"
+    "Bash(*env git*)"
   )
   local GIT_FLOOR_CANARY=(
-    "Bash(git commit -oe:*)"
-    "Bash(git commit -pS*)"
-    "Bash(git commit -oS*)"
-    $'Bash(git*add*\t*-e:*)'
-    $'Bash(git*commit*\t*-e:*)'
-    "Bash(/usr/bin/git*)"
-    "Bash(command git*)"
-    "Bash(env git*)"
-    "Bash(GIT_*:*)"
-    "Bash(git checkout-index:*)"
-    "Bash(git worktree:*)"
-    "Bash(git switch:*)"
-    "Bash(git restore:*)"
-    "Bash(git web--browse:*)"
+    "Bash(/usr/bin/env git*)"
+    "Bash(env * git*)"
+    "Bash(command -- git*)"
     "Bash(git*push*https*)"
     "Bash(git send-pack:*)"
-    "Bash(git commit*--fix*)"
+    "Bash(/usr/bin/git*)"
+    "Bash(GIT_*:*)"
+    "Bash(git web--browse:*)"
+    "Bash(git checkout-index:*)"
     "Bash(git -*)"
-    "Bash(git remote*)"
     "Bash(git add -e:*)"
   )
   python3 - "$tmp/reviewer.json" "${GH_FLOOR[@]}" <<'PY2'
