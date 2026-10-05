@@ -54,6 +54,9 @@ lip_t = 2.0;
 /* [Fit & tolerances] */
 // Lid register lip vs cavity wall (mm) — tune on the coupon first
 fit_clearance = 0.25;
+// 45° lead-in on the lip's entering (cavity) edge — feel only; fitchecks
+// prove clearance at full seat (Jane, PM B5). Tune on the coupon first.
+lip_lead_chamfer = 0.45;
 // Board-hole-to-standoff alignment slop proven by the fit-pins fitcheck (mm)
 pin_slop = 0.15;
 
@@ -188,13 +191,7 @@ module lid() { //! printed lid: plate, register lip (notched around the posts), 
             // (the posts rise to the lid's underside; post + notch is what
             // locates the lid — proven by the fit-lid fitcheck)
             translate([0, 0, base_top_z - lip_depth])
-                linear_extrude(lip_depth + 0.01)
-                    difference() {
-                        ring2d(cavity_x_half - fit_clearance, cavity_y_half - fit_clearance, lip_t);
-                        for (px = [-1, 1], py = [-1, 1])
-                            translate([px * post_x, py * post_y])
-                                circle(r = post_r + fit_clearance);
-                    }
+                register_lip();
             // plate
             translate([0, 0, base_top_z])
                 linear_extrude(lid_t)
@@ -231,6 +228,46 @@ module ring2d(x_half, y_half, t) { //! rounded-rect ring, outer half-extents giv
     difference() {
         rounded_square([2 * x_half, 2 * y_half], r = 3, center = true);
         rounded_square([2 * (x_half - t), 2 * (y_half - t)], r = 1.5, center = true);
+    }
+}
+
+module register_lip_profile(outer_inset = 0) { //! lip ring 2D; outer_inset shrinks only the outer face (lead-in chamfer)
+    xo = cavity_x_half - fit_clearance - outer_inset;
+    yo = cavity_y_half - fit_clearance - outer_inset;
+    xi = cavity_x_half - fit_clearance - lip_t;
+    yi = cavity_y_half - fit_clearance - lip_t;
+    difference() {
+        difference() {
+            rounded_square([2 * xo, 2 * yo], r = 3, center = true);
+            rounded_square([2 * xi, 2 * yi], r = 1.5, center = true);
+        }
+        for (px = [-1, 1], py = [-1, 1])
+            translate([px * post_x, py * post_y])
+                circle(r = post_r + fit_clearance);
+    }
+}
+
+module register_lip() { //! vertical register lip with optional 45° lead-in on the entering edge
+    // 45° lead-in at the cavity tip (assembled z = base_top_z - lip_depth): the
+    // outer corner that enters the base when seating (Jane, PM B5). Cut by
+    // difference so post notches are not hull-bridged. Print pose: top of the
+    // standing lip — a shallow flare, not a mid-air bridge.
+    chamfer = min(max(lip_lead_chamfer, 0), lip_depth - 0.05);
+    xo = cavity_x_half - fit_clearance;
+    yo = cavity_y_half - fit_clearance;
+    if (chamfer < 0.05) {
+        linear_extrude(lip_depth + 0.01)
+            register_lip_profile();
+    } else {
+        union() {
+            translate([0, 0, chamfer])
+                linear_extrude(lip_depth - chamfer + 0.01)
+                    register_lip_profile();
+            translate([0, 0, -0.01])
+                linear_extrude(chamfer + 0.02,
+                               scale=[xo / (xo - chamfer), yo / (yo - chamfer)])
+                    register_lip_profile(outer_inset = chamfer);
+        }
     }
 }
 
