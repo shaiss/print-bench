@@ -237,5 +237,9 @@ plate. A real print photo is the artifact that belongs there.
   half-length so odd counts (dwarf 5/1.6 → n_rib=41) no longer double the
   rays; (3) `part="coupon-cell"` exposes the cell-only print the README
   already described.
+- 2026-10-06: Docs-only fold of Drik R7 nits (PR #636): Solid variant
+  section — opaque dark filament advice for the 1.2 mm shell, and
+  hollowing cut from ~57 g → ~35 g (~40 % less), not "roughly in half".
+  Empty field-test log left alone.
 
 ## Field test log

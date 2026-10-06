@@ -40,8 +40,10 @@ shell closed near the tip (open underside so it prints support-free like the
 lattice — no flat disk across the bore), no crown bridge; physics makes it
 taller, **65 mm** tip-to-crown versus the lattice's 51 mm — about **2 h 42 m / ~35 g**
 versus the lattice's **2 h 47 m / ~30 g** (slice-measured). Hollowing the cone
-(open underside) cuts the filled-cone plastic roughly in half while keeping
-the support-free claim.
+(open underside) cuts the filled-cone plastic from about **57 g** to about
+**35 g** — roughly 40 % less — while keeping the support-free claim. The
+shell is 1.2 mm (`strand_w`); if darkness is the point, print it in an
+opaque, dark filament.
 
 CI gates and slices it as `vent-cap-solid`
 (`build/nuggs-vent-cap-vent-cap-solid.stl`). In the Customizer, set `lattice`
