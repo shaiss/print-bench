@@ -2977,14 +2977,21 @@ jobs:
         # marker is on the thread. Fail here so review-stamp cannot mark
         # the round complete. Extract the pin from base.sha AFTER the
         # agent (Write/Edit/Bash): the workspace copy is not trusted.
+        #
+        # Success-only on purpose (Bugbot on #820): the #770 artifact walk
+        # widened this to success|failure, so a chain where every provider
+        # errored (no COACH-LOCK posted) failed HERE — hard, no
+        # continue-on-error — and skipped Diagnose / Every configured
+        # provider failed. Provider exhaustion must reach those steps;
+        # missing-lock is only meaningful after a ship link claimed success.
         if: >-
           always()
-          && (steps.p1.outcome == 'success' || steps.p1.outcome == 'failure'
-              || steps.p2.outcome == 'success' || steps.p2.outcome == 'failure'
-              || steps.p3.outcome == 'success' || steps.p3.outcome == 'failure'
-              || steps.p4.outcome == 'success' || steps.p4.outcome == 'failure'
-              || steps.p5.outcome == 'success' || steps.p5.outcome == 'failure'
-              || steps.p6.outcome == 'success' || steps.p6.outcome == 'failure')
+          && (steps.p1.outcome == 'success'
+              || steps.p2.outcome == 'success'
+              || steps.p3.outcome == 'success'
+              || steps.p4.outcome == 'success'
+              || steps.p5.outcome == 'success'
+              || steps.p6.outcome == 'success')
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}

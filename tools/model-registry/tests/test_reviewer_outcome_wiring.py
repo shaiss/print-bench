@@ -255,6 +255,53 @@ def test_pm_and_coach_tolerate_a_pre_770_base_checker():
         "design-coach no longer restores reviewer-posted.sh from base.sha")
 
 
+def _coach_lock_check_step(text: str) -> str:
+    """The design-coach completeness pin (not an artifact-check vN step)."""
+    steps = _steps(_job_blocks(text)["design-coach"])
+    for chunk in steps:
+        if "Coach posted a COACH-LOCK" in chunk:
+            return chunk
+    raise AssertionError(
+        "auto-review.yml [design-coach] lost the Coach posted a COACH-LOCK "
+        "step — the #806 completeness pin is gone")
+
+
+def _assert_coach_lock_check_is_success_only(text: str) -> None:
+    """Lock check runs after a claimed success, never on provider failure.
+
+    Bugbot Medium on #820: #770 widened the if to success|failure. The step
+    has no continue-on-error, so a fully-exhausted provider chain (every
+    ship link failed, no COACH-LOCK posted) failed as a missing lock and
+    skipped Diagnose / Every configured provider failed. Missing-lock is
+    only meaningful after a ship link claimed success (#806); exhaustion
+    must reach the provider-triage path.
+    """
+    chunk = _coach_lock_check_step(text)
+    cond = _if_condition(chunk)
+    for n in range(1, LINKS + 1):
+        success = f"steps.p{n}.outcome == 'success'"
+        failure = f"steps.p{n}.outcome == 'failure'"
+        assert success in cond, (
+            f"auto-review.yml [design-coach] COACH-LOCK check lost "
+            f"{success} — a denial-only exit-0 turn would skip the pin "
+            "(issue #806)")
+        assert failure not in cond, (
+            f"auto-review.yml [design-coach] COACH-LOCK check still keys on "
+            f"{failure} — provider exhaustion would fail as a missing lock "
+            "and skip the exhaustion diagnosis (Bugbot on #820)")
+    assert "continue-on-error" not in chunk.split("run:", 1)[0], (
+        "auto-review.yml [design-coach] COACH-LOCK check gained "
+        "continue-on-error — a success-without-lock round would stamp "
+        "green (issue #806)")
+    # Exhaustion gates must still be reachable when no link succeeded:
+    # they key on served, not on the lock-check outcome.
+    _assert_exhaustion_gates_key_on_the_artifact(text)
+
+
+def test_coach_lock_check_runs_only_after_a_ship_success():
+    _assert_coach_lock_check_is_success_only(_workflow_text())
+
+
 def test_the_stamp_confirms_both_markers_before_advancing_the_sha():
     _assert_stamp_confirms_both_markers(_workflow_text())
 
@@ -423,6 +470,29 @@ def test_pm_coach_guard_rejects_an_exit_code_regression():
         assert "steps.p1.outcome != 'success'" not in body, (
             "auto-review.yml [pm-triage] still keys on exit codes — issue #770 "
             "migrated it to the artifact walk")
+
+
+def test_lock_check_guard_rejects_widening_to_failure():
+    # NEGATIVE CONTROL: Bugbot on #820 — success|failure on the lock check
+    # makes provider exhaustion look like a missing COACH-LOCK.
+    success_only = (
+        "          && (steps.p1.outcome == 'success'\n"
+        "              || steps.p2.outcome == 'success'\n"
+        "              || steps.p3.outcome == 'success'\n"
+        "              || steps.p4.outcome == 'success'\n"
+        "              || steps.p5.outcome == 'success'\n"
+        "              || steps.p6.outcome == 'success')")
+    success_or_failure = (
+        "          && (steps.p1.outcome == 'success' || steps.p1.outcome == 'failure'\n"
+        "              || steps.p2.outcome == 'success' || steps.p2.outcome == 'failure'\n"
+        "              || steps.p3.outcome == 'success' || steps.p3.outcome == 'failure'\n"
+        "              || steps.p4.outcome == 'success' || steps.p4.outcome == 'failure'\n"
+        "              || steps.p5.outcome == 'success' || steps.p5.outcome == 'failure'\n"
+        "              || steps.p6.outcome == 'success' || steps.p6.outcome == 'failure')")
+    tampered = _job_replace(
+        _workflow_text(), "design-coach", success_only, success_or_failure)
+    with pytest.raises(AssertionError, match="outcome == 'failure'"):
+        _assert_coach_lock_check_is_success_only(tampered)
 
 
 def test_stamp_guard_rejects_a_one_reviewer_confirmation():
