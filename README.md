@@ -388,7 +388,10 @@ surfaces studies awaiting a read live in
     exemption (gh, jq, mktemp; the reviewer's also keeps PM triage's
     `chunk-helper.sh`, the coach's git), always deny the render toolchain
     (apt, openscad, xvfb-run, prusa-slicer, printcheck, the render/gate/check
-    scripts, session-start.sh) and the gh escape hatches, and never deny the
+    scripts, session-start.sh) and the gh escape hatches, and the env-lock
+    floor (`export`/`env`/`unset`/`set` and `bash`/`sh`/`dash -c`, issue
+    #777) so the job-level `GIT_*` lock cannot be unset by an additive
+    allow, and never deny the
     review surface (gh, the read tools; git checkout/add/commit/push and
     Write/Edit too for the coach). A deny list cannot contain git, so the
     reviewers get none (`Bash(git:*)` denied; the workflow stages the PR
