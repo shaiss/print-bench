@@ -351,16 +351,23 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
         // ring standing on a 0.5 mm plate sliver (measured: crop spanned
         // z[2.0,5.0] at print pose). Flip it over and drop it on the base
         // corner: the notch engages the post, the lip face meets the wall.
-        // +Y extent 13.5 mm (not 18.2): a taller crop's top face slices the
-        // B5 outer chamfer band on the +Y lip perimeter, leaving ~0.03 mm mesh
-        // slivers (coupon 92/100); trimming above the post/notch corner keeps
-        // the real -X wall register and lead-in at the corner without the
-        // artifact (measured: coupon 100/100, base/lid STLs unchanged).
+        // Lid crop +X at the lip inner (−xi ≈ −43): the old +X face at x ≈
+        // −33.6 bisected the +Y lip through the B5 chamfer band (~0.03 mm mesh
+        // slivers, coupon 92/100). Trimming +Y to 13.5 mm cleared printcheck
+        // but left a ~0.15 mm fin and dropped the +Y lip face, the outer
+        // corner arc and most of the post notch (Drik R2). The 92/100 was NOT
+        // the crop top at 18.2 mm (y = 38.7, past the lid outer at 38.1) —
+        // measured: any crop top above y ≈ 34.9 mm slices the chamfer band.
+        // +Y extent 14.35 mm (top y = 34.85, lip inner yi = 33.85) is the
+        // tallest axis-aligned box that stays 100/100: rehearses −X wall
+        // register, the −X lip face, the lower +Y lip band and lead-in on the
+        // straight −X approach; the outer −X,+Y corner arc and the post notch
+        // above y ≈ 34.9 mm stay on the full lid (see NOTES.md).
         translate([0, 0, lid_top_z]) rotate([180, 0, 0])
             intersection() {
                 lid();
                 translate([-outer_l / 2 - 0.6, 20.5, -0.5])
-                    cube([outer_l / 2 - 33, 13.5, lid_top_z + 1]);
+                    cube([outer_l / 2 - 42, 14.35, lid_top_z + 1]);
             }
     }
 }

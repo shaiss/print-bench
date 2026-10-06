@@ -366,13 +366,19 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     feel-only. **Print pose:** the lid prints outer-face-down (`part="lid"`);
     the chamfer sits on the **top** of the standing lip (furthest from the bed),
     a shallow outward flare within the 45° support-free ceiling (N4), not a
-    bridge across the plate.     Coupon inherits the same parameter (one source
-    file). After the outer-only fix, the lid crop's +Y extent (18.2 mm) sliced
+    bridge across the plate.     Coupon inherits the same parameter (one source file). After the outer-only
+    fix, the lid crop's **+X** face (at x ≈ −33.6) bisected the +Y lip through
     the chamfer band and left ~0.03 mm mesh slivers (coupon 92/100, base/lid
-    still 100/100); trimming the lid crop to 13.5 mm stops above the post/notch
-    corner so the coupon still rehearses wall register, notch and lead-in at
-    the −X,+Y corner without the artifact (coupon 100/100; shipped base/lid
-    STLs unchanged).
+    still 100/100) — not the crop top at 18.2 mm (y = 38.7, past the lid outer
+    at 38.1). Trimming +Y to 13.5 mm cleared printcheck but left a ~0.15 mm
+    fin and dropped most of the +Y lip (Drik R2). **R2 fix:** move the lid
+    crop +X to the lip inner (x ≈ −43, `outer_l/2 − 42`) and raise +Y to
+    14.35 mm (top y = 34.85, the tallest axis-aligned box still 100/100).
+    The coupon rehearses −X wall register, the −X lip face, the lower +Y lip
+    band (yi–34.85 mm) and lead-in on the straight −X seat; the outer −X,+Y
+    corner arc and the post notch above y ≈ 34.9 mm are only on the full lid
+    (a taller crop re-slices the chamfer band at 92/100). No fin; base/lid
+    STLs unchanged.
 26. **Round 13 — the last caption straggler (PR #397).** One act-now, the
     page-honesty exception's third use: the `product-populated` italic caption
     (README) still said "gold header pins through the wall" — the round-3 wording
@@ -415,9 +421,12 @@ structure proof:
    `2 * insert_hole_radius(F1BM3)` from the vitamin, so tune by printer, not
    by editing the vitamin value.
 2. **Register fit:** flip the lid corner over and drop it onto the base
-   corner — the lip notch should pass the post and the lip face seat against
-   the wall with light friction, no force. Tight → `fit_clearance` +0.05
-   steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
+   corner — the −X lip face should seat against the wall with light friction,
+   no force (feel the B5 lead-in on the straight −X approach). The crop
+   includes the lower +Y lip band but not the full post notch or the outer
+   −X,+Y corner arc; confirm those on the full lid. Tight → `fit_clearance`
+   +0.05 steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM
+   printer.
 3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
    the standoff sample and hold firm.
 4. Only then print `base` (~2h45m) and `lid` (~1h40m) — the head-stamped gate
