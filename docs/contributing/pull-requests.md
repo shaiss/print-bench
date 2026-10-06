@@ -14,6 +14,10 @@ Expect CI to be an active participant, not just a judge:
 - **Sticky comments** accumulate on the PR: the printcheck gate report, smart-CI's gate selection (with any proposed gates a maintainer can cross via `/ci-gate approve <id>`), and — whenever designs are gated — the advisory geometric diff.
 - **Everything funnels into `ci-ok`**, the summary context branch protection is designed to require; today `ci.yml`'s own CAUTION still names five required job contexts, so treat every job `name:` string as load-bearing — renaming one can strand PRs, and rewiring a job id breaks `ci-ok`'s `needs:` list, which [`scripts/ci-ok-guard.sh`](../../scripts/ci-ok-guard.sh) catches in `check.sh`. Job selection per change class is the classifier's business ([CI and the gates](ci-and-gates.md)).
 
+## Mentions on PR threads
+
+Agent display names can collide with real GitHub logins. **Never `@`-mention** an agent name on a PR or issue when that happens — GitHub will subscribe the unrelated human, and there is no API to unsubscribe them for you. Deny-list starts with **`wright`** (case-insensitive): use `toolwright`, `/wright`, "platform SA burn-down", or "eng prioritizer" instead, and keep eng SA routing off the public thread. See [docs/agent-forge.md](../agent-forge.md#github-mention-hygiene-agent-display-names) and issue #822.
+
 ## Reviews
 
 - **Design PRs** get the reviewer personas automatically ([docs/reviewer-personas.md](../reviewer-personas.md)): Jane (printability experience) and Drik (fitness-for-purpose) post tagged findings, and the design's PM triages every tagged finding — act-now, queue, or decline with a cited reason. The reviewers are feedback; the PM is the gate; CI holds the numbers. `/design-coach` can drive the rounds.
