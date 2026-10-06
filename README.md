@@ -392,7 +392,16 @@ surfaces studies awaiting a read live in
     review surface (gh, the read tools; git checkout/add/commit/push and
     Write/Edit too for the coach). A deny list cannot contain git, so the
     reviewers get none (`Bash(git:*)` denied; the workflow stages the PR
-    head for Jane and Drik) and the coach's git is fenced to local verbs;
+    head for Jane and Drik) and the coach's git is fenced to local verbs
+    (global options plus the four-verb option floor from #775: editor,
+    gpg-sign, template/squash, receive-pack/exec, recurse-submodules, repo
+    at shortest unique prefixes `--e`/`--g`/`--te`/`--sq`/`--r`/`--rece`/
+    `--recu`/`--rep`, URL/path dest including dest-not-first and scp-like
+    `host:path` (`*:**`) with no required space after the verb so IFS TAB/double-space
+    splits match, plus plumbing send-pack/http-push/fetch-pack/http-fetch
+    and --fixup/--fix, enumerated clustered `-e`/`-c`/`-S` shorts (`*` only —
+    Claude Code has no `?`) plus explicit TAB twins for short option-first
+    stems, and `git remote` retarget);
     `--selftest` with a positive and a negative control per rule, run by
     check.sh. The workflow half — every reviewer ship step in
     `auto-review.yml` passes its backstop under `dontAsk` and runs under the
