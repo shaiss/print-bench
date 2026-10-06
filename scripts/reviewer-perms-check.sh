@@ -2844,11 +2844,13 @@ REQUIRED_DENIES = [
 # that used to be incidental (export/env/bash -c were simply un-allowed).
 # ENV_LOCK_FLOOR makes it a named deny so a future additive allow
 # (Bash(env:*), say) cannot wrap `env GIT_ALLOW_PROTOCOL=file git fetch …`
-# around the lock. A bare `VAR=value cmd` prefix is NOT a command token —
-# Claude Code's Bash() matcher never sees it (recorded in --selftest); it
-# stays refused under dontAsk because it is not on the allow list either.
-# The workflow half of the lock is pinned by
-# tools/model-registry/tests/test_reviewer_git_containment.py.
+# around the lock. A bare `VAR=value cmd` prefix is not a Claude Code
+# Bash() command token, so ENV_LOCK_FLOOR cannot invent prefix-assignment
+# syntax; #793's wrapper floor (`Bash(GIT_*)` / `Bash(GIT_*:*)` /
+# `Bash(*=* git*)`) matches the `GIT_*=… git …` spelling when that string
+# is presented as the command (pinned in --selftest). The env-lock floor
+# covers env/export/bash -c wrappers. The workflow half of the lock is
+# pinned by tools/model-registry/tests/test_reviewer_git_containment.py.
 ENV_LOCK_FLOOR = [
     {"Bash(export:*)"}, {"Bash(export*)"},
     {"Bash(env:*)"}, {"Bash(env*)"},
@@ -6188,16 +6190,18 @@ PY
   else
     n=$((n + 1)); echo "FAIL  selftest: the strict matcher let Bash(git -c:*) cover git -cx=y"; bad=1
   fi
-  # Issue #777: a bare VAR=value prefix is not a command token. Claude Code's
-  # Bash() matcher never sees `GIT_CONFIG_COUNT=1 git config user.x y`, so no
-  # deny (including Bash(git:*)) blocks it. Record that finding here rather
-  # than putting the string in ESCAPE_PROBES (which would fail the floor).
-  # Under dontAsk the form is still refused because it is not on the allow
-  # list; the env-lock floor covers env/export/bash -c wrappers instead.
+  # Issue #777 + #793: a bare `VAR=value cmd` prefix is not a Claude Code
+  # Bash() command token, so ENV_LOCK_FLOOR cannot invent prefix-assignment
+  # syntax (and the form stays out of ESCAPE_PROBES). #793's wrapper floor
+  # (`Bash(GIT_*)` / `Bash(GIT_*:*)` / `Bash(*=* git*)`) matches the
+  # `GIT_*=… git …` spelling when that string is presented as the command —
+  # assert both backstops hit exactly that set. The env-lock floor still
+  # covers env/export/bash -c wrappers that would unset GIT_* for a child.
   local prefix_probe="GIT_CONFIG_COUNT=1 git config user.x y"
   if python3 - "$R" "$C" "$prefix_probe" <<'PY3'
 import json, sys
 reviewer, coach, probe = sys.argv[1], sys.argv[2], sys.argv[3]
+expected = {"Bash(GIT_*)", "Bash(GIT_*:*)", "Bash(*=* git*)"}
 
 def surely_blocks(rule, command):
     if rule == "Bash":
@@ -6217,15 +6221,18 @@ def surely_blocks(rule, command):
 
 for path in (reviewer, coach):
     deny = json.load(open(path))["permissions"]["deny"]
-    if any(surely_blocks(d, probe) for d in deny):
-        sys.stderr.write(f"{path} unexpectedly blocks {probe!r}\n")
+    hits = {d for d in deny if surely_blocks(d, probe)}
+    if hits != expected:
+        sys.stderr.write(
+            f"{path} hits for {probe!r}: {sorted(hits)}; want {sorted(expected)}\n"
+        )
         sys.exit(1)
 sys.exit(0)
 PY3
   then
-    n=$((n + 1)); echo "ok    selftest: bare VAR=value prefix is not a Bash() token (GIT_CONFIG_COUNT=1 git config … unmatched — recorded #777 finding)"
+    n=$((n + 1)); echo "ok    selftest: bare GIT_*=… git … is matched by the #793 wrapper floor only (ENV_LOCK_FLOOR covers env/export/bash -c; #777+#793)"
   else
-    n=$((n + 1)); echo "FAIL  selftest: a backstop deny matched the bare VAR=value prefix; update the #777 finding"; bad=1
+    n=$((n + 1)); echo "FAIL  selftest: bare GIT_*=… git … hits drifted from the #793 wrapper floor; update the #777+#793 finding"; bad=1
   fi
   # And the floor must not cost the real surface: the complete coach backstop
   # (which carries the floor) still passes with its push verbs intact — the
@@ -6237,9 +6244,12 @@ PY3
 }
 
 if [[ "${1:-}" == "--selftest" ]]; then
-  selftest
-  echo "ok    reviewer-perms-check selftest passed"
-  exit 0
+  if selftest; then
+    echo "ok    reviewer-perms-check selftest passed"
+    exit 0
+  fi
+  echo "FAIL  reviewer-perms-check selftest failed"
+  exit 1
 fi
 
 [[ -f "$SETTINGS" ]] || { echo "FAIL  reviewer-perms: $SETTINGS missing"; exit 1; }
