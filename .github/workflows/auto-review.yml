@@ -195,6 +195,15 @@ name: Auto design review (Jane / Drik / PM / coach)
 # disposition-by-artifact discipline as routine-lock-cleanup.sh (#538) for
 # the ship routines.
 #
+# Transition (#770 landing): pm-triage checks out base.ref and design-coach
+# restores reviewer-posted.sh from base.sha — both keep the trust boundary
+# (never the PR-head checker). A pre-#770 base checker rejects --reviewer
+# pm|coach with exit 2; under set -e that would abort before served is set
+# and freeze the fallback walk. Those artifact-check steps treat that
+# specific exit-2 message as served=false (not a pass) so the walk continues
+# until main carries the extended checker — including open PRs whose
+# base.sha still predates the merge.
+#
 # Required secrets (at least one; the chain uses whichever are present):
 #   ZAI_KEY          — Z.AI key, used via the Anthropic-compatible endpoint
 #                      (https://api.z.ai/api/anthropic). Tried first.
@@ -1403,8 +1412,29 @@ jobs:
           SINCE: ${{ steps.ready.outputs.started_at }}
         run: |
           set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 1 artifact: served=$served"
 
       - name: /pm triage via Z.AI GLM (chain link 2)
@@ -1450,8 +1480,29 @@ jobs:
           SINCE: ${{ steps.ready.outputs.started_at }}
         run: |
           set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 2 artifact: served=$served"
 
       - name: /pm triage via Z.AI GLM (chain link 3)
@@ -1497,8 +1548,29 @@ jobs:
           SINCE: ${{ steps.ready.outputs.started_at }}
         run: |
           set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 3 artifact: served=$served"
 
       - name: /pm triage via Anthropic (chain link 4)
@@ -1546,8 +1618,29 @@ jobs:
           SINCE: ${{ steps.ready.outputs.started_at }}
         run: |
           set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 4 artifact: served=$served"
 
       - name: /pm triage via Anthropic (chain link 5)
@@ -1596,8 +1689,29 @@ jobs:
           SINCE: ${{ steps.ready.outputs.started_at }}
         run: |
           set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 5 artifact: served=$served"
 
       - name: /pm triage via Anthropic (chain link 6)
@@ -1647,8 +1761,29 @@ jobs:
           SINCE: ${{ steps.ready.outputs.started_at }}
         run: |
           set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 6 artifact: served=$served"
 
       - name: No provider key configured
@@ -1942,8 +2077,30 @@ jobs:
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
           chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 1 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 2)
@@ -2088,8 +2245,30 @@ jobs:
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
           chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 2 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 3)
@@ -2234,8 +2413,30 @@ jobs:
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
           chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 3 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 4)
@@ -2387,8 +2588,30 @@ jobs:
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
           chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 4 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 5)
@@ -2542,8 +2765,30 @@ jobs:
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
           chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 5 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 6)
@@ -2700,8 +2945,30 @@ jobs:
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
           chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
           served="$(scripts/reviewer-posted.sh check \
-            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE")"
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           echo "link 6 artifact: served=$served"
 
       - name: Coach posted a COACH-LOCK

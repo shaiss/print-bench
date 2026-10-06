@@ -224,6 +224,37 @@ def test_pm_and_coach_are_on_the_artifact_walk():
             f"auto-review.yml [{job}] walk does not key on served outputs")
 
 
+def test_pm_and_coach_tolerate_a_pre_770_base_checker():
+    """CodeRabbit on #820: base.ref / base.sha may still carry a jane|drik-only
+    checker. Exit 2 for hardcoded pm/coach must become served=false (walk
+    continues), never a step failure and never a pass — and never the
+    PR-head checker."""
+    text = _workflow_text()
+    blocks = _job_blocks(text)
+    needle = r"must be jane or drik \(got: (pm|coach)\)"
+    for job, who in (("pm-triage", "pm"), ("design-coach", "coach")):
+        body = _without_comments(blocks[job])
+        assert needle in body, (
+            f"auto-review.yml [{job}] lost the pre-#770 exit-2 compat match "
+            f"— an older base checker would abort the walk under set -e")
+        assert f"base checker predates #770 ({who})" in body, (
+            f"auto-review.yml [{job}] lost the pre-#770 notice"
+            f" ({who})")
+        # served=false is written explicitly — old checker never reaches
+        # its GITHUB_OUTPUT write when usage() exits 2.
+        assert 'echo "served=false" >> "$GITHUB_OUTPUT"' in body, (
+            f"auto-review.yml [{job}] does not write served=false on the "
+            "older-checker path — the walk would see an empty served")
+        # Trust boundary: coach still extracts the checker from base.sha;
+        # neither job may point the check at the PR-head tree as a "fix".
+        assert "head.sha}}:scripts/reviewer-posted.sh" not in body, (
+            f"auto-review.yml [{job}] switched the checker to the PR head "
+            "— that weakens the trust boundary CodeRabbit called out")
+    coach = _without_comments(blocks["design-coach"])
+    assert 'git show "${BASE_SHA}:scripts/reviewer-posted.sh"' in coach, (
+        "design-coach no longer restores reviewer-posted.sh from base.sha")
+
+
 def test_the_stamp_confirms_both_markers_before_advancing_the_sha():
     _assert_stamp_confirms_both_markers(_workflow_text())
 
