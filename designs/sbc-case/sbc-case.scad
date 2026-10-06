@@ -350,12 +350,17 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
         // plate sits ABOVE base_top_z, and a base-height crop leaves the lip
         // ring standing on a 0.5 mm plate sliver (measured: crop spanned
         // z[2.0,5.0] at print pose). Flip it over and drop it on the base
-        // corner: the notch engages the post, the lip face meets the wall
+        // corner: the notch engages the post, the lip face meets the wall.
+        // +Y extent 13.5 mm (not 18.2): a taller crop's top face slices the
+        // B5 outer chamfer band on the +Y lip perimeter, leaving ~0.03 mm mesh
+        // slivers (coupon 92/100); trimming above the post/notch corner keeps
+        // the real -X wall register and lead-in at the corner without the
+        // artifact (measured: coupon 100/100, base/lid STLs unchanged).
         translate([0, 0, lid_top_z]) rotate([180, 0, 0])
             intersection() {
                 lid();
                 translate([-outer_l / 2 - 0.6, 20.5, -0.5])
-                    cube([outer_l / 2 - 33, 18.2, lid_top_z + 1]);
+                    cube([outer_l / 2 - 33, 13.5, lid_top_z + 1]);
             }
     }
 }

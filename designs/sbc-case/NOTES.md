@@ -366,8 +366,13 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     feel-only. **Print pose:** the lid prints outer-face-down (`part="lid"`);
     the chamfer sits on the **top** of the standing lip (furthest from the bed),
     a shallow outward flare within the 45° support-free ceiling (N4), not a
-    bridge across the plate. Coupon inherits the same parameter (one source
-    file).
+    bridge across the plate.     Coupon inherits the same parameter (one source
+    file). After the outer-only fix, the lid crop's +Y extent (18.2 mm) sliced
+    the chamfer band and left ~0.03 mm mesh slivers (coupon 92/100, base/lid
+    still 100/100); trimming the lid crop to 13.5 mm stops above the post/notch
+    corner so the coupon still rehearses wall register, notch and lead-in at
+    the −X,+Y corner without the artifact (coupon 100/100; shipped base/lid
+    STLs unchanged).
 26. **Round 13 — the last caption straggler (PR #397).** One act-now, the
     page-honesty exception's third use: the `product-populated` italic caption
     (README) still said "gold header pins through the wall" — the round-3 wording
