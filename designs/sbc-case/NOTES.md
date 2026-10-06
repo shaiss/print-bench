@@ -357,16 +357,17 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     `lip_lead_chamfer = 0.45` mm (Customizer, tunable 0.4–0.5) on the lip's
     **cavity tip** — assembled z = `base_top_z − lip_depth`, the outer
     perimeter that enters the base first when lowering. Geometry: a
-    `linear_extrude(..., scale=...)` band on `register_lip_profile()` keeps the
-    inner profile fixed (so `fit-lid` clearance is unchanged at full seat) and
-    only tapers the outer face over the chamfer height. **Not a fit fix** — the
-    existing `ci.fitchecks` still prove clearance; this is feel-only. **Print
-    pose:** the lid prints outer-face-down (`part="lid"`); the chamfer sits on
-    the **top** of the standing lip (furthest from the bed), a shallow outward
-    flare within the 45° support-free ceiling (N4), not a bridge across the
-    plate. Coupon inherits the same parameter (one source file). Re-gated:
-    base 100/100, lid 92/100 (0 criticals), coupon 92/100, all four fitchecks
-    unchanged.
+    full `register_lip_profile()` depth intersected with
+    `register_lip_outer_envelope()` (45° scaled outer rounded-rect band + full
+    extrusion above) so only the outer perimeter tapers; inner face and post
+    notches stay on the main profile (Drik R1 on the first draft caught a scaled
+    whole-profile band that pinched post clearance). **Not a
+    fit fix** — the existing `ci.fitchecks` still prove clearance; this is
+    feel-only. **Print pose:** the lid prints outer-face-down (`part="lid"`);
+    the chamfer sits on the **top** of the standing lip (furthest from the bed),
+    a shallow outward flare within the 45° support-free ceiling (N4), not a
+    bridge across the plate. Coupon inherits the same parameter (one source
+    file).
 26. **Round 13 — the last caption straggler (PR #397).** One act-now, the
     page-honesty exception's third use: the `product-populated` italic caption
     (README) still said "gold header pins through the wall" — the round-3 wording

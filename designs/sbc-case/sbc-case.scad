@@ -231,9 +231,9 @@ module ring2d(x_half, y_half, t) { //! rounded-rect ring, outer half-extents giv
     }
 }
 
-module register_lip_profile(outer_inset = 0) { //! lip ring 2D; outer_inset shrinks only the outer face (lead-in chamfer)
-    xo = cavity_x_half - fit_clearance - outer_inset;
-    yo = cavity_y_half - fit_clearance - outer_inset;
+module register_lip_profile() { //! lip ring 2D (shared by lid, coupon, fitchecks)
+    xo = cavity_x_half - fit_clearance;
+    yo = cavity_y_half - fit_clearance;
     xi = cavity_x_half - fit_clearance - lip_t;
     yi = cavity_y_half - fit_clearance - lip_t;
     difference() {
@@ -247,26 +247,36 @@ module register_lip_profile(outer_inset = 0) { //! lip ring 2D; outer_inset shri
     }
 }
 
-module register_lip() { //! vertical register lip with optional 45° lead-in on the entering edge
-    // 45° lead-in at the cavity tip (assembled z = base_top_z - lip_depth): the
-    // outer corner that enters the base when seating (Jane, PM B5). Cut by
-    // difference so post notches are not hull-bridged. Print pose: top of the
-    // standing lip — a shallow flare, not a mid-air bridge.
-    chamfer = min(max(lip_lead_chamfer, 0), lip_depth - 0.05);
+module register_lip_outer_envelope(chamfer) { //! 45° outer taper volume; inner/notches unconstrained
     xo = cavity_x_half - fit_clearance;
     yo = cavity_y_half - fit_clearance;
+    union() {
+        translate([0, 0, chamfer])
+            linear_extrude(lip_depth - chamfer + 0.01)
+                rounded_square([2 * xo, 2 * yo], r = 3, center = true);
+        translate([0, 0, -0.01])
+            linear_extrude(chamfer + 0.02,
+                           scale = [xo / (xo - chamfer), yo / (yo - chamfer)])
+                rounded_square([2 * (xo - chamfer), 2 * (yo - chamfer)],
+                               r = max(3 - chamfer, 1.5), center = true);
+    }
+}
+
+module register_lip() { //! vertical register lip with optional 45° lead-in on the entering edge
+    // 45° lead-in at the cavity tip (assembled z = base_top_z - lip_depth): the
+    // outer face that enters the base when seating (Jane, PM B5). Full
+    // register_lip_profile() intersected with a tapered outer envelope so only
+    // the outer perimeter moves — inner face and post-notch cuts stay fixed.
+    // Print pose: top of the standing lip — a shallow flare, not a mid-air bridge.
+    chamfer = min(max(lip_lead_chamfer, 0), lip_depth - 0.05);
     if (chamfer < 0.05) {
         linear_extrude(lip_depth + 0.01)
             register_lip_profile();
     } else {
-        union() {
-            translate([0, 0, chamfer])
-                linear_extrude(lip_depth - chamfer + 0.01)
-                    register_lip_profile();
-            translate([0, 0, -0.01])
-                linear_extrude(chamfer + 0.02,
-                               scale=[xo / (xo - chamfer), yo / (yo - chamfer)])
-                    register_lip_profile(outer_inset = chamfer);
+        render() intersection() {
+            linear_extrude(lip_depth + 0.01)
+                register_lip_profile();
+            register_lip_outer_envelope(chamfer);
         }
     }
 }
