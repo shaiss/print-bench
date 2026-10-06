@@ -6244,12 +6244,14 @@ PY3
 }
 
 if [[ "${1:-}" == "--selftest" ]]; then
-  if selftest; then
-    echo "ok    reviewer-perms-check selftest passed"
-    exit 0
-  fi
-  echo "FAIL  reviewer-perms-check selftest failed"
-  exit 1
+  # Call as a simple command (sibling *-perms-check.sh pattern): wrapping
+  # selftest in `if` would suppress set -e for the whole function body, so an
+  # unguarded derive/python3 failure could continue and a later expect-fail
+  # on a missing fixture could pass. With set -e, a non-zero return from
+  # selftest exits here before the ok line — check.sh still sees the failure.
+  selftest
+  echo "ok    reviewer-perms-check selftest passed"
+  exit 0
 fi
 
 [[ -f "$SETTINGS" ]] || { echo "FAIL  reviewer-perms: $SETTINGS missing"; exit 1; }
