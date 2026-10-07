@@ -107,7 +107,9 @@ the fan on blowing into the case.
 
 If a fit is off, tune it on the coupon (NOTES.md, "Print this first") and
 reprint only the affected part — the coupon is cropped from the same geometry,
-so what you feel there is what the full parts do.
+so what you feel there is what the full parts do. A printcheck thin-wall warning
+on the coupon after a large `fit_clearance` bump can be a crop artifact; gate the
+full `lid` if in doubt (NOTES decision 27).
 
 ## Living with it
 

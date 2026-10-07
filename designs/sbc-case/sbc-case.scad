@@ -328,8 +328,21 @@ module vitamin_fan_screw()    { screw(M3_dome_screw, 20); }
 module vitamin_washer()       { washer(M3_washer); }
 
 // ── Fit coupon (print this first) ───────────────────────────────────────────
+// Lid crop +X/+Y track register_lip_profile() so tuning fit_clearance on the
+// coupon does not re-slice the B5 chamfer band (Drik R3; see NOTES 27).
+coupon_crop_y_min = 20.5; // shared −Y face for both corner crops
+coupon_lid_crop_above_yi = 1.0; // crop top = yi + this (below chamfer slice band)
+coupon_lid_crop_x_outboard = 0.15; // +X trim stays slightly outside lip_xi (R2 default)
 
 module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, post, generated standoff) in place, the lid's at print pose across the plate — flip the lid crop over and it nests on the base corner
+    lip_xi = cavity_x_half - fit_clearance - lip_t;
+    lip_yi = cavity_y_half - fit_clearance - lip_t;
+    // Above default clearance the lip/chamfer moves; trim +Y a hair so the
+    // crop plane does not re-slice the band (measured: +0.05 needs ~0.2 mm).
+    lid_crop_y_pad = coupon_lid_crop_above_yi
+        - max(0, fit_clearance - 0.25) * 4;
+    lid_crop_xw = outer_l / 2 + 0.6 - lip_xi + coupon_lid_crop_x_outboard;
+    lid_crop_yh = lip_yi + lid_crop_y_pad - coupon_crop_y_min;
     union() {
         // base -X,+Y corner as printed (floor down): real wall the lid lip
         // registers against, skirt profile, the through-insert lid-screw post,
@@ -340,7 +353,7 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
         // (Jane, PR #397). It stays the fit AND structure proof.
         intersection() {
             base();
-            translate([-outer_l / 2 - 0.6, 20.5, -0.5])
+            translate([-outer_l / 2 - 0.6, coupon_crop_y_min, -0.5])
                 cube([outer_l / 2 - 14, 18.2, base_top_z + 1]);
         }
         // lid -X,+Y corner at print pose (outer face down), cropped in
@@ -350,24 +363,20 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
         // plate sits ABOVE base_top_z, and a base-height crop leaves the lip
         // ring standing on a 0.5 mm plate sliver (measured: crop spanned
         // z[2.0,5.0] at print pose). Flip it over and drop it on the base
-        // corner: the notch engages the post, the lip face meets the wall.
-        // Lid crop +X at the lip inner (−xi ≈ −43): the old +X face at x ≈
-        // −33.6 bisected the +Y lip through the B5 chamfer band (~0.03 mm mesh
-        // slivers, coupon 92/100). Trimming +Y to 13.5 mm cleared printcheck
-        // but left a ~0.15 mm fin and dropped the +Y lip face, the outer
-        // corner arc and most of the post notch (Drik R2). The 92/100 was NOT
-        // the crop top at 18.2 mm (y = 38.7, past the lid outer at 38.1) —
-        // measured: any crop top above y ≈ 34.9 mm slices the chamfer band.
-        // +Y extent 14.35 mm (top y = 34.85, lip inner yi = 33.85) is the
-        // tallest axis-aligned box that stays 100/100: rehearses −X wall
-        // register, the −X lip face, the lower +Y lip band and lead-in on the
-        // straight −X approach; the outer −X,+Y corner arc and the post notch
-        // above y ≈ 34.9 mm stay on the full lid (see NOTES.md).
+        // corner: the notch edge meets the post, the lip face meets the wall.
+        // Lid crop +X at −lip_xi (lip inner): the old +X face at x ≈ −33.6
+        // bisected the +Y lip through the B5 chamfer band (~0.03 mm mesh
+        // slivers, coupon 92/100). +Y top at lip_yi + coupon_lid_crop_above_yi
+        // tracks fit_clearance — a fixed crop top re-slices the chamfer when
+        // clearance moves (NOTES 27). Rehearses −X wall register, the −X lip
+        // face, the lower +Y lip band and lead-in on the straight −X approach;
+        // the outer −X,+Y corner arc and the post-notch arc above that band
+        // stay on the full lid.
         translate([0, 0, lid_top_z]) rotate([180, 0, 0])
             intersection() {
                 lid();
-                translate([-outer_l / 2 - 0.6, 20.5, -0.5])
-                    cube([outer_l / 2 - 42, 14.35, lid_top_z + 1]);
+                translate([-outer_l / 2 - 0.6, coupon_crop_y_min, -0.5])
+                    cube([lid_crop_xw, lid_crop_yh, lid_top_z + 1]);
             }
     }
 }
