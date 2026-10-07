@@ -372,13 +372,16 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     still 100/100) — not the crop top at 18.2 mm (y = 38.7, past the lid outer
     at 38.1). Trimming +Y to 13.5 mm cleared printcheck but left a ~0.15 mm
     fin and dropped most of the +Y lip (Drik R2). **R2 fix:** move the lid
-    crop +X to the lip inner (x ≈ −43, `outer_l/2 − 42`) and raise +Y to
-    14.35 mm (top y = 34.85, the tallest axis-aligned box still 100/100).
-    The coupon rehearses −X wall register, the −X lip face, the lower +Y lip
-    band (yi–34.85 mm) and lead-in on the straight −X seat; the outer −X,+Y
-    corner arc and the post notch above y ≈ 34.9 mm are only on the full lid
-    (a taller crop re-slices the chamfer band at 92/100). No fin; base/lid
-    STLs unchanged.
+    crop +X to the lip inner and raise +Y to the tallest axis-aligned box
+    still 100/100 at default clearance.     **R3 fix (Drik):** derive lid-crop +X/+Y from `lip_xi` / `lip_yi` (1.0 mm
+    above inner +Y at default, shrinking 0.2 mm per +0.05 mm clearance above
+    0.25 so a +0.05 coupon step stays 100/100) instead of literal 14.35 mm /
+    `outer_l/2 − 42`. At +0.10 above default the coupon can still read 92/100
+    thin-wall from the crop plane — the full `lid` part stays 100/100. The
+    coupon rehearses −X wall register, the −X lip face, the lower +Y lip band
+    and lead-in on the straight −X seat; the outer −X,+Y corner arc and the
+    post-notch arc above that band are only on the full lid. No fin; base/lid
+    part STLs unchanged.
 26. **Round 13 — the last caption straggler (PR #397).** One act-now, the
     page-honesty exception's third use: the `product-populated` italic caption
     (README) still said "gold header pins through the wall" — the round-3 wording
