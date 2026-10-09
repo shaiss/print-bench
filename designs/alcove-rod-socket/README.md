@@ -112,7 +112,10 @@ Two such plates fit the 256 × 256 mm P2S bed.
   the collar's first-layer ring lifts, fix it with the brim above — don't
   flip the part.
 - **Print order:** both coupons first, then tune (below), then a pair
-  (deep+shallow: two bosses, one `collar`, one `collar-shallow`).
+  (deep+shallow: two bosses, one `collar`, one `collar-shallow`). The bore
+  and thread coupons prove slip and thread only — **not** the seat catch;
+  print a **full collar** (not just the bore coupon) when you want to feel
+  the seat click or scrape before you hang the rod (NOTES.md D13).
 
 The gate scores the boss / collar / collar-shallow / thread-coupon set with
 the same thin-wall warning pattern (tessellated thread crests and knurl
@@ -143,6 +146,8 @@ you'll export the fused assembly preview instead of a printable part):
 | `screw_count` | 1 | 1 central M5, or 2 off-axis (grows the flange; stops boss spin) |
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
+| `seat_detent` | on | annular catch at the rod seat — feel "fully in" |
+| `witness_window` | on | two axial sight slots at the seat — see "fully in" |
 
 Sizes other than the default 40 mm rod are **untested** — the geometry
 scales, but the fits are only proven at 40 mm, and the coupons are the
@@ -158,11 +163,20 @@ proof: print them in your material first and trust them over this page.
    weight — heavier curtains than that want a stud or `screw_count=2`
    (derivation in NOTES).
 2. Slide the collars over the rod before hanging it — one at each end.
-3. Thread each collar onto its boss until the rim seats on the plate. For a
-   rigid rod between two fixed walls: use one default `collar` (deep) and one
-   `collar-shallow` — push into the deep side, drop the shallow end in,
-   tighten both collars. Cut the rod ≈ **18–20 mm short of the mouth-to-mouth
-   span** (28 mm deep − 12 mm shallow + each mouth's lead-in).
+3. Thread each collar onto its boss until the rim seats on the plate. Push
+   each rod end in until you feel a scrape or click past the seat ridge, then
+   bottom on the shoulder — that tactile catch is what the design targets,
+   but it is **unproven until the week-of-use proving print** (NOTES.md D13;
+   field test log). Look through the two thin slots near the grip-to-tube
+   flare: you should see the rod *tip* at the seat (empty dark deep in the
+   slot = not fully in). A thin dark **crescent at the seat end** of each
+   slot can be normal when seated (the witness starts 0.3 mm above the seat
+   plane) — look for the rod tip filling the slot, not a perfectly
+   black-free bottom. For a rigid rod between two fixed walls: use
+   one default `collar` (deep) and one `collar-shallow` — push into the deep
+   side, drop the shallow end in, tighten both collars. Cut the rod ≈
+   **18–20 mm short of the mouth-to-mouth span** (28 mm deep − 12 mm shallow
+   + each mouth's lead-in).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out — **holding the flange still** as you
    unthread, because unscrewing friction can walk the single M5 out of the
