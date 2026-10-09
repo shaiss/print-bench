@@ -31,8 +31,12 @@ Printed **in pairs** (one holder per wall, one pair per rod):
 - `collar-shallow` — the same collar at `engagement_depth=12` (far side of
   the push-in-deep / drop-in-shallow install). Gated and shipped in the
   Release; not on the plate (the plate is the default-depth holder pair).
-- `thread-coupon` / `bore-coupon` — the "print this first" fit checks (see
-  Print settings).
+- `thread-coupon` / `bore-coupon` — the "print this first" fit checks at the
+  default 40 mm rod (see Print settings).
+- `thread-coupon-25` / `bore-coupon-25` — the same coupons at the **25 mm
+  reference** size (CI-gated; wrappers
+  `alcove-rod-socket-thread-coupon-25.scad` /
+  `alcove-rod-socket-bore-coupon-25.scad`).
 
 **Deliverable — two objects, never one fused STL.** `boss` and `collar` print as
 **separate parts**, and the one rule is: keep them as two distinct objects in the
@@ -114,6 +118,17 @@ Two such plates fit the 256 × 256 mm P2S bed.
 - **Print order:** both coupons first, then tune (below), then a pair
   (deep+shallow: two bosses, one `collar`, one `collar-shallow`).
 
+| Coupon | When |
+|---|---|
+| `thread-coupon` / `bore-coupon` | default **40 mm** rod (fit-proven size) |
+| `thread-coupon-25` / `bore-coupon-25` | **25 mm** reference (CI-gated; not field-tested yet) |
+
+**25 mm and both coupons fit?** Customizer on `alcove-rod-socket.scad`: set
+`rod_d = 25`, export `part` **boss** and **collar** (plus **collar-shallow**
+if you need the deep+shallow install) as separate STLs — grip drops to **32**
+flutes automatically. Gated Release parts for 25 mm holders are backlog **B5b**
+(PM.md).
+
 The gate scores the boss / collar / collar-shallow / thread-coupon set with
 the same thin-wall warning pattern (tessellated thread crests and knurl
 ridges under 0.8 mm on a few percent of sampled surface; the bore coupon is
@@ -144,9 +159,18 @@ you'll export the fused assembly preview instead of a printable part):
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
 
-Sizes other than the default 40 mm rod are **untested** — the geometry
-scales, but the fits are only proven at 40 mm, and the coupons are the
-proof: print them in your material first and trust them over this page.
+**Gated rod sizes:** **40 mm** (fit-proven in the field — production parts +
+40 mm coupons) and **25 mm** (CI-gated `thread-coupon-25` /
+`bore-coupon-25` only — not fit-tested on a real rod yet). Any other barrel
+Ø still needs you to set `rod_d` and print the 40 mm coupon wrappers at that
+override before trusting a boss/collar pair.
+
+**Calipers read ~25.4 mm (common on US “1 inch” rods)?** The 25 mm coupons
+assume a **25.0 mm** barrel and a **25.6 mm** bore (`rod_clearance = 0.6`).
+A 25.4 mm rod in that bore leaves only **0.2 mm** diametral slip — often too
+tight once the hole shrinks. Set `rod_d = 25.4` on the main file (or raise
+`rod_clearance` in the coupon wrapper, e.g. toward **1.0 mm** for a **26.0 mm**
+bore at `rod_d = 25`) before you trust boss/collar exports.
 
 ## Assembly & use
 

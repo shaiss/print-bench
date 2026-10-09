@@ -14,7 +14,7 @@ include <styles/workshop-utility/style.scad> // family tokens; $fn set below
 /* [Part] */
 // What to render: the two printable parts, the fit coupons, the assembled
 // preview, or the boolean mate proofs (ci.fitchecks — never printed).
-part = "assembly"; // [assembly, boss, collar, collar-shallow, thread-coupon, bore-coupon, fit-mate, fit-mate-ctrl, cutaway]
+part = "assembly"; // [assembly, boss, collar, collar-shallow, thread-coupon, bore-coupon, thread-coupon-25, bore-coupon-25, fit-mate, fit-mate-ctrl, cutaway]
 
 /* [Rod & socket] */
 // Rod barrel outer diameter, measured where it sits in the socket (mm)
@@ -76,7 +76,12 @@ $fn = style_fn; // 64 — the family's curve resolution
 // ---------------------------------------------------------------------------
 // Derived
 // ---------------------------------------------------------------------------
-bore_d = rod_d + rod_clearance;                    // 40.6 — rod slip bore
+// B5: 25 mm reference coupons are gated as named parts (not a second rod_d
+// override on the command line). Everything else uses the Customizer `rod_d`.
+_geom_rod_d = (part == "thread-coupon-25" || part == "bore-coupon-25")
+    ? 25.0 : rod_d;
+
+bore_d = _geom_rod_d + rod_clearance;              // slip bore at geom rod
 thread_major = bore_d + 2 * wall;                  // 47.0 — scales with bore
 thread_root_d = thread_major - 2 * thread_depth;   // 44.6 — neck core
 female_bore_d = thread_root_d + 2 * thread_tol;    // 45.2 — collar base bore
@@ -96,13 +101,31 @@ flange_d = screw_count == 2
     : collar_lower_od + 2 * seat_lip;
 
 // Knurl geometry: one cylindrical cutter per flute, axis outside the surface
-// so the groove bottom lands knurl_depth below the rim.
-knurl_arc_w = PI * collar_lower_od / knurl_flutes; // flute pitch at surface
-knurl_flute_r = 0.4 * knurl_arc_w;                 // cutter radius
-knurl_groove_w = 2 * sqrt(knurl_flute_r ^ 2
-    - (knurl_flute_r - knurl_depth) ^ 2);          // printed groove width
+// so the groove bottom lands knurl_depth below the rim. At smaller collar ODs
+// the requested flute count crowds — cap it so N6 land width still holds
+// (NOTES B5 / 2026-10-04).
+function _knurl_groove_w(od, flutes) =
+    let(arc_w = PI * od / flutes, flute_r = 0.4 * arc_w)
+    2 * sqrt(flute_r ^ 2 - (flute_r - knurl_depth) ^ 2);
 
-assert(knurl_flutes >= 6, "knurl_flutes: fewer than 6 is not a grip.");
+function _knurl_ok(od, flutes) =
+    let(arc_w = PI * od / flutes,
+        groove_w = _knurl_groove_w(od, flutes))
+    (flutes >= 6)
+    && (groove_w >= knurl_min_width)
+    && (arc_w >= groove_w + 0.8);
+
+function _knurl_flutes_cap(od, f) =
+    (f < 6) ? 6 : (_knurl_ok(od, f) ? f : _knurl_flutes_cap(od, f - 1));
+
+knurl_flutes_eff = min(knurl_flutes,
+    _knurl_flutes_cap(collar_lower_od, knurl_flutes));
+
+knurl_arc_w = PI * collar_lower_od / knurl_flutes_eff; // pitch at surface
+knurl_flute_r = 0.4 * knurl_arc_w;                     // cutter radius
+knurl_groove_w = _knurl_groove_w(collar_lower_od, knurl_flutes_eff);
+
+assert(knurl_flutes_eff >= 6, "knurl_flutes: fewer than 6 is not a grip.");
 assert(knurl_groove_w >= knurl_min_width, str(
     "knurl groove prints ", knurl_groove_w, " mm wide — under the ",
     knurl_min_width, " mm floor. Reduce knurl_flutes or knurl_depth."));
@@ -213,8 +236,8 @@ module collar(depth = engagement_depth) {
 module knurl_cut() {
     r_axis = collar_lower_od / 2 + knurl_flute_r - knurl_depth;
     z0 = style_edge_chamfer + 0.2;
-    for (i = [0 : knurl_flutes - 1])
-        rotate([0, 0, i * 360 / knurl_flutes])
+    for (i = [0 : knurl_flutes_eff - 1])
+        rotate([0, 0, i * 360 / knurl_flutes_eff])
             translate([r_axis, 0, z0])
                 cylinder(r = knurl_flute_r, h = collar_lower_h - 2 * z0);
 }
@@ -290,7 +313,7 @@ module assembly() {
     translate([0, 0, flange_t]) collar_use();
     // ghost rod showing engagement (preview only — never exported)
     %translate([0, 0, flange_t])
-        cylinder(d = rod_d, h = collar_h - flange_t + 25);
+        cylinder(d = _geom_rod_d, h = collar_h - flange_t + 25);
 }
 
 module cutaway() {
@@ -305,6 +328,8 @@ else if (part == "collar") collar();
 else if (part == "collar-shallow") collar(shallow_engagement_depth);
 else if (part == "thread-coupon") thread_coupon();
 else if (part == "bore-coupon") bore_coupon();
+else if (part == "thread-coupon-25") thread_coupon();
+else if (part == "bore-coupon-25") bore_coupon();
 else if (part == "fit-mate") fit_mate();
 else if (part == "fit-mate-ctrl") fit_mate(90);
 else if (part == "cutaway") cutaway();

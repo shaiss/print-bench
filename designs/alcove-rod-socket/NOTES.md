@@ -94,7 +94,10 @@ default-depth holder pair.
   under the rim. Guards (as asserts): flute count ≥ 6, printed groove width
   ≥ `knurl_min_width` 1.2 mm (3 extrusion widths), flutes can't merge
   (pitch ≥ groove + 0.8), and ≥ 2.0 mm wall kept over the thread groove
-  (`knurl_depth ≤ wall − 1.2`).
+  (`knurl_depth ≤ wall − 1.2`). **B5 / 2026-10-04:** at 25 mm rod the
+  requested 36 flutes fail the merge guard (collar OD 39 mm); `knurl_flutes_eff`
+  caps to the largest count that still passes (32 at 25 mm, 36 at 40 mm) so
+  N6 is not weakened — only the spacing tightens on smaller collars.
 - **D9 — Screw head geometry.** 90° countersink, Ø = M5 socket head + 0.5,
   flush at the *neck's* top face; assert keeps the head below the plane the
   rod bottoms on (rod seats on the collar shoulder, never on the screw).
@@ -193,6 +196,22 @@ production modules — what you print *is* what ships.
 
 Measure the pole with calipers first and set `rod_d` to the *barrel* reading
 (where the socket sits), not the finial/ring size.
+
+### 25 mm reference coupons (B5 / #809)
+
+For a **25 mm** closet-rod reference (brief origin size), print these gated
+parts instead of hand-overriding `rod_d`:
+
+| Part | Wrapper | What it proves |
+|---|---|---|
+| `thread-coupon-25` | `alcove-rod-socket-thread-coupon-25.scad` | printed thread at 25 mm major stack |
+| `bore-coupon-25` | `alcove-rod-socket-bore-coupon-25.scad` | slip bore at `rod_clearance=0.6` → **25.6 mm** Ø |
+
+Same tune flow as the 40 mm coupons (`thread_tol`, `rod_clearance`). US rods
+sold as 1″ often measure **25.4 mm** — see README (raise `rod_clearance` or
+set `rod_d = 25.4`). Boss / collar at 25 mm are **not** Release-gated in B5;
+after coupons fit, Customizer `rod_d = 25` + `part` boss/collar exports the
+holders (32 flutes auto). Gated `boss-25` / `collar-25` parts are backlog B5b.
 
 ## Hardware: screw length and load rating
 
