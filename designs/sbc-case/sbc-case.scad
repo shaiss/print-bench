@@ -29,8 +29,10 @@ include <NopSCADlib/vitamins/fans.scad>
 // generated from pcb_holes() of this type at build time — retargeting to
 // another board in the catalog is this one variable (outline clearances are
 // derived below, though tall/off-edge connectors of a very different board
-// deserve a check of port_overhang_x/y).
-board = RPI4;
+// deserve a check of port_overhang_x/y). Vendored catalog today: RPI4, RPI3
+// (same 85×56 outline and mounting-hole list); no RPI5 or Zero 2 W vitamin yet.
+board_preset = 0; // [0:Raspberry Pi 4, 1:Raspberry Pi 3 B+]
+board = board_preset == 0 ? RPI4 : RPI3;
 
 /* [Case] */
 // Perimeter wall thickness (mm) — 2.0 for a rigid case, keep >= 1.2
@@ -125,7 +127,7 @@ echo(str("board: ", board_l, " x ", board_w, " x ", board_t, ", holes d", board_
 
 // ── Printable geometry ─────────────────────────────────────────────────────
 
-module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts, 4 board standoffs
+module base_impl(brd = board) { //! printed base tray (brd selects the vitamin hole list for standoffs)
     union() {
         difference() {
             // outer shell, bed-chamfered, hollowed above the floor.
@@ -175,9 +177,13 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
                 insert_post(base_top_z - floor_t, through = true);
         // board standoffs — positions generated from the vitamin's hole list
         translate([0, 0, board_z])
-            pcb_screw_positions(board)
+            pcb_screw_positions(brd)
                 standoff();
     }
+}
+
+module base() {
+    base_impl(board);
 }
 
 module lid() { //! printed lid: plate, register lip (notched around the posts), aperture, insert bosses on the inner face, screw holes
@@ -317,13 +323,13 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
 // fit-pins: pins at the vitamin's hole positions rise through the standoff
 // pilots — empty proves the standoff pattern is generated from pcb_holes().
 
-module fit_pins(dx = 0) {
+module fit_pins(dx = 0, brd = board) {
     translate([dx, 0, board_z - standoff_h + 0.5])
-        pcb_screw_positions(board)
+        pcb_screw_positions(brd)
             cylinder(d = pilot_d - pin_slop, h = standoff_h + 0.5);
 }
 
-part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
+part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-pins-rpi3, fit-pins-rpi3-shift, fit-lid, fit-lid-crush]
 
 if (part == "assembled") {
     base();
@@ -348,6 +354,12 @@ if (part == "assembled") {
     intersection() { base(); fit_pins(); }
 } else if (part == "fit-pins-shift") {
     intersection() { base(); fit_pins(0.6); }   // 0.6 mm off-pattern must interfere
+} else if (part == "fit-pins-rpi3") {
+    // N1 for RPI3: same 85×56 hole list as RPI4, but the gate must render the
+    // vitamin constant explicitly (B2 board preset).
+    intersection() { base_impl(RPI3); fit_pins(0, RPI3); }
+} else if (part == "fit-pins-rpi3-shift") {
+    intersection() { base_impl(RPI3); fit_pins(0.6, RPI3); }
 } else if (part == "fit-lid") {
     // seated +0.05: strictly clear of walls, posts and standoffs (the seat
     // itself is coplanar contact, which renders no facets either way)

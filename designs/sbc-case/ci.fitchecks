@@ -2,13 +2,17 @@
 # facets; `<part> interferes` must render some — the mandatory negative
 # control proving the check can fail.
 #
-# fit-pins / fit-pins-shift: pins at pcb_screw_positions(RPI4) rise through
+# fit-pins / fit-pins-shift: pins at pcb_screw_positions(board) rise through
 #   the printed standoff pilots — empty proves the standoff pattern is
 #   generated from the vitamin's hole list, and the 0.6 mm shifted copy must
-#   interfere with the pilot walls.
+#   interfere with the pilot walls. Default board = RPI4.
+# fit-pins-rpi3 / fit-pins-rpi3-shift: same N1 proof for the RPI3 B+ preset
+#   (B2 — vendored catalog shares the Pi 4 outline and hole list).
 # fit-lid / fit-lid-crush: the lid seated 0.05 mm high must clear every wall
 #   and post; seated 1 mm low (a crushed seat) must overlap the wall tops.
 fit-pins empty
 fit-pins-shift interferes
+fit-pins-rpi3 empty
+fit-pins-rpi3-shift interferes
 fit-lid empty
 fit-lid-crush interferes
