@@ -23,9 +23,12 @@ the bosses. Curtains down for washing = unthread two collars, no tools.
 Printed **in pairs** (one holder per wall, one pair per rod):
 
 - `boss` — the wall plate: Ø58.8 × 18 mm disc with a countersunk M5 screw
-  hole and an external printed thread (an optional second off-axis screw
-  setting, `screw_count=2`, grows the flange for heavier installs — a hung
-  pair over ~10 kg; see Assembly).
+  hole and an external printed thread. The wall face carries eight shallow
+  45° V-grooves (on by default) so a single central M5 in a drywall
+  anchor does not spin when the collar is torqued. For heavier installs
+  (a hung pair over ~10 kg) set `screw_count=2` — that grows the flange
+  for an off-axis pair and **omits** the ribs (the two screws already pin
+  the boss; see Assembly).
 - `collar` — the rod socket: Ø54 × 40.6 mm knurled tube, internal printed
   thread below, Ø40.6 rod bore above (default `engagement_depth=28`).
 - `collar-shallow` — the same collar at `engagement_depth=12` (far side of
@@ -97,8 +100,10 @@ Two such plates fit the 256 × 256 mm P2S bed.
   (Bambu Studio and most slicers brim per object — select just the collar).
   Its first layer is a thin ~2.2 mm annular rim carrying a 40.6 mm tube, the
   part that can lift; the boss doesn't need it — it prints flange-down on a
-  full Ø58.8 disc, the best contact on the plate. Cheap insurance on the
-  collar rim's own merits (the v1 field failure was *packaging*, not adhesion
+  full Ø58.8 disc (the anti-rotation keys are 0.8 mm 45° V-grooves in that
+  disc — inner washer, outer rim, and the lands between still print on the
+  bed). Cheap insurance on the collar rim's own merits (the v1 field failure
+  was *packaging*, not adhesion
   — see NOTES.md — so the plate is what fixes that; the brim is separate). A
   per-object collar brim can't reach the ~5.7 mm gap to the boss, so nothing
   bridges. (Brim the *whole plate* instead and the two brims may meet in one
@@ -141,6 +146,7 @@ you'll export the fused assembly preview instead of a printable part):
 | `engagement_depth` | 28 mm | deep-side rod plug depth (`collar`); far side is the gated `collar-shallow` part at 12 mm |
 | `thread_tol` | 0.3 mm | radial thread fit — dial on the thread coupon |
 | `screw_count` | 1 | 1 central M5, or 2 off-axis (grows the flange; stops boss spin) |
+| `anti_rotate` | on | wall-face 45° V-grooves for a single M5; ignored at `screw_count=2` |
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
 
@@ -151,12 +157,16 @@ proof: print them in your material first and trust them over this page.
 ## Assembly & use
 
 1. Screw a boss to each facing wall, countersunk M5 head flush in the neck.
-   Screw length: the boss is 18 mm through, so **M5 × 40 mm** into a rated
-   drywall anchor (the anchor card governs the exact pairing), or **M5 ×
-   55 mm** into a stud behind ~13 mm board (18 + 13 leaves ≥ 20 mm in the
-   stud). One M5 in a rated anchor holds a pair to roughly **10 kg** of hung
-   weight — heavier curtains than that want a stud or `screw_count=2`
-   (derivation in NOTES).
+   The wall-face ribs should face the wall (print orientation = use
+   orientation). Screw length: the boss is 18 mm through, so **M5 × 40 mm**
+   into a rated drywall anchor (the anchor card governs the exact pairing),
+   or **M5 × 55 mm** into a stud behind ~13 mm board (18 + 13 leaves ≥ 20 mm
+   in the stud). One M5 in a rated anchor holds a pair to roughly **10 kg**
+   of hung weight — the ribs take the *spin* of threading the collar so the
+   anchor does not ream out; they do not raise the load rating. Heavier
+   curtains than that want a stud or `screw_count=2` (derivation in NOTES).
+   On tile, masonry, or metal the ribs cannot bite — use `screw_count=2`
+   (or `anti_rotate=false` if you just want a flat flange).
 2. Slide the collars over the rod before hanging it — one at each end.
 3. Thread each collar onto its boss until the rim seats on the plate. For a
    rigid rod between two fixed walls: use one default `collar` (deep) and one
@@ -164,9 +174,9 @@ proof: print them in your material first and trust them over this page.
    tighten both collars. Cut the rod ≈ **18–20 mm short of the mouth-to-mouth
    span** (28 mm deep − 12 mm shallow + each mouth's lead-in).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
-   thread) and lift the rod out — **holding the flange still** as you
-   unthread, because unscrewing friction can walk the single M5 out of the
-   wall over enough wash days. No tools.
+   thread) and lift the rod out. The wall-face ribs resist that unthread
+   torque on a single M5 in drywall or wood; still hold the flange on a
+   hard wall (tile) or if you turned `anti_rotate` off. No tools.
 
 If a fit is off, don't resize the parts — reprint the coupon and move the
 tolerance (`thread_tol`, `rod_clearance`) in 0.05–0.1 mm steps; see
