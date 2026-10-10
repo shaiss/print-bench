@@ -43,6 +43,7 @@ Three mechanics worth knowing (the full rationale is in [CLAUDE.md](../../CLAUDE
 
 - The commit-back is pushed with the `REGEN_TOKEN` PAT, not `GITHUB_TOKEN` — a `GITHUB_TOKEN` push triggers no workflow, which would strand the PR head on a commit carrying no required checks. The PAT push re-triggers CI, so **a regenerating PR runs CI twice**; the second run is the verification pass, bounded by a loop guard that recognizes regen's own commit and refuses to push again.
 - A design is skipped when its input fingerprint ([`scripts/regen-stamp.sh`](../../scripts/regen-stamp.sh)) matches the committed `.regen-stamp` — re-rendering a Cycles shot to find it byte-identical costs minutes.
+- On a **pull request**, the regen job still *runs* when `lib/` or a generator script moves (the classifier may consider the whole catalog), but it **does not commit back** unless the author's own diff vs the PR base — excluding prior regen bot commits — touches a path under `designs/`. Lib-only PRs therefore do not get stamp/preview noise that re-opens design review; default-branch `push` behavior is unchanged.
 - **On a fork PR the contract inverts** — see [Pull requests](pull-requests.md), the home of the fork differences.
 
 ## Smart CI: gates that don't exist yet
