@@ -1,0 +1,14 @@
+# Boolean fit gates (scripts/gate.sh): "<part> empty" must render zero
+# facets, "<part> interferes" is the mandatory negative control proving the
+# check can fail.
+#
+# This is a print-in-place ball joint: a fused ball scores 100/100 watertight
+# and only these interference checks see it. `fitcheck` proves the printed
+# pose clears. `fitcheck_tilt` is the articulation proof (the
+# perspective-coin fitcheck_flip pattern): the ball+stud swept through the
+# whole ±max_tilt cone against the socket — the stud must clear the dome
+# aperture at every tilt, which a rest-pose check cannot see.
+fitcheck           empty
+fitcheck_neg       interferes
+fitcheck_tilt      empty
+fitcheck_tilt_neg  interferes

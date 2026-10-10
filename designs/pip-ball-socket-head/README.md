@@ -1,0 +1,143 @@
+# pip-ball-socket-head
+
+A tilting head on a **print-in-place ball-and-socket joint**: the head comes
+off the bed assembled, its Ø20 mm ball already captive inside a clamping
+socket, with a ¼″-20 stud on top for your webcam, reading light, mic or
+sensor. Tilt it to aim, pinch the printed wings to lock — no supports, no
+assembly at the joint, no hardware in the mechanism. It is the spherical
+(3-DOF rotary) joint the other print-in-place designs here don't cover, and
+the printed answer to the ubiquitous small ball-head mount.
+
+![Studio product shot of the steel-grey pip-ball-socket-head, head tilted](previews/hero.png)
+
+![4-view contact sheet](previews/contact-sheet.png)
+
+![Head tilted 15° about the ball centre](previews/tilted-pose.png)
+
+![The capture band from the slit side: rim, dome, wings and slit](previews/collar-closeup.png)
+
+*Looking down the slit axis: the left pad can read as a detached capsule because the camera sees the 1.2 mm slot plus the cavity behind it. The wings are one body with the ring (fusecheck: 2 bodies on the sliced head).*
+
+![The same capture band ~30° around Z: pads blending into the ring, rim and dome as the scale neighbour](previews/collar-oblique.png)
+
+## What you get
+
+Two printed parts, joined by one M4 bolt. Slice the **plate**
+(`build/pip-ball-socket-head-plate.3mf`) so the head and base import as
+separate objects — a single assembled STL would weld them. The plate carries
+two objects; assign filament per object (head = PETG) or print them as
+separate jobs.
+
+- `head` — the print-in-place mechanism, one piece: stem tenon, socket ring
+  with slit collar and clamp wings, the Ø20 ball and ¼″-20 stud printed
+  captive inside it (≈ 46 × 46 × 38 mm over the wings)
+- `base` — M4 foot plate, 48 × 48 × 8 mm, two mounting holes + the centre
+  recess the head's tenon seats in
+
+**Hardware (not printed):** 1× M4 × 8 or M4 × 10 socket-cap bolt + M4 nut
+(head to base — measured: 8 mm plate with a 4 mm underside counterbore,
+~0.8 mm tenon seat, nut on a 1.6 mm floor inside the tenon; M4×8 ends at
+the nut top at the nominal seat, M4×10 still 1.7 mm under the relief).
+2× M4 screws (mounting — machine screws with nuts, or wood screws into a
+desk edge).
+
+## Print settings
+
+- **Material:** PETG for the `head` — the slit collar is a creep-loaded
+  flexing feature and PETG tolerates repeated clamping better than PLA. PLA
+  is fine for the `base`.
+- **Layer height:** 0.2 mm. The break-in fusion at the cup floor and every Z
+  gap in the joint are whole-layer numbers.
+- **Infill:** 15–20 % gyroid, 3 perimeters.
+- **Seam:** Scarf (or Back), never Random. The default Aligned seam stacks a 0.1–0.2 mm ridge on the ball — the same order as the 0.15–0.25 mm radial clearance — and on the ¼″-20 flank; Random scatters pimples over the whole mating surface.
+- **Supports: none inside the joint — ever.** An auto-support inside the
+  socket welds the ball into it, which is the exact failure this design
+  exists to defeat; the capture cone (≤ 25° from vertical) and dome (15°)
+  are shaped so no slicer support finds a surface in there. The clamp
+  wings' undersides are the one external overhang printcheck flags
+  (350 mm²); PETG at 3 perimeters prints them fine, and a support block
+  under the wings alone is harmless if yours sag — it cannot reach the
+  joint.
+- **Orientation:** head stem-down (as modelled), base flat. Never print the
+  head stud-down — the dome would have to bridge over the whole ball.
+
+### Print this first
+
+Slice `pip-ball-socket-head-coupon.scad` (or `build/pip-ball-socket-head-coupon.stl`):
+five stations, one strip. Print it in the **same PETG and profile as the head**
+— a leftover-PLA coupon does not transfer. CI's slice of this strip is
+**3 h 36 m / 40.1 g vs the head's 1 h 14 m / 12.8 g**: four production-scale
+balls, not a 20-minute print. Skip it and print the PETG head when you already
+know the printer; print it first when you don't.
+
+Cells 1–3 sweep the ball-to-socket clearance (0.15 / 0.20 / 0.25 mm); work each
+ball free — the cell that frees and then moves without rattle is your
+printer's value, set `ball_xy_clear` to it. If all three cells weld, check
+slicer gap-closing / flow (the 0.15–0.25 mm band straddles the typical 0.2 mm
+gap-close default) before raising `ball_xy_clear`. If the joint won't free
+even at 0.25, turn off gap fill for this print and check you are not on an
+Arachne-modified profile. Cell 4 is the slit-collar
+station: pinch the wings, the ball should lock and release. Cell 5 is an 8 mm
+¼″-20 stub — try it in the camera body before committing to the head. Details
+in NOTES.md.
+
+### Break-in (first motion)
+
+The ball is deliberately fused to the cup floor by one layer — that is the
+design, not a defect. In PETG the first motion is more *work it firmly through
+the tilt cone* than a light twist: lever on the **stud** (a metal ¼″-20 nut
+on the thread gives a spanner point), not the wings. It shears with a soft
+crack, then moves. Expect a fuzz or two inside the cup that a dozen cycles
+grind away. Coupon cells are rigid no-slit rings, so they read slightly harder
+to free than the production collar — that is the conservative direction.
+
+## Parameters
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `ball_xy_clear` | 0.2 mm | THE tuned fit — radial ball-to-socket clearance. Sweep on the coupon; raise 0.05 at a time if the joint won't free. |
+| `max_tilt` | 20° | The articulation the geometry guarantees (CI proves the stud clears the dome at every pose). Raise only with a coupon re-check. |
+| `ball_d` | 20 mm | Ball diameter — the whole joint scales from it. |
+| `stud_undersize` | 0.15 mm | Printed-thread loosening; raise 0.05 steps if a camera body rejects the stud. |
+| `slit_w` | 1.2 mm | The clamp slit — a real slot, never printed shut. |
+| `base_hole_pitch` | 30 mm | Mounting-hole spread on the foot plate. |
+
+All parameters are at the top of `pip-ball-socket-head.scad`, grouped in
+Customizer sections; override on the command line with `-D 'ball_xy_clear=0.25'`.
+
+## Assembly & use
+
+Bolt the head to the base **before** you mount anything. The centre bolt
+comes in from the base's underside, which is also the mounting face.
+
+1. Slide an M4 nut into the hex window on the tenon (the opening opposite
+   the slit), **corner first, flats along the side walls**. Push it home so
+   the far vertex seats in the surviving +X hex. It sits on a 1.6 mm floor
+   — it cannot fall out the bed. If it will not slide, the 7.4 mm slot roof
+   sagged; a light file on the roof, or a 0.2 mm extra on `nut_slot_h`,
+   clears it.
+2. Seat the tenon nose in the base's centre recess with the **slit and wings
+   clocked toward the desk edge** (~3 o'clock if the two mounting holes sit
+   left/right). The 45° flare wedges at about 0.8 mm; that ring is the
+   bearing, not a deep shoulder. Pull it down with an **M4 × 8 or M4 × 10
+   socket-cap** from underneath into the counterbore so the plate sits
+   flat. Keep a fingertip on the window for the first turns so the nut
+   cannot slide back toward the opening. The bolt should torque without
+   holding the nut. Lift the assembled unit by the head: the base comes
+   with it.
+3. Bolt the assembled unit to the desk edge, shelf underside or wall with
+   two M4s. Use hex-drive screws (or drive a Phillips at a slight angle) —
+   a straight #2 driver hits the socket ring.
+4. Thread your camera/light onto the ¼″-20 stud, tilt to aim, pinch the
+   wings to lock. ±20° is trim: mount the base pointing roughly right, the
+   joint fine-aims from there.
+
+**Honest payload figure:** ≤ 250 g at a 60 mm lever is the design target
+(assumed — a typical webcam is 100–200 g); it is a *field-test* number, not a
+measured one. If the clamp can't hold your payload unaided, that is a finding
+to record — the design ships no metal clamp screw to paper over it. PETG is
+the material call for exactly this reason.
+
+The ¼″-20 stud and the M4 base are deliberate departures from the
+`workshop-utility` style pack's M3 vocabulary — camera standard and the
+brief's own call respectively; recorded in NOTES.md (D4).
