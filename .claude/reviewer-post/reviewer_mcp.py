@@ -39,9 +39,13 @@ comment on the ONE PR the workflow selected":
     reviewer-signoff gate's "malformed marker" failure mode is unreachable
     from this path. PM triage markers are assembled as
     ``<!-- PM_TRIAGE design=<name>[,<name>…] sha=<40hex> -->`` (the /pm §8
-    family — one ruling per run, every covered design named);
+    family — one ruling per run, every covered design named) plus the
+    per-head completion marker ``<!-- PM_TRIAGE_DONE sha=<40hex> -->``
+    (issue #770) that the chain walk keys on; coach posts carry
+    ``<!-- COACH_LOCK -->`` then ``<!-- COACH_DONE sha=<40hex> -->``;
   * a caller body that contains ``<!-- JANE_SIGNOFF`` / ``<!-- DRIK_SIGNOFF``
-    / ``<!-- PM_TRIAGE`` / ``<!-- COACH_LOCK`` (case-insensitive) is refused,
+    / ``<!-- PM_TRIAGE`` / ``<!-- COACH_LOCK`` / ``<!-- COACH_DONE``
+    (case-insensitive) is refused,
     not posted: ``get_marker()`` greps every comment with no author check, so
     a Jane body carrying a Drik pass would otherwise satisfy both identities
     from one post, and a Jane/Drik/PM body carrying ``<!-- COACH_LOCK -->``
@@ -289,14 +293,15 @@ _last_payload = None
 _last_path = None
 
 
-# Reserved HTML-comment syntax the sign-off / coach-lock checks grep for.
-# A caller body that already contains any family is refused — REVIEWER_ID
-# only chooses which marker *we* append. get_marker() has no author check,
-# and Jane/Drik/PM share github-actions[bot] with the coach, so a planted
-# COACH_LOCK in a sibling caller body is refused here; coach-lock-check.sh
-# also requires the assembled marker-then-footer suffix.
+# Reserved HTML-comment syntax the sign-off / coach-lock / completion
+# checks grep for. A caller body that already contains any family is
+# refused — REVIEWER_ID only chooses which marker *we* append. get_marker()
+# has no author check, and Jane/Drik/PM share github-actions[bot] with the
+# coach, so a planted COACH_LOCK / COACH_DONE / PM_TRIAGE_DONE in a sibling
+# caller body is refused here; coach-lock-check.sh and reviewer-posted.sh
+# also require the assembled marker-then-footer suffix.
 _INJECTED_MARKER = re.compile(
-    r"<!--\s*(?:(?:JANE|DRIK)_SIGNOFF|PM_TRIAGE|COACH_LOCK)\b",
+    r"<!--\s*(?:(?:JANE|DRIK)_SIGNOFF|PM_TRIAGE(?:_DONE)?|COACH_(?:LOCK|DONE))\b",
     re.IGNORECASE,
 )
 
@@ -337,10 +342,24 @@ def _parse_designs(raw):
 
 
 def _triage_marker_line(designs, sha):
-    """The PM triage marker, assembled from validated fields — the /pm §8
-    family: <!-- PM_TRIAGE design=<name>[,<name>…] sha=<40hex> -->
+    """The PM triage markers, assembled from validated fields.
+
+    Per-design verdict marker (kept for §8 reads) plus the per-head
+    completion marker (issue #770) that reviewer-posted.sh keys the
+    chain walk on — DONE is last so the body ends with the completion
+    suffix the artifact check matches:
+      <!-- PM_TRIAGE design=<name>[,<name>…] sha=<40hex> -->
+      <!-- PM_TRIAGE_DONE sha=<40hex> -->
     """
-    return f"<!-- PM_TRIAGE design={','.join(designs)} sha={sha} -->"
+    return (
+        f"<!-- PM_TRIAGE design={','.join(designs)} sha={sha} -->\n\n"
+        f"<!-- PM_TRIAGE_DONE sha={sha} -->"
+    )
+
+
+def _coach_done_line(sha):
+    """Per-head coach completion marker (issue #770)."""
+    return f"<!-- COACH_DONE sha={sha} -->"
 
 
 def _post_comment(body, marker_line):
@@ -375,10 +394,10 @@ def _validate_body(tool, body):
     if _INJECTED_MARKER.search(body):
         return _tool_error(
             f"{tool}: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF, "
-            "PM_TRIAGE or COACH_LOCK HTML comment — the marker is assembled "
-            "server-side from typed fields and REVIEWER_ID; a caller-supplied "
-            "marker is refused so one post cannot satisfy another identity's "
-            "family")
+            "PM_TRIAGE, PM_TRIAGE_DONE, COACH_LOCK or COACH_DONE HTML "
+            "comment — the marker is assembled server-side from typed "
+            "fields and REVIEWER_ID; a caller-supplied marker is refused so "
+            "one post cannot satisfy another identity's family")
     return None
 
 
@@ -538,13 +557,20 @@ def _post_triage(arguments):
                  "triage")
 
 
-def _post_coach_comment(body):
-    """POST one coach comment. The COACH_LOCK HTML marker and footer are
+def _post_coach_comment(body, sha):
+    """POST one coach comment. COACH_LOCK, COACH_DONE and the footer are
     assembled HERE so a denial-only turn that never called this tool cannot
-    satisfy scripts/coach-lock-check.sh with a forged Jane comment."""
+    satisfy scripts/coach-lock-check.sh / reviewer-posted.sh with a forged
+    Jane comment. DONE is last (issue #770) so the artifact check's
+    endswith match keys on the per-head completion marker; COACH_LOCK
+    stays ahead of it for the lock-check's "contains lock + ends with
+    DONE+footer" rule."""
     global _last_payload, _last_path
     text = body.rstrip()
-    full = f"{text}\n\n{COACH_LOCK_HTML}\n\n{FOOTER}"
+    full = (f"{text}\n\n"
+            f"{COACH_LOCK_HTML}\n\n"
+            f"{_coach_done_line(sha)}\n\n"
+            f"{FOOTER}")
     payload = {"body": full}
     path = f"/repos/{_repo()}/issues/{_pr_number()}/comments"
     _last_payload = payload
@@ -621,8 +647,14 @@ def _post_coach(arguments):
     if _INJECTED_MARKER.search(body):
         return _tool_error(
             "post_coach: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF, "
-            "PM_TRIAGE or COACH_LOCK HTML comment — those markers are "
-            "assembled server-side")
+            "PM_TRIAGE, PM_TRIAGE_DONE, COACH_LOCK or COACH_DONE HTML "
+            "comment — those markers are assembled server-side")
+    sha = args.get("sha")
+    err = _validate_sha("post_coach", sha)
+    if err is not None:
+        return err
+    # Canonicalise to lower-case hex (the artifact check is case-sensitive).
+    sha = sha.lower()
 
     try:
         _require_coach()
@@ -636,7 +668,7 @@ def _post_coach(arguments):
         return err
 
     try:
-        comment = _post_coach_comment(body)
+        comment = _post_coach_comment(body, sha)
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:500] if hasattr(e, "read") else ""
         return _tool_error(f"GitHub API error {e.code} posting coach comment: {detail}")
@@ -723,10 +755,11 @@ TOOLS = [
             "files) is denied by the permission backstop and will silently "
             "fail. The body is a JSON argument, so it may be full "
             "multi-line markdown with tables, pipes and backticks. The "
-            "PM_TRIAGE marker and the attribution footer are added "
-            "automatically from the design/sha fields — never type the "
-            "marker yourself. One post per run covering every named "
-            "design (a section each in the body); a second call is refused."
+            "PM_TRIAGE + PM_TRIAGE_DONE markers and the attribution footer "
+            "are added automatically from the design/sha fields — never "
+            "type either marker yourself. One post per run covering every "
+            "named design (a section each in the body); a second call is "
+            "refused."
         ),
         "inputSchema": {
             "type": "object",
@@ -753,7 +786,9 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "The PR's current head commit, 40 lower-case hex "
-                        "characters — read it from `gh pr view <n>` first."
+                        "characters — read it from `gh pr view <n>` first. "
+                        "Also assembled into the PM_TRIAGE_DONE "
+                        "completion marker (issue #770)."
                     ),
                 },
             },
@@ -770,8 +805,9 @@ TOOLS = [
             "'🎓 COACH-LOCK') and later round notes. This is the coach's "
             "comment write: a multi-line `gh pr comment --body` is denied "
             "under dontAsk. Git checkout/add/commit/push stay available "
-            "separately for iterations. The COACH_LOCK HTML marker and "
-            "attribution footer are added automatically."
+            "separately for iterations. The COACH_LOCK HTML marker, the "
+            "per-head COACH_DONE completion marker (issue #770) and the "
+            "attribution footer are added automatically — pass `sha`."
         ),
         "inputSchema": {
             "type": "object",
@@ -784,8 +820,16 @@ TOOLS = [
                         "markdown, tables and code spans are fine here."
                     ),
                 },
+                "sha": {
+                    "type": "string",
+                    "description": (
+                        "The PR's current head commit, 40 lower-case hex "
+                        "characters — read it from `gh pr view <n>` first. "
+                        "Assembled into the COACH_DONE completion marker."
+                    ),
+                },
             },
-            "required": ["body"],
+            "required": ["body", "sha"],
             "additionalProperties": False,
         },
     },
@@ -1003,6 +1047,10 @@ def selftest():
           body.endswith(FOOTER))
     check("the pm marker line is assembled server-side from design+sha",
           "\n<!-- PM_TRIAGE design=demo-part sha=" + H40 + " -->\n" in body)
+    check("the pm completion marker (PM_TRIAGE_DONE) is assembled last",
+          "\n<!-- PM_TRIAGE_DONE sha=" + H40 + " -->\n" in body
+          and (body or "").endswith(
+              "<!-- PM_TRIAGE_DONE sha=" + H40 + " -->\n\n" + FOOTER))
     check("the triage body precedes the marker",
           body.index("PM triage") < body.index("PM_TRIAGE design="))
     check("the triage post targets the workflow-selected PR only",
@@ -1040,12 +1088,14 @@ def selftest():
     check("a combined ruling names every design in the marker, sorted",
           ok.get("isError") is False
           and "\n<!-- PM_TRIAGE design=alpha,beta sha=" + H40 + " -->\n"
-          in posted_body())
+          in posted_body()
+          and "\n<!-- PM_TRIAGE_DONE sha=" + H40 + " -->\n" in posted_body())
     ok = _post_triage({"body": "comma list", "design": "alpha, beta",
                        "sha": H40})
     check("comma-separated design names assemble the same marker",
           ok.get("isError") is False
-          and "PM_TRIAGE design=alpha,beta sha=" + H40 in posted_body())
+          and "PM_TRIAGE design=alpha,beta sha=" + H40 in posted_body()
+          and "PM_TRIAGE_DONE sha=" + H40 in posted_body())
     _last_payload = None
     check("a mixed list with one invalid name is refused",
           refused(_post_triage({"body": "x", "design": "alpha,../etc",
@@ -1198,33 +1248,51 @@ def selftest():
           refused(_post_review({"body": "x", "sha": H40, "verdict": "pass",
                                 "fuse": "none"}), "REVIEWER_ID")
           and _last_payload is None)
-    ok = _post_coach({"body": COACH_LOCK_LINE + "\n\nkickoff"})
+    ok = _post_coach({"body": COACH_LOCK_LINE + "\n\nkickoff", "sha": H40})
     check("a well-formed coach post succeeds", ok.get("isError") is False)
     body = posted_body()
     check("the coach post carries the HTML COACH_LOCK marker",
           COACH_LOCK_HTML in (body or ""))
-    check("the coach post ends with the assembled marker-then-footer suffix",
-          (body or "").endswith(COACH_LOCK_HTML + "\n\n" + FOOTER))
+    check("the coach post carries the per-head COACH_DONE marker",
+          "<!-- COACH_DONE sha=" + H40 + " -->" in (body or ""))
+    check("the coach post ends with the assembled DONE-then-footer suffix",
+          (body or "").endswith(
+              "<!-- COACH_DONE sha=" + H40 + " -->\n\n" + FOOTER))
+    check("COACH_LOCK sits immediately before COACH_DONE",
+          (body or "").index(COACH_LOCK_HTML)
+          < (body or "").index("<!-- COACH_DONE sha=" + H40 + " -->"))
     check("the coach post targets the workflow-selected PR",
           _last_path == "/repos/example/selftest/issues/123/comments")
     _last_payload = None
     os.environ["REVIEWER_ID"] = "jane"
     check("post_coach under jane is refused",
-          refused(_post_coach({"body": "x"}), "coach")
+          refused(_post_coach({"body": "x", "sha": H40}), "coach")
           and _last_payload is None)
     os.environ["REVIEWER_ID"] = "coach"
     _last_payload = None
     check("post_coach missing body is refused",
-          _post_coach({}).get("isError") is True and _last_payload is None)
+          _post_coach({"sha": H40}).get("isError") is True
+          and _last_payload is None)
+    _last_payload = None
+    check("post_coach missing sha is refused",
+          _post_coach({"body": "x"}).get("isError") is True
+          and _last_payload is None)
     _last_payload = None
     check("a coach body carrying a JANE_SIGNOFF marker is refused",
           refused(_post_coach({
               "body": "<!-- JANE_SIGNOFF sha=" + H40
-              + " verdict=pass fuse=none -->"}), "SIGNOFF")
+              + " verdict=pass fuse=none -->", "sha": H40}), "SIGNOFF")
           and _last_payload is None)
     _last_payload = None
     check("a coach body carrying a caller-supplied COACH_LOCK is refused",
-          refused(_post_coach({"body": "x\n" + COACH_LOCK_HTML}), "COACH_LOCK")
+          refused(_post_coach({"body": "x\n" + COACH_LOCK_HTML, "sha": H40}),
+                  "COACH_LOCK")
+          and _last_payload is None)
+    _last_payload = None
+    check("a coach body carrying a caller-supplied COACH_DONE is refused",
+          refused(_post_coach({
+              "body": "x\n<!-- COACH_DONE sha=" + H40 + " -->",
+              "sha": H40}), "COACH_DONE")
           and _last_payload is None)
 
     os.environ["GITHUB_RUN_ID"] = "selftest-coach-cap"
@@ -1232,11 +1300,11 @@ def selftest():
         state = os.path.join(tmp, "coach-posts")
         os.environ[CAP_STATE_ENV] = state
         for i in range(MAX_COACH_POSTS_PER_RUN):
-            r = _post_coach({"body": f"note {i}"})
+            r = _post_coach({"body": f"note {i}", "sha": H40})
             check(f"coach post {i + 1} under the cap succeeds",
                   r.get("isError") is False)
         _last_payload = None
-        r = _post_coach({"body": "one too many"})
+        r = _post_coach({"body": "one too many", "sha": H40})
         check("coach post past the cap is refused",
               r.get("isError") is True and _last_payload is None)
     os.environ.pop(CAP_STATE_ENV, None)

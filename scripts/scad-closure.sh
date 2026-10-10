@@ -17,7 +17,8 @@
 #     # commented-out `part ==` selector (entry or included parent) is
 #     # refused, an early match in a large file still counts under
 #     # pipefail (no strip|grep -Eq SIGPIPE false-negative), a cyclic
-#     # include terminates. Run by check.sh.
+#     # include terminates, `counterpart == "x"` is not a `part == "x"`
+#     # branch (issue #781). Run by check.sh.
 #
 # WHY NOT catalog.sh's walker: catalog.sh's includes_coupling (issue #517)
 # walks include AND use, because a NUGGS module can `use <nuggs-coupling.scad>`
@@ -148,10 +149,12 @@ closure_files() {
 }
 
 # The matcher gate.sh used on the entry file: a real DISPATCH selector, not
-# merely a quoted string anywhere. Scan every file in the include closure
-# with comments stripped (kinematics-check.sh's kin_strip_comments move), so
-# a `// if (part == "clear")` in a parent header cannot satisfy an empty
-# fitcheck.
+# merely a quoted string anywhere. Identifier boundary before `part` so
+# `counterpart == "…"` (or `numpart`, `subpart`, …) cannot satisfy it —
+# the same bound scripts/kinematics-check.sh already uses (issue #781).
+# Scan every file in the include closure with comments stripped
+# (kinematics-check.sh's kin_strip_comments move), so a `// if (part ==
+# "clear")` in a parent header cannot satisfy an empty fitcheck.
 # Under `set -o pipefail` (gate.sh / check.sh), piping strip→grep -Eq is a
 # false-negative trap: grep exits 0 on the first match and closes the pipe,
 # awk then dies with SIGPIPE (141), and pipefail makes the whole pipeline
@@ -167,7 +170,7 @@ closure_part_branch() { # <entry.scad> <part>
   mapfile -t files < <(closure_files "$entry")
   for f in "${files[@]}"; do
     [[ -n "$f" ]] || continue
-    if grep -Eq "part[[:space:]]*==[[:space:]]*\"${part}\"" \
+    if grep -Eq '(^|[^A-Za-z0-9_$])part[[:space:]]*==[[:space:]]*"'"${part}"'"' \
          <<<"$(closure_strip_comments "$f")"; then
       return 0
     fi
@@ -184,7 +187,8 @@ closure_selftest() {
   mkdir -p "$tmp/designs/gp" "$tmp/designs/p" "$tmp/designs/c" \
            "$tmp/designs/plain" "$tmp/designs/useonly" "$tmp/designs/commented" \
            "$tmp/designs/cycA" "$tmp/designs/cycB" \
-           "$tmp/designs/echoed" "$tmp/designs/commented-branch"
+           "$tmp/designs/echoed" "$tmp/designs/commented-branch" \
+           "$tmp/designs/lookalike"
 
   printf '%s\n' \
     'part = "assembled";' \
@@ -200,6 +204,12 @@ closure_selftest() {
   printf 'include <../cycB/cycB.scad>\n' >"$tmp/designs/cycA/cycA.scad"
   printf 'include <../cycA/cycA.scad>\nif (part == "fused") cube(1);\n' \
     >"$tmp/designs/cycB/cycB.scad"
+  # Only spelling is counterpart == "x": the unbounded grep
+  # part[[:space:]]*==[[:space:]]*"x" matches this; the identifier bound must not.
+  printf '%s\n' \
+    'counterpart = "x";' \
+    'if (counterpart == "x") cube(1);' \
+    >"$tmp/designs/lookalike/lookalike.scad"
   printf 'echo("include <../gp/gp.scad>");\ncube(1);\n' \
     >"$tmp/designs/echoed/echoed.scad"
   printf '// if (part == "fused") cube(1);\ncube(1);\n' \
@@ -294,6 +304,21 @@ closure_selftest() {
     ok "an early part == match in a large file still counts under pipefail"
   else
     bad "an early part == match in a large file was lost to pipefail/SIGPIPE"
+  fi
+
+  # Issue #781: the unbounded `part == "…"` grep treated counterpart as part.
+  # Keep the hole loaded (the old pattern still matches this fixture) so a
+  # rewritten fixture cannot silently unload the negative control.
+  if grep -Eq 'part[[:space:]]*==[[:space:]]*"x"' \
+       "$tmp/designs/lookalike/lookalike.scad"; then
+    ok "the counterpart fixture still matches the unbounded grep (the hole is loaded)"
+  else
+    bad "the counterpart fixture no longer spells counterpart == \"x\" — the negative control is unloaded"
+  fi
+  if closure_part_branch "$tmp/designs/lookalike/lookalike.scad" x; then
+    bad "counterpart == \"x\" was accepted as part == \"x\""
+  else
+    ok "counterpart == \"x\" is not a part == \"x\" dispatch branch"
   fi
 
   # Wiring pin: the two proofs this helper exists to serve still call it.
