@@ -99,6 +99,9 @@ board_hole_d = pcb_hole_d(board); // 2.75
 post_d   = 2 * insert_hole_radius(insert_type) + 2 * 1.6; // 7.2: insert hole + shell
 post_r   = post_d / 2;
 insert_d = 2 * insert_hole_radius(insert_type);           // 4.0 melt-in hole
+insert_seat_h = insert_length(insert_type);               // 5.8: F1BM3 melt-in depth
+// M3×10 through-relief below the insert shoulder (vitamin clearance, not hand-typed)
+insert_relief_d = 2 * screw_clearance_radius(lid_screw);  // 3.3
 standoff_d = 7;                                           // M2.5 boss around its pilot
 
 cavity_x_half = board_l / 2 + port_overhang_x + board_clr;   // 45.25
@@ -168,8 +171,9 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
                 translate([i * 15, cavity_y_half + wall / 2, 12])
                     vent_slot();
         }
-        // four lid-screw posts with through insert holes (through so an M3x10
-        // bottoms out in free space, not in plastic)
+        // four lid-screw posts: stepped insert seat (B4) — Ø4.0 × insert length
+        // from the post top, then M3 clearance through the rest so an M3×10 tip
+        // clears without the insert sinking past flush
         for (px = [-1, 1], py = [-1, 1])
             translate([px * post_x, py * post_y, floor_t])
                 insert_post(base_top_z - floor_t, through = true);
@@ -234,11 +238,17 @@ module ring2d(x_half, y_half, t) { //! rounded-rect ring, outer half-extents giv
     }
 }
 
-module insert_post(h, through) { //! vertical M3 insert boss; through=true bores clear for the screw tip
+module insert_post(h, through) { //! vertical M3 insert boss; through=true = stepped seat + screw relief
     difference() {
         cylinder(d = post_d, h = h);
-        translate([0, 0, through ? -0.1 : h - insert_length(insert_type)])
-            cylinder(d = insert_d, h = h + 0.2);
+        if (through) {
+            translate([0, 0, -0.1])
+                cylinder(d = insert_relief_d, h = h - insert_seat_h + 0.2);
+            translate([0, 0, h - insert_seat_h - 0.1])
+                cylinder(d = insert_d, h = insert_seat_h + 0.2);
+        } else
+            translate([0, 0, h - insert_seat_h])
+                cylinder(d = insert_d, h = h + 0.2);
     }
 }
 
@@ -285,7 +295,7 @@ module vitamin_washer()       { washer(M3_washer); }
 module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, post, generated standoff) in place, the lid's at print pose across the plate — flip the lid crop over and it nests on the base corner
     union() {
         // base -X,+Y corner as printed (floor down): real wall the lid lip
-        // registers against, skirt profile, the through-insert lid-screw post,
+        // registers against, skirt profile, the stepped-seat lid-screw post,
         // one generated board standoff (the RPI4 hole pattern is centered at
         // x = -10, so the -X corner is the one that carries a standoff), and —
         // crop widened (-33 -> -14, X to ~-14.6) — the leftmost vent slot, so
@@ -298,7 +308,8 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
         }
         // lid -X,+Y corner at print pose (outer face down), cropped in
         // assembled coords — the flip lands it on the -Y side of the plate,
-        // clear of the base corner: plate, register lip with its post notch,
+        // clear of the base corner: plate, register lip (the post-notch arc
+        // stays on the full lid, not in this crop — PM triage, B5 comment fix),
         // lid-screw hole. The crop must reach lid_top_z, not base_top_z — the
         // plate sits ABOVE base_top_z, and a base-height crop leaves the lip
         // ring standing on a 0.5 mm plate sliver (measured: crop spanned
@@ -323,7 +334,15 @@ module fit_pins(dx = 0) {
             cylinder(d = pilot_d - pin_slop, h = standoff_h + 0.5);
 }
 
-part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
+// Stepped insert seat (B4): nominal melt envelope flush with the post top must
+// clear; the same envelope sunk 1 mm past the shoulder must hit plastic.
+module fit_insert_probes(sink_extra = 0) {
+    for (px = [-1, 1], py = [-1, 1])
+        translate([px * post_x, py * post_y, floor_t + (base_top_z - floor_t) - insert_seat_h - sink_extra])
+            cylinder(d = insert_d - 0.05, h = insert_seat_h + sink_extra + 0.1);
+}
+
+part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush, fit-insert-seat, fit-insert-sink]
 
 if (part == "assembled") {
     base();
@@ -354,4 +373,8 @@ if (part == "assembled") {
     intersection() { base(); translate([0, 0, 0.05]) lid(); }
 } else if (part == "fit-lid-crush") {
     intersection() { base(); translate([0, 0, -1]) lid(); }  // seated 1 mm low must interfere
+} else if (part == "fit-insert-seat") {
+    intersection() { base(); fit_insert_probes(0); }
+} else if (part == "fit-insert-sink") {
+    intersection() { base(); fit_insert_probes(1); }  // 1 mm past shoulder must interfere
 }
