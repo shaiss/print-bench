@@ -51,7 +51,7 @@ STL imports as one fused body and welds them together — v1's field-test failur
   install. There is **no** multi-object plate `.3mf` on that Release (only
   STLs / zip / manifest) — the plate stays a local build artifact (see the
   clone path below). That is a tracked follow-up: the platform release-bundle
-  only uploads STLs today.
+  does not upload the multi-object plate 3MF today.
 - **Cloned the repo (advanced / local):** `./scripts/plate.sh alcove-rod-socket`
   bundles the two default-depth parts into one multi-object 3MF
   (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file.
@@ -76,7 +76,8 @@ bosses + one default collar + one shallow collar.
 Release (or both objects from a local `plate.sh` 3MF), select both →
 right-click → **Add Duplicate**, then swap one of the two collars for
 `collar-shallow` from the same Release — so the run is boss ×2, one default
-collar, one shallow. Two such pairs fit the 256 × 256 mm P2S bed.
+collar, one shallow. One pair (~113 × 59 mm of bed for a boss beside a
+collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
 
 ![The collar in its print orientation](previews/collar-print.png)
 
@@ -109,7 +110,9 @@ collar, one shallow. Two such pairs fit the 256 × 256 mm P2S bed.
   bridges. (Brim the *whole plate* instead and the two brims may meet in one
   web; it should peel clean, but that is **untested** — predicted, not
   observed, and the proving print is what confirms it. Per-object avoids the
-  question.)
+  question.) Trim the collar's brim tabs flush and set it on a flat surface
+  to confirm the rim sits flat before threading it onto the boss — the rim
+  is both the bed-contact face and the seating face on the flange.
 - **Orientation:** print every part as rendered — boss flange-down, collar
   (and collar-shallow) rod-mouth-down (the internal thread prints at the top
   of the collar, never on the first layer). Never flip the collar
@@ -166,8 +169,11 @@ proof: print them in your material first and trust them over this page.
 3. Thread each collar onto its boss until the rim seats on the plate. For a
    rigid rod between two fixed walls: use one default `collar` (deep) and one
    `collar-shallow` — push into the deep side, drop the shallow end in,
-   tighten both collars. Cut the rod ≈ **18–20 mm short of the mouth-to-mouth
-   span** (28 mm deep − 12 mm shallow + each mouth's lead-in).
+   tighten both collars. Measure **wall-to-wall**, then cut the rod ≈ **40 mm
+   shorter** (38–42 mm is the safe band): each end bottoms on its collar
+   shoulder 19 mm from that wall, so the seated rod spans nearly
+   wall-to-wall (mouth-to-mouth **plus** ~38 — both sockets sit recessed
+   into their collars).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out — **holding the flange still** as you
    unthread, because unscrewing friction can walk the single M5 out of the
