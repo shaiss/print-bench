@@ -202,3 +202,34 @@ folded here (adapter geometry, `ci.parts`, and cameras untouched):
 3. **Cool before ranking.** README ranking ladder: let the coupon reach
    room temperature before ranking stations — warm plastic reads about
    half a station loose and would tune `bottle_tol` too tight.
+
+## Review round — PR #813 R6 (2026-10-10)
+
+Drik and Jane both passed at `89905d1` (CI regen advanced the head to
+`0ced4a4` mid-round — previews/pages only); seven act-now docs/preview
+nits folded here (adapter geometry, `ci.parts`, and existing cameras
+untouched):
+
+1. **Whole-coupon overview camera.** New frozen `coupon-overview` line
+   (plus `CAMERAS.md` row + README embed beside Print-first): port stub
+   + full four-label strip (`15/22/30/38`), 50° elev / ~55° yaw so both
+   label edges read; `render | part="coupon"`. Additive only — the R3
+   `coupon` close-up stays frozen.
+2. **Brim: none** in README Print settings — a stock Auto-brim can weld
+   onto the port-stub sector tips (the surface the fit is judged on).
+3. **PETG bridge clause** on the existing PETG line: ~10 mm flat bridges
+   across the sector gaps can sag on the first bridging layers.
+4. **0.42 mm line-width pin** beside the 0.2 mm layer setting — label
+   strokes sit at the engraved floor; a 0.45 mm profile slips under it.
+5. **Neck ID wording.** "~28 mm inside" → "~28 mm across the threads
+   (the orifice is ~22 mm)" so calipers point at the right feature.
+6. **Bottle cool rider** on the cool-before-ranking sentence — let the
+   washed bottle cool too (same half-station warm trap, opposite sign).
+7. **Endurance hedge.** "Hundreds of turn cycles a year" restated as an
+   expectation tied to refill cadence (~52 cycles/yr at weekly wash day)
+   until the v1 field checks are ticked.
+
+**Charter:** R5 re-rank committed into `PM.md` — the two v1 field checks
+rank above all page/label polish (label epic done); deferred variants
+follow. Reviewer sandbox read-access stays queued on the platform
+charter (Reeve); not this design.
