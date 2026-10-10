@@ -110,11 +110,14 @@ the fan on blowing into the case.
 
 If a fit is off, tune it on the coupon (NOTES.md, "Print this first") and
 reprint only the affected part — the coupon is cropped from the same geometry,
-so what you feel there is what the full parts do. A printcheck thin-wall warning
-on the coupon after a large `fit_clearance` bump can be a crop artifact; print and
-check the full `lid` if in doubt (NOTES decision 27).
+so what you feel there is what the full parts do. A printcheck thin-wall warning on the coupon after a `fit_clearance` bump can be a
+crop artifact — the coupon stays honest to about +0.10; past that, tune on the full
+`lid`; print and check the full `lid` if in doubt (NOTES decision 27).
 
 ![Lid register lip lead-in chamfer at print pose](previews/lip-lead.png)
+
+*Lid at print pose (outer face down): 45° B5 lead-in on the cavity-entering edge
+of the −X register lip — 0.45 mm band; a fan insert boss in frame for scale.*
 
 ## Living with it
 
