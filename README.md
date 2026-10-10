@@ -574,6 +574,9 @@ surfaces studies awaiting a read live in
     cross-runner render wobble) and warns when a design's previews changed
     though its own sources did not. Advisory — run by CI's regen job just
     before it commits, with a `--selftest`
+  - `regen-pr-guard.sh` — on pull_request, decides whether CI's regen job may
+    commit regenerated previews/stamps back (author's diff vs base, excluding
+    regen bot commits, must touch `designs/`); `--selftest`
   - `field-test.sh` — appends a FIELD-TEST entry (one real print's result) to
     a design's NOTES.md; the tested core of the "Log a print result" Action
     (issue #101)
