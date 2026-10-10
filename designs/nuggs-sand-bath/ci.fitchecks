@@ -1,0 +1,11 @@
+# Fit proofs for nuggs-sand-bath (gate.sh renders each line as
+# build/nuggs-sand-bath-<part>.stl and checks the facet count):
+#   mated      — the bath against a library mate neck at the insertion
+#                clocking (nuggs_clockings()[0], pulled 0.01 mm). Empty =
+#                the port standard still assembles through THIS caller.
+#   mated_neg  — the same pair clocked at 0 instead of half a pitch: outer
+#                shell against outer shell. Must interfere, grossly — the
+#                mandatory negative control proving the check can fail
+#                (lib/nuggs-coupling-mates.conf, mis-clocked-collides).
+mated       empty
+mated_neg   interferes
