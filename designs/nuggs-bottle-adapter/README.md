@@ -52,6 +52,12 @@ PCO-1881; when unsure, the coupon is the proof.
   front-left exclusion (~18 × 28 mm) on “256” beds. The adapter alone fits
   smaller beds; the coupon needs ~190 mm+
 
+![Coupon ring with engraved tol numeral](previews/coupon.png)
+
+On dark filament the shadow-read engraving can be hard to see under kitchen
+light — dab acrylic paint or a white gel pen into the digits before you
+trust a ring number.
+
 ## Parameters
 
 | Parameter | Default | What it does |

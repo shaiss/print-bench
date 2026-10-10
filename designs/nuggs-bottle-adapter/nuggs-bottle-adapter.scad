@@ -336,6 +336,11 @@ strip_y     = 47;    // half-width; +1 mm so size-8 Bold does not notch the long
 coupon_label_size = 8;
 coupon_label_font = "Liberation Sans:style=Bold";
 coupon_label_cut  = 0.6;   // engraving depth, mm (≥ two 0.2 mm layers)
+// Corridor between ring rows (~7.8 mm between facing OD edges at max
+// throat_or) is left clean on purpose: a size-8 Bold legend (em box ~8 mm
+// tall, same as the ring numerals) has no real margin there, and a smaller
+// glyph would reintroduce the stroke-width mush the size-8 labels fixed.
+// The ×100 key stays in README/NOTES (Drik, PR #813 R3).
 function coupon_tol_mark(tol) = str(round(tol * 100));
 
 module coupon_ring(tol) {

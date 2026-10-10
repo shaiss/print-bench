@@ -135,3 +135,20 @@ carries both fits. In order:
 A station whose thread skips (crest rides over the ridge) is too tight;
 one that spins freely is too loose. If *none* grip, raise `f_thread_depth`
 toward the 0.85 cap (ridge land thins as you do — see Key decisions 3).
+
+## Review round — PR #813 R3 (2026-10-10)
+
+Drik and Jane both passed at `c433afd6`; three non-blocking nits folded
+here (adapter geometry untouched):
+
+1. **Coupon camera.** New frozen `previews/cameras.conf` line `coupon`
+   (plus `CAMERAS.md` row): one ring + its engraved numeral, neighbor /
+   strip edge for scale, 55° elevation so the 0.6 mm cut shades. Embedded
+   in the README Print-first block (`previews/coupon.png`).
+2. **Corridor legend declined.** Facing ring OD edges leave ~7.8 mm
+   between rows; size-8 Bold (em box ~8 mm tall, same as the numerals)
+   has no real margin there. Corridor stays clean; the ×100 key remains
+   in README/NOTES — comment in the coupon label block records why.
+3. **Dark-filament readout.** One README line: dab acrylic or a white
+   gel pen into the digits when shadow-read engraving is hard to see.
+   No geometry change.
