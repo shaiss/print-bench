@@ -317,6 +317,22 @@ jobs:
       # that leaks additively from .claude/settings.json, kept honest by
       # scripts/oracle-perms-check.sh. ORACLE_PR pins the one PR the posting
       # tool may write to; the model cannot redirect it.
+      #
+      # ORACLE_CAP_STATE is what makes "exactly ONE review per run" span the
+      # chain WALK, not one link: each link is its own claude-code-action step
+      # spawning a fresh oracle_mcp.py process, so an in-process counter reset
+      # to 0 per link — a link that posted and then ended without success
+      # handed the next link a fresh cap, and one PR event could collect a
+      # second Oracle review per remaining link (the #549 class the epic's
+      # split missed). Every link step names the SAME runner.temp file (fresh
+      # per job, so every PR event still gets its one review) and the server
+      # counts posts from it — the scout's #565 mechanism, the reeve.yml
+      # REEVE_GREENLIGHT_STATE pattern. Step-level env because the runner
+      # context is unavailable in job env. The server refuses to post if a link
+      # step lacks it, and the cap-state wiring drift guard
+      # (tools/model-registry/tests/test_cap_state_wiring.py) fails pre-merge
+      # if a link forgets it or names a different path, so a future link 5 is
+      # caught before it can silently file nothing.
 
       - name: Oracle via Anthropic (chain link 1)
         id: a1
@@ -328,7 +344,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+          ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -347,7 +364,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+          ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -367,7 +385,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+          ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -388,7 +407,8 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+          ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -410,7 +430,8 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+          ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -433,7 +454,8 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+          ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -457,7 +479,8 @@ jobs:
           API_TIMEOUT_MS: "600000"
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+          ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}

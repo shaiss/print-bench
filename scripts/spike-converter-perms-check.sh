@@ -120,6 +120,9 @@ REQUIRED_DENIES = {
     "Write", "Edit", "NotebookEdit",
 }
 
+# Jane/Drik posting surface (#773): server or tool spelling, growth-server pattern.
+REVIEWER_DENIES = {"mcp__reviewer", "mcp__reviewer__post_review"}
+
 def load(path):
     with open(path) as fh:
         return json.load(fh)
@@ -201,6 +204,10 @@ for r in sorted(REQUIRED_DENIES - deny_set):
         f"sibling write surfaces (chunk / label / assessor / scout helpers) "
         f"and the file-mutating tools to stay denied whatever settings.json "
         f"allows today.")
+if not (REVIEWER_DENIES & deny_set):
+    problems.append(
+        "the backstop no longer denies mcp__reviewer or "
+        "mcp__reviewer__post_review (issue #773 sibling deny).")
 
 if problems:
     sys.stderr.write("spike-converter permission drift:\n")
@@ -230,7 +237,7 @@ EOF
 {"permissions":{"allow":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)"]}}
 EOF
   cat > "$tmp/good-converter.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Write","Edit","NotebookEdit","mcp__reviewer","mcp__reviewer__post_review"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-converter.json" \
       "$tmp/.claude/skills/product-scout/scout-mcp.json" \
@@ -297,6 +304,18 @@ EOF
     echo "FAIL  selftest: a dropped scout-helper deny was NOT caught"; return 1
   else
     echo "ok    selftest: dropping a sibling deny fails the check"
+  fi
+
+  # Missing Jane/Drik posting deny (#773): every other required deny present.
+  cat > "$tmp/bad-reviewer-converter.json" <<'EOF'
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Write","Edit","NotebookEdit"]}}
+EOF
+  if check_pair "$tmp/bad3-settings.json" "$tmp/bad-reviewer-converter.json" \
+      "$tmp/.claude/skills/product-scout/scout-mcp.json" \
+      "$tmp/.claude/skills/product-scout/scout_mcp.py" 2>/dev/null; then
+    echo "FAIL  selftest: a missing reviewer-posting deny was NOT caught"; return 1
+  else
+    echo "ok    selftest: a missing reviewer-posting deny fails the check"
   fi
 
   # BAD 4: the filing tool itself is denied → must fail. This backstop's

@@ -230,3 +230,61 @@ carry), and the drift guard that holds `.github/models/registry.conf` and its
 consumer workflows in correspondence — including that every chain-walking
 workflow stays wired to the shared `.github/actions/provider-triage` action on
 its own chain.
+
+`tests/test_cap_state_wiring.py` is the walk's other half: every MCP write
+server bounds its writes per run by counting from a state file each link step
+shares (the #549 class — `CAP_STATE_ENV = "SCOUT_CAP_STATE"` and siblings,
+the Oracle's `ORACLE_CAP_STATE` included), and a server fails closed when its
+env var is missing, so a link step that forgets it silently files nothing.
+For every workflow step whose `claude_args` passes `--mcp-config`, the guard
+resolves the server script that config launches, reads its `CAP_STATE_ENV`
+literal by AST, and requires the step's own env to set it to a
+`${{ runner.temp }}/…` path — the same path on every step of the job that
+launches that server — and requires every launched server to declare one at
+all (an explicit, empty `UNCAPPED_SERVERS` is the only way out). Derived from
+the live tree, never a table of env names, with a negative control per rule.
+
+`tests/test_workflow_yaml_truncation.py` pins the quoting behind escalation
+#637. An unquoted `context: … (issue #${{ … }})` is cut at the ` #` (YAML reads
+it as a comment), so the escalation never named the issue whose run exhausted
+the chain. The test holds every provider-triage `context:` to its raw source
+text. It also scans every workflow's `with:`/`env:` values for one an unquoted
+` #` cut short, with inline negative controls for both checks. Its tiny stdlib
+scalar reader is cross-checked against PyYAML wherever PyYAML is importable.
+
+## OpenRouter free OSS tail (scoped)
+
+Two free-tier OpenRouter models are declared for a **scoped** last-resort
+tail after Z.AI and Anthropic:
+
+`google/gemma-4-31b-it:free` and
+`nvidia/nemotron-3-super-120b-a12b:free`.
+
+They are **not** on every chain. Free-tier models are weaker against prompt
+injection and may log prompts, so they must not hold write-capable /
+merge-gate authority (Cipher hold on #678). Keel's binding Security ruling
+on #819 further scopes the tail to **labeler only**: the drift guard's
+`OPENROUTER_FREE_TAIL_ALLOWED_CHAINS` is exactly `{labeler}`. Explicitly
+excluded — including former "advisory" write surfaces that file issues,
+post comments, or queue intents: `review`, `scout`, `adoption-assessor`,
+`wright` / `wright-signoff`, `reeve-growth`, `backlog-burn`, `design-run`,
+`chunker`, `spike-converter`, `growth-twitter`, `reeve-greenlight`, and
+every other bypassPermissions / PAT / gate-deciding walk. Oracle role
+chains and `groomer-narrative` stay vendor-pure.
+
+- **Provider:** `[provider:openrouter]` with `base_url = https://openrouter.ai/api`
+  (Anthropic-compatible; Claude Code appends `/v1/messages`).
+- **Secret:** `OPENROUTER_API_KEY`. Optional. Without it the OpenRouter steps
+  on allowlisted walks skip (`openrouter_key_present != 1`) and those walks
+  are Z.AI → Anthropic. Never commit the key:
+
+```bash
+gh secret set OPENROUTER_API_KEY --repo shaiss/print-bench
+```
+
+`model-smoke.yml` and `.github/actions/provider-triage` pass
+`OPENROUTER_API_KEY` into `model_registry smoke` / `classify` the same way they
+pass `ZAI_KEY` and `ANTHROPIC_API_KEY`. A missing OpenRouter secret is a skip,
+not a fail: smoke reports `secret OPENROUTER_API_KEY not set` for those links.
+Free-tier endpoints throttle; they are a last resort, not a funded replacement.
+
