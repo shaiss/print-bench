@@ -401,6 +401,12 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     (round-2b `notch` precedent — reframe before freeze); README states the
     coupon stays honest to about +0.10 on `fit_clearance`; CAMERAS.md names fan
     insert bosses. `sbc-case.scad` untouched.
+28. **B5 — PM triage `ffb2e81` (four act-nows):** `lip-lead` frozen as tightened;
+    `lip_lead_chamfer` assert [0, `lip_depth − 0.05`]; Customizer tooltip
+    set-and-leave; README layer-step clause on the parameter row; `## Field test
+    log` stub for B10 (nine fill-in rows, no invented results). Queued to B10
+    page reopening: satin-finish sentence, "at frame edge" caption word,
+    fattest-USB-C seating probe.
 
 ## Print settings
 
@@ -458,3 +464,25 @@ structure proof:
 - Fan screw length M3 × 20 = fan frame 11 + plate 2.5 + insert 5.8: the screw
   passes through the fan and the plate into the inner-face bosses (×10, the
   first draft's length, bottomed out in the plate before reaching the insert).
+
+## Field test log
+
+_Real prints of this design, newest at the bottom. See templates/FIELD-TEST.md
+and docs/print-feedback.md for the convention. Stub rows for B10 — fill in on
+the first real print; stamp the entry **with B5 lead-in @ 0.45**._
+
+### B10 — first real print (stub)
+
+- **Printed from:** _commit / version_
+- **Part(s):** _coupon + base + lid (+ fan assembly as built)_
+- **Slicer settings:** _profile · layer height · nozzle · material · infill · supports_
+- **SD swap (lid on):** _micro-SD card in / out through the −X open edge_
+- **Front-edge connectors:** _official USB-C PSU + both micro-HDMI + jack vs rim/skirt_
+- **Fan-lead landing:** _header pins vs 5 V/GND; wire count (2-wire vs 4-wire PWM)_
+- **Tether / reach-with-slack:** _does the fan lead reach with slack, or must it be unplugged to lift the lid?_
+- **1 a.m. noise:** _audible at desk distance with fan running_
+- **Lid seating feel:** _press over the posts, not the GPIO-notch span; does the register seat **start** straight on the B5 lead-in?_
+- **ASA chamfer edge (if ASA):** _one eye-and-fingertip look — outer lip edge whitening or wear after initial seatings_
+- **Result:** _what fit, what didn't, print-quality notes_
+- **Measured deviations:** _e.g. fit_clearance tune applied_
+- **Carry forward:** _printer.conf value(s) to update, or "none"_

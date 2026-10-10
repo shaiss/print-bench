@@ -55,7 +55,7 @@ lip_t = 2.0;
 // Lid register lip vs cavity wall (mm) — tune on the coupon first
 fit_clearance = 0.25;
 // 45° lead-in on the lip's entering (cavity) edge — feel only; fitchecks
-// prove clearance at full seat (Jane, PM B5). Tune on the coupon first.
+// prove clearance at full seat (Jane, PM B5). Set-and-leave; feel it on the coupon.
 lip_lead_chamfer = 0.45;
 // Board-hole-to-standoff alignment slop proven by the fit-pins fitcheck (mm)
 pin_slop = 0.15;
@@ -273,6 +273,9 @@ module register_lip() { //! vertical register lip with optional 45° lead-in on 
     // register_lip_profile() intersected with a tapered outer envelope so only
     // the outer perimeter moves — inner face and post-notch cuts stay fixed.
     // Print pose: top of the standing lip — a shallow flare, not a mid-air bridge.
+    assert(lip_lead_chamfer >= 0 && lip_lead_chamfer <= lip_depth - 0.05,
+           str("lip_lead_chamfer must be in [0, ", lip_depth - 0.05,
+               "] mm (lip_depth=", lip_depth, ")"));
     chamfer = min(max(lip_lead_chamfer, 0), lip_depth - 0.05);
     if (chamfer < 0.05) {
         linear_extrude(lip_depth + 0.01)
@@ -363,7 +366,7 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
         }
         // lid -X,+Y corner at print pose (outer face down), cropped in
         // assembled coords — the flip lands it on the -Y side of the plate,
-        // clear of the base corner: plate, register lip with its post notch.
+        // clear of the base corner: plate and register lip (−X face, lower +Y band).
         // The crop must reach lid_top_z, not base_top_z — the
         // plate sits ABOVE base_top_z, and a base-height crop leaves the lip
         // ring standing on a 0.5 mm plate sliver (measured: crop spanned

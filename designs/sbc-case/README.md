@@ -87,7 +87,7 @@ shown; bottom-iso includes the base bed face):
 |---|---|---|
 | `board` | `RPI4` | NopSCADlib board type — standoffs follow its hole list |
 | `fit_clearance` | 0.25 mm | lid register lip vs cavity wall; tune on the coupon |
-| `lip_lead_chamfer` | 0.45 mm | 45° lead-in on the lid lip's entering edge; 0.4–0.5 mm useful band |
+| `lip_lead_chamfer` | 0.45 mm | 45° lead-in on the lid lip's entering edge; 0.4–0.5 mm useful band; two stepped rings at 0.2 mm layers (smoother at 0.16) |
 | `standoff_h` | 5 mm | board standoff height (4–6 per the brief) |
 | `interior_h` | 24 mm | interior height; sized over the tallest RPI4 connector |
 | `fan_type` | `fan40x11` | fan vitamin; aperture and boss pitch follow it |
