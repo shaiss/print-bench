@@ -154,3 +154,20 @@ here (adapter geometry untouched):
 3. **Dark-filament readout.** One README line: dab acrylic or a white
    gel pen into the digits when shadow-read engraving is hard to see.
    No geometry change.
+
+## Review round — PR #813 R4 (2026-10-10)
+
+Drik and Jane both passed at `1133bbb0`; three non-blocking README nits
+folded here (adapter geometry untouched):
+
+1. **Coupon seam.** Seam guidance already covered the adapter; added that
+   the coupon needs the same random/rear seam — an aligned ridge in a
+   test ring can read as a false "too tight" when ranking by feel (Jane).
+2. **Dry-then-wet shortlist.** Shortlist stations dry, then re-check the
+   shortlist wet (soapy fingers / wet bottle) before committing — wash
+   day is the real use case and a station can feel a half-step looser
+   wet (Drik).
+3. **Coupon cost already owned.** Print-first bullet already states the
+   coupon is heavier/slower on purpose, with CI printcheck numbers
+   (~4 h 57 m / 62.55 g vs adapter ~4 h 10 m / 53.16 g); left alone
+   (Drik).

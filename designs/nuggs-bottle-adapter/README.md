@@ -35,7 +35,10 @@ PCO-1881; when unsure, the coupon is the proof.
 - **Supports:** none needed — steepest surface is the 44° interior funnel
 - **Orientation:** as rendered, port down on the coupling sector tips
 - **Seam:** random (or rear) — an aligned seam stacks a ridge inside the
-  threaded bore that can catch the bottle at one spot in the turn
+  threaded bore that can catch the bottle at one spot in the turn. Use the
+  same seam on the coupon: a ridge inside a test ring adds drag at one spot
+  in the turn and can read as a false "too tight" when you're ranking rings
+  by feel
 - **First layers:** the sector tips print as separate islands and merge into
   the ring a few layers up — normal for the NUGGS family pose; keep supports
   off anyway
@@ -58,6 +61,10 @@ On dark filament the shadow-read engraving can be hard to see under kitchen
 light — dab acrylic paint or a white gel pen into the digits before you
 trust a ring number.
 
+Shortlist coupon stations dry first, then re-check the shortlist with wet
+(soapy) fingers or a wet bottle before you commit — wash day is when the
+fit really gets used, and a station can feel a half-step looser wet.
+
 ## Parameters
 
 | Parameter | Default | What it does |
@@ -78,8 +85,9 @@ override on the command line with `-D 'bottle_tol=0.22'`.
 
 1. Print and check the **coupon** first, in the same filament as the adapter:
    screw a washed PCO-1881 bottle into each labelled ring (`15 / 22 / 30 / 38`
-   = `bottle_tol` × 100) and find the tol that grips without cracking or
-   skipping; put that number in `bottle_tol` and print the adapter.
+   = `bottle_tol` × 100), shortlist dry, then re-check the shortlist wet
+   (soapy fingers / wet bottle) and pick the tol that grips without cracking
+   or skipping; put that number in `bottle_tol` and print the adapter.
 2. Screw the bottle into the adapter mouth-down until its lip seats on the
    land (about 1.8 turns from first contact). The bottle's weight rests on
    the printed land — the thread only keeps it from unscrewing. Any rotational
