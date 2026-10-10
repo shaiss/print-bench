@@ -374,6 +374,13 @@ surfaces studies awaiting a read live in
     shell surface, whose `--selftest` pins every post-greenlight refusal and
     the assembled comment shape — marker, `GREENLIGHT: YES|NO|ROUTE` verdict
     line, reasoning, wrapper-appended approval footer) must never be denied
+  - `coach-lock-check.sh` — fails a design-coach round that posted no
+    trusted COACH-LOCK (an Actions-bot comment that *ends* with the
+    assembled `<!-- COACH_LOCK -->` + footer suffix, created at or
+    after `--since` — a Jane/Drik/PM family comment that smuggled
+    the HTML does not count; those jobs share github-actions[bot];
+    a lock from an earlier coach run does not either; claude-code-action
+    exits 0 on a denial-only turn; issue #806)
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):
@@ -381,11 +388,23 @@ surfaces studies awaiting a read live in
     exemption (gh, jq, mktemp; the reviewer's also keeps PM triage's
     `chunk-helper.sh`, the coach's git), always deny the render toolchain
     (apt, openscad, xvfb-run, prusa-slicer, printcheck, the render/gate/check
-    scripts, session-start.sh) and the gh escape hatches, and never deny the
+    scripts, session-start.sh) and the gh escape hatches, and the env-lock
+    floor (`export`/`env`/`unset`/`set` and `bash`/`sh`/`dash -c`, issue
+    #777) so the job-level `GIT_*` lock cannot be unset by an additive
+    allow, and never deny the
     review surface (gh, the read tools; git checkout/add/commit/push and
     Write/Edit too for the coach). A deny list cannot contain git, so the
     reviewers get none (`Bash(git:*)` denied; the workflow stages the PR
-    head for Jane and Drik) and the coach's git is fenced to local verbs;
+    head for Jane and Drik) and the coach's git is fenced to local verbs
+    (global options plus the four-verb option floor from #775: editor,
+    gpg-sign, template/squash, receive-pack/exec, recurse-submodules, repo
+    at shortest unique prefixes `--e`/`--g`/`--te`/`--sq`/`--r`/`--rece`/
+    `--recu`/`--rep`, URL/path dest including dest-not-first and scp-like
+    `host:path` (`*:**`) with no required space after the verb so IFS TAB/double-space
+    splits match, plus plumbing send-pack/http-push/fetch-pack/http-fetch
+    and --fixup/--fix, enumerated clustered `-e`/`-c`/`-S` shorts (`*` only —
+    Claude Code has no `?`) plus explicit TAB twins for short option-first
+    stems, and `git remote` retarget);
     `--selftest` with a positive and a negative control per rule, run by
     check.sh. The workflow half — every reviewer ship step in
     `auto-review.yml` passes its backstop under `dontAsk` and runs under the
@@ -393,6 +412,17 @@ surfaces studies awaiting a read live in
     config) — is pinned by
     `tools/model-registry/tests/test_reviewer_backstop_wiring.py` and
     `test_reviewer_git_containment.py`.
+  - `reviewer-deny-canary.sh` — runtime proof that the Claude Code build
+    `auto-review.yml`'s pinned `claude-code-action` SHA actually installs
+    still refuses the three syntax families the reviewer/coach backstops
+    spell (issue #776): mid-string `*`, `:*` word-boundary prefix, and
+    `Edit(./.git/**)`. `reviewer-perms-check.sh` is a Python model of the
+    matcher; this extracts the matcher from CLI 2.1.287 (the version that
+    SHA hardcodes and installs at run time — not bundled, not `latest`)
+    and fails if a denied probe is not refused. `--selftest` run by
+    `check.sh`; the live extract is `.github/workflows/reviewer-deny-canary.yml`
+    (dispatchable, not a required check). Record in
+    [docs/actions-security.md](docs/actions-security.md) CR-A.
   - `spike-converter-perms-check.sh` — the same drift check for the scheduled
     spike-to-brief converter's own deny backstop
     (`.claude/spike-converter-settings.json`, #245 child C / issue #440), the
@@ -436,6 +466,20 @@ surfaces studies awaiting a read live in
     a non-design PR and the `no-auto-review`/`signoff-override` labels pass so a
     required check never strands a PR it wasn't meant to gate. All the policy
     lives here behind a `--selftest` with a negative control per row
+  - `reviewer-posted.sh` — the reviewer-outcome reader `auto-review.yml`'s
+    chain walk and round stamp key on (issues #762 / #770): did THIS
+    reviewer's MCP-assembled per-head marker for THIS head sha land from
+    `github-actions[bot]` (the posting identity `.claude/reviewer-post/
+    reviewer_mcp.py` uses via `GITHUB_TOKEN`) — `JANE`/`DRIK_SIGNOFF`,
+    `PM_TRIAGE_DONE`, or `COACH_DONE` — ending with the server-assembled
+    marker-then-footer suffix, optionally scoped to this run with
+    `--since`? claude-code-action exits 0 whenever the agent ends its turn
+    without an API error, so an exit-0 link that posted nothing used to win
+    the chain walk and be stamped a completed round (PRs #755/#756); a
+    planted marker from any other author is ignored (coach-lock-check.sh's
+    author+suffix pattern); refuses (rather than answers `false`) on a
+    typo'd reviewer or sha, and carries a `--selftest` with a negative
+    control per row
   - `routine-lock-cleanup.sh` — withdraws a dead scheduled run's SHIP-LOCK (a
     run killed by its timeout cannot run the skill's own release step) and
     escalates to `needs-decision` after 3 run-deaths on one issue; invoked by
@@ -459,6 +503,11 @@ surfaces studies awaiting a read live in
     malformed line, and the exit-4 hard-fail path, over committed fixtures in
     `scripts/fusecheck-fixtures/` whose body counts are re-measured with
     fusecheck itself (issue #627)
+  - `scad-closure.sh` — include-closure walk behind gate.sh's `ci.fitchecks`
+    branch proof and fusecheck-check.sh's control proof (issue #766): a
+    `part == "..."` dispatcher in an included parent counts; a name nowhere
+    in the closure still FAILs; `--selftest` is the negative-control half
+    check.sh runs
   - `cog-check.sh` — proves the assembled object STANDS (issue #623), the
     thing no per-part gate can: reads a `ci.cog` manifest (per-part densities,
     non-printed hardware masses, assembly transforms, a stability margin) and
