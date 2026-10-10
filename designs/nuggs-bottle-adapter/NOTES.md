@@ -169,12 +169,13 @@ folded here (adapter geometry untouched):
    wet (Drik).
 3. **Coupon cost already owned.** Print-first bullet already states the
    coupon is heavier/slower on purpose, with CI printcheck numbers
-   (~4 h 57 m / 62.55 g vs adapter ~4 h 10 m / 53.16 g); left alone
-   (Drik).
-4. **Sticky duplicate coupon row (queued).** The printcheck sticky listed
-   `build/nuggs-bottle-adapter-coupon.stl` twice with identical 100/100
-   rows. Queued to platform/Reeve alongside the reviewer sticky-access
-   item — cosmetic, no gate impact on the part itself.
+   (~4 h 57 m / ~63 g vs adapter ~4 h 10 m / 53.16 g); left alone
+   (Drik). Re-quoted in R5 when the sticky moved from 62.55 g to 62.92 g.
+4. **Sticky duplicate coupon row — resolved by §5.** The printcheck sticky
+   once listed `build/nuggs-bottle-adapter-coupon.stl` twice with identical
+   100/100 rows (queued briefly to platform/Reeve). §5 dropped the
+   redundant `ci.parts` coupon line; the sticky at `99faa0f` shows the
+   coupon once. No platform ticket to chase.
 5. **`ci.parts` coupon line removed.** Verified in `scripts/gate.sh`: a
    `coupon` ci.parts entry renders `-D part="coupon"` →
    `build/<name>-coupon.stl`, and the canonical
@@ -185,3 +186,19 @@ folded here (adapter geometry untouched):
    `adapter`. Frozen `coupon` camera (`part="coupon"` in cameras.conf),
    product page, and wrapper gating are unchanged. Not a platform-code
    change.
+
+## Review round — PR #813 R5 (2026-10-10)
+
+Drik and Jane both passed at `99faa0fa`; three non-blocking docs nits
+folded here (adapter geometry, `ci.parts`, and cameras untouched):
+
+1. **Coupon filament quote.** README print-first and R4 §3 still said
+   62.55 g; the printcheck sticky at this head reports 62.92 g. Re-quoted
+   both to `~63 g` (Jane: round so runner wobble cannot stale it) with
+   time still `~4 h 57 m`; adapter `~4 h 10 m / 53.16 g` unchanged.
+2. **R4 §4 closed.** Marked the duplicate-coupon sticky item resolved by
+   §5 (`ci.parts` drop); current sticky lists the coupon once — no
+   platform/Reeve chase.
+3. **Cool before ranking.** README ranking ladder: let the coupon reach
+   room temperature before ranking stations — warm plastic reads about
+   half a station loose and would tune `bottle_tol` too tight.

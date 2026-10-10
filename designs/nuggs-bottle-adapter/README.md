@@ -49,7 +49,7 @@ PCO-1881; when unsure, the coupon is the proof.
   from the ring that grips a real bottle best (see below). Rings are marked
   `15 / 22 / 30 / 38` (`= bottle_tol × 100`). The coupon being heavier and
   slower than the adapter body is intentional: a full throat rehearsal
-  (port stub + bottle rings), not a bug to "fix" (~4 h 57 m / 62.55 g vs
+  (port stub + bottle rings), not a bug to "fix" (~4 h 57 m / ~63 g vs
   the adapter's ~4 h 10 m / 53.16 g)
 - **Bed:** the coupon strip is ~187 mm — keep it clear of the stock X1/P1
   front-left exclusion (~18 × 28 mm) on “256” beds. The adapter alone fits
@@ -61,9 +61,12 @@ On dark filament the shadow-read engraving can be hard to see under kitchen
 light — dab acrylic paint or a white gel pen into the digits before you
 trust a ring number.
 
-Shortlist coupon stations dry first, then re-check the shortlist with wet
-(soapy) fingers or a wet bottle before you commit — wash day is when the
-fit really gets used, and a station can feel a half-step looser wet.
+Let the coupon cool to room temperature before ranking stations — warm
+plastic reads about half a station loose, so ranking warm tunes
+`bottle_tol` too tight. Shortlist coupon stations dry first, then re-check
+the shortlist with wet (soapy) fingers or a wet bottle before you commit —
+wash day is when the fit really gets used, and a station can feel a
+half-step looser wet.
 
 ## Parameters
 
