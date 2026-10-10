@@ -63,6 +63,12 @@ fan_type = fan40x11;
 // Fan centre (mm); biased off geometric centre toward the RPI4 SoC
 fan_center = [-10, 0];
 
+/* [Fan grille — B11 finger guard] */
+// Co-planar hole diameter in the lid plate (mm) — blocks finger reach to blades
+grille_hole_d = 5.0;
+// Solid web between holes (mm); keep >= 1.2 for FDM
+grille_web = 2.0;
+
 /* [Ports & vents] */
 // How far the +X connectors overhang the board edge (mm): usb_A body l=17
 // centred at x=+36 and rj45 l=21 at x=+34 both reach x=+44.5 = edge + 2.0
@@ -117,6 +123,7 @@ pilot_d  = 2 * screw_pilot_hole(board_screw);     // M2.5 tap drill
 
 fan_bore_d = fan_bore(fan_type);   // 37
 fan_pitch  = fan_hole_pitch(fan_type); // 16 -> holes 32 apart
+grille_pitch = grille_hole_d + grille_web;
 
 echo(str("case outer: ", outer_l, " x ", outer_w, " mm; base ", base_top_z,
          " mm tall, fan stack ", boss_h + fan_depth(fan_type), " mm above it"));
@@ -180,7 +187,7 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
     }
 }
 
-module lid() { //! printed lid: plate, register lip (notched around the posts), aperture, insert bosses on the inner face, screw holes
+module lid() { //! printed lid: plate, register lip (notched around the posts), fan grille, insert bosses on the inner face, screw holes
     difference() {
         union() {
             // register lip: vertical ring dropping lip_depth into the cavity,
@@ -219,9 +226,23 @@ module lid() { //! printed lid: plate, register lip (notched around the posts), 
         for (fx = [-1, 1], fy = [-1, 1])
             translate([fan_center[0] + fx * fan_pitch, fan_center[1] + fy * fan_pitch, base_top_z - 0.1])
                 cylinder(d = 2 * screw_clearance_radius(lid_screw), h = lid_t + 0.2);
-        // fan aperture = the fan's own bore
-        translate([fan_center[0], fan_center[1], base_top_z - 0.1])
-            cylinder(d = fan_bore_d, h = lid_t + 0.2);
+        // fan intake: co-planar grille inside the vitamin bore (B11) — plate
+        // webs on all sides, no bar across the Ø37 span
+        translate([0, 0, base_top_z - 0.1])
+            linear_extrude(lid_t + 0.2)
+                fan_grille_cut2d();
+    }
+}
+
+module fan_grille_cut2d() { //! hole pattern clipped to fan_bore_d; used by lid()
+    r = fan_bore_d / 2;
+    n = ceil(r / grille_pitch) + 1;
+    intersection() {
+        translate(fan_center) circle(d = fan_bore_d);
+        for (ix = [-n:n], iy = [-n:n])
+            if (norm([ix * grille_pitch, iy * grille_pitch]) <= r + grille_hole_d / 2)
+                translate([fan_center[0] + ix * grille_pitch, fan_center[1] + iy * grille_pitch])
+                    circle(d = grille_hole_d);
     }
 }
 

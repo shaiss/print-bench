@@ -63,9 +63,10 @@ and believes the assembly before trying it.
 | product-base | the bare tray: generated standoffs, through-bored posts, skirt | high angle | #35383d satin | `part="base"` |
 
 Frozen preview cameras (`previews/cameras.conf`): `iso`, `top`, `ports`
-(assembled), `board` (base), `notch` (base + board, round 2) and the bare
-`contact-sheet` row (the as-printed 4-view, regen-owned — added round 3 to end
-the ownerless-exhibit escape) — add rows, never reframe.
+(assembled), `board` (base), `notch` (base + board, round 2), `lid-grille`
+(`lid` print pose, #810 review) and the bare `contact-sheet` row (the
+as-printed 4-view, regen-owned — added round 3 to end the ownerless-exhibit
+escape) — add rows, never reframe.
 
 No tier-1.5 / tier-2 AI shots: a functional print sells on the real
 geometry, and the GPL/first-party story stays clean.
@@ -79,7 +80,8 @@ geometry, and the GPL/first-party story stays clean.
 | B2 | Additional validated board presets (RPi 3B+/5, Zero 2 W) | `pcb_holes()` derivation makes it nearly free; each board still needs its port wall checked | low per board — parameter + render + check |
 | B7 | GPIO-with-lid-on clearance: measure the notch window height vs a 2×20 ribbon socket, then an honest page line | **Promoted above B5/B6 (round 3), and above B4 (round 5):** the notch is the hottest path this case has (~10 touches/month in a project phase), and its one unmeasured edge — jumpers clear (shown), a 2×20 ribbon socket (~51 × 8 mm) is not; a blocked socket has no walk-back (Drik's recoverability principle). Cheapest rank-mover: one measurement + one honest line. **Round 10** (Drik `[hunch]`, queued): B7's clearance proof must model the notch **occupied** — the round-9 step-7 fan leads exit the same GPIO notch, so a 2×20 ribbon socket shares it with two fan leads | low — measure in the .scad + one line |
 | B4 | Stepped insert bore on the base posts (Ø4.0 seat for the insert, Ø3.3 relief through the rest) | **Up (round 4), then below B7 (round 5):** the flush guard is prose in *two* places (README short version + ASSEMBLY step 1) — still prose; the stepped bore is the durable fix ("geometry beats prose", Drik). But a sunken insert *walks back* — a soldering iron re-melts it proud — so it ranks under B7/B10, whose failures don't (Drik's recoverability principle). Jane, round 2: the through-bore has no shoulder, so an insert can sink past flush → zero lid-screw engagement. **Round 10** (Jane `[bench-sense]`, queued): a zero-geometry stopgap while the seat waits — a **shouldered M3 insert tip** for the soldering iron bottoms on the post top exactly at flush, so the insert physically can't go deep; one clause in step 1 or the README short version, riding B4 or B10's page reopening (the round-8 FLUSH keep-guard survives it) | low — bore profile + re-gate |
-| B11 | Fan-aperture finger guard — 2–3 ribs across the Ø37 bore | Drik, round 5 `[customer-sense]`: spinning blades sit a few mm behind the outer face, reachable by finger/pencil/paperclip; a jammed intake cooks the always-on box this case is *for*, and the ribs double as the quarterly dust-out's filter mount. The page claims no guard, so nobody's fooled today. **N4 support-free proof + the Ø37 free-area/airflow cost checked when built** (Jane's domain; "prints flat" is asserted, not measured). **Round 13** (Jane `[bench-sense]`, queued): the printable construction is a **co-planar grille in the lid plate** — a pattern of small openings bounded by plate on all sides, printing in the same pass as the plate with no bridging. **Not** a bar grille across the Ø37 aperture: on the bed-face show surface its first layer lays mid-air across 37 mm (the exact class the pose flip / decision 7 avoids) and scars the show face; on the inner face it's a long PETG bridge where the fan frame clamps. Open-area cost stays B11's airflow question | low–medium — rib feature + re-gate |
+| B11 | **[done, 2026-10-04]** Fan-zone ceiling grille — co-planar holes in the lid plate | Drik round 5 / Jane round 13: co-planar Ø5 holes on 7 mm pitch (2 mm webs) clipped to `fan_bore`, not bars across Ø37. **Cost:** ~40 % of unobstructed bore free area retained (~426 / 1075 mm²); ~60 % airflow reduction vs open bore; closes the case ceiling over the fan bore (fan on outer face — not a blade guard from outside); dust still passes through holes. N4: plate-bounded openings only, lid still prints outer-face-down with no mid-air first layer across 37 mm. Page + NOTES decision 19 | consumed — draft PR, not merged |
+| B12 | Extend the coupon lid crop to include the fan-zone grille | reviewers round on #810: tuning `grille_hole_d` / `grille_web` on the coupon is impossible today (crop is −X,+Y corner; fan centre (−10,0) sits outside it) — page now says reprint the lid; a grille-bearing coupon would make airflow tuning cheap again | low — widen crop + re-gate coupon |
 | B3 | Fan shroud / duct over the SoC | the only backlog item on the 8,760 h/yr runtime path — first to move when a measured thermal story lands (Drik usage-math re-rank, round 2); still declined for support-free until then | medium — new part + slice gate |
 | B5 | Lead-in chamfer on the register lip's entering edge | Jane, round 2: 2.5 mm of straight knife-edge; a 0.4–0.5 mm chamfer starts the seat straight — feel only, the fitchecks already prove the clearance | low — chamfer + coupon re-check |
 | B6 | Printed-foot option (parameter) | Drik, round 2: the case walks on a one-handed cable pull; this round's fix is a README "add adhesive feet" line, a printed foot is the no-hardware option. **Round 7:** the adhesive feet are now billed on the README hardware line ("four carts, not five") — a glue-on dot isn't an N2 assembly vitamin, so B6's printed-foot parameter stays the durable choice the page can bill | low — parameter + render |
@@ -89,8 +91,13 @@ geometry, and the GPL/first-party story stays clean.
 
 ## Open decisions
 
-None open. The brief's four questions were all non-blocking and resolved on
-their stated assumptions (see the decision log).
+| # | Question | Options | Default if no call |
+|---|---|---|---|
+| D1 | Optional **fan-top guard** — a separate part or add-on that covers the fan intake on the outer face (blade / finger guard from outside the case) | ship as-is (grille only closes the ceiling) / design a clip-on guard / decline | ship as-is — the grille's job is case closure, not blade guarding |
+| — | *(open, owner)* Should the **default grille** stay Ø5 / 7 mm pitch (~40 % open, 2 mm webs) or move to Jane's Ø6 / 7.6 mm pitch (~49 % open, 1.6 mm webs, above the 1.2 mm web floor)? Weigh together with **D1** (outer guard) — not decided in B11 | — | shipped defaults unchanged until called |
+
+The brief's four questions were all non-blocking and resolved on their stated
+assumptions (see the decision log).
 
 ## Decision log
 
