@@ -39,7 +39,65 @@ name: Auto design review (Jane / Drik / PM / coach)
 #     .claude/design-coach-settings.json for the coach; issue #451):
 #     scripts/reviewer-perms-check.sh holds what they deny, and
 #     tools/model-registry/tests/test_reviewer_backstop_wiring.py holds
-#     every ship step here to its backstop.
+#     every ship step here to its backstop. Cursor cloud-agent PRs initiate
+#     this workflow as cursor[bot]; the pinned action defaults allowed_bots
+#     empty and refuses that actor before any review runs (the error names
+#     the slug `cursor`, not `cursor[bot]`). Every ship step sets
+#     `allowed_bots: cursor`. Do not widen to '*' — on a public repo that
+#     lets any GitHub App trigger the action. The deny backstop is unchanged.
+#
+# Posting surface (issue #764). A review body is rich multi-line markdown, and
+# under --permission-mode dontAsk the Bash permission matcher denies any
+# command whose argument carries shell structure — a table pipe or an embedded
+# newline is enough, no quoting fixes it — so Jane and Drik had NO permitted
+# write that could carry a review: every post attempt was denied, the agent
+# ended its turn, claude-code-action still exited 0 (the #538 pattern), and no
+# JANE/DRIK_SIGNOFF marker ever landed from the workflow — every sign-off on
+# record was an attended local run, and reviewer-signoff (fail-closed) blocked
+# every design PR. The fix is the oracle pattern: the reviewers' ONE write is
+# mcp__reviewer__post_review (Jane/Drik) and mcp__reviewer__post_triage (PM)
+# (served by .claude/reviewer-post/reviewer_mcp.py via --mcp-config), a JSON
+# argument so the body may be any markdown. The tool assembles the marker
+# server-side from typed fields; REVIEWER_ID — step env, never an argument —
+# selects JANE_ vs DRIK_ vs PM_TRIAGE so a session cannot post as another
+# identity, and REVIEWER_PR pins the target. Exactly one post per run,
+# counted across the whole chain walk via REVIEWER_POST_STATE (one shared
+# runner.temp file: each link spawns a fresh server process, so an in-process
+# counter would reset per link — the #549 class). Jane, Drik and PM triage
+# check out pull_request.base.ref (the Oracle's trust boundary) so the MCP
+# server, deny backstop and skills are never the PR's copy; design geometry
+# is a trusted overlay of the head's designs/ dirs. First landing (the files
+# absent on base) skips the job rather than executing a PR-controlled
+# poster. Pinned by test_reviewer_backstop_wiring.py (the flags),
+# test_reviewer_git_containment.py (the base checkout + head overlay),
+# test_cap_state_wiring.py (the state wiring) and the server's own
+# --selftest, which scripts/check.sh runs.
+#
+# Coach posting (issue #806) is the same exit-0 silence with different
+# containment. The coach still pushes iterations, so its --allowedTools
+# keep Write/Edit/Bash (Jane/Drik's read-only list must not be copied)
+# and its checkout stays the PR (full history) so git push has the
+# branch local. Comments go through mcp__reviewer__post_coach on the
+# same server (REVIEWER_ID=coach). The posting files themselves are
+# restored from pull_request.base.sha before EACH agent step — Jane/Drik
+# checkout base wholesale; the coach cannot, so a trusted overlay puts
+# reviewer-post / design-coach-settings / the skill / coach-lock-check.sh
+# back to the base copy immediately before every chain link (a failed
+# first link with Write/Edit/Bash must not leave a rewritten MCP for
+# the next spawn). The MCP config's command is `/usr/bin/python3`, not
+# PATH `python3`: GITHUB_PATH from a failed Bash link is prepended on
+# later steps, and claude-code-action looks up the command before
+# `--allowedTools` applies. claude-code-action still exits 0 on a
+# denial-only turn, so
+# after any ship step that claims success the lock-check step extracts
+# `scripts/coach-lock-check.sh` from base.sha into a temp file (the
+# workspace copy is Write-able) and runs that; it fails the job unless
+# an Actions-bot comment from *this run* (created_at >= the ready
+# step's started_at) *ends* with the assembled suffix
+# (`<!-- COACH_LOCK -->` immediately before the hardcoded footer) —
+# a substring planted by any other author, a Jane/Drik/PM body that
+# smuggled those bytes, a lock from an earlier coach run, or a
+# rewritten workspace script, does not stamp the round complete.
 #
 # Git containment (code-scanning finding on #760). A deny list cannot contain
 # git: a subcommand option no prefix rule sees (`git fetch origin
@@ -47,14 +105,17 @@ name: Auto design review (Jane / Drik / PM / coach)
 # in a repo config reached through a PR-committed bare-repository layout, a gh
 # subcommand that spawns git. So, structurally:
 #   * Jane / Drik / PM triage get NO git — their backstop denies Bash(git:*)
-#     outright. Jane and Drik review the PR head's geometry, so a trusted step
-#     in their jobs stages the head's changed design directories into the
-#     checkout before the agent starts (the merge ref at fetch-depth 2 already
-#     holds the head commit, so no fetch and no credential). PM triage reads
-#     the charter from the merge checkout and needs nothing from git.
+#     outright. They review the PR head's geometry from a BASE-branch
+#     checkout (the posting MCP must not be PR-controlled), so a trusted step
+#     fetches the head SHA (Oracle extraheader auth; persist-credentials is
+#     false) and overlays the changed design directories before the agent
+#     starts.
 #   * The coach keeps git checkout/add/commit/push (it pushes its rounds) but
 #     its backstop denies fetch/clone/pull/ls-remote and every global option;
 #     its checkout is full history, so every branch head is already local.
+#     A trusted step then overlays the posting surface from base.sha
+#     immediately before each ship step so the MCP the action spawns is
+#     never the PR's copy (including after a failed earlier link).
 #   * Every reviewer and coach job carries a job-level ENVIRONMENT lock that
 #     holds whatever the option order: GIT_ALLOW_PROTOCOL=https (git refuses
 #     the file/ext/ssh transports, so --upload-pack/--receive-pack/-u have
@@ -111,11 +172,37 @@ name: Auto design review (Jane / Drik / PM / coach)
 #
 # Provider fallback chain (per reviewer job):
 #   Z.AI GLM 5.3 → GLM 5.2 → GLM 5.1 → Anthropic Opus 4.8 → Sonnet 5 → Haiku 4.5.
-#   The first provider that succeeds wins; the rest are skipped. The job fails
-#   only when every *configured* provider failed. The order and model ids come
-#   from .github/models/registry.conf's `review` chain (issue #206); the
-#   Anthropic tail is a chain of current public ids rather than a single model
-#   (issue #298), so one unservable id cannot kill the backstop.
+#   The first provider that delivers the review wins; the rest are skipped. The
+#   job fails only when every *configured* provider failed to deliver. The
+#   order and model ids come from .github/models/registry.conf's `review` chain
+#   (issue #206); the Anthropic tail is a chain of current public ids rather
+#   than a single model (issue #298), so one unservable id cannot kill the
+#   backstop. OpenRouter `:free` models are intentionally NOT on this chain
+#   (Cipher hold on #678; #819 scoped them to labeler-only).
+#
+# Reviewer outcome is derived from the ARTIFACT, not the exit code (issues
+# #762 / #770): claude-code-action exits 0 whenever the agent ends its turn
+# without an API error, so a link that posted nothing (a provider quota hit
+# mid-run is one way — #757) still reports outcome 'success', which used to
+# skip later links and let the stamp call the round reviewed with no review
+# on the thread (PRs #755 / #756, run 37164379493). Every Jane/Drik/pm-triage
+# /design-coach ship step is followed by an artifact check
+# (scripts/reviewer-posted.sh): did that reviewer's per-head marker for the
+# PR head sha land on the thread (JANE/DRIK_SIGNOFF, PM_TRIAGE_DONE, or
+# COACH_DONE)? The chain walk falls through on `served` (the check's output),
+# the exhaustion gates fire when no link served, and the stamp confirms both
+# Jane and Drik markers before calling a round complete — the same
+# disposition-by-artifact discipline as routine-lock-cleanup.sh (#538) for
+# the ship routines.
+#
+# Transition (#770 landing): pm-triage checks out base.ref and design-coach
+# restores reviewer-posted.sh from base.sha — both keep the trust boundary
+# (never the PR-head checker). A pre-#770 base checker rejects --reviewer
+# pm|coach with exit 2; under set -e that would abort before served is set
+# and freeze the fallback walk. Those artifact-check steps treat that
+# specific exit-2 message as served=false (not a pass) so the walk continues
+# until main carries the extended checker — including open PRs whose
+# base.sha still predates the merge.
 #
 # Required secrets (at least one; the chain uses whichever are present):
 #   ZAI_KEY          — Z.AI key, used via the Anthropic-compatible endpoint
@@ -175,7 +262,16 @@ jobs:
       model4: ${{ steps.chain.outputs.link4_model }}
       model5: ${{ steps.chain.outputs.link5_model }}
       model6: ${{ steps.chain.outputs.link6_model }}
+      # Clock for the stamp's --since: actionlint 1.7.7's github context
+      # omits github.run_started_at, so the stamp cannot use that field and
+      # stay lint-clean. This job starts before Jane/Drik ship, so a
+      # date-stamped origin here still includes this round's MCP posts.
+      started_at: ${{ steps.clock.outputs.started_at }}
     steps:
+      - name: Stamp workflow clock for artifact --since
+        id: clock
+        run: echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -329,11 +425,13 @@ jobs:
     #   * model4..model6  Anthropic (secrets.ANTHROPIC_API_KEY; the Anthropic tail
     #                     is a chain of ids, issue #298, so one unservable id
     #                     can't kill the backstop)
-    # Each attempt is continue-on-error and gated on the previous ones NOT having
-    # succeeded, so the first success short-circuits the rest. A final gate step
-    # fails the job only when every *configured* provider failed. With neither
-    # key set the job degrades to a notice (exit 0) — a missing secret never
-    # blocks a PR, same as before.
+    # Each attempt is continue-on-error and gated on the previous links NOT
+    # having DELIVERED the review — the artifact check after each link (issue
+    # #762, below), not the step's exit code — so the first link that lands
+    # Jane's sign-off marker for this head short-circuits the rest. The
+    # exhaustion gates fire when no link delivered. With neither key set the
+    # job degrades to a notice (exit 0) — a missing secret never blocks a PR,
+    # same as before.
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
@@ -355,24 +453,53 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          # The merge ref plus its parents: the PR head (the merge's second
-          # parent) is then local for the staging step below — no fetch.
-          fetch-depth: 2
+          # The BASE branch, not the merge ref: the secret-bearing agent runs
+          # the reviewed posting MCP / settings / skills, never a PR's copy
+          # (Oracle's trust boundary). Design geometry arrives as a trusted
+          # overlay below.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Check the reviewer posting surface is on the base branch
+        id: ready
+        run: |
+          set -euo pipefail
+          # Stamp before any ship step so the artifact check can refuse a
+          # sign-off left by an earlier run on the same head (issue #762 /
+          # discussion_r4185453576 — coach-lock-check.sh's --since pattern).
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          if [ -f .claude/reviewer-post/reviewer_mcp.py ] \
+             && [ -f .claude/reviewer-post/reviewer-mcp.json ] \
+             && [ -f .claude/reviewer-settings.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the Jane/Drik posting surface is not on the base branch yet (first landing) — skipping the review rather than running a PR-controlled copy"
+          fi
 
       # Trusted head staging (code-scanning finding on #760). This reviewer
       # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
       # outright — so the PR head's design directories are staged into the
-      # checkout here, by workflow code, before any agent step starts; the
-      # skill reads them with Read/Grep/Glob. The design names come from the
-      # PR's own paths, so they are validated and never globbed before they
-      # reach a path, and never echoed back unvalidated.
+      # BASE checkout here, by workflow code, before any agent step starts;
+      # the skill reads them with Read/Grep/Glob. The design names come from
+      # the PR's own paths, so they are validated and never globbed before
+      # they reach a path, and never echoed back unvalidated.
       - name: Stage the PR head's design directories (trusted, no agent)
+        if: steps.ready.outputs.ready == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         run: |
           set -euo pipefail
           set -f   # PR-controlled names: no globbing
+          # persist-credentials: false on the BASE branch, so HEAD is not
+          # local. Authenticate this one fetch with the job token (Oracle's
+          # pattern) so staging works on a private repo too.
+          FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${FETCH_AUTH}"
+          git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+            fetch --no-tags origin "$HEAD_SHA"
           git cat-file -e "${HEAD_SHA}^{commit}"
           for d in $CHANGED_DESIGNS; do
             if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
@@ -390,124 +517,296 @@ jobs:
 
       - name: /jane-review via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+
+      # Artifact check (issue #762): claude-code-action exits 0 whenever the
+      # agent ends its turn without an API error, so a link that posted
+      # nothing still reports outcome 'success' — which used to skip links
+      # 2–6 and let the stamp call the round reviewed. Each Jane link is
+      # therefore followed by this check of the only evidence that counts,
+      # an Actions-bot MCP-assembled sign-off for THIS head sha from this
+      # run (scripts/reviewer-posted.sh — author+suffix+--since, the #538
+      # disposition-by-artifact discipline; discussion_r4185453576), and the
+      # next link's `if` reads `served`, not `outcome`. A link that posts
+      # and THEN errors also reads served — the marker is what matters, not
+      # a clean exit. Not continue-on-error: a check that cannot read the
+      # thread fails loud rather than guessing.
+      - name: Artifact check after link 1 (did Jane's review land?)
+        id: v1
+        if: steps.p1.outcome == 'success' || steps.p1.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
+          echo "link 1 artifact: served=$served"
 
       - name: /jane-review via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
+      - name: Artifact check after link 2 (did Jane's review land?)
+        id: v2
+        if: steps.p2.outcome == 'success' || steps.p2.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
+          echo "link 2 artifact: served=$served"
+
       - name: /jane-review via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+
+      - name: Artifact check after link 3 (did Jane's review land?)
+        id: v3
+        if: steps.p3.outcome == 'success' || steps.p3.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
+          echo "link 3 artifact: served=$served"
 
       - name: /jane-review via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+
+      - name: Artifact check after link 4 (did Jane's review land?)
+        id: v4
+        if: steps.p4.outcome == 'success' || steps.p4.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
+          echo "link 4 artifact: served=$served"
 
       - name: /jane-review via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+
+      - name: Artifact check after link 5 (did Jane's review land?)
+        id: v5
+        if: steps.p5.outcome == 'success' || steps.p5.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
+          echo "link 5 artifact: served=$served"
 
       - name: /jane-review via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: jane
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
 
+      - name: Artifact check after link 6 (did Jane's review land?)
+        id: v6
+        if: steps.p6.outcome == 'success' || steps.p6.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
+          echo "link 6 artifact: served=$served"
+
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /jane-review for PR #${{ github.event.pull_request.number }}"
 
-      # The chain failed on every link. Recover WHY (the ship steps hide their
-      # provider error) and route it: billing / out-of-tokens / bad key escalate
-      # to a human via the decision gate, a bad model id is a registry defect, a
-      # rate limit / outage just retries next round. This job carries the
-      # escalation for the whole review chain (escalate: 'true'); the sibling
-      # reviewer jobs classify-only so a parallel exhaustion can't double-file.
+      # The chain ran out of links without DELIVERING a review — every link
+      # either failed or ended its turn without posting (issue #762; the gates
+      # below read the artifact checks, not the exit codes). Recover WHY (the
+      # ship steps hide their provider error) and route it: billing /
+      # out-of-tokens / bad key escalate to a human via the decision gate, a
+      # bad model id is a registry defect, a rate limit / outage just retries
+      # next round. This job carries the escalation for the whole review chain
+      # (escalate: 'true'); the sibling reviewer jobs classify-only so a
+      # parallel exhaustion can't double-file.
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
@@ -517,28 +816,29 @@ jobs:
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "true"
 
-      - name: Every configured provider failed
+      - name: No chain link delivered the review
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
         run: |
           case "$CLASS" in
             needs-human)
-              echo "::error::/jane-review could not run — the review chain is unusable, cause '${REASON}' (an account/config problem: out of credit, out of tokens, or a bad/missing key). A needs-decision issue has been filed for a human to fund / rotate / configure the key. This is NOT a defect in this PR." ;;
+              echo "::error::/jane-review delivered no review — the review chain is unusable, cause '${REASON}' (an account/config problem: out of credit, out of tokens, or a bad/missing key). A needs-decision issue has been filed for a human to fund / rotate / configure the key. This is NOT a defect in this PR." ;;
             dead)
-              echo "::error::/jane-review could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+              echo "::error::/jane-review delivered no review — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
             servable)
-              echo "::error::/jane-review could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
+              echo "::error::/jane-review delivered no review — every provider link answered a live probe, so the chain is healthy; the review agent itself ended without posting Jane's sign-off marker (issue #762 — an exit-0 run that posts nothing). Inspect the link step logs above; a fresh push starts a new round." ;;
             *)
-              echo "::error::/jane-review could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage / transient); it retries on the next review round. See the failed step logs above." ;;
+              echo "::error::/jane-review delivered no review — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage / transient); it retries on the next review round. See the failed step logs above." ;;
           esac
           exit 1
 
@@ -555,8 +855,9 @@ jobs:
     runs-on: ubuntu-latest
     # Provider fallback chain — see the jane-review job for the rationale and
     # ordering (Z.AI glm-5.3 → glm-5.2 → glm-5.1 → Anthropic claude-opus-4-8 →
-    # claude-sonnet-5 → claude-haiku-4-5; first success wins; a missing key
-    # degrades gracefully). Issues #206, #298.
+    # claude-sonnet-5 → claude-haiku-4-5; the first link that DELIVERS the
+    # review wins — the artifact check after each link, issue #762, not the
+    # step's exit code; a missing key degrades gracefully). Issues #206, #298.
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
@@ -578,24 +879,53 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          # The merge ref plus its parents: the PR head (the merge's second
-          # parent) is then local for the staging step below — no fetch.
-          fetch-depth: 2
+          # The BASE branch, not the merge ref: the secret-bearing agent runs
+          # the reviewed posting MCP / settings / skills, never a PR's copy
+          # (Oracle's trust boundary). Design geometry arrives as a trusted
+          # overlay below.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Check the reviewer posting surface is on the base branch
+        id: ready
+        run: |
+          set -euo pipefail
+          # Stamp before any ship step so the artifact check can refuse a
+          # sign-off left by an earlier run on the same head (issue #762 /
+          # discussion_r4185453576 — coach-lock-check.sh's --since pattern).
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          if [ -f .claude/reviewer-post/reviewer_mcp.py ] \
+             && [ -f .claude/reviewer-post/reviewer-mcp.json ] \
+             && [ -f .claude/reviewer-settings.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the Jane/Drik posting surface is not on the base branch yet (first landing) — skipping the review rather than running a PR-controlled copy"
+          fi
 
       # Trusted head staging (code-scanning finding on #760). This reviewer
       # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
       # outright — so the PR head's design directories are staged into the
-      # checkout here, by workflow code, before any agent step starts; the
-      # skill reads them with Read/Grep/Glob. The design names come from the
-      # PR's own paths, so they are validated and never globbed before they
-      # reach a path, and never echoed back unvalidated.
+      # BASE checkout here, by workflow code, before any agent step starts;
+      # the skill reads them with Read/Grep/Glob. The design names come from
+      # the PR's own paths, so they are validated and never globbed before
+      # they reach a path, and never echoed back unvalidated.
       - name: Stage the PR head's design directories (trusted, no agent)
+        if: steps.ready.outputs.ready == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
         run: |
           set -euo pipefail
           set -f   # PR-controlled names: no globbing
+          # persist-credentials: false on the BASE branch, so HEAD is not
+          # local. Authenticate this one fetch with the job token (Oracle's
+          # pattern) so staging works on a private repo too.
+          FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${FETCH_AUTH}"
+          git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+            fetch --no-tags origin "$HEAD_SHA"
           git cat-file -e "${HEAD_SHA}^{commit}"
           for d in $CHANGED_DESIGNS; do
             if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
@@ -613,121 +943,284 @@ jobs:
 
       - name: /drik-review via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+
+      # Artifact check (issue #762) — same discipline as the jane-review job:
+      # each Drik link is followed by a check of the only evidence that counts,
+      # his sign-off marker for THIS head sha, and the next link's `if` reads
+      # `served`, not `outcome`. Not continue-on-error: a check that cannot
+      # read the thread fails loud rather than guessing.
+      - name: Artifact check after link 1 (did Drik's review land?)
+        id: v1
+        if: steps.p1.outcome == 'success' || steps.p1.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
+          echo "link 1 artifact: served=$served"
 
       - name: /drik-review via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
+      - name: Artifact check after link 2 (did Drik's review land?)
+        id: v2
+        if: steps.p2.outcome == 'success' || steps.p2.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
+          echo "link 2 artifact: served=$served"
+
       - name: /drik-review via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+
+      - name: Artifact check after link 3 (did Drik's review land?)
+        id: v3
+        if: steps.p3.outcome == 'success' || steps.p3.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
+          echo "link 3 artifact: served=$served"
 
       - name: /drik-review via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+
+      - name: Artifact check after link 4 (did Drik's review land?)
+        id: v4
+        if: steps.p4.outcome == 'success' || steps.p4.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
+          echo "link 4 artifact: served=$served"
 
       - name: /drik-review via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+
+      - name: Artifact check after link 5 (did Drik's review land?)
+        id: v5
+        if: steps.p5.outcome == 'success' || steps.p5.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
+          echo "link 5 artifact: served=$served"
 
       - name: /drik-review via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: drik
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
 
+      - name: Artifact check after link 6 (did Drik's review land?)
+        id: v6
+        if: steps.p6.outcome == 'success' || steps.p6.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
+          echo "link 6 artifact: served=$served"
+
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
 
       # Classify-only (escalate: 'false'): the Jane review job carries the single
       # escalation for the shared review chain, so a parallel exhaustion here does
       # not double-file. The cause still drives this job's own failure message.
+      # Fires when no link DELIVERED (artifact checks, issue #762) — same as Jane.
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
@@ -737,28 +1230,29 @@ jobs:
           context: the design-review chain (Jane / Drik / PM / coach)
           escalate: "false"
 
-      - name: Every configured provider failed
+      - name: No chain link delivered the review
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
         run: |
           case "$CLASS" in
             needs-human)
-              echo "::error::/drik-review could not run — the review chain is unusable, cause '${REASON}' (out of credit / out of tokens / bad key). The Jane review job escalates this chain to a human (needs-decision). NOT a defect in this PR." ;;
+              echo "::error::/drik-review delivered no review — the review chain is unusable, cause '${REASON}' (out of credit / out of tokens / bad key). The Jane review job escalates this chain to a human (needs-decision). NOT a defect in this PR." ;;
             dead)
-              echo "::error::/drik-review could not run — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
+              echo "::error::/drik-review delivered no review — the review chain names a model id the key cannot serve (reason '${REASON}'): a registry defect (#298). Fix .github/models/registry.conf." ;;
             servable)
-              echo "::error::/drik-review could not run — every provider link answered a live probe, so the chain is healthy; the failure was in the review agent step itself (not the provider). Inspect the failed step logs above." ;;
+              echo "::error::/drik-review delivered no review — every provider link answered a live probe, so the chain is healthy; the review agent itself ended without posting Drik's sign-off marker (issue #762 — an exit-0 run that posts nothing). Inspect the link step logs above; a fresh push starts a new round." ;;
             *)
-              echo "::error::/drik-review could not run — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage); it retries on the next review round. See the failed step logs above." ;;
+              echo "::error::/drik-review delivered no review — the review chain failed on every provider for a retryable reason ('${REASON:-unknown}': rate limit / outage); it retries on the next review round. See the failed step logs above." ;;
           esac
           exit 1
 
@@ -793,6 +1287,10 @@ jobs:
     # degrades gracefully). Issues #206, #298. The PM shares the `review`
     # chain deliberately: the registry is where a future decision to give the
     # enforcement PM a frontier-first chain of its own belongs.
+    #
+    # Issue #770: artifact walk on the per-head PM_TRIAGE_DONE marker
+    # (post_triage still emits the per-design PM_TRIAGE marker for §8 reads).
+    # Same shape as jane-review/drik-review after #762.
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
@@ -814,162 +1312,482 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # The BASE branch, not the merge ref: the secret-bearing agent runs
+          # the reviewed posting MCP / settings / skills, never a PR's copy
+          # (Oracle's trust boundary). Design geometry arrives as a trusted
+          # overlay below.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Check the reviewer posting surface is on the base branch
+        id: ready
+        run: |
+          set -euo pipefail
+          # Stamp before any ship step so the artifact check can refuse a
+          # completion marker left by an earlier run on the same head
+          # (issue #770 — Jane/Drik's --since pattern from #762).
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          if [ -f .claude/reviewer-post/reviewer_mcp.py ] \
+             && [ -f .claude/reviewer-post/reviewer-mcp.json ] \
+             && [ -f .claude/reviewer-settings.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the Jane/Drik/PM posting surface is not on the base branch yet (first landing) — skipping triage rather than running a PR-controlled copy"
+          fi
+
+      # Trusted head staging (code-scanning finding on #760). This reviewer
+      # runs with NO git — .claude/reviewer-settings.json denies Bash(git:*)
+      # outright — so the PR head's design directories (charters, NOTES) are
+      # staged into the BASE checkout here, by workflow code, before any
+      # agent step starts; the skill reads them with Read/Grep/Glob.
+      - name: Stage the PR head's design directories (trusted, no agent)
+        if: steps.ready.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHANGED_DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
+        run: |
+          set -euo pipefail
+          set -f   # PR-controlled names: no globbing
+          FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${FETCH_AUTH}"
+          git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+            fetch --no-tags origin "$HEAD_SHA"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          for d in $CHANGED_DESIGNS; do
+            if ! [[ "$d" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+              echo "::warning::skipped a changed design directory whose name is not [A-Za-z0-9._-]"
+              continue
+            fi
+            rm -rf -- "designs/${d}"
+            if git cat-file -e "${HEAD_SHA}:designs/${d}" 2>/dev/null; then
+              git checkout "$HEAD_SHA" -- "designs/${d}"
+              echo "staged designs/${d} at ${HEAD_SHA}"
+            else
+              echo "designs/${d} is removed at the PR head; left absent"
+            fi
+          done
 
       - name: /pm triage via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
+
+      - name: Artifact check after link 1 (did the PM's completion marker land?)
+        id: v1
+        if: steps.p1.outcome == 'success' || steps.p1.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 1 artifact: served=$served"
 
       - name: /pm triage via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
+
+      - name: Artifact check after link 2 (did the PM's completion marker land?)
+        id: v2
+        if: steps.p2.outcome == 'success' || steps.p2.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 2 artifact: served=$served"
 
       - name: /pm triage via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
+
+      - name: Artifact check after link 3 (did the PM's completion marker land?)
+        id: v3
+        if: steps.p3.outcome == 'success' || steps.p3.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 3 artifact: served=$served"
 
       - name: /pm triage via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
+
+      - name: Artifact check after link 4 (did the PM's completion marker land?)
+        id: v4
+        if: steps.p4.outcome == 'success' || steps.p4.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 4 artifact: served=$served"
 
       - name: /pm triage via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
+
+      - name: Artifact check after link 5 (did the PM's completion marker land?)
+        id: v5
+        if: steps.p5.outcome == 'success' || steps.p5.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 5 artifact: served=$served"
 
       - name: /pm triage via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: pm
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /pm ${{ needs.design-changes.outputs.changed_designs }} —
             reviewer-feedback triage (skill §8) for PR
             #${{ github.event.pull_request.number }}: Jane and Drik have posted
             their tagged feedback on this PR. For each design named above
-            (space-separated), load its charter per §0, triage every tagged
-            finding per §8, and post one PM verdict comment per design on the
-            PR. This job is read-only on repository content: post comments,
-            and — only when §8 routes a blocking binary fork through the §7
-            HITL gate — add the needs-decision label; never push or edit
-            repository content.
+            (space-separated), load its charter per §0 and triage every tagged
+            finding per §8, then post ONE combined PM verdict comment covering
+            all of them (a §8 section per design) via the post_triage MCP tool
+            once — pass every design name in `design` (comma-separated) with
+            `body` and `sha`. A second post_triage call is refused. Never
+            `gh pr comment`. This job is read-only on repository content:
+            post comments through that tool, and — only when §8 routes a
+            blocking binary fork through the §7 HITL gate — add the
+            needs-decision label; never push or edit repository content.
+
+      - name: Artifact check after link 6 (did the PM's completion marker land?)
+        id: v6
+        if: steps.p6.outcome == 'success' || steps.p6.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 6 artifact: served=$served"
 
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping the PM triage for PR #${{ github.event.pull_request.number }}"
 
@@ -979,13 +1797,14 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
@@ -997,13 +1816,14 @@ jobs:
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
@@ -1053,6 +1873,10 @@ jobs:
     # ordering (Z.AI glm-5.3 → glm-5.2 → glm-5.1 → Anthropic claude-opus-4-8 →
     # claude-sonnet-5 → claude-haiku-4-5; first success wins; a missing key
     # degrades gracefully). Issues #206, #298.
+    #
+    # Issue #770: artifact walk on the per-head COACH_DONE marker
+    # (post_coach still emits COACH_LOCK for the #806 lock pin). Same shape
+    # as jane-review/drik-review after #762.
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
@@ -1077,109 +1901,1158 @@ jobs:
           # Full history: every branch head (the PR's included) is local, so
           # the coach loads and pushes its rounds without `git fetch`/`pull`,
           # which its backstop denies (code-scanning finding on #760).
+          # This is the PR merge tree, not Jane's base.ref — the coach
+          # still git-pushes. The posting MCP is overlaid from base
+          # immediately before each ship step, so a PR (or a failed
+          # earlier link) cannot replace the server this job executes.
           fetch-depth: 0
+
+      - name: Check the coach posting surface is on the base branch
+        id: ready
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Stamp before any ship step so the lock-check can refuse a
+          # COACH-LOCK left by an earlier coach run (reopened /
+          # ready_for_review / denial-only turn — issue #806).
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+            echo "::add-mask::${FETCH_AUTH}"
+            git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
+              fetch --no-tags origin "$BASE_SHA"
+          fi
+          if git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer_mcp.py" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer-mcp.json" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:.claude/design-coach-settings.json" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:.claude/skills/design-coach/SKILL.md" 2>/dev/null \
+             && git cat-file -e "${BASE_SHA}:scripts/coach-lock-check.sh" 2>/dev/null; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::the coach posting surface is not on the base branch yet (first landing) — skipping the coach rather than running a PR-controlled copy"
+          fi
+
+      - name: Restore the coach posting surface from the base branch (before chain link 1)
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Z.AI GLM (chain link 1)
         id: p1
-        if: env.HAS_ZAI == 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model1 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 1 (did the coach's completion marker land?)
+        id: v1
+        if: steps.p1.outcome == 'success' || steps.p1.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 1 artifact: served=$served"
+
+      - name: Restore the coach posting surface from the base branch (before chain link 2)
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Z.AI GLM (chain link 2)
         id: p2
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model2 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 2 (did the coach's completion marker land?)
+        id: v2
+        if: steps.p2.outcome == 'success' || steps.p2.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 2 artifact: served=$served"
+
+      - name: Restore the coach posting surface from the base branch (before chain link 3)
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Z.AI GLM (chain link 3)
         id: p3
-        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model3 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 3 (did the coach's completion marker land?)
+        id: v3
+        if: steps.p3.outcome == 'success' || steps.p3.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 3 artifact: served=$served"
+
+      - name: Restore the coach posting surface from the base branch (before chain link 4)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Anthropic (chain link 4)
         id: p4
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model4 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 4 (did the coach's completion marker land?)
+        id: v4
+        if: steps.p4.outcome == 'success' || steps.p4.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 4 artifact: served=$served"
+
+      - name: Restore the coach posting surface from the base branch (before chain link 5)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Anthropic (chain link 5)
         id: p5
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model5 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 5 (did the coach's completion marker land?)
+        id: v5
+        if: steps.p5.outcome == 'success' || steps.p5.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 5 artifact: served=$served"
+
+      - name: Restore the coach posting surface from the base branch (before chain link 6)
+        if: >-
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before /usr/bin/git.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE, so re-exporting the lock alone is not
+          # enough; GIT_DIR/GIT_WORK_TREE would send checkout into an
+          # attacker tree while the workspace still looks restored.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          /usr/bin/git checkout "$BASE_SHA" -- \
+            .claude/reviewer-post \
+            .claude/design-coach-settings.json \
+            .claude/skills/design-coach \
+            scripts/coach-lock-check.sh
 
       - name: /design-coach via Anthropic (chain link 6)
         id: p6
         if: >-
-          env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && env.HAS_ANTHROPIC == 'true'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_ID: coach
+          REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          # Re-pin the job git lock: GITHUB_ENV from a Bash-capable prior
+          # link can rewrite GIT_CONFIG_* / hooksPath before this action
+          # starts, and job-level env alone does not win over that file.
+          GIT_ALLOW_PROTOCOL: https
+          GIT_CONFIG_COUNT: "4"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: explicit
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_CONFIG_KEY_3: core.pager
+          GIT_CONFIG_VALUE_3: cat
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
-          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --model ${{ needs.design-changes.outputs.model6 }}
+          allowed_bots: cursor
+          claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+
+      - name: Artifact check after link 6 (did the coach's completion marker land?)
+        id: v6
+        if: steps.p6.outcome == 'success' || steps.p6.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 6 artifact: served=$served"
+
+      - name: Coach posted a COACH-LOCK
+        # claude-code-action exits 0 on a denial-only turn (#538/#764/#806).
+        # A ship-step success is not a completed coach round unless the
+        # marker is on the thread. Fail here so review-stamp cannot mark
+        # the round complete. Extract the pin from base.sha AFTER the
+        # agent (Write/Edit/Bash): the workspace copy is not trusted.
+        #
+        # Success-only on purpose (Bugbot on #820): the #770 artifact walk
+        # widened this to success|failure, so a chain where every provider
+        # errored (no COACH-LOCK posted) failed HERE — hard, no
+        # continue-on-error — and skipped Diagnose / Every configured
+        # provider failed. Provider exhaustion must reach those steps;
+        # missing-lock is only meaningful after a ship link claimed success.
+        if: >-
+          always()
+          && (steps.p1.outcome == 'success'
+              || steps.p2.outcome == 'success'
+              || steps.p3.outcome == 'success'
+              || steps.p4.outcome == 'success'
+              || steps.p5.outcome == 'success'
+              || steps.p6.outcome == 'success')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          # Process-start pins: GITHUB_ENV from a prior Bash coach link
+          # is applied before this script body, so in-script unset is too
+          # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
+          # as bash starts). Empty BASH_ENV/`ENV` is skipped (`[ -n ]`).
+          # Absolute shell below: PATH is reset in-script too late — the
+          # runner looks up default `bash` on PATH after applying a prior
+          # GITHUB_PATH write, so a shim could exit 0 before the extract.
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          export PYTHONNOUSERSITE=1
+          # Drop git redirects / parameter overrides a prior Bash link may
+          # have written to GITHUB_ENV. GIT_CONFIG_PARAMETERS is applied
+          # AFTER COUNT/KEY/VALUE; GIT_DIR/GIT_WORK_TREE would redirect
+          # the trusted extract out of the workspace.
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          if [ -z "${SINCE:-}" ]; then
+            echo "::error::SINCE is empty — the ready step did not stamp started_at"
+            exit 1
+          fi
+          CHECK="${RUNNER_TEMP:-/tmp}/coach-lock-check.sh"
+          /usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh" > "$CHECK"
+          chmod +x "$CHECK"
+          /usr/bin/bash "$CHECK" "$PR" --since "$SINCE"
 
       - name: No provider key configured
-        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
           echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /design-coach for PR #${{ github.event.pull_request.number }}"
 
@@ -1189,13 +3062,14 @@ jobs:
       - name: Diagnose the exhausted reviewer chain
         id: triage
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
@@ -1207,13 +3081,14 @@ jobs:
 
       - name: Every configured provider failed
         if: >-
-          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          steps.ready.outputs.ready == 'true'
+          && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
@@ -1245,6 +3120,14 @@ jobs:
       && needs.design-changes.outputs.is_new_round == 'true'
     runs-on: ubuntu-latest
     steps:
+      # The merge-ref checkout the artifact confirmation below runs from — the
+      # same one-version-one-rule discipline as the signoff-status job: the
+      # stamp and the reviewer jobs read markers through the same copy of
+      # scripts/reviewer-posted.sh that round's links were checked with.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Post / update stamp comment
         # Outcome-aware: only mark a commit "reviewed" (and advance the stamped
         # SHA the round logic dedupes on) when a review ACTUALLY ran and none
@@ -1260,10 +3143,21 @@ jobs:
         # for the cord, and leaves the sha off so the round retries once the
         # cord is released. ANDON_PULLED is computed in the expression layer so
         # GitHub's case-insensitive string compare stays authoritative.
+        #
+        # ARTIFACT-CONFIRMED (issue #762): even the all-green branch must not
+        # trust the job results alone. claude-code-action exits 0 whenever the
+        # agent ends its turn without an API error — on PRs #755/#756 every
+        # reviewer job reported success and this stamp called the round
+        # complete while neither reviewer had posted. So green jobs get their
+        # evidence checked: both sign-off markers for THIS head sha must be on
+        # the thread (scripts/reviewer-posted.sh) before the sha advances. A
+        # green job with no marker is stamped incomplete — the round retries,
+        # and the fail-closed reviewer-signoff status still blocks the merge.
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ needs.design-changes.outputs.started_at }}
           DESIGNS: ${{ needs.design-changes.outputs.changed_designs }}
           HAS_SECRET: ${{ (secrets.ZAI_KEY != '' || secrets.ANTHROPIC_API_KEY != '') && 'true' || 'false' }}
           ANDON_PULLED: ${{ vars.AI_ANDON_CORD == 'pulled' }}
@@ -1275,6 +3169,12 @@ jobs:
           set -euo pipefail
           short="${HEAD_SHA:0:8}"
           gen='_Generated by [Claude Code](https://claude.ai/code)_'
+          # design-changes stamps started_at as YYYY-MM-DDTHH:MM:SSZ; keep
+          # the fractional-second trim so a future clock format still passes
+          # reviewer-posted.sh's --since validator.
+          if [[ "$SINCE" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
+            SINCE="${BASH_REMATCH[1]}Z"
+          fi
           # A reviewer result of 'success' means it ran clean; coach is allowed
           # to be 'skipped' (it only runs on opened/ready_for_review/reopened).
           # Anything else — failure, CANCELLED, or an unexpected state — is not a
@@ -1309,13 +3209,35 @@ jobs:
               "" "---" "$gen")"
             echo "::notice::auto-review skipped — no provider key (ZAI_KEY/ANTHROPIC_API_KEY) set; reviewed-SHA not advanced so the round will retry"
           elif [ "$JANE" = "success" ] && [ "$DRIK" = "success" ] && [ "$pm_ok" = "true" ] && [ "$coach_ok" = "true" ]; then
-            # A real review ran clean — mark the commit reviewed.
-            body="$(printf '%s\n' \
-              "<!-- AUTO_REVIEW_STAMP sha=${HEAD_SHA} -->" \
-              "🔍 **Auto-review round complete** — reviewed commit \`${short}\` (designs: \`${DESIGNS}\`). See the Jane / Drik / PM / coach comments on this thread." \
-              "A new round fires automatically on the next push that changes a \`designs/\` file." \
-              "Add the \`no-auto-review\` label to suppress future rounds." \
-              "" "---" "$gen")"
+            # All jobs green — confirm the artifact before believing it
+            # (issue #762): both reviewers' sign-off markers for THIS head
+            # sha must be on the thread. A clean `false` is a decision
+            # (stamped incomplete below); a failed read aborts the step and
+            # reddens this job rather than guessing.
+            jane_served="$(scripts/reviewer-posted.sh check \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
+            drik_served="$(scripts/reviewer-posted.sh check \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
+            if [ "$jane_served" = "true" ] && [ "$drik_served" = "true" ]; then
+              # A real review ran clean AND landed — mark the commit reviewed.
+              body="$(printf '%s\n' \
+                "<!-- AUTO_REVIEW_STAMP sha=${HEAD_SHA} -->" \
+                "🔍 **Auto-review round complete** — reviewed commit \`${short}\` (designs: \`${DESIGNS}\`). See the Jane / Drik / PM / coach comments on this thread." \
+                "A new round fires automatically on the next push that changes a \`designs/\` file." \
+                "Add the \`no-auto-review\` label to suppress future rounds." \
+                "" "---" "$gen")"
+            else
+              # Green jobs, no review on the thread — the exit-0-without-
+              # posting case this stamp used to call complete (issue #762).
+              # Do NOT advance the reviewed-SHA.
+              body="$(printf '%s\n' \
+                "<!-- AUTO_REVIEW_STAMP -->" \
+                "⚠️ **Auto-review incomplete** — the reviewer jobs finished green but a review never landed for \`${short}\` (jane sign-off marker for this head: \`${jane_served}\`, drik: \`${drik_served}\`)." \
+                "This is the exit-0-without-posting case (issue #762): an agent can end its turn without an API error and without commenting. This round is **not** marked reviewed; it retries on the next push that changes a \`designs/\` file." \
+                "Add the \`no-auto-review\` label to suppress future rounds." \
+                "" "---" "$gen")"
+              echo "::warning::auto-review incomplete — reviewer job(s) finished green without posting (jane_marker=$jane_served drik_marker=$drik_served, issue #762); reviewed-SHA not advanced so the round will retry"
+            fi
           else
             # A reviewer did not complete successfully (failure / cancelled /
             # unexpected state) — do NOT advance the reviewed-SHA.
@@ -1357,9 +3279,10 @@ jobs:
   #    Runs on EVERY PR event (always(), needs the reviewer jobs only so the
   #    sign-off markers are already posted when we read them). The only repo
   #    code it runs is reviewer-signoff.sh (`key`, which reads commits and
-  #    trees with git, and `decide`), from the same merge-ref checkout this
-  #    workflow file and the design-changes job's round guard come from — so
-  #    the skip and the currency are always one version of one rule.
+  #    trees with git, `fuse-warn`, and `decide`), from the same merge-ref
+  #    checkout this workflow file and the design-changes job's round guard
+  #    come from — so the skip, the fuse sticky, and the currency are always
+  #    one version of one rule.
   #
   #    ARMING (the one manual step): this status only *blocks* a merge once an
   #    admin adds `reviewer-signoff` to the branch's required status checks.
@@ -1423,15 +3346,18 @@ jobs:
 
           # Fuse warn live this round? The render-gate sticky (W1) renders a
           # fusecheck STRONG WARN when a print-in-place mechanism welds shut.
-          # Best-effort cross-workflow read: if the gate sticky isn't posted yet
-          # the flag is false and the reviewers' own acknowledgement (their skill)
-          # plus the visible warn carry it — documented in reviewer-signoff.sh.
-          fuse_warn=false
-          if gh api --paginate "/repos/$REPO/issues/$PR_NUMBER/comments" \
-               --jq '[.[] | select(.body | contains("printcheck-gate-report"))] | last | .body' \
-               2>/dev/null | grep -qi "STRONG WARN"; then
-            fuse_warn=true
-          fi
+          # Select only a body that STARTS with the sticky marker — a review
+          # comment that quotes `<!-- printcheck-gate-report -->` is not the
+          # sticky (PR #634: `contains()` + last picked Drik's sign-off).
+          # The STRONG WARN match lives in reviewer-signoff.sh fuse-warn so
+          # "No fusecheck STRONG WARN" cannot trip it. Best-effort: if the
+          # sticky isn't posted yet the flag is false and the reviewers' own
+          # acknowledgement plus the visible warn carry it.
+          sticky="$(gh api --paginate "/repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '[.[] | select((.body // "") | startswith("<!-- printcheck-gate-report -->"))] | last | .body // empty' \
+            2>/dev/null || true)"
+          fuse_warn="$(printf '%s' "$sticky" | scripts/reviewer-signoff.sh fuse-warn || true)"
+          [[ "$fuse_warn" == true ]] || fuse_warn=false
 
           # Currency key at the current head, and at each reviewer's sha, so a
           # sign-off survives a push that changed no designs/ file — or a

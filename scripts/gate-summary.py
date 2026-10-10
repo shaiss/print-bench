@@ -182,9 +182,10 @@ def main() -> int:
     if cogchecks:
         # Its own section for the fusecheck reason plus one: a tip-risk WARN
         # is ADVISORY, not a signoff demand — the wording must not borrow the
-        # fusecheck STRONG WARN phrasing, because reviewer-signoff.sh keys on
-        # exactly that and a CoG warn is a design call to look at, not a gate
-        # the reviewers must consciously clear.
+        # fusecheck STRONG WARN phrasing, because reviewer-signoff.sh fuse-warn
+        # keys on the exact cell `**STRONG WARN — reviewer signoff required.**`
+        # and a CoG warn is a design call to look at, not a gate the reviewers
+        # must consciously clear.
         print()
         print("### CoG stability (tip-over)")
         print()
