@@ -171,3 +171,17 @@ folded here (adapter geometry untouched):
    coupon is heavier/slower on purpose, with CI printcheck numbers
    (~4 h 57 m / 62.55 g vs adapter ~4 h 10 m / 53.16 g); left alone
    (Drik).
+4. **Sticky duplicate coupon row (queued).** The printcheck sticky listed
+   `build/nuggs-bottle-adapter-coupon.stl` twice with identical 100/100
+   rows. Queued to platform/Reeve alongside the reviewer sticky-access
+   item — cosmetic, no gate impact on the part itself.
+5. **`ci.parts` coupon line removed.** Verified in `scripts/gate.sh`: a
+   `coupon` ci.parts entry renders `-D part="coupon"` →
+   `build/<name>-coupon.stl`, and the canonical
+   `<name>-coupon.scad` wrapper is always auto-discovered onto the same
+   path with no dedup (secondary `*-*-coupon.scad` wrappers dedup;
+   the canonical one does not). Peer convention (e.g. alcove-rod-socket's
+   comment) is wrapper-only. Dropped the `coupon` line; left
+   `adapter`. Frozen `coupon` camera (`part="coupon"` in cameras.conf),
+   product page, and wrapper gating are unchanged. Not a platform-code
+   change.
