@@ -57,6 +57,7 @@ COACH_LOCK_CHECK_SHOW = (
 COACH_POST_JOB = "design-coach"
 COACH_ALLOWED_KEEP = ("Write", "Edit", "Bash")
 POST_PR = "${{ github.event.pull_request.number }}"
+POST_HEAD_SHA = "${{ github.event.pull_request.head.sha }}"
 POST_STATE = "${{ runner.temp }}/reviewer-posts"
 # job → the deny backstop its ship steps pass. The coach's differs because it
 # pushes iterations (Write/Edit stay allowed); the reviewers are read-only.
@@ -157,7 +158,8 @@ def test_every_reviewer_ship_step_carries_its_backstop():
 
 def _step_env(chunk: str) -> dict[str, str]:
     """The step's `env:` scalar entries — the trusted inputs the posting
-    server reads (REVIEWER_ID / REVIEWER_PR / REVIEWER_POST_STATE)."""
+    server reads (REVIEWER_ID / REVIEWER_PR / REVIEWER_HEAD_SHA /
+    REVIEWER_POST_STATE)."""
     env: dict[str, str] = {}
     for m in re.finditer(r"^ +([A-Z][A-Z0-9_]+): (.+)$", chunk, re.MULTILINE):
         env[m.group(1)] = m.group(2).strip()
@@ -195,11 +197,23 @@ def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
                 f"{at} sets REVIEWER_PR={env.get('REVIEWER_PR')!r}, not the "
                 f"workflow's PR — the posting server pins its target to this "
                 f"env; anything else lets the comment land elsewhere")
+            assert env.get("REVIEWER_HEAD_SHA") == POST_HEAD_SHA, (
+                f"{at} sets REVIEWER_HEAD_SHA="
+                f"{env.get('REVIEWER_HEAD_SHA')!r}, not the workflow's "
+                f"pull_request.head.sha — without that pin a stale 40-hex "
+                f"sha burns the one-post cap while reviewer-posted.sh stays "
+                f"served=false for the real head (PR #559 / run 37530117408)")
             assert env.get("REVIEWER_POST_STATE") == POST_STATE, (
                 f"{at} sets REVIEWER_POST_STATE="
                 f"{env.get('REVIEWER_POST_STATE')!r}, not the shared "
                 f"{POST_STATE!r} — one path across the chain walk is what "
                 f"makes the one-review cap span the links")
+            # Jane/Drik prompts must also surface the head sha so the model
+            # does not scrape a stale one from the thread.
+            if job in ("jane-review", "drik-review"):
+                assert "PR head sha" in chunk and POST_HEAD_SHA in chunk, (
+                    f"{at} prompt does not pin the PR head sha — the model "
+                    f"would have to rediscover it and can pick a stale one")
 
 
 def test_every_reviewer_ship_step_carries_the_post_surface():
@@ -249,6 +263,10 @@ def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
         assert env.get("REVIEWER_PR") == POST_PR, (
             f"{at} sets REVIEWER_PR={env.get('REVIEWER_PR')!r}, not the "
             "workflow's PR")
+        assert env.get("REVIEWER_HEAD_SHA") == POST_HEAD_SHA, (
+            f"{at} sets REVIEWER_HEAD_SHA="
+            f"{env.get('REVIEWER_HEAD_SHA')!r}, not the workflow's "
+            f"pull_request.head.sha")
         assert env.get("REVIEWER_POST_STATE") == POST_STATE, (
             f"{at} sets REVIEWER_POST_STATE="
             f"{env.get('REVIEWER_POST_STATE')!r}, not {POST_STATE!r}")
@@ -416,6 +434,14 @@ def test_wiring_guard_rejects_a_tampered_step(job, step, old, new, match):
     ("drik-review", 5,
      "REVIEWER_PR: ${{ github.event.pull_request.number }}",
      "REVIEWER_PR: 1", "REVIEWER_PR"),
+    # REVIEWER_HEAD_SHA unpinned / wrong: a stale sha can burn the one-post cap.
+    ("drik-review", 0,
+     "REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}",
+     "REVIEWER_HEAD_SHA: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+     "REVIEWER_HEAD_SHA"),
+    ("jane-review", -1,
+     "          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n",
+     "", "REVIEWER_HEAD_SHA"),
     # The state path off runner.temp / per-link: the cap stops spanning the walk.
     ("jane-review", 1,
      "REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts",
@@ -455,6 +481,10 @@ def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
     (4,
      "REVIEWER_PR: ${{ github.event.pull_request.number }}",
      "REVIEWER_PR: 1", "REVIEWER_PR"),
+    (5,
+     "REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}",
+     "REVIEWER_HEAD_SHA: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+     "REVIEWER_HEAD_SHA"),
     (5,
      "REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts",
      "REVIEWER_POST_STATE: reviewer-posts", "REVIEWER_POST_STATE"),

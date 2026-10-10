@@ -34,6 +34,16 @@ comment on the ONE PR the workflow selected":
     (JANE_SIGNOFF vs DRIK_SIGNOFF vs PM_TRIAGE) is derived from it server-side,
     so a Jane session cannot forge Drik's sign-off, a PM session cannot post a
     reviewer sign-off, and no input can post an unrecognised marker family;
+  * the PR HEAD sha the marker may carry is pinned by REVIEWER_HEAD_SHA (the
+    workflow's ``pull_request.head.sha``) in every unattended run — the model's
+    ``sha`` argument must match it byte-for-byte (after lower-casing). Format-
+    only validation used to accept any 40-hex string, so a reviewer that copied
+    a stale sha from an older thread comment could post, burn the one-post-per-
+    run cap, and leave ``reviewer-posted.sh`` ``served=false`` for the real head
+    (run 37530117408 on PR #559: Drik posted ``073fd1af…`` while head was
+    ``169898ab…``; later links including a clean glm-5.1 exit could not post).
+    A mismatch is refused BEFORE the GitHub write, so it does not consume the
+    cap and the agent can retry with the pinned value in the same turn;
   * Jane/Drik markers are ASSEMBLED from validated fields (40-hex sha,
     pass|block verdict, none|acknowledged fuse) — the fail-closed
     reviewer-signoff gate's "malformed marker" failure mode is unreachable
@@ -144,6 +154,11 @@ COACH_LOCK_LINE = "🎓 COACH-LOCK"
 # test_cap_state_wiring.py) reads CAP_STATE_ENV from this file and fails
 # pre-merge if a link step that launches this server does not set it.
 CAP_STATE_ENV = "REVIEWER_POST_STATE"
+# Trusted PR-head pin (sibling of REVIEWER_PR / REVIEWER_ID). Unattended ship
+# steps must export the workflow's pull_request.head.sha here; the model's
+# sha argument is checked against it so a stale 40-hex cannot burn the cap.
+# The backstop wiring drift guard reads HEAD_SHA_ENV the same way.
+HEAD_SHA_ENV = "REVIEWER_HEAD_SHA"
 
 
 def _cap_state_path():
@@ -402,13 +417,43 @@ def _validate_body(tool, body):
 
 
 def _validate_sha(tool, sha):
+    """Format-check ``sha`` and, when pinned, require the live PR head.
+
+    Returns ``(normalized_sha, None)`` on success or ``(None, error_result)``
+    on refusal. Normalization is lower-case so a mixed-case argument that
+    matches REVIEWER_HEAD_SHA still assembles the marker the artifact check
+    looks for (GitHub head shas are lower-case; the suffix match is exact).
+    """
     if not isinstance(sha, str) or len(sha) != 40 \
             or not set(sha.lower()) <= _SHA_CHARS:
-        return _tool_error(
+        return None, _tool_error(
             f"{tool}: 'sha' must be the PR's current head commit as 40 "
-            "lower-case hex characters (read it from `gh pr view`); got "
-            f"{sha!r}")
-    return None
+            "lower-case hex characters (the value the workflow prompt pins "
+            f"as PR head sha / `{HEAD_SHA_ENV}`); got {sha!r}")
+    sha_l = sha.lower()
+    expected = os.environ.get(HEAD_SHA_ENV, "").strip().lower()
+    if os.environ.get("GITHUB_RUN_ID", "").strip() and not expected:
+        return None, _tool_error(
+            f"{tool}: {HEAD_SHA_ENV} is not set but this is an unattended "
+            "run (GITHUB_RUN_ID is set) — the workflow must pin "
+            "pull_request.head.sha so a stale/wrong sha cannot burn the "
+            "one-post cap and leave reviewer-posted.sh served=false for "
+            "the real head")
+    if expected:
+        if len(expected) != 40 or not set(expected) <= _SHA_CHARS:
+            return None, _tool_error(
+                f"{tool}: {HEAD_SHA_ENV} is not a 40-hex sha (workflow bug); "
+                f"got {expected!r}")
+        if sha_l != expected:
+            return None, _tool_error(
+                f"{tool}: 'sha' {sha_l!r} is not the PR head pinned by "
+                f"{HEAD_SHA_ENV} ({expected}) — posting a stale sha would "
+                "burn the one-post-per-run cap while reviewer-posted.sh "
+                "still reads served=false for the real head; use the "
+                "exact 40-hex from the prompt's 'PR head sha' line (or "
+                "`gh pr view --json headRefOid`) and retry. This refusal "
+                "did not post and did not consume the cap.")
+    return sha_l, None
 
 
 def _cap_preflight(tool):
@@ -497,7 +542,7 @@ def _post_review(arguments):
     err = _validate_body("post_review", body)
     if err is not None:
         return err
-    err = _validate_sha("post_review", sha)
+    sha, err = _validate_sha("post_review", sha)
     if err is not None:
         return err
     if verdict not in ("pass", "block"):
@@ -534,7 +579,7 @@ def _post_triage(arguments):
     err = _validate_body("post_triage", body)
     if err is not None:
         return err
-    err = _validate_sha("post_triage", sha)
+    sha, err = _validate_sha("post_triage", sha)
     if err is not None:
         return err
     designs, err = _parse_designs(design)
@@ -650,11 +695,9 @@ def _post_coach(arguments):
             "PM_TRIAGE, PM_TRIAGE_DONE, COACH_LOCK or COACH_DONE HTML "
             "comment — those markers are assembled server-side")
     sha = args.get("sha")
-    err = _validate_sha("post_coach", sha)
+    sha, err = _validate_sha("post_coach", sha)
     if err is not None:
         return err
-    # Canonicalise to lower-case hex (the artifact check is case-sensitive).
-    sha = sha.lower()
 
     try:
         _require_coach()
@@ -717,9 +760,11 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "The PR's current head commit, 40 lower-case hex "
-                        "characters — read it from `gh pr view <n>` first. "
-                        "A marker for a superseded head is treated as stale "
-                        "by the merge gate."
+                        "characters — use the exact value from the prompt's "
+                        "'PR head sha' line (pinned by the workflow as "
+                        "REVIEWER_HEAD_SHA). Do not copy a sha from an older "
+                        "comment or commit on the thread; a stale sha is "
+                        "refused and does not count as posted."
                     ),
                 },
                 "verdict": {
@@ -786,9 +831,9 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "The PR's current head commit, 40 lower-case hex "
-                        "characters — read it from `gh pr view <n>` first. "
-                        "Also assembled into the PM_TRIAGE_DONE "
-                        "completion marker (issue #770)."
+                        "characters — use the prompt's 'PR head sha' line "
+                        "(REVIEWER_HEAD_SHA). Also assembled into the "
+                        "PM_TRIAGE_DONE completion marker (issue #770)."
                     ),
                 },
             },
@@ -824,8 +869,9 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "The PR's current head commit, 40 lower-case hex "
-                        "characters — read it from `gh pr view <n>` first. "
-                        "Assembled into the COACH_DONE completion marker."
+                        "characters — use the prompt's 'PR head sha' line "
+                        "(REVIEWER_HEAD_SHA). Assembled into the "
+                        "COACH_DONE completion marker."
                     ),
                 },
             },
@@ -911,6 +957,7 @@ def selftest():
     os.environ["REVIEWER_ID"] = "jane"
     fails = []
     H40 = "a" * 40
+    OTHER40 = "c" * 40
 
     def check(name, cond):
         print(f"{'ok  ' if cond else 'FAIL'}  {name}")
@@ -925,9 +972,12 @@ def selftest():
 
     # Pin the environment: each case below decides attended/unattended itself,
     # so an ambient Actions GITHUB_RUN_ID / REVIEWER_POST_STATE (this selftest
-    # runs inside CI) must not leak into the attended cases.
+    # runs inside CI) must not leak into the attended cases. REVIEWER_HEAD_SHA
+    # is set to the happy-path sha for attended + unattended posts; the
+    # mismatch / missing-pin cases below override it deliberately.
     os.environ.pop("GITHUB_RUN_ID", None)
     os.environ.pop(CAP_STATE_ENV, None)
+    os.environ[HEAD_SHA_ENV] = H40
 
     # Input guards reject and post nothing.
     _last_payload = None
@@ -949,6 +999,20 @@ def selftest():
           refused(_post_review({"body": "x", "sha": "z" * 40, "verdict": "pass",
                                 "fuse": "none"}), "'sha'")
           and _last_payload is None)
+    _last_payload = None
+    check("a sha that is not the pinned PR head is rejected (stale-sha cap burn)",
+          refused(_post_review({"body": "x", "sha": OTHER40, "verdict": "pass",
+                                "fuse": "none"}), HEAD_SHA_ENV)
+          and _last_payload is None)
+    _last_payload = None
+    # Mixed-case that still matches the pin must normalize and post — the
+    # artifact check's suffix match is case-sensitive on a lower-case head.
+    ok_case = _post_review({"body": "case fold", "sha": H40.upper(),
+                            "verdict": "pass", "fuse": "none"})
+    check("a mixed-case sha matching the pin normalizes and posts",
+          ok_case.get("isError") is False
+          and posted_body() is not None
+          and f"sha={H40} " in posted_body())
     _last_payload = None
     check("an out-of-vocabulary verdict is rejected",
           refused(_post_review({"body": "x", "sha": H40, "verdict": "maybe",
@@ -1135,6 +1199,17 @@ def selftest():
 
     # The walk-spanning one-review cap, inside an Actions run.
     os.environ["GITHUB_RUN_ID"] = "selftest-run"
+    os.environ[HEAD_SHA_ENV] = H40
+
+    # Unwired head pin: run id set but no REVIEWER_HEAD_SHA. Fail closed —
+    # format-only validation is exactly the stale-sha hole this pin closes.
+    os.environ.pop(HEAD_SHA_ENV, None)
+    _last_payload = None
+    r = _post_review({"body": "unpinned head", "sha": H40, "verdict": "pass",
+                      "fuse": "none"})
+    check("an unattended run without REVIEWER_HEAD_SHA refuses (fail closed)",
+          refused(r, HEAD_SHA_ENV) and _last_payload is None)
+    os.environ[HEAD_SHA_ENV] = H40
 
     # Unwired: run id set but no state path. Fail closed — per-process
     # counting is exactly the per-link reset the state file replaces.
@@ -1147,6 +1222,16 @@ def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         state = os.path.join(tmp, "reviewer-posts")
         os.environ[CAP_STATE_ENV] = state
+
+        # A stale-sha refusal must not consume the cap — otherwise a wrong
+        # first attempt would strand later links the same way a successful
+        # wrong-sha post did on PR #559.
+        _last_payload = None
+        r = _post_review({"body": "stale", "sha": OTHER40, "verdict": "pass",
+                          "fuse": "none"})
+        check("a stale-sha refusal does not consume the cap",
+              refused(r, HEAD_SHA_ENV) and _last_payload is None
+              and _cap_state_count(state) == 0)
 
         # A post that FAILS does not consume the cap — the record is appended
         # only after a successful write.
@@ -1334,7 +1419,10 @@ def selftest_cap_child(state_path):
     os.environ["REVIEWER_ID"] = "jane"
     os.environ["GITHUB_RUN_ID"] = "selftest-link-n+1"
     os.environ[CAP_STATE_ENV] = state_path
-    r = _post_review({"body": "cross-process probe", "sha": "b" * 40,
+    # Pin the head to the sha this probe posts — unattended runs require it.
+    child_sha = "b" * 40
+    os.environ[HEAD_SHA_ENV] = child_sha
+    r = _post_review({"body": "cross-process probe", "sha": child_sha,
                       "verdict": "pass", "fuse": "none"})
     outcome = "REFUSED" if r.get("isError") else "POSTED"
     print(f"{outcome}: {r['content'][0]['text']}")

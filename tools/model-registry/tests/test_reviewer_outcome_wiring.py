@@ -358,26 +358,31 @@ def test_check_guard_rejects_a_dropped_artifact_check():
 
 def test_check_guard_rejects_a_check_reading_the_other_reviewer():
     # NEGATIVE CONTROL: Jane's link-2 check reads Drik's marker — it would
-    # answer 'served' off the wrong reviewer's comment.
-    tampered = _job_replace(
-        _workflow_text(), "jane-review",
-        '--sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"\n'
-        '          echo "link 2 artifact',
-        '--sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"\n'
-        '          echo "link 2 artifact')
+    # answer 'served' off the wrong reviewer's comment. Flip every
+    # `--reviewer jane` inside that check step (check + diagnose) so a
+    # leftover diagnose line cannot keep the pin green.
+    text = _workflow_text()
+    block = _job_blocks(text)["jane-review"]
+    steps = [c for c in re.split(r"\n      - ", block) if c.strip()]
+    v2 = next(c for c in steps if "id: v2" in c and "Artifact check" in c)
+    flipped = v2.replace("--reviewer jane", "--reviewer drik")
+    assert flipped != v2
+    tampered = text.replace(v2, flipped, 1)
     with pytest.raises(AssertionError, match="--reviewer jane"):
         _assert_every_link_is_artifact_checked(tampered)
 
 
 def test_check_guard_rejects_a_check_without_since():
     # NEGATIVE CONTROL: drop --since from Jane's link-1 check — a stale
-    # marker from an earlier run could short-circuit the walk.
-    tampered = _job_replace(
-        _workflow_text(), "jane-review",
-        '--sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"\n'
-        '          echo "link 1 artifact',
-        '--sha "$HEAD_SHA" --reviewer jane)"\n'
-        '          echo "link 1 artifact')
+    # marker from an earlier run could short-circuit the walk. Drop it from
+    # both the check invocation and the diagnose follow-up in that step.
+    text = _workflow_text()
+    block = _job_blocks(text)["jane-review"]
+    steps = [c for c in re.split(r"\n      - ", block) if c.strip()]
+    v1 = next(c for c in steps if "id: v1" in c and "Artifact check" in c)
+    stripped = v1.replace(' --since "$SINCE"', "")
+    assert stripped != v1
+    tampered = text.replace(v1, stripped, 1)
     with pytest.raises(AssertionError, match="--since"):
         _assert_every_link_is_artifact_checked(tampered)
 
