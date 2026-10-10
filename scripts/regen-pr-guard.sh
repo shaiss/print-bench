@@ -66,7 +66,7 @@ pr_author_touches_designs() {
 }
 
 selftest() {
-  local pass=1 t r g as_bot human
+  local pass=1 t r
   ok() { echo "selftest ok    $1"; }
   bad() { echo "SELFTEST FAIL  $1: $2"; pass=0; }
 
@@ -132,7 +132,7 @@ selftest() {
   run_case 'NEGCTL bot-only since lib-only' lib-only-head lib-then-bot 1
 
   # Drift pin: ci.yml must invoke this guard before commit-push on PRs.
-  local ci miss
+  local ci
   ci="$(dirname "$0")/../.github/workflows/ci.yml"
   if [[ ! -f "$ci" ]]; then
     bad 'regen-drift' "$ci not found"
