@@ -76,7 +76,8 @@ standard … No caliper numbers will follow; the standard is the spec."
    `z_floor`; the coupon's Y bed-fit is `max(2 * strip_y, 2 * r_out)`.
 8. **Coupon layout.** Two stations on one plate: the library's own
    `nuggs_neck` stub in the family coupon pose, plus four labelled rings
-   carrying the production `throat_cavity` verbatim at tol 0.15/0.22/0.30/0.38.
+   carrying the production `throat_cavity` verbatim at tol 0.15/0.22/0.30/0.38
+  (rings engraved 15 / 22 / 30 / 38).
    Two disconnected bodies on purpose (printcheck notes them as INFO) — the
    coupon is a hand fixture. Both bed at `z_tip` (the port's sector tips);
    the strip is not at `z = 0`. Each ring's land opening pierces through the
@@ -123,13 +124,112 @@ carries both fits. In order:
    the very start of insertion and free after is elephant foot, not tolerance
    — a knife pass on the tips (or less first-layer squish) fixes that; tune
    only when it's tight through the whole engagement.
-2. **Thread stations** — four rings labelled 0.15–0.38. Screw a real
+2. **Thread stations** — four rings labelled 15 / 22 / 30 / 38. Screw a real
    PCO-1881 bottle (any soda/water bottle, washed) into each: find the
    station that grips firmly without cracking or skipping threads when you
    try to rotate the bottle by hand. Set `bottle_tol` in the design to that
    value and slice the adapter.
 3. The label is cut into the strip beside each ring (outboard of its row).
+   `15 / 22 / 30 / 38 = bottle_tol × 100`.
 
 A station whose thread skips (crest rides over the ridge) is too tight;
 one that spins freely is too loose. If *none* grip, raise `f_thread_depth`
 toward the 0.85 cap (ridge land thins as you do — see Key decisions 3).
+
+## Review round — PR #813 R3 (2026-10-10)
+
+Drik and Jane both passed at `c433afd6`; three non-blocking nits folded
+here (adapter geometry untouched):
+
+1. **Coupon camera.** New frozen `previews/cameras.conf` line `coupon`
+   (plus `CAMERAS.md` row): one ring + its engraved numeral, neighbor /
+   strip edge for scale, 55° elevation so the 0.6 mm cut shades, via
+   `render | part="coupon"` on the entry `.scad` (same shape as cutaway —
+   `src=` belongs in the opts field, not defines). Embedded in the README
+   Print-first block (`previews/coupon.png`).
+2. **Corridor legend declined.** Facing ring OD edges leave ~7.8 mm
+   between rows; size-8 Bold (em box ~8 mm tall, same as the numerals)
+   has no real margin there. Corridor stays clean; the ×100 key remains
+   in README/NOTES — comment in the coupon label block records why.
+3. **Dark-filament readout.** One README line: dab acrylic or a white
+   gel pen into the digits when shadow-read engraving is hard to see.
+   No geometry change.
+
+## Review round — PR #813 R4 (2026-10-10)
+
+Drik and Jane both passed at `1133bbb0`; three non-blocking README nits
+folded here (adapter geometry untouched):
+
+1. **Coupon seam.** Seam guidance already covered the adapter; added that
+   the coupon needs the same random/rear seam — an aligned ridge in a
+   test ring can read as a false "too tight" when ranking by feel (Jane).
+2. **Dry-then-wet shortlist.** Shortlist stations dry, then re-check the
+   shortlist wet (soapy fingers / wet bottle) before committing — wash
+   day is the real use case and a station can feel a half-step looser
+   wet (Drik).
+3. **Coupon cost already owned.** Print-first bullet already states the
+   coupon is heavier/slower on purpose, with CI printcheck numbers
+   (~4 h 57 m / ~63 g vs adapter ~4 h 10 m / 53.16 g); left alone
+   (Drik). Re-quoted in R5 when the sticky moved from 62.55 g to 62.92 g.
+4. **Sticky duplicate coupon row — resolved by §5.** The printcheck sticky
+   once listed `build/nuggs-bottle-adapter-coupon.stl` twice with identical
+   100/100 rows (queued briefly to platform/Reeve). §5 dropped the
+   redundant `ci.parts` coupon line; the sticky at `99faa0f` shows the
+   coupon once. No platform ticket to chase.
+5. **`ci.parts` coupon line removed.** Verified in `scripts/gate.sh`: a
+   `coupon` ci.parts entry renders `-D part="coupon"` →
+   `build/<name>-coupon.stl`, and the canonical
+   `<name>-coupon.scad` wrapper is always auto-discovered onto the same
+   path with no dedup (secondary `*-*-coupon.scad` wrappers dedup;
+   the canonical one does not). Peer convention (e.g. alcove-rod-socket's
+   comment) is wrapper-only. Dropped the `coupon` line; left
+   `adapter`. Frozen `coupon` camera (`part="coupon"` in cameras.conf),
+   product page, and wrapper gating are unchanged. Not a platform-code
+   change.
+
+## Review round — PR #813 R5 (2026-10-10)
+
+Drik and Jane both passed at `99faa0fa`; three non-blocking docs nits
+folded here (adapter geometry, `ci.parts`, and cameras untouched):
+
+1. **Coupon filament quote.** README print-first and R4 §3 still said
+   62.55 g; the printcheck sticky at this head reports 62.92 g. Re-quoted
+   both to `~63 g` (Jane: round so runner wobble cannot stale it) with
+   time still `~4 h 57 m`; adapter `~4 h 10 m / 53.16 g` unchanged.
+2. **R4 §4 closed.** Marked the duplicate-coupon sticky item resolved by
+   §5 (`ci.parts` drop); current sticky lists the coupon once — no
+   platform/Reeve chase.
+3. **Cool before ranking.** README ranking ladder: let the coupon reach
+   room temperature before ranking stations — warm plastic reads about
+   half a station loose and would tune `bottle_tol` too tight.
+
+## Review round — PR #813 R6 (2026-10-10)
+
+Drik and Jane both passed at `89905d1` (CI regen advanced the head to
+`0ced4a4` mid-round — previews/pages only); seven act-now docs/preview
+nits folded here (adapter geometry, `ci.parts`, and existing cameras
+untouched):
+
+1. **Whole-coupon overview camera.** New frozen `coupon-overview` line
+   (plus `CAMERAS.md` row + README embed beside Print-first): port stub
+   + full four-label strip (`15/22/30/38`), 50° elev / ~55° yaw so both
+   label edges read; `render | part="coupon"`. Additive only — the R3
+   `coupon` close-up stays frozen.
+2. **Brim: none** in README Print settings — a stock Auto-brim can weld
+   onto the port-stub sector tips (the surface the fit is judged on).
+3. **PETG bridge clause** on the existing PETG line: ~10 mm flat bridges
+   across the sector gaps can sag on the first bridging layers.
+4. **0.42 mm line-width pin** beside the 0.2 mm layer setting — label
+   strokes sit at the engraved floor; a 0.45 mm profile slips under it.
+5. **Neck ID wording.** "~28 mm inside" → "~28 mm across the threads
+   (the orifice is ~22 mm)" so calipers point at the right feature.
+6. **Bottle cool rider** on the cool-before-ranking sentence — let the
+   washed bottle cool too (same half-station warm trap, opposite sign).
+7. **Endurance hedge.** "Hundreds of turn cycles a year" restated as an
+   expectation tied to refill cadence (~52 cycles/yr at weekly wash day)
+   until the v1 field checks are ticked.
+
+**Charter:** R5 re-rank committed into `PM.md` — the two v1 field checks
+rank above all page/label polish (label epic done); deferred variants
+follow. Reviewer sandbox read-access stays queued on the platform
+charter (Reeve); not this design.
