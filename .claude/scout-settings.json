@@ -100,7 +100,9 @@
       "Bash(.claude/skills/label-issues/label-helper.sh:*)",
       "Bash(./.claude/skills/label-issues/label-helper.sh:*)",
       "mcp__growth_queue",
-      "mcp__growth_twitter"
+      "mcp__growth_twitter",
+      "mcp__reviewer",
+      "mcp__reviewer__post_review"
     ]
   }
 }

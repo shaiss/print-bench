@@ -13,6 +13,16 @@
 #      lifestyle disclosure guards still refuse an undisclosed AI shot or clip
 #   7. shot-spec selftest (scripts/shot-spec.sh --selftest): the shot-manifest
 #      freeze guard and field validators still refuse a bad line
+#   8. concept-preview selftest (scripts/concept-preview.sh --selftest): the
+#      concept-sheet checks still refuse a malformed spec, an out-of-bounds
+#      element and overlapping labels
+#   9. fusecheck selftest (scripts/fusecheck-check.sh --selftest): the
+#      ci.fusecheck bound grammar — legacy, MIN MAX, =N, malformed, exit-4 —
+#      every negative row asserted to fire on committed fixtures (issue #627),
+#      plus the include-closure control proof (issue #766)
+#   9b. scad-closure selftest (scripts/scad-closure.sh --selftest): the
+#      include-closure `part ==` branch proof still finds a parent / two-hop
+#      branch and still refuses a name nowhere in the closure
 # Run before committing. For full STL+PNG output use scripts/render.sh.
 set -euo pipefail
 
@@ -199,6 +209,27 @@ if ! ./scripts/kinematics-check.sh --selftest; then
   fail=1
 fi
 
+# And this proves the fusecheck gate's own seam — the `assert <stl> <min>
+# [<max>]` / `=N` tokenisation and the exit-3/exit-4 verdict mapping in
+# scripts/fusecheck-check.sh, the runner gate.sh sources — still discriminates:
+# every pass row passes, the too-few row WARNs without failing the run, the
+# too-many row hard-FAILs, the malformed lines fail the parse. The fixtures'
+# body counts are re-measured with fusecheck itself before any row is trusted,
+# so a drifted fixture fails loudly instead of gating on a stale expectation
+# (issue #627). Needs printcheck (the gate's own dependency) and openscad for
+# the two fixture renders; no skip path — a skipped selftest is exactly the
+# silent green this exists to close, so CI installs printcheck in every job
+# that runs check.sh.
+echo "-- scad-closure selftest: scripts/scad-closure.sh --selftest"
+if ! ./scripts/scad-closure.sh --selftest; then
+  fail=1
+fi
+
+echo "-- fusecheck selftest: scripts/fusecheck-check.sh --selftest"
+if ! ./scripts/fusecheck-check.sh --selftest; then
+  fail=1
+fi
+
 # And this proves the CoG stability verdict still discriminates: a stable
 # configuration passes, one whose CoG falls outside its support footprint is
 # flagged TIP-RISK, and a malformed manifest is refused loudly (tools/cogcheck,
@@ -208,6 +239,28 @@ fi
 # OpenSCAD, no slicer, so it runs everywhere check.sh does, unconditionally.
 echo "-- cog-check selftest: scripts/cog-check.sh --selftest"
 if ! ./scripts/cog-check.sh --selftest; then
+  fail=1
+fi
+
+# And this proves the agentic-memory write path (tools/agent-memory, issue
+# #429 — Slice 1a of docs/agentic-memory.md) still enforces its four rules:
+# importance scored by prediction error + Zeigarnik, depth set by salience,
+# provenance `source-confirmed` only when a source is cited (cited, not
+# resolved: in 1a the ref is shape-checked only, and the salience inputs are
+# the caller's word — see the tool's README), and immutable notes — each with
+# its negative control, offline, in a throwaway temp dir. Then `check`
+# re-derives every committed note under tools/agent-memory/store/ (empty until
+# Slice 1d wires a routine), so a note edited by hand after it was written —
+# a promoted importance, a hand-flipped `verified` field, a reformatted file —
+# fails here rather than poisoning a routine's recall. Pure stdlib, imported
+# from its src/ tree (the cog-check pattern), so it runs unconditionally.
+echo "-- agent-memory selftest + store check: python3 -m agent_memory"
+if ! env PYTHONPATH="$PWD/tools/agent-memory/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m agent_memory --selftest; then
+  fail=1
+fi
+if ! env PYTHONPATH="$PWD/tools/agent-memory/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m agent_memory check --store tools/agent-memory/store; then
   fail=1
 fi
 
@@ -520,14 +573,61 @@ if ! ./scripts/reeve-perms-check.sh; then
   fail=1
 fi
 
-	echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
-	if ! ./scripts/reviewer-perms-check.sh --selftest; then
-	  fail=1
-	fi
-	echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
-	if ! ./scripts/reviewer-perms-check.sh; then
-	  fail=1
-	fi
+# Reviewer permission drift (issue #323): the auto-review sessions (Jane,
+# Drik, PM triage, the coach) load .claude/settings.json additively via
+# settingSources=project, so their backstops (.claude/reviewer-settings.json,
+# .claude/design-coach-settings.json) must deny every Bash allow outside the
+# review surface, always deny the render toolchain, and never deny gh/git or
+# the read tools (the coach also keeps Write/Edit). --selftest proves each
+# rule can pass AND fail.
+echo "-- reviewer-perms selftest: scripts/reviewer-perms-check.sh --selftest"
+if ! ./scripts/reviewer-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- reviewer-perms check: scripts/reviewer-perms-check.sh"
+if ! ./scripts/reviewer-perms-check.sh; then
+  fail=1
+fi
+
+# Reviewer MCP posting tool: Jane/Drik's ONE write is post_review
+# (.claude/reviewer-post/reviewer_mcp.py, issue #764); the coach's comment
+# write is post_coach on the same server (issue #806) — JSON-argument tools
+# because a multi-line gh --body cannot pass the dontAsk Bash matcher, which
+# is the hole that let workflow rounds exit 0 having posted nothing. The
+# coach still pushes iterations (Write/Edit + git stay allowed). --selftest
+# proves the sign-off marker is assembled server-side, caller-supplied
+# JANE/DRIK_SIGNOFF/PM_TRIAGE/COACH_LOCK HTML comments are refused, the
+# marker family follows
+# REVIEWER_ID, post_coach requires REVIEWER_ID=coach, the target PR is
+# pinned to REVIEWER_PR, and the walk cap spans the chain via
+# REVIEWER_POST_STATE.
+echo "-- reviewer-post MCP selftest: .claude/reviewer-post/reviewer_mcp.py --selftest"
+if ! python3 .claude/reviewer-post/reviewer_mcp.py --selftest; then
+  fail=1
+fi
+
+# Reviewer deny-rule runtime canary (issue #776): the FILE half above is a
+# Python MODEL of the matcher. This --selftest is the harness for the canary
+# that extracts the REAL matcher from the Claude Code build the pinned
+# action SHA installs (docs/actions-security.md, CR-A). The live extract
+# (and its auto-review.yml SHA-pin sync) lives in
+# .github/workflows/reviewer-deny-canary.yml — dispatchable, not a
+# required / ci-ok check. Keep pin-drift out of this selftest: check.sh
+# runs in scad-check, which ci-ok needs, so a pin bump would otherwise
+# block the merge gate until the canary constants match.
+echo "-- reviewer-deny-canary selftest: scripts/reviewer-deny-canary.sh --selftest"
+if ! ./scripts/reviewer-deny-canary.sh --selftest; then
+  fail=1
+fi
+
+# Coach-lock presence pin (issue #806): a ship-step success is not a
+# completed coach round unless an Actions-bot comment from this run
+# ends with the assembled `<!-- COACH_LOCK -->` + footer suffix the
+# posting tool writes (a lock from an earlier coach run does not count).
+echo "-- coach-lock-check selftest: scripts/coach-lock-check.sh --selftest"
+if ! ./scripts/coach-lock-check.sh --selftest; then
+  fail=1
+fi
 
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
@@ -610,9 +710,25 @@ fi
 # logic behind the `reviewer-signoff` required status (auto-review.yml, W2). The
 # gate is fail-closed — a design PR without two clean, current sign-offs blocks —
 # so the selftest is the only thing that proves it both passes clean AND fails
-# closed (missing/malformed/stale/blocking/fuse-unacked markers each block).
+# closed (missing/malformed/stale/blocking/fuse-unacked markers each block;
+# fuse-warn sticky selection: only a body that starts with the printcheck
+# marker, and only the real fusecheck STRONG WARN cell — PR #634).
 echo "-- reviewer-signoff selftest: scripts/reviewer-signoff.sh --selftest"
 if ! ./scripts/reviewer-signoff.sh --selftest; then
+  fail=1
+fi
+
+# reviewer-posted artifact check (scripts/reviewer-posted.sh, issue #762): the
+# reviewer-outcome reader auto-review.yml's chain walk and round stamp key on —
+# did THIS reviewer's MCP-assembled sign-off for THIS head sha land from
+# github-actions[bot] (author+suffix bound, discussion_r4185453576)? An exit-0
+# reviewer link that posted nothing used to read as success and was stamped a
+# completed round (#755/#756), so the selftest is the only thing that proves
+# the reader still passes a trusted MCP post, still rejects a planted/wrong-
+# author/stale-sha/silent/impostor one, and still refuses (rather than
+# answering `false`) a typo'd reviewer or sha.
+echo "-- reviewer-posted selftest: scripts/reviewer-posted.sh --selftest"
+if ! ./scripts/reviewer-posted.sh --selftest; then
   fail=1
 fi
 
@@ -696,6 +812,32 @@ fi
 # leave every other check green — and it is fast (no render), so it runs here.
 echo "-- shot-spec selftest: scripts/shot-spec.sh --selftest"
 if ! ./scripts/shot-spec.sh --selftest; then
+  fail=1
+fi
+
+# concept-preview.sh draws a design's blueprint concept sheets from its
+# preview-spec.conf (issue #472). Its --selftest emits the fixture's four
+# sheets and requires every check to pass, then proves each negative control
+# still FAILS with the check it names — a malformed spec, an out-of-bounds
+# element, two overlapping labels. No design ships a spec yet, so this is the
+# only thing that would notice a check gone soft. Pure stdlib, no render.
+echo "-- concept-preview selftest: scripts/concept-preview.sh --selftest"
+if ! ./scripts/concept-preview.sh --selftest; then
+  fail=1
+fi
+
+# preview-diff.sh is the regen-faithfulness check (issue #470): the regen
+# job runs it, just before committing, to class each regenerated preview
+# against the committed bytes. It is advisory, so a weakened classifier
+# (always "noise") would leave every run green — the selftest is the only thing
+# that proves the band and the source cross-check still fire. Run
+# unconditionally rather than gated on ImageMagick the way the plate selftest
+# is gated on prusa-slicer: the pure classifier rows need nothing and must run
+# everywhere, and the script skips its own end-to-end half with a notice where
+# ImageMagick is absent (the scad-check jobs, whose cached apt cannot carry it
+# — issue #85).
+echo "-- preview-diff selftest: scripts/preview-diff.sh --selftest"
+if ! ./scripts/preview-diff.sh --selftest; then
   fail=1
 fi
 

@@ -99,6 +99,7 @@ REQUIRED_DENIES = [
     {"mcp__reeve_signoff", "mcp__reeve_signoff__post_reeve_signoff"},
     {"mcp__growth_queue", "mcp__growth_queue__queue_growth_post"},
     {"mcp__growth_twitter", "mcp__growth_twitter__post_tweet"},
+    {"mcp__reviewer", "mcp__reviewer__post_review"},
     {"Write"},
     {"Edit"},
     {"NotebookEdit"},
@@ -172,7 +173,7 @@ selftest() {
 {"permissions":{"allow":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)"]}}
 EOF
   cat > "$tmp/good-reeve.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","mcp__reeve_signoff","mcp__growth_queue","mcp__growth_twitter","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","mcp__reeve_signoff","mcp__growth_queue","mcp__growth_twitter","mcp__reviewer","mcp__reviewer__post_review","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-reeve.json" 2>/dev/null; then
     echo "ok    selftest: complete deny coverage passes"
@@ -196,7 +197,7 @@ EOF
   # exactly why the required-denies list exists (the dropped-cross-deny case
   # coverage alone can never catch).
   cat > "$tmp/bad2-reeve.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","mcp__reeve_signoff","mcp__growth_queue","mcp__growth_twitter","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","mcp__reeve_signoff","mcp__growth_queue","mcp__growth_twitter","mcp__reviewer","mcp__reviewer__post_review","Write","Edit","NotebookEdit"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad2-reeve.json" 2>/dev/null; then
     echo "FAIL  selftest: a missing label-helper deny was NOT caught"; return 1
@@ -206,7 +207,7 @@ EOF
 
   # BAD 3: the greenlight wrapper itself is denied → must fail (fails closed).
   cat > "$tmp/bad3-reeve.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","mcp__reeve_signoff","mcp__growth_queue","mcp__growth_twitter","Write","Edit","NotebookEdit","Bash(.claude/skills/reeve-greenlight/greenlight-helper.sh:*)"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","mcp__reeve_signoff","mcp__growth_queue","mcp__growth_twitter","mcp__reviewer","mcp__reviewer__post_review","Write","Edit","NotebookEdit","Bash(.claude/skills/reeve-greenlight/greenlight-helper.sh:*)"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad3-reeve.json" 2>/dev/null; then
     echo "FAIL  selftest: a denied wrapper was NOT caught"; return 1
@@ -216,12 +217,22 @@ EOF
 
   # BAD 4: a BROAD deny pattern that matches the wrapper path still blocks it.
   cat > "$tmp/bad4-reeve.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","mcp__reeve_signoff","mcp__growth_queue","mcp__growth_twitter","Write","Edit","NotebookEdit","Bash(.claude/skills/reeve-greenlight/*:*)"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","mcp__reeve_signoff","mcp__growth_queue","mcp__growth_twitter","mcp__reviewer","mcp__reviewer__post_review","Write","Edit","NotebookEdit","Bash(.claude/skills/reeve-greenlight/*:*)"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/bad4-reeve.json" 2>/dev/null; then
     echo "FAIL  selftest: a wildcard deny blocking the wrapper was NOT caught"; return 1
   else
     echo "ok    selftest: a wildcard deny blocking the wrapper fails the check"
+  fi
+
+  # Missing Jane/Drik posting deny (#773): neither spelling present.
+  cat > "$tmp/bad-reviewer-reeve.json" <<'EOF'
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(./.claude/skills/adoption-assessor/assessor-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","mcp__scout","mcp__assessor","mcp__oracle","mcp__wright","mcp__reeve_signoff","mcp__growth_queue","mcp__growth_twitter","Write","Edit","NotebookEdit"]}}
+EOF
+  if check_pair "$tmp/good-settings.json" "$tmp/bad-reviewer-reeve.json" 2>/dev/null; then
+    echo "FAIL  selftest: a missing reviewer-posting deny was NOT caught"; return 1
+  else
+    echo "ok    selftest: a missing reviewer-posting deny fails the check"
   fi
 }
 

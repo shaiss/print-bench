@@ -2,9 +2,11 @@
 
 Reeve's primary pulse stays committed files (``signals.py``); this module adds
 the run-health reads behind the ``routine-dead`` and ``lock-leak`` detectors
-(issue #313): the scheduled routines' completed workflow runs, the open issues
-carrying an active 🚢 SHIP-LOCK claim, and the open PRs/branches that would
-corroborate one. It also serves the greenlight loop's selection (issue #443):
+(issue #313) and the ``agent-brief-queue`` detector (#745): the scheduled
+workflows' completed runs, the open issues carrying an active 🚢 SHIP-LOCK
+claim, the open PRs/branches that would corroborate one, and the open
+``agent-brief`` issues whose labels carry the forge's queue state. It also
+serves the greenlight loop's selection (issue #443):
 ``gather_greenlight_queue`` lists the open ``needs-decision`` issues and reads
 each thread to see which already carry a greenlight marker — the trusted
 workflow's Select step consumes it, so the agent is handed only issues that
@@ -25,7 +27,9 @@ report lie about coverage.
 The greenlight loop's approval poll (issue #444) reads through this same
 seam and stays GET-only: the parked threads **with their comment ids**
 (``gather_greenlight_poll``), one comment's reactions (``list_reactions``),
-and each reactor's real repository permission (``permission_of``). The
+each reactor's real repository permission (``permission_of``), and — for the
+standing approval modes (#446) — who applied a loosening label
+(``list_label_events``). The
 writes that follow an approved reaction — the label flip, the ledger
 commit, the resolution reply — live in ``pushthrough.py``, never here.
 """
@@ -63,6 +67,15 @@ SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 # platform lead. The disposition itself is read from the issue's own labels.
 ADOPTION_STUDY_LABEL = "adoption-study"
 
+# The label a Wright proposal carries (docs/agent-forge.md). Gathered from the
+# same open-issues listing — label scan before the comments skip, like the
+# adoption studies — so the agent-brief-queue detector (#745) can surface the
+# forge backlog's state (pending / parked / declined) next to routine-dead: a
+# death-streak that leaves briefs unjudged shows as a queue that stopped
+# moving, not as an empty report. The verdict labels are read from the issue's
+# own labels (needs-decision, wright-declined, autonomy-ok).
+AGENT_BRIEF_LABEL = "agent-brief"
+
 # The label that parks an issue at the HITL decision gate (docs/decision-gate
 # .md, issue #161) — the queue the greenlight loop drafts advisory verdicts on.
 NEEDS_DECISION_LABEL = "needs-decision"
@@ -86,12 +99,18 @@ GREENLIGHT_MARKER = "<!-- reeve-greenlight v"
 # body, where the writer puts it as the first line.
 PROVIDER_ESCALATION_MARKER = "<!-- provider-escalation:"
 
-# The scheduled routines whose death Reeve watches (the #312 incident class:
+# The scheduled workflows whose death Reeve watches (the #312 incident class:
 # a run killed by its own timeout leaves conclusion "cancelled"/"failure" and
 # a ghost lock behind). growth-twitter is here because docs/growth.md names
-# this detector as the "routine silently stops" handler for the growth desk.
+# this detector as the "routine silently stops" handler for the growth desk;
+# wright.yml and growth-board-sync.yml joined at #745 — the tuple predated the
+# forge, so a forge death-streak was red in Actions but absent from the
+# bench-health report, and the growth board's sync lens (not itself an armed
+# routine, but a schedule whose GraphQL rate-limit failures reddened unseen
+# for days) was the live instance of exactly that hole. This tuple is the
+# single source of truth: nothing else in the package names the watched set.
 ROUTINE_WORKFLOWS = ("design-run.yml", "backlog-burn.yml", "chunker.yml", "labeler.yml",
-                     "growth-twitter.yml")
+                     "growth-twitter.yml", "wright.yml", "growth-board-sync.yml")
 
 # Completed runs fetched per workflow — one page, newest-first as the API
 # returns them. config.py caps `routine_dead_runs` at this value, since a
@@ -191,6 +210,7 @@ def gather_run_health(
 
     issues: list[dict[str, Any]] = []
     adoption_studies: list[dict[str, Any]] = []
+    agent_briefs: list[dict[str, Any]] = []
     for item in _paged(f"{API_ROOT}/repos/{repo}/issues?state=open&per_page=100", token):
         if "pull_request" in item:
             continue  # the issues endpoint interleaves PRs; drop them
@@ -200,6 +220,19 @@ def gather_run_health(
             # labels alone, so it must be gathered even with zero comments (the
             # skip only guards the per-issue lock-comments GET).
             adoption_studies.append(
+                {
+                    "number": item["number"],
+                    "title": item["title"],
+                    "labels": label_names,
+                    "createdAt": item.get("created_at", ""),
+                    "updatedAt": item.get("updated_at", ""),
+                    "url": item.get("html_url", ""),
+                }
+            )
+        if AGENT_BRIEF_LABEL in label_names:
+            # Same label-only shape as the studies (#745): a brief's queue state
+            # is its labels, so zero comments must not skip it either.
+            agent_briefs.append(
                 {
                     "number": item["number"],
                     "title": item["title"],
@@ -255,6 +288,7 @@ def gather_run_health(
         "workflows": workflows,
         "issues": issues,
         "adoptionStudies": adoption_studies,
+        "agentBriefs": agent_briefs,
         "openPRs": open_prs,
         "branches": branches,
     }
@@ -328,6 +362,11 @@ def gather_greenlight_queue(
                 "title": item["title"],
                 "url": item.get("html_url", ""),
                 "providerEscalation": is_provider_escalation(item.get("body", "")),
+                # The standing approval modes' inputs (#446): the Select step
+                # classifies each issue and drops a deny category before the
+                # cap, so the drafter is never handed a human-only decision.
+                "labels": [lbl.get("name", "") for lbl in item.get("labels", [])],
+                "body": item.get("body") or "",
             }
         )
 
@@ -391,6 +430,31 @@ def list_reactions(repo: str, token: str, comment_id: int) -> list[dict[str, Any
     ]
 
 
+def list_label_events(repo: str, token: str, number: int) -> list[dict[str, Any]]:
+    """One issue's label history: ``[{"event", "label", "actor", "created_at"}]``.
+
+    ``GET /repos/{repo}/issues/{n}/events``, kept to the ``labeled`` /
+    ``unlabeled`` entries. The standing approval modes (#446) read it for
+    exactly one question — *who applied this loosening label* — because a
+    label's mere presence is not authority: ``approval.label_actor_trusted``
+    holds its applier to the bar a 👍 clears. The poll's driver asks only
+    for issues that carry a label that could loosen, so a run with no such
+    label spends no request here.
+    """
+    return [
+        {
+            "event": e.get("event", ""),
+            "label": (e.get("label") or {}).get("name", ""),
+            "actor": (e.get("actor") or {}).get("login", ""),
+            "created_at": e.get("created_at", ""),
+        }
+        for e in _paged(
+            f"{API_ROOT}/repos/{repo}/issues/{number}/events?per_page=100", token
+        )
+        if e.get("event") in ("labeled", "unlabeled")
+    ]
+
+
 def gather_greenlight_poll(repo: str, token: str) -> list[dict[str, Any]]:
     """Every open parked decision's thread, ids intact (issue #444).
 
@@ -415,6 +479,8 @@ def gather_greenlight_poll(repo: str, token: str) -> list[dict[str, Any]]:
                 "title": item["title"],
                 "url": item.get("html_url", ""),
                 "body": item.get("body") or "",
+                # The standing approval modes classify on labels (#446).
+                "labels": [lbl.get("name", "") for lbl in item.get("labels", [])],
             }
         )
 

@@ -22,10 +22,18 @@ import sys
 import trimesh
 
 from printcheck.fusecheck import (
+    EXIT_ABOVE_MAX,
+    EXIT_BELOW_MIN,
+    VERDICT_FAIL,
+    VERDICT_OK,
+    VERDICT_WARN,
     count_stl,
+    format_bound,
     main,
     parse_aabb,
+    parse_bound,
     separable_bodies,
+    verdict,
 )
 
 
@@ -140,3 +148,128 @@ def test_selftest_entry_point_passes():
     rc = subprocess.call([sys.executable, "-m", "printcheck.fusecheck",
                           "--selftest"])
     assert rc == 0
+
+
+# --- two-sided bound (issue #612 part 2) ------------------------------------
+#
+# The fixture is the case the upper bound exists for: a plate carrying a
+# stencil-style "0" — an annular slot whose inner disc (the counter) is held
+# only by ONE bridge across the slot. Tethered, the plate is one body; with the
+# bridge removed the counter is a freed island and the same plate reads two.
+# Too FEW bodies is the fuse (a STRONG WARN a reviewer signs off); too MANY is
+# the freed island / dropped part (a hard FAIL) — and the legacy one-sided
+# floor every existing manifest uses can never FAIL, whatever the count.
+
+
+def _stencil_plate(tethered):
+    """30x20x2 plate minus a stencil '0' (annulus r 4..6); ``tethered`` keeps
+    a 3x2 bridge across the slot so the counter stays attached."""
+    plate = trimesh.creation.box(extents=[30, 20, 2])
+    plate.apply_translation([0, 0, 1])
+    ring = trimesh.creation.annulus(r_min=4, r_max=6, height=4)
+    ring.apply_translation([0, 0, 1])
+    if tethered:
+        bridge = trimesh.creation.box(extents=[3, 2, 4])
+        bridge.apply_translation([5, 0, 1])
+        ring = trimesh.boolean.difference([ring, bridge])
+    out = trimesh.boolean.difference([plate, ring])
+    out.merge_vertices()
+    return out
+
+
+def test_stencil_fixture_is_one_body_tethered_two_freed():
+    """The fixture itself: the tether is the only thing holding the counter."""
+    assert separable_bodies(_stencil_plate(True), []) == (1, 0)
+    assert separable_bodies(_stencil_plate(False), []) == (2, 0)
+
+
+def test_exact_bound_passes_tethered_and_fails_freed():
+    """`=1` (positive + negative control): the tethered plate is within the
+    bound, the freed-island plate is OVER it — a FAIL, not the fuse's warn."""
+    lo, hi = parse_bound("=1")
+    tethered, _ = separable_bodies(_stencil_plate(True), [])
+    freed, _ = separable_bodies(_stencil_plate(False), [])
+    assert verdict(tethered, lo, hi) == VERDICT_OK
+    assert verdict(freed, lo, hi) == VERDICT_FAIL
+
+
+def test_parse_bound_accepts_the_three_shapes():
+    assert parse_bound("3") == (3, None)        # legacy one-sided floor
+    assert parse_bound("3:5") == (3, 5)         # two-sided
+    assert parse_bound("=2") == (2, 2)          # exactly-N sugar
+    assert parse_bound("2:2") == (2, 2)         # the sugar's long form
+    assert parse_bound(" =1 ") == (1, 1)        # a manifest's stray whitespace
+
+
+def test_parse_bound_rejects_malformed():
+    """A max below the min is malformed (the negative control the two-sided
+    grammar needs), as is anything that is not a non-negative integer."""
+    for bad in ("5:3", "x", "=", "1:", ":1", "-1", "=a", "", "1:2:3", "1.5"):
+        try:
+            parse_bound(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"parse_bound accepted malformed bound {bad!r}")
+
+
+def test_one_sided_bound_warns_never_fails():
+    """Legacy `assert <stl> <min>`: a low count is the fuse WARN exactly as
+    before, and no count — however large — can ever FAIL a one-sided bound."""
+    lo, hi = parse_bound("3")
+    assert verdict(1, lo, hi) == VERDICT_WARN
+    assert verdict(3, lo, hi) == VERDICT_OK
+    assert verdict(100, lo, hi) == VERDICT_OK
+    assert all(verdict(n, lo, hi) != VERDICT_FAIL for n in range(0, 50))
+
+
+def test_two_sided_bound_orders_warn_below_fail_above():
+    lo, hi = parse_bound("2:4")
+    assert [verdict(n, lo, hi) for n in (1, 2, 3, 4, 5)] == [
+        VERDICT_WARN, VERDICT_OK, VERDICT_OK, VERDICT_OK, VERDICT_FAIL]
+
+
+def test_format_bound():
+    assert format_bound(3) == ">= 3"
+    assert format_bound(2, 2) == "= 2"
+    assert format_bound(3, 5) == "3..5"
+
+
+def test_cli_bound_exit_codes_keep_stdout_identical(tmp_path, capsys):
+    """--bound carries the verdict in the EXIT CODE only: stdout stays the bare
+    count, so a caller that never passes --bound sees byte-identical output."""
+    t = tmp_path / "tethered.stl"
+    f = tmp_path / "freed.stl"
+    _stencil_plate(True).export(str(t))
+    _stencil_plate(False).export(str(f))
+
+    assert main([str(f)]) == 0                                # no bound: legacy
+    assert capsys.readouterr().out == "2\n"
+    assert main([str(t), "--bound", "=1"]) == 0               # within
+    assert capsys.readouterr().out == "1\n"
+    assert main([str(f), "--bound", "=1"]) == EXIT_ABOVE_MAX  # freed island
+    assert capsys.readouterr().out == "2\n"
+    assert main([str(f), "--bound", "3"]) == EXIT_BELOW_MIN   # the fuse case
+    assert capsys.readouterr().out == "2\n"
+    assert main([str(f), "--bound", "1"]) == 0                # legacy floor: ok
+    assert capsys.readouterr().out == "2\n"
+
+
+def test_cli_bound_json_carries_verdict(tmp_path, capsys):
+    f = tmp_path / "freed.stl"
+    _stencil_plate(False).export(str(f))
+    rc = main([str(f), "--bound", "1:1", "--json"])
+    assert rc == EXIT_ABOVE_MAX
+    out = json.loads(capsys.readouterr().out)
+    assert out["bodies"] == 2 and out["bound"] == [1, 1]
+    assert out["verdict"] == VERDICT_FAIL
+    rc = main([str(f), "--json"])                             # no bound: unchanged
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert "bound" not in out and "verdict" not in out
+
+
+def test_cli_malformed_bound_is_usage_error(tmp_path, capsys):
+    p = tmp_path / "part.stl"
+    trimesh.creation.box(extents=(10, 10, 10)).export(str(p))
+    assert main([str(p), "--bound", "5:3"]) == 2
+    assert "bound" in capsys.readouterr().err

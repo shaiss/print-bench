@@ -160,12 +160,13 @@ jobs:
 
       - name: Note the job window start
         # Stamped before any ship step and passed to routine-lock-cleanup as
-        # --run-started-at. A claimless 🚢 DEFERRED counts as this firing's
-        # decline only when the comment is strictly newer than this instant
-        # and its author is a GitHub Bot or the repository owner, so a later
-        # success that posts nothing cannot reuse an older DEFERRED that is
-        # still the thread's latest comment, and an outsider who comments
-        # during the window cannot mint a stop and skip red-on-death.
+        # --run-started-at. A claimless stop (🚢 DEFERRED, 🚢 DECLINED or
+        # 🚦 DECISION NEEDED) counts as this firing's decline only when the
+        # comment is strictly newer than this instant and its author is a
+        # GitHub Bot or the repository owner, so a later success that posts
+        # nothing cannot reuse an older stop that is still the thread's
+        # latest comment, and an outsider who comments during the window
+        # cannot mint a stop and skip red-on-death.
         run: echo "JOB_WINDOW_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v7
@@ -327,7 +328,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
@@ -351,7 +352,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
@@ -373,7 +374,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
@@ -402,7 +403,7 @@ jobs:
           && steps.ship_zai_3.outcome != 'success'
         timeout-minutes: 105
         continue-on-error: true
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
@@ -422,7 +423,7 @@ jobs:
           && steps.ship_anthropic_4.outcome != 'success'
         timeout-minutes: 105
         continue-on-error: true
-        uses: anthropics/claude-code-action@2261fcfc88e7de1b55f179edd588805e12de71f2  # v1
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GH_TOKEN || github.token }}
@@ -691,7 +692,9 @@ jobs:
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.ANTHROPIC_API_KEY }}
           github-token: ${{ github.token }}
-          context: the backlog-burn routine (issue #${{ steps.select.outputs.issue }})
+          # Quoted: unquoted, YAML reads " #" as a comment and the issue number
+          # never reaches the escalation (#637 read "(issue —").
+          context: "the backlog-burn routine (issue #${{ steps.select.outputs.issue }})"
           escalate: "true"
 
       - name: Turn a dead agentic run red
