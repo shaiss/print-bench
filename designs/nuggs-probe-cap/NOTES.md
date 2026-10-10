@@ -149,8 +149,19 @@ brief's own warning: DS18B20 clones vary.
   class), coupon 100/100. Ceiling grooves verified in the mesh: 12 apex
   rings at r = 37.8 → 2.4 mm on the computed 3.214 mm pitch.
 - **Copilot review nits** (PR #737, hourly Quill pass): README brim aligned
-  with NUGGS sector-tip guidance (no “no brim” claim); fitcheck dispatch now
-  passes `at_*` placement + proxy depth explicitly (probe vs gland cannot
-  collapse when `probe_d == gland_d`); README + NOTES carry N7 hand-wash ≤
-  50 °C / no dishwasher. Skipped: N3 blind-terminus, N6 bore protrusion,
-  grip-preload redesign (Keel / larger eng).
+  with NUGGS sector-tip guidance (no “no brim” claim); fitcheck dispatch was
+  changed to pass `at_*` placement + proxy depth explicitly (probe vs gland
+  cannot collapse when `probe_d == gland_d`); README + NOTES carry N7
+  hand-wash ≤ 50 °C / no dishwasher. Skipped: N3 blind-terminus, N6 bore
+  protrusion, grip-preload redesign (Keel / larger eng).
+- **Fitcheck collapse (CI red on #737 tip 2f08c00)**: the Copilot nit's
+  `fitcheck(at, …)` / `at() grip_proxy(…)` is invalid OpenSCAD — modules are
+  not values. Every seat/jam render warned `Ignoring unknown variable
+  'at_probes'|'at_gland'` and `Ignoring unknown module 'at'`, then reduced
+  to `intersection(){ nuggs_probe_cap(); }` (single child = the full cap).
+  That is why CI reported the **same** 12534 Manifold facets for
+  `probe_seats`, `gland_seats`, `probe_jams`, and `gland_jams` (empty failed;
+  interferes "passed" vacuously on the same solid). Fix: dispatch on a role
+  string (`"probe"` / `"gland"`) and call `at_probes()` / `at_gland()`
+  directly — still distinct when `probe_d == gland_d`, and the proxy `below`
+  depth parameter from that nit is kept.

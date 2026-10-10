@@ -395,20 +395,27 @@ module grip_proxy(d, grow, below) {
         cylinder(d = pd, h = plate_t + boss_h + 2 + below);
 }
 
-module fitcheck(at, d, extra, below) {
+// OpenSCAD cannot pass modules as values: `fitcheck(at_probes, …)` with
+// `at() …` looks up a module literally named `at` and ignores the argument,
+// so every seat/jam check collapsed to intersection(){nuggs_probe_cap()} —
+// the full cap (identical facet counts on empty and interferes alike; CI
+// Manifold reported 12534 for all four). Dispatch on a role string instead,
+// which also keeps probe vs gland placement distinct when probe_d == gland_d.
+module fitcheck(role, d, extra, below) {
     intersection() {
         nuggs_probe_cap();
-        at() grip_proxy(d, extra, below);
+        if (role == "gland") at_gland()  grip_proxy(d, extra, below);
+        else                 at_probes() grip_proxy(d, extra, below);
     }
 }
 
-module probe_seats() { fitcheck(at_probes, probe_d, 0, probe_len); }
+module probe_seats() { fitcheck("probe", probe_d, 0, probe_len); }
 module probe_jams()  {
-    fitcheck(at_probes, probe_d, grip_clearance + jam_oversize, probe_len);
+    fitcheck("probe", probe_d, grip_clearance + jam_oversize, probe_len);
 }
-module gland_seats() { fitcheck(at_gland, gland_d, 0, 8); }
+module gland_seats() { fitcheck("gland", gland_d, 0, 8); }
 module gland_jams()  {
-    fitcheck(at_gland, gland_d, grip_clearance + jam_oversize, 8);
+    fitcheck("gland", gland_d, grip_clearance + jam_oversize, 8);
 }
 
 // ---------------------------------------------------------------------------
