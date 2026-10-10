@@ -18,7 +18,11 @@
 #      element and overlapping labels
 #   9. fusecheck selftest (scripts/fusecheck-check.sh --selftest): the
 #      ci.fusecheck bound grammar — legacy, MIN MAX, =N, malformed, exit-4 —
-#      every negative row asserted to fire on committed fixtures (issue #627)
+#      every negative row asserted to fire on committed fixtures (issue #627),
+#      plus the include-closure control proof (issue #766)
+#   9b. scad-closure selftest (scripts/scad-closure.sh --selftest): the
+#      include-closure `part ==` branch proof still finds a parent / two-hop
+#      branch and still refuses a name nowhere in the closure
 # Run before committing. For full STL+PNG output use scripts/render.sh.
 set -euo pipefail
 
@@ -216,6 +220,11 @@ fi
 # the two fixture renders; no skip path — a skipped selftest is exactly the
 # silent green this exists to close, so CI installs printcheck in every job
 # that runs check.sh.
+echo "-- scad-closure selftest: scripts/scad-closure.sh --selftest"
+if ! ./scripts/scad-closure.sh --selftest; then
+  fail=1
+fi
+
 echo "-- fusecheck selftest: scripts/fusecheck-check.sh --selftest"
 if ! ./scripts/fusecheck-check.sh --selftest; then
   fail=1
@@ -580,21 +589,43 @@ if ! ./scripts/reviewer-perms-check.sh; then
   fail=1
 fi
 
-# Reviewer MCP posting tool: the Jane/Drik reviewers' ONE write surface is the
-# post_review MCP tool (.claude/reviewer-post/reviewer_mcp.py, issue #764) —
-# a JSON-argument tool because a multi-line review body cannot pass the
-# dontAsk Bash matcher under any quoting, which is the hole that kept every
-# workflow review round from posting its sign-off. Its --selftest proves the
-# invariants a live run cannot show: the sign-off marker is assembled
-# server-side from validated sha/verdict/fuse fields (malformed markers are
-# unpostable), caller-supplied JANE/DRIK_SIGNOFF HTML comments in the body
-# are refused so one reviewer cannot satisfy the other identity, the marker
-# family follows the trusted REVIEWER_ID env so a Jane session cannot forge a
-# DRIK sign-off, the target PR is pinned to REVIEWER_PR,
-# and the one-post-per-run cap spans the chain walk cross-process — the same
-# firing-guard discipline the perms-checks follow.
+# Reviewer MCP posting tool: Jane/Drik's ONE write is post_review
+# (.claude/reviewer-post/reviewer_mcp.py, issue #764); the coach's comment
+# write is post_coach on the same server (issue #806) — JSON-argument tools
+# because a multi-line gh --body cannot pass the dontAsk Bash matcher, which
+# is the hole that let workflow rounds exit 0 having posted nothing. The
+# coach still pushes iterations (Write/Edit + git stay allowed). --selftest
+# proves the sign-off marker is assembled server-side, caller-supplied
+# JANE/DRIK_SIGNOFF/PM_TRIAGE/COACH_LOCK HTML comments are refused, the
+# marker family follows
+# REVIEWER_ID, post_coach requires REVIEWER_ID=coach, the target PR is
+# pinned to REVIEWER_PR, and the walk cap spans the chain via
+# REVIEWER_POST_STATE.
 echo "-- reviewer-post MCP selftest: .claude/reviewer-post/reviewer_mcp.py --selftest"
 if ! python3 .claude/reviewer-post/reviewer_mcp.py --selftest; then
+  fail=1
+fi
+
+# Reviewer deny-rule runtime canary (issue #776): the FILE half above is a
+# Python MODEL of the matcher. This --selftest is the harness for the canary
+# that extracts the REAL matcher from the Claude Code build the pinned
+# action SHA installs (docs/actions-security.md, CR-A). The live extract
+# (and its auto-review.yml SHA-pin sync) lives in
+# .github/workflows/reviewer-deny-canary.yml — dispatchable, not a
+# required / ci-ok check. Keep pin-drift out of this selftest: check.sh
+# runs in scad-check, which ci-ok needs, so a pin bump would otherwise
+# block the merge gate until the canary constants match.
+echo "-- reviewer-deny-canary selftest: scripts/reviewer-deny-canary.sh --selftest"
+if ! ./scripts/reviewer-deny-canary.sh --selftest; then
+  fail=1
+fi
+
+# Coach-lock presence pin (issue #806): a ship-step success is not a
+# completed coach round unless an Actions-bot comment from this run
+# ends with the assembled `<!-- COACH_LOCK -->` + footer suffix the
+# posting tool writes (a lock from an earlier coach run does not count).
+echo "-- coach-lock-check selftest: scripts/coach-lock-check.sh --selftest"
+if ! ./scripts/coach-lock-check.sh --selftest; then
   fail=1
 fi
 
@@ -684,6 +715,20 @@ fi
 # marker, and only the real fusecheck STRONG WARN cell — PR #634).
 echo "-- reviewer-signoff selftest: scripts/reviewer-signoff.sh --selftest"
 if ! ./scripts/reviewer-signoff.sh --selftest; then
+  fail=1
+fi
+
+# reviewer-posted artifact check (scripts/reviewer-posted.sh, issue #762): the
+# reviewer-outcome reader auto-review.yml's chain walk and round stamp key on —
+# did THIS reviewer's MCP-assembled sign-off for THIS head sha land from
+# github-actions[bot] (author+suffix bound, discussion_r4185453576)? An exit-0
+# reviewer link that posted nothing used to read as success and was stamped a
+# completed round (#755/#756), so the selftest is the only thing that proves
+# the reader still passes a trusted MCP post, still rejects a planted/wrong-
+# author/stale-sha/silent/impostor one, and still refuses (rather than
+# answering `false`) a typo'd reviewer or sha.
+echo "-- reviewer-posted selftest: scripts/reviewer-posted.sh --selftest"
+if ! ./scripts/reviewer-posted.sh --selftest; then
   fail=1
 fi
 

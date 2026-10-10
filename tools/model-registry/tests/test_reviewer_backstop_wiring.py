@@ -22,6 +22,7 @@ parser) so the pin reads on its own.
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -36,14 +37,25 @@ from test_workflow_drift import (
 
 REVIEWER_BACKSTOP = ".claude/reviewer-settings.json"
 COACH_BACKSTOP = ".claude/design-coach-settings.json"
-# The posting surface (issue #764): the Jane/Drik ship steps must also carry
-# the reviewer MCP server and pin its trusted env, or the reviewers relapse
-# into having NO postable write (every round then ends with denials and an
-# exit-0 job that posted nothing — the bug this closes). PM triage and the
-# coach post no sign-off, so they stay on reads only.
+# The posting surface (issues #764 / #772 / #806): Jane, Drik and pm-triage
+# ship steps must carry the reviewer MCP server and pin its trusted env, or
+# they relapse into having NO postable write (every round then ends with
+# denials and an exit-0 job that posted nothing — the bug this closes). The
+# coach uses the same server with a *different* tool and a wider
+# --allowedTools so git push still works.
 POST_CONFIG = ".claude/reviewer-post/reviewer-mcp.json"
-POST_TOOL = "mcp__reviewer__post_review"
-POST_JOBS = {"jane-review": "jane", "drik-review": "drik"}
+# job → (REVIEWER_ID, allowed MCP tool)
+POST_JOBS = {
+    "jane-review": ("jane", "mcp__reviewer__post_review"),
+    "drik-review": ("drik", "mcp__reviewer__post_review"),
+    "pm-triage": ("pm", "mcp__reviewer__post_triage"),
+}
+COACH_POST_TOOL = "mcp__reviewer__post_coach"
+COACH_LOCK_CHECK_SHOW = (
+    '/usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh"'
+)
+COACH_POST_JOB = "design-coach"
+COACH_ALLOWED_KEEP = ("Write", "Edit", "Bash")
 POST_PR = "${{ github.event.pull_request.number }}"
 POST_STATE = "${{ runner.temp }}/reviewer-posts"
 # job → the deny backstop its ship steps pass. The coach's differs because it
@@ -159,7 +171,7 @@ def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
     out for the tamper negative controls."""
     assert (REPO_ROOT / POST_CONFIG).is_file(), (
         f"{POST_CONFIG} is missing — the reviewers have no postable write")
-    for job, who in POST_JOBS.items():
+    for job, (who, tool) in POST_JOBS.items():
         block = _without_comments(_job_blocks(text)[job])
         for n, chunk in enumerate(_ship_chunks(block), 1):
             at = f"auto-review.yml [{job}] ship step {n}"
@@ -168,17 +180,17 @@ def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
             assert configs == [POST_CONFIG], (
                 f"{at} passes --mcp-config {configs or 'none'}, not exactly "
                 f"[{POST_CONFIG!r}] — the reviewer posts via that server or "
-                f"not at all (issue #764)")
+                f"not at all (issue #764/#772)")
             tools = _flag(args, "--allowedTools")
             allowed = tools[0].strip('"').split(",") if tools else []
-            assert len(tools) == 1 and POST_TOOL in allowed, (
-                f"{at} does not allow {POST_TOOL} — the session would be "
+            assert len(tools) == 1 and tool in allowed, (
+                f"{at} does not allow {tool} — the session would be "
                 f"denied on its only write surface")
             env = _step_env(chunk)
             assert env.get("REVIEWER_ID") == who, (
                 f"{at} sets REVIEWER_ID={env.get('REVIEWER_ID')!r}, not "
-                f"{who!r} — the env selects the sign-off family (JANE_ vs "
-                f"DRIK_), so a wrong value posts the wrong reviewer's marker")
+                f"{who!r} — the env selects the marker family, so a wrong "
+                f"value posts the wrong identity's marker")
             assert env.get("REVIEWER_PR") == POST_PR, (
                 f"{at} sets REVIEWER_PR={env.get('REVIEWER_PR')!r}, not the "
                 f"workflow's PR — the posting server pins its target to this "
@@ -192,6 +204,134 @@ def _assert_reviewer_steps_carry_their_post_surface(text: str) -> None:
 
 def test_every_reviewer_ship_step_carries_the_post_surface():
     _assert_reviewer_steps_carry_their_post_surface(_workflow_text())
+
+
+def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
+    """Coach ship steps load post_coach AND keep Write/Edit/Bash.
+
+    Copying Jane's read-only --allowedTools onto the coach is the #806
+    containment trap: comments would post but iterations could not push.
+    """
+    assert (REPO_ROOT / POST_CONFIG).is_file()
+    block = _without_comments(_job_blocks(text)[COACH_POST_JOB])
+    chunks = _ship_chunks(block)
+    assert chunks, "auto-review.yml [design-coach]: no ship step found"
+    assert COACH_LOCK_CHECK_SHOW in block, (
+        "auto-review.yml [design-coach] does not extract coach-lock-check.sh "
+        "from base.sha — a workspace copy the agent can rewrite would stamp "
+        "the round complete (issue #806)")
+    assert "./scripts/coach-lock-check.sh" not in block, (
+        "auto-review.yml [design-coach] still runs the workspace "
+        "coach-lock-check.sh — the completeness pin would be PR-controlled")
+    for n, chunk in enumerate(chunks, 1):
+        at = f"auto-review.yml [design-coach] ship step {n}"
+        args = _claude_args(chunk)[0]
+        configs = _flag(args, "--mcp-config")
+        assert configs == [POST_CONFIG], (
+            f"{at} passes --mcp-config {configs or 'none'}, not exactly "
+            f"[{POST_CONFIG!r}] — the coach posts via that server or not at all")
+        tools = _flag(args, "--allowedTools")
+        allowed = tools[0].strip('"').split(",") if tools else []
+        assert len(tools) == 1 and COACH_POST_TOOL in allowed, (
+            f"{at} does not allow {COACH_POST_TOOL} — the session would be "
+            "denied on its comment write (issue #806)")
+        for other in {tool for _, tool in POST_JOBS.values()}:
+            assert other not in allowed, (
+                f"{at} allows {other} — the coach must not hold a "
+                "Jane/Drik/PM posting tool")
+        for keep in COACH_ALLOWED_KEEP:
+            assert keep in allowed, (
+                f"{at} dropped {keep} from --allowedTools — copying Jane's "
+                "read-only list onto the coach would block git push")
+        env = _step_env(chunk)
+        assert env.get("REVIEWER_ID") == "coach", (
+            f"{at} sets REVIEWER_ID={env.get('REVIEWER_ID')!r}, not 'coach'")
+        assert env.get("REVIEWER_PR") == POST_PR, (
+            f"{at} sets REVIEWER_PR={env.get('REVIEWER_PR')!r}, not the "
+            "workflow's PR")
+        assert env.get("REVIEWER_POST_STATE") == POST_STATE, (
+            f"{at} sets REVIEWER_POST_STATE="
+            f"{env.get('REVIEWER_POST_STATE')!r}, not {POST_STATE!r}")
+        assert env.get("PYTHONPATH") == '""', (
+            f"{at} does not clear PYTHONPATH — a GITHUB_ENV write from an "
+            "earlier Bash link would inject sitecustomize into the posting "
+            "server even under /usr/bin/python3")
+        assert env.get("PYTHONNOUSERSITE") == '"1"', (
+            f"{at} does not set PYTHONNOUSERSITE=1 — user-site sitecustomize "
+            "would still load without isolated mode")
+        assert env.get("NODE_OPTIONS") == '""', (
+            f"{at} does not clear NODE_OPTIONS — a GITHUB_ENV write from an "
+            "earlier Bash link would --require attacker code into the Node "
+            "claude-code-action and its posting MCP child")
+        assert env.get("NODE_PATH") == '""', (
+            f"{at} does not clear NODE_PATH — a GITHUB_ENV write would inject "
+            "modules into the Node action the same way PYTHONPATH does")
+        assert env.get("LD_AUDIT") == '""', (
+            f"{at} does not clear LD_AUDIT — a GITHUB_ENV write from an "
+            "earlier Bash link would load attacker ELF audit code into the "
+            "Node action and posting MCP child")
+        for key in ("BASH_ENV", "ENV"):
+            assert env.get(key) == '""', (
+                f"{at} does not clear {key} — a GITHUB_ENV write from an "
+                "earlier Bash link would be sourced by the first bash child "
+                "under GITHUB_TOKEN / REVIEWER_* / provider keys")
+        assert env.get("GIT_CONFIG_VALUE_2") == "/dev/null", (
+            f"{at} does not re-pin core.hooksPath=/dev/null — a GITHUB_ENV "
+            "rewrite of GIT_CONFIG_* would run attacker hooks under the "
+            "coach's git push")
+        assert env.get("GIT_ALLOW_PROTOCOL") == "https", (
+            f"{at} does not re-pin GIT_ALLOW_PROTOCOL=https against a "
+            "GITHUB_ENV rewrite")
+
+
+def test_every_coach_ship_step_carries_the_post_surface():
+    _assert_coach_steps_carry_their_post_surface(_workflow_text())
+
+
+MCP_PYTHON = "/usr/bin/python3"
+
+
+def _assert_mcp_command_is_absolute(raw: str) -> None:
+    """PATH `python3` is GITHUB_PATH-poisonable after a Bash coach link.
+    ``-I`` is isolated mode so PYTHONPATH/PYTHONHOME from GITHUB_ENV cannot
+    inject sitecustomize into the posting server."""
+    data = json.loads(raw)
+    cmd = data["mcpServers"]["reviewer"]["command"]
+    args = data["mcpServers"]["reviewer"]["args"]
+    assert cmd == MCP_PYTHON, (
+        f"{POST_CONFIG} command is {cmd!r}, not {MCP_PYTHON} — a PATH-relative "
+        "python3 is GITHUB_PATH-poisonable after a failed Bash-capable coach "
+        "link, and claude-code-action looks up the command before "
+        "--allowedTools applies"
+    )
+    assert args and args[0] == "-I", (
+        f"{POST_CONFIG} args are {args!r}, not starting with -I — "
+        "/usr/bin/python3 still loads PYTHONPATH sitecustomize without "
+        "isolated mode"
+    )
+
+
+def test_posting_mcp_uses_absolute_python():
+    _assert_mcp_command_is_absolute(
+        (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8"))
+
+
+def test_posting_mcp_guard_rejects_path_python3():
+    raw = (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8").replace(
+        f'"{MCP_PYTHON}"', '"python3"')
+    assert raw != (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8"), (
+        "tamper did not land — the fixture is stale")
+    with pytest.raises(AssertionError, match="PATH-relative"):
+        _assert_mcp_command_is_absolute(raw)
+
+
+def test_posting_mcp_guard_rejects_missing_isolated_mode():
+    raw = (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8").replace(
+        '"-I", ', "")
+    assert raw != (REPO_ROOT / POST_CONFIG).read_text(encoding="utf-8"), (
+        "tamper did not land — the fixture is stale")
+    with pytest.raises(AssertionError, match="isolated mode"):
+        _assert_mcp_command_is_absolute(raw)
 
 
 def test_backstop_table_covers_every_reviewer_job():
@@ -283,12 +423,60 @@ def test_wiring_guard_rejects_a_tampered_step(job, step, old, new, match):
     # The state env dropped entirely.
     ("drik-review", -1, "          REVIEWER_POST_STATE: ${{ runner.temp }}"
      "/reviewer-posts\n", "", "REVIEWER_POST_STATE"),
+    # pm-triage: dropping the posting server is the #772 silent-no-post again.
+    ("pm-triage", 0, " --mcp-config .claude/reviewer-post/reviewer-mcp.json",
+     "", "--mcp-config"),
+    ("pm-triage", 2,
+     '--allowedTools "mcp__reviewer__post_triage,Read,Grep,Glob"',
+     '--allowedTools "Read,Grep,Glob"', "only write surface"),
+    ("pm-triage", 4, "REVIEWER_ID: pm", "REVIEWER_ID: jane",
+     "REVIEWER_ID"),
 ])
 def test_post_surface_guard_rejects_a_tampered_step(job, step, old, new, match):
     # NEGATIVE CONTROLS for the posting-surface pin, same discipline.
     tampered = _tamper(_workflow_text(), job, step, old, new)
     with pytest.raises(AssertionError, match=match):
         _assert_reviewer_steps_carry_their_post_surface(tampered)
+
+
+@pytest.mark.parametrize("step,old,new,match", [
+    (0, " --mcp-config .claude/reviewer-post/reviewer-mcp.json",
+     "", "--mcp-config"),
+    (1,
+     '--allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash"',
+     '--allowedTools "mcp__reviewer__post_review,Read,Grep,Glob"',
+     "post_coach"),
+    (2,
+     '--allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash"',
+     '--allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob"',
+     "Write"),
+    (3, "REVIEWER_ID: coach", "REVIEWER_ID: jane",
+     "REVIEWER_ID"),
+    (4,
+     "REVIEWER_PR: ${{ github.event.pull_request.number }}",
+     "REVIEWER_PR: 1", "REVIEWER_PR"),
+    (5,
+     "REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts",
+     "REVIEWER_POST_STATE: reviewer-posts", "REVIEWER_POST_STATE"),
+    (0, '          PYTHONPATH: ""\n', "", "PYTHONPATH"),
+    (1, '          NODE_OPTIONS: ""\n', "", "NODE_OPTIONS"),
+    (2, '          LD_AUDIT: ""\n', "", "LD_AUDIT"),
+    (3, '          BASH_ENV: ""\n', "", "BASH_ENV"),
+    (4, "GIT_CONFIG_VALUE_2: /dev/null", "GIT_CONFIG_VALUE_2: .githooks",
+     "hooksPath"),
+])
+def test_coach_post_surface_guard_rejects_a_tampered_step(step, old, new, match):
+    tampered = _tamper(_workflow_text(), "design-coach", step, old, new)
+    with pytest.raises(AssertionError, match=match):
+        _assert_coach_steps_carry_their_post_surface(tampered)
+
+
+def test_coach_lock_check_step_cannot_be_dropped():
+    text = _workflow_text()
+    dropped = text.replace(COACH_LOCK_CHECK_SHOW, "true", 1)
+    assert dropped != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="coach-lock-check"):
+        _assert_coach_steps_carry_their_post_surface(dropped)
 
 
 def test_post_surface_guard_rejects_a_missing_server():

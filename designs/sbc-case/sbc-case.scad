@@ -308,7 +308,8 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
         }
         // lid -X,+Y corner at print pose (outer face down), cropped in
         // assembled coords — the flip lands it on the -Y side of the plate,
-        // clear of the base corner: plate, register lip with its post notch,
+        // clear of the base corner: plate, register lip (the post-notch arc
+        // stays on the full lid, not in this crop — PM triage, B5 comment fix),
         // lid-screw hole. The crop must reach lid_top_z, not base_top_z — the
         // plate sits ABOVE base_top_z, and a base-height crop leaves the lip
         // ring standing on a 0.5 mm plate sliver (measured: crop spanned

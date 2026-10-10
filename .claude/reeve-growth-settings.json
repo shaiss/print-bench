@@ -110,7 +110,9 @@
       "mcp__oracle",
       "mcp__wright",
       "mcp__reeve_signoff",
-      "mcp__growth_twitter"
+      "mcp__growth_twitter",
+      "mcp__reviewer",
+      "mcp__reviewer__post_review"
     ]
   }
 }

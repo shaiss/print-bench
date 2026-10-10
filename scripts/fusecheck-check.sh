@@ -17,8 +17,11 @@
 #                                  # grammar — legacy `<min>`, two-sided
 #                                  # `<min> <max>`, `=N` — plus the malformed
 #                                  # line and the exit-4 hard-fail path, every
-#                                  # negative row asserted to fire. Run by
-#                                  # scripts/check.sh (issue #627).
+#                                  # negative row asserted to fire, plus the
+#                                  # include-closure control proof (issue #766:
+#                                  # a branch in an included parent counts; a
+#                                  # branch nowhere in the closure still FAILs).
+#                                  # Run by scripts/check.sh (issue #627).
 #
 # A print-in-place mechanism that welds shut still exports watertight and —
 # for a living hinge — as ONE connected body, so printcheck cannot see it; and
@@ -76,6 +79,12 @@
 # `ok    fusecheck <name>: …` / `warn  fusecheck <name>: …` /
 # `FAIL  fusecheck <name>: …` — byte-identical to the lines the inline block
 # used to emit.
+
+# Include-closure part-branch proof (issue #766). Sourced, not copied: the
+# same function gate.sh's ci.fitchecks block calls. Always sourced so a
+# `source scripts/fusecheck-check.sh` (gate.sh) gets the helper too.
+# shellcheck source=scripts/scad-closure.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scad-closure.sh"
 
 # The runner. Callers must have `fail` defined (gate.sh does; the executed
 # modes below set it) and, for a manifest with a `control` line,
@@ -176,8 +185,8 @@ fusecheck_gate() {
           # string somewhere in the file — a part with no branch renders empty,
           # counts 0 bodies, and would satisfy any <max> vacuously.
           if ! [[ "$uarg1" =~ ^[A-Za-z0-9_-]+$ ]] \
-             || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${uarg1}\"" "$src"; then
-            echo "FAIL  fusecheck ${name}: no 'part == \"${uarg1}\"' dispatch branch in ${src} — a control with no branch renders empty and can never fuse"
+             || ! closure_part_branch "$src" "$uarg1"; then
+            echo "FAIL  fusecheck ${name}: no 'part == \"${uarg1}\"' dispatch branch in the include closure of ${src} — a control with no branch renders empty and can never fuse"
             fail=1
             continue
           fi
@@ -276,9 +285,10 @@ fusecheck_selftest() {
   local mf out ffail
   run_fx() {
     mf="$1"
+    local fxsrc="${2:-$fxscad}"
     out="${scratch}/$(basename "$mf").log"
     fail=0
-    fusecheck_gate "$label" "$fxscad" "$mf" "${stls[@]}" > "$out" 2>&1
+    fusecheck_gate "$label" "$fxsrc" "$mf" "${stls[@]}" > "$out" 2>&1
     ffail="$fail"
   }
   # Expectation helpers — the negative controls of this selftest: a missing
@@ -346,6 +356,20 @@ fusecheck_selftest() {
     '^FAIL  fusecheck .*malformed assert line .*separable\.stl 2 1'
   expect "the non-numeric line to FAIL the parse" \
     '^FAIL  fusecheck .*malformed assert line .*separable\.stl 2 x'
+  expect_flag 1
+
+  # --- include-closure control proof (issue #766): dispatch two hops up
+  # through include, not in the entry file. The control render is live.
+  run_fx "${fxdir}/pass-closure.fusecheck" "${fxdir}/closure-child.scad"
+  expect "an inherited fused control to pass through the include closure" \
+    '^ok    fusecheck .*control fused stays 1 body'
+  refuse "any FAIL on a live inherited dispatcher" '^FAIL'
+  expect_flag 0
+
+  # --- refusal half: a part name nowhere in the closure still FAILs -------
+  run_fx "${fxdir}/fail-closure-missing.fusecheck" "${fxdir}/closure-child.scad"
+  expect "a missing closure branch to FAIL the control proof" \
+    '^FAIL  fusecheck .*no .part == "nope". dispatch branch in the include closure'
   expect_flag 1
 
   if [[ "$missed" -ne 0 ]]; then
