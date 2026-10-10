@@ -51,12 +51,9 @@ interior_h = 24;
 lip_depth = 2.5;
 lip_t = 2.0;
 
-// Nominal lip clearance (mm); coupon crop pad is calibrated at this value.
-fit_clearance_nominal = 0.25;
-
 /* [Fit & tolerances] */
 // Lid register lip vs cavity wall (mm) — tune on the coupon first
-fit_clearance = fit_clearance_nominal;
+fit_clearance = 0.25;
 // 45° lead-in on the lip's entering (cavity) edge — feel only; fitchecks
 // prove clearance at full seat (Jane, PM B5). Tune on the coupon first.
 lip_lead_chamfer = 0.45;
@@ -95,6 +92,11 @@ lid_screw = M3_cap_screw;
 /* [Quality] */
 // Production value (64); 32 is fine while iterating.
 $fn = 64;
+
+/* [Hidden] */
+// Coupon crop pad is calibrated at this value — must match the shipped
+// fit_clearance default above (Customizer only lists literal assignments).
+fit_clearance_nominal = 0.25;
 
 // ── Derived from the vitamin, never hand-typed (G4: measure the export) ──
 board_l  = pcb_length(board);     // 85
@@ -361,8 +363,8 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
         }
         // lid -X,+Y corner at print pose (outer face down), cropped in
         // assembled coords — the flip lands it on the -Y side of the plate,
-        // clear of the base corner: plate, register lip with its post notch,
-        // lid-screw hole. The crop must reach lid_top_z, not base_top_z — the
+        // clear of the base corner: plate, register lip with its post notch.
+        // The crop must reach lid_top_z, not base_top_z — the
         // plate sits ABOVE base_top_z, and a base-height crop leaves the lip
         // ring standing on a 0.5 mm plate sliver (measured: crop spanned
         // z[2.0,5.0] at print pose). Flip it over and drop it on the base
