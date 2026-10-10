@@ -143,8 +143,10 @@ here (adapter geometry untouched):
 
 1. **Coupon camera.** New frozen `previews/cameras.conf` line `coupon`
    (plus `CAMERAS.md` row): one ring + its engraved numeral, neighbor /
-   strip edge for scale, 55° elevation so the 0.6 mm cut shades. Embedded
-   in the README Print-first block (`previews/coupon.png`).
+   strip edge for scale, 55° elevation so the 0.6 mm cut shades, via
+   `render | part="coupon"` on the entry `.scad` (same shape as cutaway —
+   `src=` belongs in the opts field, not defines). Embedded in the README
+   Print-first block (`previews/coupon.png`).
 2. **Corridor legend declined.** Facing ring OD edges leave ~7.8 mm
    between rows; size-8 Bold (em box ~8 mm tall, same as the numerals)
    has no real margin there. Corridor stays clean; the ×100 key remains
