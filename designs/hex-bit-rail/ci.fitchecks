@@ -1,0 +1,12 @@
+# Boolean fit checks — never printed or sliced, rendered by gate.sh.
+# fit-bit: a NOMINAL steel shank (bit_af, no clearance) seated exactly as the
+#   bit seats — bottom on the pocket floor — intersected with the production
+#   rail solid. Zero facets = the shank clears every pocket face by
+#   hex_fit/2 at the production fit. Meaningful, not coincident: hex_fit is
+#   0.1, so the clearance is real volume, not a surface kiss.
+# fit-bit-ctrl: the same boolean with the shank grown 0.4 across flats —
+#   0.2 per side of real interference over the full 12 mm bore. The
+#   mandatory negative control: if this ever renders empty, the empty check
+#   above is proving nothing.
+fit-bit       empty
+fit-bit-ctrl  interferes
