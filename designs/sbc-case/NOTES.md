@@ -351,6 +351,19 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     physical print) remains. Two queue-tier filings: Jane's lid-seating feel →
     B10; Drik's exploded-view legibility → B8. `iso.png` byte-checked valid (a
     reviewer reader refusal, not a corrupt file). Freeze held rounds 3–12.
+26. **Round 13 — the last caption straggler (PR #397).** One act-now, the
+    page-honesty exception's third use: the `product-populated` italic caption
+    (README) still said "gold header pins through the wall" — the round-3 wording
+    that outlived round 10's fix of the identical false claim in the notch
+    alt-text and CAMERAS.md, so the page contradicted its own corrected exhibit a
+    screen apart (Drik's image tool made the same misread unprompted). Fixed to
+    "seated just below the notch lip", consistent with CAMERAS.md's "pin tops fall
+    ~0.6 mm below the notch lip … the pins stay behind the wall". Bundled with the
+    carried round-12/13 charter bookkeeping in one push (Vera's economy: reset the
+    sign-offs once). Queued to B10: the "2 a.m. reflash needs no tools" tagline,
+    coupled to the field-test entry. Queued to B11: the finger guard must be a
+    co-planar grille in the lid plate, never a bar across the aperture
+    (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
 27. **B5 — register-lip lead-in chamfer (draft PR).** Jane, round 2 / PM B5:
     the 2.5 mm register lip was a straight vertical outer knife-edge. Seating
     the lid slightly crooked could catch on the cavity rim. Added
@@ -383,20 +396,11 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     part stays 100/100. The coupon rehearses −X wall register, the −X lip face,
     the lower +Y lip band and lead-in on the straight −X seat. The outer
     −X,+Y corner arc and the post-notch arc above that band are only on the full
-    lid. No fin; base/lid part STLs unchanged.
-26. **Round 13 — the last caption straggler (PR #397).** One act-now, the
-    page-honesty exception's third use: the `product-populated` italic caption
-    (README) still said "gold header pins through the wall" — the round-3 wording
-    that outlived round 10's fix of the identical false claim in the notch
-    alt-text and CAMERAS.md, so the page contradicted its own corrected exhibit a
-    screen apart (Drik's image tool made the same misread unprompted). Fixed to
-    "seated just below the notch lip", consistent with CAMERAS.md's "pin tops fall
-    ~0.6 mm below the notch lip … the pins stay behind the wall". Bundled with the
-    carried round-12/13 charter bookkeeping in one push (Vera's economy: reset the
-    sign-offs once). Queued to B10: the "2 a.m. reflash needs no tools" tagline,
-    coupled to the field-test entry. Queued to B11: the finger guard must be a
-    co-planar grille in the lid plate, never a bar across the aperture
-    (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
+    lid. No fin; base/lid part STLs unchanged. **Docs round (2026-10-10, PM
+    triage `23adba3`):** `lip-lead` camera tightened in its first review round
+    (round-2b `notch` precedent — reframe before freeze); README states the
+    coupon stays honest to about +0.10 on `fit_clearance`; CAMERAS.md names fan
+    insert bosses. `sbc-case.scad` untouched.
 
 ## Print settings
 
