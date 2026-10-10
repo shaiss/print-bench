@@ -58,9 +58,11 @@ preview, or CI's posted output on the new head. Evidence, not re-derivation.
    denied under `--permission-mode dontAsk` no matter how it is quoted — the
    same hole that left Jane/Drik posting nothing (#764). In the auto-review
    job, post **every** GitHub comment through **`mcp__reviewer__post_coach`**
-   (JSON `body` argument: tables, pipes, newlines are fine). The tool appends
-   `<!-- COACH_LOCK -->` and the attribution footer; start the kickoff body
-   with `🎓 COACH-LOCK`. Do not use `gh pr comment` there.
+   (JSON `body` + `sha` arguments: tables, pipes, newlines are fine). The
+   tool appends `<!-- COACH_LOCK -->`, the per-head
+   `<!-- COACH_DONE sha=<40hex> -->` completion marker (issue #770 — pass
+   the PR head as `sha`) and the attribution footer; start the kickoff
+   body with `🎓 COACH-LOCK`. Do not use `gh pr comment` there.
 
    Attended, outside that job, the fallback that also passes the matcher is
    two steps: `Write` the markdown to a file, then a **single-line**
