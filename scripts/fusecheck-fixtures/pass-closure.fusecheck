@@ -1,0 +1,6 @@
+# Fusecheck fixture (scripts/fusecheck-check.sh --selftest, issue #766):
+# the control part `fused` lives two include hops away (closure-child.scad
+# → closure-mid.scad → fixtures.scad). The runner must accept it. Assert
+# rows reuse the already-rendered separable fixture.
+assert fusecheck-fixtures-separable.stl 2
+control fused 1
