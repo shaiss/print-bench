@@ -32,7 +32,8 @@ view lower down shows the green board and gold header pins seated just below the
   Ø37 fan aperture, four insert bosses on the inner face, lid-screw holes
   (~95 × 76 × 2.5 mm plate + 7 mm bosses)
 - `sbc-case-coupon` — two crops of the same case corner that nest; print it
-  first to tune the fits (~33 × 76 × 26 mm)
+  first to tune the fits (~33 × ~74 × 26 mm). Tune `fit_clearance` on the
+  coupon; the B5 lip lead-in chamfer needs no tuning.
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
@@ -75,9 +76,10 @@ strip of **adhesive feet** — **four carts, not five** separate hardware orders
 - **Feet:** stick four **adhesive rubber feet** on the floor — the case sits on
   a flat base, and feet keep it from walking when you plug a cable in one-handed.
 
-The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
+The closed assembled case — iso, top, front and bottom-iso (board and fan
+shown; bottom-iso includes the base bed face):
 
-![As-printed contact sheet](previews/contact-sheet.png)
+![Assembled case contact sheet](previews/contact-sheet.png)
 
 ## Parameters
 
@@ -85,6 +87,7 @@ The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 |---|---|---|
 | `board` | `RPI4` | NopSCADlib board type — standoffs follow its hole list |
 | `fit_clearance` | 0.25 mm | lid register lip vs cavity wall; tune on the coupon |
+| `lip_lead_chamfer` | 0.45 mm | 45° lead-in on the lid lip's entering edge; 0.4–0.5 mm useful band; two stepped rings at 0.2 mm layers (smoother at 0.16) |
 | `standoff_h` | 5 mm | board standoff height (4–6 per the brief) |
 | `interior_h` | 24 mm | interior height; sized over the tallest RPI4 connector |
 | `fan_type` | `fan40x11` | fan vitamin; aperture and boss pitch follow it |
@@ -107,7 +110,14 @@ the fan on blowing into the case.
 
 If a fit is off, tune it on the coupon (NOTES.md, "Print this first") and
 reprint only the affected part — the coupon is cropped from the same geometry,
-so what you feel there is what the full parts do.
+so what you feel there is what the full parts do. A printcheck thin-wall warning on the coupon after a `fit_clearance` bump can be a
+crop artifact — the coupon stays honest to about +0.10; past that, tune on the full
+`lid`; print and check the full `lid` if in doubt (NOTES decision 27).
+
+![Lid register lip lead-in chamfer at print pose](previews/lip-lead.png)
+
+*Lid at print pose (outer face down): 45° B5 lead-in on the cavity-entering edge
+of the −X register lip — 0.45 mm band; a fan insert boss in frame for scale.*
 
 ## Living with it
 

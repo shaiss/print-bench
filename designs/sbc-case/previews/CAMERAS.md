@@ -7,3 +7,4 @@
 | `ports` | low angle on the +X edge: USB-A / Ethernet cable clearance through the open skirt, the webbed vent row |
 | `board` | base tray alone from the −Y/above: the four standoffs generated from `pcb_screw_positions(RPI4)`, the through-bored lid-screw posts, skirt profile |
 | `notch` | bare tray with the Pi seated, three-quarter from +Y: the GPIO access notch cut down from the +Y wall top edge, sitting just above the seated 2×20 header — its pin tops fall ~0.6 mm below the notch lip, so a jumper/Dupont housing exits through it with the lid on (feature #4) while the pins stay behind the wall; the webbed vent row below |
+| `lip-lead` | `lid` at print pose (outer face down), close-up on the −X register lip run: the 45° B5 lead-in chamfer on the cavity-entering edge, with a fan insert boss in frame for scale |
