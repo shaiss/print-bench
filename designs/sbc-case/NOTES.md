@@ -364,6 +364,27 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
+27. **B6 — printed-foot parameter (PM backlog).** `printed_feet` (default
+    `false`) enables four corner **blind sockets** in the base bed face via
+    `base_foot_sockets()` (`foot_socket_d` 8 mm, `foot_socket_depth` 1 mm,
+    `foot_corner_inset`) and a separate printable **`foot`** part (`foot()`:
+    tread `foot_tread_d` × `foot_protrusion` below the floor, plug
+    `foot_plug_d()` × `foot_socket_depth` into the socket). One-piece downward
+    pads scored printcheck **67/100** (floor bridged between pads); coplanar
+    upward pads (R1) added no geometry below z = 0 (Drik R1 fail on PR #818).
+    R2 keeps the floor-down base support-free and puts real tread below the bed
+    plane. Print four feet (TPU preferred; PLA/PETG with tuned
+    `foot_fit_clearance`): **TPU press-fit**; **PLA/PETG need CA** (7.76 mm plug
+    in 8.00 mm bore, 1 mm engagement). Placement starts at `foot_corner_inset`
+    then shifts the **−X** sockets **+X** until each clears the generated board
+    standoff bosses (`foot_clear_r_boss()` = 7 mm boss + 8 mm socket + 0.5 mm
+    margin — at RPI4 the centres land at **(−31.16, ±26.1)** mm vs the old
+    (−35.25, ±26.1) that overlapped the (−39, ±24.5) bosses by ~3.4 mm in plan
+    and thinned the floor under those pilots to ~1 mm). Lid-screw posts at
+    (±40, ±32.75) still clear. A **0.2 mm bed-face flare** at each socket mouth
+    counters elephant foot on the first layer pinching the 0.12 mm radial
+    clearance. Default off keeps stock BOM, renders, and coupon unchanged.
+    Anti-walk benefit stays a **[hunch]** until B10.
 
 ## Print settings
 

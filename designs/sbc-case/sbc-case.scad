@@ -76,6 +76,30 @@ skirt_margin = 0.5;
 // header (~8.5 above the board)
 gpio_notch_bottom = 17.5;
 
+/* [Feet] */
+// Optional printed feet: blind sockets in the base + separate foot parts (no
+// adhesive dots). Default off so the stock BOM, renders and coupon stay on
+// adhesive rubber feet (PM.md B6).
+printed_feet = false;
+// Blind socket diameter in the base bed face (mm) — keep >= 0.8 mm printable
+foot_socket_d = 8;
+// Blind socket depth into the floor slab from z = 0 (mm); keep <= floor_t
+foot_socket_depth = 1.0;
+// How far each foot tread stands below the base bed face when installed (mm)
+foot_protrusion = 2;
+// Tread diameter on the separate foot part (mm)
+foot_tread_d = 10;
+// Radial clearance: plug_d = foot_socket_d - 2·clearance (mm); tune on a foot
+foot_fit_clearance = 0.12;
+// Foot-centre inset from the outer shell edge along X and Y (mm); starting
+// point before standoff/post clearance nudge (see foot_centre())
+foot_corner_inset = 12;
+// Minimum solid between a socket and a standoff boss or lid-screw post (mm)
+foot_feature_margin = 0.5;
+// Bed-face flare cut into each socket mouth (mm radial) — counters first-layer
+// elephant foot pinching the 0.12 mm plug clearance; only when printed_feet
+foot_socket_mouth_chamfer = 0.2;
+
 /* [Hardware] */
 // Heat-set insert for every M3 boss (lid screws, fan screws)
 insert_type = F1BM3;
@@ -167,6 +191,7 @@ module base() { //! printed base tray: floor, +Y wall, skirt rim, 4 insert posts
             for (i = [-1.5, -0.5, 0.5, 1.5])
                 translate([i * 15, cavity_y_half + wall / 2, 12])
                     vent_slot();
+            base_foot_sockets();
         }
         // four lid-screw posts with through insert holes (through so an M3x10
         // bottoms out in free space, not in plastic)
@@ -257,6 +282,53 @@ module vent_slot() { //! one stadium vent through the +Y wall
             rounded_square([12, 4.5], r = 2.2, center = true);
 }
 
+function foot_plug_d() = foot_socket_d - 2 * foot_fit_clearance;
+
+function foot_clear_r_boss() = standoff_d / 2 + foot_socket_d / 2 + foot_feature_margin;
+
+// Corner inset, then — on the −X corners only — shift +X until every board
+// standoff boss clears the socket (measured: inset (−35.25, ±26.1) overlapped
+// the RPI4 bosses at (−39, ±24.5) by ~3.4 mm in plan). +X corners and Y stay
+// on the inset; lid-screw posts at (±40, ±32.75) already clear at the inset.
+function foot_centre(sx, sy) =
+    let(fy = sy * (outer_w / 2 - foot_corner_inset),
+        fx0 = sx * (outer_l / 2 - foot_corner_inset),
+        min_b = foot_clear_r_boss(),
+        fx = sx == -1 ?
+            max([fx0,
+                for (h = pcb_holes(board))
+                    let(p = pcb_coord(board, h),
+                        dy = fy - p[1],
+                        sep2 = min_b * min_b - dy * dy)
+                    if (p[0] < -1 && sep2 > 0.01)
+                        p[0] + sqrt(sep2)
+            ]) : fx0)
+    [fx, fy];
+
+module base_foot_sockets() { //! blind cylindrical pockets in the bed face — only when enabled
+    if (printed_feet)
+        for (sx = [-1, 1], sy = [-1, 1])
+            translate(foot_centre(sx, sy))
+                union() {
+                    // mouth flare at the bed face (z = 0): wider opening, same pocket depth
+                    translate([0, 0, -0.01])
+                        cylinder(d1 = foot_socket_d + 2 * foot_socket_mouth_chamfer, d2 = foot_socket_d,
+                                 h = foot_socket_mouth_chamfer + 0.01);
+                    translate([0, 0, foot_socket_mouth_chamfer])
+                        cylinder(d = foot_socket_d, h = foot_socket_depth - foot_socket_mouth_chamfer + 0.02);
+                }
+}
+
+module foot() { //! one press-/glue-in foot: tread below the floor, plug into the socket
+    plug_d = foot_plug_d();
+    union() {
+        // tread prints on the bed; when installed it hangs below z = 0 on the base
+        cylinder(d = foot_tread_d, h = foot_protrusion);
+        translate([0, 0, foot_protrusion])
+            cylinder(d = plug_d, h = foot_socket_depth + 0.01);
+    }
+}
+
 // ── Vitamins at their assembled positions (default render) ─
 
 module board_vitamin() { translate([0, 0, board_z]) pcb(board); }
@@ -323,7 +395,7 @@ module fit_pins(dx = 0) {
             cylinder(d = pilot_d - pin_slop, h = standoff_h + 0.5);
 }
 
-part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
+part = "assembled"; // [assembled, base, base-board, lid, coupon, foot, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush]
 
 if (part == "assembled") {
     base();
@@ -344,6 +416,8 @@ if (part == "assembled") {
     translate([0, 0, lid_top_z]) rotate([180, 0, 0]) lid();
 } else if (part == "coupon") {
     coupon();
+} else if (part == "foot") {
+    foot();
 } else if (part == "fit-pins") {
     intersection() { base(); fit_pins(); }
 } else if (part == "fit-pins-shift") {
