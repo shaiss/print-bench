@@ -352,36 +352,38 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     B10; Drik's exploded-view legibility → B8. `iso.png` byte-checked valid (a
     reviewer reader refusal, not a corrupt file). Freeze held rounds 3–12.
 27. **B5 — register-lip lead-in chamfer (draft PR).** Jane, round 2 / PM B5:
-    the 2.5 mm register lip was a straight vertical outer knife-edge; seating
+    the 2.5 mm register lip was a straight vertical outer knife-edge. Seating
     the lid slightly crooked could catch on the cavity rim. Added
     `lip_lead_chamfer = 0.45` mm (Customizer, tunable 0.4–0.5) on the lip's
     **cavity tip** — assembled z = `base_top_z − lip_depth`, the outer
-    perimeter that enters the base first when lowering. Geometry: a
-    full `register_lip_profile()` depth intersected with
+    perimeter that enters the base first when lowering. Geometry: a full
+    `register_lip_profile()` depth intersected with
     `register_lip_outer_envelope()` (45° scaled outer rounded-rect band + full
-    extrusion above) so only the outer perimeter tapers; inner face and post
+    extrusion above) so only the outer perimeter tapers. Inner face and post
     notches stay on the main profile (Drik R1 on the first draft caught a scaled
-    whole-profile band that pinched post clearance). **Not a
-    fit fix** — the existing `ci.fitchecks` still prove clearance; this is
-    feel-only. **Print pose:** the lid prints outer-face-down (`part="lid"`);
-    the chamfer sits on the **top** of the standing lip (furthest from the bed),
-    a shallow outward flare within the 45° support-free ceiling (N4), not a
-    bridge across the plate.     Coupon inherits the same parameter (one source file). After the outer-only
-    fix, the lid crop's **+X** face (at x ≈ −33.6) bisected the +Y lip through
-    the chamfer band and left ~0.03 mm mesh slivers (coupon 92/100, base/lid
-    still 100/100) — not the crop top at 18.2 mm (y = 38.7, past the lid outer
-    at 38.1). Trimming +Y to 13.5 mm cleared printcheck but left a ~0.15 mm
-    fin and dropped most of the +Y lip (Drik R2). **R2 fix:** move the lid
-    crop +X to the lip inner and raise +Y to the tallest axis-aligned box
-    still 100/100 at default clearance.     **R3 fix (Drik):** derive lid-crop +X/+Y from `lip_xi` / `lip_yi` (1.0 mm
-    above inner +Y at default, shrinking 0.2 mm per +0.05 mm clearance above
-    0.25 so a +0.05 coupon step stays 100/100) instead of literal 14.35 mm /
-    `outer_l/2 − 42`. At +0.10 above default the coupon can still read 92/100
-    thin-wall from the crop plane — the full `lid` part stays 100/100. The
-    coupon rehearses −X wall register, the −X lip face, the lower +Y lip band
-    and lead-in on the straight −X seat; the outer −X,+Y corner arc and the
-    post-notch arc above that band are only on the full lid. No fin; base/lid
-    part STLs unchanged.
+    whole-profile band that pinched post clearance). **Not a fit fix** — the
+    existing `ci.fitchecks` still prove clearance; this is feel-only.
+    **Print pose:** the lid prints outer-face-down (`part="lid"`). The chamfer
+    sits on the **top** of the standing lip (furthest from the bed), a shallow
+    outward flare within the 45° support-free ceiling (N4), not a bridge across
+    the plate. The coupon inherits the same parameter (one source file).
+    After the outer-only chamfer fix, the lid crop's old **+X** face (at x ≈
+    −33.6) bisected the +Y lip through the chamfer band and left ~0.03 mm mesh
+    slivers (coupon 92/100; base/lid still 100/100). That was not the crop top at
+    18.2 mm (y = 38.7, past the lid outer at 38.1). Trimming +Y to 13.5 mm
+    cleared printcheck but left a ~0.15 mm fin and dropped most of the +Y lip
+    (Drik R2). **R2 fix:** move the lid crop +X to the lip inner and raise +Y to
+    the tallest axis-aligned box still 100/100 at default clearance. The
+    shipped crop's **+X** face sits at x ≈ −42.85 (−`lip_xi` + 0.15 mm
+    outboard), not the pre-R2 x ≈ −33.6 plane. **R3 fix (Drik):** derive
+    lid-crop +X/+Y from `lip_xi` / `lip_yi` (1.0 mm above inner +Y at
+    `fit_clearance_nominal`, pad shrinking 0.2 mm per +0.05 mm clearance above
+    nominal) instead of fixed literal crop sizes. At +0.10 above default the
+    coupon can still read 92/100 thin-wall from the crop plane — the full `lid`
+    part stays 100/100. The coupon rehearses −X wall register, the −X lip face,
+    the lower +Y lip band and lead-in on the straight −X seat. The outer
+    −X,+Y corner arc and the post-notch arc above that band are only on the full
+    lid. No fin; base/lid part STLs unchanged.
 26. **Round 13 — the last caption straggler (PR #397).** One act-now, the
     page-honesty exception's third use: the `product-populated` italic caption
     (README) still said "gold header pins through the wall" — the round-3 wording

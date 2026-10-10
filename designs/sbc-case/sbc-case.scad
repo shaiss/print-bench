@@ -51,9 +51,12 @@ interior_h = 24;
 lip_depth = 2.5;
 lip_t = 2.0;
 
+// Nominal lip clearance (mm); coupon crop pad is calibrated at this value.
+fit_clearance_nominal = 0.25;
+
 /* [Fit & tolerances] */
 // Lid register lip vs cavity wall (mm) — tune on the coupon first
-fit_clearance = 0.25;
+fit_clearance = fit_clearance_nominal;
 // 45° lead-in on the lip's entering (cavity) edge — feel only; fitchecks
 // prove clearance at full seat (Jane, PM B5). Tune on the coupon first.
 lip_lead_chamfer = 0.45;
@@ -332,7 +335,7 @@ module vitamin_washer()       { washer(M3_washer); }
 // coupon does not re-slice the B5 chamfer band (Drik R3; see NOTES 27).
 coupon_crop_y_min = 20.5; // shared −Y face for both corner crops
 coupon_lid_crop_above_yi = 1.0; // crop top = yi + this (below chamfer slice band)
-coupon_lid_crop_x_outboard = 0.15; // +X trim stays slightly outside lip_xi (R2 default)
+coupon_lid_crop_x_outboard = 0.15; // +X face at −lip_xi + this (≈ −42.85 at default)
 
 module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, post, generated standoff) in place, the lid's at print pose across the plate — flip the lid crop over and it nests on the base corner
     lip_xi = cavity_x_half - fit_clearance - lip_t;
@@ -340,7 +343,7 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
     // Above default clearance the lip/chamfer moves; trim +Y a hair so the
     // crop plane does not re-slice the band (measured: +0.05 needs ~0.2 mm).
     lid_crop_y_pad = coupon_lid_crop_above_yi
-        - max(0, fit_clearance - 0.25) * 4;
+        - max(0, fit_clearance - fit_clearance_nominal) * 4;
     lid_crop_xw = outer_l / 2 + 0.6 - lip_xi + coupon_lid_crop_x_outboard;
     lid_crop_yh = lip_yi + lid_crop_y_pad - coupon_crop_y_min;
     union() {
