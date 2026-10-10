@@ -164,4 +164,9 @@ brief's own warning: DS18B20 clones vary.
   interferes "passed" vacuously on the same solid). Fix: dispatch on a role
   string (`"probe"` / `"gland"`) and call `at_probes()` / `at_gland()`
   directly — still distinct when `probe_d == gland_d`, and the proxy `below`
-  depth parameter from that nit is kept.
+  depth parameter from that nit is kept. Re-measured with
+  `OPENSCAD_BIN=openscad-nightly OPENSCAD_ARGS=--backend=manifold` (CI's
+  render-gate engine): seats empty (0), `probe_jams` 1056 / `gland_jams`
+  402 facets (negative controls still fire; CGAL 2021.01 had reported
+  336/127 on the same geometry — tessellation differs, the empty/interferes
+  verdict does not).
