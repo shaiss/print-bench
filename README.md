@@ -466,7 +466,7 @@ surfaces studies awaiting a read live in
     a non-design PR and the `no-auto-review`/`signoff-override` labels pass so a
     required check never strands a PR it wasn't meant to gate. All the policy
     lives here behind a `--selftest` with a negative control per row
-  - `reviewer-posted.sh` — the reviewer-outcome reader `auto-review.yml`'s
+  - `reviewer-posted.sh` — check + diagnose; the reviewer-outcome reader `auto-review.yml`'s
     chain walk and round stamp key on (issues #762 / #770): did THIS
     reviewer's MCP-assembled per-head marker for THIS head sha land from
     `github-actions[bot]` (the posting identity `.claude/reviewer-post/
