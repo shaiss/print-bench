@@ -427,7 +427,8 @@ structure proof:
    by editing the vitamin value.
 2. **Register fit:** flip the lid corner over and drop it onto the base
    corner — the −X lip face should seat against the wall with light friction,
-   no force (feel the B5 lead-in on the straight −X approach). The crop
+   no force (feel the B5 lead-in on the straight −X approach). The lead-in is
+   set-and-leave; tune `fit_clearance`, not the chamfer. The crop
    includes the lower +Y lip band but not the full post notch or the outer
    −X,+Y corner arc; confirm those on the full lid. Tight → `fit_clearance`
    +0.05 steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM
