@@ -32,17 +32,22 @@ BUILD = os.path.join(os.path.dirname(__file__), "..", "..", "build")
 # Expected values — from the BRIEF and the design's parameters (issue #594):
 # what the mesh must measure, not what the .scad happens to type.
 BIT_AF = 6.35
+RAIL_L = 200.0   # pockets*pitch + 2*end_margin at production defaults
 RAIL_W = 40.0
+COUPON_L = 152.0  # 6*24 + 2*4
 FLOOR_T = 2.4
 MOUTH_BREAK = 0.6
 PARTS = {
     "hex-bit-rail-rail-short.stl": dict(
-        pockets=12, pitch=16.0, depth=12.0, fits=[0.1] * 12, label_w=0.0),
+        pockets=12, pitch=16.0, depth=12.0, fits=[0.1] * 12, label_w=0.0,
+        length=RAIL_L),
     "hex-bit-rail-rail-long.stl": dict(
-        pockets=12, pitch=16.0, depth=18.0, fits=[0.1] * 12, label_w=0.0),
+        pockets=12, pitch=16.0, depth=18.0, fits=[0.1] * 12, label_w=0.0,
+        length=RAIL_L),
     "hex-bit-rail-coupon.stl": dict(
         pockets=6, pitch=24.0, depth=12.0,
-        fits=[-0.15, -0.15, 0, 0, 0.15, 0.15], label_w=0.4),
+        fits=[-0.15, -0.15, 0, 0, 0.15, 0.15], label_w=0.4,
+        length=COUPON_L),
 }
 AF_TOL = 0.02        # hex flats are planar: tessellation-exact
 DEPTH_TOL = 0.05     # + the 0.01 floor-overshoot
@@ -105,11 +110,15 @@ def main():
                  f"watertight={mesh.is_watertight} (need 1 / True)")
         ext = mesh.extents
         # footprint: rails 200 x 40; coupon 152 x (18 + label protrusion)
+        ok_l = abs(ext[0] - exp["length"]) <= 0.1
         if "coupon" in fname:
             ok_w = (18.0 - 0.01) <= ext[1] <= (18.0 + exp["label_w"] + 0.05)
         else:
             ok_w = abs(ext[1] - RAIL_W) <= 0.1
         print(f"  footprint {ext[0]:.2f} x {ext[1]:.2f} x {ext[2]:.2f} mm")
+        if not ok_l:
+            fail(f"{fname}: length {ext[0]:.2f} outside expectation "
+                 f"(want {exp['length']:.1f})")
         if not ok_w:
             fail(f"{fname}: width {ext[1]:.2f} outside expectation")
         top_z = mesh.bounds[1][2]

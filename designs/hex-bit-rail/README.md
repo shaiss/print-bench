@@ -77,6 +77,7 @@ the cutaway render are selected with `part`.
 
 Drop a bit into a pocket — the 45° mouth break forgives a slightly
 off-angle start — and it stands ~13 mm proud, label up, gripped on all six
-flats. Pull straight out one-handed; the rail is stiff enough that
-extraction never tips it. Print the long rail for 50/75 mm bits: same
-pockets, deeper socket.
+flats. Pull straight out one-handed; whether the rail tips under a firm
+extraction is untested in a field pull (stiffness is designed in, not yet
+measured). Print the long rail for 50/75 mm bits: same pockets, deeper
+socket.

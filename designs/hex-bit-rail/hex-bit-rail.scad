@@ -198,9 +198,17 @@ module fit_check(grow = 0) {
 }
 
 // Section through the pocket axis: the fit you cannot see from outside.
+// Bits are solid here (not `%`): cameras.conf requests a full `render`,
+// which drops background-modifier geometry, so a seated bit shown via
+// assembly()'s `%` would vanish from cutaway / cutaway-close.
 module cutaway() {
     difference() {
-        assembly();
+        union() {
+            rail(pocket_depth_short);
+            for (i = [0 : 2])
+                translate([end_margin + pitch * (i + 0.5), 0, floor_t])
+                    hex_prism(bit_af, bit_len_short);
+        }
         translate([0, -rail_w, -1]) cube([rail_l, rail_w, 60]);
     }
 }
@@ -210,4 +218,5 @@ else if (part == "rail-long") rail(pocket_depth_long);
 else if (part == "fit-bit") fit_check();
 else if (part == "fit-bit-ctrl") fit_check(grow = 0.4);
 else if (part == "cutaway") cutaway();
-else assembly();
+else if (part == "assembly") assembly();
+else assert(false, str("unknown part: ", part));
