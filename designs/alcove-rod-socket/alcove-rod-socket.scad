@@ -14,7 +14,7 @@ include <styles/workshop-utility/style.scad> // family tokens; $fn set below
 /* [Part] */
 // What to render: the two printable parts, the fit coupons, the assembled
 // preview, or the boolean mate proofs (ci.fitchecks — never printed).
-part = "assembly"; // [assembly, boss, collar, thread-coupon, bore-coupon, fit-mate, fit-mate-ctrl, cutaway]
+part = "assembly"; // [assembly, boss, collar, collar-shallow, thread-coupon, bore-coupon, fit-mate, fit-mate-ctrl, cutaway]
 
 /* [Rod & socket] */
 // Rod barrel outer diameter, measured where it sits in the socket (mm)
@@ -22,8 +22,11 @@ rod_d = 40.0;
 // Diametral slip clearance added to rod_d for the socket bore (mm)
 rod_clearance = 0.6;
 // How deep the rod end plugs into the collar (mm). Deep+shallow install
-// pair: keep this side, print the far holder with a smaller value.
+// pair: this is the deep side; the far holder is collar-shallow.
 engagement_depth = 28;
+// Far-side engagement for the deep+shallow install (mm) — gated as
+// part="collar-shallow" (ci.parts cannot carry a free-form -D).
+shallow_engagement_depth = 12;
 // Structural wall thickness (mm) — load-bearing 40 mm part, not the 1.2 floor
 wall = 3.2;
 
@@ -166,7 +169,8 @@ module mount_screw_holes() {
 // flange face, rib and groove are exactly in phase. That is what makes the
 // fit-mate boolean an exact proof rather than a coincidence of rotation.
 // ---------------------------------------------------------------------------
-module collar_use() {
+module collar_use(depth = engagement_depth) {
+    h = depth + collar_lower_h;                    // total collar height at this depth
     flare_h = (collar_lower_od - rod_tube_od) / 2;  // 45° flare, 3.5
     difference() {
         union() {
@@ -179,7 +183,7 @@ module collar_use() {
                 cylinder(d1 = collar_lower_od, d2 = rod_tube_od, h = 1.0 + flare_h);
             translate([0, 0, collar_lower_h + flare_h - 0.5])
                 chamfered_cylinder(d = rod_tube_od,
-                                   h = engagement_depth - flare_h + 0.5,
+                                   h = depth - flare_h + 0.5,
                                    chamfer1 = 0, chamfer2 = style_edge_chamfer);
         }
         // female thread: the mandatory minor bore, then the groove cutter
@@ -191,17 +195,19 @@ module collar_use() {
                             seg = thread_seg);
         // rod bore with a 45° lead-in mouth where the rod enters
         translate([0, 0, collar_lower_h - 0.01])
-            cylinder(d = bore_d, h = engagement_depth + 0.02);
-        translate([0, 0, collar_h - 1.0])
+            cylinder(d = bore_d, h = depth + 0.02);
+        translate([0, 0, h - 1.0])
             cylinder(d1 = bore_d, d2 = bore_d + 2.0, h = 1.01);
         knurl_cut();
     }
 }
 
 // Print orientation: rod mouth on the bed, thread at the top of the print —
-// the internal thread never sees first-layer squish.
-module collar() {
-    translate([0, 0, collar_h]) rotate([180, 0, 0]) collar_use();
+// the internal thread never sees first-layer squish. depth defaults to the
+// deep-side engagement; collar-shallow passes shallow_engagement_depth.
+module collar(depth = engagement_depth) {
+    h = depth + collar_lower_h;
+    translate([0, 0, h]) rotate([180, 0, 0]) collar_use(depth);
 }
 
 module knurl_cut() {
@@ -296,6 +302,7 @@ module cutaway() {
 
 if (part == "boss") boss();
 else if (part == "collar") collar();
+else if (part == "collar-shallow") collar(shallow_engagement_depth);
 else if (part == "thread-coupon") thread_coupon();
 else if (part == "bore-coupon") bore_coupon();
 else if (part == "fit-mate") fit_mate();

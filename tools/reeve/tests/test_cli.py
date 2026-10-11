@@ -215,7 +215,7 @@ def _queue(*nums):
 def test_greenlight_select_prints_numbers_and_appends_output(tmp_path, monkeypatch, capsys):
     gh_out = tmp_path / "gh_output"
     monkeypatch.setattr("reeve.github.gather_greenlight_queue",
-                        lambda repo, token: _queue(230, 265, 267))
+                        lambda repo, token, trusted: _queue(230, 265, 267))
     monkeypatch.setenv("GH_TOKEN", "tok")
     rc = main(["greenlight-select", "--repo", "o/r", "--gh-output", str(gh_out)])
     assert rc == 0
@@ -229,7 +229,7 @@ def test_greenlight_select_bounds_the_queue_to_the_conf_cap(tmp_path, monkeypatc
     conf = tmp_path / "reeve.conf"
     conf.write_text("greenlight_cap: 2\n", encoding="utf-8")
     monkeypatch.setattr("reeve.github.gather_greenlight_queue",
-                        lambda repo, token: _queue(230, 265, 267, 269))
+                        lambda repo, token, trusted: _queue(230, 265, 267, 269))
     rc = main(["greenlight-select", "--repo", "o/r", "--conf", str(conf)])
     assert rc == 0
     assert capsys.readouterr().out == "230 265\n"
@@ -237,7 +237,7 @@ def test_greenlight_select_bounds_the_queue_to_the_conf_cap(tmp_path, monkeypatc
 
 def test_greenlight_select_empty_queue_is_a_clean_empty_line(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("reeve.github.gather_greenlight_queue",
-                        lambda repo, token: {"parked": [], "queue": []})
+                        lambda repo, token, trusted: {"parked": [], "queue": []})
     rc = main(["greenlight-select", "--repo", "o/r"])
     assert rc == 0
     assert capsys.readouterr().out == "\n"
@@ -249,6 +249,38 @@ def test_greenlight_select_requires_repo():
     import pytest
     with pytest.raises(SystemExit):
         main(["greenlight-select"])
+
+
+def test_greenlight_select_wires_the_marker_author_trust_rule(tmp_path, monkeypatch, capsys):
+    # #546: the other select tests monkeypatch gather_greenlight_queue away, so
+    # they cannot see WHICH trust rule the command wires. This captures the
+    # callable the command hands the gather and proves it is the real one —
+    # marker_author_trusted over permission_of: the bot login trusted by
+    # identity with no lookup, a write-level collaborator trusted through one
+    # memoized read, a read-only login refused.
+    captured = {}
+
+    def _gather(repo, token, trusted):
+        captured["trusted"] = trusted
+        return {"parked": [], "queue": []}
+
+    reads: list[str] = []
+
+    def _permission_of(repo, token, username):
+        reads.append(username)
+        return {"shaiss": "write", "driveby": "read"}[username]
+
+    monkeypatch.setattr("reeve.github.gather_greenlight_queue", _gather)
+    monkeypatch.setattr("reeve.github.permission_of", _permission_of)
+    monkeypatch.setenv("GH_TOKEN", "tok")
+    rc = main(["greenlight-select", "--repo", "o/r"])
+    assert rc == 0
+    trusted = captured["trusted"]
+    assert trusted("github-actions[bot]") is True   # by identity — no lookup
+    assert trusted("driveby") is False              # read-only author's marker
+    assert trusted("shaiss") is True                # write-level collaborator
+    assert trusted("") is False                     # authorless is never trusted
+    assert reads == ["driveby", "shaiss"]           # one memoized read each; none for the bot
 
 
 # greenlight-poll (issue #444): the loop's authority half. run_poll is
@@ -264,7 +296,7 @@ def test_greenlight_poll_prints_lines_appends_output_and_notices_missing_pat(
     gh_out = tmp_path / "gh_output"
     monkeypatch.setattr(
         "reeve.pushthrough.run_poll",
-        lambda repo, token, pat, now=None: [
+        lambda repo, token, pat, now=None, rules=None: [
             {"number": 201, "outcome": "approved", "notes": ["ledger skipped"]},
             {"number": 202, "outcome": "overruled", "reason": "👎 overrule"},
             {"number": 203, "outcome": "error", "reason": "could not apply decision-approved"},
@@ -290,8 +322,8 @@ def test_greenlight_poll_prints_lines_appends_output_and_notices_missing_pat(
 def test_greenlight_poll_passes_both_tokens_and_exits_clean(monkeypatch, capsys):
     seen = {}
 
-    def fake_run_poll(repo, token, pat, now=None):
-        seen.update(repo=repo, token=token, pat=pat)
+    def fake_run_poll(repo, token, pat, now=None, rules=None):
+        seen.update(repo=repo, token=token, pat=pat, rules=rules)
         return []
 
     monkeypatch.setattr("reeve.pushthrough.run_poll", fake_run_poll)
@@ -299,7 +331,10 @@ def test_greenlight_poll_passes_both_tokens_and_exits_clean(monkeypatch, capsys)
     monkeypatch.setenv("REGEN_TOKEN", "the-pat")
     rc = main(["greenlight-poll", "--repo", "o/r"])
     assert rc == 0
-    assert seen == {"repo": "o/r", "token": "workflow-token", "pat": "the-pat"}
+    # No --conf: the empty standing rule set (#446) — every thread asks.
+    from reeve.approval import Rules
+    assert seen == {"repo": "o/r", "token": "workflow-token", "pat": "the-pat",
+                    "rules": Rules()}
     assert capsys.readouterr().out == ""   # an empty poll is a legitimate, quiet run
 
 

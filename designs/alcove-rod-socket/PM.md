@@ -70,7 +70,7 @@ the one motion the part really performs — seeded from the hero.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B3 | Ship the shallow collar as a gated part (`engagement_depth=12` in `ci.parts`, exported with the Release) | #1: the deep+shallow install is now the documented trick, and the page has to tell the reader to hand-render the far-side collar with `-D` — the exact foot-gun the deliverable rules exist to stop. (The old item's docs half landed in #379; what remains is shipping the part.) | small: one `ci.parts` row + re-gate |
+| ~~B3~~ | ~~Ship the shallow collar as a gated part (`engagement_depth=12` in `ci.parts`, exported with the Release)~~ | **Done** (#631): `collar-shallow` gated via `ci.parts`; plate stays boss+collar; README points at the Release/gated part | — |
 | B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints | one print + NOTES entry |
 | B1 | Witness slot / seat detent ("is the rod fully in?") | brief's optional ask; install confidence — plus vibration insurance: ~730 axial curtain-tugs/yr vs single-digit unthreads, and a steep 2-start lead is what walks loose under cyclic load; nothing on the rod resists a slow unthread. Measured by the proving print's week-of-use seat check; a walked collar promotes B1 to #1 | small geometry + re-gate |
 | B2 | Anti-rotation rib (screwless alternative to `screw_count=2`) | protects drywall anchors from spin torque | small geometry + re-gate |
@@ -105,3 +105,4 @@ All four are the brief's own open questions, non-blocking for modeling.
 | 2026-08-24 | Field test FAILED on packaging, not the holder | the parts were exported stacked/assembled: they fused, and the stack put the extruder over a mid-air discontinuity (spaghetti ~10 layers in) — the geometry never got tested |
 | 2026-08-24 | Correction: the 3MF cures the *fuse*, not the *spaghetti* | two separate objects re-stacked vertically still print the upper over open air; the plate's side-by-side flat layout is the safe way, and stacking is never a space-saving option |
 | 2026-08-24 | v1 → v2 numbering (not v0.2) | the field-test failure forced a second version before any release shipped: v1 = the frozen geometry, v2 = the packaging fix |
+| 2026-09-12 | Ship `collar-shallow` as a gated part (B3 / #631) | `ci.parts` cannot carry a free-form `-D engagement_depth=12`; dual-`-D` hand-render is the foot-gun the deliverable rules stop. Depth threaded into `collar`/`collar_use`; plate unchanged (boss+collar only) |

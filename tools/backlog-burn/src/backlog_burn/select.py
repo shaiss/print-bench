@@ -14,7 +14,15 @@ Every exclusion here mirrors the ``/ship-issue`` skill's own §0 lock check:
   timeline/GraphQL metadata this stdlib snapshot deliberately does not fetch);
   the skill's own linked-PR-metadata check is the backstop, so the worst case
   is one wasted selection the skill then declines, never a wrong ship,
-* an existing remote ``claude/issue-<N>-*`` branch.
+* an existing remote ``claude/issue-<N>-*`` branch **that carries unmerged
+  work**. A branch whose compare against the default branch reports
+  ``ahead_by == 0`` — every commit it holds is already on the default branch
+  (the #565 shape: its PR closed with head == base, the fix landed through
+  another commit) — is an orphan, not a claim. Before this rule a branch was
+  a claim forever, so one orphan starved its issue out of every firing. The
+  compare is fail-conservative: a branch whose compare is missing or failed
+  still claims, because only a positively observed zero proves it empty.
+  ``scripts/routine-lock-cleanup.sh`` scores ``delivered`` by the same rule.
 
 One further exclusion does not come from the lock check: an issue carrying the
 ``needs-decision`` label is skipped because an agentic run parked it for a human
@@ -34,6 +42,20 @@ PAT identity as the owner (measured on #515: declines, withdrawals and the
 owner's own answer are all the same login), "owner activity" cannot be an
 author test — it is a comment whose first line carries no machine marker and
 whose author GitHub does not type as a ``Bot``.
+
+A fourth exclusion, the defer twin of that cooldown (issue #694, the optional
+half of #690): a brief whose *latest* ``🚢 DEFERRED`` comment sits inside the
+same shape of cooldown window is skipped — a defer means the run looked and
+found the brief's *dependencies* unlanded (#690's gap: on #641 the burn
+re-picked the same dependency-blocked issue every firing, the agent
+re-deferred, and the routine spun 20+ times without shipping). Identical
+expiry semantics to a decline: it **expires** (after the window the next
+firing re-checks whether the dependencies landed — never buries), the latest
+defer is the state (a later defer restarts it), and any owner activity
+re-arms it immediately. The marker is the same first-line ``🚢 DEFERRED``
+the red-gate's disposition classification reads
+(``scripts/routine-lock-cleanup.sh``, PR #695), so the selector and the
+cleanup can never disagree about what counts as a defer.
 
 The skill re-verifies all of this before it touches a line of code, so this
 module is a best-effort *pre-filter*. Its only jobs are to never hand the run
@@ -87,10 +109,30 @@ DECLINED_MARKER = "🚢 DECLINED"
 # owner*, never closed. 24 h is the issue's own example value.
 DECLINE_COOLDOWN_HOURS = 24
 
+# A comment whose first line starts with ``🚢 DEFERRED`` is a defer marker —
+# the stop the /ship-issue skill's walk posts when a brief's dependencies
+# have not landed yet (issue #690; the red-gate's disposition classification
+# reads the same first-line marker, PR #695, so the two agree on what a
+# defer is). A *state* like a decline: the cooldown below reads the latest
+# such comment, so a second defer restarts it.
+DEFERRED_MARKER = "🚢 DEFERRED"
+
+# A defer this fresh keeps the brief out of selection (issue #694): the run
+# already looked and found its dependencies unlanded, so re-selecting it
+# inside the window is the spin #690 measured on #641 — the same brief
+# re-picked every firing, re-deferred, 20+ firings shipping nothing. After
+# the window the next firing re-checks whether the dependencies landed —
+# a defer means *waiting on dependencies*, never closed. The same 24 h the
+# issue names beside #530's decline window, deliberately its own constant:
+# a dependency wait and an owner wait are different clocks, free to diverge
+# the day a measurement says they should.
+DEFER_COOLDOWN_HOURS = 24
+
 # First-line prefixes marking a comment as machine-posted by one of this
 # repo's automation routines: the ship family (🚢 SHIP-LOCK / WITHDRAWN /
-# DECLINED / "Draft PR up"), the HITL park (🚦 DECISION NEEDED), the labeler's
-# triage (🏷…) and the chunker's completion marker (🧩). 🏷 is the bare
+# DECLINED / DEFERRED / "Draft PR up"), the HITL park (🚦 DECISION NEEDED),
+# the labeler's triage (🏷…) and the chunker's completion marker (🧩). 🏷 is
+# the bare
 # codepoint on purpose, so it matches both with and without the variation
 # selector the labeler emits. A run comment never re-arms a decline — only
 # owner activity does — and since the routines post through the same PAT
@@ -98,10 +140,6 @@ DECLINE_COOLDOWN_HOURS = 24
 # this marker test plus GitHub's ``Bot`` author type is the whole definition
 # of "the run" here. Extend the tuple when a new routine posts to threads.
 RUN_COMMENT_MARKERS = ("🚢", "🚦", "🏷", "🧩")
-
-# Sort key floor for comments whose createdAt does not parse (see
-# :func:`_decline_cooldown`).
-_DATETIME_MIN = datetime.min.replace(tzinfo=timezone.utc)
 
 # GitHub honours these nine keywords, case-insensitively, each optionally
 # followed by a colon, to auto-close an issue from a PR body. Grepping only
@@ -195,53 +233,73 @@ def _is_run_comment(comment: dict[str, Any]) -> bool:
     return any(first.startswith(marker) for marker in RUN_COMMENT_MARKERS)
 
 
-def _decline_cooldown(
+def _stop_marker_cooldown(
     comments: list[dict[str, Any]],
     now: Optional[datetime],
     cooldown_hours: float,
+    marker: str,
+    noun: str,
+    participle: str,
 ) -> Optional[str]:
-    """Why the issue is in its decline cooldown, or ``None`` if it is not.
+    """Why the issue is in the cooldown of its latest ``marker`` stop, or
+    ``None`` if it is not.
 
-    The rule is issue #530's own: *eligible iff the latest decline is older
-    than the window OR any non-run comment is newer than the latest decline*.
-    The latest decline is the state, so a second decline restarts the window;
-    and a run comment newer than the decline — another withdrawal, a triage
-    label, a park marker — re-arms nothing, because none of it is the owner
-    answering the question the decline is waiting on.
+    One expiry semantics shared by both stop markers — declines (issue #530,
+    waiting on the owner) and defers (issue #694, waiting on dependencies) —
+    so the twin guards in :func:`exclusion_reason` cannot drift:
+    *eligible iff every matching stop has a parseable ``createdAt`` AND (the
+    latest of those is older than the window OR any non-run comment is newer
+    than that latest stop)*. The latest dated stop is the state, so a second
+    one restarts the window; and a run comment newer than the stop — another
+    withdrawal, a triage label, a park marker, even the other stop marker —
+    re-arms nothing, because none of it is the owner answering what the stop
+    is waiting on.
 
-    With ``now`` unknown (or a decline that will not parse) the window cannot
-    be judged, and the safe reading is *in* cooldown — the mirror of
-    :func:`_ship_lock_state`'s "never select over a claim we cannot date":
-    this module's contract is to never hand the run an issue that is plainly
-    taken, and a decline it cannot date is exactly that.
+    A matching stop whose ``createdAt`` is missing or unparseable cannot be
+    ordered against the dated ones. Treating it as the oldest let an expired
+    dated stop hide it and admit the issue, so any such stop excludes on its
+    own — owner re-arm applies only when every matching stop parses, because
+    "newer than the latest stop" is otherwise not well-defined. With ``now``
+    unknown the window likewise cannot be judged, and the safe reading is
+    *in* cooldown — the mirror of :func:`_ship_lock_state`'s "never select
+    over a claim we cannot date".
     """
-    declines = [
+    stops = [
         c for c in (comments or [])
-        if _first_line(c.get("body", "")).startswith(DECLINED_MARKER)
+        if _first_line(c.get("body", "")).startswith(marker)
     ]
-    if not declines:
+    if not stops:
         return None
-    latest = max(
-        declines, key=lambda c: _parse_iso(c.get("createdAt", "")) or _DATETIME_MIN
-    )
-    latest_dt = _parse_iso(latest.get("createdAt", ""))
+    # Any undatable matching stop excludes by itself. Ranking a missing
+    # createdAt as the oldest would let an expired dated stop hide it.
+    parsed: list[datetime] = []
+    for stop in stops:
+        created = _parse_iso(stop.get("createdAt", ""))
+        if created is None:
+            return (
+                f"recently {participle} (the {noun} cannot be dated — conservative)"
+            )
+        parsed.append(created)
+    latest_dt = max(parsed)
     for c in comments or []:
         if _is_run_comment(c):
             continue
         dt = _parse_iso(c.get("createdAt", ""))
         if dt is not None and latest_dt is not None and dt > latest_dt:
-            return None  # owner activity newer than the decline re-arms
-    if latest_dt is None or now is None:
-        return "recently declined (the decline cannot be dated — conservative)"
+            return None  # owner activity newer than the stop re-arms
+    if now is None:
+        return (
+            f"recently {participle} (the {noun} cannot be dated — conservative)"
+        )
     if latest_dt.tzinfo is None:
         latest_dt = latest_dt.replace(tzinfo=timezone.utc)
     age = now - latest_dt
     if age > timedelta(hours=cooldown_hours):
-        return None  # expired: a decline must never bury the brief
+        return None  # expired: a stop must never bury the brief
     hours = age.total_seconds() / 3600
     age_h = "<1 h" if hours < 1 else f"{hours:.0f} h"
     return (
-        f"recently declined ({age_h} ago, within the "
+        f"recently {participle} ({age_h} ago, within the "
         f"{cooldown_hours:g} h cooldown — an owner reply re-arms)"
     )
 
@@ -270,10 +328,41 @@ def _issue_branch_re(number: int) -> re.Pattern[str]:
     return re.compile(rf"^claude/issue-{re.escape(str(number))}-")
 
 
-def _has_issue_branch(branches: list[str], number: int) -> bool:
-    """True if any branch is this issue's ``claude/issue-<number>-*``."""
+def _known_empty(ahead_by: Any) -> bool:
+    """True only for a compare that positively reported zero commits ahead.
+
+    ``type(...) is int`` rather than ``isinstance``: a malformed snapshot's
+    ``false`` (a ``bool``, which Python counts as an ``int`` equal to 0) or
+    ``"0"`` must not release a claim. Anything but a real integer zero —
+    missing, ``None``, a string, a failed compare — reads as "may carry
+    work", the fail-conservative direction.
+    """
+    return type(ahead_by) is int and ahead_by == 0
+
+
+def _issue_branches(branches: list[str], number: int) -> list[str]:
+    """Every branch that is this issue's ``claude/issue-<number>-*``."""
     rx = _issue_branch_re(number)
-    return any(rx.match(b or "") for b in (branches or []))
+    return [b for b in (branches or []) if rx.match(b or "")]
+
+
+def _has_issue_branch(
+    branches: list[str],
+    number: int,
+    branch_ahead_by: Optional[dict[str, Any]] = None,
+) -> bool:
+    """True if a ``claude/issue-<number>-*`` branch claims the issue.
+
+    A branch claims unless its compare against the default branch is known
+    to report zero commits ahead (:func:`_known_empty`). With no compare data
+    at all (``branch_ahead_by`` omitted, or the branch absent from it) every
+    matching branch claims — the rule before compares existed, and the safe
+    reading of "unknown".
+    """
+    ahead = branch_ahead_by or {}
+    return any(
+        not _known_empty(ahead.get(b)) for b in _issue_branches(branches, number)
+    )
 
 
 def _open_pr_claims(open_prs: list[dict[str, Any]], number: int) -> bool:
@@ -296,6 +385,8 @@ def exclusion_reason(
     stale_after_hours: float = STALE_LOCK_HOURS,
     decision_label: str = DECISION_PENDING_LABEL,
     decline_cooldown_hours: float = DECLINE_COOLDOWN_HOURS,
+    defer_cooldown_hours: float = DEFER_COOLDOWN_HOURS,
+    branch_ahead_by: Optional[dict[str, Any]] = None,
 ) -> Optional[str]:
     """Why this issue is *not* eligible, or ``None`` if it is.
 
@@ -303,18 +394,22 @@ def exclusion_reason(
     on purpose: by the time we ask about the lock, a corroborating branch or
     PR has already been ruled out, so a ``stale`` lock verdict means precisely
     the skill's takeover condition — an old claim with nothing backing it —
-    and the issue is left eligible rather than frozen forever.
+    and the issue is left eligible rather than frozen forever. A branch known
+    to carry no unmerged work (``branch_ahead_by`` maps it to 0) backs
+    nothing, so it neither claims the issue nor keeps a stale lock alive.
 
     The ``needs-decision`` guard sits just after the opt-in label check, ahead
     of every claim guard: a parked decision is a *durable* block that must hold
     even after a pausing run's SHIP-LOCK goes stale, so it cannot be gated
     behind the staleness logic.
 
-    The decline cooldown sits *after* every claim guard because it is the
-    weakest exclusion — a mere "a run looked recently and walked away" — so a
-    real claim or a parked decision should be the reported reason when more
-    than one holds. (A declined thread usually carries a withdrawn lock, which
-    is why the lock guard passes it through to here.)
+    The decline and defer cooldowns sit *after* every claim guard because
+    they are the weakest exclusions — a mere "a run looked recently and
+    walked away" — so a real claim or a parked decision should be the
+    reported reason when more than one holds. Of the two stops the decline is
+    reported first: it names the stronger fact (a blocking question, not just
+    unlanded dependencies). (A declined thread usually carries a withdrawn
+    lock, which is why the lock guard passes it through to here.)
     """
     number = issue["number"]
     labels = issue.get("labels", []) or []
@@ -322,16 +417,65 @@ def exclusion_reason(
         return f"not labelled {required_label!r}"
     if decision_label in labels:
         return f"awaiting a human decision ({decision_label})"
-    if _has_issue_branch(branches, number):
+    if _has_issue_branch(branches, number, branch_ahead_by):
         return f"a claude/issue-{number}-* branch already exists"
     if _open_pr_claims(open_prs, number):
         return f"an open PR already closes #{number}"
     if _ship_lock_state(issue.get("comments", []), now, stale_after_hours) == "active":
         return "an active 🚢 SHIP-LOCK claim"
-    cooldown = _decline_cooldown(issue.get("comments", []), now, decline_cooldown_hours)
-    if cooldown is not None:
-        return cooldown
+    decline = _stop_marker_cooldown(
+        issue.get("comments", []), now, decline_cooldown_hours,
+        DECLINED_MARKER, "decline", "declined",
+    )
+    if decline is not None:
+        return decline
+    defer = _stop_marker_cooldown(
+        issue.get("comments", []), now, defer_cooldown_hours,
+        DEFERRED_MARKER, "defer", "deferred",
+    )
+    if defer is not None:
+        return defer
     return None
+
+
+def _snapshot_ahead_by(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """The snapshot's ``branchAheadBy`` map, or ``{}`` when absent/malformed.
+
+    A snapshot from before compares existed (or a hand-written fixture) has
+    no such key; a malformed one is not a dict. Both read as "nothing known",
+    so every matching branch keeps claiming — never the other way round.
+    """
+    ahead = snapshot.get("branchAheadBy") or {}
+    return ahead if isinstance(ahead, dict) else {}
+
+
+def branches_needing_compare(
+    snapshot: dict[str, Any],
+    required_label: str = DEFAULT_REQUIRED_LABEL,
+    now: Optional[datetime] = None,
+) -> list[str]:
+    """The ``claude/issue-<N>-*`` branches whose compare could change the pick.
+
+    Pure, like everything here: it tells the live gather which branches are
+    worth one ``compare`` request each, so the network cost scales with the
+    handful of *otherwise-eligible* candidates rather than with every
+    ``claude/issue-*`` branch in the repo. An issue is otherwise-eligible when
+    :func:`exclusion_reason` admits it with the branch guard taken out of the
+    picture (no branches passed); only for such an issue can a branch's
+    ahead-count decide between selected and skipped. Sorted and de-duplicated
+    so the request order is deterministic.
+    """
+    issues = snapshot.get("issues", []) or []
+    open_prs = snapshot.get("openPRs", []) or []
+    branches = snapshot.get("branches", []) or []
+    wanted: set[str] = set()
+    for issue in issues:
+        matching = _issue_branches(branches, issue["number"])
+        if not matching:
+            continue
+        if exclusion_reason(issue, open_prs, [], required_label, now=now) is None:
+            wanted.update(matching)
+    return sorted(wanted)
 
 
 def select_issue(
@@ -347,19 +491,27 @@ def select_issue(
     routine's reasoning without re-deriving it.
 
     ``now`` (a timezone-aware datetime) dates SHIP-LOCK claims for staleness
-    and decline markers for cooldown; the CLI passes the current UTC time.
-    With ``now`` omitted, a claim is never treated as stale and a decline
-    never as expired — the conservative reading.
+    and decline/defer markers for cooldown; the CLI passes the current UTC
+    time. With ``now`` omitted, a claim is never treated as stale and a
+    stop marker never as expired — the conservative reading.
+
+    ``snapshot["branchAheadBy"]`` (optional) maps a branch name to the
+    ``ahead_by`` its compare against the default branch reported; a branch
+    mapped to 0 carries no unmerged work and claims nothing. Those released
+    branches are listed in the record (``empty_branches``) so the summary
+    says why an issue with a ``claude/issue-<N>-*`` branch was still taken.
     """
     issues = snapshot.get("issues", []) or []
     open_prs = snapshot.get("openPRs", []) or []
     branches = snapshot.get("branches", []) or []
+    ahead_by = _snapshot_ahead_by(snapshot)
 
     eligible: list[dict[str, Any]] = []
     excluded: dict[str, str] = {}
     for issue in issues:
         reason = exclusion_reason(
-            issue, open_prs, branches, required_label, now=now
+            issue, open_prs, branches, required_label, now=now,
+            branch_ahead_by=ahead_by,
         )
         if reason is None:
             eligible.append(issue)
@@ -376,6 +528,16 @@ def select_issue(
     selected = eligible[0] if eligible else None
     deferred = [i["number"] for i in eligible[1:]]
 
+    # Branches the compare proved empty, among those that would otherwise
+    # have claimed one of the considered issues — the orphans this firing
+    # looked past. Sorted for a deterministic record.
+    empty_branches = sorted({
+        b
+        for issue in issues
+        for b in _issue_branches(branches, issue["number"])
+        if _known_empty(ahead_by.get(b))
+    })
+
     return {
         "selected": (selected["number"] if selected else None),
         "selected_title": (selected.get("title") if selected else None),
@@ -384,6 +546,7 @@ def select_issue(
         "deferred": deferred,
         "excluded": excluded,
         "required_label": required_label,
+        "empty_branches": empty_branches,
     }
 
 
@@ -408,6 +571,12 @@ def render_summary(record: dict[str, Any]) -> str:
     if record["deferred"]:
         deferred = ", ".join(f"#{n}" for n in record["deferred"])
         lines.append(f"- deferred to a later firing (cap 1): {deferred}")
+    if record.get("empty_branches"):
+        empty = ", ".join(f"`{b}`" for b in record["empty_branches"])
+        lines.append(
+            "- not a claim (no commits ahead of the default branch — an "
+            f"orphan, safe to delete): {empty}"
+        )
     if record["excluded"]:
         lines.append("- skipped:")
         for num, reason in sorted(record["excluded"].items(), key=lambda kv: int(kv[0])):

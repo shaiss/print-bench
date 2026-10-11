@@ -1,6 +1,10 @@
 # Printable parts to render and gate in CI (the default render is the
 # assembled preview, not a printable deliverable). The thread coupon is gated
 # separately: gate.sh picks up its wrapper file automatically.
+# collar-shallow is the far-side deep+shallow install part (engagement 12 mm);
+# it is Release-gated here but NOT on ci.plate (plate stays the default-depth
+# holder pair: boss + collar).
 boss
 collar
+collar-shallow
 bore-coupon

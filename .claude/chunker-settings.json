@@ -92,7 +92,9 @@
       "Edit",
       "NotebookEdit",
       "mcp__growth_queue",
-      "mcp__growth_twitter"
+      "mcp__growth_twitter",
+      "mcp__reviewer",
+      "mcp__reviewer__post_review"
     ]
   }
 }

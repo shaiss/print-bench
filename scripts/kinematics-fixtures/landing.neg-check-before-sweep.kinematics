@@ -1,0 +1,5 @@
+# Structural refusal (selftest: must FAIL before rendering): a check before
+# any sweep/stops line has nothing to evaluate over.
+empty landing-flat
+stops stop 0
+empty-control landing-flat-rolled

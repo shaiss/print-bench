@@ -56,7 +56,7 @@ the workflow-selected issues.
   ```
 
   The wrapper writes the marker first line
-  (`<!-- reeve-greenlight v1 issue=<N> verdict=yes -->`), enforces that your
+  (`<!-- reeve-greenlight v1 issue=<N> verdict=yes text=<digest> -->`, `text=` binding the issue text it read at post time), enforces that your
   body's first line is exactly `GREENLIGHT: YES` (or NO/ROUTE, matching
   `--verdict`) and carries no second verdict line, appends the fixed approval
   footer, refuses any issue outside the workflow-selected
@@ -78,6 +78,17 @@ the workflow-selected issues.
   on work a human meant to steer. The wrapper refuses `--arm` with any other
   verdict — arming a rejection is meaningless and a routing note sets no
   verdict — so don't reach for it there.
+
+  **Standing rules (issue #446).** The owner can pre-approve a category in
+  `.github/reeve.conf` (`approve_auto`, `approve_deny`). A **YES** you post on
+  a decision carrying the `docs-only` label may resolve with **no reaction**
+  once its 👎 grace window passes — so on such an issue, write the YES as if it
+  were the final word, and if the thread shows the yes-branch reaching beyond
+  documentation despite the label, say so plainly in the reasoning so the
+  human sees it inside the window. You are never handed a decision labeled
+  for an `approve_deny` category (`gate-machinery` is human-only); the Select
+  step drops it. A decision whose text merely names gate machinery is still
+  handed to you — it can never auto-approve, so a human reacts to your call. Nothing about the verdict or the wrapper call changes.
 
 ## What to do, per issue
 

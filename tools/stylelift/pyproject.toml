@@ -16,6 +16,10 @@ dependencies = [
     "scipy>=1.10",
     "shapely>=2.0",
     "rtree>=1.0",
+    # trimesh's Path3D.polygons_full chains section paths through networkx,
+    # an optional trimesh extra: without it polygons_full raises on the very
+    # first planar section, so the aperture measurement cannot run at all.
+    "networkx>=3.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,6 @@
+# Negative control (selftest: must FAIL): the gapped-out pair declared as
+# `nonempty`. The gate must report separation at the first phase it renders.
+steps 4
+sweep kin_phase
+nonempty mesh-gap
+nonempty-control mesh-gap
