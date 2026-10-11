@@ -15,7 +15,7 @@ that, which is the entire point.
 | # | Constraint | Number | Source | Reopens if |
 |---|---|---|---|---|
 | N1 | Grid pitch | 42 × 42 mm | kennetek `standard.scad` (MIT, numbers only) | the standard itself changes |
-| N2 | Bin top per cell | 41.5 × 41.5 (42 − 0.5/side); multi-cell n×42 − 0.5 | same | the standard itself changes |
+| N2 | Bin top per cell | 41.5 × 41.5 (42 − 0.5 mm total / 0.25 mm per side); multi-cell n×42 − 0.5 | same | the standard itself changes |
 | N3 | Boss / socket profiles | 0.8↗/1.8↑/2.15↗ boss; socket +0.25/side wall, +0.35/side floor; heights 4.75 / 4.65 | kennetek profiles (NOTES spec table) | the standard itself changes |
 | N4 | Print orientation | plate grid-down, bins opening-down | brief #733 mandate | owner decision on the issue |
 | N5 | Repo FDM defaults | walls ≥ 1.2 mm, no slicer supports, 0.4 nozzle | CLAUDE.md + brief | repo convention change |

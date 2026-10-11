@@ -51,7 +51,8 @@ dividers_y = 0;
 /* [Fit] */
 // Socket profile offset from the bin boss (mm). 0.1 is the community
 // default => 0.25 mm/side clearance at the socket wall, 0.35 at the floor
-// edge. Tune per printer with the coupon before printing a full set.
+// edge. Applied to the floor edge AND the vertical wall band. Tune per
+// printer with the coupon before printing a full set.
 fit = 0.1;
 
 /* [Quality] */
@@ -259,9 +260,12 @@ module gf_socket() {
     p2 = gf_boss[2][1] - fit;    // 2.5 — vertical band top
     p3x = gf_boss[3][0] - fit;   // 2.85 — floor edge inset
     p3y = gf_boss[3][1] - fit;   // 4.65 — profile top
-    wall_in = gf_boss[3][0] - gf_boss[1][0];  // 2.15 — wall inset (fit-free)
-    floor_e = cell - 2 * p3x;    // 36.3 floor-edge opening
-    wall_e = cell - 2 * wall_in; // 37.7 at the vertical section
+    // Vertical band: boss 37.2 + 2·(fit + 0.15). At community fit=0.1 that
+    // is 37.7 (0.25/side); raising fit widens this band the same way it
+    // widens the floor edge — otherwise "raise fit" cannot free a tight wall.
+    wall_in = gf_boss[3][0] - gf_boss[1][0] + 0.1 - fit;  // 2.15 at fit=0.1
+    floor_e = cell - 2 * p3x;    // 36.3 floor-edge opening at fit=0.1
+    wall_e = cell - 2 * wall_in; // 37.7 at the vertical section at fit=0.1
     top_e = cell;                // 42.0 at the lip
     hull() {
         rsq_plate(floor_e, style_corner_r - p3x, 0);
@@ -337,13 +341,47 @@ module main() {
         translate([-52.75, 0, 0]) print_orient(plate_floor + gf_socket_h)
             gf_plate([1, 1], 8, plate_floor);
         print_orient(gf_base_h + gf_lip_h) gf_bin([1, 1], 1);
-    } else {
-        // assembled preview — a preview, never the sliceable deliverable
+    }     else if (part == "tray-void")
+        // recess probe ∩ tray — empty iff the recess is actually cut.
+        // Sized inside the drafted floor (~34) and kept above recess_floor
+        // so it cannot kiss the solid floor or the lip.
+        intersection() {
+            gf_bin([1, 1], 1);
+            translate([-15, -15, recess_floor + 0.2])
+                cube([30, 30, gf_base_h - recess_floor - 0.6]);
+        }
+    else if (part == "tray-void-ctrl")
+        // same probe ∩ a solid-capped tray (no cavity) — must interfere
+        intersection() {
+            union() {
+                gf_bosses([1, 1], 0.1);
+                gf_sweep(gf_foot([1, 1]),
+                         [[0, gf_boss[3][1]], [0, gf_base_h + gf_lip_h]]);
+            }
+            translate([-15, -15, recess_floor + 0.2])
+                cube([30, 30, gf_base_h - recess_floor - 0.6]);
+        }
+    else if (part == "div-cover")
+        // slab on the cell boundary ∩ divided bin — must hit the divider.
+        // Y span stays inside the side walls so an open bin yields empty.
+        intersection() {
+            gf_bin([2, 1], bin_units, 1, 0);
+            translate([-0.4, -15, gf_base_h + 0.2])
+                cube([0.8, 30, bin_units * gf_base_h - gf_base_h - 0.4]);
+        }
+    else if (part == "div-cover-ctrl")
+        // same slab ∩ open bin — empty (proves div-cover can fail)
+        intersection() {
+            gf_bin([2, 1], bin_units, 0, 0);
+            translate([-0.4, -15, gf_base_h + 0.2])
+                cube([0.8, 30, bin_units * gf_base_h - gf_base_h - 0.4]);
+        }
+    else {
+        // assembled preview — matches ci.plate (one of each production part)
         gf_plate([grid_x, grid_y], margin, plate_floor);
         place = [[0.5, 0, [2, 1], bin_units],   // 2x1 bin, bottom row
                  [2, 0, [1, 1], bin_units],     // 1x1 bin
-                 [0, 2, [1, 1], 1],             // tray
-                 [2, 2, [1, 1], 1]];            // tray
+                 [0, 2, [1, 1], 1]];            // tray (one — the plate ships one)
         for (p = place)
             translate([(p[0] - (grid_x - 1) / 2) * gf_pitch,
                        (p[1] - (grid_y - 1) / 2) * gf_pitch, plate_floor])

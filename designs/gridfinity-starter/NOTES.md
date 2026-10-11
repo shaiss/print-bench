@@ -22,7 +22,7 @@ e.g. ostat/gridfinity_extended_openscad, are GPL-3 and stay out — see
 | Quantity | Value | Source file |
 |---|---|---|
 | Grid pitch | 42 × 42 mm | `src/core/standard.scad` `GRID_DIMENSIONS_MM` |
-| Bin top per cell | 41.5 × 41.5 (= 42 − 0.5 gap/unit side) | `BASE_TOP_DIMENSIONS`, `BASE_GAP_MM` |
+| Bin top per cell | 41.5 × 41.5 (= 42 − 0.5 mm total gap / 0.25 mm per side) | `BASE_TOP_DIMENSIONS`, `BASE_GAP_MM` |
 | Bin top corner radius | 3.75 | `BASE_TOP_RADIUS = 7.5/2` |
 | Multi-cell bin footprint | n×42 − 0.5 (gap at perimeter only) | `src/core/base.scad` `grid_size_mm` |
 | Boss profile | 0.8 out / 1.8 up / 2.15 out (45°/vert/45°), height 4.75 | `BASE_PROFILE` |
@@ -43,10 +43,10 @@ here.
 
 ## Given / assumed measurements
 
-Given (brief, sourced to the spec above): pitch 42; clearance +0.5 per unit
-side; 3×3 default plate; bins 1×1×3U, 2×1×3U, 1×1 low tray; print
-orientations baseplate grid-down / bins opening-down; style
-workshop-utility.
+Given (brief, sourced to the spec above): pitch 42; 0.5 mm total gap per
+unit (0.25 mm per side → 41.5 footprint); 3×3 default plate; bins 1×1×3U,
+2×1×3U, 1×1 low tray; print orientations baseplate grid-down / bins
+opening-down; style workshop-utility.
 
 Assumed (brief, stated defaults):
 
@@ -120,9 +120,15 @@ Assumed (brief, stated defaults):
   grid-down, per the brief) — the STL is what CI slices.
 - **`ci.plate`** ships the four production parts as one multi-object 3MF
   (the multi-part-fuse lesson: an assembled STL prints as one welded lump).
-  The assembled render stays a preview only. The gated `bin-2x1-div`
-  variant is deliberately **not** a plate part: it is the proof of the
-  divider option, not a starter part.
+  The assembled preview seats exactly those four (one tray, not two). The
+  gated `bin-2x1-div` variant is deliberately **not** a plate part: it is
+  the proof of the divider option, not a starter part.
+- **`ci.fitchecks`** gates the two failures printability cannot see: a
+  recess probe ∩ the tray must be empty (`tray-void`; control is the same
+  probe on a solid-capped tray), and a slab on the 2×1 cell boundary ∩
+  `bin-2x1-div` must interfere (`div-cover`; control is the same slab on
+  an open bin). Both pairs have negative controls so neither check is
+  vacuous.
 - **Optional dividers** (`dividers_x` / `dividers_y`, default 0 = open):
   wall-thick (1.2) slabs evenly spaced across the bin interior, floor to
   bin top (flush with the wall tops). Even spacing puts the first divider
@@ -270,8 +276,10 @@ the production `fit = 0.1`, both on one bed. Print it before any full part:
 3. Sloppy / rattly → lower `fit` the same step. Do not go below 0.05: the
    community clearance is what makes *other* bins fit this plate.
 
-Tuning `fit` only affects the socket (plate side). The bin boss is spec
-geometry and never moves — a bin that fits community plates is guaranteed by
+Tuning `fit` only affects the socket (plate side) — floor edge **and**
+vertical wall band both grow with `fit` (at the community default 0.1 the
+wall stays 0.25/side / 37.7 opening). The bin boss is spec geometry and
+never moves — a bin that fits community plates is guaranteed by
 construction.
 
 ## Field test log
