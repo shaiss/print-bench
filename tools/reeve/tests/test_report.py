@@ -8,6 +8,7 @@ must be a reviewed, regenerated golden.
 import json
 import pathlib
 
+from reeve import github
 from reeve.config import Config
 from reeve.detectors import evaluate
 from reeve.report import ANDON_BANNER, MARKER, render
@@ -62,6 +63,38 @@ def test_andon_released_is_the_golden_bytes():
 
 def test_report_is_byte_deterministic():
     assert _render_fixture() == _render_fixture()
+
+
+def test_fixture_workflows_cover_exactly_the_watch_tuple():
+    # #745 AC6 negative control: the golden fixture must not silently keep
+    # "watching" a workflow the tuple no longer names, nor miss one it just
+    # gained — either drift makes the golden pass while the report lies about
+    # coverage (healthy fixture runs render nothing, so the bytes alone prove
+    # nothing). Pinning the fixture's workflow set to ROUTINE_WORKFLOWS
+    # exactly fails both directions: delete a workflow from the fixture and
+    # it stops covering the tuple; delete it from the tuple and the fixture
+    # names an unwatched workflow.
+    snapshot = _load_snapshot()
+    watched = {w["file"] for w in snapshot["runHealth"]["workflows"]}
+    assert watched == set(github.ROUTINE_WORKFLOWS), (
+        "fixture snapshot.json and github.ROUTINE_WORKFLOWS have drifted — "
+        "the golden can no longer prove the watch list"
+    )
+
+
+def test_fixture_renders_the_brief_queue_and_hides_the_armed_brief():
+    # #745 AC4: the report gains the agent-brief-queue section, one line per
+    # open unruled/parked/declined brief; the armed brief (#745 itself, in
+    # the fixture) renders nothing — approved is the burn's queue, not the
+    # forge's, and that exclusion is visible in the golden bytes.
+    body = _render_fixture()
+    lines = [ln for ln in body.splitlines() if ln.startswith("- #74")]
+    assert lines == [
+        "- #741 Agent brief: detect stale style packs — pending",
+        "- #743 Agent brief: dedupe greenlight precedents — needs-decision",
+        "- #744 Agent brief: nightly dependency scraper — wright-declined",
+    ]
+    assert "| agent-brief-queue | 3 |" in body
 
 
 def test_marker_is_the_first_line():

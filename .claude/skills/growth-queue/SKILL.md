@@ -37,6 +37,10 @@ shell command). Call it with `channel` (`twitter` or `youtube`), `title`
 as a JSON argument and never touches a shell command line, it can carry
 tables, pipes, and newlines. The tool hardcodes the `growth-queue` +
 `channel:<name>` labels — it can apply no other — and caps filings per scheduled run (attended, the human in the loop is the trust boundary — the house posture).
+In a scheduled run it also refuses a near-duplicate title of anything in the
+workflow's dedup context (`GROWTHQ_DEDUP_CONTEXT` — the open queue plus what a
+human already declined, parked or closed); attended, no context is wired, so
+that check is yours.
 You **MUST actually call the tool** for each message: writing a queue item
 in your reply queues nothing.
 

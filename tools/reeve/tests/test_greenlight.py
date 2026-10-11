@@ -31,7 +31,15 @@ def test_marker_parses_with_verdict_and_issue():
     parsed = greenlight.parse_greenlight_marker(
         "<!-- reeve-greenlight v1 issue=201 verdict=yes -->"
     )
-    assert parsed == {"version": 1, "issue": 201, "verdict": "yes", "arm": False}
+    assert parsed == {"version": 1, "issue": 201, "verdict": "yes", "arm": False, "text": ""}
+
+
+def test_marker_carries_the_text_digest():
+    # The #760 binding: the wrapper records the digest of the text it read.
+    parsed = greenlight.parse_greenlight_marker(
+        "<!-- reeve-greenlight v1 issue=201 verdict=yes arm=1 text=0123456789abcdef -->"
+    )
+    assert parsed["text"] == "0123456789abcdef" and parsed["arm"] is True
 
 
 def test_marker_carries_the_arming_bit():
