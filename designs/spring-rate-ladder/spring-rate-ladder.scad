@@ -83,11 +83,12 @@ text_sink = 0.2;
 
 /* [Text layout] */
 // Station text baselines (mm, plate coordinates): N label, PLA line, PETG
-// line, plate footer
+// line, plate footer. Value lines at 4.0 bold / footer at 3.0 bold need
+// ~1 mm more pitch than the old 3.2 / 2.6 layout.
 txt_label_y = -3.5;
-txt_val1_y = -8;
-txt_val2_y = -13;
-txt_footer_y = -18;
+txt_val1_y = -9;
+txt_val2_y = -14.5;
+txt_footer_y = -19.5;
 
 /* [Quality] */
 // Sweep steps per helix turn — resolution ALONG the wire; tied to the pitch,
@@ -181,8 +182,12 @@ module helix_spring(d_wire, d_mean, n_active, l_free, end_coils = 1,
              slope = u <= e ? pe : (u <= e + n_active ? p : pe),
              a = 360 * u,
              P = path_point(u),
-             // d/du of the path, degree-consistent: xy turns at 360°/u, z at slope
-             T = _unit([-r * sin(a), r * cos(a), slope / 360]),
+             // d/du of the path: with xy = [-r·sin(a), r·cos(a)] (the 2π factor
+             // factored out of the angle-rate), the matching z term is
+             // slope/(2π). slope/360 under-tilts the ring by π/180 and turns
+             // the round wire into a ~3% flatter ellipse at N=4's lead —
+             // contradicting the lead assert's atan(p/(π·D)) geometry.
+             T = _unit([-r * sin(a), r * cos(a), slope / (2 * PI)]),
              R = [cos(a), sin(a), 0],
              U = _unit(R - T * (T * R)),
              V = cross(T, U))
@@ -217,15 +222,18 @@ module station_text(x, n) {
     translate([x, 0, plate_t - text_sink]) {
         translate([0, txt_label_y])
             linear_extrude(emboss_h + text_sink)
-                text(str("N=", n), size = 4.5, halign = "center");
+                text(str("N=", n), size = 4.5, halign = "center",
+                     font = "Liberation Sans:style=Bold");
         translate([0, txt_val1_y])
             linear_extrude(emboss_h + text_sink)
                 text(str("PLA ", fmt2(k_pred(G_pla, n))),
-                     size = 3.2, halign = "center");
+                     size = 4.0, halign = "center",
+                     font = "Liberation Sans:style=Bold");
         translate([0, txt_val2_y])
             linear_extrude(emboss_h + text_sink)
                 text(str("PETG ", fmt2(k_pred(G_petg, n))),
-                     size = 3.2, halign = "center");
+                     size = 4.0, halign = "center",
+                     font = "Liberation Sans:style=Bold");
     }
 }
 
@@ -233,7 +241,8 @@ module footer_text() {
     translate([0, txt_footer_y, plate_t - text_sink])
         linear_extrude(emboss_h + text_sink)
             text("k = G d^4 / 8 N D^3   (N/mm, predicted)",
-                 size = 2.6, halign = "center");
+                 size = 3.0, halign = "center",
+                 font = "Liberation Sans:style=Bold");
 }
 
 module ladder_plate() {
@@ -245,7 +254,15 @@ module ladder_plate() {
         "end margin under spring radius + 2 mm");
     assert(spring_y - (d_mean + d_wire) / 2 >= txt_label_y + 4.5 + 0.5,
         "station text collides with the spring footprint");
-    assert(txt_footer_y - 2.6 >= -plate_w / 2 + 1,
+    // Value/footer sizes are the embossed heights (4.0 / 3.0 bold); text
+    // grows up from its baseline, so each row's top is baseline + size.
+    assert(txt_val1_y + 4.0 <= txt_label_y - 0.4,
+        "value line overlaps the N= label");
+    assert(txt_val2_y + 4.0 <= txt_val1_y - 0.4,
+        "PETG value line overlaps the PLA line");
+    assert(txt_footer_y + 3.0 <= txt_val2_y - 0.4,
+        "footer overlaps the PETG value line");
+    assert(txt_footer_y >= -plate_w / 2 + 1,
         "footer text runs off the plate front edge");
 
     plate_l = (n_st - 1) * station_pitch + 2 * plate_end_margin;
@@ -313,6 +330,11 @@ module cap_working(delta = 0) {
         // guide-post hole, through
         translate([0, 0, -1])
             cylinder(d = post_hole, h = skirt_h + cap_t + 2);
+        // 0.4 mm 45° chamfer at the disc-face mouth — that face is the
+        // first-layer bed in cap_print(), and first-layer squish eats the
+        // 0.3 mm radial post clearance exactly where the hole lands
+        translate([0, 0, skirt_h + cap_t - 0.4])
+            cylinder(d1 = post_hole, d2 = post_hole + 0.8, h = 0.41);
     }
 }
 

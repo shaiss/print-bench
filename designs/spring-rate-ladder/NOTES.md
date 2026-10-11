@@ -48,11 +48,18 @@ All are parametric in `spring-rate-ladder.scad`.
   non-manifold, so the model keeps a 0.2 mm gap — under one extrusion width,
   so the dead coils weld in print exactly as a real closed end behaves.
   Solid height is (N + 2)·d accordingly.
-- **Support-free by the thread argument**: at the defaults the active lead
-  angle is atan(p/πD) ≈ 10° for N = 4 (9.1 mm pitch) down to 4.6° for N = 8.
-  Each layer's wire arc advances 0.2/p of a turn from the layer below, so
-  every wrap deposits on the wrap beneath it — the `lib/threads-fdm.scad`
-  physics at a tenth of its 45° budget.
+- **Support-free by lead angle, not by round-wire promise**: at the defaults
+  the active lead is atan(p/πD) ≈ 10° for N = 4 (9.1 mm pitch) down to 4.6°
+  for N = 8, well inside the ≤ 45° assert (N2). Each wrap rests
+  *approximately* on the one below — expect a slightly flattened wire
+  underside (a free coil is not a screw-thread flank on a solid core); the
+  coupon measures the as-printed section. Field-test kill criterion for N2
+  is unchanged: sagging wraps reopen the constraint.
+- **`ring()` tangent z-term is `slope/(2π)`** (2026-10-11): with the
+  unscaled xy frame `[-r·sin(a), r·cos(a)]` the matching z derivative is
+  `slope/(2π)`, matching the lead assert's `atan(p/(π·D))`. The previous
+  `slope/360` under-tilted the wire ring by π/180 (~3 % elliptical section
+  at N=4). Re-emboss is automatic (N4).
 - **No d-varying fourth station** (the brief's non-blocking question, left
   to the session on plate space): declined — the ladder's identity is
   "differ only in N" so k ∝ 1/N reads directly; a d-station breaks the
@@ -86,28 +93,38 @@ All are parametric in `spring-rate-ladder.scad`.
 ## Print settings
 
 - **Orientation:** as modelled — ladder plate down; coupon pad down; **cap
-  disc down** (flipped in `cap_print()`).
+  disc down** (flipped in `cap_print()`). The disc-face post-hole mouth has
+  a 0.4 mm 45° chamfer so first-layer squish cannot close N5's 0.3 mm radial.
 - **Material:** PLA or PETG (measuring the difference is half the point);
   springs live or die by layer adhesion — print PETG slow-cooled / PLA with
-  plenty of part-cooling.
+  plenty of part-cooling. PETG: start `post_clearance` at 0.8.
 - **Layer height:** 0.2 mm (the embossing is exactly two layers; the
   `end_gap` weld assumes ≤ 0.2).
-- **Supports:** none anywhere.
-- **Perimeters:** the wire is 1.6 mm ≈ 4 perimeters at a 0.4 nozzle — do not
-  thin it; k ∝ d⁴, so one perimeter of squish is a measurable rate change.
+- **Wall width:** 0.40 mm (4 × 0.40 = 1.60 solid wire — not stock 0.42).
+- **Seam:** back or scarf.
+- **Supports:** none anywhere; expect a slightly flattened wire underside.
+- **Perimeters:** the wire is 1.6 mm = 4 × 0.40 — do not thin it; k ∝ d⁴.
 
 ## Print this first (the coupon)
 
-1. Print `spring-rate-ladder-coupon.stl` **and** `spring-rate-ladder-cap.stl`.
-2. Seat the cap: skirt over the spring, hole down the post. It must drop
-   freely to the spring top. If the post hole binds, raise `post_clearance`
-   (+0.2 steps); if the skirt scrapes the coils, raise `cap_spring_clearance`.
-3. Zero a kitchen scale with the rig on it, press the cap, read force vs
-   the cap-underside-to-pad-top distance (caliper) at, say, 5/10/15/20 mm
-   deflection. k = slope of F(x); N = 6 defaults.
+1. Print `spring-rate-ladder-coupon.stl` **and**
+   `spring-rate-ladder-cap.stl` in one slicer session.
+2. Seat the cap: skirt over the spring, hole down the post. It should slide
+   down the post and rest on the spring under its own weight. If the post
+   hole binds, raise `post_clearance` (+0.2 steps; PETG start 0.8); if the
+   skirt scrapes the coils, raise `cap_spring_clearance`.
+3. Zero a kitchen scale (must resolve single grams — 1 g ⇒ ~0.01 N). Press
+   the cap; convert **F [N] = g × 0.00981**. Read deflection as
+   **post-tip-above-disc-top**: at rest the tip sits ~2 mm below the disc
+   face; x = (tip-above-disc pressed) − (tip-above-disc at rest). Points at
+   5/10/15/20 mm; stop around 25–30 mm (N=6 solid is the floor of the PLA
+   yield band). k = slope of F(x); N = 6 defaults.
+   Worked example: 122 g at 10 mm → F ≈ 1.20 N → k ≈ 0.12 N/mm →
+   G ≈ 3600 MPa.
 4. Back out effective G = 8·N·D³·k/d⁴ and log it as a FIELD-TEST entry
-   (templates/FIELD-TEST.md) — if you opt into the print-feedback loop,
-   that G is what `printer.conf` wants (#101).
+   (templates/FIELD-TEST.md). `printer.conf` write-back of G is planned
+   (B3) — the profile has no G field yet.
+5. Store the cap **off** the spring between sessions.
 
 The wire-Ø / print-fidelity interaction is the whole experiment: if the
 coupon's wire shows visible faceting that shifts k, step `d_wire` to 2.0 and
@@ -115,14 +132,21 @@ re-derive (k ∝ d⁴ — re-embossing is automatic).
 
 ## Status
 
-**Gate-green (design-run, 2 gate iterations).** `render.sh` clean since the
-degree-trig fix; `gate.sh --slice` exit 0 for ladder (printcheck 92/100,
-watertight, sliced — the WARNING is the embossed text strokes, thinnest
-≈ 0.24 mm), coupon (100/100) and cap (100/100); `ci.fitchecks` both verbs
-(empty ✓ / interferes 3130 facets ✓). Measured off the exports (G4):
-OD 17.60 / ID 14.40 / wire Ø 1.60 / mean Ø 16.00 / free length 40.00 c2c;
-+x coil crossings 5/7/9 = N+1 per station; station centres −36/0/+36;
-coupon post Ø 5.00; cap hole Ø 5.60, skirt ID 18.80.
+**Gate-green; 2026-10-11 act-now round on the PM triage.** CI sticky at
+`81e715b` (pre-round truth): ladder 92/100 (WARNING: Thin walls — 10% of
+sampled surface under 0.8 mm, thinnest ≈ 0.03 mm — the embossed text
+strokes), cap 100/100, coupon 92/100 (WARNING: Thin walls — 2% of sampled
+surface under 0.8 mm, thinnest ≈ 0.10 mm; the coupon carries no embossed
+text — this is the helical wire's sampled thin sections, not the ladder's
+text warning); `ci.fitchecks` both verbs (empty ✓ / interferes ✓). After
+this round's emboss bump (value lines 4.0 mm bold / footer 3.0 mm bold),
+`ring()` tangent → `slope/(2π)`, and the 0.4 mm 45° disc-face post-hole
+chamfer, a local re-gate still asserts clean and shows ladder 92/100
+(thinnest ≈ 0.21 mm — improved) / cap 100 / coupon 100; CI will re-stamp
+on push. Measured off earlier exports (G4): OD 17.60 / ID 14.40 / wire Ø
+1.60 / mean Ø 16.00 / free length 40.00 c2c; +x coil crossings 5/7/9 = N+1
+per station; station centres −36/0/+36; coupon post Ø 5.00; cap hole Ø
+5.60, skirt ID 18.80.
 
 Sessions so far, in order:
 

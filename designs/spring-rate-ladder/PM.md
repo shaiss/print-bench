@@ -81,9 +81,12 @@ the field test's job, not an AI clip).
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
 | B1 | FIELD-TEST entry: measured k + back-out G on PLA and PETG | the product's whole claim, first proof | one coupon + cap print, ~3.6 g + scale |
-| B2 | `d_wire = 2.0` variant if faceting shifts k | k ∝ d⁴ makes wire fidelity the dominant error | re-render, re-emboss is automatic |
-| B3 | G write-back into `printer.conf` via the print-feedback loop | closes the loop #101 was built for | one FIELD-TEST entry once opted in |
+| B3 | G write-back into `printer.conf` via the print-feedback loop | compounds across every later design session; B2 waits on B1's evidence | one FIELD-TEST entry once opted in |
+| B2 | `d_wire = 2.0` variant if faceting / sag shifts k | conditional on B1 observing the failure | re-render, re-emboss is automatic |
 | B4 | Fourth station varying D (k ∝ 1/D³) | second-order once N-comparison exists | plate grows ~36 mm |
+| B5 | Graduated guide post (mm marks) | zero-caliper one-hand deflection read | geometry + gate cycle |
+| B6 | Coupon + cap `ci.plate` multi-object 3MF | one slicer import for the instrument pair | opt-in plate manifest |
+| B7 | AMS colour-swap tip at the wire/plate transition | untested cosmetic; rates in contrast colour | README tip only |
 
 ## Open decisions
 
@@ -98,3 +101,4 @@ the field test's job, not an AI clip).
 | 2026-09-28 | Decline the d-varying fourth station | the ladder's identity is "differ only in N"; named follow-up (B4), not scope |
 | 2026-09-29 | Cap seats on the wire's top *surface* + 0.2 mm gap, not the centerline | iter-1 fitcheck FAIL: centerline seating put the disc 0.8 mm inside the wire |
 | 2026-09-29 | `end_gap = 0.2` between closed end coils | a self-tangent polyhedron is non-manifold; 0.2 mm is under one extrusion width so the dead coils weld in print, as a real closed end behaves |
+| 2026-10-11 | Measurement recipe states F in N with g→N (`F[N] = g × 0.00981`) and reads deflection at the post tip (post-tip-above-disc-top); support-free wording made approximate pending B1; `ring()` tangent z-term corrected to `slope/(2π)`; backlog re-ranked B1 → B3 → B2 → B4, adding B5–B7 | PM triage of Drik/Jane act-now round on head `81e715b` — the recipe is the product's front door; B3 compounds, B2 is contingent on B1 |

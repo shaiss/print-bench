@@ -21,9 +21,14 @@ new region gets a new `cameras.conf` line, never a moved camera.
 - **layout-top.png** — orthographic top: the embossed table reads as a
   table — `N=4/6/8` rows with `PLA`/`PETG` rates and the
   `k = G d^4 / 8 N D^3` footer along the front edge.
-- **station-close.png** — close on the N=4 station (x = −36): single coils
-  resolvable, the closed end coils at top and bottom, and the station's
-  label row legible.
+- **station-close.png** — close on the N=4 station (x = −36, target y = +11,
+  dist 75): single coils resolvable and the closed end coils at top and
+  bottom. Frozen as reviewed — it does **not** frame the label row (that
+  job moved to `station-labels`).
+- **station-labels.png** — same N=4 station, pulled back (dist 120) with
+  target y ≈ 0 so one frame holds the whole spring, its embossed label
+  row (`N=4` / PLA / PETG), and a slice of the N=6 neighbour for scale.
+  Added 2026-10-11; does not move any existing camera.
 - **coupon.png** — the measurement rig (`spring-rate-ladder-coupon.scad`):
   pad, guide post and its N=6 spring, as printed (pad down).
 - **cap.png** — the guided cap in its **print pose** (disc down, skirt up —
