@@ -377,10 +377,12 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     open −X skirt (unchanged). **−Y** — full-size HDMI past the board edge
     ≈ 2.9 mm, micro-USB power ≈ 2.0 mm, stereo jack ≈ 1.0 mm (all through the
     open −Y skirt; RPI4's USB-C / micro-HDMI cluster is ≈ 0.5–2.4 mm past the
-    edge). **+Y** — GPIO 2×20 at (−10, 24.5), pin tops z ≈ 16.9 mm below the
-    notch lip at 17.5 mm (unchanged). **Lid** — fan centre (−10, 0) still
-    biases over the SoC; RPI3 SoC sits at (27, −24.6) vs RPI4 at (29.25, 32.5)
-    but both stay under the Ø37 intake. `ci.fitchecks` adds `fit-pins-rpi3` /
+    edge).     **+Y** — GPIO 2×20 at (−10, 24.5) mm in the case frame, pin tops z ≈ 16.9 mm
+    below the notch lip at 17.5 mm (unchanged). **Lid** — fan centre
+    (−10, 0) mm in the case frame still biases toward the Pi 4 SoC (NopSCADlib
+    vitamin component offset (29.25, 32.5) in `pcbs.scad`); the Pi 3 B+ SoC is
+    at vitamin offset (27, −24.6) — a different corner of the board, but both
+    stay under the Ø37 intake. `ci.fitchecks` adds `fit-pins-rpi3` /
     `fit-pins-rpi3-shift`; default `board_preset = 0` (Pi 4) leaves base/lid/
     coupon meshes byte-identical to pre-B2. Gate at `-D board_preset=1`: base /
     lid / coupon printcheck 100/100.

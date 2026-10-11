@@ -1,4 +1,4 @@
-# sbc-case — vented Raspberry Pi 4 case with fan mount
+# sbc-case — vented Raspberry Pi 4 / Pi 3 B+ case with fan mount
 
 A two-piece FDM case for the Raspberry Pi 4 (primary target) with a 40 mm
 intake fan, heat-set inserts at every repeated-assembly point, and cable access
@@ -7,8 +7,13 @@ pattern is generated from the board's own mounting hole list at build time.
 The Customizer also offers a **validated Raspberry Pi 3 B+** preset (same
 85×56 mm outline and mounting holes as the Pi 4 in the vendored NopSCADlib
 catalog); set `board_preset` to *Raspberry Pi 3 B+* or pass
-`-D board_preset=1` / `-D board=RPI3` on the command line. There is no Pi 5 or
-Zero 2 W vitamin in the vendored tree yet.
+`-D board_preset=1` / `-D board=RPI3` on the command line. Exporting `base` at
+`-D board_preset=1` matches the default Pi 4 shell geometry (argus-diff on the
+exported STLs: +0.00 % volume, 0 modified bodies, 1 unchanged). Committed
+previews and product shots still show the Pi 4 vitamin — only the generated
+standoff input changes with `board_preset`; the shell is the same. The default
+`fan_center = (−10, 0)` bias targets the Pi 4's SoC, not the Pi 3 B+'s. There is
+no Pi 5 or Zero 2 W vitamin in the vendored tree yet.
 
 ![Product shot](previews/product-hero.png)
 
@@ -90,7 +95,7 @@ The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 | `board` | `RPI4` | NopSCADlib pcb type (derived from `board_preset`; override with `-D board=…`) — standoffs follow `pcb_holes(board)` |
 | `fit_clearance` | 0.25 mm | lid register lip vs cavity wall; tune on the coupon |
 | `standoff_h` | 5 mm | board standoff height (4–6 per the brief) |
-| `interior_h` | 24 mm | interior height; sized over the tallest RPI4 connector |
+| `interior_h` | 24 mm | interior height; sized over the tallest RPI4 connector (the Pi 3 B+'s stacked USB-A is the same `usb_Ax2` vitamin, 15.6 mm) |
 | `fan_type` | `fan40x11` | fan vitamin; aperture and boss pitch follow it |
 | `fan_center` | (−10, 0) mm | fan position; biased toward the SoC |
 | `board_clr` | 0.75 mm | board-to-wall clearance |
