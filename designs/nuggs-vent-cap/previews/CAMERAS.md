@@ -14,7 +14,7 @@ region gets a new `cameras.conf` line, never a moved one.
   down on its sector tips, the full-round shell, and the 45° lattice cone
   rising to the flat latticed crown.
 - **lattice-top.png** — straight down into the dome: the crown disc (15 radial
-  spokes, concentric bands, the natural hub where the spokes cross) and the 37
+  spokes, concentric bands, the natural hub where the spokes cross) and the 38
   meridian ribs falling away to the wall rim. This is the shot that shows the
   on-surface cell openings the `aperture_max` welfare ceiling governs.
 - **cells.png** — tight three-quarter on the rim cells: the 1.2 mm strands and

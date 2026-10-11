@@ -18,14 +18,18 @@ tunes its whole welfare envelope with two numbers.
 - `vent-cap-solid` — the closed variant: a hollow 45° cone closed near the
   tip (open underside, no flat ceiling across the bore), **65 mm** tall
   (gated export 64.7 mm). See **Solid variant** below.
-- `coupon` — the print-this-first plate: a port stub to tune `port_tol` with,
-  beside one lattice cell at production pitch (caliper `strand_w` and the
-  opening). About **2 h 18 m / ~30 g** (slice-measured), about the same as
-  the lattice cap. If you've already dialed `port_tol` on another NUGGS
-  module on this printer, reuse that value and print just the cell:
+- `coupon` — if you've already dialed `port_tol` on another NUGGS module on
+  this printer, reuse that value and print just the cell:
   `openscad -D 'part="coupon-cell"' -o cell.stl designs/nuggs-vent-cap/nuggs-vent-cap.scad`
-  (or Customizer → `coupon-cell`). See [`NOTES.md`](NOTES.md) for the
-  tuning steps.
+  (or Customizer → `coupon-cell`). New to the standard here: the
+  print-this-first plate is a port stub beside one lattice cell at production
+  pitch — about **2 h 18 m / ~30 g** (slice-measured), about the same as the
+  lattice cap. Caliper `strand_w` and the opening at the **top face, not the
+  base** (first-layer squish narrows the opening at its base; the dome's
+  openings print well above L1). If the stub scratches on first insertion
+  then firms up past the tip, scrape the elephant foot off the sector tips
+  with a blade before touching `port_tol`. See [`NOTES.md`](NOTES.md) for
+  the tuning steps.
 
 The cap is one printed part. Its port face is every `nuggs_cfg()` default, so
 it mates with the straight, the elbow, the den, the turnaround — any module on
@@ -54,12 +58,21 @@ tip traps more humid air than the lattice.
 
 ![The lattice from above: crown disc, 15 spokes, 38 ribs](previews/lattice-top.png)
 
+![Rim cells at print scale: 1.2 mm strands and the ≤6 mm openings](previews/cells.png)
+
 ## Print settings
 
-- **Material:** PETG (gnaw-durable); PLA fine for a calm cage. Either way,
-  family N7 still applies — see Use & care
+- **Material:** PETG (gnaw-durable); PLA fine for a calm cage. Print the
+  coupon in the **same filament** as the cap — PETG fits run ~0.1 mm tighter
+  than PLA, so a PLA coupon does not prove a PETG cap. PLA prints the
+  cleanest lattice; PETG sags and strings on the small bridges — a heat gun
+  or side-cutters tidy whiskers before fitting (animal elsewhere). For a
+  chew-facing preset, raise `strand_w` to **1.6** and stay on PETG. Either
+  way, family N7 still applies — see Use & care
 - **Layer height:** 0.2 mm
 - **Infill:** 10–15 % grid, guides only — the lattice is the structure
+- **Seam:** Back (or scarf) — stock Aligned stacks a ridge on the Ø94.9
+  coupling ring and can eat into the 0.30 mm of `port_tol`
 - **Supports:** **none** — the dome is a 45° lattice cone by design; every
   strand underside is a sub-5 mm bridge, and the crown disc bridges its own
   ~10 mm spokes
@@ -71,8 +84,8 @@ tip traps more humid air than the lattice.
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `aperture_max` | 6.0 mm | Largest passage through the lattice — the welfare number. The ¼″ hardware-cloth ceiling for a Syrian; **dwarf keepers: 5.0**. An assert refuses anything over 6.0. |
-| `strand_w` | 1.2 mm | Lattice strand width — three perimeters at a 0.4 mm nozzle. Raise to 1.6 if your printer under-extrudes thin strands. |
+| `aperture_max` | 6.0 mm | Largest passage through the lattice — the welfare number. The ¼″ hardware-cloth convention for a Syrian (**convention; confirm for your animal**); **dwarf keepers: 5.0**. An assert refuses anything over 6.0. |
+| `strand_w` | 1.2 mm | Lattice strand width — three perimeters at a 0.4 mm nozzle. Raise to 1.6 (with PETG) for chew durability, or if your printer under-extrudes thin strands. |
 | `dome_rise` | 28.0 mm | Dome height above the port zone. The length-vs-bridge trade: lower = shorter cap, bigger crown bridge. |
 | `port_tol` | 0.30 mm | The fit knob. **Unmeasured** — tune on the coupon in ±0.05 steps before printing the cap. |
 | `lattice` | true | false = the solid variant (`vent-cap-solid`): blocked, taller. |
@@ -94,10 +107,14 @@ grouped in Customizer sections; override on the command line with
 - **Condensation and wash (family N7):** both the lattice and the solid
   variant trap humid air at the tip — the closed cone more so. In humid
   rooms, pull and dry the cap weekly, and keep bedding off the dome's
-  underside. When you wash it, hand-wash either cap (NUGGS family **N7**):
-  ≤ 50 °C only, mild unscented dish soap is fine, rinse and dry fully —
-  **never a dishwasher** (the heated dry cycle exceeds even PETG, and a
-  warped port is a narrowed bore).
+  underside. Bedding also packs the port's lug pockets — blow them out when
+  you pull the cap. When you wash it, hand-wash either cap (NUGGS family
+  **N7**): ≤ 50 °C only, mild unscented dish soap is fine, rinse and dry
+  fully — **never a dishwasher** (the heated dry cycle exceeds even PETG,
+  and a warped port is a narrowed bore).
+- **Chew / welfare:** the 6 mm aperture is a mesh convention, not a chew
+  proof — inspect the widest (lowest) cells weekly and treat the lattice as
+  replaceable if the resident gnaws.
 - **Airflow:** the lattice holds ≥ 30 % open area by construction. If a keeper
   reports stuffiness, the lever is `aperture_max` (within the welfare ceiling)
   — never thinner strands.

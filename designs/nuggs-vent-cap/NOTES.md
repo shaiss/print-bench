@@ -241,5 +241,12 @@ plate. A real print photo is the artifact that belongs there.
   section — opaque dark filament advice for the 1.2 mm shell, and
   hollowing cut from ~57 g → ~35 g (~40 % less), not "roughly in half".
   Empty field-test log left alone.
+- 2026-10-11: Docs-only fold of PM triage act-now on `173ef37` (PR #636):
+  Print-settings (same-filament coupon, PETG-vs-PLA lattice trade, Seam
+  Back/scarf, `strand_w=1.6`+PETG chew preset); coupon copy leads with
+  `port_tol` reuse then top-face caliper + blade-before-`port_tol`; Use &
+  care bedding pockets + weekly chew inspect; aperture marked convention;
+  `cells.png` embedded; CAMERAS comment text 37→38 (cameras frozen). No
+  geometry. Empty field-test log and proving print left alone.
 
 ## Field test log
