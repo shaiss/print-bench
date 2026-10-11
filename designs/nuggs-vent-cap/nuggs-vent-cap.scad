@@ -1,16 +1,18 @@
 // N.U.G.G.S. vent cap — a breathing end-cap: the standard quarter-turn port
 // face closed by a support-free lattice dome. Air and light pass, bedding
-// stays, the animal cannot. Design brief: issue #592. Requirements, welfare
-// numbers and decisions: see NOTES.md next to this file. All dimensions in
-// millimeters.
+// stays; escape prevention assumes aperture_max ≤ the 6 mm welfare ceiling
+// (unconfirmed on a live animal — see NOTES.md). Design brief: issue #592.
+// Requirements, welfare numbers and decisions: see NOTES.md next to this
+// file. All dimensions in millimeters.
 //
 // WHY THIS MODULE EXISTS (charter N3, designs/nuggs/PM.md): ventilation is a
 // welfare feature — ammonia and CO2 build up in enclosed runs — and the
 // ecosystem had no way to terminate a run while it breathes. Today an owner
 // seals a tube dead (solid cap = stale air) or leaves it open (the animal
 // exits). This is the third option: an ENCLOSED end that breathes. It does not
-// break a run the way nuggs-open does — air passes, the animal cannot — so it
-// is still an end for the run-length rule, not a break.
+// break a run the way nuggs-open does — air passes; openings stay at or under
+// the assumed aperture ceiling — so it is still an end for the run-length
+// rule, not a break.
 //
 // THE DOME, AND THE ARITHMETIC THAT SHAPES IT. The design problem is closing
 // an 80 mm bore with no slicer supports (docs/advanced-techniques.md, "Self-
@@ -193,10 +195,16 @@ assert(rib_gap_max <= aperture_max, str(
     r_lattice_max, " mm), is ", rib_gap_max, " mm — over aperture_max = ",
     aperture_max, " mm. The rib count must be derived at the outer radius;",
     " an opening over the welfare ceiling is an escape route."));
-assert(aperture_max * aperture_max / (slope_pitch * slope_pitch) >= open_area_min,
-    str(
+// On-slope cell pitches are anisotropic: tangential bands sit at
+// slope_pitch, vertical bands at pitch_v stretch by √2 on the 45° face
+// (pitch_v·√2 = aperture_max + strand_w·√2). The open fraction is the
+// product of the two opening/pitch ratios, not (aperture/slope_pitch)² —
+// the isotropic form over-states open area and lets a thick-strand pairing
+// pass the 30 % floor while the real cell is under it.
+open_area_frac = aperture_max * aperture_max / (slope_pitch * pitch_v * sqrt(2));
+assert(open_area_frac >= open_area_min, str(
     "VENT CAP OPEN AREA: the derived on-slope cell fraction is ",
-    aperture_max * aperture_max / (slope_pitch * slope_pitch), ", under the ",
+    open_area_frac, ", under the ",
     open_area_min, " floor the brief sets for flow — the lattice, not the",
     " strands, must never be the bottleneck. Widen aperture_max (within the",
     " welfare ceiling) or thin strand_w (within the FDM floor)."));
@@ -365,9 +373,12 @@ module vent_cap_coupon() {
     cell = slope_pitch + strand_w;
     // Stub at the origin; one cell just outside the coupling ring OD
     // (ro + lug_r), not the tube OD — a gap inside the lugs would weld the
-    // cell to the ring and collapse the two-body plate.
+    // cell to the ring and collapse the two-body plate. Bed plane is
+    // nuggs_z_tip (= −port_proj): the neck stands on its sector tips there,
+    // so the cell must land on the same z or it floats above the bed.
     nuggs_neck(cfg_d(), z_top + 8);
-    translate([ro + lug_r + 4, -cell / 2, 0]) lattice_gauge();
+    translate([ro + lug_r + 4, -cell / 2, nuggs_z_tip(cfg_d())])
+        lattice_gauge();
 }
 
 // ---------------------------------------------------------------------------

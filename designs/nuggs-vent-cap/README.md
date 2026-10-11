@@ -1,8 +1,10 @@
 # NUGGS vent cap
 
 The breathing end-cap: the standard NUGGS quarter-turn port closed by a
-support-free **lattice dome**. Air and light pass, bedding stays in, the
-animal cannot get out — an enclosed run end that doesn't seal the system dead.
+support-free **lattice dome**. Air and light pass, bedding stays in, and
+openings stay at or under the assumed 6 mm welfare ceiling (the 1/4″
+hardware-cloth convention — owner confirmation on a live animal is still
+pending) — an enclosed run end that doesn't seal the system dead.
 Prints upright with no supports, clicks into any existing NUGGS module, and
 tunes its whole welfare envelope with two numbers.
 

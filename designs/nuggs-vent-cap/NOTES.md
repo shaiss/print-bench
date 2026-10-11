@@ -4,13 +4,16 @@
 
 The NUGGS **vent cap** (issue #592, the filter body the ecosystem names but
 doesn't have): the standard genderless quarter-turn port face closed by a
-**support-free lattice dome**. Air and light pass; bedding stays; the animal
-cannot. Charter **N2** caps a continuously enclosed run at 2 × body length
-between breaks, and today the only way to *end* a run is a solid cap — which
-seals it dead (ammonia and CO2 build up in an enclosed system) — or leaving it
-open, which is an exit. The vent cap is the third option: an enclosed end that
-breathes. It does **not** break a run the way nuggs-open does (air passes, the
-animal cannot), so under the run-length rule it is still an end.
+**support-free lattice dome**. Air and light pass; bedding stays; openings
+stay at or under the assumed 6 mm welfare ceiling (1/4″ hardware-cloth
+convention — owner confirmation on a live animal is still pending). Charter
+**N2** caps a continuously enclosed run at 2 × body length between breaks,
+and today the only way to *end* a run is a solid cap — which seals it dead
+(ammonia and CO2 build up in an enclosed system) — or leaving it open, which
+is an exit. The vent cap is the third option: an enclosed end that breathes.
+It does **not** break a run the way nuggs-open does (air passes; openings
+stay at or under that assumed ceiling), so under the run-length rule it is
+still an end.
 
 ## Given / assumed measurements
 
@@ -88,9 +91,13 @@ Both dome surfaces are lines of constant `r + z` — 45° in the r–z plane:
   (dwarf settings `aperture_max=5`/`strand_w=1.6` hit `n_rib=41` and would
   shrink spring-rim openings to ~1.65 mm while the open-area assert still
   read the intended single-ray pitch).
-- **Open area**: the on-slope cell fraction is
-  `(aperture/ (aperture+strand))² = 0.694` — well over the 30 % floor, and
-  asserted so a knob pairing that chokes the vent fails loudly.
+- **Open area**: the on-slope cell is anisotropic — tangential pitch
+  `slope_pitch = aperture+strand`, along-slope pitch
+  `pitch_v·√2 = aperture + strand·√2` — so the open fraction is
+  `aperture² / (slope_pitch · pitch_v·√2) = 0.650` at the defaults, still
+  well over the 30 % floor, and asserted on that product so a thick-strand
+  pairing that chokes the vent fails loudly (the isotropic
+  `(aperture/(aperture+strand))²` form over-states the fraction).
 
 ### One watertight body (the manifold render's 51/100)
 
@@ -186,10 +193,11 @@ No supports, no brim. PLA or PETG; PETG for gnaw durability.
 The coupon (`build/nuggs-vent-cap-coupon.stl`, `part="coupon"` in
 `nuggs-vent-cap-coupon.scad`) is **two pieces on one plate**: the production
 port stub (`nuggs_neck` at `z_top + 8`) and **one** flat cell printed on the
-bed at the dome's on-slope pitch (`slope_pitch = aperture_max + strand_w`) —
-not a multi-cell puck. Both come from the production modules; nothing is
-copied. Owners who already dialed `port_tol` on another NUGGS module can skip
-the stub and print only the cell: `part="coupon-cell"` (same production
+same bed plane as the sector tips (`z = nuggs_z_tip` = −`port_proj`) at the
+dome's on-slope pitch (`slope_pitch = aperture_max + strand_w`) — not a
+multi-cell puck. Both come from the production modules; nothing is copied.
+Owners who already dialed `port_tol` on another NUGGS module can skip the
+stub and print only the cell: `part="coupon-cell"` (same production
 `lattice_gauge()`, no copied geometry).
 
 1. **Tune `port_tol`.** Print the stub, offer it to the module it must mate
