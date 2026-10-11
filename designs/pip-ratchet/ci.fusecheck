@@ -1,0 +1,19 @@
+# Post-slice separability (print-in-place): the wheel must survive as its own
+# body in the exact STL the gate test-slices — the question printcheck cannot
+# ask, because a welded print-in-place part is still watertight and sliceable
+# (the sweetheart-hamster fused-hinge lesson). No flexure zone applies: the
+# pawls are FRAME material fused to the blocks by design, so the only legitimately
+# separable body is the wheel, which connects to NOTHING in the model — it is a
+# disjoint captive body like the captive-spinner's rotor, and a fuse here can
+# only mean clearance collapse (a z_layers or xy_tol error welding wheel to
+# post, base, cone or pawl) and reads as 1 body. A direct N-body assert is
+# stricter than dropping a flexure zone around the pawl roots: a pawl-to-frame
+# weld is legitimate, a wheel-to-anything weld is not, and the assert sees both.
+assert pip-ratchet.stl 2
+# The coupon's rack strip is a second loose body in its channel (the pawl and
+# its block are one fused body by design).
+assert pip-ratchet-coupon.stl 2
+# MANDATORY known-fused negative control: the "fused" pose shrinks the bore
+# onto the post (0.4 mm interference ring over the wheel's full height), so
+# the union is one body — proving the check can still fire.
+control fused 1

@@ -37,12 +37,18 @@ The primary pulse is entirely file-read from the committed tree:
 Plus one opt-in, GET-only live read (`src/reeve/github.py`, the groomer's
 pattern; issue #313) — only when `--repo` is passed:
 
-- **Workflow-run conclusions** for the scheduled routines (`design-run.yml`,
-  `backlog-burn.yml`, `chunker.yml`, `labeler.yml`) — the ten newest completed
-  runs each.
+- **Workflow-run conclusions** for the scheduled workflows on the watch list
+  (`ROUTINE_WORKFLOWS`, the single source of truth: `design-run.yml`,
+  `backlog-burn.yml`, `chunker.yml`, `labeler.yml`, `growth-twitter.yml`,
+  `wright.yml`, `growth-board-sync.yml` — the forge and the growth-board lens
+  joined at #745, when the board's sync had hard-failed on rate-limit for days
+  without ever reaching this report) — the ten newest completed runs each.
 - **Open issues carrying an active 🚢 SHIP-LOCK** claim, and the open PRs and
   `claude/issue-<N>-*` branches that would corroborate one (the selector's
   lock semantics, mirrored from `tools/backlog-burn`, not imported).
+- **Open `adoption-study` and `agent-brief` issues** with their labels (the
+  same listing, no extra request) — the inputs of the `adoption-study` and
+  `agent-brief-queue` detectors.
 
 The same `github.py` serves the greenlight loop's trusted Select step (issue
 #443): `gather_greenlight_queue` lists the open `needs-decision` issues and
@@ -59,14 +65,16 @@ live in `pushthrough.py`, never here.
 
 ## The detectors
 
-Eight pure functions of one snapshot, deterministic order, byte-stable report:
+Ten pure functions of one snapshot, deterministic order, byte-stable report:
 
 | Detector | Fires when |
 |---|---|
 | `budget-tightening` | a committed preview's size headroom is under `low_headroom_pct` (or over budget) |
 | `gate-failing` | the latest run has pre-fails, a part with no score / criticals / a failed slice, or a false derivative override |
-| `routine-dead` | none of a routine's last `routine_dead_runs` completed runs succeeded and at least one hard-failed (a pure-cancelled streak is queue noise) |
+| `routine-dead` | none of a watched workflow's last `routine_dead_runs` completed runs succeeded and at least one hard-failed (a pure-cancelled streak is queue noise) |
+| `agent-brief-queue` | an open forge brief is pending / parked `needs-decision` / `wright-declined` — the queue state beside `routine-dead`, so a forge death-streak shows as a backlog that stopped moving (#745; an armed brief is not flagged) |
 | `lock-leak` | an active 🚢 SHIP-LOCK is older than `lock_leak_hours` with no corroborating branch or closing PR — a killed run's ghost claim (issue #312) |
+| `adoption-study` | an open study submission has no `disposition:*` label yet, or is flagged `disposition:worth-raising` |
 | `score-regression` | a part is below `score_floor`, or down ≥ `score_drop` vs the prior full-catalog run |
 | `walltime-regression` | a design's gate wall time rose ≥ `walltime_ratio`× (and past `walltime_min_seconds`) |
 | `archived-creep` | a design newly dropped out of gating vs the prior full-catalog run |
@@ -75,7 +83,7 @@ Eight pure functions of one snapshot, deterministic order, byte-stable report:
 Comparisons only use full-catalog (`designs=ALL`) runs — a scoped run gates
 fewer parts. A detector whose input is absent is reported **not evaluated** with
 a reason, never silently empty (the groomer's honesty rule); an offline run
-(no `--repo`) reports both run-health detectors that way.
+(no `--repo`) reports every run-health detector that way.
 
 ## Advisory-only, checkable
 
@@ -119,7 +127,8 @@ the keyless report and:
   `provider-triage` escalation (its body carries the `<!--
   provider-escalation:<reason> -->` marker — one shared issue per cause since
   #550, which also covers the Oracle's escalations): an account/key ask with a
-  fixed remedy is not a decision a charter verdict can rule on;
+  fixed remedy is not a decision a charter verdict can rule on — and any in a
+  standing `approve_deny` category, which is human-only (#446, below);
 - runs the drafter (`/reeve-greenlight`, `.claude/skills/reeve-greenlight/`)
   with `--permission-mode dontAsk` over the #442 wrapper — its only shell
   surface — behind `.claude/reeve-settings.json`, its writes bound to the
@@ -177,6 +186,73 @@ tests); `pushthrough.py` is the one write seam; `test_pushthrough.py` pins the
 five Done-when cases from the issue, including the injected mid-sequence
 failure that must leave `decision-approved` set with `needs-decision` still in
 place — never the reverse.
+
+### Standing approval modes (issue #446)
+
+The owner's reviewed, per-category standing rules — the session-permission-mode
+analogue #296 named — in `.github/reeve.conf`, over a closed category
+vocabulary defined in `src/reeve/approval.py` (`docs`, `gates`):
+
+```
+approve_auto: docs     # a YES resolves with no reaction, after the 👎 grace window
+approve_deny: gates    # human only: no greenlight drafted, never resolved
+```
+
+Everything in neither list **asks** — #444's behaviour exactly. Both keys are
+strict comma lists (an unknown category, a repeat, or a category in both lists
+fails the parse) and both default to empty, so a conf without them — or a poll
+never handed the conf — auto-approves nothing and denies nothing. The shipped
+set is the owner's 2026-08-30 ruling on #446: auto-approve doc-only
+follow-ups, deny gate machinery, everything else asks.
+
+A parked decision is an issue, not a PR — there are no changed paths — so the
+classification reads the two deterministic signals it has, **asymmetrically**:
+
+- **only a trusted signal loosens.** An issue reaches `auto` only through its
+  category's label (`docs` → `docs-only`), and only when the label's latest
+  applier — read from the issue's label events (`github.list_label_events`) —
+  is a human whose real permission is write-level: the bar a 👍 clears. A
+  label a bot applied (`github-actions[bot]` or any `[bot]` App) never
+  loosens, because an agentic routine reading untrusted issue text may hold
+  `issues: write`. `docs-only` is deliberately not the generic
+  `documentation` label, which has been applied to issues whose fix shipped a
+  check script.
+- **untrusted text only tightens — to ask.** The title and body can place an
+  issue in `gates` (it names a `*-check.sh`, a perms-check, `gate.sh`,
+  `ci.yml`, a `*-settings.json` backstop or the shared `.claude/settings.json`
+  — the owner's list), and a `gates` text hit **blocks auto**: the thread asks,
+  so gate items never resolve without a human. But text alone **never
+  denies**: it cannot tell "touches" from "mentions", and an earlier cut that
+  let it deny silenced Reeve on ~18 of 51 parked issues (owner ruling,
+  2026-10-03). A full **deny takes the category's label** — `gate-machinery`,
+  from anyone, since tightening needs no vouching.
+
+Most restrictive wins — deny > ask > auto — and a mix of an auto category with
+anything else asks. What each mode does:
+
+- **deny** — `reeve greenlight-select` drops the issue before the cap (named on
+  stderr and in `denied=`), so the drafter is never handed it and the wrapper,
+  bound to the selected set, refuses a post on it; the poll writes nothing to a
+  denied thread — no approval even on a 👍, no overrule reply on a 👎. Only a
+  human `/decide` resolves it.
+- **auto** — a **YES** greenlight with no 👎 resolves once the
+  `AUTO_APPROVE_GRACE` window (20h from its post — under the daily cadence, so
+  an on-time next scheduled run qualifies and a same-day `workflow_dispatch`
+  never does; a heavily delayed scheduled post only waits one more day) has
+  passed: decide.yml's sequence exactly as for a 👍, `arm=1`
+  arming included, with the ledger row and the reply naming the rule
+  (`standing-rule:docs`), never a person. A 👍 still resolves at once, a 👎
+  still overrules, a `/decide` still outranks, and a **NO** still asks. The
+  label vouches only for the greenlit text: it must have been applied at or
+  after the greenlight's post, and the live title+body must still hash to the
+  marker's `text=` digest (`approval.text_digest`, which the wrapper computes
+  byte-identically) — otherwise the thread asks.
+- **ask** — unchanged.
+
+`approval.py` is pure (held to the package's purity scan);
+`tests/test_approval.py` pins the classification and the conf keys,
+`tests/test_approval_poll.py` the poll, the Select step and the workflow's
+`--conf` wiring — each rule with a negative control.
 
 ## The learning half (issue #445)
 
@@ -242,7 +318,8 @@ reeve config --get enabled                   # read the committed policy
 reeve armed --variable "$REEVE_ENABLED" --conf-enabled "$enabled"
 reeve greenlight-select --repo owner/name    # the draftable parked-decision queue
 reeve greenlight-poll --repo owner/name      # poll prior greenlights; push approvals
-                                             # (reads REGEN_TOKEN for the ledger commit)
+                                             # (reads REGEN_TOKEN for the ledger commit;
+                                             # --conf applies the standing modes, #446)
 reeve greenlight-context --repo owner/name   # the drafter's precedent digest (#445)
 reeve greenlight-append --repo owner/name    # records for newly-resolved rounds (#445)
 ```

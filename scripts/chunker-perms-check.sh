@@ -79,6 +79,10 @@ allow = load(settings_path).get("permissions", {}).get("allow", [])
 deny  = load(chunker_path).get("permissions", {}).get("deny", [])
 deny_set = set(deny)
 
+# Jane/Drik posting surface (#773): server or tool spelling, growth-server pattern.
+REVIEWER_DENIES = {"mcp__reviewer", "mcp__reviewer__post_review"}
+missing_reviewer = not (REVIEWER_DENIES & deny_set)
+
 # Coverage: every non-wrapper Bash allow must be denied verbatim (exact-rule
 # exemption for the wrapper — a rogue same-basename path is not exempt).
 missing = [r for r in allow
@@ -103,6 +107,12 @@ if missing:
         sys.stderr.write(f"    {r}\n")
     sys.stderr.write(
         "  → add each to .claude/chunker-settings.json permissions.deny.\n")
+if missing_reviewer:
+    ok = False
+    sys.stderr.write(
+        f"the backstop no longer denies mcp__reviewer or "
+        f"mcp__reviewer__post_review (issue #773 sibling deny) in "
+        f"{chunker_path}\n")
 
 sys.exit(0 if ok else 1)
 PY
@@ -118,7 +128,7 @@ selftest() {
 {"permissions":{"allow":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)"]}}
 EOF
   cat > "$tmp/good-chunker.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Write"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Write","mcp__reviewer","mcp__reviewer__post_review"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-chunker.json" 2>/dev/null; then
     echo "ok    selftest: complete deny coverage passes"
@@ -178,6 +188,16 @@ EOF
     echo "FAIL  selftest: a wildcard deny blocking the wrapper was NOT caught"; return 1
   else
     echo "ok    selftest: a wildcard deny blocking the wrapper fails the check"
+  fi
+
+  # Missing Jane/Drik posting deny (#773): neither spelling present.
+  cat > "$tmp/bad-reviewer-chunker.json" <<'EOF'
+{"permissions":{"deny":["Bash(xvfb-run:*)","Write"]}}
+EOF
+  if check_pair "$tmp/good-settings.json" "$tmp/bad-reviewer-chunker.json" 2>/dev/null; then
+    echo "FAIL  selftest: a missing reviewer-posting deny was NOT caught"; return 1
+  else
+    echo "ok    selftest: a missing reviewer-posting deny fails the check"
   fi
 }
 

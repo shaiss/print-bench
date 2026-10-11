@@ -142,6 +142,35 @@ def test_routine_dead_sorted_by_workflow_name():
     assert [f["workflow"] for f in found] == ["chunker.yml", "labeler.yml"]
 
 
+def test_routine_dead_fires_for_the_forge_workflow():          # #745, AC2
+    # wright.yml joined the watch list at #745 — a forge death-streak (at
+    # least one hard failure, no success in the window) must be visible in
+    # the bench-health report, not only red in Actions.
+    found = detectors.routine_dead(
+        [wf("wright.yml", ["failure", "timed_out", "failure"])], 3)
+    assert [f["workflow"] for f in found] == ["wright.yml"]
+    assert found[0]["url"] == "https://runs/wright.yml/0"
+
+
+def test_routine_dead_silent_for_the_forge_pure_cancelled():   # #745, AC2 negative
+    assert detectors.routine_dead(
+        [wf("wright.yml", ["cancelled"] * 3)], 3) == []
+
+
+def test_routine_dead_fires_for_the_growth_board_lens():       # #745, AC3
+    # growth-board-sync.yml is not an armed routine, but its schedule can die
+    # (the live GraphQL rate-limit streak this brief was filed on) — the
+    # detector must name it all the same.
+    found = detectors.routine_dead(
+        [wf("growth-board-sync.yml", ["failure"] * 3)], 3)
+    assert [f["workflow"] for f in found] == ["growth-board-sync.yml"]
+
+
+def test_routine_dead_silent_for_the_growth_board_pure_cancelled():  # #745, AC3 negative
+    assert detectors.routine_dead(
+        [wf("growth-board-sync.yml", ["cancelled", "cancelled", "cancelled"])], 3) == []
+
+
 # --- lock-leak ---------------------------------------------------------------
 
 def test_lock_leak_fires_on_old_uncorroborated_lock():
@@ -221,6 +250,78 @@ def test_adoption_study_sorted_by_number():
         adoption(305, labels=["adoption-study"]),
     ])
     assert [f["number"] for f in found] == [305, 306]
+
+
+# --- agent-brief-queue (#745) ------------------------------------------------
+
+def brief(number, title="Agent brief: x", labels=("agent-brief",)):
+    return {"number": number, "title": title, "labels": list(labels),
+            "createdAt": "2026-08-12T05:00:00Z", "updatedAt": "2026-08-13T05:00:00Z",
+            "url": f"https://github.com/o/r/issues/{number}"}
+
+
+def test_agent_brief_queue_states_pending_parked_declined():
+    found = detectors.agent_brief_queue([
+        brief(741, labels=["agent-brief", "points-2"]),
+        brief(743, labels=["agent-brief", "needs-decision"]),
+        brief(744, labels=["agent-brief", "wright-declined"]),
+    ])
+    assert {f["number"]: f["state"] for f in found} == {
+        741: "pending", 743: "needs-decision", 744: "wright-declined"}
+    assert found[0]["url"] == "https://github.com/o/r/issues/741"
+
+
+def test_agent_brief_queue_silent_on_armed_briefs():         # negative control
+    # Approved + autonomy-ok: the backlog burn's queue now, not the forge's.
+    assert detectors.agent_brief_queue(
+        [brief(745, labels=["agent-brief", "autonomy-ok", "points-2"])]) == []
+
+
+def test_agent_brief_queue_silent_on_briefs_decided_via_decide():  # negative control
+    # /decide replaces needs-decision with decision-approved/-rejected; a
+    # decided brief is resolved (wright.yml's Select never re-judges it), so
+    # it must not be reported as pending.
+    assert detectors.agent_brief_queue([
+        brief(750, labels=["agent-brief", "decision-approved"]),
+        brief(751, labels=["agent-brief", "decision-rejected"]),
+    ]) == []
+
+
+def test_agent_brief_queue_still_pending_beside_unrelated_decision_labels():
+    # Positive control: only the exact resolved labels drop a brief — an
+    # unrelated label that merely looks decision-ish stays pending.
+    found = detectors.agent_brief_queue(
+        [brief(752, labels=["agent-brief", "decision-pending", "points-2"])])
+    assert [(f["number"], f["state"]) for f in found] == [(752, "pending")]
+
+
+def test_resolved_brief_labels_match_wright_signoff_select():
+    # Drift guard: the detector's resolved set is exactly the labels
+    # wright.yml's sign-off Select excludes beyond the two flagged states.
+    import pathlib
+    import re
+    wf = pathlib.Path(__file__).resolve().parents[3] / ".github/workflows/wright.yml"
+    excluded = set(re.findall(r"-label:([A-Za-z0-9:_-]+)", wf.read_text()))
+    assert excluded - {"needs-decision", "wright-declined"} == set(
+        detectors.RESOLVED_BRIEF_LABELS)
+
+
+def test_agent_brief_queue_needs_decision_outranks_a_co_present_decline():
+    # A brief both declined and parked is still parked — the actionable state.
+    found = detectors.agent_brief_queue(
+        [brief(746, labels=["agent-brief", "wright-declined", "needs-decision"])])
+    assert [f["state"] for f in found] == ["needs-decision"]
+
+
+def test_agent_brief_queue_empty_is_clean():                  # negative control
+    # An empty queue is "checked, clean", never a finding and never "not
+    # evaluated" (that honesty rule is evaluate()'s, for an absent input).
+    assert detectors.agent_brief_queue([]) == []
+
+
+def test_agent_brief_queue_sorted_by_number():
+    found = detectors.agent_brief_queue([brief(748), brief(741)])
+    assert [f["number"] for f in found] == [741, 748]
 
 
 # --- score-regression --------------------------------------------------------
@@ -319,16 +420,18 @@ def test_evaluate_scoped_runs_do_not_enable_comparisons():
 
 
 def test_evaluate_marks_absent_run_health_not_evaluated():
-    # The offline invariant: no runHealth key -> both run-health detectors are
+    # The offline invariant: no runHealth key -> every run-health detector is
     # "not evaluated" with the pass-`--repo` reason, never silently empty.
     result = detectors.evaluate({"records": [], "previews": [], "reportPlaceholder": True}, CFG)
     ne = result["not_evaluated"]
     assert "offline run" in ne["routine-dead"]
     assert "offline run" in ne["lock-leak"]
     assert "offline run" in ne["adoption-study"]
+    assert "offline run" in ne["agent-brief-queue"]
     assert "routine-dead" not in result["findings"]
     assert "lock-leak" not in result["findings"]
     assert "adoption-study" not in result["findings"]
+    assert "agent-brief-queue" not in result["findings"]
 
 
 def test_evaluate_run_health_present_evaluates_both():
@@ -337,15 +440,28 @@ def test_evaluate_run_health_present_evaluates_both():
             "runHealth": {"gatheredAt": NOW,
                           "workflows": [wf("design-run.yml", ["failure"] * 3)],
                           "issues": [locked(281)], "openPRs": [], "branches": [],
-                          "adoptionStudies": [adoption(305, labels=["adoption-study"])]}}
+                          "adoptionStudies": [adoption(305, labels=["adoption-study"])],
+                          "agentBriefs": [brief(741, labels=["agent-brief"])]}}
     result = detectors.evaluate(snap, CFG)
-    assert "routine-dead" not in result["not_evaluated"]
-    assert "lock-leak" not in result["not_evaluated"]
-    assert "adoption-study" not in result["not_evaluated"]
+    for key in ("routine-dead", "lock-leak", "adoption-study", "agent-brief-queue"):
+        assert key not in result["not_evaluated"]
     assert [f["workflow"] for f in result["findings"]["routine-dead"]] == ["design-run.yml"]
     # Ages are computed from runHealth's own gatheredAt, not generatedAt.
     assert result["findings"]["lock-leak"][0]["age_hours"] == 6.0
     assert [f["state"] for f in result["findings"]["adoption-study"]] == ["awaiting-disposition"]
+    assert [f["state"] for f in result["findings"]["agent-brief-queue"]] == ["pending"]
+
+
+def test_evaluate_agent_brief_queue_with_empty_briefs_is_clean_not_absent():
+    # AC4: an empty queue renders a clean ✅ / zero, not "not evaluated" —
+    # runHealth present with no open briefs is a checked-empty forge backlog.
+    snap = {"records": [], "previews": [], "reportPlaceholder": True,
+            "generatedAt": "2026-08-01T00:00:00Z",
+            "runHealth": {"gatheredAt": NOW, "workflows": [], "issues": [],
+                          "openPRs": [], "branches": []}}
+    result = detectors.evaluate(snap, CFG)
+    assert "agent-brief-queue" not in result["not_evaluated"]
+    assert result["findings"]["agent-brief-queue"] == []
 
 
 def test_evaluate_is_pure_and_repeatable():
@@ -379,8 +495,11 @@ WRITE_SEAM = "pushthrough.py"
 # greenlight comments live outside this package entirely, in
 # .claude/skills/reeve-greenlight/. cli.py stays in this list because it
 # imports github.py and pushthrough.py lazily, inside the --repo /
-# greenlight-select / greenlight-poll paths only.
-_PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py", "signals.py")
+# greenlight-select / greenlight-poll paths only. approval.py (#446, the
+# standing approval modes) is pure policy the write seam consumes, so it is
+# held here too — the seam may import it only because it can carry nothing.
+_PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py", "signals.py",
+                 "approval.py")
 
 
 def _imports_of(path):
@@ -435,7 +554,10 @@ def test_write_verbs_are_confined_to_the_seam_and_the_seam_is_real():
     # The read side it builds on stays the GET seam; the pure side stays pure.
     assert _imports_of(seam) & {"urllib"} == {"urllib"}
     local_imports = _relative_imports_of(seam.read_text(encoding="utf-8"))
-    assert local_imports <= {"config", "detectors", "greenlight", "github", "report", "signals"}, (
+    # `approval` (#446's standing modes) is held pure by _PURE_MODULES above,
+    # so the seam importing it carries no write verb anywhere.
+    assert local_imports <= {"approval", "config", "detectors", "greenlight", "github",
+                             "report", "signals"}, (
         f"{WRITE_SEAM} imports outside the package's own modules: {sorted(local_imports)}"
     )
 

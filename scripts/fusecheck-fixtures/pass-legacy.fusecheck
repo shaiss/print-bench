@@ -1,0 +1,9 @@
+# Fusecheck fixture (scripts/fusecheck-check.sh --selftest): every row must
+# PASS. The legacy one-sided floor and the =N exact sugar against the
+# separable fixture (measured 2 bodies — the selftest re-measures before
+# trusting these rows).
+assert fusecheck-fixtures-separable.stl 2
+assert fusecheck-fixtures-separable.stl =2
+# Mandatory negative control: the fused fixture stays 1 body (<= 1), so the
+# check can fire.
+control fused 1

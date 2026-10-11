@@ -12,8 +12,10 @@ The load-bearing check parses each reviewer job's ordered ship steps and asserts
 * the step at slot k sources `--model … outputs.model{k}` — the slot→model binding,
   so a scrambled reference (slot 1 pulling `model4`) is caught, not just the count;
 * the step's literal `anthropic_api_key: secrets.<X>` is the registry link's secret
-  at that position — so slots 1–3 wire `ZAI_KEY`, slots 4–6 `ANTHROPIC_API_KEY`
-  (the #298 Anthropic tail), and swapping one is caught;
+  at that position — so slots 1–3 wire `ZAI_KEY` and slots 4–6
+  `ANTHROPIC_API_KEY` (the #298 Anthropic tail); swapping one is caught.
+  (OpenRouter free-tier models are forbidden on the review chain — Cipher
+  hold on #678 — and the free-tail allowlist test enforces that.)
 * the step's `ANTHROPIC_BASE_URL` matches the link's `base_url` exactly — present
   and equal for Z.AI (the Anthropic-compatible endpoint), absent for Anthropic —
   so pointing a slot at the wrong endpoint is caught.
@@ -45,6 +47,15 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "auto-review.yml"
 SCOUT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "product-scout.yml"
 REGISTRY = REPO_ROOT / ".github" / "models" / "registry.conf"
+
+# Chains permitted to carry OpenRouter `:free` model ids. Keel binding
+# Security ruling on #819: LABELER-ONLY. Everything else that resolves a
+# free-tier OpenRouter model is a Cipher-hold regression — including
+# "advisory" write surfaces that file issues, post comments, or queue
+# intents (scout, adoption-assessor, wright propose, reeve-growth).
+OPENROUTER_FREE_TAIL_ALLOWED_CHAINS = frozenset({
+    "labeler",  # routing labels via label-helper; dontAsk; github.token — ONLY
+})
 
 # The reviewer-round jobs that carry the fallback chain — the two reviewer
 # personas, the PM triage gate on their feedback, and the coach. Each has one
@@ -100,6 +111,102 @@ def test_committed_registry_is_valid():
     # A malformed committed registry would fail the resolve step at run time and
     # block every design PR's review — catch it here instead.
     Registry.load(str(REGISTRY))
+
+
+
+def test_openrouter_free_tail_only_on_allowlisted_chains():
+    """Cipher hold on #678: `:free` OpenRouter models stay off write-capable
+    and merge-gate chains. The allowlist is the only place they may appear."""
+    reg = Registry.load(str(REGISTRY))
+    free_re = re.compile(r":free\b")
+    offenders = []
+    for chain_id in sorted(reg.chains):
+        links = reg.resolve(chain_id)
+        free_models = [link.model for link in links if free_re.search(link.model)]
+        if not free_models:
+            continue
+        if chain_id not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS:
+            offenders.append((chain_id, free_models))
+        else:
+            # Allowlisted chains must actually be openrouter-provider links.
+            for link in links:
+                if free_re.search(link.model):
+                    assert link.provider == "openrouter", (
+                        f"allowlisted chain {chain_id!r} has free model "
+                        f"{link.model!r} on provider {link.provider!r}, "
+                        "expected openrouter")
+    assert not offenders, (
+        "OpenRouter :free models appear on non-allowlisted chain(s) "
+        f"{offenders} — remove them or (only with a Security ruling) add "
+        "the chain to OPENROUTER_FREE_TAIL_ALLOWED_CHAINS. Forbidden "
+        "examples: review, scout, wright, reeve-growth, adoption-assessor, "
+        "wright-signoff, backlog-burn, design-run, chunker, "
+        "spike-converter, growth-twitter, reeve-greenlight.")
+
+
+def test_openrouter_free_tail_allowlist_rejects_non_labeler_chains():
+    """NEGATIVE CONTROL (Keel labeler-only ruling on #819): the allowlist is
+    exactly {labeler}. Re-adding :free to scout / wright / reeve-growth /
+    adoption-assessor / review must make those chains offenders."""
+    assert OPENROUTER_FREE_TAIL_ALLOWED_CHAINS == frozenset({"labeler"})
+    forbidden = (
+        "review", "wright-signoff", "backlog-burn", "design-run",
+        "scout", "wright", "reeve-growth", "adoption-assessor",
+        "spike-converter", "growth-twitter", "chunker", "reeve-greenlight",
+    )
+    for cid in forbidden:
+        assert cid not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS, cid
+
+    raw = REGISTRY.read_text(encoding="utf-8")
+    injections = {
+        "review": (
+            "[chain:review]\nmodels = glm-5.3, glm-5.2, glm-5.1, claude-opus-4-8, "
+            "claude-sonnet-5, claude-haiku-4-5",
+            "[chain:review]\nmodels = glm-5.3, glm-5.2, glm-5.1, claude-opus-4-8, "
+            "claude-sonnet-5, claude-haiku-4-5, google/gemma-4-31b-it:free",
+        ),
+        "scout": (
+            "[chain:scout]\nmodels = glm-5.2, claude-sonnet-5, claude-haiku-4-5",
+            "[chain:scout]\nmodels = glm-5.2, claude-sonnet-5, claude-haiku-4-5, "
+            "google/gemma-4-31b-it:free",
+        ),
+        "wright": (
+            "[chain:wright]\nmodels = glm-5.2, claude-sonnet-5, claude-haiku-4-5",
+            "[chain:wright]\nmodels = glm-5.2, claude-sonnet-5, claude-haiku-4-5, "
+            "google/gemma-4-31b-it:free",
+        ),
+        "reeve-growth": (
+            "[chain:reeve-growth]\nmodels = glm-5.3, claude-sonnet-5, claude-haiku-4-5",
+            "[chain:reeve-growth]\nmodels = glm-5.3, claude-sonnet-5, claude-haiku-4-5, "
+            "google/gemma-4-31b-it:free",
+        ),
+        "adoption-assessor": (
+            "[chain:adoption-assessor]\nmodels = glm-5.3, claude-sonnet-5, claude-haiku-4-5",
+            "[chain:adoption-assessor]\nmodels = glm-5.3, claude-sonnet-5, "
+            "claude-haiku-4-5, google/gemma-4-31b-it:free",
+        ),
+    }
+    import tempfile, os
+    for chain_id, (needle, repl) in injections.items():
+        tampered = raw.replace(needle, repl, 1)
+        assert tampered != raw, f"tamper target not found for {chain_id}"
+        with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
+            fh.write(tampered)
+            tmp = fh.name
+        try:
+            reg = Registry.load(tmp)
+            free_re = re.compile(r":free\b")
+            offenders = [
+                cid for cid in reg.chains
+                if any(free_re.search(link.model) for link in reg.resolve(cid))
+                and cid not in OPENROUTER_FREE_TAIL_ALLOWED_CHAINS
+            ]
+            assert chain_id in offenders, (
+                f"injecting :free into {chain_id} did not make it an offender "
+                f"(offenders={offenders}); allowlist weakened")
+        finally:
+            os.unlink(tmp)
+
 
 
 def test_every_ship_step_is_pinned_to_its_registry_link():
@@ -703,14 +810,16 @@ ROUTINES = {
         workflow="labeler.yml", chain="labeler",
         conf=".github/labeler.conf", job="label",
         resolve_id="chain", prefix="run",
-        layout=("zai", "zai", "zai", "anthropic", "anthropic"),
+        layout=("zai", "zai", "zai", "anthropic", "anthropic", "openrouter", "openrouter"),
         gates=(EXHAUSTED_RED_STEP, TRIAGE_STEP), ship_lock=False,
         permission_mode="dontAsk", backstop=".claude/labeler-settings.json",
         mcp_config=None,
         allowed="Bash(.claude/skills/label-issues/label-helper.sh:*),Read,Grep,Glob"),
     # #544 Part B: the eight formerly single-link routines, one row each —
     # the GLM head (one link, or the sign-off's three), then the two-link
-    # Anthropic tail. The scout was the template.
+    # Anthropic tail. The OpenRouter free OSS tail is labeler-only
+    # (Keel binding Security ruling on #819) — see
+    # OPENROUTER_FREE_TAIL_ALLOWED_CHAINS below.
     "scout": Routine(
         workflow="product-scout.yml", chain="scout",
         conf=".github/product-scout.conf", job="scout",
@@ -934,7 +1043,9 @@ ANDON_EXPLAIN_LEG = "vars.AI_ANDON_CORD == 'pulled'"
 # Anthropic tail wires CLAUDE_KEY, a historical alias — without it that tail
 # would be invisible). So a NEW registry provider's secret enrols its
 # spenders the moment the stanza lands, with no edit here.
-_LITERAL_PROVIDER_SECRETS = frozenset({"ANTHROPIC_API_KEY", "ZAI_KEY", "CLAUDE_KEY"})
+_LITERAL_PROVIDER_SECRETS = frozenset({
+    "ANTHROPIC_API_KEY", "ZAI_KEY", "CLAUDE_KEY", "OPENROUTER_API_KEY",
+})
 _ALIAS_MARKER_RE = re.compile(r"registry-secret-alias:\s*(\w+)=(\w+)")
 
 
@@ -1994,10 +2105,16 @@ def test_ship_step_pin_rejects_a_tail_step_rewired_to_the_other_provider():
 
 
 def _without_anthropic_tail(text: str, row: Routine) -> str:
-    """A copy of a routine workflow with its Anthropic tail steps deleted —
-    a workflow that reads only ONE provider's steps against a mixed chain."""
+    """A copy of a routine workflow with every non-head-provider tail step
+    deleted — a walk that keeps only the GLM links against a mixed chain
+    (Anthropic + OpenRouter tails removed)."""
     out = text
-    for link in (4, 5):
+    # Delete from the end so earlier link numbers stay stable while we chop.
+    links = sorted(
+        s["link"] for s in _routine_ship_steps(
+            _routine_job_text(out, row), row.resolve_id)
+        if s["link"] and s["link"] > 3)
+    for link in reversed(links):
         chunk = _tail_step_chunk(out, row, link)
         out = out.replace("\n      - " + chunk, "", 1)
     assert out != text
@@ -2005,9 +2122,9 @@ def _without_anthropic_tail(text: str, row: Routine) -> str:
 
 
 def test_ship_step_pin_rejects_a_workflow_carrying_one_providers_steps_only():
-    # NEGATIVE CONTROL (iii): delete the Anthropic tail from a copy of
-    # labeler.yml so it walks only the GLM steps against the mixed chain —
-    # the one-step-per-link count must fail (links 4 and 5 have no step).
+    # NEGATIVE CONTROL (iii): delete the Anthropic + OpenRouter tails from a
+    # copy of labeler.yml so it walks only the GLM steps against the mixed
+    # chain — the one-step-per-link count must fail (links 4..N have no step).
     row = ROUTINES["labeler"]
     tampered = _without_anthropic_tail(_routine_text(row.workflow), row)
     reg = Registry.load(str(REGISTRY))
@@ -2269,11 +2386,19 @@ def _assert_routine_skip_notice_fires_only_without_any_key(
     assert 'echo "key_present=$key"' in policy[0], (
         f"{workflow}: the policy step no longer emits key_present — the "
         "any-key gate the notice / triage / red steps read is unfilled")
-    assert ('if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; '
-            'else key=0; fi') in policy[0], (
+    # Derive the either-key expression from this row's layout providers so
+    # OpenRouter-free walks (gate/signoff chains) and allowlisted free-tail
+    # walks share one assertion.
+    providers = list(dict.fromkeys(row.layout))  # unique, file order
+    var = {"zai": "zai_key", "anthropic": "anthropic_key",
+           "openrouter": "openrouter_key"}
+    parts = [f'[ "${var[p]}" = 1 ]' for p in providers]
+    either = 'if ' + ' || '.join(parts) + '; then key=1; else key=0; fi'
+    assert either in policy[0], (
         f"{workflow}: the policy step's key_present is no longer the "
-        "either-key derivation (zai OR anthropic) — a keyless head would "
-        "skip the whole run instead of falling through to the tail")
+        f"either-key derivation for layout {','.join(row.layout)} "
+        f"(expected {either!r}) — a keyless head would skip the whole run "
+        "instead of falling through to the tail")
     notice = [c for c in chunks if _NO_KEY_NOTICE in c]
     assert len(notice) == 1, (
         f"{workflow}: expected exactly one step carrying the no-key notice "
@@ -2316,7 +2441,8 @@ def test_skip_notice_guard_rejects_a_head_only_key_present_derivation():
     # alone — the whole run would skip on a keyless head, tail or no tail.
     row = ROUTINES["labeler"]
     text = _routine_text(row.workflow)
-    either = 'if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ]; then key=1; else key=0; fi'
+    either = ('if [ "$zai_key" = 1 ] || [ "$anthropic_key" = 1 ] || [ "$openrouter_key" = 1 ]; '
+              'then key=1; else key=0; fi')
     assert either in text, "tamper target not found — the fixture is stale"
     tampered = text.replace(either, 'if [ "$zai_key" = 1 ]; then key=1; else key=0; fi', 1)
     with pytest.raises(AssertionError, match="either-key derivation"):
@@ -3390,8 +3516,8 @@ def test_provider_triage_action_declares_the_io_its_callers_use():
     # callers depend on (the classify chain input, both provider keys, the token,
     # the escalate switch, and the class/reason outputs the callers read).
     action = TRIAGE_ACTION.read_text(encoding="utf-8")
-    for decl in ("chain:", "zai-key:", "anthropic-key:", "github-token:",
-                 "context:", "escalate:"):
+    for decl in ("chain:", "zai-key:", "anthropic-key:", "openrouter-key:",
+                 "github-token:", "context:", "escalate:"):
         assert decl in action, f"provider-triage no longer declares input {decl!r}"
     assert re.search(r"^outputs:", action, re.MULTILINE), "provider-triage lost its outputs block"
     for out in ("class:", "reason:"):
