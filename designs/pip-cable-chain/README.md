@@ -52,10 +52,12 @@ flexing the chain if you need full retention end-to-end.
   clearances in whole 0.2 mm layers; a different layer height changes the
   fit (re-derive: `clear_z` follows `layer_h` automatically in the file)
 - **Infill:** 15%, gyroid — the walls and plates carry the load
-- **Supports:** none needed — the bore roofs are 45° teardrops, the tunnel
-  ceiling is vaulted at exactly 45° (every downward roof face is at or
-  steeper than the support-free angle by construction), everything else
-  grows from the bed
+- **Supports:** none — leave slicer supports off. The bore roofs are 45°
+  teardrops, and most of each pocket ceiling is vaulted at 45°. A short
+  flat band remains behind the vault (x from `plate_x0` to `ridge_x0`,
+  NOTES.md D9: ~0.09 unsupported share) so enable bridge tuning if your
+  printer struggles with that short span; do not add support material.
+  Everything else grows from the bed.
 - **Orientation:** exactly as rendered — flat, pin axes horizontal, teardrop
   roofs up. Do not rotate a joint 90°; that puts the whole-layer clearances
   on the wrong plane and the chain welds solid.
@@ -87,9 +89,11 @@ Customizer sections; override on the command line with
    passage, and connect the moving end.
 4. A joint that binds means welds in the bore: raise `clear_xy` by 0.05
    (`clear_z` re-derives to the next whole layer automatically) and
-   reprint. A stub that snaps out means too loose: if you raised
-   `clear_xy` earlier, step it back down by 0.05 — but never below 0.25,
-   the measured weld floor the design refuses to render under.
+   reprint. A stub that snaps out means too loose: lowering `clear_xy`
+   is only valid after a prior increase above 0.25 — step back by 0.05,
+   never below that floor (the design asserts and will not render under
+   it). At the default 0.25 the coupon cannot be tightened further;
+   investigate layer adhesion instead.
 
 Tune `clear_xy` in one place — the coupon and the chain share every
 parameter through the include.

@@ -454,14 +454,10 @@ module main() {
     assert(ridge_x0 > plate_x0 && plate_x1 - ridge_x0 > 3,
            "vault ridge span degenerate — the ceiling would open or the ridge vanish");
 
-    // An unknown part (a typo'd -D part=...) must not fall through to the
-    // straight run: a gate expecting EMPTY would then see a full chain, and
-    // one expecting the run would silently pass on the wrong geometry.
-    assert(part == "" || part == "fitcheck" || part == "fitcheck_neg"
-               || part == "pose_up44" || part == "pose_dn44"
-               || part == "stop_up47" || part == "stop_dn47" || part == "fused",
-           str("unknown part \"", part, "\""));
-
+    // Preview / printed run only for the empty selector. An unknown part
+    // (a typo'd -D part=...) must not fall through to run() or demo_bend:
+    // a gate expecting EMPTY would then see a full chain, and one expecting
+    // the run would silently pass on the wrong geometry.
     if (part == "fitcheck") {
         // every adjacent pair at the print pose must clear — zero facets
         for (i = [0 : links - 2])
@@ -490,11 +486,15 @@ module main() {
         // ci.fusecheck's known-fused control: oversized stubs weld every
         // joint, the whole run renders as ONE body
         run(stub_d = pin_d + 2 * clear_xy + 1);
-    } else if (demo_bend > 0) {
-        link();                 // preview pose: joint 1 bent, the rest straight
-        bend_from(1, demo_bend);
+    } else if (part == "") {
+        if (demo_bend > 0) {
+            link();             // preview pose: joint 1 bent, the rest straight
+            bend_from(1, demo_bend);
+        } else {
+            run();              // the printed artifact
+        }
     } else {
-        run();                  // the printed artifact
+        assert(false, str("unknown part \"", part, "\""));
     }
 }
 
