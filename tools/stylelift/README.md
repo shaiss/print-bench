@@ -100,6 +100,9 @@ Two guards make it trustworthy on real meshes:
 | Form curvature | curvature that closes on itself, or spans a third of the part: the shape, not a treatment of its edges | `edges.form.*` |
 | Round features | closed curved bands — bores and pillars — grouped by size and axis | `features.cylinders`, `features.dominant_hole_d_mm` |
 | Curve resolution | segments per full turn, snapped to a value a design would write | `implied_fn` |
+| Facetedness (dihedral sharpness) | share of shaped edge length turning more than the mesh's own tessellation — normalized against the finest `$fn` the mesh declares, so a tessellated-smooth curve earns no credit for its tessellation edges | `edges.facetedness.*` with `sharpness`, `fn_curve`, `tessellation_turn_deg` and the `histogram` |
+| Openness (projected void fraction) | open share of the silhouette, integrated over the sphere as a fan of parallel lines per view direction — pose-stable by construction, no favored projection | `openness.void_fraction`, `max_void_span_mm`, `max_glyph_aperture_mm`, `min_bridge_mm` |
+| Through-cuts | topological handle count — holes that pass through the part; a blind pocket, an open channel or a sealed cavity is never one — plus the largest material-bounded chord across a cut | `openness.through_cut_count`, `max_through_span_mm` |
 | Material thickness | inward ray casts from area-weighted samples; solid parts say so | `walls.*` with `shelled` |
 | Massing | bbox fill, convexity, proportion | `massing.*` |
 | Surface direction | area shares up / down / vertical / sloped, with dominant slopes (measured from the build direction, not the bed) | `orientation.*` |
@@ -118,6 +121,121 @@ answers as a number you can hold a family to. A part can be perfectly printable
 with a 20° roof and supports; it is simply not in a family whose whole grammar
 is the 45° cut. The metric reports the share and nothing else — no verdict, no
 advice, no orientation search.
+
+## How it tells a design facet from tessellation
+
+`softness` cannot see a faceted design language. A stencil-cut plate and a
+smooth box exported at `$fn=8` both turn steep folds everywhere; the angle
+alone cannot separate them, because what separates them is whether the fold is
+a *decision* or a *segment*. So the sharpness metric normalizes against the
+curve resolution the mesh itself declares:
+
+- A part that draws its curves at `$fn=64` has declared 5.6° to be
+  tessellation — so its 45° folds must be design, and they count.
+- A part whose finest curve is an 8-sided barrel has declared 45° to be one
+  segment of that curve — so the same 45° fold there is tessellation, and it
+  does not count.
+
+The declared resolution (`edges.facetedness.fn_curve`) is the finest
+`implied_fn` reported by the **edge rounding vocabulary and the cylindrical
+features**. Form curvature is deliberately not consulted: a barrel or a sphere
+is a parameterized surface whose fold angle varies across it, so a mode's
+median turn there describes where the surface happens to sample, not a
+resolution the author wrote — a uv sphere of `$fn=64` compresses to sub-degree
+folds at its poles, which would drag the median to `$fn≈126` and set a
+threshold finer than the author's own sampling. The latitude rings of that same
+sphere are detected as cylinders at `$fn=64`, which is the truth the surface
+mode buries. A mesh that draws no curve at all is held to the smooth-curve
+convention (`fn_curve_fallback`, `$fn=48`).
+
+`tessellation_turn_deg` is `1.1 × 360 / fn_curve` — the slack absorbs a
+measured segment count wobbling by about a segment. `sharpness` is the share
+of *shaped* edge length (folds of `flat_deg` or more, the same denominator
+`softness` uses) that turns more than that. The `histogram` bins that edge
+length by fold angle, each bin flagged by whichever kind owns most of it, so a
+style can be written against the *shape* of the distribution and not only the
+total.
+
+## How it measures openness, and the legibility rule
+
+A single projection cannot answer "how open is this part": face-on, a stencil
+plate is mostly void; edge-on it is nearly all material. Any *chosen* view
+smuggles the answer in with the choice. So `openness` integrates over the
+sphere: `void_dirs` near-uniform view directions (a Fibonacci lattice —
+deterministic, no RNG), a fan of `void_rays_per_dir` parallel lines through
+each, and the open share of that view's silhouette is the fraction of lines
+that cross the convex hull but never meet material. The mean over views is a
+solid-angle integral, so rotating the part permutes the directions and changes
+nothing — the pose stability is in the construction, not the sampling luck.
+(The estimate still carries the lattice's sampling error, which shrinks as
+`void_dirs` grows; the tests pin that directly.)
+
+The convex hull is the reference silhouette, so deep concavities count as
+openness alongside true cut-throughs: the honest reading of the number is "how
+airy is the form". Alongside the fraction it reports the largest gap any line
+threads (`max_void_span_mm`, as `max_void_span_fraction` of the part's
+bounding-sphere diameter — a hull-referenced airiness chord, not a cut-through
+signal; AABB side length would be pose-dependent), the widest visible opening
+(`max_glyph_aperture_mm`, as `max_glyph_aperture_fraction` of the same
+diameter — the glyph's *size*), and the narrowest material span
+(`min_bridge_mm`, measured by inward normal
+rays with plate-thickness faces filtered — the web between two cut-outs).
+Non-watertight meshes report `openness.measured: false` with the reason, and
+every rule over these metrics skips rather than fails.
+
+A glyph's size is its aperture, not its depth (#701): a chord measures how far
+a sampling ray travels inside the void, so a hole as narrow as a nozzle tip
+but drilled deep spans a long chord while its visible mouth stays unreadable.
+The aperture is the extent of the connected opening in its own plane, measured
+exactly from planar sections taken just inside each hull plane — the
+convex-hull-minus-section pieces are the openings, and the widest pair of
+points on one is its extent. A narrow-deep hole slices to the same small mouth
+however deep its bore runs; the reading is exact, pose-invariant (no rays, no
+chosen view), and self-normalizing (each slice's hull is the slice's own, so a
+chamfered slab's shrunken bottom section is not a false opening). A mouth
+small enough to hide between hull planes — facing a hull edge rather than a
+face — falls back to a ray projection seeded by the views that look into it.
+
+Airiness is not through-cutting, and a chord threshold cannot tell them apart:
+a deep open channel threads lines end to end (a huge `max_void_span_mm`)
+without piercing any material, and a sealed cavity crosses material, void and
+material again. So the through-cut signal is topological (#702):
+`through_cut_count` is the mesh's handle count — a hole that connects one side
+of the part to the other, which a blind pocket, an open channel and an enclosed
+cavity never are — computed from the Euler characteristic (exact,
+pose-invariant, no sampling), and `max_through_span_mm` sizes the largest cut
+from the only chords that describe one: gaps bounded by material on both
+sides, never one ending on a sealed cavity's (inward-facing) shell. Both are
+zeroed when the count is zero. The handle count decides whether the
+legibility pair applies; the aperture above, not the chord, decides whether a
+glyph passes it. A triangulation the count cannot trust — T-junction edges, which some earcut multi-ring output has and
+OpenSCAD/CGAL exports never do — reports `through_cut_count: null` with the
+reason instead of a wrong integer.
+
+When a reference really is cut through (`through_cut_count ≥ 1`),
+`stylelift lift` proposes the legibility pair as **required** rules, and a
+hand-written pack copies the same shape (constants `GLYPH_MIN_FRACTION`,
+`BRIDGE_MIN_WIDTHS`, `LINE_WIDTH_MM` in `spec.py`). Advisory openness still
+keys off the area fraction independently:
+
+```json
+{"id": "legible-glyph", "metric": "openness.max_glyph_aperture_fraction",
+ "op": "min", "value": 0.15, "severity": "required",
+ "when": {"metric": "openness.through_cut_count", "op": "min", "value": 1},
+ "why": "the widest opening must measure at least 15% of the part across its own mouth, or it cannot be read at the distance a mark is read from"}
+
+{"id": "bridge-width", "metric": "openness.min_bridge_mm",
+ "op": "min", "value": 0.8, "severity": "required",
+ "when": {"metric": "openness.through_cut_count", "op": "min", "value": 1},
+ "why": "webs between cut-throughs print as lines: 2 extrusion widths of 0.4 mm"}
+```
+
+The `when` gate is what keeps the pair honest, in both directions: a solid or
+merely pocketed part has no handles, so the rules skip instead of failing it —
+however airy its hull-referenced spans measure — while a plate of tiny glyphs
+has almost no open area yet is exactly the part the legibility rule exists
+for, so `derive()` emits the pair from the *existence of a cut-through* (the
+handle count), not the open-area fraction.
 
 ## Conformance
 

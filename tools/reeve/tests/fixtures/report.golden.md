@@ -11,6 +11,7 @@ Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.
 |---|---|
 | gate-failing | 4 |
 | routine-dead | 1 |
+| agent-brief-queue | 3 |
 | lock-leak | 1 |
 | score-regression | 3 |
 | budget-tightening | 2 |
@@ -29,6 +30,12 @@ Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.
 ## Routine dead — no success in a routine's last 3 completed runs
 
 - `design-run.yml` — cancelled, failure, cancelled — [latest run](https://github.com/o/r/actions/runs/300)
+
+## Agent brief queue — open forge briefs pending / parked / declined
+
+- #741 Agent brief: detect stale style packs — pending
+- #743 Agent brief: dedupe greenlight precedents — needs-decision
+- #744 Agent brief: nightly dependency scraper — wright-declined
 
 ## Ship-lock leak — an uncorroborated 🚢 SHIP-LOCK older than 2h
 

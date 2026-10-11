@@ -1,0 +1,5 @@
+# Structural refusal (selftest: must FAIL before rendering): a part with no
+# `part == "landing-nope"` dispatch branch — it would render empty and pass.
+stops stop 0
+empty landing-nope
+empty-control landing-flat-rolled

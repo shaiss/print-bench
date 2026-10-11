@@ -1,0 +1,7 @@
+# Fusecheck fixture (scripts/fusecheck-check.sh --selftest): the legacy floor
+# the FUSED fixture cannot meet. 1 body < min 2 -> fusecheck exits 3 and the
+# row is a WARN the run continues through, never a FAIL (the too-few exit is
+# never a hard failure).
+assert fusecheck-fixtures-fused.stl 2
+# Mandatory negative control.
+control fused 1

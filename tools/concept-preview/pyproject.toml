@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "concept-preview"
+version = "0.1.0"
+description = "Blueprint-style SVG concept-preview emitter: one drafting system, six primitives, four checked sheets (issue #472)"
+license = "CC-BY-SA-4.0"
+requires-python = ">=3.10"
+# Deliberately empty, and it must stay that way: scripts/concept-preview.sh
+# runs the package straight out of src/ with no install step (the
+# tools/cogcheck / tools/lineage pattern), and the emitted sheets must be
+# reproducible byte-for-byte from a bare checkout. No network either — the
+# served SVGs carry no external reference, and neither does the tool.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+concept-preview = "concept_preview.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

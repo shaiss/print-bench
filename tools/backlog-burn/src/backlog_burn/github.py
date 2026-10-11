@@ -5,16 +5,31 @@ runs in CI where the only guaranteed interpreter is the system Python, and a
 selection tool that pulled in ``requests`` would need a pip step in front of
 the step that decides what to ship. This module is thin I/O — it does no
 policy — so the interesting logic all sits behind unit tests in ``select``.
+Even *which* branches are worth a compare request is asked of ``select``
+(:func:`backlog_burn.select.branches_needing_compare`), not decided here.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
+import sys
 import urllib.error
+import urllib.parse
 import urllib.request
-from typing import Any
+from datetime import datetime
+from typing import Any, Optional
+
+from .select import DEFAULT_REQUIRED_LABEL, branches_needing_compare
 
 _API = "https://api.github.com"
+
+# What a single best-effort request may raise: HTTP errors and transport
+# failures (``urllib.error.URLError`` is an ``OSError``; so are timeouts and
+# connection resets), a malformed status line, or a body that is not JSON.
+# Anything else — an ``AssertionError`` from a test double included — still
+# propagates, so a programming error is never mistaken for "compare failed".
+_REQUEST_ERRORS = (OSError, ValueError, http.client.HTTPException)
 
 
 def _get(url: str, token: str) -> tuple[Any, dict[str, str]]:
@@ -102,7 +117,74 @@ def _issue_comments(repo: str, number: int, token: str) -> list[dict[str, str]]:
     ]
 
 
-def gather_snapshot(repo: str, token: str) -> dict[str, Any]:
+def _warn(message: str) -> None:
+    """One diagnostic line on stderr (an Actions ``::warning::`` in CI)."""
+    sys.stderr.write(f"::warning::backlog-burn: {message}\n")
+
+
+def _ahead_by(repo: str, token: str, base: str, branch: str) -> Optional[int]:
+    """How many commits ``branch`` holds that ``base`` does not, or ``None``.
+
+    ``GET /repos/{repo}/compare/{base}...{branch}``'s ``ahead_by``. ``None``
+    whenever the answer is not a clean integer — the request failed, the
+    branch vanished between the listing and the compare, the payload has no
+    ``ahead_by`` — and the policy reads ``None`` as "may carry work", so a
+    failed compare can only keep a claim, never release one. Ref names are
+    percent-encoded with ``/`` kept literal (a ``claude/issue-<N>-*`` name is
+    path-shaped by design); anything else URL-special is escaped.
+    """
+    basehead = (
+        f"{urllib.parse.quote(base, safe='/')}..."
+        f"{urllib.parse.quote(branch, safe='/')}"
+    )
+    try:
+        body, _ = _get(f"{_API}/repos/{repo}/compare/{basehead}", token)
+    except _REQUEST_ERRORS as exc:
+        _warn(f"compare {base}...{branch} failed ({exc}) — keeping the branch as a claim")
+        return None
+    ahead = body.get("ahead_by") if isinstance(body, dict) else None
+    if type(ahead) is not int:
+        _warn(f"compare {base}...{branch} returned no integer ahead_by — keeping the branch as a claim")
+        return None
+    return ahead
+
+
+def _branch_ahead_by(
+    repo: str, token: str, wanted: list[str]
+) -> dict[str, int]:
+    """``{branch: ahead_by}`` for each wanted branch whose compare succeeded.
+
+    One ``GET /repos/{repo}`` for the default branch (only when there is
+    something to compare), then one compare per branch. A branch whose
+    compare failed is simply absent from the map — absence is the policy's
+    "unknown", which claims. If the default branch itself cannot be read,
+    nothing can be compared and the map is empty: every branch claims.
+    """
+    if not wanted:
+        return {}
+    try:
+        meta, _ = _get(f"{_API}/repos/{repo}", token)
+    except _REQUEST_ERRORS as exc:
+        _warn(f"could not read the default branch ({exc}) — every claude/issue-* branch stays a claim")
+        return {}
+    base = meta.get("default_branch") if isinstance(meta, dict) else None
+    if not isinstance(base, str) or not base:
+        _warn("the repo payload named no default branch — every claude/issue-* branch stays a claim")
+        return {}
+    out: dict[str, int] = {}
+    for branch in wanted:
+        ahead = _ahead_by(repo, token, base, branch)
+        if ahead is not None:
+            out[branch] = ahead
+    return out
+
+
+def gather_snapshot(
+    repo: str,
+    token: str,
+    required_label: str = DEFAULT_REQUIRED_LABEL,
+    now: Optional[datetime] = None,
+) -> dict[str, Any]:
     """Build the snapshot for ``repo`` (``owner/name``) via the REST API.
 
     An issue's comment thread is fetched only when the list payload reports it
@@ -110,6 +192,12 @@ def gather_snapshot(repo: str, token: str) -> dict[str, Any]:
     :func:`_issue_comments`). So a commented-but-unlocked issue still costs
     one extra request — while a fresh, comment-free issue is read from the
     list call alone.
+
+    ``branchAheadBy`` carries the compare result for exactly the branches
+    :func:`backlog_burn.select.branches_needing_compare` names — those of
+    issues that are eligible but for their branch, under ``required_label``
+    and ``now`` (pass the same values the selection will use). Which branches
+    are worth a request is policy, so this layer asks rather than decides.
     """
     raw_issues = _paginate(f"/repos/{repo}/issues?state=open", token)
     issues: list[dict[str, Any]] = []
@@ -145,4 +233,9 @@ def gather_snapshot(repo: str, token: str) -> dict[str, Any]:
     raw_branches = _paginate(f"/repos/{repo}/branches", token)
     branches = [b.get("name", "") for b in raw_branches]
 
-    return {"issues": issues, "openPRs": open_prs, "branches": branches}
+    snapshot: dict[str, Any] = {
+        "issues": issues, "openPRs": open_prs, "branches": branches,
+    }
+    wanted = branches_needing_compare(snapshot, required_label, now)
+    snapshot["branchAheadBy"] = _branch_ahead_by(repo, token, wanted)
+    return snapshot

@@ -33,8 +33,8 @@ def comment(cid, body, login=BOT, created="2026-08-20T06:00:00Z"):
     return {"id": cid, "user": {"login": login}, "created_at": created, "body": body}
 
 
-def greenlight_thread(number=201, verdict="yes", arm=False, extra_comments=()):
-    attrs = f"verdict={verdict}" + (" arm=1" if arm else "")
+def greenlight_thread(number=201, verdict="yes", arm=False, extra_comments=(), text=None):
+    attrs = f"verdict={verdict}" + (" arm=1" if arm else "") + (f" text={text}" if text else "")
     gl = (f"<!-- reeve-greenlight v1 issue={number} {attrs} -->\n\n"
           f"GREENLIGHT: {verdict.upper()}\nReasoning.")
     return {
