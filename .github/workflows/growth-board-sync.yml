@@ -167,16 +167,11 @@ jobs:
           PYTHONPATH=tools/growth/src python3 -m growth board-stage \
             --snapshot snapshot.json > stages.tsv
 
-          # 4. Reflect each derived Stage onto the board. Always --stage (never
-          #    --stage-if-new): a lens board's Stage is the derived truth, not a
-          #    human-dragged position, so a reconcile re-sets it. The board write
-          #    is the one step that needs PROJECT_TOKEN's `project` scope.
-          count=0
-          tab="$(printf '\t')"
-          while IFS="$tab" read -r url stage; do
-            [ -n "$url" ] || continue
-            scripts/gh-project.sh --board growth add-item "$url" --stage "$stage" \
-              | GH_TOKEN="$PROJECT_TOKEN" bash
-            count=$((count + 1))
-          done < stages.tsv
-          echo "::notice::growth-board sync reflected ${count} item(s) onto the board."
+          # 4. Reflect each derived Stage onto the board in one batch pass.
+          #    Always --stage (never --stage-if-new): a lens board's Stage is the
+          #    derived truth, not a human-dragged position, so a reconcile re-sets
+          #    it. sync-stages resolves the project once, lists items once, and
+          #    retries on GraphQL rate limit instead of hard-failing the job
+          #    (issue #748). The board write needs PROJECT_TOKEN's `project` scope.
+          scripts/gh-project.sh --board growth sync-stages stages.tsv \
+            | GH_TOKEN="$PROJECT_TOKEN" bash

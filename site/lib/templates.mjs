@@ -78,6 +78,11 @@ ${thumbs}
 
 const SITE_NAME = "print-bench";
 const TAGLINE = "Parametric 3D-printable designs, gated before they ship.";
+const GITHUB_REPO = "https://github.com/shaiss/print-bench";
+const GITHUB_STAR = GITHUB_REPO;
+const SITE_CONTRIBUTE = "/docs/contributing/README.md";
+const LICENSE_URL = "https://creativecommons.org/licenses/by-sa/4.0/";
+const OG_IMAGE_PATH = "/assets/favicon.svg";
 
 // Cache-busting for the shared CSS/JS. vercel.json caches /assets/* for a day
 // with stable filenames, so without this a returning visitor keeps an old
@@ -198,6 +203,12 @@ export function layout({ title, description, body, canonicalPath = "/", extraHea
 <meta property="og:url" content="${escapeHtml(SITE_URL + canonicalPath)}">
 `
     : "";
+  const ogImage = SITE_URL
+    ? `<meta property="og:image" content="${escapeHtml(SITE_URL + OG_IMAGE_PATH)}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="${escapeHtml(SITE_URL + OG_IMAGE_PATH)}">
+`
+    : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -208,7 +219,7 @@ export function layout({ title, description, body, canonicalPath = "/", extraHea
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description || TAGLINE)}">
 <meta property="og:type" content="website">
-${canonical}<link rel="stylesheet" href="${asset("/assets/site.css")}">
+${canonical}${ogImage}<link rel="stylesheet" href="${asset("/assets/site.css")}">
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <script>${THEME_BOOTSTRAP}</script>
 ${extraHead}
@@ -223,7 +234,9 @@ ${extraHead}
       <a href="/styles/"${canonicalPath.startsWith("/styles") ? ' aria-current="page"' : ""}>Styles</a>
       <a href="/people/"${canonicalPath.startsWith("/people") ? ' aria-current="page"' : ""}>People</a>
       <a href="/how-it-works/"${canonicalPath.startsWith("/how-it-works") ? ' aria-current="page"' : ""}>How it works</a>
-      <a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">Source ↗</a>
+      <a href="${GITHUB_STAR}" rel="noopener noreferrer">Star ↗</a>
+      <a href="${SITE_CONTRIBUTE}">Contribute</a>
+      <a href="${GITHUB_REPO}" rel="noopener noreferrer">Source ↗</a>
       ${notificationBell()}
       <button class="theme-toggle" type="button" aria-label="Switch theme">☾</button>
     </nav>
@@ -235,7 +248,7 @@ ${body}
 <footer class="site-foot">
   <div class="wrap">
     <span>Every design here is rendered, printability-gated and test-sliced in CI before it lands.</span>
-    <span><a href="https://github.com/shaiss/print-bench" rel="noopener noreferrer">shaiss/print-bench</a></span>
+    <span class="site-foot-links"><a href="${GITHUB_STAR}" rel="noopener noreferrer">Star on GitHub</a> · <a href="${SITE_CONTRIBUTE}">Contribute</a> · <a href="${GITHUB_REPO}" rel="noopener noreferrer">shaiss/print-bench</a> · <a href="${LICENSE_URL}" rel="noopener noreferrer">CC&nbsp;BY-SA&nbsp;4.0</a></span>
   </div>
 </footer>
 <script src="${asset("/assets/site.js")}" defer></script>
@@ -386,6 +399,7 @@ ${designs.map(cardOf).join("\n")}
     <p>OpenSCAD models co-designed by humans and AI reviewers. Previews render
     from source; a printability gate — watertight, overhang-checked,
     test-sliced — passes before merge.</p>
+    <p class="hero-cta"><a href="${GITHUB_STAR}" rel="noopener noreferrer">Star on GitHub</a> · <a href="${SITE_CONTRIBUTE}">Contribute</a></p>
   </section>
 ${gallery}
 </div>`;

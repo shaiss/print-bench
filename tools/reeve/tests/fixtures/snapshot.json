@@ -61,6 +61,31 @@
         {"conclusion": "success", "createdAt": "2026-08-16T05:17:00Z", "url": "https://github.com/o/r/actions/runs/301"},
         {"conclusion": "success", "createdAt": "2026-08-15T05:17:00Z", "url": "https://github.com/o/r/actions/runs/297"},
         {"conclusion": "failure", "createdAt": "2026-08-14T05:17:00Z", "url": "https://github.com/o/r/actions/runs/296"}
+      ]},
+      {"file": "growth-twitter.yml", "runs": [
+        {"conclusion": "success", "createdAt": "2026-08-16T05:11:00Z", "url": "https://github.com/o/r/actions/runs/302"},
+        {"conclusion": "success", "createdAt": "2026-08-15T05:11:00Z", "url": "https://github.com/o/r/actions/runs/303"},
+        {"conclusion": "success", "createdAt": "2026-08-14T05:11:00Z", "url": "https://github.com/o/r/actions/runs/304"}
+      ]},
+      {"file": "wright.yml", "runs": [
+        {"conclusion": "success", "createdAt": "2026-08-16T04:41:00Z", "url": "https://github.com/o/r/actions/runs/305"},
+        {"conclusion": "success", "createdAt": "2026-08-15T04:41:00Z", "url": "https://github.com/o/r/actions/runs/306"},
+        {"conclusion": "success", "createdAt": "2026-08-14T04:41:00Z", "url": "https://github.com/o/r/actions/runs/307"}
+      ]},
+      {"file": "growth-board-sync.yml", "runs": [
+        {"conclusion": "success", "createdAt": "2026-08-16T05:31:00Z", "url": "https://github.com/o/r/actions/runs/308"},
+        {"conclusion": "success", "createdAt": "2026-08-15T05:31:00Z", "url": "https://github.com/o/r/actions/runs/309"},
+        {"conclusion": "success", "createdAt": "2026-08-14T05:31:00Z", "url": "https://github.com/o/r/actions/runs/310"}
+      ]},
+      {"file": "chunker.yml", "runs": [
+        {"conclusion": "success", "createdAt": "2026-08-16T05:05:00Z", "url": "https://github.com/o/r/actions/runs/311"},
+        {"conclusion": "success", "createdAt": "2026-08-15T05:05:00Z", "url": "https://github.com/o/r/actions/runs/312"},
+        {"conclusion": "success", "createdAt": "2026-08-14T05:05:00Z", "url": "https://github.com/o/r/actions/runs/313"}
+      ]},
+      {"file": "labeler.yml", "runs": [
+        {"conclusion": "success", "createdAt": "2026-08-16T05:23:00Z", "url": "https://github.com/o/r/actions/runs/314"},
+        {"conclusion": "success", "createdAt": "2026-08-15T05:23:00Z", "url": "https://github.com/o/r/actions/runs/315"},
+        {"conclusion": "success", "createdAt": "2026-08-14T05:23:00Z", "url": "https://github.com/o/r/actions/runs/316"}
       ]}
     ],
     "issues": [
@@ -71,6 +96,12 @@
       {"number": 305, "title": "Adoption study: BOSL2 involute gear generator", "labels": ["adoption-study"], "createdAt": "2026-08-12T05:00:00Z", "updatedAt": "2026-08-13T05:00:00Z", "url": "https://github.com/o/r/issues/305"},
       {"number": 306, "title": "Adoption study: lasercut finger-joint box", "labels": ["adoption-study", "disposition:worth-raising"], "createdAt": "2026-08-11T05:00:00Z", "updatedAt": "2026-08-14T05:00:00Z", "url": "https://github.com/o/r/issues/306"},
       {"number": 307, "title": "Adoption study: declined idea", "labels": ["adoption-study", "disposition:declined"], "createdAt": "2026-08-10T05:00:00Z", "updatedAt": "2026-08-15T05:00:00Z", "url": "https://github.com/o/r/issues/307"}
+    ],
+    "agentBriefs": [
+      {"number": 741, "title": "Agent brief: detect stale style packs", "labels": ["agent-brief", "points-2"], "createdAt": "2026-08-14T05:00:00Z", "updatedAt": "2026-08-15T05:00:00Z", "url": "https://github.com/o/r/issues/741"},
+      {"number": 743, "title": "Agent brief: dedupe greenlight precedents", "labels": ["agent-brief", "needs-decision"], "createdAt": "2026-08-13T05:00:00Z", "updatedAt": "2026-08-15T05:00:00Z", "url": "https://github.com/o/r/issues/743"},
+      {"number": 744, "title": "Agent brief: nightly dependency scraper", "labels": ["agent-brief", "wright-declined"], "createdAt": "2026-08-12T05:00:00Z", "updatedAt": "2026-08-14T05:00:00Z", "url": "https://github.com/o/r/issues/744"},
+      {"number": 745, "title": "Agent brief: extend Reeve routine-dead watch to forge + growth-board-sync", "labels": ["agent-brief", "autonomy-ok", "points-2"], "createdAt": "2026-08-11T05:00:00Z", "updatedAt": "2026-08-16T05:00:00Z", "url": "https://github.com/o/r/issues/745"}
     ],
     "openPRs": [],
     "branches": ["main", "claude/issue-284-corroborated"]
