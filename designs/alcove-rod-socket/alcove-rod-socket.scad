@@ -14,7 +14,7 @@ include <styles/workshop-utility/style.scad> // family tokens; $fn set below
 /* [Part] */
 // What to render: the two printable parts, the fit coupons, the assembled
 // preview, or the boolean mate proofs (ci.fitchecks — never printed).
-part = "assembly"; // [assembly, boss, collar, collar-shallow, thread-coupon, bore-coupon, fit-mate, fit-mate-ctrl, cutaway]
+part = "assembly"; // [assembly, boss, collar, collar-shallow, thread-coupon, bore-coupon, fit-mate, fit-mate-ctrl, cutaway, cutaway-wide]
 
 /* [Rod & socket] */
 // Rod barrel outer diameter, measured where it sits in the socket (mm)
@@ -300,6 +300,18 @@ module cutaway() {
     }
 }
 
+// Diametral section for the cutaway-wide preview: remove the +y half so the
+// cut plane is the xz midplane. Face-on at that plane shows both walls
+// end-to-end, the central countersink in section, and the boss/collar
+// thread mesh on both sides. Preview-only — does not touch cutaway() or
+// gated parts.
+module cutaway_wide() {
+    difference() {
+        assembly();
+        translate([-75, 0, -1]) cube([150, 75, 120]);
+    }
+}
+
 if (part == "boss") boss();
 else if (part == "collar") collar();
 else if (part == "collar-shallow") collar(shallow_engagement_depth);
@@ -308,4 +320,5 @@ else if (part == "bore-coupon") bore_coupon();
 else if (part == "fit-mate") fit_mate();
 else if (part == "fit-mate-ctrl") fit_mate(90);
 else if (part == "cutaway") cutaway();
+else if (part == "cutaway-wide") cutaway_wide();
 else assembly();

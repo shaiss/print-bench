@@ -7,14 +7,18 @@ the bosses. Curtains down for washing = unthread two collars, no tools.
 
 > **v2** — ships the separable multi-object plate deliverable. v1 (#361)
 > printed **fused** in the field (a single STL of the two parts slices as one
-> welded body); v2 fixes the packaging, geometry unchanged. See *Deliverable*
-> below and the field test log in NOTES.md.
+> welded body); v2 fixes the packaging (per-part STLs / plate as file format),
+> geometry unchanged — the proving print that confirms the customer-facing
+> cure (print, unthread, lift the rod) is still pending; see NOTES.md.
+> See *Deliverable* below and the field test log in NOTES.md.
 
 ![Product shot](previews/product-hero.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ![Section through the seated socket](previews/cutaway.png)
+
+![Diametral section — full width, countersink in plane, thread mesh](previews/cutaway-wide.png)
 
 ![The seated pair with the rod through it — boss, collar, thread engaged](previews/assembly.png)
 
@@ -94,7 +98,10 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   prints the thread slightly fatter, so expect `thread_tol` +0.05–0.1 mm
   vs PLA; ASA shrinks the bore ~0.2–0.4 mm — about the whole slip — so
   print the bore coupon in ASA first and expect +0.1–0.2 mm on
-  `rod_clearance` (a material-specific preset is charter backlog B4).
+  `rod_clearance`. An ASA install should print the **thread** coupon in
+  ASA too — longer engagement, and the taper is unforgiving of a
+  half-percent shrink — still unproven until B4 (a material-specific
+  preset is charter backlog B4).
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
 - **Seam:** Scarf (Bambu Studio) or Back — the default Aligned seam stacks a
@@ -108,14 +115,17 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   part that can lift; the boss doesn't need it — it prints flange-down on a
   full Ø58.8 disc, the best contact on the plate. Cheap insurance on the
   collar rim's own merits (the v1 field failure was *packaging*, not adhesion
-  — see NOTES.md — so the plate is what fixes that; the brim is separate). A
-  per-object collar brim can't reach the ~5.7 mm gap to the boss, so nothing
-  bridges. (Brim the *whole plate* instead and the two brims may meet in one
-  web; it should peel clean, but that is **untested** — predicted, not
-  observed, and the proving print is what confirms it. Per-object avoids the
-  question.) Trim the collar's brim tabs flush and set it on a flat surface
-  to confirm the rim sits flat before threading it onto the boss — the rim
-  is both the bed-contact face and the seating face on the flange.
+  — see NOTES.md — so the plate is what fixes that; the brim is separate). If
+  the rim's outer edge starts lifting in the first centimeter, kill the
+  print — more brim won't save it mid-run, and a lifted rim is a cocked
+  thread. A per-object collar brim can't reach the ~5.7 mm gap to the boss,
+  so nothing bridges. (Brim the *whole plate* instead and the two brims may
+  meet in one web; it should peel clean, but that is **untested** —
+  predicted, not observed, and the proving print is what confirms it.
+  Per-object avoids the question.) Trim the collar's brim tabs flush and
+  set it on a flat surface to confirm the rim sits flat before threading it
+  onto the boss — the rim is both the bed-contact face and the seating face
+  on the flange.
 - **Orientation:** print every part as rendered — boss flange-down, collar
   (and collar-shallow) rod-mouth-down (the internal thread prints at the top
   of the collar, never on the first layer). Never flip the collar
@@ -170,7 +180,7 @@ proof: print them in your material first and trust them over this page.
    (derivation in NOTES).
 2. Slide the collars over the rod before hanging it — one at each end.
 3. Lower the rod between the bosses, slide each collar out to its boss, and
-   thread it on until the rim seats on the plate. For a rigid rod between
+   thread it on until the rim seats on the boss's flange. For a rigid rod between
    two fixed walls: use one default `collar` (deep) and one `collar-shallow`
    — the deep/shallow pairing is the retention margin on each end, not how
    the rod goes in. Measure **wall-to-wall**, then cut the rod ≈ **40 mm
