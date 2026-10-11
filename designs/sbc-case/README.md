@@ -12,8 +12,10 @@ catalog); set `board_preset` to *Raspberry Pi 3 B+* or pass
 exported STLs: +0.00 % volume, 0 modified bodies, 1 unchanged). Committed
 previews and product shots still show the Pi 4 vitamin — only the generated
 standoff input changes with `board_preset`; the shell is the same. The default
-`fan_center = (−10, 0)` bias targets the Pi 4's SoC, not the Pi 3 B+'s. There is
-no Pi 5 or Zero 2 W vitamin in the vendored tree yet.
+`fan_center = (−10, 0)` sits over the SoC on both boards — they're ~2.5 mm apart
+in the case frame, both ~6 mm from the fan centre under the Ø37 intake — so leave
+it unchanged on either preset. There is no Pi 5 or Zero 2 W vitamin in the
+vendored tree yet.
 
 ![Product shot](previews/product-hero.png)
 
@@ -123,7 +125,8 @@ so what you feel there is what the full parts do.
 - **Swap the micro-SD without opening the case.** The −X edge is open, so the
   card — and every cable — *should* come out with the lid on and every screw
   untouched — the first real print verifies the card clears the restored rim
-  (the planned field test in NOTES). The 2 a.m. reflash needs no tools.
+  (the planned field test in NOTES — a Pi 4 build; the Pi 3 B+'s connector fit
+  is vitamin-checked, first plastic pending). The 2 a.m. reflash needs no tools.
 - **GPIO stays reachable.** A notch in the +Y wall clears the 2×20 header, so
   jumper wires reach the pins with the lid on.
 - **Serviceable where it counts.** The heat-set inserts sit at the two joints
