@@ -1,0 +1,7 @@
+# Fusecheck fixture (scripts/fusecheck-check.sh --selftest): the count
+# EXCEEDS the two-sided max — 2 bodies against a 1..1 bound — so fusecheck
+# exits 4 and the row is a hard FAIL, never a WARN (the too-many exit is
+# never downgraded).
+assert fusecheck-fixtures-separable.stl 1 1
+# Mandatory negative control.
+control fused 1

@@ -13,8 +13,9 @@ job. Here lives the policy.
 ## The policy
 
 From a snapshot of the repo's open issues (plus the open PRs and remote
-branches that reveal what is already claimed), `select` returns **at most
-one** issue, applying, in order:
+branches that reveal what is already claimed, and — for the branches that
+could change the pick — how many commits each holds beyond the default
+branch), `select` returns **at most one** issue, applying, in order:
 
 1. **opt-in** — the issue must carry the `autonomy-ok` label. Nothing is
    eligible until a human adds it, so the routine ships nothing on the day it
@@ -32,12 +33,30 @@ one** issue, applying, in order:
    signals hold: an active `🚢 SHIP-LOCK` marker comment (a `WITHDRAWN` one
    releases it), an open PR that closes the issue (any of GitHub's nine
    closing keywords, or a `claude/issue-<N>-*` head branch), or an existing
-   remote `claude/issue-<N>-*` branch. A SHIP-LOCK more than a few hours old
-   with **no** backing branch and **no** closing PR is a *stale* claim — a run
-   that died between posting its lock and pushing — and, exactly as the skill's
-   §0.3 takeover rule allows, it does **not** block: otherwise a dead run would
-   freeze the issue out of the burn forever, since the skill's own takeover
-   only runs for an issue this selector actually hands it.
+   remote `claude/issue-<N>-*` branch **carrying unmerged work**. A SHIP-LOCK
+   more than a few hours old with **no** backing branch and **no** closing PR
+   is a *stale* claim — a run that died between posting its lock and pushing —
+   and, exactly as the skill's §0.3 takeover rule allows, it does **not**
+   block: otherwise a dead run would freeze the issue out of the burn forever,
+   since the skill's own takeover only runs for an issue this selector
+   actually hands it.
+
+   *Unmerged work* is a compare against the default branch: a matching branch
+   whose `GET /repos/{r}/compare/{default}...{branch}` reports `ahead_by == 0`
+   holds nothing the default branch lacks — an orphan (the #565 shape: its PR
+   closed with head == base, the fix landed through another commit) — so it
+   neither claims the issue nor backs a stale lock. Before this rule any
+   matching branch was a claim forever and one orphan starved its issue out of
+   every firing. The rule is **fail-conservative**: a branch whose compare is
+   missing, failed, or not a clean integer still claims — only a positively
+   observed zero releases it. The compares are requested only for the
+   branches of *otherwise-eligible* candidates (`branches_needing_compare`,
+   itself pure policy), so the cost is one request per candidate that a
+   branch alone is holding back, not one per `claude/issue-*` branch in the
+   repo. The selection record lists the released orphans (`empty_branches`)
+   and the job summary names them — each is safe to delete. `/ship-issue`
+   §0.3, `/design-run` §0.3 and `scripts/routine-lock-cleanup.sh`'s
+   `delivered` disposition apply the identical rule.
 4. **not freshly declined** (issue #530) — excluded while the thread's
    *latest* `🚢 DECLINED` comment is inside a 24 h cooldown: a run already
    looked at the brief and walked away (a blocking open question nobody has
@@ -52,9 +71,23 @@ one** issue, applying, in order:
    (#515: the declines, the withdrawals and the owner's own answer are all
    one login), "machine-posted" cannot be an author test — it is a first-line
    marker test (`🚢`/`🚦`/`🏷`/`🧩` prefixes) plus GitHub's `Bot` author type.
-5. **oldest-first** — among what survives, the oldest issue by creation time
+5. **not freshly deferred** (issue #694, the optional half of #690) —
+   excluded while the thread's *latest* `🚢 DEFERRED` comment is inside a
+   24 h cooldown: a run took the brief, found its dependencies unlanded and
+   deferred — the #641 loop, where the burn re-picked the same blocked issue
+   every firing, the agent re-deferred, and 20+ firings shipped nothing
+   before the spin was parked by hand. The same expiry semantics as the
+   decline cooldown beside it (both run one shared implementation, so the
+   twin guards cannot drift): it **expires** — after the window the next
+   firing re-checks whether the dependencies landed, never buries — the
+   latest defer restarts it, and any owner activity re-arms immediately.
+   The marker is the same first-line `🚢 DEFERRED` the red-gate's
+   disposition classification reads (`scripts/routine-lock-cleanup.sh`,
+   PR #695), so the selector and the cleanup never disagree about what a
+   defer is.
+6. **oldest-first** — among what survives, the oldest issue by creation time
    (tie-broken by number, so the pick is deterministic across runs).
-6. **cap of one** — everything past the first eligible issue is deferred to
+7. **cap of one** — everything past the first eligible issue is deferred to
    the next firing, so a bad night costs one PR, not five.
 
 `select` is a **pure function of the snapshot** — no network — which is what
@@ -74,8 +107,9 @@ an issue that is plainly taken, and never more than one.
 # Pure policy: snapshot JSON on stdin -> selection record on stdout
 backlog-burn select --input snapshot.json
 
-# Live read: build the snapshot from the GitHub REST API (needs GH_TOKEN)
-GH_TOKEN=... backlog-burn gather --repo owner/name
+# Live read: build the snapshot from the GitHub REST API (needs GH_TOKEN);
+# --label picks whose claude/issue-* branches get a compare (default autonomy-ok)
+GH_TOKEN=... backlog-burn gather --repo owner/name --label autonomy-ok
 
 # What the workflow runs: gather then select
 GH_TOKEN=... backlog-burn run --repo owner/name --label autonomy-ok
@@ -182,7 +216,9 @@ quality may vary.
 ## Layout
 
 - `src/backlog_burn/select.py` — the pure policy (tested)
-- `src/backlog_burn/github.py` — the thin live GitHub read (stdlib `urllib`)
+- `src/backlog_burn/github.py` — the thin live GitHub read (stdlib `urllib`),
+  including the best-effort branch compares (a failed one leaves the branch
+  a claim)
 - `src/backlog_burn/config.py` — the committed-policy parser (tested)
 - `src/backlog_burn/cli.py` — `select` / `gather` / `run` / `config`
 - `tests/` — pytest; CI runs it when the tool changes

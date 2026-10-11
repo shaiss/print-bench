@@ -22,6 +22,16 @@ SCHEMA = "stylelift/style@1"
 # snapped up to this ladder so a spec never asks for $fn = 83.
 FN_LADDER = (16, 24, 32, 48, 64, 96, 128, 180, 256)
 
+# Legibility of cut-through marks. These are the numbers a style pack's rules
+# quote when its parts carry stencil glyphs or windows: a mark smaller than
+# this fraction of the part cannot be read at the distance a mark is read
+# from, and a web thinner than this many extrusion lines will not print as
+# the line the design drew. When the reference itself is cut through, derive()
+# proposes both as required rules; a hand-written pack copies the same shape.
+GLYPH_MIN_FRACTION = 0.15   # glyph height >= 0.15 x part diameter
+BRIDGE_MIN_WIDTHS = 2.0     # bridge width >= 2 x line width
+LINE_WIDTH_MM = 0.4         # the extrusion width the bridge bound assumes
+
 
 class Status(str, Enum):
     PASS = "pass"
@@ -361,6 +371,42 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
                    "dominant edge grammar",
         })
 
+    # Facetedness is the axis softness cannot see: a stencil-cut plate and a
+    # coarsely drawn smooth one both turn steep folds everywhere, and only the
+    # share of that edge length which the mesh's own curves do NOT explain as
+    # tessellation is design. Whichever side the reference sits on is the
+    # family's look, so a smooth reference proposes a ceiling, a faceted one
+    # a floor.
+    facet = dig(measurement, "edges.facetedness") or {}
+    sharpness = facet.get("sharpness")
+    if sharpness is not None:
+        sharpness = round(float(sharpness), 3)
+        tokens["sharpness"] = sharpness
+        if sharpness >= 0.5:
+            rules.append({
+                "id": "facet-sharpness",
+                "metric": "edges.facetedness.sharpness",
+                "op": "min", "value": round(max(0.25, sharpness * 0.6), 3),
+                "severity": "advisory",      # a length share; see soft-edges
+                "when": {"metric": "edges.facetedness.shaped_length_mm",
+                         "op": "min", "value": 1.0},
+                "why": "this is a faceted family: most of its shaped edge "
+                       "length is decided angle above what its own curve "
+                       "resolution explains as tessellation",
+            })
+        elif sharpness <= 0.2:
+            rules.append({
+                "id": "no-design-facets",
+                "metric": "edges.facetedness.sharpness",
+                "op": "max", "value": round(max(0.3, sharpness * 2 + 0.15), 3),
+                "severity": "advisory",      # a length share; see soft-edges
+                "when": {"metric": "edges.facetedness.shaped_length_mm",
+                         "op": "min", "value": 1.0},
+                "why": "this is a smooth family: its edges are curve "
+                       "tessellation, and folds that steep but undeclared "
+                       "would read as unwanted facets",
+            })
+
     if walls.get("shelled"):
         wall = walls.get("mode_mm")
         if wall:
@@ -376,6 +422,96 @@ def derive(measurement: dict, name: str) -> tuple[dict, list]:
                 "why": f"the family builds at about {wall:g} mm of material; "
                        "thinner walls change how solid the part feels",
             })
+
+    # How airy the form is, pose-stably, and — when the family really is cut
+    # through — the legibility pair: a glyph big enough to read and webs wide
+    # enough to print. Those two are required, not advisory: a stencil that
+    # fails them does not merely look off-style, it cannot do its job.
+    #
+    # Cut-through is the mesh's handle count (`through_cut_count`), not a
+    # hull-chord threshold and not the open-area fraction: a deep blind pocket
+    # or an open channel spans hull-referenced gaps without piercing any
+    # material, while a plate of tiny glyphs has almost no open area yet is
+    # exactly the part the legibility rule exists for. Advisory openness still
+    # keys off area fraction independently (#702). Glyph *size* is the
+    # aperture (`max_glyph_aperture_mm`, #701), not a chord: the chord
+    # measures depth along the sampling ray, so a narrow hole drilled deep
+    # read "legible" to a rule keyed on it while the visible mark was too
+    # small to read. Topology decides whether the pair applies; the aperture
+    # decides whether the glyph passes.
+    openness = measurement.get("openness") or {}
+    if openness.get("measured"):
+        void = float(openness.get("void_fraction") or 0.0)
+        tokens["void_fraction"] = round(void, 3)
+        measured_gate = {"metric": "openness.measured", "op": "min", "value": 1}
+        through = openness.get("through_cut_count")
+        through_gate = {"metric": "openness.through_cut_count",
+                        "op": "min", "value": 1}
+        # Area-fraction advisory is independent of the cut-through gate.
+        if void >= 0.05:
+            rules.append({
+                "id": "openness",
+                "metric": "openness.void_fraction",
+                "op": "min", "value": round(void * 0.6, 3),
+                "severity": "advisory",
+                "when": measured_gate,
+                "why": f"the reference is open ({void:.0%} of its silhouette "
+                       "is air); a solid part reads as a different family "
+                       "entirely",
+            })
+        if through is not None and through >= 1:
+            rules.append({
+                "id": "legible-glyph",
+                "metric": "openness.max_glyph_aperture_fraction",
+                "op": "min", "value": GLYPH_MIN_FRACTION,
+                "severity": "required",
+                # The glyph's size is its aperture — the extent of the
+                # connected opening in its own plane (#701) — not the chord a
+                # sampling ray threads: a narrow hole drilled deep has a long
+                # chord and an unreadable mouth. Gated on "a cut-through
+                # topologically exists" (#702), never on the void fraction or
+                # a chord threshold: a plate of tiny glyphs has almost no open
+                # area but is exactly the part the legibility rule exists
+                # for, and a blind pocket spans a chord without passing
+                # through. A solid part has no handles, so it skips.
+                "when": through_gate,
+                "why": f"the family's cut-throughs are legible marks: the "
+                       f"widest opening must measure at least "
+                       f"{GLYPH_MIN_FRACTION:.0%} of the part across its own "
+                       "mouth, or it cannot be read at the distance a mark is "
+                       "read from",
+            })
+            bridge = _mm(BRIDGE_MIN_WIDTHS * LINE_WIDTH_MM)
+            rules.append({
+                "id": "bridge-width",
+                "metric": "openness.min_bridge_mm",
+                "op": "min", "value": bridge,
+                "severity": "required",
+                "when": through_gate,
+                "why": f"the webs between cut-throughs must print as the "
+                       f"lines the design drew: at least "
+                       f"{BRIDGE_MIN_WIDTHS:g} extrusion widths of "
+                       f"{LINE_WIDTH_MM:g} mm, i.e. {bridge:g} mm",
+            })
+        elif through == 0:
+            # Closed-form only when no cut-through exists at all — genus 0,
+            # not merely "no chord over threshold": a family with blind
+            # pockets is closed too. Cap aligns with the openness floor (0.05)
+            # so a reference in the old (0.02, 0.05) dead zone cannot fail the
+            # rule derive() just wrote for it.
+            rules.append({
+                "id": "closed-form",
+                "metric": "openness.void_fraction",
+                "op": "max", "value": 0.05,
+                "severity": "advisory",
+                "when": measured_gate,
+                "why": "the family is solid: cut-throughs would change how "
+                       "it reads more than any edge treatment could",
+            })
+        # through is None (non-conforming triangulation): neither the pair nor
+        # closed-form — a rule whose gate cannot be evaluated must not be
+        # required, and a mesh whose topology is unknown cannot be called
+        # closed either.
 
     hole = dig(measurement, "features.dominant_hole_d_mm")
     if hole:

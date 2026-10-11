@@ -1,0 +1,7 @@
+# Fusecheck fixture (scripts/fusecheck-check.sh --selftest): malformed bound
+# grammar — each LINE fails the manifest parse before any geometry is
+# measured.
+assert fusecheck-fixtures-separable.stl 2 1   # max < min
+assert fusecheck-fixtures-separable.stl 2 x   # non-numeric operand
+# Mandatory negative control.
+control fused 1

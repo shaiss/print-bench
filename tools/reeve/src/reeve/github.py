@@ -2,9 +2,11 @@
 
 Reeve's primary pulse stays committed files (``signals.py``); this module adds
 the run-health reads behind the ``routine-dead`` and ``lock-leak`` detectors
-(issue #313): the scheduled routines' completed workflow runs, the open issues
-carrying an active 🚢 SHIP-LOCK claim, and the open PRs/branches that would
-corroborate one. It also serves the greenlight loop's selection (issue #443):
+(issue #313) and the ``agent-brief-queue`` detector (#745): the scheduled
+workflows' completed runs, the open issues carrying an active 🚢 SHIP-LOCK
+claim, the open PRs/branches that would corroborate one, and the open
+``agent-brief`` issues whose labels carry the forge's queue state. It also
+serves the greenlight loop's selection (issue #443):
 ``gather_greenlight_queue`` lists the open ``needs-decision`` issues and reads
 each thread to see which already carry a greenlight marker — the trusted
 workflow's Select step consumes it, so the agent is handed only issues that
@@ -25,7 +27,9 @@ report lie about coverage.
 The greenlight loop's approval poll (issue #444) reads through this same
 seam and stays GET-only: the parked threads **with their comment ids**
 (``gather_greenlight_poll``), one comment's reactions (``list_reactions``),
-and each reactor's real repository permission (``permission_of``). The
+each reactor's real repository permission (``permission_of``), and — for the
+standing approval modes (#446) — who applied a loosening label
+(``list_label_events``). The
 writes that follow an approved reaction — the label flip, the ledger
 commit, the resolution reply — live in ``pushthrough.py``, never here.
 """
@@ -37,7 +41,7 @@ import re
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 API_ROOT = "https://api.github.com"
 
@@ -63,6 +67,15 @@ SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 # platform lead. The disposition itself is read from the issue's own labels.
 ADOPTION_STUDY_LABEL = "adoption-study"
 
+# The label a Wright proposal carries (docs/agent-forge.md). Gathered from the
+# same open-issues listing — label scan before the comments skip, like the
+# adoption studies — so the agent-brief-queue detector (#745) can surface the
+# forge backlog's state (pending / parked / declined) next to routine-dead: a
+# death-streak that leaves briefs unjudged shows as a queue that stopped
+# moving, not as an empty report. The verdict labels are read from the issue's
+# own labels (needs-decision, wright-declined, autonomy-ok).
+AGENT_BRIEF_LABEL = "agent-brief"
+
 # The label that parks an issue at the HITL decision gate (docs/decision-gate
 # .md, issue #161) — the queue the greenlight loop drafts advisory verdicts on.
 NEEDS_DECISION_LABEL = "needs-decision"
@@ -86,12 +99,18 @@ GREENLIGHT_MARKER = "<!-- reeve-greenlight v"
 # body, where the writer puts it as the first line.
 PROVIDER_ESCALATION_MARKER = "<!-- provider-escalation:"
 
-# The scheduled routines whose death Reeve watches (the #312 incident class:
+# The scheduled workflows whose death Reeve watches (the #312 incident class:
 # a run killed by its own timeout leaves conclusion "cancelled"/"failure" and
 # a ghost lock behind). growth-twitter is here because docs/growth.md names
-# this detector as the "routine silently stops" handler for the growth desk.
+# this detector as the "routine silently stops" handler for the growth desk;
+# wright.yml and growth-board-sync.yml joined at #745 — the tuple predated the
+# forge, so a forge death-streak was red in Actions but absent from the
+# bench-health report, and the growth board's sync lens (not itself an armed
+# routine, but a schedule whose GraphQL rate-limit failures reddened unseen
+# for days) was the live instance of exactly that hole. This tuple is the
+# single source of truth: nothing else in the package names the watched set.
 ROUTINE_WORKFLOWS = ("design-run.yml", "backlog-burn.yml", "chunker.yml", "labeler.yml",
-                     "growth-twitter.yml")
+                     "growth-twitter.yml", "wright.yml", "growth-board-sync.yml")
 
 # Completed runs fetched per workflow — one page, newest-first as the API
 # returns them. config.py caps `routine_dead_runs` at this value, since a
@@ -191,6 +210,7 @@ def gather_run_health(
 
     issues: list[dict[str, Any]] = []
     adoption_studies: list[dict[str, Any]] = []
+    agent_briefs: list[dict[str, Any]] = []
     for item in _paged(f"{API_ROOT}/repos/{repo}/issues?state=open&per_page=100", token):
         if "pull_request" in item:
             continue  # the issues endpoint interleaves PRs; drop them
@@ -200,6 +220,19 @@ def gather_run_health(
             # labels alone, so it must be gathered even with zero comments (the
             # skip only guards the per-issue lock-comments GET).
             adoption_studies.append(
+                {
+                    "number": item["number"],
+                    "title": item["title"],
+                    "labels": label_names,
+                    "createdAt": item.get("created_at", ""),
+                    "updatedAt": item.get("updated_at", ""),
+                    "url": item.get("html_url", ""),
+                }
+            )
+        if AGENT_BRIEF_LABEL in label_names:
+            # Same label-only shape as the studies (#745): a brief's queue state
+            # is its labels, so zero comments must not skip it either.
+            agent_briefs.append(
                 {
                     "number": item["number"],
                     "title": item["title"],
@@ -255,21 +288,34 @@ def gather_run_health(
         "workflows": workflows,
         "issues": issues,
         "adoptionStudies": adoption_studies,
+        "agentBriefs": agent_briefs,
         "openPRs": open_prs,
         "branches": branches,
     }
 
 
-def carries_greenlight(comments: list[Any]) -> bool:
-    """Whether any comment in ``comments`` opens with a greenlight marker.
+def carries_greenlight(
+    comments: list[Any], trusted: Callable[[str], bool]
+) -> bool:
+    """Whether any comment in ``comments`` opens with a greenlight marker
+    **whose author ``trusted`` vouches for**.
 
     Pure, so the selection rule is testable without the seam: the wrapper
     writes the marker as the comment's first line, and its live idempotency
-    check greps that same line — this is the read-side mirror, prefix-matched
-    so any marker version or verdict (yes/no/route) counts.
+    check applies the same two tests — this is the read-side mirror,
+    prefix-matched so any marker version or verdict (yes/no/route) counts.
+    The author test is the one the approval poll has applied since #518
+    (:func:`greenlight.marker_author_trusted` over the memoized
+    :func:`permission_of`): a marker counts only under the workflow's own
+    bot login or a login with a real write-level permission, so anyone who
+    can comment cannot park a decision out of the drafter's queue by pasting
+    one (issue #546). ``trusted`` is injected — the driver supplies the live
+    permission read — and consulted only for a comment that IS a marker: no
+    lookup is spent on ordinary comments.
     """
     return any(
         _first_line(c.get("body", "")).startswith(GREENLIGHT_MARKER)
+        and trusted((c.get("user") or {}).get("login", ""))
         for c in comments
     )
 
@@ -279,7 +325,9 @@ def is_provider_escalation(body: str | None) -> bool:
     return PROVIDER_ESCALATION_MARKER in (body or "")
 
 
-def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
+def gather_greenlight_queue(
+    repo: str, token: str, trusted: Callable[[str], bool]
+) -> dict[str, Any]:
     """The greenlight loop's work-list, from the live repo (issue #443).
 
     Every OPEN issue parked at the decision gate (``needs-decision``), plus
@@ -287,10 +335,18 @@ def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
     workflow's Select step reads this and hands the agent only the rest, so
     the drafter never even sees an issue it cannot post on (the wrapper
     re-checks live at write time; this is the selection, not the enforcement).
+    A marker counts only when its author passes ``trusted`` (issue #546: the
+    same ``greenlight.marker_author_trusted`` rule the poll applies, so an
+    untrusted commenter's pasted marker leaves the issue queued — dropping it
+    on any marker-looking text was a denial of service on the queue). A
+    permission read that raises propagates: the select step fails loud and
+    every issue waits for the next run — the fail-closed direction, never
+    "treat an unreadable author as untrusted and draft anyway".
     A parked issue that is a provider-triage escalation (its body carries
     ``PROVIDER_ESCALATION_MARKER``) stays in ``parked`` — it IS at the gate —
     but never enters ``queue``, and its thread is not even read.
-    Still GET-only: two listings per issue and nothing else.
+    Still GET-only: two listings per issue, plus at most one collaborator
+    permission read per distinct marker author.
     """
     parked: list[dict[str, Any]] = []
     for item in _paged(
@@ -306,6 +362,11 @@ def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
                 "title": item["title"],
                 "url": item.get("html_url", ""),
                 "providerEscalation": is_provider_escalation(item.get("body", "")),
+                # The standing approval modes' inputs (#446): the Select step
+                # classifies each issue and drops a deny category before the
+                # cap, so the drafter is never handed a human-only decision.
+                "labels": [lbl.get("name", "") for lbl in item.get("labels", [])],
+                "body": item.get("body") or "",
             }
         )
 
@@ -317,7 +378,7 @@ def gather_greenlight_queue(repo: str, token: str) -> dict[str, Any]:
             f"{API_ROOT}/repos/{repo}/issues/{issue['number']}/comments?per_page=100",
             token,
         )
-        if not carries_greenlight(comments):
+        if not carries_greenlight(comments, trusted):
             queue.append(issue)
 
     # Oldest first (the sibling routines' bias — a decision parked longest
@@ -369,6 +430,31 @@ def list_reactions(repo: str, token: str, comment_id: int) -> list[dict[str, Any
     ]
 
 
+def list_label_events(repo: str, token: str, number: int) -> list[dict[str, Any]]:
+    """One issue's label history: ``[{"event", "label", "actor", "created_at"}]``.
+
+    ``GET /repos/{repo}/issues/{n}/events``, kept to the ``labeled`` /
+    ``unlabeled`` entries. The standing approval modes (#446) read it for
+    exactly one question — *who applied this loosening label* — because a
+    label's mere presence is not authority: ``approval.label_actor_trusted``
+    holds its applier to the bar a 👍 clears. The poll's driver asks only
+    for issues that carry a label that could loosen, so a run with no such
+    label spends no request here.
+    """
+    return [
+        {
+            "event": e.get("event", ""),
+            "label": (e.get("label") or {}).get("name", ""),
+            "actor": (e.get("actor") or {}).get("login", ""),
+            "created_at": e.get("created_at", ""),
+        }
+        for e in _paged(
+            f"{API_ROOT}/repos/{repo}/issues/{number}/events?per_page=100", token
+        )
+        if e.get("event") in ("labeled", "unlabeled")
+    ]
+
+
 def gather_greenlight_poll(repo: str, token: str) -> list[dict[str, Any]]:
     """Every open parked decision's thread, ids intact (issue #444).
 
@@ -393,6 +479,8 @@ def gather_greenlight_poll(repo: str, token: str) -> list[dict[str, Any]]:
                 "title": item["title"],
                 "url": item.get("html_url", ""),
                 "body": item.get("body") or "",
+                # The standing approval modes classify on labels (#446).
+                "labels": [lbl.get("name", "") for lbl in item.get("labels", [])],
             }
         )
 

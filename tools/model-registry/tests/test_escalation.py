@@ -180,6 +180,21 @@ def test_no_matching_open_issue_files_exactly_one():
     assert "walked zai -> anthropic" in body
 
 
+def test_quota_reset_is_woven_into_a_freshly_filed_body():
+    # Issue #545: when classify extracted a quota reset timestamp, a freshly
+    # filed escalation names WHEN the chain comes back. Empty reset invents
+    # no line (negative control).
+    with_reset = esc.plan_escalation(
+        "quota", "labeler", "the labeler routine", ["zai"], WHEN, [],
+        reset="2026-09-04 18:30:53")
+    assert with_reset.action == "file"
+    assert "names the reset: **2026-09-04 18:30:53**" in with_reset.body
+    without = esc.plan_escalation(
+        "quota", "labeler", "the labeler routine", ["zai"], WHEN, [],
+        reset="")
+    assert "names the reset" not in without.body
+
+
 def test_open_issues_without_the_marker_do_not_count():
     # The marker is the reuse key, not the label alone: other open
     # needs-decision issues (parked human decisions) must not absorb a

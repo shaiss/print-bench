@@ -1,0 +1,6 @@
+# Include-closure positive control (selftest: PASS): dispatch lives only in
+# the included parent (two hops: child → mid → parent). The child itself
+# names no `part ==` branch and no `stop` assignment.
+stops stop 0
+empty closure-empty
+empty-control closure-solid

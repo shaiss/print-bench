@@ -1,0 +1,88 @@
+# designs/ovodyo/ci.cog — assembled standing-frame CoG / tip-over check
+# (tools/cogcheck, scripts/cog-check.sh, issue #623; product half of #603 item 10).
+#
+# Opt-in by presence. TIP-RISK is an advisory WARN, never a hard fail — do not
+# "fix" geometry to force STABLE. A broken line or an STL the gate did not
+# render IS a hard fail.
+#
+# Units: density g/cm³, mass g, length mm. rotate then translate (OpenSCAD:
+# rotate([x,y,z]) = Rz·Ry·Rx). Printed PLA density is the repo convention 1.24
+# applied to the SOLID mesh volume — the slicer infill (15–20 %) is invisible
+# here, so the balls are OVER-massed vs a real print (conservative toward
+# TIP-RISK). Non-printed hardware is mass: point masses. mock-drive and
+# seam-coupon are gated printability samples, not standing-assembly parts.
+#
+# Part basenames are gate.sh's build/<design>-<ci.parts value>.stl — never a
+# bare hours-top.stl, never a path. Duplicate STL basenames are forbidden:
+# ci.parts lists base-end and base-plug once (print two in the slicer); the
+# second copy is a mass: at the mirrored / other-port pose, not a second part:.
+#
+# Defaults cited from designs/ovodyo/ovodyo.scad unless noted:
+#   ball_d=78, ball_spacing=200, ball_center_z=124, stalk_d=4.5,
+#   truss_h=34, seg_len=127, core_len=120, core_h=8.8, core_wall=1.4,
+#   core_port_wall=4.2, plug_head_h=1.2, _port_z=5.75.
+# Ballast fill: NOTES.md "Ballast (stated assumption)" ≈55 g (2×28 g) Ø2 mm
+# steel shot — a starting fill to tune against the measured verdict, not a
+# STABLE claim.
+
+margin: 2.0
+
+# ---- ball halves (print: pole-down, seam on the bed; module ball_half) ------
+# Print frame: translate([0,0,R]) of the seated hemisphere (R = ball_d/2 = 39);
+# the top half also rotate([180,0,0]) so its outer pole is on the bed.
+# Seated frame has the ball centre at the origin and the equator at z=0.
+# Standing: hours centre (-100,0,124), minutes (100,0,124).
+# Bottom STL centre is at (0,0,R) → translate (±100, 0, 124-R) = (±100,0,85).
+# Top STL: undoing the print Rx(180) with rotate: 180,0,0 then translating the
+# print-frame origin (the outer pole) to (±100, 0, 124+R) = (±100,0,163)
+# puts the centre at z=124 (Rx(180) of (0,0,R) is (0,0,-R); +163 → 124).
+part: ovodyo-hours-top.stl     | density: 1.24 | translate: -100,0,163 | rotate: 180,0,0
+part: ovodyo-hours-bottom.stl  | density: 1.24 | translate: -100,0,85
+part: ovodyo-minutes-top.stl   | density: 1.24 | translate:  100,0,163 | rotate: 180,0,0
+part: ovodyo-minutes-bottom.stl| density: 1.24 | translate:  100,0,85
+
+# ---- base, modelled in the standing frame already (z=0 deck) ---------------
+# base-end is the −x wing (stations 0..bays, stalk at x=−100) as base_end().
+# base-segment / base-core sit on the deck as exported. base-plug prints
+# head-down at the origin; core_plug_seated(+1) is
+# translate([core_len/2 + plug_head_h, +_port_y, _port_z]) rotate([0,-90,0])
+# = translate(61.2, 22, 5.75) rotate(0,-90,0). The −y port is a mass: below.
+part: ovodyo-base-segment.stl  | density: 1.24
+part: ovodyo-base-end.stl      | density: 1.24
+part: ovodyo-base-core.stl     | density: 1.24
+part: ovodyo-base-plug.stl     | density: 1.24 | translate: 61.2,22,5.75 | rotate: 0,-90,0
+
+# ---- brass stalks (vitamin Ø4.5 rod, brass ~8.5 g/cm³) ---------------------
+# Length L = ball_center_z − base_h(±100). |x|=100 is on an end wing:
+# base_t(100) = 1 − (100 − seg_len/2)/seg_len = 1 − 36.5/127 = 0.712598…
+# base_h = truss_h·t = 24.228 mm; L = 99.772 mm.
+# V = π·(d/2)²·L = 1.5868 cm³ → 13.49 g. Cylinder centroid at
+# z = base_h + L/2 = 74.11 mm, x = ±100 (module stalk()).
+mass: stalk-hours   | grams: 13.49 | at: -100,0,74.11
+mass: stalk-minutes | grams: 13.49 | at:  100,0,74.11
+
+# ---- steel shot ballast (NOTES: ≈55 g total, starting fill) ----------------
+# Two pockets, s=±1, from _pocket_sec / _core_pocket. Uniform-section
+# centroid of the y–z polygon (socket-hump subtraction ignored — it removes
+# a little fill next to the deck struts): y_abs = 21.65 mm, z = 3.91 mm.
+# Along x the pocket runs [−core_len/2 + core_wall, +core_len/2 − core_port_wall]
+# = [−58.6, 55.8], midpoint x = −1.4 mm (thicker +x port wall). NOTES rounds
+# this to "z ≈ 5 mm"; 27.5 g each so the two masses sum to the 55 g starting
+# fill rather than 2×28 = 56. Tune the fill against the gate's verdict —
+# do not read STABLE into this number.
+mass: ballast-neg | grams: 27.5 | at: -1.4,-21.65,3.91
+mass: ballast-pos | grams: 27.5 | at: -1.4, 21.65,3.91
+
+# ---- second printed copies (not a second part: line) -----------------------
+# +x wing: full_base() mirrors the −x wing in x. Mesh volume of
+# ovodyo-base-end.stl from PR #789 argus-diff sticky on d8d9cf5:
+# 6323.1 mm³ × 1.24 g/cm³ = 7.84 g (replaces the 8.9 g strut-inventory
+# estimate). Not the printcheck filament-est 7.89 g (infill, not solid mesh).
+# CoG still the strut-midpoint used for that estimate (−110.9, −0.1, 6.5);
+# mirrored x → (110.9, −0.1, 6.5).
+mass: base-end-plus | grams: 7.84 | at: 110.9,-0.1,6.5
+# −y ballast plug: same PLA frustum-head estimate as core_plug()
+# (head Ø5×1.2 + taper 3.3→2.7 × 4.5 mm → 0.069 g). Print-frame CoG ≈
+# (0,0,2.15); after rotate([0,-90,0]) + translate(61.2, −22, 5.75) →
+# (63.35, −22, 5.75). Geared steppers / PCB omitted — NOTES gives no mass.
+mass: base-plug-neg | grams: 0.069 | at: 63.35,-22,5.75

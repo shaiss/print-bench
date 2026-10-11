@@ -1,0 +1,5 @@
+# Negative control (selftest: must FAIL): an empty-control that never
+# interferes — the landed shell itself — so the empty check is unfalsifiable.
+stops stop 0,1
+empty landing-flat
+empty-control landing-flat
