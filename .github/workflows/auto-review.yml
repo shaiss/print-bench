@@ -180,21 +180,29 @@ name: Auto design review (Jane / Drik / PM / coach)
 #   backstop. OpenRouter `:free` models are intentionally NOT on this chain
 #   (Cipher hold on #678; #819 scoped them to labeler-only).
 #
-# Reviewer outcome is derived from the ARTIFACT, not the exit code (issue
-# #762): claude-code-action exits 0 whenever the agent ends its turn without
-# an API error, so a link that posted nothing (a provider quota hit mid-run
-# is one way — #757) still reports outcome 'success', which used to skip
-# later links and let the stamp call the round reviewed with no review on the
-# thread (PRs #755 / #756, run 37164379493). Every Jane/Drik ship step is
-# followed by an artifact check (scripts/reviewer-posted.sh): did that
-# reviewer's sign-off marker for the PR head sha land on the thread? The
-# chain walk falls through on `served` (the check's output), the exhaustion
-# gates fire when no link served, and the stamp confirms both markers before
-# calling a round complete — the same disposition-by-artifact discipline as
-# routine-lock-cleanup.sh (#538) for the ship routines. The PM triage and
-# the design coach keep exit-code walks: no per-head completion marker is
-# defined for either (the PM's PM_TRIAGE markers are per-design verdicts,
-# the coach's COACH-LOCK is a dedupe lock, not a completion signal).
+# Reviewer outcome is derived from the ARTIFACT, not the exit code (issues
+# #762 / #770): claude-code-action exits 0 whenever the agent ends its turn
+# without an API error, so a link that posted nothing (a provider quota hit
+# mid-run is one way — #757) still reports outcome 'success', which used to
+# skip later links and let the stamp call the round reviewed with no review
+# on the thread (PRs #755 / #756, run 37164379493). Every Jane/Drik/pm-triage
+# /design-coach ship step is followed by an artifact check
+# (scripts/reviewer-posted.sh): did that reviewer's per-head marker for the
+# PR head sha land on the thread (JANE/DRIK_SIGNOFF, PM_TRIAGE_DONE, or
+# COACH_DONE)? The chain walk falls through on `served` (the check's output),
+# the exhaustion gates fire when no link served, and the stamp confirms both
+# Jane and Drik markers before calling a round complete — the same
+# disposition-by-artifact discipline as routine-lock-cleanup.sh (#538) for
+# the ship routines.
+#
+# Transition (#770 landing): pm-triage checks out base.ref and design-coach
+# restores reviewer-posted.sh from base.sha — both keep the trust boundary
+# (never the PR-head checker). A pre-#770 base checker rejects --reviewer
+# pm|coach with exit 2; under set -e that would abort before served is set
+# and freeze the fallback walk. Those artifact-check steps treat that
+# specific exit-2 message as served=false (not a pass) so the walk continues
+# until main carries the extended checker — including open PRs whose
+# base.sha still predates the merge.
 #
 # Required secrets (at least one; the chain uses whichever are present):
 #   ZAI_KEY          — Z.AI key, used via the Anthropic-compatible endpoint
@@ -1280,11 +1288,9 @@ jobs:
     # chain deliberately: the registry is where a future decision to give the
     # enforcement PM a frontier-first chain of its own belongs.
     #
-    # NOTE (issue #762): this job KEEPS the exit-code walk the Jane/Drik jobs
-    # dropped. Their artifact check keys on one per-head sign-off marker; the
-    # PM's PM_TRIAGE markers are per-DESIGN verdicts (one per changed design,
-    # so "all of them" is a count against a list, not one marker to find), and
-    # no per-head completion marker is defined for this job.
+    # Issue #770: artifact walk on the per-head PM_TRIAGE_DONE marker
+    # (post_triage still emits the per-design PM_TRIAGE marker for §8 reads).
+    # Same shape as jane-review/drik-review after #762.
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
@@ -1317,6 +1323,10 @@ jobs:
         id: ready
         run: |
           set -euo pipefail
+          # Stamp before any ship step so the artifact check can refuse a
+          # completion marker left by an earlier run on the same head
+          # (issue #770 — Jane/Drik's --since pattern from #762).
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           if [ -f .claude/reviewer-post/reviewer_mcp.py ] \
              && [ -f .claude/reviewer-post/reviewer-mcp.json ] \
              && [ -f .claude/reviewer-settings.json ]; then
@@ -1392,9 +1402,44 @@ jobs:
             blocking binary fork through the §7 HITL gate — add the
             needs-decision label; never push or edit repository content.
 
+      - name: Artifact check after link 1 (did the PM's completion marker land?)
+        id: v1
+        if: steps.p1.outcome == 'success' || steps.p1.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 1 artifact: served=$served"
+
       - name: /pm triage via Z.AI GLM (chain link 2)
         id: p2
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -1425,9 +1470,44 @@ jobs:
             blocking binary fork through the §7 HITL gate — add the
             needs-decision label; never push or edit repository content.
 
+      - name: Artifact check after link 2 (did the PM's completion marker land?)
+        id: v2
+        if: steps.p2.outcome == 'success' || steps.p2.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 2 artifact: served=$served"
+
       - name: /pm triage via Z.AI GLM (chain link 3)
         id: p3
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -1458,14 +1538,49 @@ jobs:
             blocking binary fork through the §7 HITL gate — add the
             needs-decision label; never push or edit repository content.
 
+      - name: Artifact check after link 3 (did the PM's completion marker land?)
+        id: v3
+        if: steps.p3.outcome == 'success' || steps.p3.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 3 artifact: served=$served"
+
       - name: /pm triage via Anthropic (chain link 4)
         id: p4
         if: >-
           steps.ready.outputs.ready == 'true'
           && env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -1493,15 +1608,50 @@ jobs:
             blocking binary fork through the §7 HITL gate — add the
             needs-decision label; never push or edit repository content.
 
+      - name: Artifact check after link 4 (did the PM's completion marker land?)
+        id: v4
+        if: steps.p4.outcome == 'success' || steps.p4.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 4 artifact: served=$served"
+
       - name: /pm triage via Anthropic (chain link 5)
         id: p5
         if: >-
           steps.ready.outputs.ready == 'true'
           && env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -1529,16 +1679,51 @@ jobs:
             blocking binary fork through the §7 HITL gate — add the
             needs-decision label; never push or edit repository content.
 
+      - name: Artifact check after link 5 (did the PM's completion marker land?)
+        id: v5
+        if: steps.p5.outcome == 'success' || steps.p5.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 5 artifact: served=$served"
+
       - name: /pm triage via Anthropic (chain link 6)
         id: p6
         if: >-
           steps.ready.outputs.ready == 'true'
           && env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -1566,6 +1751,41 @@ jobs:
             blocking binary fork through the §7 HITL gate — add the
             needs-decision label; never push or edit repository content.
 
+      - name: Artifact check after link 6 (did the PM's completion marker land?)
+        id: v6
+        if: steps.p6.outcome == 'success' || steps.p6.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          # Transition: base.ref may still be a pre-#770 checker (jane|drik
+          # only). Exit 2 for hardcoded --reviewer pm is "older checker",
+          # not a pass — write served=false so the fallback walk continues.
+          # Other failures (network, bad sha) still fail loud. Trust
+          # boundary unchanged: we never run the PR-head checker.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer pm --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (pm) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 6 artifact: served=$served"
+
       - name: No provider key configured
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
         run: |
@@ -1579,12 +1799,12 @@ jobs:
         if: >-
           steps.ready.outputs.ready == 'true'
           && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
@@ -1598,12 +1818,12 @@ jobs:
         if: >-
           steps.ready.outputs.ready == 'true'
           && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}
@@ -1654,10 +1874,9 @@ jobs:
     # claude-sonnet-5 → claude-haiku-4-5; first success wins; a missing key
     # degrades gracefully). Issues #206, #298.
     #
-    # NOTE (issue #762): this job KEEPS the exit-code walk the Jane/Drik jobs
-    # dropped — the coach's only thread marker is COACH-LOCK, a dedupe lock
-    # saying "a coach session exists", not a per-head completion signal, so
-    # there is no artifact for a check to key on.
+    # Issue #770: artifact walk on the per-head COACH_DONE marker
+    # (post_coach still emits COACH_LOCK for the #806 lock pin). Same shape
+    # as jane-review/drik-review after #762.
     env:
       HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
       HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
@@ -1812,10 +2031,80 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 1 (did the coach's completion marker land?)
+        id: v1
+        if: steps.p1.outcome == 'success' || steps.p1.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 1 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 2)
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
@@ -1869,7 +2158,7 @@ jobs:
 
       - name: /design-coach via Z.AI GLM (chain link 2)
         id: p2
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -1910,10 +2199,80 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 2 (did the coach's completion marker land?)
+        id: v2
+        if: steps.p2.outcome == 'success' || steps.p2.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 2 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 3)
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
@@ -1967,7 +2326,7 @@ jobs:
 
       - name: /design-coach via Z.AI GLM (chain link 3)
         id: p3
-        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -2008,15 +2367,85 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 3 (did the coach's completion marker land?)
+        id: v3
+        if: steps.p3.outcome == 'success' || steps.p3.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 3 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 4)
         if: >-
           steps.ready.outputs.ready == 'true'
           && env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
@@ -2073,9 +2502,9 @@ jobs:
         if: >-
           steps.ready.outputs.ready == 'true'
           && env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -2113,16 +2542,86 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 4 (did the coach's completion marker land?)
+        id: v4
+        if: steps.p4.outcome == 'success' || steps.p4.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 4 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 5)
         if: >-
           steps.ready.outputs.ready == 'true'
           && env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
@@ -2179,10 +2678,10 @@ jobs:
         if: >-
           steps.ready.outputs.ready == 'true'
           && env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -2220,17 +2719,87 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+
+      - name: Artifact check after link 5 (did the coach's completion marker land?)
+        id: v5
+        if: steps.p5.outcome == 'success' || steps.p5.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 5 artifact: served=$served"
 
       - name: Restore the coach posting surface from the base branch (before chain link 6)
         if: >-
           steps.ready.outputs.ready == 'true'
           && env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
@@ -2287,11 +2856,11 @@ jobs:
         if: >-
           steps.ready.outputs.ready == 'true'
           && env.HAS_ANTHROPIC == 'true'
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
         env:
@@ -2329,8 +2898,78 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }}
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
 
+
+      - name: Artifact check after link 6 (did the coach's completion marker land?)
+        id: v6
+        if: steps.p6.outcome == 'success' || steps.p6.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.ready.outputs.started_at }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: ""
+          PYTHONHOME: ""
+          PYTHONSTARTUP: ""
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -e {0}
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:/bin:/usr/local/bin"
+          unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
+                PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
+                DYLD_INSERT_LIBRARIES BASH_ENV ENV NODE_OPTIONS NODE_PATH || true
+          unset GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE \
+                GIT_OBJECT_DIRECTORY GIT_INDEX_FILE \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES || true
+          export GIT_ALLOW_PROTOCOL=https
+          export GIT_CONFIG_COUNT=4
+          export GIT_CONFIG_KEY_0=safe.bareRepository
+          export GIT_CONFIG_VALUE_0=explicit
+          export GIT_CONFIG_KEY_1=core.fsmonitor
+          export GIT_CONFIG_VALUE_1=false
+          export GIT_CONFIG_KEY_2=core.hooksPath
+          export GIT_CONFIG_VALUE_2=/dev/null
+          export GIT_CONFIG_KEY_3=core.pager
+          export GIT_CONFIG_VALUE_3=cat
+          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          mkdir -p scripts
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          chmod +x scripts/reviewer-posted.sh
+          # Transition: base.sha may still be a pre-#770 checker (jane|drik
+          # only) — including open PRs whose base.sha predates the #770
+          # merge. Exit 2 for hardcoded --reviewer coach is "older
+          # checker", not a pass — write served=false so the fallback walk
+          # continues. Do NOT switch to the PR-head checker (trust
+          # boundary). Other failures still fail loud.
+          err="$(mktemp)"
+          set +e
+          served="$(scripts/reviewer-posted.sh check \
+            --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer coach --since "$SINCE" \
+            2>"$err")"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 2 ]] && grep -qE 'must be jane or drik \(got: (pm|coach)\)' "$err"; then
+            cat "$err" >&2
+            echo "::notice::base checker predates #770 (coach) — treating as not-served; walk continues"
+            served=false
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$rc" -ne 0 ]]; then
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
+          echo "link 6 artifact: served=$served"
 
       - name: Coach posted a COACH-LOCK
         # claude-code-action exits 0 on a denial-only turn (#538/#764/#806).
@@ -2338,6 +2977,13 @@ jobs:
         # marker is on the thread. Fail here so review-stamp cannot mark
         # the round complete. Extract the pin from base.sha AFTER the
         # agent (Write/Edit/Bash): the workspace copy is not trusted.
+        #
+        # Success-only on purpose (Bugbot on #820): the #770 artifact walk
+        # widened this to success|failure, so a chain where every provider
+        # errored (no COACH-LOCK posted) failed HERE — hard, no
+        # continue-on-error — and skipped Diagnose / Every configured
+        # provider failed. Provider exhaustion must reach those steps;
+        # missing-lock is only meaningful after a ship link claimed success.
         if: >-
           always()
           && (steps.p1.outcome == 'success'
@@ -2418,12 +3064,12 @@ jobs:
         if: >-
           steps.ready.outputs.ready == 'true'
           && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         uses: ./.github/actions/provider-triage
         with:
           chain: review
@@ -2437,12 +3083,12 @@ jobs:
         if: >-
           steps.ready.outputs.ready == 'true'
           && (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
-          && steps.p1.outcome != 'success'
-          && steps.p2.outcome != 'success'
-          && steps.p3.outcome != 'success'
-          && steps.p4.outcome != 'success'
-          && steps.p5.outcome != 'success'
-          && steps.p6.outcome != 'success'
+          && steps.v1.outputs.served != 'true'
+          && steps.v2.outputs.served != 'true'
+          && steps.v3.outputs.served != 'true'
+          && steps.v4.outputs.served != 'true'
+          && steps.v5.outputs.served != 'true'
+          && steps.v6.outputs.served != 'true'
         env:
           CLASS: ${{ steps.triage.outputs.class }}
           REASON: ${{ steps.triage.outputs.reason }}

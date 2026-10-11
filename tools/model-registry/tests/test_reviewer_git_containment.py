@@ -8,7 +8,9 @@ containment is structural, in two halves:
 
 * the FILE half (``scripts/reviewer-perms-check.sh``): Jane / Drik / PM triage
   deny ``Bash(git:*)`` outright; the coach keeps checkout/add/commit/push and
-  denies everything else;
+  denies everything else; both backstops deny the env-lock surface
+  (``export``/``env``/``unset``/``set`` and ``bash``/``sh``/``dash -c``) so
+  the job-level ``GIT_*`` lock cannot be unset by an additive allow (#777);
 * the WORKFLOW half, pinned here:
   - every reviewer and coach ship step — every chain link, every provider —
     runs under the git ENVIRONMENT lock (``GIT_ALLOW_PROTOCOL=https`` plus
@@ -35,12 +37,18 @@ workflow text, proving it can fail.
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
 
-from test_reviewer_backstop_wiring import BACKSTOPS, _ship_chunks
-from test_workflow_drift import _job_blocks, _without_comments, _workflow_text
+from test_reviewer_backstop_wiring import (
+    BACKSTOPS,
+    COACH_BACKSTOP,
+    REVIEWER_BACKSTOP,
+    _ship_chunks,
+)
+from test_workflow_drift import REPO_ROOT, _job_blocks, _without_comments, _workflow_text
 
 # The lock every reviewer/coach ship step must run under.
 PROTOCOL = "https"
@@ -69,6 +77,19 @@ COACH_RESTORE_PATHS = (
 COACH_LOCK_CHECK_BLOB = "${BASE_SHA}:scripts/coach-lock-check.sh"
 COACH_LOCK_CHECK_SHOW = (
     '/usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh"'
+)
+
+# FILE-half env lock (#777): named denies so the job-level GIT_* lock cannot
+# be unset by an additive allow. Workflow lock above; these rules in both
+# backstop JSON files, pinned also by scripts/reviewer-perms-check.sh.
+ENV_LOCK_DENIES = (
+    "Bash(export:*)", "Bash(export*)",
+    "Bash(env:*)", "Bash(env*)",
+    "Bash(unset:*)", "Bash(unset*)",
+    "Bash(set:*)", "Bash(set*)",
+    "Bash(bash -c:*)", "Bash(bash -c*)", "Bash(bash -*)",
+    "Bash(sh -c:*)", "Bash(sh -c*)", "Bash(sh -*)",
+    "Bash(dash -c:*)", "Bash(dash -c*)", "Bash(dash -*)",
 )
 
 
@@ -421,6 +442,30 @@ def test_coach_lock_check_runs_the_base_copy_after_the_agent():
     _assert_coach_lock_check_runs_base_copy(_workflow_text())
 
 
+def _deny_list(relpath: str) -> list[str]:
+    data = json.loads((REPO_ROOT / relpath).read_text(encoding="utf-8"))
+    return data["permissions"]["deny"]
+
+
+def test_both_backstops_deny_the_env_lock_escape_surface():
+    for relpath in (REVIEWER_BACKSTOP, COACH_BACKSTOP):
+        deny = set(_deny_list(relpath))
+        missing = [r for r in ENV_LOCK_DENIES if r not in deny]
+        assert not missing, (
+            f"{relpath} is missing env-lock floor denies {missing} — a future "
+            f"Bash(env:*) allow would wrap GIT_* around the job-level lock"
+        )
+
+
+def test_env_lock_denies_are_the_ones_every_ship_step_backstop_uses():
+    # Same table as the wiring guard: no reviewer job ships under a file that
+    # is not one of the two backstops this pin reads.
+    for job, relpath in BACKSTOPS.items():
+        deny = set(_deny_list(relpath))
+        missing = [r for r in ENV_LOCK_DENIES if r not in deny]
+        assert not missing, f"auto-review.yml [{job}] backstop {relpath}: {missing}"
+
+
 # ── negative controls ─────────────────────────────────────────────────────────
 
 def _job_replace(text: str, job: str, old: str, new: str) -> str:
@@ -437,6 +482,12 @@ def _step_replace(text: str, job: str, step: int, old: str, new: str) -> str:
     tampered = text.replace(chunk, chunk.replace(old, new, 1), 1)
     assert tampered != text, "tamper did not land — the fixture is stale"
     return tampered
+
+
+def test_env_lock_guard_rejects_a_backstop_missing_env():
+    deny = [r for r in _deny_list(REVIEWER_BACKSTOP) if r != "Bash(env:*)"]
+    missing = [r for r in ENV_LOCK_DENIES if r not in set(deny)]
+    assert missing == ["Bash(env:*)"], "tamper target not found — the fixture is stale"
 
 
 @pytest.mark.parametrize("job,old,new", [
