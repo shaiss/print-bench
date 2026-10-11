@@ -16,7 +16,7 @@ the bosses. Curtains down for washing = unthread two collars, no tools.
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
-![Section through the seated socket](previews/cutaway.png)
+![Half of the seated socket — the full section is below](previews/cutaway.png)
 
 ![Diametral section — full width, countersink in plane, thread mesh](previews/cutaway-wide.png)
 
@@ -101,7 +101,9 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   `rod_clearance`. An ASA install should print the **thread** coupon in
   ASA too — longer engagement, and the taper is unforgiving of a
   half-percent shrink — still unproven until B4 (a material-specific
-  preset is charter backlog B4).
+  preset is charter backlog B4). If that ASA coupon binds, the fix is a
+  `thread_tol` change, which needs the clone/source path rather than the
+  Release STLs.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
 - **Seam:** Scarf (Bambu Studio) or Back — the default Aligned seam stacks a
@@ -187,7 +189,9 @@ proof: print them in your material first and trust them over this page.
    shorter** (38–42 mm is the safe band): each end bottoms on its collar
    shoulder 19 mm from that wall, so the seated rod spans nearly
    wall-to-wall (mouth-to-mouth **plus** ~38 — both sockets sit recessed
-   into their collars).
+   into their collars). Aim for ~40 mm shorter; if you land between sizes,
+   cut long (toward the 38 mm end of the band) and trim — a rod can be
+   shortened, but a too-short rod means buying another.
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out — **holding the flange still** as you
    unthread, because unscrewing friction can walk the single M5 out of the
