@@ -155,13 +155,14 @@ default-depth holder pair.
 
 ## Print settings
 
-- **Material:** PLA proved the geometry (the v1 field test); PETG or ASA for
-  a permanent, load-bearing install — PLA creeps under sustained load, and
-  a hot south-facing window (heat + UV) is the one-strike failure. Retune
-  on the coupons: PETG wants `thread_tol` +0.05–0.1 mm vs PLA; ASA shrinks
-  the bore ~0.2–0.4 mm — about the whole slip — so print the bore coupon in
-  ASA first and expect +0.1–0.2 mm on `rod_clearance` (a material-specific
-  preset is charter backlog B4).
+- **Material:** PLA validated the print path only; the proving print is
+  still open (v1 FAILED before a measurable state — field-test log below).
+  PETG or ASA for a permanent, load-bearing install — PLA creeps under
+  sustained load, and a hot south-facing window (heat + UV) is the
+  one-strike failure. Retune on the coupons: PETG wants `thread_tol`
+  +0.05–0.1 mm vs PLA; ASA shrinks the bore ~0.2–0.4 mm — about the whole
+  slip — so print the bore coupon in ASA first and expect +0.1–0.2 mm on
+  `rod_clearance` (a material-specific preset is charter backlog B4).
 - **Nozzle / layer:** 0.4 mm / 0.2 mm.
 - **Perimeters:** 3 (walls are 3.2 mm by design — the wall *is* the part).
 - **Infill:** 20% gyroid (the socket is wall-dominated; infill is backup).
@@ -193,6 +194,18 @@ production modules — what you print *is* what ships.
 
 Measure the pole with calipers first and set `rod_d` to the *barrel* reading
 (where the socket sits), not the finial/ring size.
+
+## Rod cut (wall-to-wall)
+
+With both collars seated, each rod end bottoms on the collar shoulder at
+`flange_t + collar_lower_h` = 6.4 + 12.6 = **19 mm** from its wall (the +1 mm
+in `collar_lower_h` is relief past the boss neck tip at `boss_h` = 18).
+Double-bottom length is therefore wall-to-wall − **38 mm**; the product page
+recommends ≈ **40 mm** short (38–42 band) for a couple mm of install slack.
+Deep/shallow mouth heights off the wall are 47 / 31 mm (`flange_t` + collar
+height) — they set mouth-to-mouth, not the cut. Engagement depths (28 / 12)
+are how far the rod plugs past each mouth once it is in, not a span to
+subtract.
 
 ## Hardware: screw length and load rating
 

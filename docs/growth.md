@@ -244,7 +244,8 @@ It reuses the desk's machinery rather than adding any:
   skill uses — it gets no second filing surface, and so inherits every
   queue-tool guard: the hardcoded `growth-queue` + `channel:twitter` labels
   (it can never approve, prioritize, or route), the `Growth post:` title
-  prefix, the closed channel set, and the `GROWTHQ_MAX_POSTS` per-run cap.
+  prefix, the closed channel set, the `GROWTHQ_MAX_POSTS` per-run cap, and
+  the near-duplicate refusal against the dedup context (below).
 * **It queues intent, never copy.** A filed item carries the message angle +
   a fact budget cited to committed files — never the finished tweet. Lark
   writes the words from those facts. The queue seam keeps finished copy off
@@ -258,9 +259,24 @@ It reuses the desk's machinery rather than adding any:
   queue tool asserted never-denied), and it is the one exception to "every
   sibling denies both growth servers".
 * **Oracle-shaped.** No shell wrapper: reads are Read/Grep/Glob over the
-  checkout plus a trusted workflow-assembled `.reeve-growth-context/` (the open
-  queue, for dedup). The run allow-lists exactly the queue tool + the read-only
-  file tools.
+  checkout plus a trusted workflow-assembled `.reeve-growth-context/`. The run
+  allow-lists exactly the queue tool + the read-only file tools.
+* **Dedup against what a human already ruled on, not just the open queue.**
+  Once a human rules on a queue item it usually stops carrying `growth-queue`
+  (a declined post keeps only `channel:*` + `disposition:declined`; a parked
+  one swaps to `needs-decision`; a posted one closes), so a dedup list of the
+  open queue alone let a declined post straight back in under a new title
+  (#597 → #754, #598 → #746). Before every chain link the workflow runs the
+  tested, GET-only `python3 -m growth dedup-context` (`tools/growth`), which
+  lists every open `channel:*` issue plus every one closed in the last 120
+  days, in two sections — *queued* and *already covered or declined* — as
+  `dedup.md` (the agent dedups against both, by story) and `dedup.json`. The
+  queue tool reads the JSON (`GROWTHQ_DEDUP_CONTEXT`) and refuses a title
+  whose token similarity to any listed one is ≥ 0.6 — a deterministic
+  backstop for the near-verbatim retitle (a re-angled story scores lower, so
+  the topic call stays the agent's). Fail closed: a failed read writes the
+  context marked unavailable, and the tool then refuses every filing that
+  run; unattended, an unwired link refuses too.
 
 **Dry-run-first, and disarmed.** Everything Reeve-growth files is a *draft*: a
 human reads and culls the queue issue, Lark then dry-runs it, and it still
@@ -285,6 +301,7 @@ cadence parity is `cadence-sync-check.sh`-covered.
 | Over-long copy burns an approval at the API | The weighted-length guard refuses at compose review time (tool + simulator), parity-pinned against the reference rule |
 | The poster refills its own queue | Its backstop denies `mcp__growth_queue` (pinned by `growth-perms-check.sh` with a negative control); the reverse — the queuer reaching the channel — is closed the same way: `reeve-growth`, the one scheduled routine that *owns* the queue server, denies the poster `mcp__growth_twitter`, pinned by `reeve-growth-perms-check.sh` with its own negative control. Every *other* sibling backstop denies **both** growth servers |
 | A sibling routine acquires either growth surface | Every sibling backstop denies both servers — except the two owners, Lark (denies the queue server) and `reeve-growth` (denies the poster); each perms-check pins the denies in `REQUIRED_DENIES` and asserts the owner's one write surface is never denied |
+| The queuer re-proposes a post a human already declined, parked or posted | The dedup context lists every open-or-recent `channel:*` item in two sections (queued / already covered or declined), refreshed before every chain link by the tested `growth dedup-context`; the queue tool refuses a near-verbatim retitle of any of them (token similarity ≥ 0.6) and refuses everything when the context is missing or unavailable |
 | The labeler sweeps a queue item (parking it `needs-decision`, or arming it `autonomy-ok` for the burn) | `growth-queue` is in the labeler's `NON_TRIAGE_LABELS` (label-helper.sh) — the sweep never selects a queue item, the agent-brief precedent |
 | The routine silently stops (or silently starts) | Two-key arming + the `disarmed-notice` job; a disabled conf logs; an empty queue logs; Reeve's `routine-dead` detector reads run conclusions once armed |
 | A dead model id kills the sweep | The chain walks past it since #544: a dead GLM head falls through to the Anthropic tail (`claude-sonnet-5` → `claude-haiku-4-5`), and total exhaustion runs `provider-triage` → `classify`, escalating a human-fixable cause (billing, a bad key) once through the `needs-decision` gate instead of a silent red; `model-registry smoke growth-twitter` proves every link before arming |

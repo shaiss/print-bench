@@ -296,7 +296,7 @@ def test_greenlight_poll_prints_lines_appends_output_and_notices_missing_pat(
     gh_out = tmp_path / "gh_output"
     monkeypatch.setattr(
         "reeve.pushthrough.run_poll",
-        lambda repo, token, pat, now=None: [
+        lambda repo, token, pat, now=None, rules=None: [
             {"number": 201, "outcome": "approved", "notes": ["ledger skipped"]},
             {"number": 202, "outcome": "overruled", "reason": "👎 overrule"},
             {"number": 203, "outcome": "error", "reason": "could not apply decision-approved"},
@@ -322,8 +322,8 @@ def test_greenlight_poll_prints_lines_appends_output_and_notices_missing_pat(
 def test_greenlight_poll_passes_both_tokens_and_exits_clean(monkeypatch, capsys):
     seen = {}
 
-    def fake_run_poll(repo, token, pat, now=None):
-        seen.update(repo=repo, token=token, pat=pat)
+    def fake_run_poll(repo, token, pat, now=None, rules=None):
+        seen.update(repo=repo, token=token, pat=pat, rules=rules)
         return []
 
     monkeypatch.setattr("reeve.pushthrough.run_poll", fake_run_poll)
@@ -331,7 +331,10 @@ def test_greenlight_poll_passes_both_tokens_and_exits_clean(monkeypatch, capsys)
     monkeypatch.setenv("REGEN_TOKEN", "the-pat")
     rc = main(["greenlight-poll", "--repo", "o/r"])
     assert rc == 0
-    assert seen == {"repo": "o/r", "token": "workflow-token", "pat": "the-pat"}
+    # No --conf: the empty standing rule set (#446) — every thread asks.
+    from reeve.approval import Rules
+    assert seen == {"repo": "o/r", "token": "workflow-token", "pat": "the-pat",
+                    "rules": Rules()}
     assert capsys.readouterr().out == ""   # an empty poll is a legitimate, quiet run
 
 

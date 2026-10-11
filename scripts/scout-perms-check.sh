@@ -90,6 +90,10 @@ allow = load(settings_path).get("permissions", {}).get("allow", [])
 deny  = load(scout_path).get("permissions", {}).get("deny", [])
 deny_set = set(deny)
 
+# Jane/Drik posting surface (#773): server or tool spelling, growth-server pattern.
+REVIEWER_DENIES = {"mcp__reviewer", "mcp__reviewer__post_review"}
+missing_reviewer = not (REVIEWER_DENIES & deny_set)
+
 # Coverage: every non-wrapper Bash allow must be denied verbatim. scout-helper.sh
 # is not on settings.json's allow-list, so this covers chunk-helper.sh and
 # label-helper.sh too — the scout must deny both, which is the whole point of a
@@ -116,6 +120,12 @@ if missing:
         sys.stderr.write(f"    {r}\n")
     sys.stderr.write(
         "  → add each to .claude/scout-settings.json permissions.deny.\n")
+if missing_reviewer:
+    ok = False
+    sys.stderr.write(
+        f"the backstop no longer denies mcp__reviewer or "
+        f"mcp__reviewer__post_review (issue #773 sibling deny) in "
+        f"{scout_path}\n")
 
 sys.exit(0 if ok else 1)
 PY
@@ -132,7 +142,7 @@ selftest() {
 {"permissions":{"allow":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)"]}}
 EOF
   cat > "$tmp/good-scout.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Write"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Write","mcp__reviewer","mcp__reviewer__post_review"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-scout.json" 2>/dev/null; then
     echo "ok    selftest: complete deny coverage passes"
@@ -191,6 +201,16 @@ EOF
     echo "FAIL  selftest: a wildcard deny blocking the wrapper was NOT caught"; return 1
   else
     echo "ok    selftest: a wildcard deny blocking the wrapper fails the check"
+  fi
+
+  # Missing Jane/Drik posting deny (#773): neither spelling present.
+  cat > "$tmp/bad-reviewer-scout.json" <<'EOF'
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Write"]}}
+EOF
+  if check_pair "$tmp/good-settings.json" "$tmp/bad-reviewer-scout.json" 2>/dev/null; then
+    echo "FAIL  selftest: a missing reviewer-posting deny was NOT caught"; return 1
+  else
+    echo "ok    selftest: a missing reviewer-posting deny fails the check"
   fi
 }
 
