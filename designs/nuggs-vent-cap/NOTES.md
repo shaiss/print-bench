@@ -256,5 +256,12 @@ plate. A real print photo is the artifact that belongs there.
   care bedding pockets + weekly chew inspect; aperture marked convention;
   `cells.png` embedded; CAMERAS comment text 37→38 (cameras frozen). No
   geometry. Empty field-test log and proving print left alone.
+- 2026-10-11: PR #636 review-thread fold: (1) coupon cell dropped to
+  `nuggs_z_tip` so it shares the sector-tip bed plane (was floating at
+  z=0); (2) open-area assert uses anisotropic on-slope pitches
+  `slope_pitch × pitch_v·√2` (defaults 0.650; thick-strand pairing that
+  used to pass at 0.309 now fails at 0.261); (3) product/gallery copy
+  qualifies escape prevention on the assumed 6 mm ceiling pending a live
+  animal confirmation.
 
 ## Field test log
