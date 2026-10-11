@@ -104,9 +104,12 @@ corner_r = 12;
 // Interior fill-line witness: depth into the dish wall (mm). 0 disables.
 // Sits on the designed fill plane (y_sand), not a new height. In the print
 // pose Y is sideways, so this is a vertical slot — no new overhang.
-fill_mark_d = 0.4;
+// 0.8 mm ≈ two extrusion widths — a 0.4 mm nick vanished under the perimeter
+// bead (Jane, PR #674); assert ceiling is dish_wall/2.
+fill_mark_d = 0.8;
 // Interior fill-line witness: height along use-up / print-Y (mm).
-fill_mark_h = 0.8;
+// ~1.5 mm keeps the mouth clear of gap-fill on a 0.4 mm nozzle (Jane, PR #674).
+fill_mark_h = 1.5;
 
 /* [Quality] */
 // This design's own preset. Iterating: $fa=6/$fs=1.5. Production: $fa=3/$fs=0.8.
@@ -403,8 +406,8 @@ module nuggs_sand_bath() {
 // walls (z >= z_wide): in the print pose Y is sideways, so the nick is a
 // vertical slot (all faces nz = 0). Kept off the beach, the staged skirts,
 // the floor fillets and the far ramp so it cannot add an overhang or a
-// chewable ledge the animal reaches from the sand floor. Depth is one
-// extrusion; height is two — visible when pouring, not a snag.
+// chewable ledge the animal reaches from the sand floor. Depth is two
+// extrusions; height ~1.5 mm — visible when pouring, not a snag.
 module fill_line_groove() {
     if (fill_mark_d > 0)
         intersection() {

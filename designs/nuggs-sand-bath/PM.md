@@ -71,10 +71,12 @@ render and the stranger's decision.
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B1 | Lid variant (hinged or lift-off) | named follow-up in the brief; keeps sand in during transport | a second part + its own gates |
+| B1 | Lid variant (hinged or lift-off) | nightly sand containment (~100:1 vs transport — Drik usage math on PR #674); chew-safety, ventilation and bore-entry compatibility are the lid brief's open questions | a second part + its own gates |
 | B2 | Multi-port in-run variant | explicitly out of scope v1; changes the run-break story | its own brief |
+| B5 | Single-stub coupon override (`coupon_stubs=1`) | twice-proposed (Jane 6 + Drik D5): owners who already mate against a habitat port can halve the coupon (~30 g / ~2¼ h); two-stub default stays deliberate (README says so) | one `-D` path + coupon geometry |
 | B3 | `floor_run=140` + `max_build_height=250` for ≥250 mm printers | documented escape hatch in README; needs a real tall-printer field test | print time ~2× |
 | B4 | Harness follow-up: printcheck 256³ vs slicer 200 mm ceiling mismatch | platform, not this design — flag in PR, file on the harness | an issue |
+| B6 | Turntable reveal animation (`animations.conf`) | Jane bonus: chimney → dish by lying down — best story, cosmetic mid-review; last until the freeze window is over | one anim entry + GIF budget |
 
 ## Open decisions
 
@@ -91,4 +93,6 @@ render and the stranger's decision.
 | 2026-09-14 | `sand_depth = 18` | welfare source says 2–3 cm (15 is the floor, not the target); 18 closes capacity under the 199 mm ceiling with lip−sand ≥ 2 |
 | 2026-09-14 | Staged widening (tube → circle → dish) | census-measured 59.6° corners on the single hull; two hulls fit the 199 mm ceiling at 197.155 mm |
 | 2026-09-14 | `printcheck.args` stays 256³ | family-consistent with NUGGS modules; the 200 mm slicer ceiling is this design's own assert; mismatch flagged as B4 |
-| 2026-10-04 | Interior fill-line witness at `y_sand` | Drik first-customer nit on PR #674: first fill was eyeball + cup; a 0.4 × 0.8 mm groove on the vertical trough walls at the existing fill plane (not a new height). B1 lid stays backlog, unteased. |
+| 2026-10-04 | Interior fill-line witness at `y_sand` | Drik first-customer nit on PR #674: first fill was eyeball + cup; a groove on the vertical trough walls at the existing fill plane (not a new height). B1 lid stays backlog, unteased. |
+| 2026-10-11 | Fill-mark resized to 0.8 × 1.5 mm | Jane [saw-it] on PR #674: 0.4 × 0.8 mm printed as a ghost under the two-line floor; assert ceiling `dish_wall/2` = 1.2 still holds. New `fill-line` camera (freeze respected — `hero` untouched). |
+| 2026-10-11 | B1 *why* rewritten (nightly containment) | Drik [customer-sense]: transport is ~2–5/yr; dig-kick containment is nightly (~100:1). Lid brief must pre-scope chew-safety, ventilation, bore-entry. |

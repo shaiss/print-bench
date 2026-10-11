@@ -202,16 +202,18 @@ segments, not rectangles.
 8. **$fa/$fs match the library pin** (`3/0.8`): where this file's tube meets
    the port, mismatched presets split the shell into ~20 bodies under Manifold
    (issue #99, PR #200). Do not "improve" them.
-9. **Fill-line witness groove** (Drik, first-customer review on PR #674): a
-   0.4 × 0.8 mm interior nick on the vertical trough walls, centred on the
-   designed fill plane `y_sand = y_floor_in + sand_depth` (measured −42.00 mm
-   with the defaults: 18 mm above the floor / 15 mm below the low rim — not a
-   new height). In the print pose Y is sideways, so the nick is a vertical
-   slot (nz = 0); it is kept off the beach, the staged skirts, the floor
-   fillets and the far ramp so it cannot add overhang or a chewable ledge at
-   sand-floor height. First fill is the groove, not eyeball + measuring cup.
-   `part = "sandbody"` is unchanged (the groove is in the wall, not the fill
-   solid), so the 245.5 mL mesh audit still holds.
+9. **Fill-line witness groove** (Drik, first-customer review on PR #674;
+   resized Jane [saw-it] same PR): a **0.8 × 1.5 mm** interior nick on the
+   vertical trough walls, centred on the designed fill plane
+   `y_sand = y_floor_in + sand_depth` (measured −42.00 mm with the defaults:
+   18 mm above the floor / 15 mm below the low rim — not a new height). The
+   first ship was 0.4 × 0.8 mm and vanished under a 0.4 mm nozzle perimeter;
+   0.8 stays under `dish_wall/2` = 1.2. In the print pose Y is sideways, so
+   the nick is a vertical slot (nz = 0); it is kept off the beach, the staged
+   skirts, the floor fillets and the far ramp so it cannot add overhang or a
+   chewable ledge at sand-floor height. First fill is the groove, not eyeball
+   + measuring cup. `part = "sandbody"` is unchanged (the groove is in the
+   wall, not the fill solid), so the 245.5 mL mesh audit still holds.
 
 ## Print settings
 
@@ -220,16 +222,24 @@ segments, not rectangles.
 - **Supports:** none — 0.0 mm² of >45° non-bridge overhang (census above).
   Leave slicer supports off.
 - **Brim:** yes — 527 mm² of bed contact on the sector tips is under 5% of the
-  footprint (printcheck's advisory; a 4–5 mm brim is enough).
+  footprint (printcheck's advisory; a 4–5 mm brim is enough). Trim brim flush
+  and deburr the sector tips before judging fit (Jane 3).
+- **Seam:** Back (or scarf) — Aligned stacks a 197 mm ridge (Jane 5).
 - **Material:** PLA or PETG. PETG if the bath will be washed often.
 - **Walls / layer:** 0.4 mm nozzle, ≥ 3 perimeters (`dish_wall = 2.4`), 0.2 mm
   layers.
-- **Test-slice reference:** 8 h 55 m / 129.4 g (body, normal mode).
+- **Test-slice reference (local, post fill-mark resize):** body 84/100 —
+  9 h 22 m / 129.1 g; coupon 92/100 — 4 h 36 m / 60.4 g (same caveats:
+  bed-contact brim advisory on the body; coupling zero-area facets).
 - **Expected slicer notices:** print-stability warning (the brim answers it);
   2 zero-area facets from the port tessellation — the pure-library coupon
   carries 4 of its own, i.e. they come from the coupling, not this junction.
 - **Fill with bathing *sand* (0.1–0.5 mm grain), never chinchilla dust** —
-  dust is a respiratory irritant for hamsters.
+  dust is a respiratory irritant for hamsters. Pour to the 0.8 × 1.5 mm
+  interior groove.
+- **Depth recipe:** 18 mm is the answer at the stock 200 mm ceiling; full 2 cm
+  needs `-D floor_run=140 -D max_build_height=250` (≥250 mm) plus
+  `-D sand_depth=20 -D lip_h=22` (Drik D9).
 - **Cleaning (family N7, `designs/nuggs/PM.md`):** after sifting or replacing
   sand, hand wash the dish only, ≤ 50 °C, mild unscented dish soap OK; rinse
   and dry fully — never a dishwasher.
@@ -237,7 +247,17 @@ segments, not rectangles.
 ## Print this first
 
 `nuggs-sand-bath-coupon.scad` — two bore-clean `nuggs_neck()` port stubs
-(~60 g, 4.5 h). Mate them, or mate one to any NUGGS module you already own, and
-tune `port_tol` in ±0.05 mm steps until the quarter-turn locks without rock.
-The port tolerance is **untested on any printer** (the lib header's own
-warning) — the coupon is mandatory before the full dish.
+(~60 g, 4.5 h). Two stubs are deliberate: tune the pair without touching the
+habitat (Drik D5); a single-stub override is backlog B5. The coupon's first
+2 mm is the body's first 2 mm — if elephant foot stiffens the stubs, use
+elephant-foot compensation rather than raising `port_tol` (Jane 4). Mate them,
+or mate one to any NUGGS module you already own, and tune `port_tol` in
+±0.05 mm steps until the quarter-turn locks without rock. The port tolerance
+is **untested on any printer** (the lib header's own warning) — the coupon is
+mandatory before the full dish.
+
+## Field test log
+
+*(No entries yet. First FIELD-TEST should capture: (1) groove legibility in
+plastic — empirical close-out of Jane 1's resize; (2) turn-around observation —
+does the animal reverse down the beach tail-first? Drik D4.)*
