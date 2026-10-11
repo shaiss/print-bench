@@ -104,9 +104,9 @@ corner_r = 12;
 // Interior fill-line witness: depth into the dish wall (mm). 0 disables.
 // Sits on the designed fill plane (y_sand), not a new height. In the print
 // pose Y is sideways, so this is a vertical slot — no new overhang.
-// 0.8 mm ≈ two extrusion widths — a 0.4 mm nick vanished under the perimeter
-// bead (Jane, PR #674); assert ceiling is dish_wall/2.
-fill_mark_d = 0.8;
+// 1.2 mm = dish_wall/2 ceiling ≈ three extrusion widths — 0.8 sat on Jane's
+// engraved-feature coin-flip under a 0.4 mm nozzle (PR #674, round 2).
+fill_mark_d = 1.2;
 // Interior fill-line witness: height along use-up / print-Y (mm).
 // ~1.5 mm keeps the mouth clear of gap-fill on a 0.4 mm nozzle (Jane, PR #674).
 fill_mark_h = 1.5;

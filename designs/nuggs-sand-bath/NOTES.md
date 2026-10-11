@@ -203,17 +203,20 @@ segments, not rectangles.
    the port, mismatched presets split the shell into ~20 bodies under Manifold
    (issue #99, PR #200). Do not "improve" them.
 9. **Fill-line witness groove** (Drik, first-customer review on PR #674;
-   resized Jane [saw-it] same PR): a **0.8 × 1.5 mm** interior nick on the
-   vertical trough walls, centred on the designed fill plane
-   `y_sand = y_floor_in + sand_depth` (measured −42.00 mm with the defaults:
-   18 mm above the floor / 15 mm below the low rim — not a new height). The
-   first ship was 0.4 × 0.8 mm and vanished under a 0.4 mm nozzle perimeter;
-   0.8 stays under `dish_wall/2` = 1.2. In the print pose Y is sideways, so
-   the nick is a vertical slot (nz = 0); it is kept off the beach, the staged
-   skirts, the floor fillets and the far ramp so it cannot add overhang or a
-   chewable ledge at sand-floor height. First fill is the groove, not eyeball
-   + measuring cup. `part = "sandbody"` is unchanged (the groove is in the
-   wall, not the fill solid), so the 245.5 mL mesh audit still holds.
+   resized Jane [saw-it] then bumped Jane [bench-sense] round 2): a
+   **1.2 × 1.5 mm** interior nick on **both long side walls**, centred on the
+   designed fill plane `y_sand = y_floor_in + sand_depth` (measured −42.00 mm
+   with the defaults: 18 mm above the floor / **15 mm below the low rim** —
+   not a new height). Ship history: 0.4 × 0.8 vanished under a 0.4 mm nozzle
+   perimeter; 0.8 × 1.5 sat on Jane's engraved-feature coin-flip (~2 line
+   widths); 1.2 is the asserted `dish_wall/2` ceiling ≈ 3 line widths. In the
+   print pose Y is sideways, so the nick is a vertical slot (nz = 0); it is
+   kept off the beach, the staged skirts, the floor fillets and the far ramp
+   so it cannot add overhang or a chewable ledge at sand-floor height. Page
+   fill story (Drik D10): rim-relative 15 mm below the low rim is primary;
+   the groove is tactile confirmation. `part = "sandbody"` is unchanged (the
+   groove is in the wall, not the fill solid), so the 245.5 mL mesh audit
+   still holds.
 
 ## Print settings
 
@@ -222,21 +225,27 @@ segments, not rectangles.
 - **Supports:** none — 0.0 mm² of >45° non-bridge overhang (census above).
   Leave slicer supports off.
 - **Brim:** yes — 527 mm² of bed contact on the sector tips is under 5% of the
-  footprint (printcheck's advisory; a 4–5 mm brim is enough). Trim brim flush
-  and deburr the sector tips before judging fit (Jane 3).
+  footprint (printcheck's advisory; ~8 mm brim, or 4–5 mm plus a skirt ring —
+  Jane + Drik co-sign on the inverted-pendulum tips). Trim brim flush and
+  deburr the sector tips **and the mouth rim** before judging fit (Jane 3 /
+  carried knife-edge note).
 - **Seam:** Back (or scarf) — Aligned stacks a 197 mm ridge (Jane 5).
-- **Material:** PLA or PETG. PETG if the bath will be washed often.
+- **Material:** PLA or PETG. PETG if the bath will be washed often. Print the
+  coupon in the same material as the bath (Drik D12 / Jane first-2 mm logic).
 - **Walls / layer:** 0.4 mm nozzle, ≥ 3 perimeters (`dish_wall = 2.4`), 0.2 mm
   layers.
-- **Test-slice reference (local, post fill-mark resize):** body 84/100 —
-  9 h 22 m / 129.1 g; coupon 92/100 — 4 h 36 m / 60.4 g (same caveats:
+- **Test-slice reference (local, post fill_mark_d 1.2):** body 84/100 —
+  9 h 44 m / 129.0 g; coupon 92/100 — 4 h 36 m / 60.4 g (same caveats:
   bed-contact brim advisory on the body; coupling zero-area facets).
 - **Expected slicer notices:** print-stability warning (the brim answers it);
   2 zero-area facets from the port tessellation — the pure-library coupon
   carries 4 of its own, i.e. they come from the coupling, not this junction.
 - **Fill with bathing *sand* (0.1–0.5 mm grain), never chinchilla dust** —
-  dust is a respiratory irritant for hamsters. Pour to the 0.8 × 1.5 mm
-  interior groove.
+  dust is a respiratory irritant for hamsters. Primary fill: **15 mm below
+  the low rim**; confirm with fingertip on the 1.2 × 1.5 mm groove along both
+  long side walls (Drik D10). Expect some sand out nightly at the port mouth
+  (`lip_h − sand_depth ≥ 2`); sift weekly, replace when it clumps or soils;
+  rock-check the mount after the first few weeks (re-seat = quarter-turn).
 - **Depth recipe:** 18 mm is the answer at the stock 200 mm ceiling; full 2 cm
   needs `-D floor_run=140 -D max_build_height=250` (≥250 mm) plus
   `-D sand_depth=20 -D lip_h=22` (Drik D9).
@@ -247,8 +256,10 @@ segments, not rectangles.
 ## Print this first
 
 `nuggs-sand-bath-coupon.scad` — two bore-clean `nuggs_neck()` port stubs
-(~60 g, 4.5 h). Two stubs are deliberate: tune the pair without touching the
-habitat (Drik D5); a single-stub override is backlog B5. The coupon's first
+(~60 g, 4.5 h). Print in the same material as the bath. Two stubs are
+deliberate: tune the pair without touching the habitat (Drik D5); B5 (promoted
+#2) will add a single-stub override **plus** a groove-witness patch so the
+coupon answers port fit and groove legibility together. The coupon's first
 2 mm is the body's first 2 mm — if elephant foot stiffens the stubs, use
 elephant-foot compensation rather than raising `port_tol` (Jane 4). Mate them,
 or mate one to any NUGGS module you already own, and tune `port_tol` in
@@ -259,5 +270,7 @@ mandatory before the full dish.
 ## Field test log
 
 *(No entries yet. First FIELD-TEST should capture: (1) groove legibility in
-plastic — empirical close-out of Jane 1's resize; (2) turn-around observation —
-does the animal reverse down the beach tail-first? Drik D4.)*
+plastic — empirical close-out of the 1.2 × 1.5 mm resize; (2) PETG-vs-groove —
+does PETG's rounder bead flatten the nick after wash cycles? Drik D12;
+(3) groove-as-gnaw-edge — any chew wear at the sand-line nick; (4) turn-around
+observation — does the animal reverse down the beach tail-first? Drik D4.)*

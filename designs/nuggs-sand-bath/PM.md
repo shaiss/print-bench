@@ -72,11 +72,12 @@ render and the stranger's decision.
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
 | B1 | Lid variant (hinged or lift-off) | nightly sand containment (~100:1 vs transport — Drik usage math on PR #674); chew-safety, ventilation and bore-entry compatibility are the lid brief's open questions | a second part + its own gates |
+| B5 | Single-stub coupon override + groove-witness patch | promoted #2 (PM triage 2026-10-11): `coupon_stubs=1` for keepers who already mate against a habitat port (~30 g / ~2¼ h) **and** a patch of fill-line groove so the coupon answers port fit + groove legibility in one print (Jane 1b + Drik D11); two-stub default stays deliberate until then | one `-D` path + coupon geometry |
 | B2 | Multi-port in-run variant | explicitly out of scope v1; changes the run-break story | its own brief |
-| B5 | Single-stub coupon override (`coupon_stubs=1`) | twice-proposed (Jane 6 + Drik D5): owners who already mate against a habitat port can halve the coupon (~30 g / ~2¼ h); two-stub default stays deliberate (README says so) | one `-D` path + coupon geometry |
 | B3 | `floor_run=140` + `max_build_height=250` for ≥250 mm printers | documented escape hatch in README; needs a real tall-printer field test | print time ~2× |
-| B4 | Harness follow-up: printcheck 256³ vs slicer 200 mm ceiling mismatch | platform, not this design — flag in PR, file on the harness | an issue |
-| B6 | Turntable reveal animation (`animations.conf`) | Jane bonus: chimney → dish by lying down — best story, cosmetic mid-review; last until the freeze window is over | one anim entry + GIF budget |
+| B4 | Harness follow-up: printcheck 256³ vs slicer 200 mm ceiling mismatch | platform, not this design — flag in PR, file on the harness (#673) | an issue |
+| B7 | `ci.cog` advisory for port dead-load moment | Drik: filled bath ~0.65–0.7 kg a hand-span out on one port; care line already rock-checks; advisory manifest is the cheap gate follow-up (low) | one `ci.cog` + densities |
+| B6 | Turntable reveal + `hero-wide` companion | Jane bonus: chimney → dish by lying down, plus a wider hero crop (frozen `hero` stays for cross-round comparison; listing lead is `product-hero`); post-freeze cosmetic tier | anim entry + new camera line + GIF/PNG budget |
 
 ## Open decisions
 
@@ -96,3 +97,7 @@ render and the stranger's decision.
 | 2026-10-04 | Interior fill-line witness at `y_sand` | Drik first-customer nit on PR #674: first fill was eyeball + cup; a groove on the vertical trough walls at the existing fill plane (not a new height). B1 lid stays backlog, unteased. |
 | 2026-10-11 | Fill-mark resized to 0.8 × 1.5 mm | Jane [saw-it] on PR #674: 0.4 × 0.8 mm printed as a ghost under the two-line floor; assert ceiling `dish_wall/2` = 1.2 still holds. New `fill-line` camera (freeze respected — `hero` untouched). |
 | 2026-10-11 | B1 *why* rewritten (nightly containment) | Drik [customer-sense]: transport is ~2–5/yr; dig-kick containment is nightly (~100:1). Lid brief must pre-scope chew-safety, ventilation, bore-entry. |
+| 2026-10-11 | Fill-mark depth 0.8 → 1.2 mm (`fill_mark_h` stays 1.5) | Jane [bench-sense] round 2 / Drik co-sign on PR #674: 0.8 sat on the engraved-feature coin-flip (~2 line widths); 1.2 is the asserted `dish_wall/2` ceiling ≈ 3 line widths. |
+| 2026-10-11 | `fill-line` camera reframed pre-freeze | Both reviewers authorized: ~half distance, wall edge-on so the nick throws a shadow, floor-to-wall junction in frame; `hero` untouched. |
+| 2026-10-11 | Fill emphasis flipped rim-relative-primary | Drik D10: mid-pour the groove is a fingertip feature; page now leads with "15 mm below the low rim" and the groove as tactile confirmation along both long side walls. |
+| 2026-10-11 | B5 promoted #2, re-scoped | Single-stub override + groove-witness patch (Jane 1b + Drik D11); B7 proposed (ci.cog advisory); B6 gains hero-wide companion. |
