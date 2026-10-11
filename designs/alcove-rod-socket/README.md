@@ -32,7 +32,8 @@ Printed **in pairs** (one holder per wall, one pair per rod):
   the push-in-deep / drop-in-shallow install). Gated and shipped in the
   Release; not on the plate (the plate is the default-depth holder pair).
 - `thread-coupon` / `bore-coupon` — the "print this first" fit checks (see
-  Print settings).
+  Print settings); Release files are `alcove-rod-socket-coupon.stl` and
+  `alcove-rod-socket-bore-coupon.stl`.
 
 **Deliverable — two objects, never one fused STL.** `boss` and `collar` print as
 **separate parts**, and the one rule is: keep them as two distinct objects in the
@@ -51,7 +52,9 @@ STL imports as one fused body and welds them together — v1's field-test failur
   install. There is **no** multi-object plate `.3mf` on that Release (only
   STLs / zip / manifest) — the plate stays a local build artifact (see the
   clone path below). That is a tracked follow-up: the platform release-bundle
-  does not upload the multi-object plate 3MF today.
+  does not upload the multi-object plate 3MF today. Release STLs are as of
+  the tag; if this README names a part or parameter the Release lacks, use
+  the clone path.
 - **Cloned the repo (advanced / local):** `./scripts/plate.sh alcove-rod-socket`
   bundles the two default-depth parts into one multi-object 3MF
   (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file.
@@ -166,10 +169,11 @@ proof: print them in your material first and trust them over this page.
    weight — heavier curtains than that want a stud or `screw_count=2`
    (derivation in NOTES).
 2. Slide the collars over the rod before hanging it — one at each end.
-3. Thread each collar onto its boss until the rim seats on the plate. For a
-   rigid rod between two fixed walls: use one default `collar` (deep) and one
-   `collar-shallow` — push into the deep side, drop the shallow end in,
-   tighten both collars. Measure **wall-to-wall**, then cut the rod ≈ **40 mm
+3. Lower the rod between the bosses, slide each collar out to its boss, and
+   thread it on until the rim seats on the plate. For a rigid rod between
+   two fixed walls: use one default `collar` (deep) and one `collar-shallow`
+   — the deep/shallow pairing is the retention margin on each end, not how
+   the rod goes in. Measure **wall-to-wall**, then cut the rod ≈ **40 mm
    shorter** (38–42 mm is the safe band): each end bottoms on its collar
    shoulder 19 mm from that wall, so the seated rod spans nearly
    wall-to-wall (mouth-to-mouth **plus** ~38 — both sockets sit recessed
