@@ -86,7 +86,7 @@ tip traps more humid air than the lattice.
 |---|---|---|
 | `aperture_max` | 6.0 mm | Largest passage through the lattice — the welfare number. The ¼″ hardware-cloth convention for a Syrian (**convention; confirm for your animal**); **dwarf keepers: 5.0**. An assert refuses anything over 6.0. |
 | `strand_w` | 1.2 mm | Lattice strand width — three perimeters at a 0.4 mm nozzle. Raise to 1.6 (with PETG) for chew durability, or if your printer under-extrudes thin strands. |
-| `dome_rise` | 28.0 mm | Dome height above the port zone. The length-vs-bridge trade: lower = shorter cap, bigger crown bridge. |
+| `dome_rise` | 28.0 mm | Dome height above the port zone. The length-vs-bridge trade: lower = shorter cap, bigger crown bridge. A droopy PETG crown means raise `dome_rise` 2–3 mm (taller cap, shorter crown bridges); lowering only buys ~1 mm before the assert fires (`dome_rise ≥ ri−13` = 27 at defaults). |
 | `port_tol` | 0.30 mm | The fit knob. **Unmeasured** — tune on the coupon in ±0.05 steps before printing the cap. |
 | `lattice` | true | false = the solid variant (`vent-cap-solid`): blocked, taller. |
 | `bore_d`, `wall`, … | 80 / 2.4 | The NUGGS standard, at `nuggs_cfg()` defaults. Changing these un-mates the cap from every module you already printed. |
@@ -114,7 +114,9 @@ grouped in Customizer sections; override on the command line with
   and a warped port is a narrowed bore).
 - **Chew / welfare:** the 6 mm aperture is a mesh convention, not a chew
   proof — inspect the widest (lowest) cells weekly and treat the lattice as
-  replaceable if the resident gnaws.
+  replaceable if the resident gnaws. A chewed-through cap is a reprint (about
+  2 h 47 m / about 28.5 g per episode), not a repair; there is no dome-only
+  spare.
 - **Airflow:** the lattice holds ≥ 30 % open area by construction. If a keeper
   reports stuffiness, the lever is `aperture_max` (within the welfare ceiling)
   — never thinner strands.

@@ -204,7 +204,10 @@ the stub and print only the cell: `part="coupon-cell"` (same production
    opening at the top face, not the base: first-layer squish narrows the
    opening at its base, and the dome's openings are printed well above the
    first layer, so a base reading can look small and hide a dome that's
-   over 6.0 mm.
+   over 6.0 mm. On the proving print, pass a 6 mm shank (or a 1/4″
+   hardware-cloth offcut) through the widest rim cells, measuring the long
+   way across (the diagonal) — fold that check into the weekly chew-inspect
+   the README already mandates.
 3. Only then print the cap. The dome's print behaviour itself is gated by
    printcheck and the test-slice; what only your printer can tell you is in
    the coupon.
@@ -213,6 +216,9 @@ The coupon **intentionally has no product-page photo** until a proving print
 exists (Drik, PR #636). Hero / contact-sheet / lattice-top / cutaway stay the
 showroom; do not "fix" the missing coupon face with a studio render of the
 plate. A real print photo is the artifact that belongs there.
+
+The `coupon-cell` skip path's slice cost is deliberately unmeasured until
+the proving print, which will measure it (same hold as the coupon photo).
 
 ## Decisions log
 
@@ -248,5 +254,11 @@ plate. A real print photo is the artifact that belongs there.
   care bedding pockets + weekly chew inspect; aperture marked convention;
   `cells.png` embedded; CAMERAS comment text 37→38 (cameras frozen). No
   geometry. Empty field-test log and proving print left alone.
+- 2026-10-11: Docs-only fold of PM triage act-now on `7d5ab66` (PR #636,
+  21:39Z): NOTES step 2 shank-check through widest rim cells (long way /
+  diagonal) into the weekly chew-inspect; `dome_rise` raise-on-droop
+  direction (2–3 mm; ~1 mm lower room before assert); Use & care reprint
+  cost (~2 h 47 m / ~28.5 g, no dome-only spare); `coupon-cell` cost hold
+  until proving print. No geometry.
 
 ## Field test log
