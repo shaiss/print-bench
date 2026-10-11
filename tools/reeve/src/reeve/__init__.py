@@ -41,7 +41,13 @@ PAT-backed ledger append, then the resolution reply. Never a posted
 `/decide` command: decide.yml anchors on a bare command and the comment
 tooling appends an attribution footer, so a bot-posted command is silently
 neutralized while the run reports success — observed live in stage 1, and
-the reason the push goes through the API. The loop's **learning half**
+the reason the push goes through the API. The poll also applies the owner's
+**standing approval modes** (issue #446, `approval.py` — pure): reviewed
+per-category rules in `.github/reeve.conf` under which a YES in an
+`approve_auto` category resolves with no reaction after a 👎 grace window and
+an `approve_deny` category is never drafted on or resolved; only a label a
+write-permission human applied can loosen, the issue's text only tightens.
+The loop's **learning half**
 (issue #445) keeps the deterministic line: the precedent log's pure core
 (`greenlights.py` — parse, derive, load) lives here, its two verbs (`cli.py
 greenlight-context` / `greenlight-append`) only read threads and write a

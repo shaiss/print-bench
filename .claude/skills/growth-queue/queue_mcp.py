@@ -31,6 +31,16 @@ into anything but filing a recognisable, un-approved queue item:
     nor write files, so it cannot reach or reset the count; at worst a
     hijacked run queues a bounded number of items, noise a human closes,
     never an escalation;
+  * a near-duplicate of anything the desk already holds is refused — the
+    title is compared (token Jaccard, `DUP_THRESHOLD`) against every item in
+    the dedup context the workflow assembles (`GROWTHQ_DEDUP_CONTEXT`, the
+    `dedup.json` that `python3 -m growth dedup-context` writes: the open
+    queue AND everything a human already declined, parked, culled or closed).
+    It fails closed — an unattended run with no context path, or (whenever
+    one is set) an unreadable file or a context marked incomplete, refuses
+    the filing — because a missing dedup list must never read as an empty
+    one. Attended with no path set, a human is the trust boundary (the cap's
+    rule);
   * the only GitHub call is `POST /issues` on the CURRENT repo — it never
     edits an existing issue, never posts to any channel, pushes no code.
 
@@ -50,6 +60,8 @@ only; logs go to stderr so stdout carries nothing but JSON-RPC.
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -143,6 +155,98 @@ def _cap_state_ensure_appendable(path):
         ) from e
 
 
+# --- The near-duplicate backstop (the dedup context) -------------------------
+#
+# A queuer that re-files what a human already declined is the failure this
+# guards (#597 → #754): the workflow assembles every open-or-recent channel
+# item into a JSON context (`python3 -m growth dedup-context`, the single
+# source of the rule below), names it via GROWTHQ_DEDUP_CONTEXT on every link
+# step, and this refuses a title too close to any of them. It only catches the
+# near-verbatim retitle; a re-angled story under a fresh title is the agent's
+# judgment, read from the same context's markdown twin.
+#
+# The tokeniser, stopwords and threshold are COPIES of growth.dedup's (this
+# server imports nothing from the tree, like growth_mcp.py's length rule), and
+# tools/growth/tests/test_queue_dedup_parity.py pins them — and the JSON shape
+# read here — to the package, so the renderer and this check cannot drift.
+DEDUP_ENV = "GROWTHQ_DEDUP_CONTEXT"
+DUP_THRESHOLD = 0.6
+_DEDUP_SECTIONS = ("queued", "covered")
+_STOPWORDS = frozenset(
+    "a an and are as at by for from in is it its of on or that the this to via with".split()
+)
+
+
+def _title_tokens(title):
+    """growth.dedup.title_tokens, verbatim: prefix dropped, lowercase,
+    alphanumeric runs, stopwords removed."""
+    text = title.strip()
+    if text.lower().startswith(TITLE_PREFIX.lower()):
+        text = text[len(TITLE_PREFIX):]
+    words = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
+    return frozenset(w for w in words if w not in _STOPWORDS)
+
+
+def _similarity(a, b):
+    """growth.dedup.similarity, verbatim: token-set Jaccard, 0.0 when either
+    title has no tokens."""
+    ta, tb = _title_tokens(a), _title_tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def _dedup_context_path():
+    """The dedup-context path, "" when an unattended run left it unwired, or
+    None attended without one (a human is the trust boundary there — the cap's
+    rule). Set explicitly, it applies attended too."""
+    path = os.environ.get(DEDUP_ENV, "").strip()
+    if path:
+        return path
+    if os.environ.get("GITHUB_RUN_ID", "").strip():
+        return ""
+    return None
+
+
+def _dedup_entries(path):
+    """``[(number, title, status)]`` from both sections of the context.
+
+    Raises RuntimeError on anything but a readable, well-formed, COMPLETE
+    context — an unavailable or half-read list must refuse, never pass."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            ctx = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise RuntimeError(f"cannot read {DEDUP_ENV} file {path}: {e}") from e
+    if not isinstance(ctx, dict) or ctx.get("complete") is not True:
+        why = ctx.get("error") if isinstance(ctx, dict) else None
+        raise RuntimeError(
+            f"the dedup context at {path} is marked unavailable"
+            + (f" ({why})" if why else "")
+            + " — refusing to file without it")
+    entries = []
+    for section in _DEDUP_SECTIONS:
+        items = ctx.get(section)
+        if not isinstance(items, list):
+            raise RuntimeError(f"the dedup context at {path} has no '{section}' list")
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get("title"), str):
+                raise RuntimeError(f"malformed '{section}' entry in {path}: {item!r:.120}")
+            entries.append((item.get("number"), item["title"], str(item.get("status", section))))
+    return entries
+
+
+def _near_duplicate(title, entries):
+    """The closest entry at or above DUP_THRESHOLD, as
+    ``(score, number, title, status)``, or None."""
+    best = None
+    for number, other, status in entries:
+        score = _similarity(title, other)
+        if score >= DUP_THRESHOLD and (best is None or score > best[0]):
+            best = (score, number, other, status)
+    return best
+
+
 def log(msg):
     """Diagnostics go to stderr — stdout is reserved for JSON-RPC frames."""
     print(f"queue_mcp: {msg}", file=sys.stderr, flush=True)
@@ -222,6 +326,32 @@ def _queue_growth_post(arguments):
             f"queue_growth_post: title must start with '{TITLE_PREFIX}' (got {title!r})"
         )
 
+    # Near-duplicate backstop — before the cap, so a refused duplicate never
+    # reads as "cap reached" and the agent knows to pick a different story.
+    dedup = _dedup_context_path()
+    if dedup is not None:
+        if not dedup:
+            return _tool_error(
+                f"queue_growth_post: {DEDUP_ENV} is not set but this is an "
+                "unattended run (GITHUB_RUN_ID is set) — the workflow must hand "
+                "every link step the dedup context `python3 -m growth "
+                "dedup-context` writes, or nothing stops a re-proposal of an "
+                "item a human already declined; refusing to file"
+            )
+        try:
+            entries = _dedup_entries(dedup)
+        except RuntimeError as e:
+            return _tool_error(f"queue_growth_post: {e}")
+        hit = _near_duplicate(title, entries)
+        if hit is not None:
+            score, number, other, status = hit
+            return _tool_error(
+                f"queue_growth_post: near-duplicate of #{number} ({status}): "
+                f"{' '.join(other.split())[:160]!r} — title similarity "
+                f"{score:.2f} >= {DUP_THRESHOLD}. The desk already holds this "
+                "story; propose a different one, not a retitle"
+            )
+
     # Per-run cap — enforced only inside an Actions run (the unattended case
     # the cap exists to bound); attended, a human is the trust boundary. The
     # count is read from the shared state file so it spans the whole chain
@@ -288,7 +418,9 @@ TOOLS = [
             "matching templates/growth-post.md. The 'growth-queue' and "
             "'channel:<name>' labels are applied automatically and are the only "
             "labels this tool can set — it can never approve, prioritize, or "
-            "route; the title must start with 'Growth post:'. Returns "
+            "route; the title must start with 'Growth post:'. A title that "
+            "near-duplicates an item in the desk's dedup context (queued, or "
+            "already covered or declined) is refused. Returns "
             "'QUEUED #<n> for <channel> <url>'. One call queues one item, up to "
             "the per-run cap."
         ),
@@ -397,6 +529,30 @@ def selftest():
     # not leak into the attended cases.
     os.environ.pop("GITHUB_RUN_ID", None)
     os.environ.pop(CAP_STATE_ENV, None)
+    os.environ.pop(DEDUP_ENV, None)
+
+    # Dedup-context fixtures (the shape `growth dedup-context` writes; the
+    # parity test in tools/growth pins it). Live titles from the desk: #671 is
+    # a real retitle source (#735 re-proposed it at similarity 0.73).
+    dedup_dir = tempfile.mkdtemp(prefix="queue-mcp-selftest-")
+
+    def _ctx_file(name, ctx):
+        path = os.path.join(dedup_dir, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(ctx, fh)
+        return path
+
+    dedup_ok = _ctx_file("dedup.json", {
+        "version": 1, "complete": True, "window_days": 120,
+        "queued": [{"number": 753, "status": "queued",
+                    "title": "Growth post: copyleft stays in the design layer "
+                             "— the one-rule license boundary"}],
+        "covered": [{"number": 671, "status": "disposition: declined (open)",
+                     "title": "Growth post: the andon cord — one variable that "
+                              "greys out every AI agent"}],
+    })
+    dedup_empty = _ctx_file("empty.json", {"version": 1, "complete": True,
+                                           "queued": [], "covered": []})
 
     # Input guards reject and file nothing.
     check("missing channel is rejected",
@@ -432,9 +588,60 @@ def selftest():
           ok2.get("isError") is False
           and _last_payload["labels"] == [QUEUE_LABEL, "channel:youtube"])
 
+    # The near-duplicate backstop. Set explicitly, it applies attended too.
+    os.environ[DEDUP_ENV] = dedup_ok
+    r = _queue_growth_post({"channel": "twitter", "body": "b",
+                            "title": "Growth post: the andon cord — one repo "
+                                     "variable that greys out every AI agent"})
+    check("a retitle of a DECLINED item is refused, naming it",
+          r.get("isError") is True and "#671" in r["content"][0]["text"])
+    r = _queue_growth_post({"channel": "twitter", "body": "b",
+                            "title": "Growth post: copyleft stays in the design "
+                                     "layer — one license boundary rule"})
+    check("a retitle of a QUEUED item is refused, naming it",
+          r.get("isError") is True and "#753" in r["content"][0]["text"])
+    r = _queue_growth_post({"channel": "twitter", "body": "b",
+                            "title": "Growth post: a gear pair swept through "
+                                     "every phase of its mesh"})
+    check("a novel title files against the same context (negative control)",
+          r.get("isError") is False)
+
+    # Fail closed: a context that is unavailable, missing or malformed refuses.
+    os.environ[DEDUP_ENV] = _ctx_file("down.json", {
+        "version": 1, "complete": False, "error": "HTTPError: 502"})
+    r = _queue_growth_post({"channel": "twitter", "title": "Growth post: novel",
+                            "body": "b"})
+    check("a context marked unavailable refuses every filing",
+          r.get("isError") is True and "unavailable" in r["content"][0]["text"])
+    os.environ[DEDUP_ENV] = os.path.join(dedup_dir, "never-written.json")
+    r = _queue_growth_post({"channel": "twitter", "title": "Growth post: novel",
+                            "body": "b"})
+    check("a missing context file refuses (never reads as an empty list)",
+          r.get("isError") is True and "cannot read" in r["content"][0]["text"])
+    os.environ[DEDUP_ENV] = _ctx_file("broken.json", {"version": 1, "complete": True,
+                                                      "queued": "oops"})
+    r = _queue_growth_post({"channel": "twitter", "title": "Growth post: novel",
+                            "body": "b"})
+    check("a malformed context refuses",
+          r.get("isError") is True and "queued" in r["content"][0]["text"])
+    os.environ.pop(DEDUP_ENV, None)
+
     # The walk-spanning cap (issue #567), inside an Actions run.
     os.environ["GITHUB_RUN_ID"] = "selftest-run"
     os.environ["GROWTHQ_MAX_POSTS"] = "2"
+
+    # Unwired dedup: run id set, a valid cap state, but no context path. Fail
+    # closed — an unattended queuer with no dedup list re-files declined posts.
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ[CAP_STATE_ENV] = os.path.join(tmp, "growthq-posts")
+        r = _queue_growth_post({"channel": "twitter", "title": "Growth post: unwired",
+                                "body": "b"})
+        check("an unattended run without GROWTHQ_DEDUP_CONTEXT refuses (fail closed)",
+              r.get("isError") is True and DEDUP_ENV in r["content"][0]["text"])
+    os.environ.pop(CAP_STATE_ENV, None)
+    # Every unattended case below is about the cap: hand it a valid, empty
+    # dedup context (the subprocess probes inherit it through the env).
+    os.environ[DEDUP_ENV] = dedup_empty
 
     # Unwired: run id set but no state path. Fail closed — per-process
     # counting is exactly the per-link reset the state file replaces.
@@ -490,18 +697,21 @@ def selftest():
     check("an unreadable state file refuses (never counts as zero)",
           r.get("isError") is True and "cannot read" in r["content"][0]["text"])
 
-    # Attended behavior is unchanged: no GITHUB_RUN_ID means the cap is
-    # skipped — no state file needed, filing not bounded by GROWTHQ_MAX_POSTS.
+    # Attended behavior is unchanged: no GITHUB_RUN_ID means the cap and the
+    # dedup requirement are skipped — no state file or context needed, filing
+    # not bounded by GROWTHQ_MAX_POSTS.
     os.environ.pop(CAP_STATE_ENV, None)
+    os.environ.pop(DEDUP_ENV, None)
     os.environ.pop("GITHUB_RUN_ID", None)
     os.environ["GROWTHQ_MAX_POSTS"] = "1"
     a1 = _queue_growth_post({"channel": "twitter", "title": "Growth post: attended one",
                              "body": "b"})
     a2 = _queue_growth_post({"channel": "twitter", "title": "Growth post: attended two",
                              "body": "b"})
-    check("attended (no GITHUB_RUN_ID) skips the cap — no state file required",
+    check("attended (no GITHUB_RUN_ID) skips the cap and the dedup requirement",
           a1.get("isError") is False and a2.get("isError") is False)
     os.environ.pop("GROWTHQ_MAX_POSTS", None)
+    shutil.rmtree(dedup_dir, ignore_errors=True)
 
     # The JSON-RPC surface only exposes the one tool.
     check("tools/list exposes exactly queue_growth_post",
