@@ -14,8 +14,8 @@ new region gets a new `cameras.conf` line, never a moved camera.
 
 - **contact-sheet.png** — 4-view overview of the deliverable `ladder` part
   (iso / top / front / bottom-iso). The bottom-iso quadrant is the
-  overhang/bed-contact view: the springs print axis-vertical like a screw
-  thread (lead ≈ 5–10°), so every wrap deposits on the one below.
+  overhang/bed-contact *geometry* view (lead ≈ 5–10°); it does not prove
+  support-free print behaviour — that waits on FIELD-TEST B1.
 - **ladder-iso.png** — the whole ladder, 3/4 view: three stations on the one
   baseplate, embossed predictions facing the camera.
 - **layout-top.png** — orthographic top: the embossed table reads as a

@@ -143,10 +143,10 @@ function spring_z(u, e, n, p, pe) =
 // the helix. A circular section is invariant to frame twist, so the
 // radial/tangential frame below needs no parallel transport — any orthonormal
 // frame perpendicular to the tangent sweeps the same surface. The wire prints
-// axis-vertical like a screw thread: the helix climbs at the lead angle
-// atan(p / π·D) ≈ 10° at the defaults, so every wrap deposits on the wrap
-// below it (the lib/threads-fdm.scad support-free argument, one tenth of the
-// budget).
+// axis-vertical: the helix climbs at lead angle atan(p/π·D) ≈ 5–10° at the
+// defaults (lib/threads-fdm.scad's ≤ 45° support-free budget). Free coils are
+// not a thread flank on a solid core — expect a slightly flattened underside;
+// FIELD-TEST B1 is the real print proof.
 // ---------------------------------------------------------------------------
 module helix_spring(d_wire, d_mean, n_active, l_free, end_coils = 1,
                     end_gap = 0.2, steps_per_turn = 48, wire_sides = 20) {
@@ -371,15 +371,7 @@ module fitcheck(delta) {
 // Dispatch
 // ---------------------------------------------------------------------------
 module main() {
-    if (part == "coupon")
-        coupon_rig();
-    else if (part == "cap")
-        cap_print();
-    else if (part == "fitcheck")
-        fitcheck(0);
-    else if (part == "fitcheck_neg")
-        fitcheck(fit_neg_delta);
-    else {
+    if (part == "ladder") {
         ladder_plate();
         // The prediction the embossing states, echoed for the gate log —
         // the coupon's job is to measure where reality disagrees
@@ -388,7 +380,17 @@ module main() {
                      " k_petg=", fmt2(k_pred(G_petg, n)), " N/mm",
                      "  F_solid=", fmt2(f_solid(G_pla, n)), "/", fmt2(f_solid(G_petg, n)), " N",
                      "  tau_solid=", fmt2(tau_solid(G_pla, n)), "/", fmt2(tau_solid(G_petg, n)), " MPa"));
-    }
+    } else if (part == "coupon")
+        coupon_rig();
+    else if (part == "cap")
+        cap_print();
+    else if (part == "fitcheck")
+        fitcheck(0);
+    else if (part == "fitcheck_neg")
+        fitcheck(fit_neg_delta);
+    else
+        assert(false, str("unknown part: ", part,
+            " (expected ladder, coupon, cap, fitcheck, fitcheck_neg)"));
 }
 
 main();

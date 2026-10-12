@@ -102,10 +102,12 @@ Customizer sections; override on the command line with
    `printer.conf` write-back of G is planned (B3) — the profile has no G
    field yet.
 
-**Care.** Stop pressing the coupon around 25–30 mm — full solid on the N=6
-coupon sits at the bottom edge of the PLA shear-yield band and a taken-set
-spring silently biases every later G. Store the cap **off** the spring
-between sessions (a seated cap is a creep fixture).
+**Care.** Stop routine presses at the **20 mm** reading. Full solid on the
+N=6 coupon is ~27 mm of travel and sits at the bottom edge of the PLA
+shear-yield band — a taken-set spring silently biases every later G. Treat
+any solid-height check as a separate controlled test, not the measurement
+series. Store the cap **off** the spring between sessions (a seated cap is
+a creep fixture).
 
 Honesty note, because the plate's own footer says *predicted*: fully
 compressed to solid, the Wahl-corrected torsional stress is ≈ 61 / 36 / 24 MPa

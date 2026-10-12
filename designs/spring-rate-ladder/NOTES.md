@@ -16,8 +16,9 @@ pop-fidget-card 2026-08-22 print found PLA flexures printing stiffer than
 modeled (snap beam thinned 1.5 → 1.3 mm), and pip-ratchet deferred a whole
 PLA pawl variant (#675). A printed spring whose rate is *derived from first
 principles and then measured* turns that surprise into a number: measure k
-on the coupon, back out effective G for the filament, feed it to
-`printer.conf` (#101, `docs/print-feedback.md`).
+on the coupon, back out effective G for the filament, and log it as a
+FIELD-TEST entry (`templates/FIELD-TEST.md`). `printer.conf` write-back of
+G is planned (PM backlog B3) — the profile has no G field yet.
 
 ## Given / assumed measurements (from the brief)
 
@@ -29,7 +30,7 @@ on the coupon, back out effective G for the filament, feed it to
 | Free length | ~40 mm | assumed |
 | Active coils N | 4 / 6 / 8 (k ∝ 1/N) | assumed |
 | Spring rate | k = G·d⁴/(8·N·D³); G ≈ 3.5 GPa PLA, 1.9–2 GPa PETG | assumed, literature — the coupon measures real G |
-| Compress to solid | no yield / permanent set | **given** — the acceptance the FIELD TEST verifies |
+| Compress to solid | no yield / permanent set on the *coupon measurement range* (≤ 20 mm) | **scoped** — full-solid on N=4 PLA sits past shear yield (~61 MPa) and will likely take set; README discloses that. FIELD-TEST B1 verifies the measurement range, not N=4 pressed flat. |
 
 All are parametric in `spring-rate-ladder.scad`.
 
@@ -69,10 +70,10 @@ All are parametric in `spring-rate-ladder.scad`.
   is a cup — bearing face a first-layer surface, skirt walls vertical, post
   hole through the floor. Nothing bridges. Ladder and coupon print
   plate/pad-down as modelled.
-- **No `ci.plate`**: every deliverable STL is a single object (ladder;
-  coupon rig; cap). The plate convention guards a fused multi-part
-  deliverable, which cannot arise here — the rig's two parts never render
-  into one file.
+- **`ci.plate` for coupon + cap**: the measurement instrument's two
+  separately-printed parts ship as `build/spring-rate-ladder-plate.3mf`
+  (N distinct objects). The ladder is a standalone single-object deliverable
+  and stays off the plate.
 - **Stress honesty (predictions, echoed by the render)**: at full solid the
   Wahl-corrected torsional stress is ≈ 61 / 36 / 24 MPa (PLA) and ≈ 34 / 20 /
   13 MPa (PETG) for N = 4/6/8. PLA's shear yield is ~35–45 MPa literature —
@@ -117,8 +118,11 @@ All are parametric in `spring-rate-ladder.scad`.
    the cap; convert **F [N] = g × 0.00981**. Read deflection as
    **post-tip-above-disc-top**: at rest the tip sits ~2 mm below the disc
    face; x = (tip-above-disc pressed) − (tip-above-disc at rest). Points at
-   5/10/15/20 mm; stop around 25–30 mm (N=6 solid is the floor of the PLA
-   yield band). k = slope of F(x); N = 6 defaults.
+   5/10/15/20 mm; stop at the 20 mm reading for routine G measurement.
+   Pressing toward solid (~27 mm travel on N=6) risks permanent set and
+   biases later readings — treat a solid-height check as a separate
+   controlled test, not the measurement series. k = slope of F(x); N = 6
+   defaults.
    Worked example: 122 g at 10 mm → F ≈ 1.20 N → k ≈ 0.12 N/mm →
    G ≈ 3600 MPa.
 4. Back out effective G = 8·N·D³·k/d⁴ and log it as a FIELD-TEST entry

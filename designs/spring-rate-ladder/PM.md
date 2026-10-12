@@ -42,10 +42,20 @@ the reviewer.
 
 - [x] Three stations N = 4/6/8 on one plate, predictions embossed (computed
       in-render, echoed by the gate log)
-- [x] Coupon + guided cap measure k and back out G (procedure in README)
+- [x] Coupon + guided cap measure k and back out G (procedure in README;
+      routine stops at 20 mm — not full solid)
 - [x] `gate.sh --slice` green for ladder / coupon / cap, both fitcheck verbs
+- [x] Coupon + cap `ci.plate` multi-object 3MF (instrument pair deliverable)
 - [ ] A field test validating predicted vs measured k on a real printer
       (owner's print; the FIELD-TEST convention records it)
+
+**Scope note on "compress to solid, no permanent set" (brief / issue #734).**
+v1 does **not** claim the N=4 PLA station survives press-to-solid without
+set: Wahl-corrected τ at solid is ≈ 61 MPa vs PLA shear yield ~35–45 MPa
+(disclosed in README / NOTES). The acceptance that remains is (1) the
+coupon measurement range ≤ 20 mm stays elastic enough to yield a usable G,
+and (2) FIELD-TEST B1 confirms that on a real print. Full-solid survival
+on N=4 PLA is out of v1 scope, not deferred as proven.
 
 ## Product page & shots (art direction)
 
@@ -85,7 +95,7 @@ the field test's job, not an AI clip).
 | B2 | `d_wire = 2.0` variant if faceting / sag shifts k | conditional on B1 observing the failure | re-render, re-emboss is automatic |
 | B4 | Fourth station varying D (k ∝ 1/D³) | second-order once N-comparison exists | plate grows ~36 mm |
 | B5 | Graduated guide post (mm marks) | zero-caliper one-hand deflection read | geometry + gate cycle |
-| B6 | Coupon + cap `ci.plate` multi-object 3MF | one slicer import for the instrument pair | opt-in plate manifest |
+| B6 | ~~Coupon + cap `ci.plate` multi-object 3MF~~ | **done** — `ci.plate` ships coupon + cap | — |
 | B7 | AMS colour-swap tip at the wire/plate transition | untested cosmetic; rates in contrast colour | README tip only |
 
 ## Open decisions
@@ -102,3 +112,4 @@ the field test's job, not an AI clip).
 | 2026-09-29 | Cap seats on the wire's top *surface* + 0.2 mm gap, not the centerline | iter-1 fitcheck FAIL: centerline seating put the disc 0.8 mm inside the wire |
 | 2026-09-29 | `end_gap = 0.2` between closed end coils | a self-tangent polyhedron is non-manifold; 0.2 mm is under one extrusion width so the dead coils weld in print, as a real closed end behaves |
 | 2026-10-11 | Measurement recipe states F in N with g→N (`F[N] = g × 0.00981`) and reads deflection at the post tip (post-tip-above-disc-top); support-free wording made approximate pending B1; `ring()` tangent z-term corrected to `slope/(2π)`; backlog re-ranked B1 → B3 → B2 → B4, adding B5–B7 | PM triage of Drik/Jane act-now round on head `81e715b` — the recipe is the product's front door; B3 compounds, B2 is contingent on B1 |
+| 2026-10-12 | Scope "compress to solid / no set" to coupon ≤ 20 mm; N=4 PLA full-solid set risk stays disclosed not gated; ship coupon+cap `ci.plate`; fail-closed unknown `part`; stop Care note at 20 mm | Bot-review thread sweep on PR #739 — keep brief geometry, close honesty gaps |
