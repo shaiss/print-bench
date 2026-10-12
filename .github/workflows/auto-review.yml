@@ -2110,6 +2110,8 @@ jobs:
           # COACH-LOCK left by an earlier coach run (reopened /
           # ready_for_review / denial-only turn — issue #806).
           echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          # Seed the trusted head pin for coach posts (advanced on push).
+          printf '%s\n' "${{ github.event.pull_request.head.sha }}" > "${RUNNER_TEMP}/reviewer-head-sha"
           if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
             echo "::add-mask::${FETCH_AUTH}"
@@ -2131,6 +2133,9 @@ jobs:
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2179,6 +2184,21 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Z.AI GLM (chain link 1)
         id: p1
@@ -2193,6 +2213,7 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2224,7 +2245,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 1 (did the coach's completion marker land?)
         id: v1
@@ -2266,6 +2287,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2300,6 +2336,9 @@ jobs:
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2348,6 +2387,21 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Z.AI GLM (chain link 2)
         id: p2
@@ -2362,6 +2416,7 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2393,7 +2448,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 2 (did the coach's completion marker land?)
         id: v2
@@ -2435,6 +2490,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2469,6 +2539,9 @@ jobs:
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2517,6 +2590,21 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Z.AI GLM (chain link 3)
         id: p3
@@ -2531,6 +2619,7 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2562,7 +2651,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 3 (did the coach's completion marker land?)
         id: v3
@@ -2604,6 +2693,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2643,6 +2747,9 @@ jobs:
           && steps.v3.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2691,6 +2798,21 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Anthropic (chain link 4)
         id: p4
@@ -2707,6 +2829,7 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2738,7 +2861,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 4 (did the coach's completion marker land?)
         id: v4
@@ -2780,6 +2903,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2820,6 +2958,9 @@ jobs:
           && steps.v4.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2868,6 +3009,21 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Anthropic (chain link 5)
         id: p5
@@ -2885,6 +3041,7 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2916,7 +3073,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 5 (did the coach's completion marker land?)
         id: v5
@@ -2958,6 +3115,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2999,6 +3171,9 @@ jobs:
           && steps.v5.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -3047,6 +3222,21 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Anthropic (chain link 6)
         id: p6
@@ -3065,6 +3255,7 @@ jobs:
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
           REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -3096,7 +3287,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
 
       - name: Artifact check after link 6 (did the coach's completion marker land?)
@@ -3139,6 +3330,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
