@@ -272,5 +272,23 @@ mandatory before the full dish.
 *(No entries yet. First FIELD-TEST should capture: (1) groove legibility in
 plastic — empirical close-out of the 1.2 × 1.5 mm resize; (2) PETG-vs-groove —
 does PETG's rounder bead flatten the nick after wash cycles? Drik D12;
-(3) groove-as-gnaw-edge — any chew wear at the sand-line nick; (4) turn-around
-observation — does the animal reverse down the beach tail-first? Drik D4.)*
+(3) groove-as-gnaw-edge **and rim-watch** — any chew wear at the sand-line nick,
+and whether the knife-edge raked rim needs a geometry land after real wear
+(Jane r3/r4: deburr instruction stands until field says otherwise);
+(4) turn-around observation — does the animal reverse down the beach
+tail-first? Drik D4; (5) lug-grit after N weeks — does kicked sand bed into the
+bayonet lug faces and make the quarter-turn feel gritty? Drik 00:36 hunch.)*
+
+## Fill-line preview — one-nudge then concede
+
+PM triage 2026-10-12 (head `c081b578`): Jane r4's read of `fill-line.png`
+governs (committed PNG corroborates — the nick does not read as a fill line).
+Last pre-freeze camera nudge landed in `cameras.conf` (~25–30° off wall
+normal; `hero` frozen untouched). Local verification: OpenSCAD preview still
+does not resolve the 1.2 mm recess as a stranger-readable line under that
+framing (face-on views show no pixel delta for the groove; edge-on only the
+stippled edge patch Jane declined). **Next step if CI regen agrees: concede
+to honest caption** — do not iterate cameras again; rim-relative 15 mm below
+the low rim stays the primary fill instruction; B5's groove-witness coupon
+patch is the plastic proof. Do not embed `fill-line.png` until a regenerated
+shot verifiably shows the nick.

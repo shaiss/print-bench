@@ -16,7 +16,7 @@ run. One printed part, no supports, no hardware.
   inside width, ~245 mL of bathing sand, 18 mm deep)
 - `coupon` — two port stubs to tune the coupling fit *before* the long print
 
-![Use pose — mouth up, port horizontal (preview coloring only — one material)](previews/hero.png)
+![Use pose — mouth up, port horizontal; the rim rakes from the port crown down to a low lip (the vault over the entry), not a warped print (preview coloring only — one material)](previews/hero.png)
 
 ## Print settings
 
@@ -46,8 +46,8 @@ run. One printed part, no supports, no hardware.
 
 `nuggs-sand-bath-coupon.scad` — two bore-clean port stubs (~4.5 h / 60 g; same
 brim as the body). **Print the coupon in the same material you will print the
-bath in** — what the coupon's first 2 mm says about elephant foot (and groove
-legibility) is what the body will do. The two stubs are deliberate: mate them
+bath in** — what the coupon's first 2 mm says about elephant foot is what the
+body will do. The two stubs are deliberate: mate them
 to each other so you can tune the pair without touching the habitat. (If you
 already own a NUGGS module, mating one stub to that works too.) If the stubs'
 first layers mate stiff, dress the tips or enable elephant-foot compensation
@@ -84,7 +84,7 @@ sand sits **15 mm below the low rim** (18 mm above the floor) — that rim-relat
 line is the designed fill; eyeball it from any angle. Confirm with a fingertip
 along either long side wall: a shallow groove (1.2 × 1.5 mm) runs the length of
 both long side walls at that sand line. About 245 mL reaches it. Expect some
-sand out nightly and sweep the port mouth occasionally — that is the hamster
+sand out nightly and sweep the port mouth every few days — that is the hamster
 doing it right, not the design failing (the lip sits only 2 mm above the sand
 line at the port, by the design's own `lip_h − sand_depth ≥ 2` assert); the
 15 mm freeboard catches dig-kick on the trough. **Sift weekly; replace when the
