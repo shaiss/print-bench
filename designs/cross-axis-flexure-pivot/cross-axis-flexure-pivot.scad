@@ -7,15 +7,17 @@
 // panel and the bistable arch, but not the cross-axis row — "good in
 // tension, WEAK IN COMPRESSION, near-fixed virtual center".
 //
-// Dimensioned from the doc's relations instead of guessed:
+// Dimensioned from the WELDED geometry, not the unwelded leaf ideal:
 //
 //   I = w*t^3 / 12              second moment of area (mm^4)
-//   K = 2*E*I / L               pivot stiffness (N*mm/rad): each strip is two
-//                               half-beams in series through the welded
-//                               crossing (EI/L per strip, the doc's pure-
-//                               moment leaf value), two strips in parallel
-//   sigma ~= E*t*theta / (2L)   root stress, pure-moment ideal; the x2 bound
-//                               brackets what a real S-bend sees
+//   K = 8*E*I / L               pivot stiffness (N*mm/rad): the weld pins the
+//                               crossing (no lateral drift), so each strip is
+//                               two half-beams of length L/2 in an S-bend,
+//                               four half-beams in parallel → 8·EI/L
+//   sigma_weld = 2*E*t*θ/L      peak bending stress at the weld under that
+//                               pinned S-bend (M_weld = 4·EI·θ/L); the pure-
+//                               moment leaf σ = E·t·θ/(2L) is ~4× lower and
+//                               describes beams that cross WITHOUT touching
 //
 // and CC1 (orientation), the reason this prints flat: the whole silhouette
 // lives in the XY (bed) plane and is extruded up in Z to `w`, so every beam
@@ -43,8 +45,8 @@ L = 28;
 // Beam width = part height (mm). Multi-perimeter so one bad road does not
 // kill the beam; root stress does not depend on it.
 w = 8;
-// Root fillet (mm) — doc fatigue rule r >= 0.5*t. The four beam roots are
-// the fatigue-critical corners.
+// Root fillet (mm) — doc fatigue rule r >= 0.5*t. Applied at the eight ring
+// roots AND the four re-entrant weld corners (the highest-moment real estate).
 root_fillet = 0.6;
 // Crossing half-angle (deg) — each strip is inclined ±alpha to the frame↔
 // stage axis and the two weld where they cross. 45 is the classic symmetric
@@ -73,8 +75,8 @@ tab_r = 4;
 h_pad = 4;
 
 /* [Quality] */
-// Iterating: 64. Production: 96 for the final STL (the arcs and the root
-// fillets are the visible curves).
+// Production tessellation for the arcs and fillet arcs. Previews and the
+// gated STL both use this value (no per-export override).
 $fn = 64;
 
 // ---- derived -----------------------------------------------------------
@@ -86,10 +88,12 @@ land     = arc_wall - 0.5;           // beam root buried inside the ring band
 tab_cx   = r_out + tab_len / 2;      // finger-tab center radius (25.5 stock)
 theta    = stop_angle * PI / 180;    // ROM in rad
 I        = w * t * t * t / 12;       // second moment of area (mm^4)
-K        = 2 * E * I / L;            // pivot stiffness (N*mm/rad)
-sigma_doc = E * t * theta / (2 * L); // root stress, pure-moment ideal
-sigma_pk  = 2 * sigma_doc;           // x2 bound (real S-bend brackets these)
-F_handle  = K * theta / tab_cx;      // fingertip force at the tab (N)
+// Welded (pinned-crossing) model — see header. The leaf formulas below are
+// kept as the unwelded reference so a reader can see the ~4× gap.
+K          = 8 * E * I / L;            // pivot stiffness (N*mm/rad)
+sigma_weld = 2 * E * t * theta / L;    // peak at weld, pinned S-bend
+sigma_leaf = E * t * theta / (2 * L);  // pure-moment leaf (unwelded ideal)
+F_handle   = K * theta / tab_cx;       // fingertip force at the tab (N)
 
 // fitcheck pocket probes: the four open pockets flanking the crossing, on
 // the ±x/±y bisectors. A probe is valid while it stays clear of both beams.
@@ -98,13 +102,13 @@ probe_r  = 1.5;
 probe_pts = [[probe_d, 0], [0, probe_d], [-probe_d, 0], [0, -probe_d]];
 
 echo(str("cross-pivot: K ~= ", K, " N*mm/rad at +/-", stop_angle,
-         " deg  (2 strips x EI/L, I = ", I, " mm^4, E = ", E,
-         " MPa assumed)"));
-echo(str("root stress at +/-", stop_angle, " deg: ", sigma_doc,
-         " MPa pure-moment ideal .. ", sigma_pk,
-         " MPa bound — the coupon is the truth, not this echo"));
+         " deg  (welded / pinned-crossing: 8*E*I/L, I = ", I, " mm^4, E = ",
+         E, " MPa assumed)"));
+echo(str("weld stress at +/-", stop_angle, " deg: ", sigma_weld,
+         " MPa (pinned S-bend) — leaf ideal would be ", sigma_leaf,
+         " MPa; cycle the pivot itself for the weld, not only the coupon"));
 echo(str("fingertip force at r = ", tab_cx, " mm: ", F_handle,
-         " N — should feel firm but comfortable"));
+         " N — firm at desk scale under the welded model"));
 if (t < 0.8)
     echo(str("WARNING: t = ", t, " is under the 0.8 mm production floor ",
              "(2 extrusion widths) — fine for a deliberate coupon row, ",
@@ -113,7 +117,7 @@ if (t < 0.8)
 module checks() {
     assert(t >= 0.5, "t under 0.5 mm will not extrude at all");
     assert(root_fillet >= 0.5 * t,
-           "root fillet below 0.5*t — the flexure root is a crack starter");
+           "root fillet below 0.5*t — ring roots and weld corners are crack starters");
     assert(w >= 2.4, "beam width under 3 perimeters (2.4 mm) — one bad road kills the beam");
     assert(alpha > 10 && alpha < 80, "crossing half-angle outside 10-80 deg");
     assert(stop_angle > 5 && stop_angle < 80, "hard-stop angle outside 5-80 deg");
@@ -124,9 +128,12 @@ module checks() {
     // the buried beam end must stay inside the ring's outer face
     assert(pow(r_in + land, 2) + pow(t / 2, 2) < pow(r_out - 0.2, 2),
            "beam end pokes through the ring's outer face");
-    // fitcheck probes must sit in open pocket, clear of both beams
+    // fitcheck probes must sit in open pocket, clear of both beams AND of
+    // the weld-corner fillets that grow outward along the same bisectors
     assert(probe_d * sin(alpha) - t / 2 >= probe_r + 0.5,
            "pocket probes no longer clear the beams — move them or shrink probe_r");
+    assert(probe_d - (t / 2) / sin(alpha) - max(root_fillet, 0.5 * t) >= probe_r + 0.5,
+           "pocket probes collide with weld fillets — move them or shrink fillet/probe");
     // coupon guards
     assert(min(coupon_ts) >= 0.5, "coupon rows under 0.5 mm will not extrude");
     assert(max(coupon_ts) <= 1.6, "coupon rows over 1.6 mm stop being a flexure ladder");
@@ -184,6 +191,41 @@ module root_fillets_at_2d(span, tt, a)
 module root_fillets_2d(span, tt)
     for (a = [alpha, -alpha]) root_fillets_at_2d(span, tt, a);
 
+// One fillet filling a concave notch of air-angle `psi` (deg). Local frame:
+// corner at the origin, notch bisector along +x, walls at ±psi/2 from +x.
+// Same square-minus-disc discipline as root_fillet_2d (shares a full edge
+// with each wall) — generalized past the 90° case so the acute and obtuse
+// weld notches (psi = 2*alpha and 180-2*alpha) both get r ≥ 0.5·t.
+module notch_fillet_2d(f, psi) {
+    hw = psi / 2;
+    d  = f / sin(hw);       // corner → arc center along the bisector
+    tl = f / tan(hw);       // corner → tangent point along each wall
+    // CCW winding (OpenSCAD drops a clockwise polygon as empty area).
+    difference() {
+        polygon([[0, 0],
+                 [tl * cos(hw), -tl * sin(hw)],
+                 [tl * cos(hw),  tl * sin(hw)]]);
+        translate([d, 0]) circle(f);
+    }
+}
+
+// Four re-entrant corners of the welded X. Corners sit on the angle
+// bisectors (the ±x / ±y axes) at distance (t/2)/sin(alpha) from the
+// origin; x-bisector notches have air angle 2*alpha, y-bisector notches
+// have 180-2*alpha. Same fatigue rule as the ring roots.
+module weld_fillets_2d() {
+    f = max(root_fillet, 0.5 * t);
+    r_c = (t / 2) / sin(alpha);
+    for (a = [0, 180])
+        rotate([0, 0, a])
+            translate([r_c, 0])
+                notch_fillet_2d(f, 2 * alpha);
+    for (a = [90, 270])
+        rotate([0, 0, a])
+            translate([r_c, 0])
+                notch_fillet_2d(f, 180 - 2 * alpha);
+}
+
 // spine/arm: a capsule from inside the ring band out under the tab. Both
 // circles stay inside the band radially (no lobe past the ring's outer
 // face) and the far end stays inside the tab (no nub past its edge).
@@ -215,6 +257,7 @@ module pivot_2d()
         frame_2d();
         beams_2d();
         root_fillets_2d(r_in, t);
+        weld_fillets_2d();
         stage_2d();
     }
 
@@ -222,9 +265,11 @@ module pivot_2d()
 // Print this first (NOTES.md has the protocol): a strip of single-beam
 // specimens straight from the production dimensions — the t ladder
 // (coupon_ts) plus two IDENTICAL production-t twins, one to print in PETG
-// and one in PLA, so the material ranking is measured, not assumed. Each
-// specimen loads its beam the way the pivot does: hold one grip, twist the
-// other in the layer plane, count cycles to whitening / crack.
+// and one in PLA, so the material ranking is measured, not assumed.
+// SCOPE: the coupon qualifies a STRAIGHT beam (t ladder + material twin).
+// It has no crossing and no weld — the pivot's highest-stress junction is
+// absent. Cycle the production pivot itself for the welded X; use the
+// coupon to pick t and filament before that print.
 coupon_ts = [0.6, 0.8, 1.0];
 // pitch >= specimen length (L + 2*tab_len) + clearance, or adjacent grips
 // fuse and the ladder prints as one untestable lump
@@ -312,10 +357,11 @@ module main() {
         // so the export's ROM is stop_angle +/- 0.5 deg, not "about 40"
         linear_extrude(w)
             intersection() { frame_2d(); rotate([0, 0, stop_angle + 0.5]) stage_2d(); }
-    else {
+    else if (part == "") {
         linear_extrude(w) pivot_2d();
         if (h_pad > 0) translate([0, 0, w]) linear_extrude(h_pad) stage_tab_2d();
-    }
+    } else
+        assert(false, str("unknown part: ", part));
 }
 
 main();

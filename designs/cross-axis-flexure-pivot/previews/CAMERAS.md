@@ -13,8 +13,8 @@ fixed once reviewed; a new region gets a new line).
   grip tabs point +x (stage, with the raised finger pad) and −x (frame); the
   four pockets flanking the crossing stay open.
 - **crossing** — close plan view of the weld: both beams fused at the origin,
-  the root fillets where each beam meets its arc, and the open center the
-  arcs deliberately leave clear.
+  the four weld-corner fillets on the X, the root fillets where each beam
+  meets its arc, and the open center the arcs deliberately leave clear.
 - **coupon** — the print-this-first strip (`cross-axis-flexure-pivot-coupon.scad`),
   two rows of single-beam specimens: row 0 is the t ladder **0.6 / 0.8 / 1.0**
   (0.8 = the production beam), row 1 two identical production-t twins labelled

@@ -27,7 +27,7 @@ compression weakness as a deliberate, invited demo — not a surprise failure.
 | Beam thickness `t` | 0.8 mm | assumed (≥ 2× 0.4 nozzle) | `t`, echo warns below the 0.8 floor |
 | Beam free span `L` | 28 mm | assumed (derived from θ, σ ≈ E·t·θ/2L) | `L` = distance between the arcs' inner faces |
 | Beam width `w` | 8.0 mm | assumed (multi-perimeter) | `w` = part height |
-| Root fillet `r` | ≥ 0.5·t | **given** (doc fatigue rule) | `root_fillet`, asserted ≥ 0.5·t; measured 8/8 corners at r = 0.6 |
+| Root fillet `r` | ≥ 0.5·t | **given** (doc fatigue rule) | `root_fillet`, asserted ≥ 0.5·t at the 8 ring roots **and** the 4 weld corners |
 | Overall footprint | ≈ 60 × 40 × 12 | assumed | measured off the export: 61.0 × 38.5 × 12.0 |
 | Hard-stop angle | ±40° vs rigid pads | assumed | arc end faces meet face-to-face at ±40° both sides |
 | Coupon cycle target | ≥ 200 cycles @ ±40° | assumed | the coupon protocol (below); cycles-to-whitening is the record |
@@ -46,29 +46,37 @@ run, recorded here):
 - **Compression-demo lever:** hand overload only — the README invites the
   axial push; no extra labelled pad parameter. `h_pad` stays the finger pad.
 
-## Derivation — the doc's relations, not guesses
+## Derivation — welded (pinned-crossing) model
 
-Evaluated at render time (echoed; values at the shipped defaults):
+The beams **weld** at the origin. That pin forbids the lateral drift a
+pure-moment leaf assumes, so each strip is two half-beams of length `L/2`
+clamped at both ends and forced into an S. Evaluated at render time (echoed;
+values at the shipped defaults, E = 2000 MPa assumed):
 
 ```
-I  = w·t³/12            = 8·0.8³/12      = 0.341333 mm⁴
-K  = 2·E·I/L            = 2·2000·0.341333/28 = 48.7619 N·mm/rad
-θ  = 40°                                 = 0.698132 rad
-σ_doc = E·t·θ/(2L)      = 2000·0.8·0.698132/56 = 19.9466 MPa  (pure-moment ideal)
-σ_pk  = 2·σ_doc                          = 39.8932 MPa  (×2 bound: a real S-bend
-                                                          brackets these)
-F_handle = K·θ/tab_cx    = 48.7619·0.698132/25.5 = 1.33499 N at r = 25.5 mm
+I  = w·t³/12              = 8·0.8³/12           = 0.341333 mm⁴
+θ  = 40°                                        = 0.698132 rad
+K  = 8·E·I/L              = 8·2000·0.341333/28  = 195.047 N·mm/rad
+σ_weld = 2·E·t·θ/L        = 2·2000·0.8·0.698132/28 = 79.786 MPa
+σ_leaf = E·t·θ/(2L)       = 2000·0.8·0.698132/56   = 19.947 MPa  (unwelded reference)
+F_handle = K·θ/tab_cx     = 195.047·0.698132/25.5  = 5.340 N
 ```
 
-- **K = 2·E·I/L**, not E·I/L: each strip is two half-beams in series through
-  the welded crossing (EI/L per strip, the doc's pure-moment leaf value), and
-  the two strips act in parallel.
-- The **×2 stress bound** brackets the real deflected shape: the pure-moment
-  ideal is the floor, a tip-loaded S-bend the ceiling. At the bound the root
-  sits at ~0.8 × PETG's ≈50 MPa yield at full travel — static-safe, cyclic
-  marginal, which is exactly what the coupon ladder is for.
-- **Fingertip force 1.33 N** at the 25.5 mm handle radius: firm but
-  comfortable at desk-demo scale — the brief's "feel a pinless hinge" target.
+- **Why 8·EI/L, not 2·EI/L.** Beam-element stiffness with δ = 0 at the
+  crossing: a half-beam of length ℓ = L/2 with end rotations 0 and θ/2
+  carries M_weld = (4·EI/ℓ)·(θ/2) = 4·EI·θ/L. Four half-beams
+  (2 strips × 2) store U = 4 · (EI θ² / L); (1/2) K θ² = U ⇒ K = 8·EI/L.
+  The earlier K = 2·EI/L was the *series* leaf model (crossing free to
+  drift) — the geometry the weld exists to forbid.
+- **σ_weld ≈ 80 MPa** at ±40° is past PETG's ~50 MPa yield. That is an
+  honest echo, not a pass/fail: full-travel cycling will whiten at the X;
+  the beams are wear items and the hard stops keep a stranger from going
+  further. Lower `stop_angle` or `t` if you want the nominal stress inside
+  the band.
+- **σ_leaf ≈ 20 MPa** is kept in the echo as the unwelded reference so the
+  ~4× gap stays visible — it is *not* a property of this part.
+- **Fingertip force ≈ 5.3 N** at the 25.5 mm handle: still finger-friendly
+  at desk-demo scale, about 4× the leaf-model 1.3 N the page used to quote.
 
 ## Key decisions
 
@@ -93,6 +101,11 @@ F_handle = K·θ/tab_cx    = 48.7619·0.698132/25.5 = 1.33499 N at r = 25.5 mm
   is the only material at the crossing.
 - **Root fillets by nested single-axis mirrors** — see the bug entry below;
   composed wrongly, two of eight roots silently had no fillet.
+- **Weld-corner fillets (r ≥ 0.5·t)** — the four re-entrant corners of the X
+  carry the same fatigue rule as the ring roots. `weld_fillets_2d()` places a
+  `notch_fillet_2d` on each bisector (air angle 2·α on ±x, 180−2·α on ±y).
+  Review blocker on PR #644: the page quoted leaf K/σ while the sharp weld
+  was the highest-moment real estate and the coupon never saw it.
 
 ### The mirror([1,1]) fillet bug (issue #37's lesson, again)
 
@@ -165,7 +178,8 @@ parameters — re-derived for the §6 audit:
   corridor-filtered to the beam): **t = 0.800 mm, w = 8.000 mm**.
 - **Arc radii** (vertex radius peaks): r_in 13.98–14.00 mm ⇒ **L = 2·r_in =
   28.0 mm**; r_out 20.48–20.50 ⇒ arc_wall = 6.5 mm.
-- **Root fillets:** 8/8 corners carrying the r = 0.6 arc (see the bug entry).
+- **Root fillets:** 8/8 ring corners carrying the r = 0.6 arc (see the bug
+  entry); 4/4 weld corners carry the same r via `weld_fillets_2d()`.
 - **ROM measured bound** (`ci.fitchecks`, boolean emptiness off the export):
   stage at −39.5° **empty** (clear of the frame), at +40.5° **interferes** —
   the ROM is 40° ± 0.5°, measured, not asserted. At rest the rigid bodies'
@@ -206,12 +220,12 @@ regen output of adding a design (CI's regen commits the same). Nothing else.
 | Beam t 0.8 | `t` | plane slice through a beam: **t = 0.800** |
 | Beam L 28 | `L` | arc inner-face radius peaks 13.98–14.0 ⇒ **L = 2·r_in = 28.0** |
 | Beam w 8.0 | `w` | same slice: **w = 8.000** |
-| Root fillet ≥ 0.5·t | `root_fillet` + assert | **8/8 corners carry the r = 0.6 arc** |
+| Root fillet ≥ 0.5·t | `root_fillet` + assert | **8/8 ring + 4/4 weld corners carry r = 0.6** |
 | Footprint ≈ 60 × 40 × 12 | derived from `r_in`,`arc_wall`,`tab_*` | **61.0 × 38.5 × 12.0** (assumed row; X +1.7 %, Y −3.8 %, Z exact) |
 | Hard stops ±40° vs rigid pads | arc end faces | the same ±0.5° fitcheck bound; faces meet face-to-face |
 | Coupon ≥ 200 cycles, PETG/PLA | coupon strip + protocol | 5 independent components (gaps 4.0/4.0/4.0 mm), twins labelled PETG/PLA; the 200-cycle bar is a physical criterion the "Print this first" method records |
 | No supports / flat / monolithic | CC1 silhouette | bodies: 1, watertight, printcheck "orientation as good as any"; bottom-iso inspected (G1) |
-| K/σ echo + not-fused check | echoes + `ci.fitchecks` | echoes at render; fitcheck empty at rest, interferes 5° past |
+| K/σ echo + not-fused check | echoes + `ci.fitchecks` | welded-model echoes at render (K ≈ 195, σ_weld ≈ 80); fitcheck empty at rest, interferes 5° past |
 
 ## Print settings
 
@@ -221,29 +235,36 @@ regen output of adding a design (CI's regen commits the same). Nothing else.
 
 ## Print this first
 
-`cross-axis-flexure-pivot-coupon.scad` — five single-beam specimens on one
-strip, straight from the production modules (include-and-override wrapper,
-≤10 lines, no copied geometry): row 0 is the `t` ladder **0.6 / 0.8 / 1.0**,
-row 1 two identical production-t twins labelled **PETG** and **PLA**. ~1 h,
-≈ 13 g.
+`cross-axis-flexure-pivot-coupon.scad` — five **straight** single-beam
+specimens on one strip, straight from the production modules
+(include-and-override wrapper, ≤10 lines, no copied geometry): row 0 is the
+`t` ladder **0.6 / 0.8 / 1.0**, row 1 two identical production-t twins
+labelled **PETG** and **PLA**. ~1 h, ≈ 13 g.
 
-**Method (cycles-to-whitening, per specimen):** hold one grip flat on the
-desk, twist the other grip in the **layer plane** to ≈ ±40° (match the
-pivot's stop), return, repeat. Whitening at a root is the warning; a crack
-is the verdict. Record the cycle count next to the label. The brief's bar is
-≥ 200 cycles at ±40°; the production row (0.8 PETG) is the one that must
-clear it.
+**Scope (honest):** the coupon has no crossing and no weld. It qualifies the
+straight-beam `t` ladder and the material twin. The pivot's highest-stress
+junction is the welded X — cycle the **production pivot** for that (hard
+stops + true load path). A welded-X coupon specimen is backlog (B1), not
+shipped in this round.
+
+**Method (cycles-to-whitening, per coupon specimen):** hold one grip flat on
+the desk, swing the other grip in the **layer plane** to ≈ ±40°, return,
+repeat. Whitening at a root is the warning; a crack is the verdict. Record
+the cycle count next to the label. ≥ 200 cycles at ±40° on the **pivot** is
+the not-broken-out-of-the-gate bar, not a lifetime number.
 
 **Tune order:**
-1. **Read the ladder.** 0.6 is under the 0.8 floor on purpose — expect it to
-   feel best and die first. 1.0 is the durability ceiling at this L (and the
-   stress ceiling per degree).
-2. **Rank PETG vs PLA** on the twins — the material answer is measured, not
+1. **Read the ladder.** Thicker is stiffer and more stressed per degree
+   (σ ∝ t at fixed angle). 0.6 is the print-quality floor demo (under two
+   extrusion widths); judge production between 0.8 and 1.0.
+2. **Rank PETG vs PLA** — print the strip once per material and read the
+   twin named for what is loaded. The material answer is measured, not
    assumed (Domain 1: PETG ≫ PLA in cyclic flex; verify on your printer).
 3. Retune the pivot: **`t`** first (K ∝ t³, σ ∝ t), **`L`** second (σ ∝ 1/L,
-   free until the footprint grows), **`root_fillet`** last (keep ≥ 0.5·t,
-   asserted). Raising `stop_angle` raises root stress linearly — climb
-   toward 60° only if a coupon row survived.
+   free until the footprint grows), **`root_fillet`** last (keep ≥ 0.5·t at
+   ring roots and weld corners, asserted). Raising `stop_angle` raises weld
+   stress linearly — climb toward 60° only if the production pivot survived
+   full-travel cycling.
    Sweep: `./scripts/render.sh cross-axis-flexure-pivot --sweep t=0.6:1.2:0.2`
 
 ## Deferred / out of scope
@@ -256,7 +277,11 @@ clear it.
   or a coupon calibration; until then every quoted force/stress carries
   "assumed".
 - **A labelled compression-demo pad** (brief open question 3) — declined for
-  v1; hand overload is the demo (README "Use").
+  v1; hand overload is the demo (README "Use"), bounded in wording to a
+  millimetre or two.
+- **Welded-X coupon specimen (B1)** — the straight-beam strip stays; a
+  crossing specimen that tests the weld is the coupon-scope follow-up once
+  field evidence says the page's honesty isn't enough.
 
 ## Field test log
 
