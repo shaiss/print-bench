@@ -372,7 +372,7 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
-19. **B11 — co-planar fan grille (2026-10-04).** Replaced the through-bored
+27. **B11 — co-planar fan grille (2026-10-04).** Replaced the through-bored
     Ø37 lid cut with `fan_grille_cut2d()` — Ø5 holes, 7 mm pitch, 2 mm webs,
     clipped to `fan_bore(fan_type)`. Trade: ~40 % of the unobstructed bore's
     free area retained (Monte Carlo on the parametric grid); case ceiling closed
@@ -381,7 +381,7 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     larger objects only — not screw or wire sealing at Ø5.
     Boss pitch and M3 fan screws unchanged; grille stays inside the bore circle,
     clear of the corner bosses at 16 mm pitch.
-20. **B12 — grille tune coupon (2026-10-04).** The fit coupon's −X,+Y lid crop
+28. **B12 — grille tune coupon (2026-10-04).** The fit coupon's −X,+Y lid crop
     cannot include the fan at (−10, 0) without breaking the corner-nest register
     test (decision 8), so grille tuning gets its own wrapper
     (`sbc-case-grille-coupon.scad` → `part="grille-coupon"`): `lid()` at print
@@ -435,7 +435,7 @@ structure proof:
 `sbc-case-grille-coupon.scad` after the fit coupon. It is the production lid
 plate cropped over the vitamin bore at the same outer-face-down pose as `lid`
 — same `fan_grille_cut2d()` cut, no register lip or corner nest; the four fan
-screw holes are in the crop but not the inner insert bosses (see decision 20).
+screw holes are in the crop but not the inner insert bosses (see decision 28).
 Tune the two grille parameters in **`sbc-case.scad`** with **`part =
 grille-coupon`** — the Customizer on the wrapper file does not show them. Compare
 hole size and web feel on the bench; you can also hold a 40 mm fan on the coupon
