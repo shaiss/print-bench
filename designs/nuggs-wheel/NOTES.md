@@ -77,6 +77,20 @@ two coupons).
 - **Layer height:** 0.2 mm. **Infill:** 15–20 % for stand/hub; 20 %+ for rim.
 - **Seam:** Away from the running surface and the port ring.
 
+## Gate measurements (G4 — measured on export, not the typed parameter)
+
+| Brief row | Parameter | Measured |
+|---|---|---|
+| bore 80 / port_tol 0.30 / port_proj 10 / n_lug 3 | `nuggs_cfg()` defaults | `mates` fitcheck empty (0 facets); `mates-ctrl` 1060 facets |
+| Wheel Ø 280, width 90 | `wheel_d` / `wheel_w` | Rim segment AABB height (tread) **92.40 mm** = 90 + back_t; 8× segments close the circle by construction (`n_seg`/`seg_ang`) |
+| Max part bound ≤ 180 | — | rim-segment max **128.9**; hub **48**; stand **178.0**; axle **126**; coupon **149** — all ≤ 180 |
+| Joint step ≤ 0.25 | `joint_step=0.20` | `joint-fit` empty (mated shingle); `joint-fit-ctrl` interferes |
+| Axle Ø 8 + clearance | `axle_d=8`, `axle_clear=0.35` → bore 8.70 | `axle-fit` empty; `axle-fit-ctrl` interferes; axle AABB Ø **8.00** |
+| Stand footprint ≥ 0.6×Ø | `stand_depth_mult=0.60` → 168 | Foot depth in use frame 168; `ci.cog` STABLE, margin **26.39 mm** (> 2.0) |
+| Back closed | segment pies | Assembled preview: no path through the back disc |
+
+Gate scores (local `gate.sh --slice`): rim-segment **84**/100, hub **100**, stand **76**, axle **100**, coupon **76**. Plate 4 objects. All fitchecks ok.
+
 ## Field test log
 
 _(none yet)_
