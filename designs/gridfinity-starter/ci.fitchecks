@@ -1,0 +1,13 @@
+# Diagnostic boolean checks — never printed or sliced, rendered by gate.sh.
+# tray-void:        recess probe ∩ tray — empty iff the recess is actually cut
+#                   (a solid-capped tray survived every printability gate; NOTES
+#                   iteration 5). The control uses the same probe on a tray with
+#                   no cavity difference — must interfere, or the empty check
+#                   is unfalsifiable.
+# div-cover:        thin slab on the 2×1 cell boundary ∩ bin-2x1-div — must
+#                   interfere (divider present and covering the span). The
+#                   control runs the same slab on an open bin — must be empty.
+tray-void        empty
+tray-void-ctrl   interferes
+div-cover        interferes
+div-cover-ctrl   empty
