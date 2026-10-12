@@ -90,7 +90,7 @@ two coupons).
 | Stand footprint ≥ 0.6×Ø | `stand_depth_mult=0.60` → 168 | Foot depth in use frame 168; `ci.cog` STABLE, margin **26.39 mm** (> 2.0) |
 | Back closed | segment pies | Assembled preview: no path through the back disc |
 
-Gate scores (local `gate.sh --slice`): rim-segment **84**/100, hub **100**, stand **76**, axle **100**, coupon **76**. Plate 4 objects. All fitchecks ok.
+Gate scores (local `gate.sh --slice`): rim-segment **84**/100 (1 body, watertight; thin-wall WARN at the 0.20 mm joint step), hub **100**, stand **76**, axle **100**, coupon **76**. Plate 4 objects. All fitchecks ok (including `joint-fit` empty both ways).
 
 ## Field test log
 
