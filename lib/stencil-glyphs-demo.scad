@@ -70,7 +70,7 @@ module cut_plate_2d() {
 }
 
 // The raised zone: a strip of the same plate carrying positive glyphs.
-strip_w = 74; strip_h = 2 * row_p + 6;
+strip_w = 74; strip_h = 3 * row_p + 6;
 strip_x = plate_x0 + plate_w + 8;
 
 module raised_zone() {
@@ -84,6 +84,14 @@ module raised_zone() {
         translate([-8,  -row_p / 2]) stencil_digit(6, gh, bridged = false);
         translate([ 8,  -row_p / 2]) stencil_digit(4, gh, bridge = 1.4, bridge_min = 1.2);
         translate([24,  -row_p / 2]) stencil_digit(9, gh, stroke = 2.4, bridge = br);
+        // Floor-stroke diagonals (#769): stroke = 0.8 stays legal (the input
+        // guard is not raised) and the 1/2/7 flags and the 4's lighter
+        // diagonal clamp to 0.8 mm instead of printing at 0.72 / 0.68.
+        // bridged = false so a 1.2 mm bar cannot swallow the thin stroke.
+        translate([-24, -row_p - 2]) stencil_digit(1, gh, stroke = 0.8, bridged = false);
+        translate([-8,  -row_p - 2]) stencil_digit(2, gh, stroke = 0.8, bridged = false);
+        translate([ 8,  -row_p - 2]) stencil_digit(4, gh, stroke = 0.8, bridged = false);
+        translate([24,  -row_p - 2]) stencil_digit(7, gh, stroke = 0.8, bridged = false);
     }
 }
 
