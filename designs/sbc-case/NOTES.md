@@ -65,10 +65,11 @@ NopSCADlib vitamins (the brief's named source), read at build time:
    bottom half for stiffness.
 5. **Fan bolts flush to the lid's outer face; the insert bosses are on the
    inner face.** Intake is a **co-planar grille** in the lid plate (B11): Ø5
-   holes on a 7 mm pitch (2 mm webs), clipped to the vitamin's Ø37 bore
-   (`fan_bore(fan_type)`). Plate material bounds every opening — no bar across
-   the bore span (N4 / outer-face-down print). Measured open area inside the
-   bore: **~40 %** of an unobstructed Ø37 disc (~426 mm² vs 1075 mm²); ~60 %
+   holes on a 7 mm pitch (2 mm webs), fully inside the vitamin's Ø37 bore
+   (`fan_bore(fan_type)` — centres within `r − grille_hole_d/2`, no rim
+   crescents). Plate material bounds every opening — no bar across the bore span
+   (N4 / outer-face-down print). Measured open area inside the bore: **~38 %**
+   of an unobstructed Ø37 disc (~412 mm² vs 1075 mm²); ~62 %
    of the former free hole is now solid web closing the case ceiling over the
    fan bore (the fan sits on the outer face; the grille is not a blade guard
    from outside). Honesty scale: stops fingers and larger dropped objects on the
@@ -374,13 +375,18 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
 27. **B11 — co-planar fan grille (2026-10-04).** Replaced the through-bored
     Ø37 lid cut with `fan_grille_cut2d()` — Ø5 holes, 7 mm pitch, 2 mm webs,
-    clipped to `fan_bore(fan_type)`. Trade: ~40 % of the unobstructed bore's
-    free area retained (Monte Carlo on the parametric grid); case ceiling closed
-    over the fan bore (not a blade guard from outside); dust still enters through
-    the holes (page updated). Page honesty (Drik round 2 on #810): fingers and
+    inside `fan_bore(fan_type)`. Trade: ~38 % of the unobstructed bore's free
+    area retained (21 full holes, ~412 / 1075 mm²); case ceiling closed over the
+    fan bore (not a blade guard from outside); dust still enters through the
+    holes (page updated). Page honesty (Drik round 2 on #810): fingers and
     larger objects only — not screw or wire sealing at Ø5.
     Boss pitch and M3 fan screws unchanged; grille stays inside the bore circle,
-    clear of the corner bosses at 16 mm pitch.
+    clear of the corner bosses at 16 mm pitch. **Jane rim-crescent fix
+    (2026-10-12, PR #815):** keep only holes whose centres satisfy
+    `norm(offset) ≤ r − grille_hole_d/2` (was `≤ r + d/2` plus bore clip, which
+    left partial holes at the rim). Hole count 29 → 21; open area ~426 mm²
+    (~40 %) → ~412 mm² (~38 %) — slightly less open area, cleaner FDM webs at
+    the bore edge.
 28. **B12 — grille tune coupon (2026-10-04).** The fit coupon's −X,+Y lid crop
     cannot include the fan at (−10, 0) without breaking the corner-nest register
     test (decision 8), so grille tuning gets its own wrapper

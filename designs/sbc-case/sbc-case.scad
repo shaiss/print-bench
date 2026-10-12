@@ -234,16 +234,13 @@ module lid() { //! printed lid: plate, register lip (notched around the posts), 
     }
 }
 
-module fan_grille_cut2d() { //! hole pattern clipped to fan_bore_d; used by lid()
+module fan_grille_cut2d() { //! hole pattern inside fan_bore_d; used by lid()
     r = fan_bore_d / 2;
     n = ceil(r / grille_pitch) + 1;
-    intersection() {
-        translate(fan_center) circle(d = fan_bore_d);
-        for (ix = [-n:n], iy = [-n:n])
-            if (norm([ix * grille_pitch, iy * grille_pitch]) <= r + grille_hole_d / 2)
-                translate([fan_center[0] + ix * grille_pitch, fan_center[1] + iy * grille_pitch])
-                    circle(d = grille_hole_d);
-    }
+    for (ix = [-n:n], iy = [-n:n])
+        if (norm([ix * grille_pitch, iy * grille_pitch]) <= r - grille_hole_d / 2)
+            translate([fan_center[0] + ix * grille_pitch, fan_center[1] + iy * grille_pitch])
+                circle(d = grille_hole_d);
 }
 
 // ── Shared sub-modules (coupon and fitchecks reuse these, never copies) ────
