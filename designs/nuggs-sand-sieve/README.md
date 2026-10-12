@@ -2,9 +2,11 @@
 
 A bathing-sand **sieve end-cap** for the 80 mm-bore N.U.G.G.S. system: a
 shallow open basket with a printed grid floor and one standard quarter-turn
-port on the underside. Dock it on the sand bath (or hold it over a bin), pour
-used sand in the top, shake gently — clean grains fall back through the grid
-and the bore; debris stays in the basket to tip out. The maintenance half of
+port on the underside. Pull the bath off the run and stand it port-up (sieve
+mouth up on top), or hold the sieve over a bin — then pour used sand in the
+top and shake gently. Clean grains fall back through the grid and the bore;
+debris stays in the basket to tip out. Docking sideways while the bath is
+still in the run wall dumps the pour on the floor. The maintenance half of
 the sand-bath kit.
 
 ![Product shot](previews/product-hero.png)
@@ -31,7 +33,8 @@ with the sand bath, the straight, the elbow — any module on the standard.
 - **Supports:** **none** — flare ≤45°, walls vertical, pour lip 45°
 - **Orientation:** as modelled — port axis vertical, standing on the coupling's
   sector tips, mouth up
-- **Brim:** none; the sector tips are the family's standard bed contact
+- **Brim:** **recommended for the full basket** (sector-tip pose, small bed
+  contact — printcheck warns under 5% footprint); optional for the coupon
 - **Seam:** Back (or scarf) — stock Aligned can ridge the coupling ring and
   eat into `port_tol`
 
@@ -58,11 +61,18 @@ grouped in Customizer sections; override on the command line with
 - **Fit:** push onto any NUGGS port face and twist a quarter turn. Tune
   `port_tol` on the coupon first if it rocks or binds (0.30 is the standard's
   default and has never been measured on a printer).
-- **Sift:** dock on the sand bath's mouth (or hold over a bin), pour used
-  sand in, shake gently, tip debris out. Re-seat the bath when done.
+- **Sift:** pull the sand bath off the run and stand it **port-up** (mouth
+  facing up), then quarter-turn the sieve on top — or hold the sieve over a
+  bin. Pour used sand in, shake gently with **two hands when full** (smooth
+  Ø115 exterior is intentional — no grip ribs), tip debris out. Re-seat the
+  bath when done. Do **not** dock sideways while the bath is still in the run
+  wall: that dumps sand on the floor.
 - **Sand, not chinchilla dust:** fill and sift **bathing sand (0.1–0.5 mm
   grain) only — never chinchilla dust**, which is a respiratory irritant for
   hamsters. Same welfare line the sand bath carries.
+- **Clear the lattice:** before washing, dislodge grains from the 1.0 mm cells
+  with a soft brush from below or a reverse rinse — **no picks** (a pick can
+  nick a 1.2 mm web).
 - **Wash / heat:** hand-wash ≤ 50 °C, mild unscented dish soap, rinse and dry
   fully — **never a dishwasher** (the heated dry cycle exceeds even PETG, and
   a warped port is a narrowed bore). PLA/PETG at a room-temperature rinse is

@@ -54,11 +54,14 @@ below 1.2. v1 ships at **1.0 / 1.2**. Gate observation recorded below under
 ### Docking pose / run-length (brief open question)
 
 **Maintenance kit, not corridor.** Precedence: the sand bath's own ruling
-(PR #674 NOTES — destination / open module). This sieve docks onto a bath
-mouth for a sift, or is hand-held over a bin; it is not left in a run as
-passage. Geometry does not prefer either pose. **No run-length implication** —
-it does not sit mid-run, so it neither breaks nor extends an enclosed length.
-Recorded here per the brief; owner confirmation welcome at the PR.
+(PR #674 NOTES — destination / open module). The bath lives port-horizontal
+in the run wall; pouring into the bath only works if the bath is **pulled
+off the run and stood port-up** (sieve mouth up on top), or the sieve is
+held over a bin. Sideways dock while the bath is still in-wall dumps sand
+on the floor — called out on the README Use line (Drik R1). Geometry does
+not prefer either pose. **No run-length implication** — it does not sit
+mid-run, so it neither breaks nor extends an enclosed length. Recorded here
+per the brief; owner confirmation welcome at the PR.
 
 ### Capacity claim vs cylinder math
 
@@ -92,20 +95,61 @@ at production `hole_d` / `web_w` / `floor_t`.
 - **Orientation:** as modelled — port axis vertical, sector tips on the bed,
   mouth up.
 - **Supports:** none.
+- **Brim:** recommended for the full basket (sector-tip pose); optional for
+  the coupon.
 - **Material:** PLA or PETG.
 - **Layer height:** 0.2 mm.
 - **Infill:** 15 % in the flare/wall; the grid is solid bars.
 
 ## Gate results
 
-Local `./scripts/gate.sh --slice nuggs-sand-sieve` (2026-10-12):
+**CI sticky** (tip `2a7abd9` / design-stable `3a6cbe0`, Manifold nightly
+render — the numbers that gate the PR):
 
 | Part | printcheck | slice | notes |
 |---|---|---|---|
-| `sieve` | **84/100** | ok (~12 h 47 m / 92 g) | WARN: 2 degenerate faces; small bed-contact patch (sector tips — family pose). Webs at 1.0/1.2 **not** flagged — hole_d stays 1.0. |
-| `coupon` | **92/100** | ok (~2 h 18 m / 30 g) | 2 bodies intentional (stub + tile). |
+| `sieve` | **92/100** | ok (~12 h 50 m / 92 g) | WARN: small bed-contact 528 mm² (sector tips — brim recommended). INFO: 10 disconnected shells — see **Shell count** below (harmless). Webs at 1.0/1.2 **not** flagged — `hole_d` stays 1.0. |
+| `coupon` | **100/100** | ok (~2 h 18 m / 30 g) | 2 bodies intentional (stub + tile). |
+
+**Local** `./scripts/gate.sh --slice` (OpenSCAD 2021.01 CGAL — scores differ
+from CI because the mesh tessellation differs; same geometry source):
+
+| Part | printcheck | notes |
+|---|---|---|
+| `sieve` | **84/100** | WARN: 2 degenerate faces + small bed-contact (same pose). **1** body in the exported STL. |
+| `coupon` | **92/100** | 2 bodies intentional. |
 
 Fitchecks: `mates` empty; `mates-ctrl` interferes (1060 facets).
+
+### Shell count (CI INFO: 10 disconnected shells)
+
+Investigated on the CI `stls` artifact (`nuggs-sand-sieve-sieve.stl` from
+the Manifold render gate):
+
+| | Count | What |
+|---|---|---|
+| **Before / as-shipped CI mesh** | **10** shells | 1 main body + 9 tiny needles |
+| **After (no geometry change)** | **10** | unchanged — documented, not real free pieces |
+| Local 2021.01 CGAL STL | **1** shell | same `.scad`; Manifold-only artifact |
+
+The nine extras are **not** lattice bars or free webs:
+
+- They sit in the **port / coupling ring** at r ≈ 45.25 mm (between tube OD
+  42.4 and lug OD 48.4), z = −10 … 7.3 — the `nuggs_neck` sector band, **not**
+  the grid floor (z = 28 … 30.4).
+- Angular positions cluster at ~68° / ~188° / ~308° — the three lug sectors
+  (120° spacing).
+- Each is an 8-face needle: XY extent 0.006–0.1 mm, cross-section
+  ~0.3–5 µm², volume ~0.0002–0.001 mm³. All nine together ≈ **0.005 mm³**.
+- A 0.4 mm nozzle cannot extrude them; a slicer drops them. They cannot fall
+  into the sand bath as loose plastic.
+
+Cause: Manifold tessellation slivers at the library sector/rib booleans
+inside `nuggs_neck()` — tool noise, not a basket connectivity failure. The
+orthogonal lattice unions into the floor rim ring and the wall band by
+construction (`floor_bite` / rim ring in `grid_floor()`). No design geometry
+change; port stub interface unchanged. If a later library pin hardens those
+booleans, this INFO should disappear without a sieve edit.
 
 ### G4 — Must-fit/hold measured on exported STL
 
