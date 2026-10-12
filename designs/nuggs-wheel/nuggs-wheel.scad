@@ -228,6 +228,11 @@ module rim_segment() {
     ov = 0.4;  // union bite — coplanar stacks export as separate volumes
     // Back pie stops short of the neighbour rim's start angle
     back_half = seg_ang / 2 - lap_ang / 2 - 0.5;
+    // Female / male cuts span the wall's downward ov bite (z = back_t-ov)
+    // as well as the tread — otherwise adjacent walls intersect in that
+    // buried band and joint-fit reports a few dozen interference facets.
+    cut_z0 = back_t - ov - 0.01;
+    cut_h  = wheel_w + ov + 0.02;
     // Pegs are unioned AFTER the wall cuts: the male OD trim would otherwise
     // shear the peg cylinders into disconnected dust shells (printcheck
     // bodies at the peg Z heights).
@@ -256,18 +261,18 @@ module rim_segment() {
                                      h = back_t + hub_post_h);
             }
             // Female pocket: slightly oversize vs the tongue
-            translate([0, 0, back_t - 0.01])
-                linear_extrude(height = wheel_w + 0.02)
+            translate([0, 0, cut_z0])
+                linear_extrude(height = cut_h)
                     annular_sector_2d(r_run + joint_step - 0.05, r_outer - 0.3,
                                       a0 - 0.15, a0 + lap_ang + 0.15);
             // Male recess: raise the running surface by joint_step in tongue zone
-            translate([0, 0, back_t - 0.01])
-                linear_extrude(height = wheel_w + 0.02)
+            translate([0, 0, cut_z0])
+                linear_extrude(height = cut_h)
                     annular_sector_2d(r_run - 0.01, r_run + joint_step,
                                       a_tongue0, a_tongue1 + 0.01);
             // Male OD trim (clearance vs neighbour lip / pocket)
-            translate([0, 0, back_t - 0.01])
-                linear_extrude(height = wheel_w + 0.02)
+            translate([0, 0, cut_z0])
+                linear_extrude(height = cut_h)
                     annular_sector_2d(r_outer - 0.5, r_outer + 0.1,
                                       a_tongue0, a_tongue1 + 0.01);
             // Peg bores in the female pocket
