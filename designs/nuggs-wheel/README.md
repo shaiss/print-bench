@@ -1,0 +1,77 @@
+# NUGGS wheel
+
+The **exercise module** for the N.U.G.G.S. hamster-tunnel system: a segmented
+rim wheel on a free-standing stand that quarter-turns into a standard 80 mm
+genderless port so it stays put without hardware. Syrian-scale by default
+(Ø280 × 90 mm), printed in identical segments so every part clears a ~180 mm
+bound under the gate's 200 mm test-slice ceiling.
+
+![Product shot](previews/product-hero.png)
+
+![4-view contact sheet](previews/contact-sheet.png)
+
+![Assembled three-quarter](previews/hero.png)
+
+![Rim segment — shingle joint and closed back pie](previews/segment.png)
+
+> **Work in progress — nothing in this system has been printed yet.**
+> `port_tol = 0.30` is an untested guess inherited from the shared standard.
+> **Print the coupon first** and expect to tune port, joint, and axle fits.
+
+## What you get
+
+Separately printed parts — the deliverable is the multi-object 3MF plate
+(`build/nuggs-wheel-plate.3mf`), not a single assembled STL (that would fuse).
+
+- `rim-segment` × **8** (identical) — arc of running surface + closed back pie +
+  shingle joint (≈ 155 mm XY diagonal at defaults)
+- `hub` — axle carrier with posts into the segment pads (Ø48 × 22 mm)
+- `stand` — footplate + axle arm + NUGGS port anchor (≈ 168 × 110 mm footprint)
+- `axle` — Ø8 plain shaft, loose / repairable
+- `coupon` — port stub + joint pair + axle-in-bore sample
+
+## Print settings
+
+- **Material:** PETG for rim segments and hub (impact at the joints); PLA fine
+  for the stand and axle. Coupon in the **same filament** as the part it tunes
+- **Layer height:** 0.2 mm
+- **Infill:** 15–20 % (stand/hub); ≥ 20 % for rim segments
+- **Supports:** **none**
+- **Orientation:**
+  - rim-segment / hub — back flat on the bed
+  - stand — port-down on the coupling sector tips (family pose; foot is
+    vertical during print, on the floor in use)
+  - axle — on its side
+- **Brim:** optional on the stand foot if adhesion is weak
+
+## Parameters
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `wheel_d` | 280 mm | Running-surface diameter — set to your animal; ≥ 200 asserted |
+| `wheel_w` | 90 mm | Tread width |
+| `n_seg` | 8 | Identical rim segments (derived from the 180 mm bound at Ø280) |
+| `joint_step` | 0.20 mm | Radial seam step; asserted ≤ 0.25 mm |
+| `axle_clear` | 0.35 mm | Diametral bearing clearance — **quiet running lives here** |
+| `port_tol` | 0.30 mm | NUGGS fit knob — **unmeasured**; tune on the coupon |
+| `stand_depth_mult` | 0.60 | Foot depth as a fraction of `wheel_d` |
+
+All parameters are at the top of [`nuggs-wheel.scad`](nuggs-wheel.scad),
+grouped in Customizer sections; override with `-D 'wheel_d=300'`.
+
+## Assembly & use
+
+1. **Coupon first** — see [`NOTES.md`](NOTES.md) “Print this first”.
+2. Print 8× `rim-segment`, 1× `hub`, 1× `stand`, 1× `axle` (or slice the plate).
+3. Shingle the segments into a rim (pegs locate; lap has no butt gap). Seat
+   the hub posts into the inner pads.
+4. Pass the axle through the stand boss and hub; retain with a drop of
+   filament rivet or a printed collar if you want (v1 ships loose).
+5. Quarter-turn the stand's port into any NUGGS face to anti-slide anchor it;
+   the foot stands free on a flat floor either way.
+
+**Layout:** a destination at an enclosure, not a bore-through mid-run module
+(see NOTES — run-break ruling). Open front toward the enclosure; closed back
+toward the stand arm.
+
+**Care (family N7):** hand-wash ≤ 50 °C; never a dishwasher.

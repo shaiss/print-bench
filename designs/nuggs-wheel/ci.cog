@@ -1,0 +1,13 @@
+# Assembled stand tip-over check (tools/cogcheck, issue #623).
+# Standing frame = the stand's print/use frame (foot on z=0).
+# Wheel + axle treated as a point mass at the axle (conservative: all wheel
+# mass at axle height, no credit for the rim's low running surface).
+# TIP-RISK is advisory WARN, never a hard fail.
+margin: 2.0
+
+part: nuggs-wheel-stand.stl | density: 1.24
+
+# Assembled wheel estimate: 8 PETG segments + hub + axle ≈ 180 g at the axle
+# station (arm_x = 0.55·stand_depth, y near arm − boss, axle_z). Defaults:
+# stand_depth=168, stand_w=100, axle_z=144, arm at x=92.4, y≈85.
+mass: wheel-assembly | grams: 180 | at: 92.4, 85, 144

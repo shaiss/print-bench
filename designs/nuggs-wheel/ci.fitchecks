@@ -1,0 +1,8 @@
+# Boolean fit checks (gate.sh). empty = zero facets; interferes = mandatory
+# negative control proving the check can fail.
+mates           empty
+mates-ctrl      interferes
+axle-fit        empty
+axle-fit-ctrl   interferes
+joint-fit       empty
+joint-fit-ctrl  interferes
