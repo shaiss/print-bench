@@ -146,8 +146,8 @@ so what you feel there is what the full parts do.
   screws (~2.5–3 mm shank), paperclips, and stiff wire. With the lid **off the
   case**, a **pencil tip** fits a hole where a fingertip meets the web (assembled,
   the fan bolts to the outer face and covers the grille). Airflow is reduced
-  versus a bare bore (~40 % of the old free area at the default 5.0 / 2.0 mm
-  holes and webs). Open **`sbc-case.scad`**, set **`part` to `grille-coupon`**, and
+  versus a bare bore (~38 % of the unobstructed bore at the default 5.0 / 2.0 mm
+  holes and webs — 21 full holes, no partials at the rim). Open **`sbc-case.scad`**, set **`part` to `grille-coupon`**, and
   tune **`grille_hole_d` / `grille_web`** in the Customizer (the wrapper
   `sbc-case-grille-coupon.scad` does not list those sliders — OpenSCAD only
   exposes variables assigned in the file you opened, not in an `include`), then
@@ -157,6 +157,11 @@ so what you feel there is what the full parts do.
   proves hole size, web width, and printability of the co-planar pattern only —
   it does **not** measure airflow, thermals, or noise, and the fit coupon still
   proves register lip, post, and board-pilot fit only (no grille).
+
+![Lid at print pose (outer face down): co-planar Ø5 mm grille over the fan bore — full holes only, no rim crescents](previews/lid-grille.png)
+
+*Lid `part` at print pose; the fan mounts on the opposite face in use.*
+
 - **Keep it breathing.** The fan still blows *in* through the grille and the
   open-skirted case, so it is an intake for dust too — on an always-on build,
   blow through the grille and the vent row out every few months.
