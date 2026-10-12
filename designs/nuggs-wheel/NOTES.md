@@ -72,7 +72,8 @@ two coupons).
 
 - **Rim segments / hub / back:** PETG preferred (impact at joints). Flat, back
   on the bed. No supports.
-- **Stand:** PLA ok. Foot on the bed. No supports.
+- **Stand:** PLA ok. Port-down on the coupling sector tips (foot vertical
+  during print, on the floor in use). No supports.
 - **Axle:** PLA or PETG; on its side. No supports.
 - **Layer height:** 0.2 mm. **Infill:** 15–20 % for stand/hub; 20 %+ for rim.
 - **Seam:** Away from the running surface and the port ring.

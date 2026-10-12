@@ -15,10 +15,11 @@
 // is nuggs_cfg()'s default so the stand clicks into every existing module.
 // port_tol is UNMEASURED — the coupon is mandatory.
 //
-// PRINT. Rim segment and hub print flat (back on the bed). Stand prints on
-// its foot base with the port axis horizontal, ring bottom on the bed so
-// the coupling does not face the bed as an overhang. Axle prints on its
-// side. No slicer supports. PETG preferred for the rim; PLA ok for the stand.
+// PRINT. Rim segment and hub print flat (back on the bed). Stand prints
+// port-down on the coupling sector tips (family bed-contact idiom) — the
+// foot is vertical during print and on the floor in use. Axle prints on
+// its side. No slicer supports. PETG preferred for the rim; PLA ok for
+// the stand.
 
 use <nuggs-coupling.scad>
 
@@ -213,76 +214,90 @@ module rim_segment() {
     a0 = -seg_span / 2;
     a1 =  seg_span / 2;
     lap_ang = joint_lap / r_run * 180 / PI;
-    // Rim wall spans the female pocket zone through the core; the male lap
-    // zone is ONLY the recessed tongue (no full-thickness tread there).
-    // 0.4° hairline at the core/tongue handoff so neighbouring full-thickness
-    // cores never tessellate into a joint-fit interference sliver — the tongue
-    // already overlaps the core by 1° and covers the gap.
-    a_rim0 = a0;
-    a_rim1 = a1 - lap_ang - 0.4;
+    // ONE continuous rim wall from female end through the male tongue —
+    // the shingle recess is a DIFFERENCE cut, never a second overlapping
+    // shell. A separate tongue solid that only angularly overlapped the
+    // core exported as concatenated non-manifold shells at the handoff
+    // (~z = back_t + wheel_w near the joint step; CI printcheck CRITICAL).
+    a_wall0 = a0;
+    a_wall1 = a1 - 0.3;              // under-cut vs neighbour pocket
+    a_tongue0 = a1 - lap_ang - 1;    // recess begins with a bite into core
+    a_tongue1 = a1 - 0.3;
+    // Lip stays on the non-tongue core (no hang over the lap)
+    a_lip1 = a1 - lap_ang - 0.4;
     ov = 0.4;  // union bite — coplanar stacks export as separate volumes
     // Back pie stops short of the neighbour rim's start angle
     back_half = seg_ang / 2 - lap_ang / 2 - 0.5;
-    difference() {
-        union() {
-            // Closed back pie — out to the running surface only (the tread
-            // wall owns r ≥ r_run).
-            linear_extrude(height = back_t)
-                annular_sector_2d(r_pie_in, r_run + ov,
-                                  -back_half, back_half);
-            // Running-surface wall — slight downward bite into THIS segment's
-            // own pie only (pie ends before the neighbour's rim begins)
-            translate([0, 0, back_t - ov])
-                linear_extrude(height = wheel_w + ov)
-                    annular_sector_2d(r_run, r_outer, a_rim0, a_rim1);
-            // Outer lip — same angular span as the rim wall, radial overlap
-            translate([0, 0, back_t + wheel_w - lip_h - ov])
-                linear_extrude(height = lip_h + ov)
-                    annular_sector_2d(r_run + rim_t * 0.3, r_outer + lip_h,
-                                      a_rim0, a_rim1);
-            // Male shingle tongue: recessed by joint_step; angularly under-cut
-            // by 0.3° vs the pocket so tessellation cannot invent interference
-            translate([0, 0, back_t])
-                linear_extrude(height = wheel_w)
-                    annular_sector_2d(r_run + joint_step, r_outer - 0.5,
-                                      a1 - lap_ang - 1, a1 - 0.3);
-            // Locating pegs — short, fully inside the tongue
+    // Pegs are unioned AFTER the wall cuts: the male OD trim would otherwise
+    // shear the peg cylinders into disconnected dust shells (printcheck
+    // bodies at the peg Z heights).
+    union() {
+        difference() {
+            union() {
+                // Closed back pie — out to the running surface only (the tread
+                // wall owns r ≥ r_run).
+                linear_extrude(height = back_t)
+                    annular_sector_2d(r_pie_in, r_run + ov,
+                                      -back_half, back_half);
+                // Continuous running-surface wall (core + tongue span)
+                translate([0, 0, back_t - ov])
+                    linear_extrude(height = wheel_w + ov)
+                        annular_sector_2d(r_run, r_outer, a_wall0, a_wall1);
+                // Outer lip — core span only, radial + Z bite into the wall
+                translate([0, 0, back_t + wheel_w - lip_h - ov])
+                    linear_extrude(height = lip_h + ov)
+                        annular_sector_2d(r_run + rim_t * 0.3, r_outer + lip_h,
+                                          a_wall0, a_lip1);
+                // Hub-mount pads at the pie inner edge
+                for (s = [-1, 1])
+                    rotate([0, 0, s * seg_ang * 0.28])
+                        translate([r_post, 0, 0])
+                            cylinder(d = hub_post_d + 2.4,
+                                     h = back_t + hub_post_h);
+            }
+            // Female pocket: slightly oversize vs the tongue
+            translate([0, 0, back_t - 0.01])
+                linear_extrude(height = wheel_w + 0.02)
+                    annular_sector_2d(r_run + joint_step - 0.05, r_outer - 0.3,
+                                      a0 - 0.15, a0 + lap_ang + 0.15);
+            // Male recess: raise the running surface by joint_step in tongue zone
+            translate([0, 0, back_t - 0.01])
+                linear_extrude(height = wheel_w + 0.02)
+                    annular_sector_2d(r_run - 0.01, r_run + joint_step,
+                                      a_tongue0, a_tongue1 + 0.01);
+            // Male OD trim (clearance vs neighbour lip / pocket)
+            translate([0, 0, back_t - 0.01])
+                linear_extrude(height = wheel_w + 0.02)
+                    annular_sector_2d(r_outer - 0.5, r_outer + 0.1,
+                                      a_tongue0, a_tongue1 + 0.01);
+            // Peg bores in the female pocket
             for (z = [back_t + wheel_w * 0.30, back_t + wheel_w * 0.70])
-                rotate([0, 0, a1 - lap_ang / 2])
+                rotate([0, 0, a0 + lap_ang / 2])
                     translate([r_run + rim_t * 0.55, 0, z])
                         rotate([90, 0, 0])
-                            cylinder(d = joint_peg_d, h = joint_lap * 0.6,
-                                     center = true, $fn = 16);
-            // Hub-mount pads at the pie inner edge
+                            cylinder(d = joint_peg_d + 2 * joint_peg_clear,
+                                     h = joint_lap * 1.0, center = true,
+                                     $fn = 16);
+            // Hub post holes
             for (s = [-1, 1])
                 rotate([0, 0, s * seg_ang * 0.28])
-                    translate([r_post, 0, 0])
-                        cylinder(d = hub_post_d + 2.4, h = back_t + hub_post_h);
+                    translate([r_post, 0, -0.1])
+                        cylinder(d = hub_post_d + 2 * hub_post_clear,
+                                 h = back_t + hub_post_h + 0.2);
+            // Lightening slots in the back pie
+            for (k = [-1, 0, 1])
+                rotate([0, 0, k * seg_ang * 0.22])
+                    translate([(r_pie_in + r_run) / 2, 0, -0.1])
+                        cylinder(d = min(14, (r_run - r_pie_in) * 0.35),
+                                 h = back_t + 0.2, $fn = 32);
         }
-        // Female pocket: slightly oversize vs the tongue
-        translate([0, 0, back_t - 0.01])
-            linear_extrude(height = wheel_w + 0.02)
-                annular_sector_2d(r_run + joint_step - 0.05, r_outer - 0.3,
-                                  a0 - 0.15, a0 + lap_ang + 0.15);
-        // Peg bores in the female pocket
+        // Locating pegs — short, rooted in the finished tongue
         for (z = [back_t + wheel_w * 0.30, back_t + wheel_w * 0.70])
-            rotate([0, 0, a0 + lap_ang / 2])
+            rotate([0, 0, a1 - lap_ang / 2])
                 translate([r_run + rim_t * 0.55, 0, z])
                     rotate([90, 0, 0])
-                        cylinder(d = joint_peg_d + 2 * joint_peg_clear,
-                                 h = joint_lap * 1.0, center = true, $fn = 16);
-        // Hub post holes
-        for (s = [-1, 1])
-            rotate([0, 0, s * seg_ang * 0.28])
-                translate([r_post, 0, -0.1])
-                    cylinder(d = hub_post_d + 2 * hub_post_clear,
-                             h = back_t + hub_post_h + 0.2);
-        // Lightening slots in the back pie
-        for (k = [-1, 0, 1])
-            rotate([0, 0, k * seg_ang * 0.22])
-                translate([(r_pie_in + r_run) / 2, 0, -0.1])
-                    cylinder(d = min(14, (r_run - r_pie_in) * 0.35),
-                             h = back_t + 0.2, $fn = 32);
+                        cylinder(d = joint_peg_d, h = joint_lap * 0.6,
+                                 center = true, $fn = 16);
     }
 }
 

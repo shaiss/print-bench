@@ -42,7 +42,7 @@ Separately printed parts — the deliverable is the multi-object 3MF plate
   - stand — port-down on the coupling sector tips (family pose; foot is
     vertical during print, on the floor in use)
   - axle — on its side
-- **Brim:** optional on the stand foot if adhesion is weak
+- **Brim:** optional on the sector tips if adhesion is weak
 
 ## Parameters
 
