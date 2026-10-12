@@ -2112,8 +2112,8 @@ jobs:
           # ready_for_review / denial-only turn — issue #806).
           echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           # Seed the trusted head pin for coach posts (advanced on push).
-          # Expression stays in env: — interpolating ${{ }} into the script
-          # body is refused by the coach git-containment guard.
+          # Keep the Actions expression in env: EVENT_HEAD — the ready-step
+          # run body must not interpolate expressions (git-containment guard).
           printf '%s\n' "$EVENT_HEAD" > "${RUNNER_TEMP}/reviewer-head-sha"
           if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
