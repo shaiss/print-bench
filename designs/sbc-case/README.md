@@ -45,7 +45,8 @@ view lower down shows the green board and gold header pins seated just below the
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
 cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan, and four
-adhesive rubber feet. The screws come out of one standard **M2.5 / M3
+adhesive rubber feet — plus 4 × M3 nuts if you'll run the grille-coupon fan
+check. The screws come out of one standard **M2.5 / M3
 assortment**; add one bag of **M3 heat-set inserts**, that single fan, and a
 strip of **adhesive feet** — **four carts, not five** separate hardware orders.
 
@@ -139,7 +140,7 @@ so what you feel there is what the full parts do.
   header before you lift the lid, or a set-aside lid hangs by two wires.
 - **Closed ceiling over the fan bore.** The fan bolts to the lid's **outer**
   face (above the plate); the grille is co-planar holes in the plate, not a
-  blade guard from outside.   It closes the case ceiling over the Ø37 zone so **fingers and larger dropped
+  blade guard from outside. It closes the case ceiling over the Ø37 zone so **fingers and larger dropped
   objects** (coins, washers) meet the 2 mm webs instead of falling through a bare
   bore — not protection against small hardware: **Ø5 mm** holes still pass M2.5/M3
   screws (~2.5–3 mm shank), paperclips, and stiff wire. With the lid **off the
