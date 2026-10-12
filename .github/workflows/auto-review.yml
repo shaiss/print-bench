@@ -2103,6 +2103,7 @@ jobs:
         id: ready
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -2111,7 +2112,9 @@ jobs:
           # ready_for_review / denial-only turn — issue #806).
           echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           # Seed the trusted head pin for coach posts (advanced on push).
-          printf '%s\n' "${{ github.event.pull_request.head.sha }}" > "${RUNNER_TEMP}/reviewer-head-sha"
+          # Expression stays in env: — interpolating ${{ }} into the script
+          # body is refused by the coach git-containment guard.
+          printf '%s\n' "$EVENT_HEAD" > "${RUNNER_TEMP}/reviewer-head-sha"
           if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
             echo "::add-mask::${FETCH_AUTH}"
