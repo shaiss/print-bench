@@ -420,7 +420,7 @@ surfaces studies awaiting a read live in
     still refuses the three syntax families the reviewer/coach backstops
     spell (issue #776): mid-string `*`, `:*` word-boundary prefix, and
     `Edit(./.git/**)`. `reviewer-perms-check.sh` is a Python model of the
-    matcher; this extracts the matcher from CLI 2.1.287 (the version that
+    matcher; this extracts the matcher from CLI 2.1.295 (the version that
     SHA hardcodes and installs at run time — not bundled, not `latest`)
     and fails if a denied probe is not refused. `--selftest` run by
     `check.sh`; the live extract is `.github/workflows/reviewer-deny-canary.yml`
