@@ -32,6 +32,21 @@ import {
 } from "../lib/teams.mjs";
 import { SEAM } from "../lib/seam.mjs";
 
+/**
+ * The text a reader sees: every "<…>" run dropped by a single character walk
+ * (no tag regex), whitespace collapsed. Only for asserting on rendered copy.
+ */
+function visibleText(html) {
+  let out = "";
+  let inTag = false;
+  for (const ch of html) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">" && inTag) inTag = false;
+    else if (!inTag) out += ch;
+  }
+  return out.replace(/\s+/g, " ");
+}
+
 const GH = "https://github.example/blob/main";
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -173,7 +188,7 @@ test("REAL: no rostered product page claims 'Reviewed by →'", () => {
       people: team.people,
     });
     // compare the visible text, with tags stripped, as a reader sees it
-    const text = html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+    const text = visibleText(html);
     assert.ok(!/Reviewed by\s*→/.test(text), `${d.name}: no per-PR "Reviewed by →" claim`);
     assert.match(text, /Review specialists → /, `${d.name}: the specialists line is present`);
   }

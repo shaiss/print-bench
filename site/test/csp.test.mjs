@@ -83,11 +83,29 @@ const META = /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/g;
  */
 function independentHashes(html) {
   const hashes = [];
-  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
-    if (/\ssrc=/.test(m[1])) continue;
-    const type = (m[1].match(/\stype="([^"]*)"/) || [, ""])[1].toLowerCase();
+  // Index-based on purpose (not a tag regex): an end tag is "</script"
+  // followed by anything up to the next ">", so "</script >" and
+  // "</SCRIPT\n>" close a script exactly as the browser closes it.
+  const lower = html.toLowerCase();
+  let at = 0;
+  for (;;) {
+    const open = lower.indexOf("<script", at);
+    if (open < 0) break;
+    const after = lower[open + 7];
+    if (after !== ">" && !/\s/.test(after || "")) {
+      at = open + 7;
+      continue;
+    }
+    const tagEnd = html.indexOf(">", open);
+    const close = lower.indexOf("</script", tagEnd);
+    if (tagEnd < 0 || close < 0) break;
+    const attrs = html.slice(open + 7, tagEnd);
+    const body = html.slice(tagEnd + 1, close);
+    at = html.indexOf(">", close) + 1 || html.length;
+    if (/\ssrc=/.test(attrs)) continue;
+    const type = (attrs.match(/\stype="([^"]*)"/) || [, ""])[1].toLowerCase();
     if (type && !["module", "importmap", "text/javascript"].includes(type)) continue;
-    hashes.push(`'sha256-${createHash("sha256").update(m[2]).digest("base64")}'`);
+    hashes.push(`'sha256-${createHash("sha256").update(body).digest("base64")}'`);
   }
   return hashes;
 }
@@ -157,10 +175,9 @@ test("a preview build (VERCEL_ENV=preview) allows exactly the Vercel Toolbar ori
     assertTree(out, { preview: true });
     const html = readFileSync(join(out, "index.html"), "utf8");
     const policy = parsePolicy([...html.matchAll(META)][0][1]);
-    assert.ok(policy.get("connect-src").includes("https://vercel.live"));
-    assert.ok(policy.get("connect-src").includes("wss://ws-us3.pusher.com"));
-    assert.ok(policy.get("img-src").includes("https://vercel.live"));
-    assert.ok(policy.get("img-src").includes("https://vercel.com"));
+    // Exact source lists: the Toolbar origins and nothing else are added.
+    assert.deepEqual(policy.get("connect-src"), ["'self'", "https://vercel.live", "wss://ws-us3.pusher.com"]);
+    assert.deepEqual(policy.get("img-src"), ["'self'", "data:", "blob:", "https://vercel.live", "https://vercel.com"]);
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
