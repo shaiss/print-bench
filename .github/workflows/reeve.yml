@@ -159,7 +159,11 @@ jobs:
         # on the default branch. A read-only fetch — the checkout's
         # persist-credentials:false means auth is supplied per-fetch here. If the
         # branch does not exist yet (no record has landed), reeve reads the seed,
-        # exactly as before, and those detectors stay 'not evaluated'.
+        # exactly as before, and those detectors stay 'not evaluated'. Each file
+        # is overlaid only when the tip carries it, through a temp file and a
+        # rename: a bare `git show FETCH_HEAD:<path> > <path>` truncates the
+        # committed seed before git looks the path up, so a tip missing the file
+        # left reeve reading a 0-byte one. A missing file keeps the seed.
         if: steps.policy.outputs.armed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,8 +171,14 @@ jobs:
           set -euo pipefail
           url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if git fetch --depth=1 "$url" telemetry 2>/dev/null; then
-            git show FETCH_HEAD:telemetry/log.ndjson > telemetry/log.ndjson
-            git show FETCH_HEAD:telemetry/REPORT.md  > telemetry/REPORT.md 2>/dev/null || true
+            for f in telemetry/log.ndjson telemetry/REPORT.md; do
+              if git cat-file -e "FETCH_HEAD:$f" 2>/dev/null; then
+                git show "FETCH_HEAD:$f" > "$f.tip"
+                mv "$f.tip" "$f"
+              else
+                echo "::notice::the telemetry branch carries no $f — reeve reads the committed seed"
+              fi
+            done
             echo "overlaid live telemetry ($(wc -l < telemetry/log.ndjson) records)"
           else
             echo "::notice::no telemetry data branch yet — reeve reads the committed seed; gate-side detectors will read 'not evaluated' until the first record lands"
@@ -559,7 +569,9 @@ jobs:
         # below and ci.yml's roll-up), not the default-branch seed. Overlay it
         # so the drafter's context and (in `observe`) the append both read
         # current records. Read-only fetch, per-fetch auth — the same shape as
-        # the report job's overlay.
+        # the report job's overlay, including its guard: overlaid only when the
+        # tip carries the file, through a temp file and a rename, so a tip
+        # without it leaves the committed seed intact instead of truncating it.
         if: steps.policy.outputs.armed == 'true' && steps.policy.outputs.greenlight == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -567,8 +579,10 @@ jobs:
           set -euo pipefail
           url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if git fetch --depth=1 "$url" telemetry 2>/dev/null; then
-            if git show FETCH_HEAD:telemetry/reeve-greenlights.ndjson \
-                > telemetry/reeve-greenlights.ndjson 2>/dev/null; then
+            if git cat-file -e FETCH_HEAD:telemetry/reeve-greenlights.ndjson 2>/dev/null; then
+              git show FETCH_HEAD:telemetry/reeve-greenlights.ndjson \
+                > telemetry/reeve-greenlights.ndjson.tip
+              mv telemetry/reeve-greenlights.ndjson.tip telemetry/reeve-greenlights.ndjson
               echo "overlaid the live precedent log ($(wc -l < telemetry/reeve-greenlights.ndjson) records)"
             else
               echo "::notice::the telemetry branch carries no precedent log yet — the drafter reads the committed seed"
@@ -1009,6 +1023,24 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           url="https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # seed_file <path>: the data branch tip's copy of <path> when the tip
+          # carries one, else main's committed seed (HEAD:<path>) — written
+          # through a temp file and a rename, never by redirecting straight onto
+          # <path>: a bare `git show FETCH_HEAD:<path> > <path>` truncates the
+          # committed seed before git looks the path up, so a tip missing <path>
+          # left a 0-byte file the tree below then pushed. ci.yml's roll-up
+          # carries the same helper.
+          seed_file() {
+            local src=HEAD
+            if git cat-file -e "FETCH_HEAD:$1" 2>/dev/null; then src=FETCH_HEAD; fi
+            git show "${src}:$1" > "$1.seed"
+            mv "$1.seed" "$1"
+          }
+          gl=telemetry/reeve-greenlights.ndjson
+          # Main's committed precedent-log seed, set aside before any attempt
+          # overwrites the checkout's copy — the reference the merge restores from.
+          gl_seed="${RUNNER_TEMP}/reeve-greenlights.seed.ndjson"
+          cp "$gl" "$gl_seed"
           for attempt in 1 2 3; do
             # Seed the live files from the data branch's tip if it exists; the
             # committed seeds in the checkout are the first-run fallback. The
@@ -1017,30 +1049,50 @@ jobs:
             # holds (idempotent — a recorded round derives nothing).
             lease=""
             if git fetch "$url" "$DATA_BRANCH" 2>/dev/null; then
-              git show FETCH_HEAD:telemetry/log.ndjson > telemetry/log.ndjson
-              git show FETCH_HEAD:telemetry/REPORT.md > telemetry/REPORT.md 2>/dev/null || true
-              git show FETCH_HEAD:telemetry/reeve-greenlights.ndjson \
-                > telemetry/reeve-greenlights.ndjson 2>/dev/null || true
+              seed_file telemetry/log.ndjson
+              seed_file telemetry/REPORT.md
+              seed_file "$gl"
               lease="$(git rev-parse FETCH_HEAD)"
             fi
+            # Put back any seed record the tip lost before deriving on top of it
+            # (ci.yml's roll-up runs the same repair). A tip the strict parser
+            # rejects is left exactly as it is, and greenlight-append's own
+            # parse then stops the run — nothing is pushed over it.
+            if ! reeve greenlights-merge --tip "$gl" --seed "$gl_seed" --out "$gl" \
+                --gh-output "$GITHUB_OUTPUT"; then
+              echo "::warning::the ${DATA_BRANCH} branch's ${gl} failed reeve's strict parse — left unchanged; repair it by hand"
+            fi
+            restored="$(sed -n 's/^restored=//p' "$GITHUB_OUTPUT" | tail -1)"
             reeve greenlight-append --repo "$GITHUB_REPOSITORY" \
               --conf .github/reeve.conf --ledger .github/decisions/ledger.conf \
               --gh-output "$GITHUB_OUTPUT"
             appended="$(sed -n 's/^appended=//p' "$GITHUB_OUTPUT" | tail -1)"
-            if [ "${appended:-0}" = "0" ]; then
-              echo "no newly-resolved greenlight rounds — nothing to push"
+            # A repair alone is worth a push: a tip that lost the seed records
+            # otherwise stays without them until the next roll-up.
+            if [ "${appended:-0}" = "0" ] && [ "${restored:-0}" = "0" ]; then
+              echo "no newly-resolved greenlight rounds and no seed record to restore — nothing to push"
               exit 0
             fi
-            # Rebuild the THREE-file data branch with plumbing (never touching
-            # main's index or working tree) — ci.yml's roll-up shape, plus the
-            # precedent log. log.ndjson/REPORT.md ride along unchanged from the
-            # tip so this push can never clobber a gate-run record.
+            # Rebuild the five-path data branch with plumbing (never touching
+            # main's index or working tree) — ci.yml's roll-up tree, path for
+            # path (tests/test_learning_wiring.py pins the two): the three
+            # telemetry files, log.ndjson/REPORT.md riding along unchanged from
+            # the tip so this push can never clobber a gate-run record, plus
+            # the data-branch Vercel guard hashed from its committed files — a
+            # root vercel.json that disables git deployments of the commit, and
+            # the stub scripts/vercel-ignore-build.sh the project's Ignored
+            # Build Step runs (without one there it exits 127, which Vercel
+            # reads as "build").
             log_blob="$(git hash-object -w telemetry/log.ndjson)"
             rpt_blob="$(git hash-object -w telemetry/REPORT.md)"
             gl_blob="$(git hash-object -w telemetry/reeve-greenlights.ndjson)"
+            vercel_blob="$(git hash-object -w .github/data-branch-guard/vercel.json)"
+            ignore_blob="$(git hash-object -w .github/data-branch-guard/vercel-ignore-build.sh)"
             subtree="$(printf '100644 blob %s\tlog.ndjson\n100644 blob %s\tREPORT.md\n100644 blob %s\treeve-greenlights.ndjson\n' \
               "$log_blob" "$rpt_blob" "$gl_blob" | git mktree)"
-            root="$(printf '040000 tree %s\ttelemetry\n' "$subtree" | git mktree)"
+            scripts_tree="$(printf '100755 blob %s\tvercel-ignore-build.sh\n' "$ignore_blob" | git mktree)"
+            root="$(printf '100644 blob %s\tvercel.json\n040000 tree %s\tscripts\n040000 tree %s\ttelemetry\n' \
+              "$vercel_blob" "$scripts_tree" "$subtree" | git mktree)"
             commit="$(git commit-tree "$root" -m "Reeve greenlights: resolved rounds through run ${GITHUB_RUN_ID}")"
             if [ -n "$lease" ]; then
               git push --force-with-lease="refs/heads/${DATA_BRANCH}:${lease}" \
@@ -1049,7 +1101,7 @@ jobs:
               git push "$url" "${commit}:refs/heads/${DATA_BRANCH}" && ok=1 || ok=0
             fi
             if [ "$ok" = "1" ]; then
-              echo "recorded ${appended} newly-resolved round(s) — precedent log pushed to the ${DATA_BRANCH} branch"
+              echo "recorded ${appended:-0} newly-resolved round(s), restored ${restored:-0} seed record(s) — precedent log pushed to the ${DATA_BRANCH} branch"
               exit 0
             fi
             echo "push contended (attempt ${attempt}) — ${DATA_BRANCH} advanced, re-seeding and re-deriving"
@@ -1067,6 +1119,7 @@ jobs:
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           APPEND_OUTCOME: ${{ steps.append.outcome }}
           APPENDED: ${{ steps.append.outputs.appended }}
+          RESTORED: ${{ steps.append.outputs.restored }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           {
@@ -1085,6 +1138,9 @@ jobs:
               echo "- ✅ no newly-resolved rounds — the precedent log is current."
             else
               echo "- ✅ recorded ${APPENDED} newly-resolved round(s) to the telemetry branch's precedent log."
+            fi
+            if [ "$APPEND_OUTCOME" = "success" ] && [ "${RESTORED:-0}" != "0" ]; then
+              echo "- 🩹 restored ${RESTORED} default-branch seed record(s) the telemetry branch's precedent log had lost (see the append step log for the push)."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
