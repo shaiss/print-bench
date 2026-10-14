@@ -56,6 +56,7 @@ import {
   isAiLifestyle,
 } from "./lib/media.mjs";
 import { buildModel } from "./lib/model.mjs";
+import { applyCsp, checkCsp, toolbarAllowed } from "./lib/csp.mjs";
 import {
   indexPage,
   designPage,
@@ -100,10 +101,36 @@ function fail(msg) {
   process.exit(2);
 }
 
+// The Content-Security-Policy (lib/csp.mjs). Every HTML page gets its own
+// <meta> policy here, at write time, computed from the page's final bytes, so
+// its inline-script hashes cannot drift from the scripts actually served. The
+// Vercel Toolbar's origins are allowed on preview deploys only (VERCEL_ENV),
+// so local, CI and production builds stay byte-identical to each other.
+const CSP_TOOLBAR = toolbarAllowed();
+const cspStats = { pages: 0, hashes: 0 };
+
+function securePage(relPath, html) {
+  let out;
+  try {
+    out = applyCsp(html, { preview: CSP_TOOLBAR });
+  } catch (err) {
+    fail(`${relPath}: ${err.message}`);
+  }
+  // An inline event handler or a javascript: URL is something no hash can
+  // allow: the browser would silently refuse it in production, so it stops
+  // the build here instead, like a broken link does.
+  const problems = checkCsp(out);
+  if (problems.length) fail(`${relPath}: Content-Security-Policy: ${problems.join("; ")}`);
+  cspStats.pages += 1;
+  const policy = out.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
+  cspStats.hashes += (policy.match(/'sha256-/g) || []).length;
+  return out;
+}
+
 function write(outDir, relPath, contents) {
   const dest = join(outDir, relPath);
   mkdirSync(dirname(dest), { recursive: true });
-  writeFileSync(dest, contents);
+  writeFileSync(dest, relPath.endsWith(".html") ? securePage(relPath, contents) : contents);
 }
 
 function copyTree(from, to, keep = null) {
@@ -671,6 +698,10 @@ async function main() {
   console.log(
     `      llms: /llms.txt + /llms-full.txt, ${mdFiles} markdown/txt sources served ` +
       `(${servedDocs.length} docs verbatim)`
+  );
+  console.log(
+    `      csp: ${cspStats.pages} pages, ${cspStats.hashes} inline-script hashes` +
+      (CSP_TOOLBAR ? ", Vercel Toolbar origins allowed (preview)" : "")
   );
 }
 
