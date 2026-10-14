@@ -164,6 +164,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # pull_request: full history so regen-pr-guard.sh can walk merge-base..HEAD
+          # past regen bot commits (depth 1 would hide the author's commits).
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
           # Don't leave the push credential in .git/config: between checkout
           # and push this job runs five generators out of the PR branch, and
           # a same-repo PR could read a contents:write token straight out of
@@ -345,6 +348,23 @@ jobs:
             already=true
             echo "::notice::HEAD is already a regen commit — this pass verifies it and will not push again"
           fi
+          # On pull_request, commit back only when the author's own diff (vs the
+          # PR base, excluding prior regen bot commits) touches designs/. Lib-only
+          # PRs still regenerate locally for gates, but must not push stamp/preview
+          # noise that re-opens design review (scripts/regen-pr-guard.sh).
+          author_touches_designs=true
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            pr_base="${{ github.event.pull_request.base.sha }}"
+            guard_rc=0
+            ./scripts/regen-pr-guard.sh pr-author-touches-designs \
+              --base "$pr_base" --head HEAD || guard_rc=$?
+            if [ "$guard_rc" -eq 1 ]; then
+              author_touches_designs=false
+              echo "::notice::PR author's changes (excluding regen bot commits) touch no files under designs/ — regenerated previews and stamps will not be committed to this branch"
+            elif [ "$guard_rc" -ne 0 ]; then
+              echo "::warning::regen-pr-guard could not run (exit $guard_rc) — commit-back guard skipped (fail-open)"
+            fi
+          fi
           {
             echo "designs=$designs"
             echo "render_designs=$render_designs"
@@ -354,6 +374,7 @@ jobs:
             echo "can_push=$can_push"
             echo "already=$already"
             echo "have_pat=$HAVE_PAT"
+            echo "author_touches_designs=$author_touches_designs"
           } >> "$GITHUB_OUTPUT"
           echo "candidates: ${designs:-(nothing — no design moved)}"
           echo "re-rendering: ${render_designs:-(nothing — no candidate has changed inputs)}"
@@ -550,6 +571,7 @@ jobs:
           CAN_PUSH: ${{ steps.plan.outputs.can_push }}
           ALREADY: ${{ steps.plan.outputs.already }}
           HAVE_PAT: ${{ steps.plan.outputs.have_pat }}
+          AUTHOR_TOUCHES_DESIGNS: ${{ steps.plan.outputs.author_touches_designs }}
           # Scoped to this step alone — see persist-credentials on the
           # checkout. Actions masks it in the log.
           PUSH_TOKEN: ${{ secrets.REGEN_TOKEN || github.token }}
@@ -571,6 +593,13 @@ jobs:
           fi
           echo "regenerated:"
           git diff --cached --name-only | sed 's/^/  /'
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] \
+             && [ "${AUTHOR_TOUCHES_DESIGNS:-true}" = "false" ]; then
+            echo "::notice::pull_request with no human-authored designs/ changes — leaving committed artifacts as-is (no regen commit-back)"
+            git reset >/dev/null
+            echo "sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             # Default-branch push: every source change reaches the default
             # branch through a PR (the repository ruleset forbids direct

@@ -841,6 +841,11 @@ if ! ./scripts/preview-diff.sh --selftest; then
   fail=1
 fi
 
+echo "-- regen-pr-guard selftest: scripts/regen-pr-guard.sh --selftest"
+if ! ./scripts/regen-pr-guard.sh --selftest; then
+  fail=1
+fi
+
 # field-test.sh is the tested core of the "Log a print result" Action
 # (issue #101): its --selftest proves the FIELD-TEST entry formatting, the
 # section-creation, and the design-name/required-field refusals still hold.
