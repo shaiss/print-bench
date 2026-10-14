@@ -8,7 +8,7 @@ committed on the default branch records the stage-1 round, live appends land on
 the `telemetry` data branch (pushed by the observing workflow run with
 ``GITHUB_TOKEN``, which triggers no workflow — the #481 feature).
 
-Three pure layers, no I/O of its own:
+Four pure layers, no I/O of its own:
 
 - **parse/render** — a strict ndjson schema (``parse_log`` /
   ``render_line``): a malformed record raises naming the offending line, never
@@ -22,11 +22,15 @@ Three pure layers, no I/O of its own:
 - **load** (``context_digest``) — the drafter's context fragment: the most
   recent N records plus inline owner replies, both bounded, so the injected
   context cannot grow unbounded.
+- **restore** (``merge_logs``) — the branch builders' repair: the data
+  branch's log with any default-branch seed record it lost put back in front,
+  every tip record kept byte-for-byte.
 
 The I/O halves live elsewhere by design: ``github.gather_greenlight_rounds``
 (the GET-only thread gather) and ``cli.py``'s ``greenlight-context`` /
-``greenlight-append`` verbs compose these. The package itself still writes
-nothing — the observing run's data-branch push is trusted workflow bash.
+``greenlight-append`` / ``greenlights-merge`` verbs compose these. The package
+itself still writes nothing to GitHub — the data-branch push is trusted
+workflow bash.
 """
 
 from __future__ import annotations
@@ -296,6 +300,49 @@ def append_records(text: str, records: list[dict[str, Any]]) -> str:
     for record in records:
         appended += render_line(record) + "\n"
     return appended
+
+
+def merge_logs(
+    tip_text: str,
+    seed_text: str,
+    tip_where: str = "tip",
+    seed_where: str = "seed",
+) -> str:
+    """The data branch's log with the default-branch seed's lost records restored.
+
+    The live log is the ``telemetry`` data branch's copy; the seed committed on
+    the default branch carries the rounds that predate it (the stage-1 round,
+    #296). The branch builders used to seed with ``git show <tip>:<path> >
+    <path>``, and the shell truncates ``<path>`` before git looks the path up
+    — so a tip missing the file left a 0-byte copy that the builder then
+    pushed, and every later build re-seeded from that empty tip. This puts the
+    lost records back without touching anything the observer appended:
+
+    - every tip record is kept byte-for-byte and in order — the tip is the live
+      data, so it wins over a seed record for the same ``issue``;
+    - each seed record whose ``issue`` the tip lacks is added BEFORE the tip
+      records, in seed order (the seed's rounds are the older ones), as the
+      seed's own line bytes;
+    - a tip with no records yields exactly the seed's bytes, and a tip that
+      already carries every seed issue yields exactly the tip's bytes — so a
+      healthy branch passes through unchanged and the merge is idempotent.
+
+    Both inputs are strictly parsed first (:func:`parse_log`): a malformed tip
+    or seed raises naming its line, so the caller writes nothing and keeps the
+    tip as it is — a log this cannot read is never "repaired" into data loss.
+    """
+    tip = parse_log(tip_text, tip_where)
+    seed = parse_log(seed_text, seed_where)
+    if not tip:
+        return seed_text
+    held = {record["issue"] for record in tip}
+    # parse_log yields exactly one record per non-blank line (or raises), so
+    # pairing the same filter of the same splitlines() keeps line ↔ record.
+    seed_lines = [raw for raw in seed_text.splitlines() if raw.strip()]
+    lost = [raw for raw, record in zip(seed_lines, seed) if record["issue"] not in held]
+    if not lost:
+        return tip_text
+    return "".join(raw + "\n" for raw in lost) + tip_text
 
 
 def context_digest(
