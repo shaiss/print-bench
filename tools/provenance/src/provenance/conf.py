@@ -22,8 +22,9 @@ deploy_wait_hours           2            wait for a terminal Production deployme
 scheduled_max_requests      400          request cap of one scheduled run
 rate_floor                  500          X-RateLimit-Remaining floor (stop / sleep)
 dispatch_max_minutes        330          a dispatch's CAPTURE stops at job start + this − the reserve
-derive_reserve_minutes      30           kept for derive + publish after capture; replaced by 2× the
-                                         measured derive time of the integration dry run
+derive_reserve_minutes      30           kept for derive + publish after capture (the parser default;
+                                         the committed conf sets 1 — 2× the integration dry run's
+                                         measured derive, rounded up to a minute)
 backfill_since              2026-07-31   earliest ``--since`` accepted, and the PR/brief cursor floor
 ambiguity_window_minutes    15           serving code-basis ambiguity window
 edit_grace_seconds          60           comment edit → claimed

@@ -37,12 +37,12 @@ def _replace(key: str, value: str) -> str:
 
 
 def test_committed_conf_parses_with_decision_9_values():
-    """The committed conf parses: settle 6, max defer 24, cap 400, floor 500, 330 min with a 30 min derive reserve, since 2026-07-31, :29 hourly, 15 min, 90-day continuity horizon, the nine watched workflows, snapshot pr843 at audits/provenance-2026-10/rescue pinned to commit 411a7565… and manifest c713379b…."""
+    """The committed conf parses: settle 6, max defer 24, cap 400, floor 500, 330 min with a 1 min derive reserve (2× the integration dry run's measured derive), since 2026-07-31, :29 hourly, 15 min, 90-day continuity horizon, the nine watched workflows, snapshot pr843 at audits/provenance-2026-10/rescue pinned to commit 411a7565… and manifest c713379b…."""
     c = conf.load(str(CONF))
     assert c.enabled is True
     assert (c.settle_hours, c.max_defer_hours, c.deploy_wait_hours) == (6, 24, 2)
     assert (c.scheduled_max_requests, c.rate_floor) == (400, 500)
-    assert (c.dispatch_max_minutes, c.derive_reserve_minutes) == (330, 30)
+    assert (c.dispatch_max_minutes, c.derive_reserve_minutes) == (330, 1)
     assert c.backfill_since == "2026-07-31"
     assert c.cadence == "29 * * * *"
     assert (c.ambiguity_window_minutes, c.edit_grace_seconds) == (15, 60)

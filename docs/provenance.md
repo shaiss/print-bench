@@ -1116,7 +1116,7 @@ sibling workflow.
 |---|---|
 | scheduled cap | `scheduled_max_requests` (400) non-304 responses; the request that would exceed it is not sent |
 | floor | when `X-RateLimit-Remaining` < `rate_floor` (500): a scheduled run stops cleanly; a dispatch sleeps until `X-RateLimit-Reset` + 5 s |
-| capture deadline | a dispatch stops capturing at job start + `dispatch_max_minutes` (330) − `derive_reserve_minutes` (30, to be replaced by twice the derive time measured in the integration dry run); derive and publish run after it, inside `timeout-minutes: 350`; cursors resume on the next dispatch |
+| capture deadline | a dispatch stops capturing at job start + `dispatch_max_minutes` (330) − `derive_reserve_minutes` (1: twice the derive time the integration dry run measured — 13–17 s over the full #843 ingest plus the fixture PRs — rounded up to a minute; a full ~200-PR backfill projects to ~3–4 minutes, inside the 20 minutes between 330 and `timeout-minutes: 350`); derive and publish run after it, inside `timeout-minutes: 350`; cursors resume on the next dispatch |
 | ETag | `If-None-Match` on every GET from `<out-dir>/etag-cache/`; a 304 is free and not counted |
 | retries | 5xx, 403/429 with `Retry-After` or a secondary-limit message, socket timeouts: 3 retries (2/4/8 s); 401/404/410/422 not retried |
 | pagination | `per_page=100`; `rel="next"` followed only on `api.github.com`; more than `max_pages` raises rather than truncating |
@@ -1147,7 +1147,7 @@ duplicate / colonless / malformed lines fail with `path:lineno`; integers only).
 | `scheduled_max_requests` | 400 | scheduled request cap |
 | `rate_floor` | 500 | rate-limit floor |
 | `dispatch_max_minutes` | 330 | a dispatch's capture budget from job start (with the reserve below) |
-| `derive_reserve_minutes` | 30 | kept after capture for derive + publish; set from the measured dry run |
+| `derive_reserve_minutes` | 1 | kept after capture for derive + publish; twice the integration dry run's measured derive (13–17 s), rounded up; the P2 backfill re-measures |
 | `backfill_since` | 2026-07-31 | earliest `since`; floor of a fresh PR/brief cursor |
 | `ambiguity_window_minutes` | 15 | code-basis ambiguity window |
 | `edit_grace_seconds` | 60 | an edit at least this long after creation → `claimed` |
