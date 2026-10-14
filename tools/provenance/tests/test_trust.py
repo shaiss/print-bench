@@ -498,7 +498,24 @@ def test_comment_tier_rules_per_kind():
     assert _tier("coach.lock", lock, marker_sha=None) == ("verified", "actions-bot+suffix")
     assert _tier("coach.lock", lock, marker_sha=OLD) == ("claimed", "marker:no-suffix")
     assert _tier("coach.lock", f"r\n\n{coach_done}\n\n{FOOTER}") == ("claimed", "marker:no-suffix")
-    assert _tier("coach.lock", "🎓 COACH-LOCK\n\nkickoff") == ("claimed", "marker:no-suffix")
+    # a coach.lock built from the lead line alone carries no marker: only the login is known
+    # (coach-lock-check.sh reads that body as no lock at all), whoever posted it — so serving's
+    # window upgrade can still lift it; never claimed/marker:* (no marker is present)
+    kickoff = "🎓 COACH-LOCK\n\nkickoff"
+    assert not trust.coach_lock_served([{"body": kickoff, "user": {"login": "github-actions[bot]"},
+                                         "created_at": "2026-10-05T12:00:00Z"}])
+    assert _tier("coach.lock", kickoff) == ("login", "login")
+    assert _tier("coach.lock", kickoff, login="shaiss") == ("login", "login")  # owner-posted, no marker
+    assert _tier("coach.lock", kickoff, login="cursor[bot]") == ("login", "login")
+    assert _tier("coach.lock", kickoff, login=None) == ("none", "none")
+    assert _tier("coach.lock", kickoff, updated="2026-10-06T12:00:00Z") == ("login", "login")
+    # … while ONE marker of the family (either half of the pair) makes it a judged marker post
+    half = f"{kickoff}\n\n{trust.COACH_LOCK_MARKER}\n"
+    assert _tier("coach.lock", half) == ("claimed", "marker:no-suffix")
+    assert _tier("coach.lock", half, login="shaiss") == ("claimed", "marker:owner-token")
+    assert _tier("coach.lock", f"r\n\n{coach_done}\n", login="shaiss") == ("claimed", "marker:owner-token")
+    # a marker of ANOTHER family does not make a judged kind a marker post
+    assert _tier("coach.lock", f"{kickoff}\n\n{jane}\n\n{FOOTER}") == ("login", "login")
     # oracle: the head marker and the footer
     oracle = f"{trust.ORACLE_MARKER}\n\n## Oracle\n\n{FOOTER}"
     assert _tier("oracle.review", oracle) == ("verified", "actions-bot+head-marker")
@@ -507,6 +524,36 @@ def test_comment_tier_rules_per_kind():
     # a kind with no marker rule: only the login is known
     assert _tier("coach.round", "Round 2 — x") == ("login", "login")
     assert _tier("brief.claimed", "🚢 SHIP-LOCK", login=None) == ("none", "none")
+    # the same family rule for the three kinds the extractor always builds from a marker
+    assert _tier("review.signoff", "Jane.\n\nprose only") == ("login", "login")
+    assert _tier("review.signoff", f"Jane.\n\n{jane.lower()}\n\n{FOOTER}") == ("login", "login")
+    assert _tier("triage.verdict", "t\n\nprose only", login="shaiss") == ("login", "login")
+    assert _tier("oracle.review", "## Oracle\n\nprose only", login=None) == ("none", "none")
+
+
+def test_markerless_coach_lock_on_397_is_login():
+    """#397 comment 5393176225 (Actions bot, 2026-08-24, lead coach_lock, no marker at all) is a
+    coach.lock with only its login known — not claimed/marker:no-suffix, which would claim a marker
+    the body does not carry; coach-lock-check.sh reads it as no lock."""
+    c = next(c for c in raw_pr(397)["issue_comments"] if c["id"] == 5393176225)
+    d = c["body"]
+    assert d["lead"] == "coach_lock" and d["marker_lines"] == [] and d["suffix_markers"] == []
+    assert d["head_marker"] is None
+    args = dict(kind="coach.lock", owner_login=OWNER_LOGIN, digest=d, created_at=c["created_at"],
+                updated_at=c["updated_at"], edit_grace_seconds=60, marker_sha=None)
+    assert trust.comment_tier(login=c["user"]["login"], **args) == ("login", "login")
+    assert trust.comment_tier(login=OWNER_LOGIN, **args) == ("login", "login")  # owner-posted: no owner-token
+    assert trust.comment_tier(login=None, **args) == ("none", "none")
+
+
+def test_comment_tier_needs_the_owner():
+    """The owner-token rule cannot run without the owner: a missing or empty owner_login is refused."""
+    body = f"Jane.\n\n{jane}\n\n{FOOTER}"
+    for bad in (None, "", "  ", 7):
+        with pytest.raises(ValueError):
+            trust.comment_tier(kind="review.signoff", login="shaiss", owner_login=bad,
+                               digest=digest.body_digest(body), created_at="2026-10-05T12:00:00Z",
+                               updated_at=None, edit_grace_seconds=60, marker_sha=HEAD)
 
 
 def test_triage_tiers_on_nuggs_vent_cap():
@@ -532,18 +579,37 @@ def test_status_trust_needs_actions_creator_and_receipt():
     ids = _auto_review_runs()
     statuses = [s for sts in raw_pr(636)["statuses"].values() for s in sts if s["context"] == "reviewer-signoff"]
     assert len(statuses) == 22
-    assert {trust.status_tier(s, ids) for s in statuses} == {("verified", "actions-status+receipt")}
+    def tier(status, run_ids=ids):
+        return trust.status_tier(status, run_ids, owner_login=OWNER_LOGIN)
+
+    assert {tier(s) for s in statuses} == {("verified", "actions-status+receipt")}
     one = statuses[0]
-    assert trust.status_tier(dict(one, creator="shaiss"), ids, owner_login="shaiss") == ("claimed", "marker:owner-token")
-    assert trust.status_tier(dict(one, creator="shaiss"), ids) == ("claimed", "marker:other-author")
-    assert trust.status_tier(dict(one, creator="cursor[bot]"), ids) == ("claimed", "marker:other-author")
-    assert trust.status_tier(one, set()) == ("login", "login")  # no receipt vouches for the run
-    assert trust.status_tier(dict(one, target_url=None), ids) == ("login", "login")
-    assert trust.status_tier(dict(one, target_url="https://vercel.com/x/actions/runs/1"), ids) == ("login", "login")
-    assert trust.status_tier(dict(one, creator=None), ids) == ("none", "none")
+    assert tier(dict(one, creator=OWNER_LOGIN)) == ("claimed", "marker:owner-token")
+    assert tier(dict(one, creator=OWNER_LOGIN.upper())) == ("claimed", "marker:owner-token")
+    assert tier(dict(one, creator="someone-else")) == ("claimed", "marker:other-author")
+    assert tier(dict(one, creator="cursor[bot]")) == ("claimed", "marker:other-author")
+    assert tier(one, set()) == ("login", "login")  # no receipt vouches for the run
+    assert tier(dict(one, target_url=None)) == ("login", "login")
+    assert tier(dict(one, target_url="https://vercel.com/x/actions/runs/1")) == ("login", "login")
+    assert tier(dict(one, creator=None)) == ("none", "none")
     rid = trust.run_id_of(one["target_url"])
     assert rid in ids and trust.run_id_of(one["target_url"] + "/job/5") == rid
     assert trust.run_id_of(f"https://github.com/o/r/actions/runs/{rid}x") is None
+
+
+def test_status_tier_requires_the_owner():
+    """owner_login is a required keyword: the skeleton-shaped call status_tier(status, ids) fails
+    loudly (TypeError) instead of labelling the owner's own status marker:other-author — the label
+    serving's window upgrade is free to attribute to an agent run; None/empty is refused too."""
+    ids = _auto_review_runs()
+    one = next(s for sts in raw_pr(636)["statuses"].values() for s in sts if s["context"] == "reviewer-signoff")
+    mine = dict(one, creator=OWNER_LOGIN)
+    with pytest.raises(TypeError):
+        trust.status_tier(mine, ids)  # the skeleton signature
+    for bad in (None, "", " "):
+        with pytest.raises(ValueError):
+            trust.status_tier(mine, ids, owner_login=bad)
+    assert trust.status_tier(mine, ids, owner_login=OWNER_LOGIN) == ("claimed", "marker:owner-token")
 
 
 def test_selftest_cases_hold():

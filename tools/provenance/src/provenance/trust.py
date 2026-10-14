@@ -69,7 +69,14 @@ replays every ``row`` of ``reviewer-posted.sh --selftest`` and every row of
   name (``review.signoff``, ``triage.verdict``, ``coach.lock``,
   ``oracle.review``); any other comment kind (a ``coach.round`` note, a
   SHIP-LOCK) carries no verifiable marker and is ``login`` (or ``none``
-  without a login). For a judged kind the author decides first (owner →
+  without a login). A judged kind is judged only when the digest actually
+  carries a marker of its family (:data:`KIND_FAMILIES`, looked for in
+  ``head_marker``, ``marker_lines`` and ``suffix_markers``): ``claimed``
+  means a marker is present, so a ``coach.lock`` built from the
+  ``🎓 COACH-LOCK`` lead line alone (no ``COACH_LOCK``/``COACH_DONE``
+  marker — coach-lock-check.sh reads it as no lock at all) is ``login``
+  (``none`` without a login), whoever posted it, and stays eligible for
+  serving's window upgrade. Otherwise the author decides first (owner →
   ``marker:owner-token``, any other non-bot author or none →
   ``marker:other-author``), then the rule (``marker:no-suffix``), then the
   edit window (``marker:edited``). ``marker_sha`` is the sha of the marker
@@ -79,9 +86,16 @@ replays every ``row`` of ``reviewer-posted.sh --selftest`` and every row of
 * :func:`status_tier`: Actions-bot creator + an ``auto-review.yml`` receipt
   for the ``target_url`` run → ``verified``; an Actions-bot status whose run
   has no receipt → ``login`` (nothing vouches for which workflow posted it);
-  the owner (optional keyword ``owner_login``) → ``claimed`` /
-  ``marker:owner-token``; any other creator → ``claimed`` /
-  ``marker:other-author``; no creator → ``none``.
+  the owner → ``claimed`` / ``marker:owner-token``; any other creator →
+  ``claimed`` / ``marker:other-author``; no creator → ``none``.
+  ``owner_login`` is a REQUIRED keyword (a signature delta from the
+  skeleton's ``status_tier(status, auto_review_run_ids)``): a call that
+  omits it fails with ``TypeError`` instead of labelling the owner's own
+  statuses ``marker:other-author``, which serving's window upgrade would
+  then be free to attribute to an agent run.
+* Both tier functions refuse (``ValueError``) an ``owner_login`` that is not
+  a non-empty string: the owner-token rule cannot be applied without the
+  owner.
 * :func:`is_edited` is the edit-window rule on its own (the ``edited``
   field of the four judged kinds' field sets).
 
@@ -96,6 +110,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from . import digest as _digest
+from . import markers as _markers
 
 ACTIONS_BOT = "github-actions"
 REVIEWER_FAMILIES = {"jane": "JANE_SIGNOFF", "drik": "DRIK_SIGNOFF",
@@ -103,8 +118,15 @@ REVIEWER_FAMILIES = {"jane": "JANE_SIGNOFF", "drik": "DRIK_SIGNOFF",
 COACH_LOCK_MARKER = "<!-- COACH_LOCK -->"
 ORACLE_MARKER = "<!-- ORACLE_REVIEW -->"
 
-#: The comment kinds whose trust is decided by a marker rule here.
-JUDGED_KINDS = frozenset({"review.signoff", "triage.verdict", "coach.lock", "oracle.review"})
+#: The comment kinds whose trust is decided by a marker rule here, each with the marker
+#: families whose presence makes the comment a marker post (``claimed`` at worst).
+KIND_FAMILIES: dict[str, frozenset[str]] = {
+    "review.signoff": frozenset(_markers.SIGNOFF_FAMILIES),
+    "triage.verdict": frozenset({"PM_TRIAGE", "PM_TRIAGE_DONE"}),
+    "coach.lock": frozenset({"COACH_LOCK", "COACH_DONE"}),
+    "oracle.review": frozenset({"ORACLE_REVIEW"}),
+}
+JUDGED_KINDS = frozenset(KIND_FAMILIES)
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
 _SINCE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
@@ -283,12 +305,31 @@ def _rule_holds(kind: str, d: dict[str, Any], marker_sha: Optional[str]) -> bool
     return False
 
 
+def _check_owner(owner_login: Any) -> str:
+    if not isinstance(owner_login, str) or not owner_login.strip():
+        raise ValueError(f"owner_login must be the repo owner's login, got {owner_login!r}")
+    return owner_login
+
+
+def _has_family_marker(kind: str, d: dict[str, Any]) -> bool:
+    """True when the digest carries a marker of ``kind``'s family (:data:`KIND_FAMILIES`) in
+    ``head_marker``, ``marker_lines`` or ``suffix_markers``."""
+    families = KIND_FAMILIES.get(kind, frozenset())
+    lines = [d.get("head_marker"), *(d.get("marker_lines") or []), *(d.get("suffix_markers") or [])]
+    for line in lines:
+        m = _markers.parse_marker(line) if isinstance(line, str) else None
+        if m is not None and m.family in families:
+            return True
+    return False
+
+
 def comment_tier(*, kind: str, login: Optional[str], owner_login: str, digest: dict[str, Any],
                  created_at: str, updated_at: Optional[str], edit_grace_seconds: int,
                  marker_sha: Optional[str] = None) -> tuple[str, str]:
     """``(tier, trust_basis)`` for a marker-bearing comment event — ``verified``/``claimed``/
     ``login``/``none`` (window is serving's)."""
-    if kind not in JUDGED_KINDS:
+    owner_login = _check_owner(owner_login)
+    if kind not in JUDGED_KINDS or not _has_family_marker(kind, digest):
         return ("login", "login") if login else ("none", "none")
     if not is_actions_bot(login):
         if _same_login(login, owner_login):
@@ -310,12 +351,13 @@ def run_id_of(target_url: Optional[str]) -> Optional[int]:
 
 
 def status_tier(status: dict[str, Any], auto_review_run_ids: set[int], *,
-                owner_login: Optional[str] = None) -> tuple[str, str]:
+                owner_login: str) -> tuple[str, str]:
     """``(tier, basis)`` for a ``reviewer-signoff`` status (raw-pr@1 status shape).
 
-    ``owner_login`` (optional) names the owner's own statuses ``marker:owner-token``;
-    without it every non-bot creator is ``marker:other-author``.
+    ``owner_login`` is required: it names the owner's own statuses ``marker:owner-token``
+    (never eligible for serving's window upgrade).
     """
+    owner_login = _check_owner(owner_login)
     creator = status.get("creator")
     creator = creator if isinstance(creator, str) and creator else None
     if creator is None:

@@ -187,8 +187,31 @@ def test_enum_and_list_max_and_map_rules():
     assert errs("list", {"0": 1}) == ["$: want list, got obj"]
     assert ok("map", {"ab": 1, "c": 2})
     assert errs("map", {"AB": 1}) == ['$["AB"]: key does not match [a-z]+']
+    # a key whose PREFIX matches but whose tail does not: the key must full-match, not prefix-match
+    assert errs("map", {"aB": 1}) == ['$["aB"]: key does not match [a-z]+']
+    assert errs("map", {"ab1": 1}) == ['$["ab1"]: key does not match [a-z]+']
+    assert errs("map", {"ab\n": 1}) == ['$["ab\\n"]: key does not match [a-z]+']
     assert errs("map", {"a": 1, "b": 2, "c": 3}) == ["$: more than 2 entries (3)"]
     assert errs("map", {"a": "1"}) == ['$["a"]: want int, got str']
+
+
+def test_real_map_keys_fullmatch():
+    """On the real contract a map key with a valid prefix and an invalid tail is refused: a status
+    sha key with a trailing newline or a 41st hex char, a record's design key "demo/x" / "demo\\n"."""
+    pr = raw_pr(636)
+    sha = next(iter(pr["statuses"]))
+    for bad in (sha + "\n", sha + "0", sha + "/x"):
+        doc = copy.deepcopy(pr)
+        doc["statuses"][bad] = doc["statuses"].pop(sha)
+        got = C.validate("raw-pr@1", doc)
+        assert got == [f"$.statuses[{json.dumps(bad)}]: key does not match [0-9a-f]{{40}}"], (bad, got)
+    commit = _records()[f"records/commit/{SHA}.json"]
+    assert C.validate("record@1:commit", commit) == []
+    for bad in ("demo/x", "demo\n", "demo "):
+        rec = copy.deepcopy(commit)
+        rec["designs"][bad] = rec["designs"].pop("demo")
+        assert C.validate("record@1:commit", rec) == [
+            f"$.designs[{json.dumps(bad)}]: key does not match [a-z0-9][a-z0-9-]{{0,63}}"], bad
 
 
 def test_unique_is_canonical_json_with_sorted_keys():
@@ -571,6 +594,15 @@ def _event():
 NODE_MJS = REPO / "site" / "lib" / "provenance-contract.mjs"
 NODE_BUNDLE = REPO / "site" / "test" / "fixtures" / "provenance-bundle.json"
 
+#: The one corpus case the two stacks CANNOT agree on through ``validate(shape, value)``: Python's
+#: ``json.loads("1.0")`` keeps a float (``want int, got float``) while Node's ``JSON.parse("1.0")``
+#: is the integer ``1`` — the distinction is gone before a JS validator sees the value. What refuses
+#: an integral float on the Node side is the canonical-bytes check of the file it read
+#: (:func:`test_integral_float_is_refused_by_the_canonical_bytes_check` pins the Python half: a
+#: tree blob carrying ``1.0`` is never canonical). Pinned both ways so a change on either side is seen.
+INTEGRAL_FLOAT = "an integral float (N.0) where an int belongs"
+NODE_DIVERGES = {INTEGRAL_FLOAT: (False, True)}  # label -> (python accepts, node accepts)
+
 
 def _corpus():
     """``[(label, shape, value)]`` over the real contract: accepts and the matching rejects."""
@@ -592,6 +624,9 @@ def _corpus():
     flt = copy.deepcopy(pr)
     flt["pull"]["commits"] = 1.5
     out.append(("a float where an int belongs", "raw-pr@1", flt))
+    flt = copy.deepcopy(pr)
+    flt["pull"]["commits"] = float(flt["pull"]["commits"])  # serialised as "N.0"
+    out.append((INTEGRAL_FLOAT, "raw-pr@1", flt))
     long_title = copy.deepcopy(pr)
     long_title["pull"]["title"] = "\U0001F600" * 1000  # 1000 code points = max, 2000 UTF-16 units
     out.append(("1000 emoji title (max 1000 code points)", "raw-pr@1", long_title))
@@ -601,6 +636,26 @@ def _corpus():
     out.append(("event@1 with a foreign kind field", "event@1", ev))
     out.append(("evidence state", "state@1", _state()))
     return out
+
+
+def test_integral_float_is_refused_by_the_canonical_bytes_check():
+    """The Python half of the NODE_DIVERGES closure: a stored blob spelling an int as ``1.0`` (which
+    a JS ``JSON.parse`` reads back as ``1``) is refused by ``validate_tree`` — canonical bytes never
+    carry a float — on a derived tree (site/bundle.json) and on an evidence raw blob."""
+    files = _derived_files()
+    blob = files["site/bundle.json"]
+    assert blob.count(b'"producer_run": 1,') == 1
+    files["site/bundle.json"] = blob.replace(b'"producer_run": 1,', b'"producer_run": 1.0,')
+    got = _tree_errors(files, "derived")
+    assert "site/bundle.json: not storable canonical JSON ($.producer_run: float 1.0 — the provenance " \
+           "contract stores integers only)" in got, got
+    ev = _evidence_files()
+    doc = json.loads(gzip.decompress(ev["raw/pr/636.json.gz"]))
+    doc["pull"]["commits"] = float(doc["pull"]["commits"])
+    ev["raw/pr/636.json.gz"] = gzip.compress(json.dumps(doc, indent=1, sort_keys=True,
+                                                        ensure_ascii=False).encode() + b"\n", mtime=0)
+    assert any(e.startswith("raw/pr/636.json.gz: not storable canonical JSON ($.pull.commits: float")
+               for e in _tree_errors(ev, "evidence"))
 
 
 @pytest.mark.skipif(shutil.which("node") is None or not NODE_MJS.exists(),
@@ -618,12 +673,17 @@ def test_python_and_node_agree(tmp_path):
     proc = subprocess.run(["node", "--input-type=module", "-e", script, str(NODE_MJS), str(path)],
                           capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr
-    node = json.loads(proc.stdout.strip().splitlines()[-1])
-    python = [C.validate(shape, value) == [] for _, shape, value in corpus]
-    assert dict(zip([c[0] for c in corpus], node)) == dict(zip([c[0] for c in corpus], python))
+    labels = [c[0] for c in corpus]
+    node = dict(zip(labels, json.loads(proc.stdout.strip().splitlines()[-1])))
+    python = dict(zip(labels, (C.validate(shape, value) == [] for _, shape, value in corpus)))
+    # the known divergence, pinned exactly (python rejects, node accepts) …
+    assert {label: (python[label], node[label]) for label in NODE_DIVERGES} == NODE_DIVERGES
+    # … and every other case agrees
+    assert {k: v for k, v in node.items() if k not in NODE_DIVERGES} == {
+        k: v for k, v in python.items() if k not in NODE_DIVERGES}
     expected_reject = {label for label, _, _ in corpus if any(w in label for w in (
         "extra field", "bad enum", "UTF-16 order", "float", "foreign kind"))}
-    assert {label for (label, _, _), good in zip(corpus, python) if not good} == expected_reject
+    assert {label for label, good in python.items() if not good} == expected_reject
 
 
 def test_python_corpus_verdicts():
