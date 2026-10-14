@@ -4,7 +4,7 @@
  "doc": "docs/provenance.md",
  "note": "The closed, machine-readable contract for the provenance harvester's stored shapes. Python (tools/provenance/src/provenance/contract.py) and Node (site/lib/provenance-contract.mjs) validate against THIS file with hand-rolled validators; no JSON Schema dependency. Type language: see 'typelang'. Every 'obj' is closed (extra keys invalid) and every listed field is required (nullable where 'null': true) unless listed under 'optional_fields'. Patterns are written without anchors and always FULL-match (Python re.fullmatch; JS new RegExp('^(?:'+p+')$')).",
  "typelang": {
-  "str": "string; optional 're' (full-match, ASCII-only pattern) and 'max' (UTF-16 length bound, applied to code points in Python)",
+  "str": "string; optional 're' (full-match, ASCII-only pattern) and 'max' (an upper bound on the number of Unicode CODE POINTS — Python len(s), JS [...s].length, never JS s.length)",
   "int": "integer (never a bool, never a float); optional 'min'/'max' inclusive",
   "bool": "true/false",
   "enum": "one of 'of' (strings)",

@@ -13,7 +13,9 @@ exactly, because the Node validator implements the same ones:
   objects inside receipts).
 * ``int`` rejects ``bool`` and any float (``True`` is not ``1`` here).
 * ``str`` ``re`` is a FULL match (``re.fullmatch``); ``max`` bounds the
-  length in code points.
+  length in Unicode code points (``len(s)``; the Node validator must use
+  ``[...s].length``, not the UTF-16 ``s.length``, or an emoji-bearing
+  title would validate differently in the two stacks).
 * ``list`` ``unique`` compares canonical JSON; ``sorted`` means
   ``value == sorted(value)``.
 * ``map`` keys full-match ``key``.
