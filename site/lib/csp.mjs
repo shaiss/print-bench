@@ -139,6 +139,45 @@ export function scanHtml(html) {
   return { tags, scripts };
 }
 
+// The named character references that decode to something a URL scheme check
+// can see: the ':' that ends a scheme, and the tab and newline the URL parser
+// drops from anywhere in a URL. No named reference decodes to an ASCII letter,
+// so these are the only ones that can disguise a `javascript:`. All three need
+// their semicolon (none is a legacy reference) and are case-sensitive:
+// `&Colon;` is U+2237.
+const NAMED_REFS = { colon: ":", Tab: "\t", NewLine: "\n" };
+const CHAR_REF = /&#(?:[xX]([0-9a-fA-F]+)|([0-9]+));?|&(colon|Tab|NewLine);/g;
+
+/**
+ * An attribute value with its character references decoded the way the
+ * browser's tokenizer decodes them, as far as a URL scheme check needs:
+ * numeric references (decimal or hex, digits consumed greedily, semicolon
+ * optional) and NAMED_REFS. A reference to NUL, a surrogate or past U+10FFFF
+ * becomes U+FFFD, as in the browser. The C1 remap (&#x80;–&#x9F; to
+ * windows-1252) is skipped: neither side of it is ASCII, so it cannot make or
+ * break a scheme.
+ */
+export function decodeCharRefs(value) {
+  return value.replace(CHAR_REF, (ref, hex, dec, name) => {
+    if (name) return NAMED_REFS[name];
+    const cp = hex ? parseInt(hex, 16) : parseInt(dec, 10);
+    if (!(cp > 0 && cp <= 0x10ffff) || (cp >= 0xd800 && cp <= 0xdfff)) return "�";
+    return String.fromCodePoint(cp);
+  });
+}
+
+/**
+ * Whether an attribute value is a javascript: URL to the browser: references
+ * decoded, then what the URL parser strips before it reads a scheme — every
+ * ASCII tab or newline, and leading C0 controls and spaces. Leading whitespace
+ * in the wider \s sense is stripped too, which the parser does not do; that
+ * can only flag more.
+ */
+export function isJavascriptUrl(value) {
+  const url = decodeCharRefs(value).replace(/[\t\n\r]/g, "").replace(/^[\s\x00-\x1f]+/, "");
+  return /^javascript:/i.test(url);
+}
+
 /** The scripts a policy has to name: inline and executable. */
 function hashableScripts(scripts) {
   return scripts.filter((s) => s.inline && s.executable);
@@ -248,7 +287,7 @@ export function checkCsp(html) {
   for (const t of tags) {
     for (const [name, value] of t.attrs) {
       if (/^on/.test(name)) problems.push(`inline event handler ${name}= on <${t.name}>`);
-      if (["href", "src", "action", "formaction"].includes(name) && /^\s*javascript:/i.test(value)) {
+      if (["href", "src", "action", "formaction"].includes(name) && isJavascriptUrl(value)) {
         problems.push(`javascript: URL in ${name}= on <${t.name}>`);
       }
     }

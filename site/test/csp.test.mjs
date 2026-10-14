@@ -239,6 +239,42 @@ test("checkCsp flags what no hash can allow, and a misplaced or weakened policy"
   assert.deepEqual(checkCsp(prose), []);
 });
 
+test("checkCsp reads a URL the way the browser does: character references decoded, tabs and newlines dropped", () => {
+  const page = (href) => applyCsp(`<html><head></head><body><a href="${href}">x</a></body></html>`);
+  // Each of these is a javascript: URL to the browser, and none matches the
+  // literal string: the tokenizer decodes the reference, then the URL parser
+  // drops leading C0 controls and spaces and every tab or newline.
+  for (const href of [
+    "&#106;avascript:void(0)",
+    "&#x6A;avascript:void(0)",
+    "&#X6a;avascript:void(0)",
+    "&#0000106avascript:void(0)", // leading zeros, no semicolon
+    "javascript&colon;void(0)",
+    "java&Tab;script:void(0)",
+    "java&NewLine;script:void(0)",
+    "java&#10;script:void(0)",
+    "java&#x0D;script:void(0)",
+    "&#1;&#32;javascript:void(0)",
+  ]) {
+    assert.ok(
+      checkCsp(page(href)).some((p) => /javascript: URL in href=/.test(p)),
+      `${href} should be flagged: ${checkCsp(page(href)).join("; ")}`
+    );
+  }
+  // References that decode to something else are left alone: a query string,
+  // an escaped colon in a path, a reference greedy hex digits turn into
+  // another character, and named references that are not ':' or whitespace.
+  for (const href of [
+    "/?a=1&amp;b=2",
+    "/notes&colon;javascript",
+    "&#x6Aavascript:void(0)",
+    "javascript&Colon;void(0)",
+    "java&tab;script:void(0)",
+  ]) {
+    assert.deepEqual(checkCsp(page(href)), [], href);
+  }
+});
+
 test("the tokenizer counts only scripts the browser would run", () => {
   const html = [
     "<html><head>",
