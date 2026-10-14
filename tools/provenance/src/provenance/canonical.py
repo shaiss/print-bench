@@ -114,8 +114,8 @@ PRECISION_RANK = ("day", "second")
 
 #: Source rank: the event-id prefix order used to break timestamp ties. Mirrors
 #: site/lib/provenance-contract.json ``enums.source_rank`` (pinned by a test).
-SOURCE_RANK = ("issue", "pr", "timeline", "commit", "issuecomment", "status", "run", "job",
-               "deployment", "release", "row")
+SOURCE_RANK = ("issue", "pr", "timeline", "commit", "issuecomment", "review", "status", "run",
+               "job", "deployment", "release", "row")
 
 
 def event_sort_key(event: dict[str, Any]) -> tuple:

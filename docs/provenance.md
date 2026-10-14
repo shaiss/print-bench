@@ -149,6 +149,19 @@ reopened and closed again); every reader folds the highest revision.
 | Release | on publish (non-draft) | immediately | `raw/release/<tag>.json.gz` (`raw-release@1`) |
 | Direct-to-main commit | — | derived from local git; no API; only a first-parent main commit with no PR subject, not committed by GitHub, in no frozen PR (§Records) | `records/commit/<sha40>.json` only |
 
+**Admission and isolation** (`freeze.plan_freezes`). Every raw document
+passes `contract.validate` before it is planned: a PR or brief that fails
+stays pending with reason `contract-invalid` (a PR's linked briefs are held
+with it), so nothing invalid ever reaches the add-only ref; a failing release
+is skipped and retried by the next listing; `refreeze` raises
+`ContractInvalid` (exit 1). An API refusal while considering one unit — the
+`designs/` files check, the pending re-reads, a capture — holds only that
+unit pending as `capture-failed` and the pass continues. Only 404/410/422 on
+an optional section (a sha's statuses, a deployment's statuses) count as
+gone; any other refusal fails the unit, which is retried. `refreeze` needs an
+already-frozen PR (`RefreezeRefused`, before any request); a first capture is
+`harvest pr=<n>`.
+
 Revision paths: revision 1 is `<key>.json.gz`; revision K ≥ 2 is
 `<key>.r<K>.json.gz`. Which units are frozen, at which revision, is read
 from these paths (`state.frozen_from_paths`) — never from `state.json`, so
@@ -378,7 +391,20 @@ any clone that holds it restores continuity by pushing exactly `C` — tip ==
   security.md). The control that holds is that such a run's marks are not
   accepted (head branch, first-parent history, workflow path and event);
 - the one harvest job both parses untrusted API payloads and holds
-  `contents: write` (§Workflow explains why it is not split).
+  `contents: write` (§Workflow explains why it is not split);
+- Reeve's port verifies a mark's run head by **reachability** from the
+  default branch (`GET /compare/{head_sha}...{default}`, status `identical`
+  or `ahead` — which refuses a run dispatched on a tag named like the default
+  branch), not the harvester's first-parent rule (it holds no clone); a
+  commit reachable only through a merged PR's second parent passes Reeve, and
+  the harvester's own scan still refuses that mark;
+- whoever holds `actions: write` can delete artifacts or runs: deleting the
+  newest checkpoint makes an older genuine one the newest, and a force-push
+  back to it then reads **ok** (the newer frozen units vanish and are later
+  re-captured with late activity). No workflow here grants `actions: write`;
+  keep it off the agents' token. An optional cross-check (not built): refuse
+  an evidence tip whose `state.json` cursors or `raw/` path count went
+  backwards against what the newest derived bundle was built from.
 
 ## The evidence digest
 
@@ -503,8 +529,8 @@ anchored patterns, one per naming era, each with a fixture:
 | Era | First seen | Shape | Model of record |
 |---|---|---|---|
 | E0 | 2026-08-12 (#200) | `Run /jane-review (unattended)` | inline `--model` pin |
-| E1 | 2026-08-08 → 08-21 | `Run via Anthropic (Claude)`, `Ship via Z.AI (GLM)` | inline `--model` pin (pre-#326) |
-| E2 | 2026-08-12 → 08-20 | `/jane-review via Z.AI GLM 5.2`, `/pm triage via Anthropic Opus 5` | inline `--model` pin (the name's label is a cross-check only) |
+| E1 | 2026-08-08 → 08-21 | `Run via Anthropic (Claude)`, `Ship via Z.AI (GLM)` | inline `--model` pin (pre-#326), or a registry chain output (`steps.<id>.outputs.link<N>_model`: product-scout's `Run via Z.AI (GLM)`) |
+| E2 | 2026-08-12 → 08-20 | `/jane-review via Z.AI GLM 5.2`, `/pm triage via Anthropic Opus 5` | inline `--model` pin, or (from 08-16, when auto-review moved onto the registry) `needs.design-changes.outputs.model<N>` → `chain[N]` of `review`; the name's label is a cross-check only — a mismatch is `ambiguous` |
 | E3 | 2026-08-21 → | `Run via Z.AI (GLM, chain link 3)`, `/drik-review via Anthropic (chain link 4)`, `Oracle via Z.AI GLM (chain link 1)`, `Ship via OpenRouter (OSS, chain link 6)`, `Propose via …` / `Sign off via …` (wright.yml) | `chain[link]` from `registry.conf` at the code basis |
 
 Leads: `Run`, `Ship`, `Oracle`, `Propose`, `Sign off`, `/jane-review`,
@@ -621,7 +647,10 @@ after GitHub deleted them.
    commit)
 3. `/pulls/{n}/commits` (survives branch deletion)
 4. `/issues/{n}/comments`
-5. `/pulls/{n}/reviews` and 6. `/pulls/{n}/comments` (counted, never rendered)
+5. `/pulls/{n}/reviews` — a review body carrying an event marker is an event
+   `review:<id>` (ts = `submitted_at`; the M3-era Jane sign-offs on #371/#397:
+   15 of sbc-case's 31), every other review is counted — and 6.
+   `/pulls/{n}/comments` (counted, never rendered)
 7. `/issues/{n}/timeline`
 8. the GraphQL query (thread `isResolved` counts, `lastEditedAt`)
 9. `/actions/workflows/ci.yml/runs?branch=<head_ref>` — rows kept when
@@ -676,7 +705,7 @@ ambiguous), **N** not derivable (null with an explicit basis, never inferred).
 
 | Field | Tag | Definition |
 |---|---|---|
-| `id` | D | closed forms: `issue:<n>:filed`, `issuecomment:<id>`, `timeline:<id>`, `pr:<n>:opened\|merged\|closed`, `commit:<sha40>`, `status:<id>`, `run:<id>`, `job:<id>`, `deployment:<id>`, `release:<id>`, `row:<design>:<PM\|NOTES>.md:<sha256[:16]>:<k>` |
+| `id` | D | closed forms: `issue:<n>:filed`, `issuecomment:<id>`, `review:<id>` (a PR review body carrying an event marker), `timeline:<id>`, `pr:<n>:opened\|merged\|closed`, `commit:<sha40>`, `status:<id>`, `run:<id>`, `job:<id>`, `deployment:<id>`, `release:<id>`, `row:<design>:<PM\|NOTES>.md:<sha256[:16]>:<k>` |
 | `ts` | D | RFC3339 UTC to the second: `created_at` / `submitted_at` / author date / job `started_at`; day rows `YYYY-MM-DDT00:00:00Z` |
 | `ts_precision` | D | `second` \| `day` |
 | `tz` | D | `UTC` |
@@ -686,7 +715,7 @@ ambiguous), **N** not derivable (null with an explicit basis, never inferred).
 | `head_sha` | J | the pushed head live at `ts` |
 | `stale_sha` | J | the marker sha is not among its round's heads |
 | `after_merge` | D | `ts > merged_at` |
-| `url` | D | constructed from validated ids and OWNER/REPO, never copied from `html_url`; every stored event has one |
+| `url` | D | constructed from validated ids and OWNER/REPO, never copied from `html_url`; every stored event has one (a review-sourced event links `pull/<n>#pullrequestreview-<id>`) |
 | `signals` | D | raw identity facts: `login`, `login_type`, `app`, `marker`, `commit_author_name`, `commit_author_email`, `committer_login`, `status_context`, `regen_identity`, `trailer_coauthors`, `trailer_session` — identity is resolved at site build (P3c `people/actors.conf`), never in the data |
 | `trust` | D\|W | `verified` \| `window` \| `claimed` \| `login` \| `ambiguous` \| `none` (§Trust tiers) |
 | `trust_basis` | D | `actions-bot+suffix`, `actions-bot+head-marker`, `actions-status+receipt`, `receipt`, `window:run <id>`, `marker:owner-token\|other-author\|no-suffix\|edited`, `trailer`, `login`, `ambiguous`, `none` |
@@ -730,7 +759,7 @@ spelling), `fuse`, `edited`; `triage.verdict` `designs`, `act_now`, `queue`,
 bot comments by app (`comment.bot.coderabbit|cursor|qodo|vercel|entelligence|
 copilot|other`), lead-classified noise (`comment.bugbot_limit`,
 `comment.qodo_paused`, `comment.decision_needed`, `comment.clear_prs`,
-`comment.unclassified`), reviews (`review.bot|empty_wrapper|human`), review
+`comment.unclassified`), reviews that yield no event (`review.bot|empty_wrapper|human`), review
 comments (`review_comment.bot|human`), statuses (`status.coderabbit|vercel|
 other`, `status.reviewer_signoff.no_design_changes`), the three stickies
 (`sticky.auto_review_stamp|printcheck_gate_report|argus_diff_report`),
@@ -815,7 +844,9 @@ evidence without a re-harvest.
 is the PR's final head, a ci.yml run names it, or it carries at least one
 commit status (Vercel and CodeRabbit post one per pushed head even when
 ci.yml did not run). `pushed_at` = the earliest of those runs' and statuses'
-`created_at`. Measured on the fixtures, this reproduces every round count the
+`created_at`; a final head with neither (a degraded capture: no ci runs, its
+statuses unavailable) takes its committer date (author date if absent) when
+that is later than every other pushed head's, else `null`. Measured on the fixtures, this reproduces every round count the
 audit hand-built: #636 15 (NVC-1), #371 2 and #397 14 (SBC-1), #634 13 (CC-5
 — #634's three one-second web commits are pushed heads only by the status
 rule).
@@ -865,7 +896,10 @@ test log` `### YYYY-MM-DD — …` → `field_test`; `NOTES.md ## Changelog` `##
 <v> — YYYY-MM-DD — <t>` → `changelog`; and, new, `NOTES.md ## Decisions log`
 / `## Decision log` dated top-level bullets → `decision.notes_log`. Each row's
 `added_in_sha` and `line` come from `git blame --porcelain` (the commit that
-added the line and its number there), and its URL is
+added the line and its number there; `added_in_sha` is required — a blame
+that does not cover the file line for line, an empty one from a failed git
+call included, raises `episodes.BlameUnavailable` and derive fails closed:
+the plan's `derive_error`, never a silently dropped row), and its URL is
 `blob/<added_in_sha>/designs/<d>/<file>#L<line>` — none of which moves when
 main moves; `added_in_pr` from the first-parent
 main commit containing it (`(#N)` squash or `Merge pull request #N`), or, for
@@ -901,13 +935,24 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    as the Actions bot; the ship routines as the owner's PAT and commit as a
    bot). One window → attributed; none → `none`; windows of two or more runs →
    `ambiguous`. An owner-token sign-off inside a reviewer window is never
-   attributed to it.
+   attributed to it. A reviewer-role window (`jane`, `drik`, `pm`, `coach`,
+   `oracle`) is a candidate only on a PR record whose run it is: the run's
+   `pull_requests` holds the PR, or its `head_branch` is the record's
+   `head_ref` and the run was created within the PR's `[created_at,
+   closed_at]` (the step-5 job rule). Every reviewer posts as the Actions bot
+   and auto-review runs of different PRs overlap constantly — over the #843
+   snapshot a window's last 3 s overlaps another PR's same-role window for
+   640/1,822 Jane, 515/1,766 Drik, 275/637 PM, 71/785 Oracle and 33/135 coach
+   windows — so unscoped, 6 of #636's 12 verified sign-offs and all 5 of
+   #634's come out ambiguous, and a PR whose own receipt is missing would be
+   attributed to another PR's run.
    **The owner's token needs a key.** An OWNER-authored artifact inside a
    design-run or backlog-burn window may be the owner's own attended work, so
    it is attributed only through the issue that run claimed: `run_claims`
    maps a run to the one issue whose OWNER SHIP-LOCK (`brief.claimed`) lies in
-   its windows (the selector claims one issue per run; a run with two such
-   SHIP-LOCKs claims nothing). The SHIP-LOCK itself, OWNER `brief.*` events on
+   its windows (the selector claims one issue per run; a run whose windows
+   hold SHIP-LOCKs on two or more distinct issues claims nothing; several
+   locks on one issue, like #281's two in run 32026482297, are one claim). The SHIP-LOCK itself, OWNER `brief.*` events on
    that issue, and OWNER `pr.opened` / `commit.*` on a `claude/issue-<N>-…`
    branch whose N is the claimed issue get `window`; anything else stays
    `login` (an owner PR on another branch inside a routine window, a run that
@@ -923,15 +968,22 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
      `.github/models/registry.conf` and the workflow from that tree;
    - `pull_request` in `oracle.yml`: the job checks out
      `pull_request.base.ref` **by name when its checkout step runs**, which can
-     be long after `created_at` on a busy queue, so main at that step's
-     `started_at` (from the same receipt job);
+     be long after `created_at` on a busy queue, so the registry is main at
+     that step's `started_at` (from the same receipt job); the workflow text
+     (the resolve literal and the step's `--model`) is the PR merge commit's,
+     because GitHub runs a pull_request workflow's definition from
+     `GITHUB_SHA` — read from `git merge-tree --write-tree <main@checkout>
+     <run.head_sha>`, which equals GitHub's merge from main@created_at unless
+     main touched the workflow in between;
    - `main@T` = the last first-parent main commit with committer date ≤ T;
    - `ambiguous` when merge-tree conflicts on either file, or a main commit
      touching either landed within `ambiguity_window_minutes` (15) before
      `created_at` (merge: the merge ref GitHub built may predate it) or within
-     15 minutes either side of the checkout step (main);
+     15 minutes either side of the checkout step (main; for the workflow file
+     the interval starts 15 minutes before `created_at`), or merge-tree
+     conflicts on the workflow file (main);
    - a commit the basis needs that is not local after the job-start fetch (a
-     force-pushed-away head) → basis `none`, `incomplete:
+     force-pushed-away head; the Oracle's run head included) → basis `none`, `incomplete:
      codebasis-unavailable:<sha8>` — never a fetch. Bases are memoized per
      `(workflow, kind, main8, head8)`.
 4. **Chain and model.** E3: the chain is the workflow's `model_registry
@@ -944,14 +996,25 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    never "failed" (auto-review walks on `served`; a link can exit 0 having
    posted nothing, #762). E0–E2: the step's inline `--model` literal in the
    workflow at the basis — found by a line scanner (the job by `name:`, the
-   step by exact `- name:`), not a YAML parser.
+   step by exact `- name:`), not a YAML parser. A step with no literal pin
+   whose `--model` is a registry chain output gets the E3 rule with link = N
+   and the `model_registry resolve` literal of step `<id>`; the two forms are
+   `${{ needs.<job>.outputs.<out> }}`, traced to that job's `<out>: ${{
+   steps.<id>.outputs.link<N>_model }}`, and `${{
+   steps.<id>.outputs.link<N>_model }}` itself. Over the snapshot this covers
+   139 of the 213 local E2 windows (auto-review from 08-16) and
+   product-scout's 3 E1 windows; the other 74 E2 windows carry a literal pin.
+   The E2 name label is a cross-check: a label that spells a different id than
+   the pin or the chain output gives `ambiguous` (0 of 213 disagree).
 5. **Job-level** (`job.reviewer`): the last non-skipped link step
    (`continue-on-error` masks step conclusions) with basis `job-link+…`;
    `posted` = some event of the record is attributed to that job (Drik's job
    in run 38161046420 tried all six links and posted nothing).
 6. **Trailers.** `Co-Authored-By: Claude <Name> <noreply@anthropic.com>` →
    `model = Name` (e.g. `Claude Opus 5.5`), basis `trailer`, trust
-   `claimed`; `Cursor Agent` → platform `cursor`, model null.
+   `claimed`; `Cursor Agent` → platform `cursor`, model null; `Claude Code`
+   names the harness, not a model → harness `claude-code`, model null, basis
+   `none` (31 commits carry it).
 
 Displayed as "requested for chain link N": a provider-side alias swap or an
 in-harness fallback is invisible to this join.
@@ -976,7 +1039,14 @@ drift-pinned to `reviewer_mcp.FOOTER`, the marker literals and both scripts.
 
 "Verified" means exactly what `reviewer-posted.sh` accepts and inherits that
 rule's residuals (any session holding `GITHUB_TOKEN` can post as the Actions
-bot). On #636 this yields 12 verified sign-offs (6 Jane, 6 Drik) and 13
+bot). A PR **review** body is never `verified`: `reviewer-posted.sh` reads
+only issue comments, so a review-sourced sign-off or triage is capped at
+`claimed` / `marker:no-suffix` (`window` at best, through the serving join).
+A judged kind with no marker of its own family — a `coach.lock` built from its
+lead line alone — is `login`, not `claimed`. A `reviewer-signoff` status
+carries the auto-review receipt's `runtime.workflow` / `run_id` only when it
+is `verified` / `actions-status+receipt`. On #636 this yields 12 verified
+sign-offs (6 Jane, 6 Drik) and 13
 owner-token Drik sign-offs that are `claimed` (NVC-5, NVC-6). The display rule
 (owner decision 6): owner-token sign-offs are shown tagged "unverified —
 posted from the owner's token" and never count toward "Reviewed by".
@@ -1136,7 +1206,9 @@ pushes only) plus read on `actions`, `pull-requests`, `issues`, `statuses`,
   :29 schedule would silently cancel an operator's pending backfill or
   refreeze).
 - `harvest` — `needs: gate`, `if: needs.gate.outputs.go == 'true' &&
-  github.ref_name == github.event.repository.default_branch`, job-level
+  github.ref == format('refs/heads/{0}',
+  github.event.repository.default_branch)` (the full ref, so a tag named like
+  the default branch never matches), job-level
   `concurrency: {group: provenance-writer, cancel-in-progress: false}`,
   `timeout-minutes: 350`. Steps:
   1. checkout (`ref` = default branch, `fetch-depth: 0`,
@@ -1144,16 +1216,23 @@ pushes only) plus read on `actions`, `pull-requests`, `issues`, `statuses`,
   2. **plan** — `python3 -m provenance <harvest|refreeze|recover> … --out-dir
      .provenance`, env `GH_TOKEN` (read use only), `PYTHONPATH=
      tools/provenance/src:tools/model-registry/src`; it performs the
-     token-less bulk fetch itself;
+     token-less bulk fetch itself. An input the selected mode does not use is
+     refused (`::error::`, exit 1), never silently dropped — recover's
+     `dry_run` included, since recover has no dry run;
   3. **declare** — two `actions/upload-artifact` steps, `name:
      intent-<ref>-<sha>`, `retention-days: 90`, each `if:` its ref changed;
   4. **publish** — `python3 -m provenance publish`, env `GH_TOKEN` (the only
      step that pushes);
   5. **checkpoint** — two `actions/upload-artifact` steps, `name:
-     tip-<ref>-<sha>`, `retention-days: 90`, each `if:` publish named a
-     verified tip for that ref (a no-op run checkpoints too);
+     tip-<ref>-<sha>` (file `.provenance/tip-<ref>.json`), `retention-days:
+     90`, each `if: !cancelled() &&` publish named a verified tip for that ref
+     (a no-op run checkpoints too; `!cancelled()` because publish can exit
+     non-zero after a verified evidence push);
   6. **verdict** — fails the job (exit 3, `::error::`) when the plan found a
      foreign evidence tip — after the derived overwrite and the checkpoints;
+     a second verdict step fails it (exit 1) when the plan reports
+     `derive_error` (a derive layer raised: the evidence was published and
+     checkpointed, `provenance-site` was not rebuilt);
   7. **summary** (`if: always()`) — `.provenance/summary.md` →
      `$GITHUB_STEP_SUMMARY`: mode, requests used / 304s, receipts full/stub,
      units frozen / pending / deferred / re-captured, `unknown.step` and
@@ -1185,10 +1264,10 @@ three). Runtime: the runner's system Python, stdlib only, no pip.
 
 | Where | What | Builder |
 |---|---|---|
-| `tools/reeve` | `ROUTINE_WORKFLOWS += provenance.yml` (routine-dead). Detector `provenance-foreign-tip`: either ref's verdict under the continuity rule — a port of `gitstore.continuity_verdict` over the same artifact scan (`GET /actions/artifacts`, run verification, `git/ref/heads/<ref>`, `GET /git/commits/<sha>` for first parents), passing every row of the shared `tools/provenance/tests/fixtures/continuity_cases.json` so the two implementations cannot drift; `foreign`, `deleted` and `unanchored` are findings. Detector `provenance-lag`: (a) the oldest pending unit past `due_at + provenance_lag_hours` (`GET contents/state.json?ref=provenance`), and (b) the **stall check** — one page of `/pulls?state=closed&sort=updated&direction=desc`: any PR closed more than `settle_hours + max_defer_hours + provenance_lag_hours` ago that is in none of frozen (the `raw/pr` tree listing), `pending` or `skipped` means the harvester has stopped seeing PRs (dropped schedule slots, a failing gate, a dead job) even though nothing is pending. Both report "not evaluated" only while `PROVENANCE_ENABLED` is unset (reeve.yml passes the variable's raw value, the andon pattern) or offline; once armed, an absent ref is a finding. Every read lives in ONE module, `tools/reeve/src/reeve/provenance.py` (the read lens allow-lists it). Golden report pairs updated, each detector with a positive and a negative control; `provenance_lag_hours` key in its conf parser | H6 |
+| `tools/reeve` | `ROUTINE_WORKFLOWS += provenance.yml` (routine-dead). Detector `provenance-foreign-tip`: either ref's verdict under the continuity rule — a port of `gitstore.continuity_verdict` over the same artifact scan (`GET /actions/artifacts`, run verification, `git/ref/heads/<ref>`, `GET /git/commits/<sha>` for first parents), passing every row of the shared `tools/provenance/tests/fixtures/continuity_cases.json` so the two implementations cannot drift (a mark's run head is checked by reachability, §Tip continuity residuals); `foreign`, `deleted` and `unanchored` are findings. Detector `provenance-lag`: (a) the oldest pending unit past its anchor `+ provenance_lag_hours` (`GET contents/state.json?ref=provenance`) — the anchor is `due_at`, or `defer_until` for a unit deferred by design (every reason `in-flight-run` or `deployment-pending`), and (b) the **stall check** — one page of `/pulls?state=closed&sort=updated&direction=desc`: any PR closed more than `settle_hours + max_defer_hours + provenance_lag_hours` ago, last updated more than `provenance_lag_hours` ago and not before `backfill_since`, that is in none of frozen (the `raw/pr` tree listing), `pending` or `skipped` means the harvester has stopped seeing PRs (dropped schedule slots, a failing gate, a dead job) even though nothing is pending. Both report "not evaluated" only while `PROVENANCE_ENABLED` is unset (reeve.yml passes the variable's raw value, the andon pattern), offline, or when the armed gather itself failed (named in the reason; the rest of the report still renders); once armed, an absent ref is a finding. Every read lives in ONE module, `tools/reeve/src/reeve/provenance.py` (the read lens allow-lists it). Golden report pairs updated, each detector with a positive and a negative control; `provenance_lag_hours` key in its conf parser | H6 |
 | `scripts/cadence-sync-check.sh` | `ROUTINES += provenance` (conf raw cron `29 * * * *` ↔ the workflow's single-quoted literal) | H6 |
-| `scripts/ci-classify.sh` | new output `provenance_tests` (true for `tools/provenance/*`, `.github/provenance.conf`, `.github/workflows/provenance.yml`, `.github/data-branch-guard/*`, `site/lib/provenance-contract*`, `site/test/fixtures/provenance-bundle.json`, `scripts/provenance.sh`, the drift-pinned `scripts/reviewer-posted.sh` / `coach-lock-check.sh` / `reviewer-signoff.sh` / `.claude/reviewer-post/reviewer_mcp.py`, `tools/model-registry/*`, `audits/provenance-2026-10/fixtures/*`, `audits/provenance-2026-10/rescue/*` (the pinned snapshot), `site/lib/timeline.mjs`, `ci.yml`); `tools/provenance/*` and `.github/provenance.conf` join the soft-infra and required-context lists; the reeve-tests trigger also fires on `tools/provenance/tests/fixtures/continuity_cases.json`; the header's output count and the `--selftest` rows. (The timeline.mjs ↔ Python row parity itself runs in `site-build`, on every PR — §Episodes.) | H6 |
-| `.github/workflows/ci.yml` | a `provenance-tests` job (`python3 -m pytest tools/provenance -q`) gated on that output and listed in `ci-ok`'s `needs` (`scripts/ci-ok-guard.sh`) | H6 |
+| `scripts/ci-classify.sh` | new output `provenance_tests` (true for `tools/provenance/*`, `.github/provenance.conf`, `.github/workflows/provenance.yml`, `.github/data-branch-guard/*`, `site/lib/provenance-contract*`, `site/test/fixtures/provenance-bundle.json`, `scripts/provenance.sh`, the drift-pinned `scripts/reviewer-posted.sh` / `coach-lock-check.sh` / `reviewer-signoff.sh` / `.claude/reviewer-post/reviewer_mcp.py`, `tools/model-registry/*`, `audits/provenance-2026-10/fixtures/*`, `audits/provenance-2026-10/rescue/*` (the pinned snapshot), `site/lib/timeline.mjs`, `ci.yml`), and a second output `provenance_read_lens` (any change under `scripts/`, `tools/`, `.github/`, `.claude/` or `site/` — the read lens's scan roots — on which `provenance-tests` runs only `test_read_lens.py`, so a new data-ref reader fails its own PR, not the post-merge push); `tools/provenance/*` and `.github/provenance.conf` join the soft-infra and required-context lists; the reeve-tests trigger also fires on `tools/provenance/tests/fixtures/continuity_cases.json`; the header's output count and the `--selftest` rows. (The timeline.mjs ↔ Python row parity itself runs in `site-build`, on every PR — §Episodes.) | H6 |
+| `.github/workflows/ci.yml` | a `provenance-tests` job (`python3 -m pytest tools/provenance -q`, or the read lens alone) gated on either output and listed in `ci-ok`'s `needs` (`scripts/ci-ok-guard.sh`) | H6 |
 | `scripts/check.sh` | `scripts/provenance.sh --selftest` | H6 |
 | `CLAUDE.md`, `README.md` | the `tools/provenance/` bullets, `provenance.sh` in the scripts bullet, this document in the docs bullet (landed with the scaffold; `scripts/docs-check.sh`) | scaffold |
 | `docs/actions-security.md` | a row: provenance.yml holds `contents: write` via `GITHUB_TOKEN`, is keyless and dispatchable; the default-branch `if:` is defense in depth; tip continuity (checkpoints, monotonic) is the control; the residuals of §Tip continuity — a forged derived tip lives until the next run (until the next dispatch while disarmed), a rollback to the newest checkpoint is accepted, the single job parses untrusted payloads while holding `contents: write` (§Workflow), and the optional Environment lever for `recover` | H6 |
@@ -1231,7 +1310,8 @@ the refs exist — this build pushes nothing.
 | A push is rejected or the remote tip moved since the plan | `publish` | `::error::`, exit 3; nothing further pushed | inspect: inside the concurrency group only a foreign writer can move a tip |
 | Push transport failure after 3 retries | `publish` | exit 1; the declared intent is harmless | next run |
 | The bulk PR-head fetch fails | `fetch_all` | evidence still published, no derived push that run (`derive_skipped`) | next run |
-| Rate-limit floor / request cap / capture deadline | `BudgetExhausted` | clean stop, cursors saved, exit 0 | next run / next dispatch |
+| A derive layer raises (a bug in views/bundle/episodes/serving, or a blame that does not cover a design file) | plan step `::error::`, `derive_error=true` | evidence still published and checkpointed, no derived push; the derive verdict step fails the job after the checkpoints | fix the bug; the next run rebuilds `provenance-site` |
+| Rate-limit floor / request cap / capture deadline (the continuity scan included) | `BudgetExhausted` | clean stop, cursors saved, exit 0; a stop inside the continuity scan is a no-op plan (old == new == the fetched tip, verdict unknown) that publishes and checkpoints nothing | next run / next dispatch |
 | A filtered runs list would hit GitHub's 1,000-result cap | `total_count` check | the window is halved; a one-minute window still capped fails the pass loudly | none expected (a minute holds far fewer than 1,000 runs) |
 | A scheduled run would evict a pending dispatch | the `gate` job | the schedule skips that hour | none needed |
 | GraphQL unavailable | `GraphQLUnavailable` | `incomplete: graphql-unavailable`, thread counts absent | `refreeze` later |
@@ -1405,7 +1485,7 @@ them; `tests/test_integration_complete.py` fails once integration flips its
 | P1a | CC-1, NVC-6, NVC-7, CC-6, verified = 12 | `test_acceptance.py`, `test_trust.py` |
 | P1a | every reviewer-posted.sh selftest row agrees; FOOTER drift pin | `test_trust.py`, `test_digest.py` (live) |
 | P1a | no fixture field outside the contract (no prose) | `test_contract.py`, `test_fixtures.py` (live) |
-| P1b | NVC-1, 8, 9, 11, 12b, 13, 14; SBC-1, 6, 7; CC-5, 7; NVC-12 re-baselined | `test_acceptance.py`, `test_episodes.py`, `test_extract.py` |
+| P1b | NVC-1, 8, 9, 11, 12b, 13, 14; SBC-1, 6, 7 (sbc-case threads across #371 + #397: 26 total / 6 resolved — #371 4/0, #397 22/6); sbc-case's 31 sign-offs, 15 from PR review bodies, matched to the golden; CC-5, 7; NVC-12 re-baselined | `test_acceptance.py`, `test_episodes.py`, `test_extract.py` |
 | P1b | merge-method fixtures map blamed rows (original line, adding commit); direct-commit rule; extractor has no clock | `test_extract.py`, `test_episodes.py`, `test_purity.py` |
 | P1b | timeline.mjs ↔ Python row parity over every design | `site/test/provenance-rows.test.mjs` (site-build, every PR) |
 | P1c | NVC-2, 3, 4, 5; merge-tree basis; 5-minute ambiguity; oracle at its checkout; pre-#326 pin; overlapping windows; owner key negatives; missing commit = none; basis always set | `test_serving.py`, `test_codebasis.py` |

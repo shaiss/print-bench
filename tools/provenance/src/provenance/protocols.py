@@ -140,11 +140,15 @@ class Basis:
     ``kind`` — ``head`` (schedule/dispatch: ``run.head_sha``), ``merge``
     (auto-review pull_request: ``git merge-tree`` of ``main_sha`` =
     main@created_at with ``head_sha``) or ``main`` (oracle pull_request:
-    ``main_sha`` = main at the checkout step's ``started_at``).
+    ``main_sha`` = main at the checkout step's ``started_at``, which supplies
+    the registry; ``head_sha`` = the run head, whose ``git merge-tree`` with
+    ``main_sha`` supplies the workflow text, because GitHub runs a
+    pull_request workflow's definition from the merge commit).
     ``ambiguous`` — True when the reconstruction cannot be trusted (merge
     conflict on the file; a main commit touching registry/workflow within
     the ambiguity window before ``created_at`` (merge) or within ± the window
-    of the checkout step's interval (main)); ``reason`` says which.
+    of the checkout step's interval (main; for the workflow file the interval
+    starts the window before ``created_at``)); ``reason`` says which.
     ``unavailable`` — a commit the basis needs is not in the local object
     store after the job-start fetch (force-pushed away): the join answers
     basis ``none`` and the record gains ``codebasis-unavailable:<sha8>``.

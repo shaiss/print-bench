@@ -267,20 +267,23 @@ jobs:
           python3 -m provenance publish --out-dir .provenance --gh-output "$GITHUB_OUTPUT"
 
       - name: Checkpoint the evidence tip
-        if: steps.publish.outputs.evidence_tip != ''
+        # !cancelled(): publish may exit non-zero AFTER a verified evidence
+        # push (a derived rejection); that tip must still be checkpointed or
+        # the next run refuses it as unanchored.
+        if: ${{ !cancelled() && steps.publish.outputs.evidence_tip != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: tip-provenance-${{ steps.publish.outputs.evidence_tip }}
-          path: .provenance/checkpoint-provenance.json
+          path: .provenance/tip-provenance.json
           retention-days: 90
           if-no-files-found: error
 
       - name: Checkpoint the derived tip
-        if: steps.publish.outputs.site_tip != ''
+        if: ${{ !cancelled() && steps.publish.outputs.site_tip != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: tip-provenance-site-${{ steps.publish.outputs.site_tip }}
-          path: .provenance/checkpoint-provenance-site.json
+          path: .provenance/tip-provenance-site.json
           retention-days: 90
           if-no-files-found: error
 
@@ -295,6 +298,17 @@ jobs:
         run: |
           echo "::error::provenance: the evidence tip failed tip continuity — no evidence was written; the derived ref was rebuilt from the newest checkpoint (docs/provenance.md, Tip continuity; recovery: dispatch recover with confirm_sha set to that checkpoint)"
           exit 3
+
+      - name: Verdict (derive)
+        # A derive layer raised (a bug in views/bundle/episodes/serving, or a
+        # blame that does not cover a design file): the plan still published
+        # and checkpointed the evidence, but provenance-site was not rebuilt.
+        # Red after the checkpoints, so evidence capture never waits on the
+        # fix and the failure is never green.
+        if: ${{ !cancelled() && steps.plan.outputs.derive_error == 'true' }}
+        run: |
+          echo "::error::provenance: derive raised (see the Plan step); evidence was published and checkpointed, provenance-site was not rebuilt"
+          exit 1
 
       - name: Summary
         if: always()

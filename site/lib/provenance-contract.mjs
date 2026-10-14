@@ -23,7 +23,9 @@
 //   or its target says so.
 // * `int` = a number with `Number.isInteger` (never a boolean). JSON.parse
 //   cannot tell 1.0 from 1, so Python additionally rejects a 1.0 this cannot
-//   see; the shared corpus uses 1.5 for its float negative.
+//   see; the shared corpus uses 1.5 for its float negative. A consumer that
+//   must refuse 1.0 verifies the canonical bytes of the file it read (the
+//   contract's typelang `int`; canonical JSON never emits a float).
 // * `str` `re` FULL-matches: `new RegExp('^(?:' + p + ')$', 'u')`. The `u`
 //   flag makes a quantifier count code points as Python does, and every
 //   unescaped `.` outside a class is rewritten to `[^\n]` — Python's `.`

@@ -16,7 +16,7 @@ import pytest
 
 from conftest import TESTS, TOOL
 
-INTEGRATED = False
+INTEGRATED = True
 
 
 def _stubs() -> list[str]:

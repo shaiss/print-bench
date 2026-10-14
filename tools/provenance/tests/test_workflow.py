@@ -28,6 +28,7 @@ HARVEST_STEPS = [
     "Checkpoint the evidence tip",
     "Checkpoint the derived tip",
     "Verdict",
+    "Verdict (derive)",
     "Summary",
 ]
 
@@ -103,7 +104,7 @@ def run_blocks(text: str) -> list[str]:
 def test_reader_sees_the_whole_file(text):
     assert job_names(text) == ["gate", "harvest"]
     assert [n for n, _ in steps(job_block(text, "harvest"))] == HARVEST_STEPS
-    assert len(run_blocks(text)) == 5
+    assert len(run_blocks(text)) == 6
 
 
 # --- the pins ----------------------------------------------------------------
@@ -223,16 +224,16 @@ def test_step_order_intents_publish_checkpoints_verdict(text):
     uploads = {
         "Declare the evidence intent": ("steps.plan.outputs.evidence_changed == 'true'",
                                         "intent-provenance-${{ steps.plan.outputs.evidence_sha }}",
-                                        ".provenance/intent-provenance.json"),
+                                        f".provenance/{cli.intent_file('provenance')}"),
         "Declare the derived intent": ("steps.plan.outputs.site_changed == 'true'",
                                        "intent-provenance-site-${{ steps.plan.outputs.site_sha }}",
-                                       ".provenance/intent-provenance-site.json"),
-        "Checkpoint the evidence tip": ("steps.publish.outputs.evidence_tip != ''",
+                                       f".provenance/{cli.intent_file('provenance-site')}"),
+        "Checkpoint the evidence tip": ("${{ !cancelled() && steps.publish.outputs.evidence_tip != '' }}",
                                         "tip-provenance-${{ steps.publish.outputs.evidence_tip }}",
-                                        ".provenance/checkpoint-provenance.json"),
-        "Checkpoint the derived tip": ("steps.publish.outputs.site_tip != ''",
+                                        f".provenance/{cli.tip_file('provenance')}"),
+        "Checkpoint the derived tip": ("${{ !cancelled() && steps.publish.outputs.site_tip != '' }}",
                                        "tip-provenance-site-${{ steps.publish.outputs.site_tip }}",
-                                       ".provenance/checkpoint-provenance-site.json"),
+                                       f".provenance/{cli.tip_file('provenance-site')}"),
     }
     for name, (cond, artifact, path) in uploads.items():
         body = s[name]
@@ -255,6 +256,12 @@ def test_step_order_intents_publish_checkpoints_verdict(text):
         "steps.publish.outputs.foreign_tip == 'true' || "
         "(steps.publish.outcome == 'skipped' && steps.plan.outputs.foreign_tip == 'true')")
     assert re.search(r"^\s+exit 3$", verdict, re.MULTILINE) and "::error::" in verdict
+    # A derive exception publishes and checkpoints the evidence, then fails the job here — after
+    # the checkpoints, never silently green (cli's derive_error output).
+    derive = s["Verdict (derive)"]
+    assert re.search(r"^        if: (.+)$", derive, re.MULTILINE).group(1) == (
+        "${{ !cancelled() && steps.plan.outputs.derive_error == 'true' }}")
+    assert re.search(r"^\s+exit 1$", derive, re.MULTILINE) and "::error::" in derive
     assert "if: always()" in s["Summary"] and "GITHUB_STEP_SUMMARY" in s["Summary"]
     assert ".provenance/summary.md" in s["Summary"]
 

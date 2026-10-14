@@ -841,8 +841,9 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
                 dtb.set(path, data, fmode)
             dtree = dtb.write_tree()
             current = gitstore.GitTreeReader(git, dv.tip) if dv.tip and git.has_commit(dv.tip) else None
-            same = bundle.same_content(current, dt.files)
-            site_changed = (not dv.accepted) or (not same)
+            # A tip that failed continuity is overwritten whatever it holds, so its blobs are never
+            # parsed (same_content is total over tip content anyway; this skips a needless read).
+            site_changed = (not dv.accepted) or (not bundle.same_content(current, dt.files))
             if site_changed:
                 dv_new = gitstore.commit_tree(git, dtree, None,
                                               f"provenance-site: derived from evidence {derived_from} "

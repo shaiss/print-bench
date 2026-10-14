@@ -66,6 +66,9 @@ Body digest fields (contract ``body-digest@1``):
 ``refs_closes``
     sorted unique issue numbers named by a GitHub closing keyword
     (``Closes #N`` …) anywhere in the body — only a PR body's are used.
+    ``#0`` (or ``#00`` …) names no issue and is dropped: the contract's
+    ``min 1`` means no contract-valid digest ever held a 0, so dropping it
+    changes no stored value and needs no ``DIGEST_VERSION`` bump.
 ``digest``
     :data:`DIGEST_VERSION`.
 
@@ -303,8 +306,8 @@ def classify_lead(body: str) -> tuple[Optional[str], dict[str, Any]]:
 
 
 def refs_closes(body: str) -> list[int]:
-    """Sorted unique issue numbers after a closing keyword (≤ :data:`MAX_CLOSES`)."""
-    return sorted({int(n) for n in _CLOSES_RE.findall(body)})[:MAX_CLOSES]
+    """Sorted unique issue numbers ≥ 1 after a closing keyword (≤ :data:`MAX_CLOSES`)."""
+    return sorted({int(n) for n in _CLOSES_RE.findall(body)} - {0})[:MAX_CLOSES]
 
 
 def body_digest(body: Optional[str]) -> dict[str, Any]:

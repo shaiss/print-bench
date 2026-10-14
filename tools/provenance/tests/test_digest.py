@@ -74,6 +74,16 @@ def test_lead_classes_and_fields():
     assert digest.classify_lead("Hi! Jane here 👋") == (None, {})
 
 
+def test_refs_closes_drops_issue_zero():
+    """``#0`` names no issue (contract body-digest@1.refs_closes is ``min 1``): it is dropped, while
+    every positive number — leading zeros included, the pre-integration behaviour — is kept."""
+    assert digest.refs_closes("Closes #0\nfixes #901\nResolves: #00") == [901]
+    assert digest.refs_closes("Closes #0123") == [123]
+    assert digest.body_digest("Closes #0")["refs_closes"] == []
+    # Negative control: without the filter the same body would carry the invalid 0.
+    assert sorted({int(n) for n in digest._CLOSES_RE.findall("Closes #0")}) == [0]
+
+
 def test_message_digest_trailers():
     msg = ("Fix x\n\nbody\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"
            "Claude-Session: https://claude.ai/code/session_01WCMY5F5seUgxYPnyibzYs1\nPreview-Diff: maybe\n")

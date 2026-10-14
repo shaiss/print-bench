@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import copy
 import gzip
-import importlib.util
 import json
 import posixpath
 import tarfile
 from typing import Any, Iterable, Optional
 
-from conftest import OWNER, OWNER_LOGIN, REPO, REPO_NAME, TESTS, codebasis_blob, codebasis_index, main_history
+from conftest import OWNER, OWNER_LOGIN, REPO, REPO_NAME, codebasis_blob, codebasis_index, main_history
 from fakes import FakeCommit, FakeGitReader
 from provenance import codebasis, serving
 from provenance.serving import ts_epoch
@@ -36,12 +35,11 @@ WATCHED = ("auto-review.yml", "backlog-burn.yml", "chunker.yml", "design-run.yml
 # Receipts for the whole #843 snapshot (the real, concurrent run set).
 
 def _reference_build_receipt():
-    """``tests/dev/build_fixtures.py::build_receipt`` — the reference every committed fixture
-    receipt was built with (receipts.build_receipt must reproduce it byte for byte)."""
-    spec = importlib.util.spec_from_file_location("_provenance_build_fixtures", TESTS / "dev" / "build_fixtures.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.build_receipt
+    """The production writer, ``receipts.build_receipt`` (integration: it reproduces every
+    committed fixture receipt byte for byte — test_receipts pins that — so the whole-snapshot
+    index is built exactly as a live harvest would build it)."""
+    from provenance import receipts
+    return receipts.build_receipt
 
 
 def snapshot_receipts(run_ids: Optional[Iterable[int]] = None) -> list[dict[str, Any]]:

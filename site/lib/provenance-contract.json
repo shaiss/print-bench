@@ -5,7 +5,7 @@
  "note": "The closed, machine-readable contract for the provenance harvester's stored shapes. Python (tools/provenance/src/provenance/contract.py) and Node (site/lib/provenance-contract.mjs) validate against THIS file with hand-rolled validators; no JSON Schema dependency. Type language: see 'typelang'. Every 'obj' is closed (extra keys invalid) and every listed field is required (nullable where 'null': true) unless listed under 'optional_fields'. Patterns are written without anchors and always FULL-match (Python re.fullmatch; JS new RegExp('^(?:'+p+')$')). Content identity and every stored digest (evidence_ref.raw_sha256, receipt parity, the ingest's identical-vs-conflict test, TreeBuilder.add on a .json.gz path) are defined on the DECOMPRESSED canonical JSON bytes; gzip bytes are storage only and may differ across zlib builds.",
  "typelang": {
   "str": "string; optional 're' (full-match, ASCII-only pattern) and 'max' (an upper bound on the number of Unicode CODE POINTS — Python len(s), JS [...s].length, never JS s.length)",
-  "int": "integer (never a bool, never a float); optional 'min'/'max' inclusive",
+  "int": "integer (never a bool, never a float); optional 'min'/'max' inclusive. An integral float spelling (1.0) is refused by Python value validation and by the canonical-bytes check of a stored file (canonical JSON never emits a float); JSON.parse cannot tell 1.0 from 1, so a Node consumer that validates parsed values must also verify the canonical bytes of the file it read to refuse it",
   "bool": "true/false",
   "enum": "one of 'of' (strings)",
   "list": "array of 'of'; optional 'max' length; 'unique' — no two elements with the same canonical JSON (sorted keys at every depth, no whitespace: Python json.dumps(v, sort_keys=True, separators=(',', ':'), ensure_ascii=False); Node must stringify with recursively sorted keys, never plain JSON.stringify); 'sorted' — ascending, comparing ints numerically and strings by Unicode CODE POINT (Python '<'; Node must compare [...a] against [...b] code point by code point, never the default UTF-16 sort or localeCompare); a 'sorted' list is always homogeneous (all ints or all strings)",
@@ -162,6 +162,7 @@
    "timeline",
    "commit",
    "issuecomment",
+   "review",
    "status",
    "run",
    "job",
@@ -202,12 +203,12 @@
   },
   "url": {
    "t": "str",
-   "re": "https://github\\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/(issues/[0-9]+(#issuecomment-[0-9]+)?|pull/[0-9]+(/commits/[0-9a-f]{40}|#issuecomment-[0-9]+)?|commit/[0-9a-f]{40}|actions/runs/[0-9]+(/job/[0-9]+)?|releases/tag/[A-Za-z0-9._-]+|blob/[0-9a-f]{40}/designs/[a-z0-9-]+/(PM|NOTES)\\.md#L[0-9]+)",
+   "re": "https://github\\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/(issues/[0-9]+(#issuecomment-[0-9]+)?|pull/[0-9]+(/commits/[0-9a-f]{40}|#issuecomment-[0-9]+|#pullrequestreview-[0-9]+)?|commit/[0-9a-f]{40}|actions/runs/[0-9]+(/job/[0-9]+)?|releases/tag/[A-Za-z0-9._-]+|blob/[0-9a-f]{40}/designs/[a-z0-9-]+/(PM|NOTES)\\.md#L[0-9]+)",
    "max": 300
   },
   "event_id": {
    "t": "str",
-   "re": "(issue:[0-9]+:filed|issuecomment:[0-9]+|timeline:[0-9]+|pr:[0-9]+:(opened|merged|closed)|commit:[0-9a-f]{40}|status:[0-9]+|run:[0-9]+|job:[0-9]+|deployment:[0-9]+|release:[0-9]+|row:[a-z0-9][a-z0-9-]{0,63}:(PM|NOTES)\\.md:[0-9a-f]{16}:[0-9]+)"
+   "re": "(issue:[0-9]+:filed|issuecomment:[0-9]+|review:[0-9]+|timeline:[0-9]+|pr:[0-9]+:(opened|merged|closed)|commit:[0-9a-f]{40}|status:[0-9]+|run:[0-9]+|job:[0-9]+|deployment:[0-9]+|release:[0-9]+|row:[a-z0-9][a-z0-9-]{0,63}:(PM|NOTES)\\.md:[0-9a-f]{16}:[0-9]+)"
   },
   "episode": {
    "t": "str",
