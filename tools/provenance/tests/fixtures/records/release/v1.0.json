@@ -1,0 +1,75 @@
+{
+ "designs": [
+  "alpha-clip"
+ ],
+ "events": [
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "D:2026-09-03",
+   "fields": {
+    "assets": 3,
+    "prerelease": false,
+    "tag": "v1.0"
+   },
+   "head_sha": null,
+   "id": "release:9501",
+   "issue": null,
+   "kind": "release",
+   "pr": null,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "unknown",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": "1921dcc9bfd4357fdddeb175189423b724334a73",
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "shaiss",
+    "login_type": "User",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-03T15:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/releases/tag/v1.0"
+  }
+ ],
+ "evidence": {
+  "raw": "raw/release/v1.0.json.gz",
+  "raw_sha256": "f2896fd380a11ebd637eca6f5034380c23ab308c38cf9a3277c8be189d683cf3",
+  "receipts": [],
+  "revision": 1,
+  "source": "evidence"
+ },
+ "extractor": "provenance-extract 1",
+ "format": "record@1",
+ "incomplete": [],
+ "key": "v1.0",
+ "kind": "release",
+ "published_at": "2026-09-03T15:00:00Z",
+ "tag": "v1.0"
+}
