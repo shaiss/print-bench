@@ -12,6 +12,11 @@ once reviewed — add a line, never reframe one.
 - **cutaway** — orthographic section (the +x half removed) face-on: male
   thread on the boss neck, female groove in the collar, rod bore above,
   countersunk screw hole through the boss. The internal-fit evidence shot.
+- **cutaway-wide** — orthographic diametral section (the +y half removed)
+  face-on from −y: full flange-to-flange width in frame, the central
+  countersunk M5 in the section plane, and the boss rib / collar groove
+  mesh visible on both sides of the bore. Complements `cutaway` without
+  moving that frozen camera.
 - **collar-print** — the collar alone in its print orientation, rod mouth
   down: shows the tube that lands on the bed, the 45° flare up to the grip
   band, and that the internal thread sits at the top of the print.
