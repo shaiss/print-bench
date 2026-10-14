@@ -101,10 +101,16 @@ makes the site look more locked-down than it is. Kept apart:
   (`lib/seam.mjs`): `off` (the flag is unset — the local/CI default, and the
   page renders exactly the committed baseline), `ok`, `empty` (fetched fine,
   genuinely nothing), or `unavailable` (offline, non-2xx, rate limit, timeout,
-  unparseable body). An `unavailable` seam prints a `WARN <seam>: fetch
+  unparseable or unexpected body, or a 200 that is not the whole answer — a
+  search GitHub flags `incomplete_results`, a queue that ran out short of its
+  `total_count`). An `unavailable` seam prints a `WARN <seam>: fetch
   unavailable … (<failure class>)` line in the build log and a visible
   couldn't-load note on the affected page, instead of a zero count that reads
-  like real emptiness. `lib/releases.mjs` is the reference implementation
+  like real emptiness. CI builds offline, where every seam is `off`, so
+  `test/build-seams.test.mjs` runs the real `build.mjs` with every seam armed
+  against a stubbed `fetch` (all 401s, then an honest empty 200) — the only
+  check on the wiring from a seam's status to its WARN line and its page.
+  `lib/releases.mjs` is the reference implementation
   (`SITE_FETCH_RELEASES=1`, the latest GitHub Release manifest → download
   links; nothing locally, no broken build when the API is down).
   `lib/history.mjs` is the second (`SITE_FETCH_HISTORY=1`): a design's own git
@@ -239,9 +245,11 @@ things keep it consistent with the rest of the site:
 - **Best-effort, never a broken build — and never a false "no release".** The
   manifest is fetched at build time (`lib/releases.mjs`); a design with no
   release simply renders no Downloads block. An unreachable or rate-limited API
-  (or one design's unreadable manifest) is different: that design's Downloads
-  block says the release downloads couldn't be loaded for this deploy and links
-  the releases list, so a failed fetch never reads as "nothing to download". The
+  (or one design's unreadable or malformed manifest) is different: that design's
+  Downloads block says this deploy couldn't check for release downloads and
+  links the releases list, so a failed fetch never reads as "nothing to
+  download" — and, since a whole-release failure lands the note on every page,
+  it never claims a download exists either. The
   no-404 rule still holds for *committed* references — release links are
   external and absent when the release is.
 - **Vercel-scoped, so local and CI stay deterministic.** The fetch runs only on

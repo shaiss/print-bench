@@ -40,25 +40,39 @@ export function shouldFetchReleases(env = process.env) {
   return Boolean(env.VERCEL); // Vercel sets VERCEL=1 in the build environment
 }
 
+/** A manifest part that names its release asset — the rows a Downloads block lists. */
+const isPart = (p) => Boolean(p) && typeof p.file === "string";
+
+/**
+ * Pure: whether a manifest can become a Downloads block — a design, a version
+ * and at least one part naming its file. The one predicate both halves share:
+ * manifestToDownloads renders exactly what passes it, and the fetch boundary
+ * records a manifest that fails it as a failed read, so a malformed manifest
+ * is never silently dropped as "no downloads".
+ */
+export function isReleaseManifest(manifest) {
+  return (
+    Boolean(manifest) &&
+    typeof manifest === "object" &&
+    typeof manifest.design === "string" &&
+    typeof manifest.version === "string" &&
+    Array.isArray(manifest.parts) &&
+    manifest.parts.some(isPart)
+  );
+}
+
 /**
  * Pure: a release manifest → the download-link model a product page renders,
- * or null when the manifest is missing or malformed (→ no Downloads block).
- * Every asset URL follows GitHub's stable release-download convention, so no
- * per-asset API lookup is needed:
+ * or null when the manifest is missing or malformed (→ no Downloads block;
+ * isReleaseManifest is the test). Every asset URL follows GitHub's stable
+ * release-download convention, so no per-asset API lookup is needed:
  *   https://github.com/<owner>/<repo>/releases/download/<version>/<file>
  */
 export function manifestToDownloads(manifest, { owner, repo }) {
-  if (
-    !manifest ||
-    typeof manifest.design !== "string" ||
-    typeof manifest.version !== "string" ||
-    !Array.isArray(manifest.parts)
-  ) {
-    return null;
-  }
+  if (!isReleaseManifest(manifest)) return null;
   const base = `https://github.com/${owner}/${repo}/releases/download/${manifest.version}`;
   const parts = manifest.parts
-    .filter((p) => p && typeof p.file === "string")
+    .filter(isPart)
     .map((p) => ({
       part: typeof p.part === "string" ? p.part : p.file,
       file: p.file,
@@ -66,7 +80,6 @@ export function manifestToDownloads(manifest, { owner, repo }) {
       sha256: typeof p.sha256 === "string" ? p.sha256 : null,
       url: `${base}/${p.file}`,
     }));
-  if (parts.length === 0) return null;
   const bundleFile = `${manifest.design}-${manifest.version}.zip`;
   return {
     design: manifest.design,
@@ -103,13 +116,15 @@ function assetDesign(name, tag) {
  *   empty        no published release (GitHub answers /releases/latest with
  *                404 when there is none), or a release with no manifests
  *   unavailable  the release itself could not be read (a non-404 error, network
- *                error, timeout, unparseable body) — every design is affected,
+ *                error, timeout, unparseable body, or a release object with no
+ *                `assets` array) — every design is affected,
  *                `unavailableDesigns: null`; or some manifest assets could not
- *                be read — `items` keeps the ones that were (one bad asset
- *                must not sink the rest) and `unavailableDesigns` names the
- *                designs whose manifest failed (null if a failed asset's name
- *                does not say which design it is). designReleaseStatus turns
- *                this into a per-page answer.
+ *                be read or are not usable manifests (isReleaseManifest) —
+ *                `items` keeps the ones that were (one bad asset must not sink
+ *                the rest) and `unavailableDesigns` names the designs whose
+ *                manifest failed (null if a failed asset does not say which
+ *                design it is). designReleaseStatus turns this into a per-page
+ *                answer.
  * `fetchImpl` is injectable so tests drive it with a stub; `token` (optional)
  * lifts the unauthenticated rate limit but is never required for a public repo.
  * Each request is bounded by `timeoutMs` (fetchJson).
@@ -134,28 +149,39 @@ export async function fetchLatestReleaseManifests({
     return { ...seamResult(SEAM.UNAVAILABLE, result, latest.reason), unavailableDesigns: null };
   }
   const release = latest.body;
-  if (!release || typeof release !== "object" || Array.isArray(release)) {
+  // A release object always carries an `assets` array (empty when nothing is
+  // attached); one without it is a body we don't understand, not "no manifests".
+  if (
+    !release ||
+    typeof release !== "object" ||
+    Array.isArray(release) ||
+    !Array.isArray(release.assets)
+  ) {
     return {
       ...seamResult(SEAM.UNAVAILABLE, result, "unexpected response body"),
       unavailableDesigns: null,
     };
   }
-  const assets = Array.isArray(release.assets) ? release.assets : [];
   const failures = [];
   let failedDesigns = new Set();
-  for (const asset of assets) {
+  for (const asset of release.assets) {
     if (!asset || typeof asset.name !== "string") continue;
     if (!asset.name.endsWith(".manifest.json")) continue;
     if (typeof asset.browser_download_url !== "string") continue;
     const got = await fetchJson(fetchImpl, asset.browser_download_url, { headers, timeoutMs });
     const manifest = got.ok ? got.body : null;
-    if (manifest && typeof manifest.design === "string") {
+    if (isReleaseManifest(manifest)) {
       result.set(manifest.design, manifest);
       continue;
     }
     // One bad asset must not sink the rest — but it is recorded, not dropped.
+    // A manifest that parsed but can't become a Downloads block counts too:
+    // keeping it would leave its page with no block and no note.
     failures.push(got.ok ? "unexpected manifest body" : got.reason);
-    const design = assetDesign(asset.name, release.tag_name);
+    const design =
+      manifest && typeof manifest === "object" && typeof manifest.design === "string"
+        ? manifest.design
+        : assetDesign(asset.name, release.tag_name);
     if (design === null) failedDesigns = null;
     else if (failedDesigns) failedDesigns.add(design);
   }

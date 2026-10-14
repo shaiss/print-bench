@@ -122,7 +122,7 @@ const badJson = () => ({
 const pageUrl = (page, perPage = 100) =>
   `https://api.github.com/search/issues?q=${encodeURIComponent(
     `repo:${OWNER}/${REPO} is:open label:${LABEL}`
-  )}&per_page=${perPage}&page=${page}&sort=created&order=ascending`;
+  )}&per_page=${perPage}&page=${page}&sort=created&order=asc`;
 const QUEUE_URL = pageUrl(1);
 const ISSUE_42 = item({ number: 42, title: "Loosen the coupon fit?", url: "https://github.com/o/r/issues/42" });
 const OPTS = { owner: OWNER, repo: REPO };
@@ -210,9 +210,10 @@ test("fetchOpenDecisions stops once total_count items have arrived", async () =>
   assert.equal(requested.length, 2, "no third request past total_count");
 });
 
-test("fetchOpenDecisions caps pagination at 10 pages", async () => {
+test("fetchOpenDecisions caps pagination at 10 pages — and says the queue didn't fit", async () => {
   // A source that never ends (total_count missing, every page full) must not
-  // loop forever: 10 × 100 is the search API's own 1000-result ceiling.
+  // loop forever: 10 × 100 is the search API's own 1000-result ceiling. Nor
+  // may the 50 rows it did read pass for the whole queue.
   let n = 0;
   const got = await fetchOpenDecisions({
     fetchImpl: async () => {
@@ -223,7 +224,42 @@ test("fetchOpenDecisions caps pagination at 10 pages", async () => {
     perPage: 5,
   });
   assert.equal(n, 10, "exactly maxPages requests");
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "queue longer than 10 pages");
+  assert.deepEqual(got.items, []);
+});
+
+test("fetchOpenDecisions: a queue that ends exactly on the last allowed page is whole", async () => {
+  // Negative control for the cap above: total_count reached on page 10 is a
+  // complete queue, not a truncated one.
+  let n = 0;
+  const got = await fetchOpenDecisions({
+    fetchImpl: async () => {
+      const page = items(5, 1 + 5 * n++);
+      return { ok: true, status: 200, json: async () => ({ total_count: 50, items: page }) };
+    },
+    ...OPTS,
+    perPage: 5,
+  });
+  assert.equal(n, 10);
+  assert.equal(got.status, SEAM.OK);
   assert.equal(got.items.length, 50);
+});
+
+test("fetchOpenDecisions asks GitHub for oldest-first as `order=asc`", async () => {
+  // The API knows only asc/desc and silently ignores anything else — the old
+  // `order=ascending` came back newest-first with no error.
+  let called;
+  await fetchOpenDecisions({
+    fetchImpl: async (url) => {
+      called = url;
+      return { ok: true, status: 200, json: async () => ({ total_count: 0, items: [] }) };
+    },
+    ...OPTS,
+  });
+  const params = new URL(called).searchParams;
+  assert.equal(params.get("sort"), "created");
+  assert.equal(params.get("order"), "asc");
 });
 
 test("fetchOpenDecisions de-duplicates a row the ranking repeats across pages", async () => {
@@ -280,6 +316,66 @@ test("fetchOpenDecisions: a body with no items array is unavailable", async () =
   const got = await fetchOpenDecisions({ fetchImpl, ...OPTS });
   assert.equal(got.status, SEAM.UNAVAILABLE);
   assert.equal(got.reason, "unexpected response body");
+});
+
+test("fetchOpenDecisions: GitHub's incomplete_results flag is unavailable, never empty or ok", async () => {
+  // The search timed out server-side and answered with what it had. An empty
+  // page flagged incomplete must not read as "all caught up", and a 7-row page
+  // flagged incomplete must not put 7 on the badge as the whole queue.
+  for (const [body, label] of [
+    [{ total_count: 0, incomplete_results: true, items: [] }, "empty but incomplete"],
+    [{ total_count: 53, incomplete_results: true, items: items(7) }, "7 of 53, incomplete"],
+  ]) {
+    const got = await fetchOpenDecisions({ fetchImpl: stubFetch({ [QUEUE_URL]: body }), ...OPTS });
+    assert.equal(got.status, SEAM.UNAVAILABLE, label);
+    assert.equal(got.reason, "incomplete search results", label);
+    assert.deepEqual(got.items, [], label);
+  }
+  // Negative control: the same page flagged complete is an ordinary empty queue.
+  const ok = await fetchOpenDecisions({
+    fetchImpl: stubFetch({ [QUEUE_URL]: { total_count: 0, incomplete_results: false, items: [] } }),
+    ...OPTS,
+  });
+  assert.equal(ok.status, SEAM.EMPTY);
+});
+
+test("fetchOpenDecisions: a page whose items yield no usable row is unavailable", async () => {
+  // Shape drift: three items arrived and none carries number/title/html_url.
+  // That is not an empty queue.
+  const fetchImpl = stubFetch({
+    [QUEUE_URL]: { total_count: 3, items: [{ id: 1 }, { id: 2 }, { id: 3 }] },
+  });
+  const got = await fetchOpenDecisions({ fetchImpl, ...OPTS });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "unexpected response body");
+});
+
+test("fetchOpenDecisions: pages that run out short of total_count are unavailable", async () => {
+  // A short page ends the walk, but 30 + 13 rows against a total_count of 53
+  // is not the queue — it would put 43 on the badge.
+  const all = items(53);
+  const fetchImpl = stubFetch({
+    [pageUrl(1, 30)]: { total_count: 53, items: all.slice(0, 30) },
+    [pageUrl(2, 30)]: { total_count: 53, items: all.slice(30, 43) },
+  });
+  const got = await fetchOpenDecisions({ fetchImpl, ...OPTS, perPage: 30 });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "partial results: 43 of 53");
+  assert.deepEqual(got.items, []);
+});
+
+test("fetchOpenDecisions: a decision resolved between page reads is not a failure", async () => {
+  // The race the latest-total_count rule exists for: a page-1 decision closes
+  // before page 2 is read, so page 2 starts one row later and total_count
+  // drops to 52. Both sides fall by one — no false 'unavailable'.
+  const all = items(53);
+  const fetchImpl = stubFetch({
+    [pageUrl(1, 30)]: { total_count: 53, items: all.slice(0, 30) },
+    [pageUrl(2, 30)]: { total_count: 52, items: all.slice(31) },
+  });
+  const got = await fetchOpenDecisions({ fetchImpl, ...OPTS, perPage: 30 });
+  assert.equal(got.status, SEAM.OK);
+  assert.equal(got.items.length, 52);
 });
 
 test("fetchOpenDecisions: a failure on page 2 is unavailable — no partial queue", async () => {

@@ -260,7 +260,7 @@ async function main() {
   // stays deterministic and simply shows no downloads. A failure never breaks
   // the build, and it is never passed off as "no release" either: the seam
   // reports `unavailable` (lib/seam.mjs), this logs a WARN, and the affected
-  // pages' Downloads block says it couldn't be loaded.
+  // pages' Downloads block says this deploy couldn't check for downloads.
   const releases = await runSeam(
     shouldFetchReleases(),
     () =>

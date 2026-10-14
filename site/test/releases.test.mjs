@@ -14,6 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  isReleaseManifest,
   manifestToDownloads,
   fetchLatestReleaseManifests,
   designReleaseStatus,
@@ -220,6 +221,62 @@ test("fetchLatestReleaseManifests: a failed asset whose name names no design aff
   assert.equal(designReleaseStatus(got, "anything"), SEAM.UNAVAILABLE);
 });
 
+test("fetchLatestReleaseManifests: a release object with no assets array is unavailable", async () => {
+  // GitHub always sends `assets` (empty when nothing is attached); a 200 body
+  // without it is one we don't understand — not a release with no manifests.
+  const got = await fetchLatestReleaseManifests({
+    fetchImpl: stubFetch({ [LATEST]: { tag_name: "v1" } }),
+    owner: OWNER,
+    repo: REPO,
+  });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "unexpected response body");
+  assert.equal(designReleaseStatus(got, "calibration-cube"), SEAM.UNAVAILABLE);
+  // Negative control: `assets: []` is the genuine "nothing attached".
+  const empty = await fetchLatestReleaseManifests({
+    fetchImpl: stubFetch({ [LATEST]: { tag_name: "v1", assets: [] } }),
+    owner: OWNER,
+    repo: REPO,
+  });
+  assert.equal(empty.status, SEAM.EMPTY);
+});
+
+test("fetchLatestReleaseManifests: a manifest that parses but can't make a Downloads block is a failed read", async () => {
+  // `{ design }` alone used to be kept as `ok`; manifestToDownloads then gave
+  // null and the page dropped its Downloads block with no note — a silent
+  // "no downloads". isReleaseManifest is the one predicate both halves use.
+  for (const [body, label] of [
+    [{ design: "cube" }, "no version or parts"],
+    [{ design: "cube", version: "v1" }, "no parts"],
+    [{ design: "cube", version: "v1", parts: [{ sha256: "z" }] }, "no part names a file"],
+  ]) {
+    const url = "https://github.com/shaiss/print-bench/releases/download/v1/cube-v1.manifest.json";
+    const got = await fetchLatestReleaseManifests({
+      fetchImpl: stubFetch({
+        [LATEST]: { tag_name: "v1", assets: [{ name: "cube-v1.manifest.json", browser_download_url: url }] },
+        [url]: body,
+      }),
+      owner: OWNER,
+      repo: REPO,
+    });
+    assert.equal(got.status, SEAM.UNAVAILABLE, label);
+    assert.equal(got.reason, "unexpected manifest body", label);
+    assert.equal(got.items.size, 0, label);
+    assert.equal(designReleaseStatus(got, "cube"), SEAM.UNAVAILABLE, label);
+    assert.equal(designReleaseStatus(got, "other"), SEAM.EMPTY, `${label}: narrowed to its design`);
+    assert.equal(manifestToDownloads(body, REPO_OPTS), null, `${label}: the renderer agrees`);
+  }
+});
+
+test("isReleaseManifest is exactly what manifestToDownloads renders", () => {
+  assert.equal(isReleaseManifest(MANIFEST), true);
+  assert.notEqual(manifestToDownloads(MANIFEST, REPO_OPTS), null);
+  for (const bad of [null, "x", { design: "x" }, { design: "x", version: "v1", parts: [] }]) {
+    assert.equal(isReleaseManifest(bad), false);
+    assert.equal(manifestToDownloads(bad, REPO_OPTS), null);
+  }
+});
+
 test("releases disabled (the local/CI default) is off, and nothing is fetched", async () => {
   let fetched = false;
   const fetchImpl = async () => {
@@ -288,26 +345,29 @@ test("designPage shows no Downloads block when there is no release", () => {
   }
 });
 
-test("designPage says the downloads couldn't be loaded when the release was unavailable", () => {
+test("designPage says it couldn't check for downloads when the release was unavailable", () => {
   const page = designPage(DESIGN_FIXTURE, {
     ...PAGE_OPTS,
     downloads: null,
     releaseStatus: SEAM.UNAVAILABLE,
   });
   assert.match(page, /<h3>Downloads<\/h3>/, "the block is not silently absent");
-  assert.match(page, /Release downloads couldn(&#39;|')t be loaded for this deploy/);
+  assert.match(page, /Couldn(&#39;|')t check for release downloads on this deploy/);
   assert.ok(
     page.includes('href="https://github.com/shaiss/print-bench/releases"'),
     "points the reader at the releases list"
   );
   assert.ok(!page.includes("Download STLs"), "no download action for a release we couldn't read");
+  // A whole-release failure lands this note on every product page — most of
+  // which have no release — so it must not claim a download exists.
+  assert.ok(!/Release downloads couldn/.test(page), "never implies this design has downloads");
 });
 
 test("designPage: a design whose manifest DID load shows its downloads even if another's failed", () => {
   const downloads = manifestToDownloads(MANIFEST, REPO_OPTS);
   const page = designPage(DESIGN_FIXTURE, { ...PAGE_OPTS, downloads, releaseStatus: SEAM.OK });
   assert.ok(page.includes("calibration-cube-v0.1.zip"));
-  assert.ok(!/couldn(&#39;|')t be loaded/.test(page));
+  assert.ok(!/Couldn(&#39;|')t check/.test(page));
 });
 
 test("humanSize renders B / KB / MB", () => {

@@ -83,10 +83,11 @@ export function searchToDecisions(items) {
  *   ok           items: every open decision row, across all pages
  *   empty        the search ran and nothing is parked — "all caught up" is true
  *   unavailable  items: [], with the failure class in `reason` — a non-2xx on
- *                any page, network error, timeout, unparseable body or a body
- *                with no `items` array. A page-2 failure is unavailable too:
- *                showing the first page's rows as the whole queue is the
- *                undercount this replaces, so no partial queue is returned.
+ *                any page, network error, timeout, unparseable body, a body
+ *                with no `items` array, or an answer that is not the whole
+ *                queue (below). A page-2 failure is unavailable too: showing
+ *                the first page's rows as the whole queue is the undercount
+ *                this replaces, so no partial queue is returned.
  * `fetchImpl` is injectable so tests never touch the network; `token`
  * (optional) lifts the unauthenticated rate limit but is never required for a
  * public repo.
@@ -94,7 +95,10 @@ export function searchToDecisions(items) {
  * The search API ranks issues and PRs together; `repo:` scopes it, `is:open`
  * keeps only unresolved ones, and `label:` is the unspoofable state the
  * pipeline keys on (`docs/decision-gate.md`). Created-ascending so the oldest
- * parked decision leads the queue — the one waiting longest for a human.
+ * parked decision leads the queue — the one waiting longest for a human. The
+ * API spells that `order=asc` (its only values are asc/desc) and silently
+ * ignores anything else: this once sent `order=ascending`, and the live queue
+ * came back newest-first with no error to say so.
  *
  * Paginated: it requests `perPage` (the API's maximum, 100) per page and
  * follows pages until a short page or `total_count` rows have arrived, capped
@@ -103,6 +107,16 @@ export function searchToDecisions(items) {
  * Rows are de-duplicated by number in case the ranking shifts between pages.
  * Each page is bounded by `timeoutMs` (fetchJson), so a hung connection cannot
  * stall the deploy build.
+ *
+ * A 200 is not proof the queue arrived whole, and a short count shown as the
+ * queue is the same lie as "all caught up" — so these are `unavailable` too:
+ * GitHub flagging the search `incomplete_results` (it timed out server-side and
+ * answered with what it had); a page whose items yield no usable row (the shape
+ * drifted under searchToDecisions); fewer distinct rows than the latest
+ * `total_count` when the pages ran out; and hitting `maxPages` with the queue
+ * still going. Measured against the latest page's `total_count` because a
+ * decision resolved between two page reads lowers both sides by one, so a race
+ * keeps the count honest rather than reading as a failure.
  */
 export async function fetchOpenDecisions({
   fetchImpl = globalThis.fetch,
@@ -119,8 +133,10 @@ export async function fetchOpenDecisions({
   const q = encodeURIComponent(`repo:${owner}/${repo} is:open label:${label}`);
   const rows = [];
   const seen = new Set();
+  let total = null; // the latest page's total_count, when the API sent one
+  let complete = false;
   for (let page = 1; page <= maxPages; page++) {
-    const url = `${GITHUB_API}/search/issues?q=${q}&per_page=${perPage}&page=${page}&sort=created&order=ascending`;
+    const url = `${GITHUB_API}/search/issues?q=${q}&per_page=${perPage}&page=${page}&sort=created&order=asc`;
     const got = await fetchJson(fetchImpl, url, { headers, timeoutMs });
     const where = page > 1 ? ` on page ${page}` : "";
     if (!got.ok) return seamResult(SEAM.UNAVAILABLE, [], `${got.reason}${where}`);
@@ -128,15 +144,32 @@ export async function fetchOpenDecisions({
     if (!body || !Array.isArray(body.items)) {
       return seamResult(SEAM.UNAVAILABLE, [], `unexpected response body${where}`);
     }
-    for (const row of searchToDecisions(body.items)) {
+    if (body.incomplete_results === true) {
+      return seamResult(SEAM.UNAVAILABLE, [], `incomplete search results${where}`);
+    }
+    const parsed = searchToDecisions(body.items);
+    if (body.items.length && !parsed.length) {
+      return seamResult(SEAM.UNAVAILABLE, [], `unexpected response body${where}`);
+    }
+    for (const row of parsed) {
       if (seen.has(row.number)) continue;
       seen.add(row.number);
       rows.push(row);
     }
-    if (body.items.length < perPage) break; // a short page is the last one
-    // Every distinct decision the search counted has arrived. (A repeated row
-    // doesn't count toward it, so a ranking shift costs one more page, not a row.)
-    if (Number.isInteger(body.total_count) && rows.length >= body.total_count) break;
+    if (Number.isInteger(body.total_count)) total = body.total_count;
+    // Done on a short page (the last one), or once every distinct decision the
+    // search counted has arrived. (A repeated row doesn't count toward it, so a
+    // ranking shift costs one more page, not a row.)
+    if (body.items.length < perPage || (total !== null && rows.length >= total)) {
+      complete = true;
+      break;
+    }
+  }
+  if (!complete) {
+    return seamResult(SEAM.UNAVAILABLE, [], `queue longer than ${maxPages} pages`);
+  }
+  if (total !== null && rows.length < total) {
+    return seamResult(SEAM.UNAVAILABLE, [], `partial results: ${rows.length} of ${total}`);
   }
   return fetchedResult(rows);
 }

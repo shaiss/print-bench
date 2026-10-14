@@ -528,13 +528,16 @@ function viewerPanel(design) {
  * the release (`releaseStatus` "unavailable", releases.mjs designReleaseStatus),
  * a missing block would read as "this design has no release". So the block
  * renders as a short note instead, pointing at the releases list — a page never
- * passes a failed fetch off as no downloads.
+ * passes a failed fetch off as no downloads. The note says only that we
+ * couldn't check, never that downloads exist: a whole-release failure lands it
+ * on every product page, most of which (archived designs included) have no
+ * release to download.
  */
 function downloadsBlock(downloads, releaseStatus = SEAM.OFF) {
   if (!downloads && releaseStatus === SEAM.UNAVAILABLE) {
     return `<div class="rail-block">
     <h3>Downloads</h3>
-    <p class="rail-note">Release downloads couldn't be loaded for this deploy; the next deploy retries. Every release is listed on <a href="${GITHUB_REPO}/releases" rel="noopener noreferrer">GitHub</a>.</p>
+    <p class="rail-note">Couldn't check for release downloads on this deploy; the next deploy retries. Releases are listed on <a href="${GITHUB_REPO}/releases" rel="noopener noreferrer">GitHub</a>.</p>
   </div>`;
   }
   if (!downloads) return "";
