@@ -1,0 +1,61 @@
+design_key,dir_on_main,status,parent,aliases,brief_issues,followup_issues,origin_pr,member_prs_merged,member_prs_closed,member_prs_open
+aerochord,True,shipped,,,,,#77,#77 #88 #424,,
+alcove-rod-socket,True,shipped,,,#355 #376 #631 #809 #814,#379,#361,#361 #377 #384 #632 #784,,#787 #792 #812 #816 #833
+battery-caddy,False,in-flight,,,#704,,,,,#716
+bistable-snap-box,False,brief-only,,,#392,,,,,
+bistable-toggle,True,shipped,,,#389,,#253,#209 #250 #253 #406,#215 #227,
+calibration-cube,True,shipped,,,,#123,#130 #134,#20 #29 #105 #127 #130 #131 #134 #228 #492 #634,#8 #10,
+captive-spinner,True,shipped,,,#387,,#238,#209 #238 #254 #403,#211 #226 #262,
+compliant-gripper,True,shipped,,,#391,,#239,#209 #239 #255 #410,#218 #224 #263,
+constant-force-slider,True,shipped,,,,,#240 #261,#209 #240 #254 #261,#216 #221,
+cross-axis-flexure-pivot,False,in-flight,,,#630,,,,,#644
+czs-slider,True,shipped,,constant-force-slider,#393,,#488,#488,,
+desiccant-capsule,True,shipped,,,,#18 #37 #69,#1,#1 #20 #29 #33 #70 #88,#8 #10,
+extrusion-shelf-bracket,True,shipped,,,#283,,#317,#317,,
+extrusion-spool-holder,False,in-flight,,,#669,,,,,#677
+gridfinity-starter,True,shipped,,,#733,,#738,#738,,
+hex-bit-rail,True,shipped,,,#594,,,#643,,
+let-folding-panel,True,shipped,,,#388,,#220 #405,#209 #220 #254 #405,#217 #256,
+nuggs,True,shipped,,,#34 #73,#56 #84,#39 #381,#39 #42 #44 #48 #59 #78 #86 #88 #381,,
+nuggs-bottle-adapter,True,shipped,,,#515,,,#561,,#813
+nuggs-den,True,shipped,,,,,#189 #190,#189 #190 #191 #196 #228 #232 #510,,
+nuggs-elbow,True,shipped,,,#116,,,#188,,
+nuggs-frieda,True,shipped,,,,#542,#192 #193,#192 #193 #194 #196 #228 #233,,
+nuggs-hopper,True,shipped,,,#281,,#316,#316,,
+nuggs-open,True,shipped,,,#308,,,#320,,
+nuggs-orrery,True,shipped,,,,,#195 #381,#195 #381,,
+nuggs-port-gauge,False,in-flight,,,#514,,,,,#841
+nuggs-probe-cap,False,in-flight,,,#732,,,,,#737
+nuggs-rim-saddle,True,shipped,,,#395,,#437,#437,,
+nuggs-sand-bath,False,in-flight,,,#667,,,,,#674
+nuggs-sand-sieve,False,in-flight,,,#835,,,,,#840
+nuggs-shutter-valve,True,shipped,,,#99,,#200,#200 #364,,
+nuggs-turnaround,True,shipped,,,#394 #499,#466 #508,#436,#436 #503 #575,,
+nuggs-turnaround-tee,True,shipped,nuggs-turnaround,,#435,#517,#500,#500 #532 #563,,
+nuggs-vent-cap,True,shipped,,,#592,,#636,#636,,
+nuggs-wheel,False,in-flight,,,#834,,,,,#839
+nuggs-y-splitter,True,shipped,,,#284,,#318,#318,,
+nuggs-yard,True,shipped,,,#80,#509,#76,#76 #78 #88 #510 #512,,
+over-center-toggle-clamp,True,shipped,,,#285,#467,#414,#414 #539,,
+ovodyo,True,shipped,,,#602,#599 #600 #601 #603 #604 #624 #768,#605,#605 #621 #629 #789,#628,
+pegboard-hooks,False,brief-only,,,#396,,,,,
+perspective-coin,True,shipped,,,,,#321,#321 #328 #341,,
+pip-ball-socket-head,False,in-flight,,,#593,,,,,#811
+pip-cable-chain,False,in-flight,,,#705,,,,,#717
+pip-micrometer-vice,False,rejected,,,#516,,,,#533,
+pip-piano-hinge,True,shipped,,,#390,,#225,#209 #225 #254 #409,#213 #258,
+pip-planetary,True,shipped,,,#307,#541,#319,#319,,
+pip-ratchet,True,shipped,,,#668,,#676,#676,,
+pip-ratchet-pla,False,in-flight,,,#675,,,,,#767
+pip-thrust-turntable,False,brief-only,,,#703,,,,,
+pop-fidget-card,True,shipped,,,#342,#352,#343,#343 #349 #351 #383 #424 #633,,
+preroll-elevator,True,shipped,,,#471,,#477,#476 #477,,
+sbc-case,True,shipped,,,#363,,#371,#371 #397,,#802 #805 #810 #815 #817 #818 #821
+snap-cantilever-clip,True,shipped,,,#386,,#219 #257,#209 #219 #254 #257 #402,#212,
+snap-clamshell-box,True,shipped,,,,#230 #265 #266 #267 #269 #270,#223 #259,#209 #223 #254 #259 #268 #271 #299,#214 #264,
+spring-rate-ladder,False,in-flight,,,#734,,,,,#739
+support-free-bracket,True,shipped,,,#385,#469,#222 #260,#209 #222 #254 #260 #401 #559,#210,
+sushi-battleship,True,shipped,,,,#14 #15 #16 #17 #21 #22 #24 #25 #26 #27 #66,#2 #4,#2 #3 #4 #12 #13 #20 #29 #30 #74 #88 #228,#8 #10,
+sushi-battleship-tracker,True,shipped,sushi-battleship,,,#129 #158 #236 #251 #287,#121 #132,#121 #131 #132 #133 #182 #228 #234 #252 #492,#288 #289 #291,
+sweetheart-hamster,True,shipped,,,#354,#367 #369 #462,#359 #381,#359 #370 #372 #381 #411 #531 #635 #700,,
+tslot-cable-clip,False,brief-only,,,#836,,,,,
