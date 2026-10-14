@@ -9,13 +9,14 @@
 # time the classifier moved. Now the workflow and the local mirror share this
 # implementation — they cannot disagree.
 #
-#   Emits, one `key=value` per line on STDOUT (the 21 outputs ci.yml's
+#   Emits, one `key=value` per line on STDOUT (the 23 outputs ci.yml's
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests, cogcheck_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
 #     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests,
-#     growth_tests, andon_tests, concept_preview_tests, agent_memory_tests, styles, gate,
-#     gate_designs, regen, regen_designs, docs_standards
+#     growth_tests, andon_tests, concept_preview_tests, agent_memory_tests,
+#     provenance_tests, styles, gate, gate_designs, regen, regen_designs,
+#     docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
 # Usage:
@@ -45,12 +46,12 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 
 # --- classify: the shared decision -------------------------------------------
 # Reads the changed-file list from stdin (one path per line), reads the working
-# tree for existence/ARCHIVED/style.conf facts, and prints the 21 outputs.
+# tree for existence/ARCHIVED/style.conf facts, and prints the 23 outputs.
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
   local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false gwtests=false docs_standards=false
-  local bstests=false adtests=false cogtests=false cptests=false amtests=false
+  local bstests=false adtests=false cogtests=false cptests=false amtests=false prtests=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -59,7 +60,7 @@ classify() {
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
     bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; gwtests=true; docs_standards=true
-    bstests=true; adtests=true; cogtests=true; cptests=true; amtests=true
+    bstests=true; adtests=true; cogtests=true; cptests=true; amtests=true; prtests=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -135,6 +136,7 @@ classify() {
         tools/andon/*|\
         tools/concept-preview/*|\
         tools/agent-memory/*|\
+        tools/provenance/*|.github/provenance.conf|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
           soft_infra=true ;;
@@ -266,10 +268,38 @@ classify() {
         # test_learning_wiring.py pins both its content and its 100755 mode.
         # It moves no mesh, no pixels and no site byte (Vercel skips .github/),
         # so nothing else runs for it.
+        # The shared tip-continuity table (tools/provenance's
+        # continuity_cases.json) joins too: reeve's provenance-foreign-tip
+        # detector ports gitstore.continuity_verdict and its tests run every
+        # row of that one file, so a table edit must re-run BOTH suites or the
+        # two implementations could drift apart unseen.
         tools/reeve/*|.github/reeve.conf|\
         telemetry/reeve-greenlights.ndjson|.github/data-branch-guard/*|\
         .github/workflows/reeve.yml|scripts/preview-budget.sh|\
+        tools/provenance/tests/fixtures/continuity_cases.json|\
         .github/workflows/ci.yml) rvtests=true ;;
+      esac
+      case "$f" in
+        # The provenance harvester (docs/provenance.md §Registration): its own
+        # suite, which also reads files outside tools/provenance — the
+        # workflow and conf it pins, the data-branch guard both refs carry,
+        # the site contract and fixture bundle, the reviewer-posted.sh /
+        # coach-lock-check.sh / reviewer-signoff.sh / reviewer_mcp.py
+        # constants its trust port is drift-pinned to, the model-registry
+        # parser the serving join reuses, the audit's golden timelines, the
+        # pinned #843 snapshot it ingests (a byte change there must fail the
+        # pin test, not ship silently) and site/lib/timeline.mjs (the row
+        # parser its committed-row extraction mirrors). So a change to any of
+        # them re-runs it. (The timeline.mjs ↔ Python row parity itself runs
+        # in site-build, on every PR.)
+        tools/provenance/*|.github/provenance.conf|\
+        .github/workflows/provenance.yml|.github/data-branch-guard/*|\
+        site/lib/provenance-contract*|site/test/fixtures/provenance-bundle.json|\
+        scripts/provenance.sh|scripts/reviewer-posted.sh|scripts/coach-lock-check.sh|\
+        scripts/reviewer-signoff.sh|.claude/reviewer-post/reviewer_mcp.py|\
+        tools/model-registry/*|audits/provenance-2026-10/fixtures/*|\
+        audits/provenance-2026-10/rescue/*|site/lib/timeline.mjs|\
+        .github/workflows/ci.yml) prtests=true ;;
       esac
       case "$f" in
         # brief-sources (#438, the deterministic half of the #245
@@ -357,6 +387,7 @@ classify() {
         tools/andon/*|\
         tools/concept-preview/*|\
         tools/agent-memory/*|\
+        tools/provenance/*|.github/provenance.conf|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
           scad=true ;;
@@ -459,6 +490,7 @@ classify() {
   echo "andon_tests=$adtests"
   echo "concept_preview_tests=$cptests"
   echo "agent_memory_tests=$amtests"
+  echo "provenance_tests=$prtests"
   echo "styles=$styles"
   echo "gate=$gate"
   echo "gate_designs=$designs"
@@ -786,6 +818,63 @@ selftest() {
     "agent_memory_tests=true" "gate=true" "gate_designs=" "regen=false"
   out="$(run ".github/workflows/ci.yml")"
   check "ci-workflow-reruns-agent-memory" "$out" "agent_memory_tests=true"
+  # 4k. The provenance harvester (docs/provenance.md §Registration) is
+  #     soft-infra like its tool siblings: its own tests run and the required
+  #     contexts RUN with an empty design list — it writes two data refs and
+  #     moves no mesh and no pixels. Its suite reads files outside the tool
+  #     (the workflow and conf, the trust-port drift-pinned scripts, the
+  #     pinned #843 snapshot, the site contract and timeline.mjs), so each of
+  #     those re-runs it; the shared continuity table re-runs reeve's suite as
+  #     well (its provenance-foreign-tip port runs every row). A reeve-only or
+  #     docs-only change does not.
+  out="$(run "tools/provenance/src/provenance/freeze.py")"
+  check "provenance-only" "$out" \
+    "provenance_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "reeve_tests=false" \
+    "model_registry_tests=false"
+  out="$(run ".github/provenance.conf")"
+  check "provenance-conf" "$out" \
+    "provenance_tests=true" "gate=true" "gate_designs=" "scad=true" "regen=false"
+  out="$(run ".github/workflows/provenance.yml")"
+  check "provenance-workflow" "$out" \
+    "provenance_tests=true" "model_registry_tests=true" "gate=true" "gate_designs="
+  out="$(run "scripts/provenance.sh")"
+  check "provenance-wrapper" "$out" \
+    "provenance_tests=true" "gate=true" "gate_designs=" "scad=true"
+  out="$(run "tools/provenance/tests/fixtures/continuity_cases.json")"
+  check "provenance-continuity-table-reruns-reeve" "$out" \
+    "provenance_tests=true" "reeve_tests=true"
+  out="$(run "audits/provenance-2026-10/rescue/MANIFEST.sha256")"
+  check "provenance-snapshot-pin-drift" "$out" \
+    "provenance_tests=true" "gate=false" "scad=false" "regen=false"
+  out="$(run "audits/provenance-2026-10/fixtures/golden/nuggs-vent-cap.golden.json.gz")"
+  check "provenance-golden-drift" "$out" "provenance_tests=true"
+  out="$(run "scripts/reviewer-posted.sh")"
+  check "provenance-trust-port-drift" "$out" "provenance_tests=true"
+  out="$(run ".claude/reviewer-post/reviewer_mcp.py")"
+  check "provenance-footer-drift" "$out" "provenance_tests=true"
+  out="$(run "site/lib/timeline.mjs")"
+  check "provenance-row-parser-drift" "$out" \
+    "provenance_tests=true" "gate=true" "gate_designs="
+  out="$(run "site/lib/provenance-contract.json")"
+  check "provenance-contract-drift" "$out" "provenance_tests=true"
+  out="$(run ".github/data-branch-guard/vercel.json")"
+  check "provenance-data-branch-guard" "$out" \
+    "provenance_tests=true" "reeve_tests=true" "gate=false"
+  out="$(run "tools/model-registry/src/model_registry/registry.py")"
+  check "provenance-registry-parser-drift" "$out" \
+    "provenance_tests=true" "model_registry_tests=true"
+  out="$(run ".github/workflows/ci.yml")"
+  check "ci-workflow-reruns-provenance" "$out" "provenance_tests=true"
+  # Negative controls: a reeve-only change, a doc about the harvester and an
+  # unrelated audit run nothing of it.
+  out="$(run "tools/reeve/src/reeve/detectors.py")"
+  check "reeve-only-is-not-provenance" "$out" "provenance_tests=false"
+  out="$(run "docs/provenance.md")"
+  check "provenance-doc-is-not-provenance-tests" "$out" \
+    "provenance_tests=false" "gate=false" "scad=false"
+  out="$(run "audits/pr3/README.md")"
+  check "other-audit-is-not-provenance" "$out" "provenance_tests=false" "gate=false"
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must
