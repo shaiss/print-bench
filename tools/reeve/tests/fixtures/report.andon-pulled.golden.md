@@ -51,7 +51,7 @@ Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.
 
 ## Provenance lag — a unit overdue by more than 3h, or the harvester no longer seeing closed PRs
 
-- overdue: pr #902 was due 2026-08-14T18:00:00Z — 33.0h past due + grace (1 pending unit(s) overdue)
+- overdue: pr #902 deferred until 2026-08-15T12:00:00Z — 15.0h past that + grace (1 pending unit(s) overdue)
 - stall: 1 PR(s) closed more than 33h ago are in none of frozen / pending / skipped: #700
 
 ## Score regression — a part below 80/100 or down ≥3

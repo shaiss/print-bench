@@ -15,40 +15,65 @@ detectors, and every read they need lives here, so the #646 read lens
   ``foreign``, ``deleted`` and ``unanchored`` are findings; once armed, so is
   ``bootstrap`` (an absent ref the harvester has never published).
 * ``provenance-lag`` — (a) the oldest pending unit in the evidence ref's
-  ``state.json`` past ``due_at + provenance_lag_hours``, and (b) the STALL
-  check: one page of ``/pulls?state=closed&sort=updated&direction=desc``; a
-  PR closed more than ``settle_hours + max_defer_hours +
-  provenance_lag_hours`` ago that is in none of frozen (the ``raw/pr`` tree
-  listing), ``pending`` or ``skipped`` means the harvester stopped seeing PRs
-  — dropped schedule slots, a failing gate, a dead job — even though nothing
-  is pending. Every closed PR a harvest pass sees lands in exactly one of the
-  three (tools/provenance's ``freeze.plan_freezes``), which is what makes the
-  absence meaningful.
+  ``state.json`` past its anchor + ``provenance_lag_hours``: the anchor is
+  ``due_at``, or ``defer_until`` for a unit LEGITIMATELY deferred (every
+  reason one of :data:`DEFER_REASONS` — an in-flight run, a pending
+  deployment — which the harvester holds until ``defer_until`` by design); a
+  unit that is failing (``capture-failed``, ``contract-invalid``) is measured
+  from ``due_at``. (b) The STALL check: one page of
+  ``/pulls?state=closed&sort=updated&direction=desc``; a PR closed more than
+  ``settle_hours + max_defer_hours + provenance_lag_hours`` ago, last updated
+  more than ``provenance_lag_hours`` ago (so the harvester's hourly listing
+  has had its chance at an update — a fresh comment on an old PR is not a
+  stall) and not before ``backfill_since`` (the harvester never lists those),
+  that is in none of frozen (the ``raw/pr`` tree listing), ``pending`` or
+  ``skipped`` means the harvester stopped seeing PRs — dropped schedule slots,
+  a failing gate, a dead job — even though nothing is pending. Every closed
+  PR a harvest pass sees lands in exactly one of the three (tools/provenance's
+  ``freeze.plan_freezes``), which is what makes the absence meaningful.
 
 Both read "not evaluated" only while the harvester is DISARMED (the
 ``PROVENANCE_ENABLED`` variable — whose raw value reeve.yml hands the report
 job, the andon pattern — is not ``true`` under GitHub's case-insensitive
-compare, or the committed ``.github/provenance.conf`` says ``enabled: false``)
-or on an offline run. Once armed, an absent ref is a finding, never a skip.
+compare, or the committed ``.github/provenance.conf`` says ``enabled: false``),
+on an offline run, or when the armed gather itself FAILED (a refused read, a
+runaway artifact scan, an unreadable conf): the failure is caught, named in
+the "not evaluated" reason, and the rest of the daily report still renders —
+a provenance read problem never costs Reeve every other detector. Once armed
+and gathered, an absent ref is a finding, never a skip.
 
 **The reads** (all GET, through ``github._get`` — the package's one network
 seam, so the tests monkeypatch it and nothing leaves the process): the two
 tips (``/git/ref/heads/<ref>``); the repo-wide artifact list, newest first,
-until each ref has a verified checkpoint or the horizon passes; each candidate
-mark's run (``/actions/runs/{id}``: ``path``, ``event``, ``head_branch``);
-the first parents a continuity walk asks for (``/git/commits/{sha}``);
-``state.json`` at the evidence tip (``/contents``, the ``/git/blobs``
-fallback past the contents size limit); the ``raw/pr`` tree listing
-(``/git/trees``, three levels); and the one closed-PR page. A mark counts
-only when its artifact's ``workflow_run`` is on the default branch and the run
-is ``provenance.yml`` fired by ``schedule`` / ``workflow_dispatch`` — the
-harvester's own rule minus its first-parent pre-filter, which needs a clone
-Reeve does not hold (a residual only a rewritten default branch could reach).
+until each ref has a verified checkpoint or the horizon passes (bounded by
+:func:`max_artifact_pages`, derived from the horizon); each candidate mark's
+run (``/actions/runs/{id}``: ``path``, ``event``, ``head_branch``,
+``head_sha``) and that run's commit on the default branch
+(``/compare/{head_sha}...{default}``); the first parents a continuity walk
+asks for (``/git/commits/{sha}``); ``state.json`` at the evidence tip
+(``/contents``, the ``/git/blobs`` fallback past the contents size limit);
+the ``raw/pr`` tree listing (``/git/trees``, three levels); and the one
+closed-PR page.
+
+**Which marks count.** A mark counts only when its artifact's
+``workflow_run`` names the default branch and its run is ``provenance.yml``
+fired by ``schedule`` / ``workflow_dispatch`` with ``head_branch`` the
+default branch AND ``head_sha`` in the default branch's history (``compare``
+status ``identical`` or ``ahead``). The last check is what refuses a run
+dispatched on a TAG named like the default branch — its ``head_branch`` is
+the tag's short name, so the name checks alone would pass it, and its YAML is
+whatever the tag points at (a contents-write holder could make that upload
+forged ``tip-…`` marks, then force-push the forged tip). Residual: this is
+reachability, not the harvester's first-parent rule (which needs a clone
+Reeve does not hold), so a commit reachable only through a merged PR's
+second-parent history passes here; the harvester's own scan refuses such a
+mark, its run goes red, and ``routine-dead`` reports it.
 
 The policy values Reeve needs from the harvester (``enabled``,
-``settle_hours``, ``max_defer_hours``, ``continuity_horizon_days``) are READ
-from the committed ``.github/provenance.conf``, never duplicated; Reeve's own
-threshold is ``provenance_lag_hours`` in ``.github/reeve.conf``.
+``settle_hours``, ``max_defer_hours``, ``continuity_horizon_days``,
+``backfill_since``) are READ from the committed ``.github/provenance.conf``,
+never duplicated; Reeve's own threshold is ``provenance_lag_hours`` in
+``.github/reeve.conf``.
 
 Pure at import: the network seam is imported inside :func:`gather` only, so
 ``detectors.py`` can import the pure half (held by the package's purity scan).
@@ -71,15 +96,29 @@ MARK_EVENTS = frozenset({"schedule", "workflow_dispatch"})
 MARK_KINDS = {"intent": "intent-", "tip": "tip-"}
 VERDICTS = ("ok", "foreign", "deleted", "unanchored", "bootstrap")
 CONF_PATH = os.path.join(".github", "provenance.conf")
-#: The harvester's conf keys Reeve reads (and the ints they must be).
-CONF_KEYS = ("enabled", "settle_hours", "max_defer_hours", "continuity_horizon_days")
-#: Artifact-list pages read at most (100 artifacts each; ~1.4 days a page measured on
-#: 2026-10-14, so 70 pages comfortably cover the 90-day horizon). Hitting it raises.
-MAX_ARTIFACT_PAGES = 70
+#: The harvester's conf keys Reeve reads: ``enabled``, three integers, and ``backfill_since``.
+CONF_KEYS = ("enabled", "settle_hours", "max_defer_hours", "continuity_horizon_days",
+             "backfill_since")
+_INT_KEYS = ("settle_hours", "max_defer_hours", "continuity_horizon_days")
+#: Artifact-list pages (100 artifacts each) the scan may read per day of the continuity
+#: horizon: ~70 artifacts a day were measured on 2026-10-14 (6,519 in all), so 3 pages a day
+#: is ~4x headroom before :func:`max_artifact_pages` refuses a scan that has not reached
+#: the horizon.
+PAGES_PER_HORIZON_DAY = 3
+MIN_ARTIFACT_PAGES = 10
+#: Pending reasons that mean "deferred until ``defer_until`` by design" — tools/provenance's
+#: ``freeze.REASON_IN_FLIGHT`` / ``REASON_DEPLOYMENT``, mirrored (the tools stay independently
+#: installable) and pinned to them by a test in each suite. Any other reason is a failure.
+DEFER_REASONS = frozenset({"in-flight-run", "deployment-pending"})
+#: Compare statuses that put a run's head sha in the default branch's history.
+ON_BRANCH_STATUSES = frozenset({"identical", "ahead"})
 #: Unseen PR numbers a stall finding names (the count is always exact).
 STALL_SHOWN = 10
+#: Length cap of a gather-failure reason (the report's "not evaluated" line).
+ERROR_SHOWN = 200
 
 _SHA40_RE = re.compile(r"[0-9a-f]{40}")
+_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _RAW_PR_RE = re.compile(r"([1-9][0-9]{0,6})(?:\.r[0-9]{1,4})?\.json\.gz")
 _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 
@@ -160,10 +199,17 @@ def armed(conf_enabled: bool, variable: Optional[str]) -> bool:
     return conf_enabled is True and isinstance(variable, str) and variable.casefold() == "true"
 
 
+def max_artifact_pages(horizon_days: int) -> int:
+    """The artifact-scan page bound for a ``horizon_days`` horizon (:data:`PAGES_PER_HORIZON_DAY`
+    a day, never under :data:`MIN_ARTIFACT_PAGES`) — derived, so a longer horizon or a busier
+    repo moves it with the conf instead of tripping a fixed count."""
+    return max(MIN_ARTIFACT_PAGES, int(horizon_days) * PAGES_PER_HORIZON_DAY)
+
+
 def read_conf(text: str, where: str = CONF_PATH) -> dict[str, Any]:
-    """The four values Reeve needs from the committed harvester conf (``key: value``, ``#``
+    """The five values Reeve needs from the committed harvester conf (``key: value``, ``#``
     comments; the file's other keys are the harvester's own and are not read). A missing or
-    non-integer value raises ``ValueError`` naming ``where`` — never a silent default."""
+    malformed value raises ``ValueError`` naming ``where`` — never a silent default."""
     found: dict[str, str] = {}
     for raw in text.splitlines():
         line = raw.strip()
@@ -178,10 +224,13 @@ def read_conf(text: str, where: str = CONF_PATH) -> dict[str, Any]:
     if found["enabled"].lower() not in ("true", "false"):
         raise ValueError(f"{where}: 'enabled' must be true or false")
     out: dict[str, Any] = {"enabled": found["enabled"].lower() == "true"}
-    for key in CONF_KEYS[1:]:
+    for key in _INT_KEYS:
         if not re.fullmatch(r"[0-9]{1,6}", found[key]):
             raise ValueError(f"{where}: {key!r} must be a non-negative integer")
         out[key] = int(found[key])
+    if not _DATE_RE.fullmatch(found["backfill_since"]) or _ts(found["backfill_since"]) is None:
+        raise ValueError(f"{where}: 'backfill_since' must be a YYYY-MM-DD date")
+    out["backfill_since"] = found["backfill_since"]
     return out
 
 
@@ -226,19 +275,28 @@ def lag(block: dict[str, Any], now: str, lag_hours: int) -> list[dict[str, Any]]
     overdue = []
     for kind in ("pr", "brief"):
         for key, entry in sorted(((state.get("pending") or {}).get(kind) or {}).items()):
-            due = _ts((entry or {}).get("due_at", ""))
+            entry = entry or {}
+            due = _ts(entry.get("due_at", ""))
             if due is None or t is None:
                 continue
-            past = (t - (due + timedelta(hours=lag_hours))).total_seconds() / 3600.0
+            # A unit deferred by design (every reason a DEFER_REASONS one) is pending until
+            # defer_until; a failing one (capture-failed, contract-invalid) from due_at.
+            anchor_key, anchor = "due_at", due
+            reasons = set(entry.get("reasons") or ())
+            until = _ts(entry.get("defer_until", ""))
+            if reasons and reasons <= DEFER_REASONS and until is not None and until > due:
+                anchor_key, anchor = "defer_until", until
+            past = (t - (anchor + timedelta(hours=lag_hours))).total_seconds() / 3600.0
             if past > 0:
-                overdue.append((past, kind, key, entry["due_at"]))
+                overdue.append((past, kind, key, anchor_key, entry[anchor_key]))
     if overdue:
         overdue.sort(key=lambda o: (-o[0], o[1], int(o[2]) if o[2].isdigit() else 0))
-        past, kind, key, due_at = overdue[0]
-        findings.append({"kind": "overdue", "unit": f"{kind} #{key}", "due_at": due_at,
-                         "hours_past": round(past, 1), "count": len(overdue)})
+        past, kind, key, anchor_key, since = overdue[0]
+        findings.append({"kind": "overdue", "unit": f"{kind} #{key}", "anchor": anchor_key,
+                         "since": since, "hours_past": round(past, 1), "count": len(overdue)})
     conf = block.get("conf") or {}
     window = int(conf.get("settle_hours", 0)) + int(conf.get("max_defer_hours", 0)) + int(lag_hours)
+    floor = _ts(conf.get("backfill_since") or "")
     known = ({int(n) for n in block.get("frozen_prs") or []}
              | {int(k) for k in ((state.get("pending") or {}).get("pr") or {})}
              | {int(k) for k in ((state.get("skipped") or {}).get("pr") or {})})
@@ -247,6 +305,12 @@ def lag(block: dict[str, Any], now: str, lag_hours: int) -> list[dict[str, Any]]
         closed = _ts(pr.get("closed_at") or "")
         if closed is None or t is None or pr.get("number") in known:
             continue
+        # updated_at ≥ closed_at on GitHub; an older snapshot without it reads closed_at.
+        updated = _ts(pr.get("updated_at") or "") or closed
+        if floor is not None and updated < floor:
+            continue  # never in the harvester's listing (its cursor floor is backfill_since)
+        if (t - updated).total_seconds() / 3600.0 <= lag_hours:
+            continue  # touched since the harvester's last chances to list it: not yet a stall
         if (t - closed).total_seconds() / 3600.0 > window:
             unseen.append(int(pr["number"]))
     if unseen:
@@ -262,7 +326,17 @@ def not_evaluated_reason(block: Optional[dict[str, Any]]) -> Optional[str]:
         return "no provenance block gathered (offline run — pass --repo to enable)"
     if not block.get("armed"):
         return block.get("reason") or "the provenance harvester is disarmed"
+    if block.get("error"):
+        return f"the provenance gather failed: {block['error']}"
     return None
+
+
+def _one_line(text: str) -> str:
+    """A gather failure as one markdown-defused line of at most :data:`ERROR_SHOWN` characters
+    (the report's not-evaluated line carries it; an exception text is not ours to trust)."""
+    flat = re.sub(r"\s+", " ", str(text)).strip()
+    escaped = re.sub(r"([\\`*_\[\]|~<>])", r"\\\1", flat)
+    return escaped[:ERROR_SHOWN] + "…" if len(escaped) > ERROR_SHOWN else escaped
 
 
 # --- the GET-only gather -----------------------------------------------------------
@@ -296,18 +370,32 @@ def _tip(repo: str, token: str, ref: str) -> Optional[str]:
     return sha if _is_sha(sha) else None
 
 
+def _on_default_branch(repo: str, token: str, sha: str, default_branch: str,
+                       memo: dict[str, bool]) -> bool:
+    """Is ``sha`` in the default branch's history? ``GET /compare/{sha}...{default}``: status
+    ``identical`` (it is the tip) or ``ahead`` (the branch moved on from it); ``behind`` /
+    ``diverged`` — a tag's or another branch's commit — and an unknown sha (404) are not."""
+    if sha not in memo:
+        body = _get_or_none(_api(repo, f"/compare/{sha}...{default_branch}?per_page=1"), token)
+        memo[sha] = isinstance(body, dict) and body.get("status") in ON_BRANCH_STATUSES
+    return memo[sha]
+
+
 def _scan_marks(repo: str, token: str, *, now: datetime, horizon_days: int,
                 default_branch: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
     horizon = now - timedelta(days=horizon_days)
+    max_pages = max_artifact_pages(horizon_days)
     marks: list[dict[str, Any]] = []
     runs: dict[int, bool] = {}
+    reach: dict[str, bool] = {}
     counts = {"pages": 0, "runs_verified": 0, "marks_rejected": 0}
     url: Optional[str] = _api(repo, "/actions/artifacts?per_page=100")
     while url:
         counts["pages"] += 1
-        if counts["pages"] > MAX_ARTIFACT_PAGES:
-            raise RuntimeError(f"more than {MAX_ARTIFACT_PAGES} artifact pages — refusing a "
-                               "silently-truncated provenance continuity scan")
+        if counts["pages"] > max_pages:
+            raise RuntimeError(f"more than {max_pages} artifact pages before the "
+                               f"{horizon_days}-day horizon — refusing a silently-truncated "
+                               "provenance continuity scan")
         body, link = _call(url, token)
         items = (body or {}).get("artifacts") if isinstance(body, dict) else None
         if not isinstance(items, list):
@@ -328,9 +416,14 @@ def _scan_marks(repo: str, token: str, *, now: datetime, horizon_days: int,
                 continue
             if run_id not in runs:
                 run = _get_or_none(_api(repo, f"/actions/runs/{run_id}"), token) or {}
+                head = run.get("head_sha")
+                # head_branch is a TAG's short name for a run dispatched on refs/tags/<default>;
+                # only the head sha being in the default branch's history refuses that run.
                 runs[run_id] = (run.get("path") == WORKFLOW_PATH
                                 and run.get("event") in MARK_EVENTS
-                                and run.get("head_branch") == default_branch)
+                                and run.get("head_branch") == default_branch
+                                and _is_sha(head)
+                                and _on_default_branch(repo, token, head, default_branch, reach))
                 counts["runs_verified"] += runs[run_id]
             if not runs[run_id]:
                 counts["marks_rejected"] += 1
@@ -407,11 +500,22 @@ def gather(repo: str, token: str, *, root: str = ".", variable: Optional[str] = 
     Disarmed → ``{"armed": false, "reason": …}`` with NO request sent and the conf read
     only when the variable arms it. Armed → the tips, the verified marks (newest first),
     the first parents the continuity walk asked for, the scan counts, ``state.json``'s
-    pending / skipped, the frozen PR numbers and one closed-PR page."""
+    pending / skipped, the frozen PR numbers and one closed-PR page. Any failure once the
+    variable arms it → ``{"armed": true, "error": <one defused line>}``: both detectors then
+    read "not evaluated" with that reason and every other detector still reports."""
     if not (isinstance(variable, str) and variable.casefold() == "true"):
         return {"armed": False,
                 "reason": "PROVENANCE_ENABLED is not 'true' — the harvester's schedule is "
                           "disarmed (arming is phase P2, docs/provenance.md)"}
+    try:
+        return _gather_armed(repo, token, root=root, variable=variable, now=now,
+                             default_branch=default_branch)
+    except Exception as exc:  # any read or parse failure: report it, never lose the report
+        return {"armed": True, "error": _one_line(f"{type(exc).__name__}: {exc}")}
+
+
+def _gather_armed(repo: str, token: str, *, root: str, variable: str, now: Optional[datetime],
+                  default_branch: str) -> dict[str, Any]:
     with open(os.path.join(root, CONF_PATH), encoding="utf-8") as fh:
         conf = read_conf(fh.read())
     if not armed(conf["enabled"], variable):
@@ -436,10 +540,12 @@ def gather(repo: str, token: str, *, root: str = ".", variable: Optional[str] = 
     page, _ = _call(_api(repo, "/pulls?state=closed&sort=updated&direction=desc&per_page=100"), token)
     if not isinstance(page, list):
         raise RuntimeError("unexpected closed-pulls payload (not a list)")
-    closed = [{"number": p["number"], "closed_at": p.get("closed_at")}
+    closed = [{"number": p["number"], "closed_at": p.get("closed_at"),
+               "updated_at": p.get("updated_at")}
               for p in page if isinstance(p, dict) and isinstance(p.get("number"), int)]
     return {"armed": True,
             "conf": {"settle_hours": conf["settle_hours"],
-                     "max_defer_hours": conf["max_defer_hours"]},
+                     "max_defer_hours": conf["max_defer_hours"],
+                     "backfill_since": conf["backfill_since"]},
             "tips": tips, "marks": marks, "parents": parents, "scan": counts,
             "state": state, "frozen_prs": frozen, "closed_prs": closed}

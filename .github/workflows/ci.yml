@@ -74,6 +74,7 @@ jobs:
       concept_preview_tests: ${{ steps.filter.outputs.concept_preview_tests }}
       agent_memory_tests: ${{ steps.filter.outputs.agent_memory_tests }}
       provenance_tests: ${{ steps.filter.outputs.provenance_tests }}
+      provenance_read_lens: ${{ steps.filter.outputs.provenance_read_lens }}
       styles: ${{ steps.filter.outputs.styles }}
       gate: ${{ steps.filter.outputs.gate }}
       gate_designs: ${{ steps.filter.outputs.gate_designs }}
@@ -956,7 +957,12 @@ jobs:
   provenance-tests:
     name: provenance unit tests
     needs: changes
-    if: needs.changes.outputs.provenance_tests == 'true'
+    # Two modes: the full suite on its own trigger list, or ONLY the #646
+    # read lens (test_read_lens.py, sub-second) when a change under any of
+    # the lens's scan roots — scripts/, tools/, .github/, .claude/, site/ —
+    # could have added a reader of the two data refs (scripts/ci-classify.sh,
+    # provenance_read_lens).
+    if: needs.changes.outputs.provenance_tests == 'true' || needs.changes.outputs.provenance_read_lens == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -979,7 +985,15 @@ jobs:
         # (test_workflow.py), the reviewer-posted.sh / coach-lock-check.sh
         # trust-port drift pins and the pinned #843 snapshot's ingest checks —
         # which is why those files re-run this job (scripts/ci-classify.sh).
-        run: python -m pytest tools/provenance -q
+        # Read-lens-only mode when just a scan root moved.
+        env:
+          FULL_SUITE: ${{ needs.changes.outputs.provenance_tests }}
+        run: |
+          if [ "$FULL_SUITE" = "true" ]; then
+            python -m pytest tools/provenance -q
+          else
+            python -m pytest tools/provenance/tests/test_read_lens.py -q
+          fi
 
   model-registry-tests:
     name: model-registry unit tests

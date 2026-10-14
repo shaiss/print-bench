@@ -126,8 +126,44 @@ def test_lag_fires_on_the_oldest_overdue_unit():
     st["pending"]["brief"]["901"] = {"closed_at": None, "due_at": "2026-08-15T20:00:00Z",
                                      "defer_until": "2026-08-15T20:00:00Z", "reasons": []}
     found = provenance.lag(block(state=st), NOW, 3)
-    assert found == [{"kind": "overdue", "unit": "pr #902", "due_at": "2026-08-14T18:00:00Z",
-                      "hours_past": 33.0, "count": 2}]
+    assert found == [{"kind": "overdue", "unit": "pr #902", "anchor": "due_at",
+                      "since": "2026-08-14T18:00:00Z", "hours_past": 33.0, "count": 2}]
+
+
+def test_lag_measures_a_deferred_unit_from_defer_until():
+    """A unit the harvester deferred by design (in-flight run / pending deployment) is pending
+    until defer_until (due + 18 h), so it is overdue only past THAT + grace; a failing unit
+    (capture-failed / contract-invalid, alone or mixed in) is still measured from due_at."""
+    entry = {"closed_at": "2026-08-15T00:00:00Z", "due_at": "2026-08-15T06:00:00Z",
+             "defer_until": "2026-08-16T00:00:00Z"}
+
+    def found(reasons, now=NOW):
+        st = {"pending": {"pr": {"902": dict(entry, reasons=reasons)}, "brief": {}},
+              "skipped": {"pr": {}}}
+        return provenance.lag(block(state=st), now, 3)
+
+    # NOW is 24 h past due but, deferred by design, measured from defer_until: 6 h past it,
+    # so 3.0 h past it + the 3 h grace.
+    for reasons in (["in-flight-run"], ["deployment-pending"], ["deployment-pending", "in-flight-run"]):
+        assert found(reasons) == [{"kind": "overdue", "unit": "pr #902", "anchor": "defer_until",
+                                   "since": "2026-08-16T00:00:00Z", "hours_past": 3.0,
+                                   "count": 1}], reasons
+        assert found(reasons, now="2026-08-16T02:00:00Z") == [], reasons     # inside the deferral
+    # Negative controls: a failing unit is overdue from due_at even mid-deferral.
+    for reasons in (["capture-failed"], ["contract-invalid"], ["capture-failed", "in-flight-run"], []):
+        got = found(reasons, now="2026-08-16T02:00:00Z")
+        assert [(f["anchor"], f["hours_past"]) for f in got] == [("due_at", 17.0)], reasons
+
+
+def test_defer_reasons_mirror_the_harvester():
+    """DEFER_REASONS is tools/provenance's freeze.REASON_IN_FLIGHT / REASON_DEPLOYMENT (read from
+    the source — the tools stay independently installable); the provenance suite pins the
+    same pair from its side."""
+    text = (REPO_ROOT / "tools" / "provenance" / "src" / "provenance" / "freeze.py").read_text(
+        encoding="utf-8")
+    harvester = set(re.findall(r'^REASON_(?:IN_FLIGHT|DEPLOYMENT) = "([a-z-]+)"$', text, re.MULTILINE))
+    assert len(harvester) == 2 and harvester == set(provenance.DEFER_REASONS)
+    assert 'CAPTURE_FAILED = "capture-failed"' in text and "capture-failed" not in provenance.DEFER_REASONS
 
 
 def test_lag_silent_inside_the_grace():                                      # negative control
@@ -150,6 +186,22 @@ def test_lag_stall_check_silent_when_every_old_pr_is_accounted_for():        # n
     # … and the window comes from the harvester's conf plus Reeve's grace: a shorter one fires.
     assert provenance.lag(block(closed_prs=[{"number": 1, "closed_at": "2026-08-16T00:00:00Z"}],
                                 conf={"settle_hours": 1, "max_defer_hours": 2}), NOW, 1)
+
+
+def test_lag_stall_ignores_a_fresh_update_and_pre_backfill_prs():
+    """Not a stall: an old closed PR updated within provenance_lag_hours (a fresh comment — the
+    harvester's hourly listing has not had its chance yet), or one last updated before
+    backfill_since (the harvester never lists it). The same PR updated longer ago is one."""
+    old = "2026-08-01T00:00:00Z"
+    conf = {"settle_hours": 6, "max_defer_hours": 24, "backfill_since": "2026-07-31"}
+    fresh = [{"number": 700, "closed_at": old, "updated_at": "2026-08-16T04:00:00Z"}]   # 2h ago
+    assert provenance.lag(block(closed_prs=fresh, conf=conf), NOW, 3) == []
+    stale = [{"number": 700, "closed_at": old, "updated_at": "2026-08-16T02:00:00Z"}]   # 4h ago
+    assert [f["prs"] for f in provenance.lag(block(closed_prs=stale, conf=conf), NOW, 3)] == [[700]]
+    ancient = [{"number": 9, "closed_at": "2026-05-01T00:00:00Z", "updated_at": "2026-07-30T23:00:00Z"}]
+    assert provenance.lag(block(closed_prs=ancient, conf=conf), NOW, 3) == []
+    on_floor = [{"number": 9, "closed_at": "2026-05-01T00:00:00Z", "updated_at": "2026-07-31T00:00:00Z"}]
+    assert [f["prs"] for f in provenance.lag(block(closed_prs=on_floor, conf=conf), NOW, 3)] == [[9]]
 
 
 def test_lag_reports_an_absent_evidence_ref_once_armed():
@@ -203,13 +255,21 @@ def test_evaluate_uses_reeve_s_own_lag_threshold():
 def test_committed_provenance_conf_is_readable():
     conf = provenance.read_conf((REPO_ROOT / ".github" / "provenance.conf").read_text(encoding="utf-8"))
     assert conf == {"enabled": True, "settle_hours": 6, "max_defer_hours": 24,
-                    "continuity_horizon_days": 90}
+                    "continuity_horizon_days": 90, "backfill_since": "2026-07-31"}
+
+
+_CONF_OK = ("enabled: true\nsettle_hours: 6\nmax_defer_hours: 24\ncontinuity_horizon_days: 90\n"
+            "backfill_since: 2026-07-31\n")
 
 
 @pytest.mark.parametrize("text,pattern", [
-    ("enabled: true\nsettle_hours: 6\nmax_defer_hours: 24\n", "missing continuity_horizon_days"),
-    ("enabled: maybe\nsettle_hours: 6\nmax_defer_hours: 24\ncontinuity_horizon_days: 90\n", "'enabled'"),
-    ("enabled: true\nsettle_hours: 6.5\nmax_defer_hours: 24\ncontinuity_horizon_days: 90\n", "settle_hours"),
+    ("enabled: true\nsettle_hours: 6\nmax_defer_hours: 24\nbackfill_since: 2026-07-31\n",
+     "missing continuity_horizon_days"),
+    (_CONF_OK.replace("enabled: true", "enabled: maybe"), "'enabled'"),
+    (_CONF_OK.replace("settle_hours: 6", "settle_hours: 6.5"), "settle_hours"),
+    (_CONF_OK.replace("backfill_since: 2026-07-31\n", ""), "missing backfill_since"),
+    (_CONF_OK.replace("2026-07-31", "2026-13-40"), "backfill_since"),
+    (_CONF_OK.replace("2026-07-31", "yesterday"), "backfill_since"),
 ])
 def test_conf_reader_refuses_rather_than_defaulting(text, pattern):
     with pytest.raises(ValueError, match=pattern):
@@ -257,6 +317,13 @@ def _art(aid, name, run_id, branch="main", created="2026-08-16T05:30:00Z"):
             "workflow_run": {"id": run_id, "head_branch": branch, "head_sha": "ff" * 20}}
 
 
+MAIN_SHA, TAG_SHA = "e1" * 20, "7a" * 20
+
+
+def _compare(sha):
+    return _api(f"/compare/{sha}...main?per_page=1")
+
+
 def _world():
     root_tree, raw_tree, pr_tree = "a0" * 20, "a1" * 20, "a2" * 20
     state = {"format": "state@1", "pending": {"pr": {"902": {"closed_at": "2026-08-15T00:00:00Z",
@@ -276,9 +343,10 @@ def _world():
             _art(5, f"tip-provenance-{'97' * 20}", 80, created="2026-01-01T00:00:00Z"),  # past horizon
         ]},
         _api("/actions/runs/80"): {"path": ".github/workflows/provenance.yml", "event": "schedule",
-                                   "head_branch": "main"},
+                                   "head_branch": "main", "head_sha": MAIN_SHA},
         _api("/actions/runs/78"): {"path": ".github/workflows/ci.yml", "event": "schedule",
-                                   "head_branch": "main"},
+                                   "head_branch": "main", "head_sha": MAIN_SHA},
+        _compare(MAIN_SHA): {"status": "ahead", "ahead_by": 3, "behind_by": 0},
         _api(f"/git/commits/{E_FORGED}"): {"parents": [{"sha": E_C}], "tree": {"sha": root_tree}},
         _api(f"/git/trees/{root_tree}"): {"tree": [{"path": "raw", "type": "tree", "sha": raw_tree},
                                                    {"path": "state.json", "type": "blob", "sha": "b" * 40}]},
@@ -290,8 +358,8 @@ def _world():
         _api(f"/contents/state.json?ref={E_FORGED}"): {"encoding": "base64", "content": _b64(state),
                                                        "sha": "b" * 40},
         _api("/pulls?state=closed&sort=updated&direction=desc&per_page=100"): [
-            {"number": 636, "closed_at": "2026-08-10T00:00:00Z"},
-            {"number": 700, "closed_at": "2026-08-14T00:00:00Z"}],
+            {"number": 636, "closed_at": "2026-08-10T00:00:00Z", "updated_at": "2026-08-10T01:00:00Z"},
+            {"number": 700, "closed_at": "2026-08-14T00:00:00Z", "updated_at": "2026-08-14T00:00:00Z"}],
     }
 
 
@@ -315,8 +383,7 @@ def test_gather_disarmed_sends_nothing(monkeypatch, tmp_path):
         assert out["armed"] is False and "PROVENANCE_ENABLED" in out["reason"]
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github" / "provenance.conf").write_text(
-        "enabled: false\nsettle_hours: 6\nmax_defer_hours: 24\ncontinuity_horizon_days: 90\n",
-        encoding="utf-8")
+        _CONF_OK.replace("enabled: true", "enabled: false"), encoding="utf-8")
     paused = provenance.gather("o/r", "tok", root=str(tmp_path), variable="true")
     assert paused["armed"] is False and "enabled: false" in paused["reason"]
 
@@ -335,17 +402,21 @@ def test_gather_armed_reads_the_closed_set_of_endpoints(monkeypatch):
     assert out["frozen_prs"] == [371, 636]
     assert out["state"]["pending"]["pr"]["902"]["due_at"] == "2026-08-15T06:00:00Z"
     assert out["state"]["skipped"]["pr"] == {"800": {"closed_at": "2026-08-01T00:00:00Z"}}
-    assert out["closed_prs"] == [{"number": 636, "closed_at": "2026-08-10T00:00:00Z"},
-                                 {"number": 700, "closed_at": "2026-08-14T00:00:00Z"}]
-    assert out["conf"] == {"settle_hours": 6, "max_defer_hours": 24}
+    assert out["closed_prs"] == [
+        {"number": 636, "closed_at": "2026-08-10T00:00:00Z", "updated_at": "2026-08-10T01:00:00Z"},
+        {"number": 700, "closed_at": "2026-08-14T00:00:00Z", "updated_at": "2026-08-14T00:00:00Z"}]
+    assert out["conf"] == {"settle_hours": 6, "max_defer_hours": 24, "backfill_since": "2026-07-31"}
     # Every request is one of the design's reads, under this repo, through the GET seam.
     allowed = re.compile(
         r"https://api\.github\.com/repos/o/r/(git/ref/heads/(provenance|provenance-site)"
         r"|actions/artifacts\?per_page=100|actions/runs/[0-9]+|git/commits/[0-9a-f]{40}"
+        r"|compare/[0-9a-f]{40}\.\.\.main\?per_page=1"
         r"|git/trees/[0-9a-f]{40}|git/blobs/[0-9a-f]{40}|contents/state\.json\?ref=[0-9a-f]{40}"
         r"|pulls\?state=closed&sort=updated&direction=desc&per_page=100)")
     assert seen and all(allowed.fullmatch(u) for u in seen), seen
     assert _api("/actions/runs/77") not in seen     # an off-branch mark costs no run GET
+    assert seen.count(_compare(MAIN_SHA)) == 1       # one reachability GET per head sha
+    assert _compare(MAIN_SHA) in seen and seen.index(_compare(MAIN_SHA)) > seen.index(_api("/actions/runs/80"))
     # … and the detectors over that block find the forged tip and the stall.
     res = detectors.evaluate(_snapshot(out), Config())
     assert [f["verdict"] for f in res["findings"]["provenance-foreign-tip"]] == ["foreign"]
@@ -381,16 +452,82 @@ def test_gather_absent_refs_are_none_not_errors(monkeypatch):
     assert [f["verdict"] for f in provenance.foreign_tip(out)] == ["deleted", "deleted"]
 
 
-def test_gather_fails_loud_on_anything_but_a_404(monkeypatch):
+def test_gather_rejects_marks_of_a_run_dispatched_on_a_tag_named_main(monkeypatch):
+    """A contents-write holder creates tag `main`, dispatches provenance.yml on refs/tags/main
+    (its head_branch reads "main"), uploads tip marks for a forged sha and force-pushes it. The
+    run passes every name check; its head sha is not in main's history (compare: diverged), so
+    its marks are refused and the forged tip is a finding. Negative controls: the same run with
+    its sha on main is accepted; a sha GitHub cannot compare (404) is refused."""
+    forged = "f0" * 20
+
+    def world(status):
+        w = _world()
+        w[_api("/git/ref/heads/provenance")] = {"object": {"sha": forged}}
+        w[_api("/actions/artifacts?per_page=100")]["artifacts"].insert(
+            0, _art(30, f"tip-provenance-{forged}", 81))
+        w[_api("/actions/runs/81")] = {"path": ".github/workflows/provenance.yml",
+                                       "event": "workflow_dispatch", "head_branch": "main",
+                                       "head_sha": TAG_SHA}
+        if status is not None:
+            w[_compare(TAG_SHA)] = {"status": status}
+        w[_api(f"/contents/state.json?ref={forged}")] = w.pop(_api(f"/contents/state.json?ref={E_FORGED}"))
+        w[_api(f"/git/commits/{forged}")] = w.pop(_api(f"/git/commits/{E_FORGED}"))
+        return w
+
+    def run(status):
+        seen: list[str] = []
+        _patch(monkeypatch, world(status), seen)
+        out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true",
+                                now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
+        return out, seen
+
+    for status in ("diverged", "behind", None):
+        out, seen = run(status)
+        assert _compare(TAG_SHA) in seen, status
+        assert all(m["run_id"] != 81 for m in out["marks"]), status
+        assert out["scan"]["marks_rejected"] == 3, status
+        assert [(f["ref"], f["verdict"]) for f in provenance.foreign_tip(out)] == [
+            ("provenance", "foreign")], status
+    for status in ("ahead", "identical"):                                  # negative controls
+        out, _ = run(status)
+        assert out["marks"][0] == mark(30, "tip", "provenance", forged, 81), status
+        assert provenance.foreign_tip(out) == [], status
+
+
+def test_artifact_page_cap_is_derived_from_the_horizon():
+    """The scan's page bound moves with the conf's horizon (3 pages — 300 artifacts — a day,
+    ~4x the measured ~70/day): the 90-day horizon allows 270, far above the ~63 pages a scan
+    with no checkpoint in reach needs today; a tiny horizon keeps a floor."""
+    assert provenance.max_artifact_pages(90) == 270 >= 90 * 70 // 100 + 1
+    assert provenance.max_artifact_pages(1) == provenance.MIN_ARTIFACT_PAGES
+    assert provenance.max_artifact_pages(30) == 90
+
+
+def _failed(monkeypatch, fake):
+    monkeypatch.setattr(github, "_get", fake)
+    out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true")
+    assert out["armed"] is True and set(out) == {"armed", "error"}
+    return out
+
+
+def test_gather_failure_is_not_evaluated_and_never_costs_the_report(monkeypatch):
+    """Anything but a 404 still fails the provenance read loudly — but as BOTH detectors'
+    "not evaluated" reason (one markdown-defused line), never an exception that would cost the
+    daily report every other detector."""
     class Forbidden(Exception):
         code = 403
 
     def fake(url, token):
-        raise Forbidden(url)
+        raise Forbidden(f"HTTP Error 403: `nope`\n| {url}")
 
-    monkeypatch.setattr(github, "_get", fake)
-    with pytest.raises(Forbidden):
-        provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true")
+    out = _failed(monkeypatch, fake)
+    assert out["error"].startswith("Forbidden: HTTP Error 403: \\`nope\\` \\| https://")
+    assert "\n" not in out["error"] and len(out["error"]) <= provenance.ERROR_SHOWN + 1
+    res = detectors.evaluate(_snapshot(out), Config())
+    for key in ("provenance-foreign-tip", "provenance-lag"):
+        assert res["not_evaluated"][key].startswith("the provenance gather failed: Forbidden"), key
+        assert key not in res["findings"]
+    assert "routine-dead" in res["findings"]                          # the rest still reports
 
 
 def test_gather_refuses_a_runaway_artifact_scan(monkeypatch):
@@ -406,10 +543,9 @@ def test_gather_refuses_a_runaway_artifact_scan(monkeypatch):
             return copy.deepcopy(world[url]), ""
         raise _NotFound(url)
 
-    monkeypatch.setattr(github, "_get", fake)
-    monkeypatch.setattr(provenance, "MAX_ARTIFACT_PAGES", 3)
-    with pytest.raises(RuntimeError, match="more than 3 artifact pages"):
-        provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true")
+    monkeypatch.setattr(provenance, "max_artifact_pages", lambda days: 3)
+    out = _failed(monkeypatch, fake)
+    assert "more than 3 artifact pages before the 90-day horizon" in out["error"]
 
 
 def test_gather_never_follows_a_next_link_off_the_api(monkeypatch):
@@ -423,9 +559,8 @@ def test_gather_never_follows_a_next_link_off_the_api(monkeypatch):
             return copy.deepcopy(world[url]), ""
         raise AssertionError(f"followed {url}")
 
-    monkeypatch.setattr(github, "_get", fake)
-    with pytest.raises(RuntimeError, match="off api.github.com"):
-        provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true")
+    out = _failed(monkeypatch, fake)
+    assert "off api.github.com" in out["error"]
 
 
 def test_cli_run_with_repo_hands_the_variable_to_the_gather(tmp_path, monkeypatch, capsys):

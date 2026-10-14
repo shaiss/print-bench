@@ -58,13 +58,19 @@ pattern; issue #313) — only when `--repo` is passed:
   handed over by reeve.yml as `--provenance-enabled`, casefolds to `true`, and
   `.github/provenance.conf` says `enabled: true`; disarmed, not one request is
   sent): both refs' tips, the repo-wide artifact list newest-first until each
-  ref has a verified `tip-<ref>-<sha>` checkpoint (each candidate's run checked
-  as `provenance.yml` on the default branch, fired by `schedule` /
-  `workflow_dispatch`), the first parents a continuity walk asks for,
+  ref has a verified `tip-<ref>-<sha>` checkpoint or the horizon passes (a page
+  bound derived from the horizon, `provenance.max_artifact_pages`; each
+  candidate's run checked as `provenance.yml` fired by `schedule` /
+  `workflow_dispatch` on the default branch, with its head sha in the default
+  branch's history by `GET /compare/{sha}...{default}` — so a run dispatched on
+  a TAG named like the default branch, whose `head_branch` reads the same,
+  never anchors a checkpoint), the first parents a continuity walk asks for,
   `state.json` at the evidence tip, the `raw/pr` tree listing and one closed-PR
   page. Every read is a GET through `github._get`. The harvester's
-  `settle_hours` / `max_defer_hours` / `continuity_horizon_days` are read from
-  its committed conf, never copied.
+  `settle_hours` / `max_defer_hours` / `continuity_horizon_days` /
+  `backfill_since` are read from its committed conf, never copied. A failure
+  of any of these reads is caught and becomes both provenance detectors'
+  "not evaluated" reason — the rest of the report still renders.
 
 The same `github.py` serves the greenlight loop's trusted Select step (issue
 #443): `gather_greenlight_queue` lists the open `needs-decision` issues and
@@ -91,7 +97,7 @@ Twelve pure functions of one snapshot, deterministic order, byte-stable report:
 | `agent-brief-queue` | an open forge brief is pending / parked `needs-decision` / `wright-declined` — the queue state beside `routine-dead`, so a forge death-streak shows as a backlog that stopped moving (#745; an armed brief is not flagged) |
 | `lock-leak` | an active 🚢 SHIP-LOCK is older than `lock_leak_hours` with no corroborating branch or closing PR — a killed run's ghost claim (issue #312) |
 | `provenance-foreign-tip` | either provenance data ref fails tip continuity — `foreign` (forged or rolled back), `deleted`, `unanchored`, or (armed) `bootstrap`; `provenance.continuity_verdict` ports the harvester's rule and runs every row of the shared `tools/provenance/tests/fixtures/continuity_cases.json` |
-| `provenance-lag` | a pending unit is past `due_at + provenance_lag_hours`, the evidence ref is absent, or the STALL check: a PR closed more than `settle_hours + max_defer_hours + provenance_lag_hours` ago is in none of frozen / pending / skipped (the harvester stopped seeing PRs) |
+| `provenance-lag` | a pending unit is past its anchor + `provenance_lag_hours` (`due_at`; `defer_until` for a unit deferred by design — an in-flight run or a pending deployment), the evidence ref is absent, or the STALL check: a PR closed more than `settle_hours + max_defer_hours + provenance_lag_hours` ago, last updated more than `provenance_lag_hours` ago and not before `backfill_since`, is in none of frozen / pending / skipped (the harvester stopped seeing PRs) |
 | `adoption-study` | an open study submission has no `disposition:*` label yet, or is flagged `disposition:worth-raising` |
 | `score-regression` | a part is below `score_floor`, or down ≥ `score_drop` vs the prior full-catalog run |
 | `walltime-regression` | a design's gate wall time rose ≥ `walltime_ratio`× (and past `walltime_min_seconds`) |
@@ -103,7 +109,8 @@ fewer parts. A detector whose input is absent is reported **not evaluated** with
 a reason, never silently empty (the groomer's honesty rule); an offline run
 (no `--repo`) reports every run-health detector that way, and the two
 provenance detectors also read "not evaluated" while the harvester is disarmed
-— once it is armed, an absent data ref is a finding, never a skip.
+or when the armed gather failed (the failure is the reason) — once it is
+armed and gathered, an absent data ref is a finding, never a skip.
 
 ## Advisory-only, checkable
 

@@ -112,7 +112,7 @@
     "branches": ["main", "claude/issue-284-corroborated"],
     "provenance": {
       "armed": true,
-      "conf": {"settle_hours": 6, "max_defer_hours": 24},
+      "conf": {"settle_hours": 6, "max_defer_hours": 24, "backfill_since": "2026-07-31"},
       "tips": {"provenance": "4646464646464646464646464646464646464646",
                "provenance-site": "4444444444444444444444444444444444444444"},
       "marks": [
@@ -127,11 +127,13 @@
       },
       "frozen_prs": [371, 636],
       "closed_prs": [
-        {"number": 701, "closed_at": "2026-08-15T12:00:00Z"},
-        {"number": 902, "closed_at": "2026-08-14T12:00:00Z"},
-        {"number": 700, "closed_at": "2026-08-14T10:00:00Z"},
-        {"number": 636, "closed_at": "2026-08-13T08:00:00Z"},
-        {"number": 800, "closed_at": "2026-08-13T00:00:00Z"}
+        {"number": 650, "closed_at": "2026-08-02T00:00:00Z", "updated_at": "2026-08-16T05:00:00Z"},
+        {"number": 701, "closed_at": "2026-08-15T12:00:00Z", "updated_at": "2026-08-15T12:00:00Z"},
+        {"number": 902, "closed_at": "2026-08-14T12:00:00Z", "updated_at": "2026-08-14T12:00:00Z"},
+        {"number": 700, "closed_at": "2026-08-14T10:00:00Z", "updated_at": "2026-08-14T10:00:00Z"},
+        {"number": 636, "closed_at": "2026-08-13T08:00:00Z", "updated_at": "2026-08-13T08:00:00Z"},
+        {"number": 800, "closed_at": "2026-08-13T00:00:00Z", "updated_at": "2026-08-13T00:00:00Z"},
+        {"number": 120, "closed_at": "2026-05-01T00:00:00Z", "updated_at": "2026-07-01T00:00:00Z"}
       ]
     }
   }

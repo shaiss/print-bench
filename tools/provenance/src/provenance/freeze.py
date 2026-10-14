@@ -99,11 +99,38 @@ unit never strands it; a pending PR found open again (reopened) leaves
 branch=<head_ref>`` page (watched runs whose status is queued / in progress /
 pending / waiting / requested) and, when merged, the merge sha's Production
 deployment and its statuses (the newest deployment's newest status is one
-of success / failure / error / inactive → terminal). A PR whose capture fails
-(``CaptureError``: its ``/pulls/{n}`` answered nothing) stays pending with
-the reason ``capture-failed``, so it is retried — every closed PR the pass
-has seen ends in exactly one of frozen, pending or skipped (Reeve's
-``provenance-lag`` stall check counts on it).
+of success / failure / error / inactive → terminal; a lookup GitHub refuses
+counts as not terminal). A unit whose capture fails is ISOLATED: an API refusal
+anywhere in it — the ``designs/`` files check, the capture itself (``CaptureError``:
+its ``/pulls/{n}`` answered nothing), a linked brief's reads — or in the
+re-read of a pending unit the listing did not reach leaves THAT unit pending
+with the reason ``capture-failed`` and the pass goes on to the next one, so
+one PR GitHub keeps refusing never blocks the PRs, briefs and releases after
+it (a pending PR carrying ``capture-failed`` re-runs the ``designs/`` check,
+since a failed one decided nothing). Every closed PR the pass has seen ends in
+exactly one of frozen, pending or skipped (Reeve's ``provenance-lag`` stall
+check counts on it); a unit that keeps failing is Reeve's ``overdue`` finding.
+A failure of a LISTING itself (``/pulls``, ``/issues``, ``/releases``) still
+ends the pass: nothing below it is knowable.
+
+**Gone vs transient.** Only a 404 / 410 / 422 on a per-object listing
+(``/commits/{sha}/statuses`` of a sha GitHub no longer knows, the statuses of a
+deleted deployment) reads as "gone" — recorded as
+``statuses-unavailable:<sha8>`` or an empty list. Any other refusal (a 5xx
+after retries, a transport failure) fails the unit's capture, so it stays
+pending and is retried next run instead of freezing a transient gap into
+revision 1.
+
+**Admission.** Every document is validated against the closed contract
+(``contract.validate``: ``raw-pr@1`` / ``raw-brief@1`` / ``raw-release@1``)
+BEFORE it is planned: the evidence ref is add-only, so a document that breaks
+the contract could never be removed and every later ``check`` of the tree
+would fail on it. A failing PR or brief stays pending with the reason
+``contract-invalid`` (a PR's linked briefs with it — the unit is whole); a
+failing release is not planned and the next full ``/releases`` listing retries
+it; ``refreeze`` raises :class:`ContractInvalid`. ``linked_issues`` keeps only
+issue numbers ≥ 1 whatever the body digest says (an untrusted body reading
+"Closes #0" links nothing).
 
 A PR and the briefs it links freeze as ONE unit: the PR's file is planned only
 after its linked issues were each captured, left a number, or recorded
@@ -131,6 +158,12 @@ state's and ``cursors`` equal to its cursors (state.json byte-identical).
 ``since`` (a dispatch's ``since`` input: lowers both listing cursors for this
 pass, never below ``backfill_since``).
 
+``refreeze`` applies only to a PR that is already frozen (revision ≥ 1): it is
+the operator's "capture this settled unit again", never a way around the
+settle rule or the ``designs/`` filter — an unfrozen PR raises
+:class:`RefreezeRefused` (a ``CaptureError``, so the cli exits 1) before any
+request; ``harvest --pr N`` is the path for a PR that was never frozen.
+
 Owner: H6.
 """
 
@@ -141,9 +174,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Optional
 
-from . import HARVESTER, canonical, rawdoc
+from . import HARVESTER, canonical, contract, rawdoc
 from .digest import DIGEST_VERSION
-from .github import APIError, BudgetExhausted, GraphQLUnavailable
+from .github import APIError, BudgetExhausted, GraphQLUnavailable, Truncated
 from .protocols import GitHubAPI
 
 
@@ -188,6 +221,16 @@ class CaptureError(Exception):
     """A unit's primary object (``/pulls/{n}``) answered nothing usable; the unit stays pending."""
 
 
+class ContractInvalid(CaptureError):
+    """A captured document failed the closed contract; it is never planned (module docstring,
+    "Admission"). The message names the shape, the error count and the first error's JSON path
+    only — never a value, which may be untrusted text."""
+
+
+class RefreezeRefused(CaptureError):
+    """``refreeze`` of a PR with no frozen revision (``harvest --pr N`` is that path)."""
+
+
 KINDS = ("pr", "brief", "release")
 BRIEF_LABEL = "design-brief"
 DESIGNS_PREFIX = "designs/"
@@ -201,6 +244,14 @@ MAX_PR_COMMITS = 250
 MAX_PR_FILES = 3000
 #: The reason a pending unit carries while its capture keeps failing.
 CAPTURE_FAILED = "capture-failed"
+#: The reason a pending unit carries while its captured document fails the contract.
+CONTRACT_INVALID = "contract-invalid"
+#: The contract shape each kind's document must satisfy before it is planned.
+SHAPES = {"pr": "raw-pr@1", "brief": "raw-brief@1", "release": "raw-release@1"}
+#: HTTP statuses a per-object listing answers for an object GitHub no longer has.
+GONE_STATUSES = frozenset({404, 410, 422})
+#: The failures that leave ONE unit pending instead of ending the pass.
+UNIT_ERRORS = (CaptureError, APIError, Truncated)
 #: Pending reasons of a deferred PR (state@1 ``pending.*.reasons``).
 REASON_IN_FLIGHT = "in-flight-run"
 REASON_DEPLOYMENT = "deployment-pending"
@@ -210,6 +261,7 @@ _NUMBER_RE = re.compile(r"[1-9][0-9]{0,6}")
 _TAG_RE = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}")
 _SHA40_RE = re.compile(r"[0-9a-f]{40}")
 _HEAD_ISSUE_RE = re.compile(r"claude/issue-([0-9]{1,7})-")
+_ERROR_PATH_RE = re.compile(r"[^A-Za-z0-9_.$\[\]@-]")
 
 
 # --- small pure helpers ------------------------------------------------------
@@ -265,12 +317,25 @@ def _items(value: Any, key: Optional[str] = None) -> Optional[list[Any]]:
 
 
 def _optional_list(gh: GitHubAPI, path: str, params: Optional[dict[str, str]] = None) -> Optional[list[Any]]:
-    """A per-object listing that may legitimately be refused (a sha GitHub no longer knows, a
-    deployment gone): ``None`` instead of failing the whole capture. Budget stops propagate."""
+    """A per-object listing whose object may be gone (a sha GitHub no longer knows, a deleted
+    deployment): ``None`` on a :data:`GONE_STATUSES` refusal only. Any other ``APIError`` (a 5xx
+    after retries; a transport failure, ``status`` None) propagates and fails the unit's capture,
+    so it is retried next run rather than frozen with a transient gap. Budget stops propagate."""
     try:
         return _items(gh.get_paged(path, params))
-    except APIError:
-        return None
+    except APIError as exc:
+        if getattr(exc, "status", None) in GONE_STATUSES:
+            return None
+        raise
+
+
+def _admit(kind: str, doc: dict[str, Any]) -> bytes:
+    """The document's ``*.json.gz`` bytes — only when it satisfies ``SHAPES[kind]``."""
+    errors = contract.validate(SHAPES[kind], doc)
+    if errors:
+        where = _ERROR_PATH_RE.sub("?", str(errors[0]).split(": ", 1)[0])[:120]
+        raise ContractInvalid(f"{SHAPES[kind]}: {len(errors)} contract error(s), first at {where}")
+    return canonical.dumps_gz(doc)
 
 
 def _union(live: Iterable[dict[str, Any]], *older: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -312,10 +377,16 @@ def _pr_numbers(prs: Any) -> set[int]:
     return out
 
 
+def _issue_number(n: Any) -> bool:
+    return isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= 9_999_999
+
+
 def _linked_issues(body_digest: dict[str, Any], head_ref: Optional[str]) -> list[int]:
-    linked = set(body_digest.get("refs_closes") or [])
+    """``body.refs_closes`` ∪ the ``claude/issue-<N>-`` head-ref number, issue numbers ≥ 1 only:
+    an untrusted body reading "Closes #0" must never put a 0 into ``linked_issues``."""
+    linked = {n for n in body_digest.get("refs_closes") or () if _issue_number(n)}
     m = _HEAD_ISSUE_RE.match(head_ref or "")
-    if m and int(m.group(1)) >= 1:
+    if m and _issue_number(int(m.group(1))):
         linked.add(int(m.group(1)))
     return sorted(linked)
 
@@ -598,6 +669,18 @@ class _Pass:
     def pending(self, kind: str) -> dict[str, Any]:
         return self.plan.pending[kind]
 
+    def hold(self, kind: str, key: str, closed_at: Optional[str], s: Settle, reason: str) -> None:
+        """Keep ONE unit pending with ``reason`` added (its capture failed); the pass goes on."""
+        self.pending(kind)[key] = _entry(closed_at, Settle(
+            "defer", s.due_at, s.defer_until, tuple(sorted(set(s.reasons) | {reason}))))
+
+    def hold_existing(self, kind: str, key: str) -> None:
+        """A pending unit whose re-read GitHub refused: its entry stays, marked ``capture-failed``."""
+        entry = dict(self.pending(kind).get(key) or {})
+        if entry:
+            entry["reasons"] = sorted(set(entry.get("reasons") or ()) | {CAPTURE_FAILED})
+            self.pending(kind)[key] = entry
+
     def commit_unit(self, files: dict[str, bytes], units: list[tuple[str, str, int, bool]]) -> None:
         self.plan.files.update(files)
         for kind, key, revision, recapture in units:
@@ -621,16 +704,22 @@ class _Pass:
                    and str(r.get("path") or "").rsplit("/", 1)[-1] in watched)
 
     def deployment_terminal(self, merge_sha: Optional[str]) -> bool:
+        """Is the merge sha's newest Production deployment over? Unknown (no deployment, or a
+        lookup GitHub refuses) is ``False``: wait, and freeze with ``deployment-not-terminal``
+        once ``deploy_wait_hours`` has passed — never read a refusal as terminal."""
         if not merge_sha:
             return False
-        deps = [d for d in _optional_list(
-            self.gh, "/deployments", {"sha": merge_sha, "environment": "Production"}) or []
-            if isinstance(d, dict) and d.get("id") is not None]
-        if not deps:
+        try:
+            deps = [d for d in _optional_list(
+                self.gh, "/deployments", {"sha": merge_sha, "environment": "Production"}) or []
+                if isinstance(d, dict) and d.get("id") is not None]
+            if not deps:
+                return False
+            newest = max(deps, key=lambda d: d["id"])
+            statuses = [s for s in _optional_list(self.gh, f"/deployments/{newest['id']}/statuses")
+                        or [] if isinstance(s, dict)]
+        except (APIError, Truncated):
             return False
-        newest = max(deps, key=lambda d: d["id"])
-        statuses = [s for s in _optional_list(self.gh, f"/deployments/{newest['id']}/statuses") or []
-                    if isinstance(s, dict)]
         if not statuses:
             return False
         latest = max(statuses, key=lambda s: s.get("id") or 0)
@@ -654,18 +743,28 @@ class _Pass:
                 if self.pending("pr").pop(key, None) is not None:
                     self.plan.cleared.append(("pr", key))
                 return
-        files_raw = None
-        if not k and key not in self.pending("pr"):
-            if key in self.skipped and (self.skipped[key] or {}).get("closed_at") == closed_at:
-                return
-            files_raw = _items(self.gh.get_paged(f"/pulls/{number}/files")) or []
-            if not _touches_designs(files_raw):
-                self.plan.skipped_prs[number] = closed_at
-                return
         cfg = self.conf
         due_at = _plus_hours(closed_at, cfg.settle_hours)
+        defer_until = _plus_hours(closed_at, cfg.max_defer_hours)
+        files_raw = None
+        held = self.pending("pr").get(key)
+        # The designs/ check runs for a NEW PR, and again for a pending one whose earlier pass
+        # failed (a capture-failed entry may never have read its files).
+        if not k and (held is None or CAPTURE_FAILED in (held.get("reasons") or ())):
+            if held is None and key in self.skipped \
+                    and (self.skipped[key] or {}).get("closed_at") == closed_at:
+                return
+            try:
+                files_raw = _items(self.gh.get_paged(f"/pulls/{number}/files")) or []
+            except (APIError, Truncated):
+                self.hold("pr", key, closed_at, Settle("defer", due_at, defer_until), CAPTURE_FAILED)
+                return
+            if not _touches_designs(files_raw):
+                self.pending("pr").pop(key, None)
+                self.plan.skipped_prs[number] = closed_at
+                return
         if _ts(self.now) < _ts(due_at):
-            s = Settle("pending", due_at, _plus_hours(closed_at, cfg.max_defer_hours))
+            s = Settle("pending", due_at, defer_until)
         else:
             head_ref = (row.get("head") or {}).get("ref")
             s = settle_pr(closed_at=closed_at, merged_at=merged_at,
@@ -686,15 +785,18 @@ class _Pass:
                               previous=previous, files_raw=files_raw)
             if s.incomplete:
                 doc["incomplete"] = sorted(set(doc["incomplete"]) | set(s.incomplete))
-            unit_files = {raw_path("pr", key, revision): canonical.dumps_gz(doc)}
+            unit_files = {raw_path("pr", key, revision): _admit("pr", doc)}
             units = [("pr", key, revision, bool(k))]
             for issue in doc["linked_issues"]:
                 self.linked_brief(issue, unit_files, units, brief_pending)
-        except (CaptureError, APIError):
+        except ContractInvalid:
+            # A document the add-only ref could never shed: none of the unit is planned.
+            self.hold("pr", key, closed_at, s, CONTRACT_INVALID)
+            return
+        except UNIT_ERRORS:
             # The PR and its briefs are one unit: a refusal anywhere in it leaves the PR
             # pending (retried next pass) and plans none of it.
-            self.pending("pr")[key] = _entry(closed_at, Settle(
-                "defer", s.due_at, s.defer_until, tuple(sorted(set(s.reasons) | {CAPTURE_FAILED}))))
+            self.hold("pr", key, closed_at, s, CAPTURE_FAILED)
             return
         self.pending("brief").update(brief_pending)
         self.commit_unit(unit_files, units)
@@ -722,7 +824,7 @@ class _Pass:
         doc = _capture_brief_from(self.gh, number, issue_raw, timeline_raw, revision=1,
                                   captured=self.captured, incomplete=s.incomplete)
         if doc is not None:
-            unit_files[raw_path("brief", key, 1)] = canonical.dumps_gz(doc)
+            unit_files[raw_path("brief", key, 1)] = _admit("brief", doc)
             units.append(("brief", key, 1, False))
 
     def cutoff(self, cursor_key: str, since: Optional[str], hours: int) -> str:
@@ -758,7 +860,11 @@ class _Pass:
         for key in sorted(self.pending("pr"), key=int):
             if key in seen:
                 continue
-            row = self.gh.get(f"/pulls/{key}")
+            try:
+                row = self.gh.get(f"/pulls/{key}")
+            except (APIError, Truncated):
+                self.hold_existing("pr", key)
+                continue
             if isinstance(row, dict):
                 self.consider_pr(int(key), row)
         self.plan.cursors["prs_updated"] = newest
@@ -782,7 +888,11 @@ class _Pass:
         for key in sorted(self.pending("brief"), key=int):
             if key in seen:
                 continue
-            issue_raw = _issue(self.gh, int(key))
+            try:
+                issue_raw = _issue(self.gh, int(key))
+            except (APIError, Truncated):
+                self.hold_existing("brief", key)
+                continue
             if issue_raw is not None:
                 self.consider_brief(int(key), issue_raw)
         self.plan.cursors["briefs_updated"] = newest
@@ -809,16 +919,18 @@ class _Pass:
             return
         try:
             doc = capture_brief(self.gh, number, revision=k + 1, captured=self.captured)
-        except APIError:
-            self.pending("brief")[key] = _entry(closed_at, Settle(
-                "defer", s.due_at, s.defer_until, (CAPTURE_FAILED,)))
+            data = None if doc is None else _admit("brief", doc)
+        except ContractInvalid:
+            self.hold("brief", key, closed_at, s, CONTRACT_INVALID)
             return
-        if doc is None:
+        except UNIT_ERRORS:
+            self.hold("brief", key, closed_at, s, CAPTURE_FAILED)
+            return
+        if data is None:
             if self.pending("brief").pop(key, None) is not None:
                 self.plan.cleared.append(("brief", key))
             return
-        self.commit_unit({raw_path("brief", key, k + 1): canonical.dumps_gz(doc)},
-                         [("brief", key, k + 1, bool(k))])
+        self.commit_unit({raw_path("brief", key, k + 1): data}, [("brief", key, k + 1, bool(k))])
 
     def releases(self) -> None:
         newest = (self.state.get("cursors") or {}).get("releases_published")
@@ -833,9 +945,11 @@ class _Pass:
                 newest = rel["published_at"]
             if self.revision_of("release", tag):
                 continue
-            doc = capture_release(rel, revision=1, captured=self.captured)
-            self.commit_unit({raw_path("release", tag, 1): canonical.dumps_gz(doc)},
-                             [("release", tag, 1, False)])
+            try:
+                data = _admit("release", capture_release(rel, revision=1, captured=self.captured))
+            except ContractInvalid:
+                continue  # never planned; the next full /releases listing retries it
+            self.commit_unit({raw_path("release", tag, 1): data}, [("release", tag, 1, False)])
         self.plan.cursors["releases_published"] = newest
 
 
@@ -864,12 +978,17 @@ def plan_freezes(gh: GitHubAPI, *, state: dict[str, Any], frozen: dict[str, dict
 
 def refreeze(gh: GitHubAPI, number: int, *, state: dict[str, Any], frozen: dict[str, dict[str, int]],
              conf: Any, read: Callable[[str], Optional[bytes]], run_id: int = 0) -> FreezePlan:
-    """Capture PR ``number`` again as the next revision (no settle wait, retention union from
-    revision K); adds exactly one path and modifies nothing."""
+    """Capture FROZEN PR ``number`` again as revision K+1 (no settle wait, retention union from
+    revision K); adds exactly one path and modifies nothing. A PR with no frozen revision raises
+    :class:`RefreezeRefused` before any request — refreeze never bypasses settle or the
+    ``designs/`` filter (``harvest --pr N`` is that path)."""
     p = _Pass(gh, state=state, frozen=frozen, conf=conf, now="", read=read, run_id=run_id)
     key = _key("pr", number)
     k = p.revision_of("pr", key)
-    previous = _read_doc(read, raw_path("pr", key, k)) if k else None
+    if k < 1:
+        raise RefreezeRefused(f"refreeze needs a frozen PR: #{key} has no raw/pr revision "
+                              "(use harvest --pr for a PR that was never frozen)")
+    previous = _read_doc(read, raw_path("pr", key, k))
     try:
         doc = _capture_pr(gh, int(number), revision=k + 1, captured=p.captured,
                           snapshot_runs=p.snap.runs, snapshot_statuses=p.snap.statuses,
@@ -877,7 +996,7 @@ def refreeze(gh: GitHubAPI, number: int, *, state: dict[str, Any], frozen: dict[
     except BudgetExhausted:
         p.plan.budget_stopped = True
         return p.plan
-    # Not a changed terminal state, so not in ``recaptured``; a CaptureError propagates (the
-    # operator named a PR GitHub cannot serve — cli exits 1).
-    p.commit_unit({raw_path("pr", key, k + 1): canonical.dumps_gz(doc)}, [("pr", key, k + 1, False)])
+    # Not a changed terminal state, so not in ``recaptured``. A CaptureError (the operator named
+    # a PR GitHub cannot serve) and a ContractInvalid propagate — cli exits 1, nothing planned.
+    p.commit_unit({raw_path("pr", key, k + 1): _admit("pr", doc)}, [("pr", key, k + 1, False)])
     return p.plan

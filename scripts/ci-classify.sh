@@ -9,14 +9,14 @@
 # time the classifier moved. Now the workflow and the local mirror share this
 # implementation — they cannot disagree.
 #
-#   Emits, one `key=value` per line on STDOUT (the 23 outputs ci.yml's
+#   Emits, one `key=value` per line on STDOUT (the 24 outputs ci.yml's
 #   `changes` job declares — the shape is what `>> "$GITHUB_OUTPUT"` consumes):
 #     scad, printcheck_tests, stylelift_tests, lineage_tests, cogcheck_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
 #     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests,
 #     growth_tests, andon_tests, concept_preview_tests, agent_memory_tests,
-#     provenance_tests, styles, gate, gate_designs, regen, regen_designs,
-#     docs_standards
+#     provenance_tests, provenance_read_lens, styles, gate, gate_designs,
+#     regen, regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
 # Usage:
@@ -46,12 +46,12 @@ _join() { printf '%s' "$1" | sed '/^$/d' | sort | tr "$NL" ' ' | sed 's/ *$//'; 
 
 # --- classify: the shared decision -------------------------------------------
 # Reads the changed-file list from stdin (one path per line), reads the working
-# tree for existence/ARCHIVED/style.conf facts, and prints the 23 outputs.
+# tree for existence/ARCHIVED/style.conf facts, and prints the 24 outputs.
 classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
   local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false gwtests=false docs_standards=false
-  local bstests=false adtests=false cogtests=false cptests=false amtests=false prtests=false
+  local bstests=false adtests=false cogtests=false cptests=false amtests=false prtests=false prlens=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -60,7 +60,7 @@ classify() {
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
     bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; gwtests=true; docs_standards=true
-    bstests=true; adtests=true; cogtests=true; cptests=true; amtests=true; prtests=true
+    bstests=true; adtests=true; cogtests=true; cptests=true; amtests=true; prtests=true; prlens=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -302,6 +302,18 @@ classify() {
         .github/workflows/ci.yml) prtests=true ;;
       esac
       case "$f" in
+        # The #646 read lens (tools/provenance/tests/test_read_lens.py): no
+        # file outside its allow-list may read the two data refs. It scans
+        # EVERY file under scripts/, tools/, .github/, .claude/ and site/, so a
+        # new reader can arrive in any of them — a gate script, a routine
+        # workflow, a skill, a site module — none of which is on the full
+        # suite's trigger list above. A change under any scan root re-runs
+        # just that one sub-second test (provenance-tests' read-lens mode);
+        # without this the reader would pass its own PR and turn red only on
+        # the post-merge push to main.
+        scripts/*|tools/*|.github/*|.claude/*|site/*) prlens=true ;;
+      esac
+      case "$f" in
         # brief-sources (#438, the deterministic half of the #245
         # spike-to-brief converter): its own tests. docs/*.md is here for the
         # same reason reeve.yml is in reeve's list — the live-control test
@@ -491,6 +503,7 @@ classify() {
   echo "concept_preview_tests=$cptests"
   echo "agent_memory_tests=$amtests"
   echo "provenance_tests=$prtests"
+  echo "provenance_read_lens=$prlens"
   echo "styles=$styles"
   echo "gate=$gate"
   echo "gate_designs=$designs"
@@ -875,6 +888,26 @@ selftest() {
     "provenance_tests=false" "gate=false" "scad=false"
   out="$(run "audits/pr3/README.md")"
   check "other-audit-is-not-provenance" "$out" "provenance_tests=false" "gate=false"
+  # 4l. The #646 read lens scans every file under scripts/, tools/, .github/,
+  #     .claude/ and site/, so a change under any of them re-runs it (the
+  #     provenance-tests job's read-lens-only mode) even when the full suite's
+  #     trigger list is not hit: a new data-ref reader in a gate script, a
+  #     routine workflow, a skill or a site module fails its own PR, not the
+  #     post-merge push. Outside the scan roots it stays off.
+  for f in scripts/gate.sh .github/workflows/labeler.yml \
+           .claude/skills/preflight/SKILL.md site/lib/catalog.mjs \
+           tools/reeve/src/reeve/detectors.py; do
+    out="$(run "$f")"
+    check "read-lens-$f" "$out" "provenance_read_lens=true" "provenance_tests=false"
+  done
+  out="$(run "tools/provenance/src/provenance/freeze.py")"
+  check "read-lens-with-the-full-suite" "$out" \
+    "provenance_read_lens=true" "provenance_tests=true"
+  for f in docs/provenance.md designs/calibration-cube/calibration-cube.scad \
+           audits/provenance-2026-10/rescue/MANIFEST.sha256 CLAUDE.md; do
+    out="$(run "$f")"
+    check "read-lens-off-$f" "$out" "provenance_read_lens=false"
+  done
 
   # 4a. people/ (the team registry, #123) is soft-infra for the same reason as
   #     telemetry/: only the site build reads it, but a people-only PR must

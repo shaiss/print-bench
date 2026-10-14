@@ -249,8 +249,11 @@ def test_step_order_intents_publish_checkpoints_verdict(text):
     assert re.search(r"^        id: publish$", s["Publish"], re.MULTILINE)
     assert "if: steps.plan.outputs.dry_run != 'true'" in s["Publish"]
     verdict = s["Verdict"]
-    assert ("if: steps.plan.outputs.foreign_tip == 'true' || "
-            "steps.publish.outputs.foreign_tip == 'true'") in verdict
+    # Publish's foreign_tip is authoritative whenever Publish ran; the plan's counts only when
+    # Publish was skipped (a dry run) — so a successful recover never ends red.
+    assert re.search(r"^        if: (.+)$", verdict, re.MULTILINE).group(1) == (
+        "steps.publish.outputs.foreign_tip == 'true' || "
+        "(steps.publish.outcome == 'skipped' && steps.plan.outputs.foreign_tip == 'true')")
     assert re.search(r"^\s+exit 3$", verdict, re.MULTILINE) and "::error::" in verdict
     assert "if: always()" in s["Summary"] and "GITHUB_STEP_SUMMARY" in s["Summary"]
     assert ".provenance/summary.md" in s["Summary"]
@@ -294,3 +297,97 @@ def test_modes_and_input_validation(text):
             cli.validate_inputs(**bad)
     # The schedule always runs mode harvest, whatever the (absent) input says.
     assert 'if [ "$EVENT" = "schedule" ]; then\n            mode=harvest' in plan
+
+
+# --- the Plan script, executed -----------------------------------------------------
+
+INPUT_ENV = ("MODE", "SINCE", "UNTIL", "PR", "RECEIPTS_ONLY", "MAX_REQUESTS", "DRY_RUN", "BOOTSTRAP",
+             "CONFIRM_SHA")
+
+
+def _plan_script(text: str) -> str:
+    plan = dict(steps(job_block(text, "harvest")))["Plan"]
+    bodies = [b for b in run_blocks(plan) if "python3 -m provenance" in b]
+    assert len(bodies) == 1
+    return bodies[0]
+
+
+def run_plan(text: str, tmp_path, event: str = "workflow_dispatch", **inputs):
+    """Run the Plan step's script under bash with a stub ``python3`` that records its argv (the
+    workflow's env shape: every input present, booleans 'true'/'false', strings maybe empty)."""
+    import os
+    import shutil
+    import subprocess
+
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("no bash")
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    log = tmp_path / "argv"
+    stub = bindir / "python3"
+    stub.write_text(f'#!{bash}\nprintf "%s\\n" "$@" > "{log}"\n', encoding="utf-8")
+    stub.chmod(0o755)
+    if log.exists():
+        log.unlink()
+    env = {"PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}", "EVENT": event,
+           "GITHUB_OUTPUT": str(tmp_path / "out")}
+    for name in INPUT_ENV:
+        default = "false" if name in ("RECEIPTS_ONLY", "DRY_RUN", "BOOTSTRAP") else ""
+        env[name] = str(inputs.get(name.lower(), default))
+    proc = subprocess.run([bash, "-c", _plan_script(text)], env=env, capture_output=True,
+                          text=True, timeout=30)
+    argv = log.read_text(encoding="utf-8").splitlines() if log.exists() else None
+    return proc.returncode, proc.stdout + proc.stderr, argv
+
+
+SHA = "c" * 40
+
+
+def test_plan_script_refuses_inputs_its_mode_ignores(text, tmp_path):
+    """mode=recover never silently ignores dry_run=true (it would perform the force-with-lease it
+    was asked not to): the Plan step refuses it — and every other input a mode does not use —
+    with an ::error:: and exit 1, before the cli runs. Positive controls pass each mode's own
+    inputs through."""
+    refusals = [
+        ("recover", {"dry_run": "true"}), ("recover", {"since": "2026-08-01"}),
+        ("recover", {"until": "2026-08-01"}), ("recover", {"pr": "636"}),
+        ("recover", {"max_requests": "40"}), ("recover", {"receipts_only": "true"}),
+        ("recover", {"bootstrap": "true"}),
+        ("refreeze", {"since": "2026-08-01"}), ("refreeze", {"until": "2026-08-01"}),
+        ("refreeze", {"max_requests": "40"}), ("refreeze", {"receipts_only": "true"}),
+        ("refreeze", {"bootstrap": "true"}), ("refreeze", {"confirm_sha": SHA}),
+        ("harvest", {"confirm_sha": SHA}),
+    ]
+    for mode, extra in refusals:
+        kw = {"mode": mode, **({"confirm_sha": SHA} if mode == "recover" else {}),
+              **({"pr": "636"} if mode == "refreeze" else {}), **extra}
+        code, out, argv = run_plan(text, tmp_path, **kw)
+        name = next(iter(extra))
+        assert code == 1 and argv is None, (mode, extra, out)
+        assert f"::error::input {name} is not used by mode {mode}" in out, (mode, extra, out)
+    # Positive controls: each mode's own inputs reach the cli.
+    code, out, argv = run_plan(text, tmp_path, mode="recover", confirm_sha=SHA)
+    assert code == 0, out
+    assert argv == ["-m", "provenance", "recover", "--out-dir", ".provenance", "--gh-output",
+                    str(tmp_path / "out"), f"--confirm-sha={SHA}"]
+    code, out, argv = run_plan(text, tmp_path, mode="refreeze", pr="636", dry_run="true")
+    assert code == 0 and argv[2] == "refreeze" and argv[-2:] == ["--pr=636", "--dry-run"], (out, argv)
+    code, out, argv = run_plan(text, tmp_path, mode="harvest", since="2026-08-01", dry_run="true",
+                               bootstrap="true", receipts_only="true", max_requests="9", pr="1")
+    assert code == 0 and argv[2] == "harvest", out
+    assert {"--since=2026-08-01", "--max-requests=9", "--pr=1", "--dry-run", "--bootstrap",
+            "--receipts-only"} <= set(argv) and "--scheduled" not in argv
+    # The schedule: empty inputs, mode forced to harvest, --scheduled added.
+    code, out, argv = run_plan(text, tmp_path, event="schedule", mode="", dry_run="",
+                               receipts_only="", bootstrap="")
+    assert code == 0 and argv[2] == "harvest" and "--scheduled" in argv and "--dry-run" not in argv
+    # An unknown mode is refused too.
+    code, out, argv = run_plan(text, tmp_path, mode="ingest")
+    assert code == 1 and argv is None and "::error::unknown mode" in out
+    # Tamper negative: without the recover dry_run guard the dry run would reach the cli (whose
+    # recover has no --dry-run) and Publish would then push.
+    tampered = text.replace('[ "$DRY_RUN" != "true" ] || unused dry_run\n', "")
+    assert tampered != text
+    code, _, argv = run_plan(tampered, tmp_path, mode="recover", confirm_sha=SHA, dry_run="true")
+    assert code == 0 and argv is not None and "--dry-run" not in argv

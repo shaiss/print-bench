@@ -76,11 +76,11 @@ on:
         type: boolean
         default: false
       max_requests:
-        description: 'request cap for this dispatch (empty = self-paced, unlimited)'
+        description: 'harvest: request cap for this dispatch (empty = self-paced, unlimited)'
         type: string
         default: ''
       dry_run:
-        description: 'plan and summarise, push nothing'
+        description: 'harvest / refreeze: plan and summarise, push nothing (recover has no dry run and refuses it)'
         type: boolean
         default: false
       bootstrap:
@@ -189,9 +189,18 @@ jobs:
           if [ "$EVENT" = "schedule" ]; then
             mode=harvest
           fi
+          # An input the selected mode does not use is REFUSED, never silently dropped: a
+          # recover dispatched with dry_run=true would otherwise perform the force-with-lease
+          # it was asked not to (recover has no dry run — it plans exactly the one restore of
+          # the confirmed checkpoint, and Publish performs it).
+          unused() {
+            echo "::error::input $1 is not used by mode $mode; refusing the run rather than ignoring it"
+            exit 1
+          }
           args=(--out-dir .provenance --gh-output "$GITHUB_OUTPUT")
           case "$mode" in
             harvest)
+              [ -z "$CONFIRM_SHA" ] || unused confirm_sha
               args+=(--since="$SINCE" --until="$UNTIL" --pr="$PR" --max-requests="$MAX_REQUESTS")
               if [ "$EVENT" = "schedule" ]; then args+=(--scheduled); fi
               if [ "$RECEIPTS_ONLY" = "true" ]; then args+=(--receipts-only); fi
@@ -199,10 +208,23 @@ jobs:
               if [ "$BOOTSTRAP" = "true" ]; then args+=(--bootstrap); fi
               ;;
             refreeze)
+              [ -z "$SINCE" ] || unused since
+              [ -z "$UNTIL" ] || unused until
+              [ -z "$MAX_REQUESTS" ] || unused max_requests
+              [ "$RECEIPTS_ONLY" != "true" ] || unused receipts_only
+              [ "$BOOTSTRAP" != "true" ] || unused bootstrap
+              [ -z "$CONFIRM_SHA" ] || unused confirm_sha
               args+=(--pr="$PR")
               if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
               ;;
             recover)
+              [ -z "$SINCE" ] || unused since
+              [ -z "$UNTIL" ] || unused until
+              [ -z "$PR" ] || unused pr
+              [ -z "$MAX_REQUESTS" ] || unused max_requests
+              [ "$RECEIPTS_ONLY" != "true" ] || unused receipts_only
+              [ "$BOOTSTRAP" != "true" ] || unused bootstrap
+              [ "$DRY_RUN" != "true" ] || unused dry_run
               args+=(--confirm-sha="$CONFIRM_SHA")
               ;;
             *)
@@ -265,8 +287,11 @@ jobs:
       - name: Verdict
         # After the derived overwrite and the checkpoints: a foreign,
         # deleted or unanchored evidence tip turns the run red (exit 3) —
-        # nothing was written to the evidence ref.
-        if: steps.plan.outputs.foreign_tip == 'true' || steps.publish.outputs.foreign_tip == 'true'
+        # nothing was written to the evidence ref. Publish's own foreign_tip
+        # is authoritative whenever Publish ran (a successful recover restored
+        # the evidence, whatever its plan said); the plan's is read only when
+        # Publish was skipped (a dry run).
+        if: steps.publish.outputs.foreign_tip == 'true' || (steps.publish.outcome == 'skipped' && steps.plan.outputs.foreign_tip == 'true')
         run: |
           echo "::error::provenance: the evidence tip failed tip continuity — no evidence was written; the derived ref was rebuilt from the newest checkpoint (docs/provenance.md, Tip continuity; recovery: dispatch recover with confirm_sha set to that checkpoint)"
           exit 3

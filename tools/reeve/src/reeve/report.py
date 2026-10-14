@@ -79,8 +79,10 @@ def _line_provenance_tip(f: dict) -> str:
 
 def _line_provenance_lag(f: dict) -> str:
     if f["kind"] == "overdue":
-        return (f"- overdue: {f['unit']} was due {f['due_at']} — {f['hours_past']}h past "
-                f"due + grace ({f['count']} pending unit(s) overdue)")
+        # A legitimately deferred unit is measured from defer_until, a failing one from due_at.
+        when = "deferred until" if f["anchor"] == "defer_until" else "was due"
+        return (f"- overdue: {f['unit']} {when} {f['since']} — {f['hours_past']}h past "
+                f"that + grace ({f['count']} pending unit(s) overdue)")
     if f["kind"] == "stall":
         shown = ", ".join(f"#{n}" for n in f["prs"])
         more = f" (+{f['count'] - len(f['prs'])} more)" if f["count"] > len(f["prs"]) else ""
