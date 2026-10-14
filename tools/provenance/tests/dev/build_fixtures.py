@@ -14,9 +14,12 @@ fixtures/raw/release/<tag>.json.gz raw-release@1 for every release
 fixtures/receipts/Y/M/D/<id>.a<k>  receipt@1 for the fixture runs (snapshot jobs)
 fixtures/codebasis/index.json      {sha40: {path: blob sha256}} + blobs/<sha256>.gz
 fixtures/main_history.json.gz      main's commits since 2026-07-31 (sha, parents,
-                                   committer date) + path-touch sets
+                                   committer date + e-mail, subject) + path-touch sets
 fixtures/membership/pr_files.json.gz  {pr: {state, merged_at, title, files}} for
                                    every PR in the audit's membership.csv
+fixtures/design-files/<d>/         PM.md / NOTES.md / team.conf of the three
+                                   golden designs at main 521d092 (#636's merge),
+                                   read with ``git show`` from the checkout
 fixtures/snapshot-mini/            a miniature #843-format snapshot (real rows,
                                    check-run output nulled) for ingest tests
 =================================  ===============================================
@@ -28,7 +31,10 @@ Usage (from the repo root)::
         --out tools/provenance/tests/fixtures [--check]
 
 ``--check`` regenerates into a temp dir and exits 1 if any committed fixture
-differs (the H2/H3 parity check after a digest or projection change).
+differs (the H2/H3 parity check after a digest or projection change). A
+``*.gz`` file is compared on its DECOMPRESSED bytes (critique item 19: gzip
+bytes are storage only and differ between zlib builds); everything else on
+its bytes.
 The raw capture is produced by the GET-only scratch script
 ``<scratch>/harvester/bin/capture_raw.py`` (+ ``capture_main.py``); the
 snapshot dir is the extracted ``runs.tar``/``jobs.tar``/``sha.tar`` of the
@@ -40,7 +46,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import filecmp
 import glob
 import gzip
 import hashlib
@@ -49,6 +54,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -65,6 +71,10 @@ WATCHED = ("auto-review.yml", "design-run.yml", "backlog-burn.yml", "product-sco
 ROUTINES = ("design-run.yml", "backlog-burn.yml", "product-scout.yml", "spike-converter.yml",
             "chunker.yml", "labeler.yml")
 CAPTURED = {"digest": "body-digest@1", "harvester": "fixture", "run_id": 0}
+#: The main commit the design-file copies are taken at (#636's merge; conftest.FIXTURE_MAIN_SHA).
+FIXTURE_MAIN_SHA = "521d092813b78a88bd9a74b1052cfef1f230d86b"
+DESIGN_FILE_DESIGNS = ("calibration-cube", "nuggs-vent-cap", "sbc-case")
+DESIGN_FILE_NAMES = ("NOTES.md", "PM.md", "team.conf")
 
 
 def _rel(path, params=None):
@@ -258,8 +268,11 @@ def build_codebasis(raw_root, out):
 
 def build_main_history(raw, out):
     commits = raw.get("/commits", {"sha": "main", "since": "2026-07-31T00:00:00Z"}) or []
-    rows = [{"committed_at": c["commit"]["committer"]["date"], "parents": [p["sha"] for p in c["parents"]],
-             "sha": c["sha"], "subject_pr": None} for c in commits]
+    rows = [{"committed_at": c["commit"]["committer"]["date"],
+             "committer_email": c["commit"]["committer"]["email"],
+             "parents": [p["sha"] for p in c["parents"]], "sha": c["sha"],
+             "subject": c["commit"]["message"].split("\n", 1)[0].strip(), "subject_pr": None}
+            for c in commits]
     for c, row in zip(commits, rows):
         m = re.search(r"\(#([0-9]+)\)$|^Merge pull request #([0-9]+)", c["commit"]["message"].split("\n", 1)[0])
         row["subject_pr"] = int(m.group(1) or m.group(2)) if m else None
@@ -270,7 +283,8 @@ def build_main_history(raw, out):
         lst = raw.get("/commits", {"path": path, "sha": "main", "since": "2026-07-31T00:00:00Z"}) or []
         touches[path] = sorted(c["sha"] for c in lst)
     write_gz(os.path.join(out, "main_history.json.gz"),
-             {"commits": rows, "note": "GET /commits?sha=main since 2026-07-31, API order (newest first)",
+             {"commits": rows, "note": "GET /commits?sha=main since 2026-07-31, API order (newest first); "
+                                       "subject = the message's first line (main's public commit subjects)",
               "touches": touches})
 
 
@@ -287,6 +301,21 @@ def build_pr_files(raw, out):
         table[str(n)] = {"files": sorted(f["filename"] for f in files), "merged_at": pull.get("merged_at"),
                          "state": pull.get("state"), "title": pull.get("title")}
     write_gz(os.path.join(out, "membership", "pr_files.json.gz"), table)
+
+
+def build_design_files(out):
+    """``git show <FIXTURE_MAIN_SHA>:designs/<d>/<file>`` for the golden designs — committed,
+    human-merged text (what episodes.decision_rows parses); a file absent there is skipped."""
+    for design in DESIGN_FILE_DESIGNS:
+        for name in DESIGN_FILE_NAMES:
+            res = subprocess.run(["git", "-C", REPO_ROOT, "show", f"{FIXTURE_MAIN_SHA}:designs/{design}/{name}"],
+                                 capture_output=True)
+            if res.returncode != 0:
+                continue
+            p = os.path.join(out, "design-files", design, name)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as fh:
+                fh.write(res.stdout)
 
 
 def _tar_bytes(members):
@@ -379,10 +408,27 @@ def build(raw_root, snap, out):
     build_codebasis(raw_root, out)
     build_main_history(raw, out)
     build_pr_files(raw, out)
+    build_design_files(out)
     build_snapshot_mini(snap, snapruns, out)
 
 
-GENERATED = ("raw", "receipts", "codebasis", "main_history.json.gz", "membership", "snapshot-mini")
+GENERATED = ("raw", "receipts", "codebasis", "main_history.json.gz", "membership", "design-files",
+             "snapshot-mini")
+
+
+def _content(path):
+    """A fixture's identity bytes: decompressed for ``*.gz`` (critique item 19), raw otherwise."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    return gzip.decompress(data) if path.endswith(".gz") else data
+
+
+def _tree_files(root):
+    out = set()
+    for dirpath, _, names in os.walk(root):
+        for name in names:
+            out.add(os.path.relpath(os.path.join(dirpath, name), root))
+    return out
 
 
 def main(argv=None):
@@ -407,13 +453,11 @@ def main(argv=None):
         for g in GENERATED:
             a, b = os.path.join(tmp, g), os.path.join(args.out, g)
             if os.path.isdir(a):
-                cmp = filecmp.dircmp(a, b)
-                stack = [cmp]
-                while stack:
-                    c = stack.pop()
-                    bad += [os.path.join(c.left, x) for x in c.left_only + c.right_only + c.diff_files]
-                    stack.extend(c.subdirs.values())
-            elif not os.path.exists(b) or open(a, "rb").read() != open(b, "rb").read():
+                left, right = _tree_files(a), (_tree_files(b) if os.path.isdir(b) else set())
+                bad += [os.path.join(b, x) for x in sorted(left ^ right)]
+                bad += [os.path.join(b, x) for x in sorted(left & right)
+                        if _content(os.path.join(a, x)) != _content(os.path.join(b, x))]
+            elif not os.path.exists(b) or _content(a) != _content(b):
                 bad.append(b)
         for p in bad:
             print(f"differs: {p}", file=sys.stderr)
