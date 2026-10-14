@@ -34,13 +34,22 @@ Subcommands (docs/provenance.md §Workflow):
        other verdict is an error (exit 1). The derived verdict only decides the
        message: a non-``ok`` derived tip is overwritten with ``::error::``
        (``foreign``/``deleted``) or ``::notice::`` (``bootstrap``/``unanchored``).
+       A ``github.BudgetExhausted`` DURING the scan (the scheduled floor, the
+       request cap) stops the run before any verdict: a no-op plan whose refs
+       carry ``old == new ==`` the fetched tip, ``changed`` false and verdict
+       ``unknown`` — ``publish`` then pushes nothing and checkpoints nothing,
+       exit 0 (``budget_stopped=true``).
     3. **ingest** — ``ingest.needs_ingest(state, snapshot_id)`` → ``ingest.
        read_snapshot(snapshot_dir, …, pin)`` + ``plan_ingest`` (≈ 0 requests).
     4. **receipts** — ``receipts.harvest_receipts`` over every watched
        workflow from its cursor (or ``--since``), day-windowed.
     5. unless ``--receipts-only``: **freeze** — ``freeze.plan_freezes``
        (settle/defer, re-capture of a changed terminal state, PR/brief/release
-       capture; ``--pr`` restricts it to the named PRs).
+       capture; ``--pr`` restricts it to the named PRs; ``--since`` lowers the
+       PR/brief listing cursors for this pass; ``run_id`` is ``--run-id``,
+       recorded as ``captured.run_id``). Its :class:`freeze.FreezePlan` is
+       applied through ``state.py`` by :func:`_apply_freeze` (``pending`` is the
+       complete new map; ``cleared`` units leave it).
     6. **evidence commit** — ``gitstore.TreeBuilder`` (add-only; guard files
        only at bootstrap) + ``gitstore.guard_diff`` against the old tip
        (``[]`` → evidence unchanged). Guard drift from main → ``::warning::``.
@@ -48,7 +57,13 @@ Subcommands (docs/provenance.md §Workflow):
        (or ``C`` when foreign) + main, ``gitstore.DerivedTreeBuilder``, and
        ``site_changed = not derived_continuity.accepted or not
        bundle.same_content(<current derived tree>, new files)`` — the tip's
-       actual blobs are compared, never its ``content_sha256`` field.
+       actual blobs are compared, never its ``content_sha256`` field. An
+       exception raised by derive (a bug in a derive layer) does not stop the
+       evidence half (receipts expire): it is ``::error::``,
+       ``derive_skipped=true`` AND ``derive_error=true`` (``counts.derive_error``
+       names the exception type), and the workflow's verdict step fails the job
+       on ``derive_error`` after the checkpoints are uploaded — so
+       ``provenance-site`` can never silently stop updating.
     8. **plan** — ``<out-dir>/plan.json``, ``<out-dir>/intent-<ref>.json`` per
        ref that will move, ``<out-dir>/summary.md``, and ``$GITHUB_OUTPUT``
        lines (below).
@@ -111,7 +126,7 @@ Subcommands (docs/provenance.md §Workflow):
 
 ``$GITHUB_OUTPUT`` (``--gh-output``): ``mode``, ``dry_run``, ``foreign_tip``,
 ``evidence_changed``, ``evidence_sha``, ``site_changed``, ``site_sha``,
-``derive_skipped``, ``budget_stopped`` (plan modes); ``evidence_tip``,
+``derive_skipped``, ``derive_error``, ``budget_stopped`` (plan modes); ``evidence_tip``,
 ``site_tip``, ``foreign_tip`` (publish); ``go`` (gate). Every sha output is
 validated 40-hex before it is written (the workflow puts them in artifact
 names). ``evidence_sha`` / ``site_sha`` are the sha a ref WILL move to when its
@@ -122,7 +137,7 @@ plan-mode command first removes every one of them, so a refused run can never
 leave an older plan for ``publish``):
 
 * ``plan.json`` — ``{"format": "plan@1", "mode", "dry_run", "foreign_tip",
-  "derive_skipped", "derived_from": sha|null, "budget_stopped", "run_id",
+  "derive_skipped", "derive_error", "derived_from": sha|null, "budget_stopped", "run_id",
   "run_attempt", "refs": {"provenance": {"old", "new", "changed",
   "would_change", "verdict", "checkpoint"}, "provenance-site": {…}}, "counts"}``.
   ``old`` is the tip the plan saw, ``new`` the sha the ref should hold after
@@ -133,9 +148,13 @@ leave an older plan for ``publish``):
   a dry run too, for inspection; the workflow uploads them only when
   ``*_changed``).
 * after ``publish``: ``checkpoints.json`` = ``{"provenance": checkpoint@1|null,
-  "provenance-site": …}`` and ``tip-<ref>.json`` (``checkpoint@1``) for each
-  verified tip — written even when publish fails part-way, naming only what
-  was verified before the failure.
+  "provenance-site": …}`` and ``tip-<ref>.json`` (``checkpoint@1``,
+  :func:`tip_file` — the workflow's checkpoint upload ``path`` must be exactly
+  it) for each verified tip — written even when publish fails part-way (exit
+  1 or 3), naming only what was verified before the failure; so the workflow's
+  checkpoint steps must run on a failed publish too (``if: !cancelled() &&
+  <tip> != ''``), or an evidence tip pushed before a derived rejection is never
+  checkpointed and the next run refuses it as ``unanchored``.
 * ``summary.md`` — the job summary (publish appends its line).
 * ``etag-cache/`` — the client's conditional-GET cache.
 
@@ -147,8 +166,9 @@ Common options: ``--repo OWNER/NAME`` (default ``$GITHUB_REPOSITORY``),
 token is ``$GH_TOKEN`` (read scopes for the plan modes; ``contents: write``
 is used by ``publish`` alone, through ``gitstore``'s env-only credential).
 
-Exit codes: 0 ok (including a clean budget stop, "nothing to do", and a plan
-with ``foreign_tip`` — the workflow fails the job after publishing); 1
+Exit codes: 0 ok (a clean budget stop, the continuity scan's included; "nothing
+to do"; and a plan with ``foreign_tip`` or ``derive_error`` — for those two the
+workflow's verdict step fails the job after the checkpoints are uploaded); 1
 validation/contract failure, bad input, or a push transport failure; 2
 argparse error; 3 tip-continuity refusal (bootstrap without the flag,
 recover refused, a rejected or raced push); 4 guard violation (an add-only
@@ -329,7 +349,18 @@ MAIN_REF = "refs/remotes/origin/main"
 #: Output names whose value must be "" or a 40-hex sha (they become artifact names).
 SHA_OUTPUTS = frozenset({"evidence_sha", "site_sha", "evidence_tip", "site_tip"})
 BOOL_OUTPUTS = frozenset({"dry_run", "foreign_tip", "evidence_changed", "site_changed",
-                          "derive_skipped", "budget_stopped", "go"})
+                          "derive_skipped", "derive_error", "budget_stopped", "go"})
+
+
+def intent_file(ref: str) -> str:
+    """``intent-<ref>.json`` — the file the workflow's declare step uploads as ``intent-<ref>-<sha>``."""
+    return f"intent-{ref}.json"
+
+
+def tip_file(ref: str) -> str:
+    """``tip-<ref>.json`` — the file the workflow's checkpoint step uploads as ``tip-<ref>-<sha>``
+    (written by ``publish`` for each verified tip; the workflow's upload ``path`` must be exactly it)."""
+    return f"tip-{ref}.json"
 
 
 class _Exit(Exception):
@@ -427,8 +458,8 @@ def _context(args: argparse.Namespace, *, plan_mode: bool = False) -> _Ctx:
 def _clear_plan(out_dir: str) -> None:
     """A plan-mode command starts from an empty plan: a refused or failed run must never leave an
     earlier run's plan.json / intents / checkpoints for a later ``publish`` to act on."""
-    for name in (PLAN_FILE, SUMMARY_FILE, CHECKPOINTS_FILE, *(f"intent-{r}.json" for r in (EV, DV)),
-                 *(f"tip-{r}.json" for r in (EV, DV))):
+    for name in (PLAN_FILE, SUMMARY_FILE, CHECKPOINTS_FILE, *(intent_file(r) for r in (EV, DV)),
+                 *(tip_file(r) for r in (EV, DV))):
         try:
             os.remove(os.path.join(out_dir, name))
         except FileNotFoundError:
@@ -507,21 +538,21 @@ def _ref_entry(old: Optional[str], new: Optional[str], changed: bool, dry_run: b
 
 def _emit_plan(ctx: _Ctx, *, mode: str, dry_run: bool, foreign_tip: bool, derive_skipped: bool,
                derived_from: Optional[str], budget_stopped: bool, refs: dict, counts: dict,
-               parents: dict) -> None:
+               parents: dict, derive_error: bool = False) -> None:
     """Step 8: plan.json, the intent files of every ref that would move, summary, outputs."""
     for ref in (EV, DV):
         try:
-            os.remove(os.path.join(ctx.out_dir, f"intent-{ref}.json"))
+            os.remove(os.path.join(ctx.out_dir, intent_file(ref)))
         except FileNotFoundError:
             pass
         r = refs[ref]
         if r["would_change"] and r["new"]:
-            _write_json(os.path.join(ctx.out_dir, f"intent-{ref}.json"),
+            _write_json(os.path.join(ctx.out_dir, intent_file(ref)),
                         _intent(ctx, ref, r["new"], parents.get(ref)))
-    plan = {"budget_stopped": budget_stopped, "counts": counts, "derive_skipped": derive_skipped,
-            "derived_from": derived_from, "dry_run": dry_run, "foreign_tip": foreign_tip,
-            "format": PLAN_FORMAT, "mode": mode, "refs": refs, "run_attempt": ctx.run_attempt,
-            "run_id": ctx.run_id}
+    plan = {"budget_stopped": budget_stopped, "counts": counts, "derive_error": derive_error,
+            "derive_skipped": derive_skipped, "derived_from": derived_from, "dry_run": dry_run,
+            "foreign_tip": foreign_tip, "format": PLAN_FORMAT, "mode": mode, "refs": refs,
+            "run_attempt": ctx.run_attempt, "run_id": ctx.run_id}
     _write_json(os.path.join(ctx.out_dir, PLAN_FILE), plan)
     ev, dv = refs[EV], refs[DV]
     ctx.summary.append(f"- evidence: {_short(ev['old'])} → {_short(ev['new'])} "
@@ -535,15 +566,24 @@ def _emit_plan(ctx: _Ctx, *, mode: str, dry_run: bool, foreign_tip: bool, derive
         "mode": mode, "dry_run": dry_run, "foreign_tip": foreign_tip,
         "evidence_changed": ev["changed"], "evidence_sha": ev["new"] if ev["changed"] else "",
         "site_changed": dv["changed"], "site_sha": dv["new"] if dv["changed"] else "",
-        "derive_skipped": derive_skipped, "budget_stopped": budget_stopped,
+        "derive_skipped": derive_skipped, "derive_error": derive_error, "budget_stopped": budget_stopped,
     })
 
 
-def _noop_plan(ctx: _Ctx, mode: str, dry_run: bool, reason: str) -> int:
-    """A plan that moves nothing and checkpoints nothing (budget stopped before continuity)."""
+def _noop_plan(ctx: _Ctx, git: gitstore.Git, mode: str, dry_run: bool, reason: str) -> int:
+    """A plan that moves nothing and checkpoints nothing (budget stopped before continuity).
+
+    Each ref's ``old`` and ``new`` are the tip this run FETCHED (``changed`` false,
+    verdict ``unknown``, no checkpoint), so ``publish``'s moved-since-the-plan
+    pre-check compares the remote with what the plan actually saw — a scan stop
+    is a clean exit 0 through ``publish`` too (no push, no checkpoint: publish
+    checkpoints only an ``ok`` verdict), never a phantom continuity alarm."""
     _notice(reason)
     ctx.summary.append(f"- stopped: {reason}")
-    refs = {ref: _ref_entry(None, None, False, dry_run, "unknown", None) for ref in (EV, DV)}
+    refs = {}
+    for ref in (EV, DV):
+        tip = git.rev_parse(f"refs/remotes/origin/{ref}")
+        refs[ref] = _ref_entry(tip, tip, False, dry_run, "unknown", None)
     _emit_plan(ctx, mode=mode, dry_run=dry_run, foreign_tip=False, derive_skipped=True, derived_from=None,
                budget_stopped=True, refs=refs, counts={}, parents={})
     return EXIT_OK
@@ -552,16 +592,29 @@ def _noop_plan(ctx: _Ctx, mode: str, dry_run: bool, reason: str) -> int:
 def _apply_freeze(st: dict, fp: "freeze.FreezePlan") -> None:
     """Apply a FreezePlan's state updates through state.py (the cli is state's only writer).
 
-    ``fp.pending`` is read as ``{kind: {key: {closed_at, due_at, defer_until, reasons}}}``
-    (kinds ``pr``/``brief``); every ``frozen`` unit leaves ``pending`` (and a PR leaves
-    ``skipped``); a skipped PR leaves ``pending``; a freeze cursor is set when the plan
-    names a value (``None`` keeps the stored cursor)."""
+    H6's contract (freeze.py, "The plan"): ``fp.pending`` is the COMPLETE new
+    ``state.pending`` map, ``{kind: {key: {closed_at, due_at, defer_until, reasons}}}``
+    with carried-over entries included — so every kind it names (``pr``/``brief``)
+    REPLACES the stored map: each entry is written through ``state.set_pending`` and
+    each stored key it no longer holds leaves through ``state.clear_pending`` (a kind
+    it does not name keeps its entries). Then every ``fp.cleared`` ``(kind, key)``
+    leaves ``pending`` (a reopened or unchanged unit), every ``frozen`` unit leaves
+    ``pending`` (and a PR leaves ``skipped``), a skipped PR is recorded and leaves
+    ``pending``, and a freeze cursor is set when the plan names a value (``None`` keeps
+    the stored cursor)."""
     for kind, entries in (fp.pending or {}).items():
         if kind not in state.PENDING_KINDS or not isinstance(entries, dict):
             raise ValueError(f"FreezePlan.pending: unexpected kind {kind!r}")
+        keep = {str(k) for k in entries}
+        for key in sorted(set(st["pending"].get(kind, {})) - keep):
+            state.clear_pending(st, kind, key)
         for key, e in entries.items():
             state.set_pending(st, kind, str(key), closed_at=e.get("closed_at"), due_at=e["due_at"],
                               defer_until=e["defer_until"], reasons=list(e.get("reasons") or []))
+    for kind, key in getattr(fp, "cleared", None) or ():
+        if kind not in state.PENDING_KINDS:
+            raise ValueError(f"FreezePlan.cleared: unexpected kind {kind!r}")
+        state.clear_pending(st, kind, str(key))
     for kind, key, _rev in list(fp.frozen) + list(fp.recaptured):
         if kind in state.PENDING_KINDS:
             state.clear_pending(st, kind, str(key))
@@ -610,7 +663,7 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
     try:
         ev, dv, scan_counts = _scan(ctx, gh, git)
     except github.BudgetExhausted as exc:
-        return _noop_plan(ctx, mode, dry_run, f"budget stopped before tip continuity could be judged ({exc})")
+        return _noop_plan(ctx, git, mode, dry_run, f"budget stopped before tip continuity could be judged ({exc})")
     if bootstrap and ev.verdict != "bootstrap":
         _err(f"--bootstrap refused: the evidence verdict is {ev.verdict} ({ev.reason}); a root is created "
              "only when the ref is absent and no checkpoint exists in the horizon")
@@ -687,24 +740,36 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
 
         # 5. freeze / refreeze.
         if not budget_stopped and ((mode == "harvest" and not receipts_only) or mode == "refreeze"):
-            frozen = state.frozen_from_paths(existing_paths | set(planned))
-            try:
-                plans = []
-                if mode == "harvest":
-                    plans.append(freeze.plan_freezes(gh, state=st, frozen=frozen, conf=conf, now=ctx.now,
-                                                     read=read, only_prs=inputs.prs))
-                else:
-                    for n in inputs.prs:
-                        plans.append(freeze.refreeze(gh, n, state=st, frozen=frozen, conf=conf, read=read))
-                        frozen = state.frozen_from_paths(existing_paths | set(planned) | set(plans[-1].files))
-            except github.BudgetExhausted:
-                budget_stopped = True
-            for fp in plans:
+            plans: list = []
+
+            def take(fp: "freeze.FreezePlan") -> None:
+                # Applied at once, so the next refreeze sees this one's state and paths.
+                plans.append(fp)
                 _apply_freeze(st, fp)
                 planned.update(fp.files)
-                budget_stopped = budget_stopped or fp.budget_stopped
+
+            # A dispatch's since lowers the PR/brief listing cursors for this pass (never below
+            # backfill_since — _date_floor refused that already): rescue and backfill are both
+            # harvest with since (docs/provenance.md §Workflow).
+            since = receipts.normalize_bound(inputs.since, end=False) if inputs.since else None
+            try:
+                if mode == "harvest":
+                    frozen = state.frozen_from_paths(existing_paths | set(planned))
+                    take(freeze.plan_freezes(gh, state=st, frozen=frozen, conf=conf, now=ctx.now, read=read,
+                                             only_prs=inputs.prs, run_id=ctx.run_id, since=since))
+                else:
+                    for n in inputs.prs:
+                        frozen = state.frozen_from_paths(existing_paths | set(planned))
+                        take(freeze.refreeze(gh, n, state=st, frozen=frozen, conf=conf, read=read,
+                                             run_id=ctx.run_id))
+                        if plans[-1].budget_stopped:
+                            break
+            except github.BudgetExhausted:
+                budget_stopped = True
+            budget_stopped = budget_stopped or any(fp.budget_stopped for fp in plans)
             pending_n = sum(len(v) for v in st["pending"].values())
-            counts["freeze"] = {"frozen": sum(len(p.frozen) for p in plans), "pending": pending_n,
+            counts["freeze"] = {"cleared": sum(len(getattr(p, "cleared", None) or ()) for p in plans),
+                                "frozen": sum(len(p.frozen) for p in plans), "pending": pending_n,
                                 "recaptured": sum(len(p.recaptured) for p in plans),
                                 "skipped": sum(len(p.skipped_prs) for p in plans)}
             ctx.summary.append(f"- freeze: {counts['freeze']}")
@@ -743,6 +808,7 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
     derived_from = ev.checkpoint if foreign_tip else ev_new
     dv_new: Optional[str] = dv.tip
     site_changed = False
+    derive_error = False
     if not derive_skipped:
         if derived_from is None:
             derive_skipped = True
@@ -762,7 +828,10 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
                 evidence_sha=derived_from, producer_run=ctx.run_id,
                 edit_grace_seconds=conf.edit_grace_seconds, guard=guard)
         except Exception as exc:  # a derive bug must not block evidence capture (receipts expire)
+            # ... but it must not stay green either: derive_error=true is the workflow's red verdict
+            # (after the checkpoints are uploaded), so provenance-site cannot silently stop updating.
             derive_skipped = True
+            derive_error = True
             reasons.append(f"derive failed ({type(exc).__name__})")
             counts["derive_error"] = type(exc).__name__
             _err(f"derive failed ({type(exc).__name__}: {str(exc)[:200]}); no derived push this run")
@@ -805,7 +874,7 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
     }
     _emit_plan(ctx, mode=mode, dry_run=dry_run, foreign_tip=foreign_tip, derive_skipped=derive_skipped,
                derived_from=derived_from if not derive_skipped else None, budget_stopped=budget_stopped,
-               refs=refs, counts=counts, parents={EV: base, DV: None})
+               refs=refs, counts=counts, parents={EV: base, DV: None}, derive_error=derive_error)
     return EXIT_OK
 
 
@@ -821,10 +890,22 @@ def _guarded(fn, *a, **kw) -> int:
     except gitstore.ForeignTip as exc:
         _err(f"tip continuity: {exc}")
         return EXIT_FOREIGN_TIP
-    except (gitstore.GitError, ingest.IngestError, github.APIError, github.Truncated,
-            github.GraphQLUnavailable) as exc:
+    except _invalid_errors() as exc:
         _err(f"{type(exc).__name__}: {exc}")
         return EXIT_INVALID
+
+
+def _invalid_errors() -> tuple[type, ...]:
+    """The package exceptions that are exit 1. ``freeze.CaptureError`` (H6) is what a refreeze of a
+    PR GitHub cannot serve raises; it is looked up at call time so the scaffold's freeze.py (which
+    predates it) still imports. A ``BudgetExhausted`` that reaches here (``recover``'s scan — the
+    harvest path stops cleanly on its own) is exit 1 with an ``::error::``, never a traceback."""
+    errors: list[type] = [gitstore.GitError, ingest.IngestError, github.APIError, github.Truncated,
+                          github.GraphQLUnavailable, github.BudgetExhausted]
+    capture = getattr(freeze, "CaptureError", None)
+    if isinstance(capture, type) and issubclass(capture, BaseException):
+        errors.append(capture)
+    return tuple(errors)
 
 
 def cmd_harvest(args: argparse.Namespace) -> int:
@@ -879,7 +960,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
     def finish() -> int:
         ckpts = {}
         for ref in (EV, DV):
-            path = os.path.join(out_dir, f"tip-{ref}.json")
+            path = os.path.join(out_dir, tip_file(ref))
             if tips[ref]:
                 ckpts[ref] = _checkpoint(run_id, run_attempt, ref, tips[ref])
                 _write_json(path, ckpts[ref])
@@ -894,7 +975,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
             with open(os.path.join(out_dir, SUMMARY_FILE), "a", encoding="utf-8") as fh:
                 fh.write(f"- publish (exit {code}): checkpoint evidence {_short(tips[EV] or None)} · "
                          f"derived {_short(tips[DV] or None)}"
-                         f"{' · foreign evidence tip: the verdict step fails the job' if plan['foreign_tip'] else ''}\n")
+                         f"{' · foreign evidence tip: the verdict step fails the job' if plan['foreign_tip'] else ''}"
+                         f"{' · derive error: the verdict step fails the job' if plan.get('derive_error') else ''}\n")
         except OSError:
             pass
         write_outputs(args.gh_output, {"evidence_tip": tips[EV], "site_tip": tips[DV],

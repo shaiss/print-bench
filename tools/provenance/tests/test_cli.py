@@ -14,13 +14,15 @@ runs at integration.
 
 from __future__ import annotations
 
+import gzip
 import json
+import re
 from urllib.parse import urlsplit
 
 import pytest
 
 from _gitstore_helpers import MINI, NOW_EPOCH, REPO_SLUG, Harness
-from conftest import needs
+from conftest import REPO, needs
 
 from provenance import canonical, cli, contract, freeze, github, gitstore
 from provenance import conf as conf_mod
@@ -29,6 +31,8 @@ from provenance.gitstore import EVIDENCE_REF as EV
 
 SNAP = ("--snapshot-dir", str(MINI))
 SNAP_END = "2026-10-11T17:46:29Z"
+#: H6's real freeze pass, captured before any Harness patches it (the integration tests restore it).
+REAL_PLAN_FREEZES = freeze.plan_freezes
 
 
 @pytest.fixture
@@ -62,11 +66,12 @@ def _record_pushes(monkeypatch):
     return order
 
 
-def test_harvest_dry_run_writes_plan_not_pushes(h, capsys):
+def test_harvest_dry_run_writes_plan_not_pushes(h, monkeypatch, capsys):
     """harvest --dry-run over a temp repo + local bare origin + FakeGitHub writes plan.json, intent files and summary.md, sets evidence_changed/site_changed false in --gh-output and calls no push."""
+    order = _record_pushes(monkeypatch)
     code, out = h.plan("--bootstrap", "--dry-run", *SNAP)
     assert code == 0, capsys.readouterr().err
-    assert out == {"budget_stopped": "false", "derive_skipped": "false", "dry_run": "true",
+    assert out == {"budget_stopped": "false", "derive_error": "false", "derive_skipped": "false", "dry_run": "true",
                    "evidence_changed": "false", "evidence_sha": "", "foreign_tip": "false", "mode": "harvest",
                    "site_changed": "false", "site_sha": ""}
     plan = h.plan_doc()
@@ -82,7 +87,6 @@ def test_harvest_dry_run_writes_plan_not_pushes(h, capsys):
     assert "dry run" in summary and "ingest pr843" in summary and "continuity" in summary
     assert plan["derived_from"] == ev["new"] and h.sb.git.has_commit(ev["new"])
     assert h.sb.remote(EV) is None and h.sb.remote(DV) is None              # nothing pushed
-    order = []
     code, pub = h.publish()
     assert code == 0 and pub == {"evidence_tip": "", "foreign_tip": "false", "site_tip": ""}
     assert h.sb.remote(EV) is None and h.sb.remote(DV) is None and order == []
@@ -126,6 +130,53 @@ def test_budget_stop_exits_zero(h, capsys):
     h.freeze = lambda gh, **kw: freeze.FreezePlan(budget_stopped=True)
     code, out = h.plan()
     assert code == 0 and out["budget_stopped"] == "true"
+
+
+def test_scan_budget_stop_is_a_clean_noop_through_publish(h, monkeypatch, capsys):
+    """A BudgetExhausted DURING the continuity scan (the scheduled floor, the 400 cap, a dispatch's
+    max_requests) is a no-op plan whose refs carry old == new == the FETCHED tip with verdict
+    unknown: plan exits 0, publish exits 0 pushing and checkpointing nothing (both *_tip outputs
+    empty, no phantom 'moved since the plan'), the remotes are unchanged, and the next run with budget
+    judges continuity normally. Control: a tip that really moves between that plan and publish is
+    still refused (exit 3)."""
+    c, d = _bootstrap(h)
+    real = h.fake.iter_pages
+
+    def floor(path, params=None, **kw):
+        if path == "/actions/artifacts":
+            raise github.BudgetExhausted("X-RateLimit-Remaining 12 < floor 500")
+        return real(path, params, **kw)
+    monkeypatch.setattr(h.fake, "iter_pages", floor)
+    order = _record_pushes(monkeypatch)
+    capsys.readouterr()
+    r = h.cycle("--scheduled")
+    err = capsys.readouterr().err
+    assert r["plan"] == 0 and r["publish"] == 0, err
+    assert "::error::" not in err and "budget stopped before tip continuity" in err
+    po = r["plan_out"]
+    assert (po["budget_stopped"], po["foreign_tip"], po["evidence_changed"], po["site_changed"],
+            po["evidence_sha"], po["site_sha"]) == ("true", "false", "false", "false", "", "")
+    assert r["pub_out"] == {"evidence_tip": "", "foreign_tip": "false", "site_tip": ""}
+    plan = h.plan_doc()
+    for ref, tip in ((EV, c), (DV, d)):
+        assert plan["refs"][ref] == {"changed": False, "checkpoint": None, "new": tip, "old": tip,
+                                     "verdict": "unknown", "would_change": False}
+    assert order == [] and h.sb.remote(EV) == c and h.sb.remote(DV) == d
+    assert json.loads((h.out / "checkpoints.json").read_text()) == {EV: None, DV: None}
+    assert not (h.out / cli.tip_file(EV)).exists() and not (h.out / cli.tip_file(DV)).exists()
+    # The next run, with budget: continuity holds (the bootstrap checkpoint still anchors both tips).
+    monkeypatch.setattr(h.fake, "iter_pages", real)
+    r = h.cycle()
+    assert r["publish"] == 0 and h.plan_doc()["refs"][EV]["verdict"] == "ok"
+    assert r["pub_out"] == {"evidence_tip": c, "foreign_tip": "false", "site_tip": d}
+    # Control: the remote moves between a scan-stopped plan and its publish → refused, nothing pushed.
+    monkeypatch.setattr(h.fake, "iter_pages", floor)
+    code, _ = h.plan("--scheduled")
+    assert code == 0
+    mover = h.sb.commit(dict(h.sb.files_at(c), **{"raw/pr/5.json.gz": b"x"}), c)
+    h.sb.push(mover, EV)
+    pcode, pub = h.publish()
+    assert pcode == 3 and pub["evidence_tip"] == "" and h.sb.remote(EV) == mover and h.sb.remote(DV) == d
 
 
 def test_capture_deadline_leaves_the_derive_reserve(h, monkeypatch, capsys):
@@ -298,6 +349,20 @@ def test_recover_refused_while_continuity_holds(h, capsys):
     assert h.sb.remote(EV) == c
 
 
+def test_recover_budget_stop_exits_1_without_a_plan(h, monkeypatch, capsys):
+    """recover cannot judge continuity without the scan: a BudgetExhausted there is exit 1 with an
+    ::error:: (never a traceback) and no plan for publish to act on."""
+    c, _ = _bootstrap(h)
+
+    def floor(path, params=None, **kw):
+        raise github.BudgetExhausted("X-RateLimit-Remaining 3 < floor 500")
+    monkeypatch.setattr(h.fake, "iter_pages", floor)
+    capsys.readouterr()
+    code, out = h.plan("--confirm-sha", c, mode="recover")
+    assert code == 1 and "::error::BudgetExhausted" in capsys.readouterr().err
+    assert not (h.out / "plan.json").exists() and out == {} and h.sb.remote(EV) == c
+
+
 def test_recover_needs_the_newest_checkpoint(h, monkeypatch, capsys):
     """Critique 4: with a foreign tip, recover --confirm-sha <an older checkpoint or an intent> → exit 3; --confirm-sha <newest checkpoint> → a force-with-lease plan of that sha over the foreign tip."""
     c1, _ = _bootstrap(h)
@@ -452,6 +517,99 @@ def test_failed_pr_head_fetch_skips_derive(h, monkeypatch, capsys):
     assert out["site_changed"] == "false"
 
 
+def test_derive_exception_publishes_evidence_and_reports_derive_error(h, monkeypatch, capsys):
+    """A derive bug does not block evidence capture (receipts expire) but never stays green: plan
+    exits 0 with derive_skipped AND derive_error true (counts.derive_error names the type), publish
+    pushes the evidence and checkpoints it, pushes no derived tip, and its summary line says the
+    verdict step fails the job. Control: a healthy derive reports derive_error false."""
+    from provenance import bundle
+    c, d = _bootstrap(h)
+
+    def broken(*a, **kw):
+        raise KeyError("a derive-layer bug")
+    monkeypatch.setattr(bundle, "derive", broken)
+    h.add_live_run("design-run.yml", 961, "2026-10-13T10:00:00Z")
+    capsys.readouterr()
+    r = h.cycle()
+    err = capsys.readouterr().err
+    assert r["plan"] == 0 and r["publish"] == 0 and "::error::derive failed (KeyError" in err
+    po = r["plan_out"]
+    assert po["derive_error"] == "true" and po["derive_skipped"] == "true"
+    assert po["evidence_changed"] == "true" and po["site_changed"] == "false"
+    plan = h.plan_doc()
+    assert plan["derive_error"] is True and plan["counts"]["derive_error"] == "KeyError"
+    assert r["pub_out"]["evidence_tip"] == po["evidence_sha"] == h.sb.remote(EV) != c
+    assert r["pub_out"]["site_tip"] == d == h.sb.remote(DV)       # the old derived tip, still verified
+    assert "derive error: the verdict step fails the job" in (h.out / "summary.md").read_text()
+    monkeypatch.undo()
+    h2 = Harness(h.root / "healthy", monkeypatch)
+    _bootstrap(h2)
+    code, out = h2.plan()
+    assert code == 0 and out["derive_error"] == "false" and h2.plan_doc()["derive_error"] is False
+
+
+def test_freeze_calls_carry_run_id_and_since(h, monkeypatch):
+    """H6's freeze contract: plan_freezes gets run_id (= --run-id, recorded as captured.run_id) and
+    since (a dispatch's since, as RFC3339 — it lowers the PR/brief listing cursors; None without
+    it); refreeze gets run_id, each plan is applied before the next PR's refreeze is planned (its
+    frozen map sees the previous revision), and a budget-stopped refreeze ends the loop."""
+    _bootstrap(h)
+    seen = []
+    h.freeze = lambda gh, **kw: seen.append(kw) or freeze.FreezePlan()
+    code, _ = h.plan("--since", "2026-10-12")
+    assert code == 0 and seen[-1]["run_id"] == h.run_id and seen[-1]["since"] == "2026-10-12T00:00:00Z"
+    code, _ = h.plan("--since", "2026-10-12T06:30:00Z")
+    assert code == 0 and seen[-1]["since"] == "2026-10-12T06:30:00Z"
+    code, _ = h.plan()
+    assert code == 0 and seen[-1]["since"] is None and seen[-1]["run_id"] == h.run_id
+    calls = []
+
+    def refreeze(gh, number, **kw):
+        calls.append((number, kw["run_id"], dict(kw["frozen"]["pr"])))
+        return freeze.FreezePlan(files={f"raw/pr/{number}.json.gz": canonical.dumps_gz({"pr": number})},
+                                 frozen=[("pr", str(number), 1)], budget_stopped=number == 371)
+    monkeypatch.setattr(freeze, "refreeze", refreeze)
+    code, out = h.plan("--pr", "636,371,5", mode="refreeze")
+    assert code == 0 and out["budget_stopped"] == "true"
+    assert calls == [(5, h.run_id, {}), (371, h.run_id, {"5": 1})]   # 636 never planned: 371 stopped
+    files = h.sb.files_at(out["evidence_sha"])
+    assert "raw/pr/5.json.gz" in files and "raw/pr/371.json.gz" in files and "raw/pr/636.json.gz" not in files
+
+
+def test_refreeze_of_an_unservable_pr_exits_1(h, monkeypatch, capsys):
+    """freeze.CaptureError (H6: the operator named a PR GitHub cannot serve) maps to exit 1."""
+    _bootstrap(h)
+
+    class CaptureError(Exception):
+        pass
+    monkeypatch.setattr(freeze, "CaptureError", CaptureError, raising=False)
+
+    def refreeze(gh, number, **kw):
+        raise CaptureError(f"/pulls/{number} answered nothing")
+    monkeypatch.setattr(freeze, "refreeze", refreeze)
+    capsys.readouterr()
+    code, out = h.plan("--pr", "999999", mode="refreeze")
+    assert code == 1 and "CaptureError: /pulls/999999" in capsys.readouterr().err
+    assert not (h.out / "plan.json").exists() and out == {}
+
+
+@needs(freeze.plan_freezes, freeze.capture_release)
+def test_live_freeze_records_the_run_id(h, monkeypatch):
+    """At integration (H6's real freeze pass): a raw document a harvest plans carries
+    captured.run_id == --run-id (never the fixture sentinel 0), through plan → publish."""
+    _bootstrap(h)
+    monkeypatch.setattr(freeze, "plan_freezes", REAL_PLAN_FREEZES)
+    h.fake.responses[("/releases", frozenset())] = [{
+        "assets": [], "author": {"login": "octo", "type": "User"}, "body": "notes",
+        "created_at": "2026-10-13T09:00:00Z", "draft": False, "id": 4242, "name": "v9.9",
+        "prerelease": False, "published_at": "2026-10-13T10:00:00Z", "tag_name": "v9.9",
+        "target_commitish": "main"}]
+    r = h.cycle()
+    assert r["plan"] == 0 and r["publish"] == 0
+    doc = json.loads(gzip.decompress(h.sb.files_at(r["pub_out"]["evidence_tip"])["raw/release/v9.9.json.gz"]))
+    assert doc["captured"]["run_id"] == h.run_id != 0
+
+
 def test_refreeze_adds_one_revision(h, monkeypatch, capsys):
     """refreeze wiring: freeze.refreeze's one new path lands in an add-only evidence commit; a
     foreign evidence tip refuses refreeze (exit 3)."""
@@ -492,6 +650,37 @@ def test_apply_freeze_updates_state_through_state_py():
         cli._apply_freeze(st, freeze.FreezePlan(pending={"636": {}}))
 
 
+def test_apply_freeze_replaces_pending_and_honours_cleared():
+    """H6's contract: FreezePlan.pending is the COMPLETE new map per kind it names — a stored entry
+    it no longer holds leaves (a reopened or unchanged PR/brief cannot stay pending forever, which
+    would make Reeve's provenance-lag report it overdue permanently); a kind it does not name keeps
+    its entries; every FreezePlan.cleared unit leaves pending; a cleared kind outside pr/brief is
+    refused."""
+    from provenance import state as state_mod
+    entry = {"closed_at": "2026-10-01T00:00:00Z", "defer_until": "2026-10-02T00:00:00Z",
+             "due_at": "2026-10-01T06:00:00Z", "reasons": []}
+    st = state_mod.empty_state({})
+    for kind, key in (("pr", "5"), ("pr", "6"), ("brief", "40"), ("brief", "41")):
+        state_mod.set_pending(st, kind, key, **entry)
+    # The PR map is replaced: 5 carried over (re-deferred), 6 dropped (reopened), 9 new; briefs untouched.
+    fp = freeze.FreezePlan(pending={"pr": {"5": dict(entry, reasons=["settle-deferred"]), "9": entry}})
+    cli._apply_freeze(st, fp)
+    assert sorted(st["pending"]["pr"]) == ["5", "9"] and st["pending"]["pr"]["5"]["reasons"] == ["settle-deferred"]
+    assert sorted(st["pending"]["brief"]) == ["40", "41"]
+    # cleared (H6's field; absent from the scaffold's dataclass, so set as an attribute) removes units.
+    fp = freeze.FreezePlan()
+    fp.cleared = [("brief", "41"), ("pr", "9")]
+    cli._apply_freeze(st, fp)
+    assert sorted(st["pending"]["pr"]) == ["5"] and sorted(st["pending"]["brief"]) == ["40"]
+    # An empty map for a kind is "nothing pending of that kind" — a replacement, not a no-op.
+    cli._apply_freeze(st, freeze.FreezePlan(pending={"pr": {}, "brief": {"40": entry}}))
+    assert st["pending"] == {"pr": {}, "brief": {"40": entry}}
+    bad = freeze.FreezePlan()
+    bad.cleared = [("release", "v1")]
+    with pytest.raises(ValueError):
+        cli._apply_freeze(st, bad)
+
+
 def _export(h, sha, dest):
     for path, data in h.sb.files_at(sha).items():
         p = dest.joinpath(*path.split("/"))
@@ -530,6 +719,56 @@ def test_bootstrapped_evidence_tree_passes_check(h, tmp_path):
     c, _ = _bootstrap(h)
     tree = _export(h, c, tmp_path / "tree")
     assert cli.main(["check", "--dir", str(tree), "--kind", "evidence", "--repo-dir", str(h.sb.checkout)]) == 0
+
+
+def _upload_steps(text):
+    """``(artifact name, path, if)`` of every actions/upload-artifact step in a workflow's text."""
+    steps = re.split(r"\n\s*- name: ", text)
+    out = []
+    for step in steps:
+        if "uses: actions/upload-artifact" not in step:
+            continue
+        name = re.search(r"\n\s+name: (\S+)", step)
+        path = re.search(r"\n\s+path: (\S+)", step)
+        cond = re.search(r"\n\s+if: (.+)", step)
+        out.append((name.group(1) if name else "", path.group(1) if path else "",
+                    cond.group(1).strip() if cond else ""))
+    return out
+
+
+def test_workflow_uploads_the_files_publish_writes():
+    """The plan/publish file contract seen from the workflow (H6's provenance.yml; skipped until it
+    exists): each intent upload's path is ``<out-dir>/`` + cli.intent_file(ref) and each checkpoint
+    upload's path ``<out-dir>/`` + cli.tip_file(ref) — a mismatch with ``if-no-files-found: error``
+    fails every non-dry run and no checkpoint is ever uploaded; and each checkpoint step runs even
+    when publish failed after a verified push (``!cancelled()`` or ``always()``), or the evidence
+    tip pushed before a derived rejection is never checkpointed and the next run refuses it."""
+    wf = REPO / ".github" / "workflows" / "provenance.yml"
+    if not wf.exists():
+        pytest.skip("waits for H6's .github/workflows/provenance.yml")
+    text = wf.read_text(encoding="utf-8")
+    out_dir = re.search(r"publish --out-dir (\S+)", text)
+    assert out_dir, "the publish step names its --out-dir"
+    uploads = _upload_steps(text)
+    for kind, fname in (("intent", cli.intent_file), ("tip", cli.tip_file)):
+        for ref in (EV, DV):
+            prefix = f"{kind}-{ref}-${{{{"
+            hits = [(p, c) for n, p, c in uploads if n.startswith(prefix)]
+            assert len(hits) == 1, (kind, ref, uploads)
+            path, cond = hits[0]
+            assert path == f"{out_dir.group(1)}/{fname(ref)}", (kind, ref, path)
+            if kind == "tip":
+                assert "!cancelled()" in cond or "always()" in cond, (ref, cond)
+
+
+def test_upload_step_parser_can_fail():
+    """Negative control for the workflow pin's parser: a wrong path and a bare if are seen as such."""
+    text = ("steps:\n      - name: Checkpoint the evidence tip\n        if: steps.publish.outputs.evidence_tip != ''\n"
+            "        uses: actions/upload-artifact@v7\n        with:\n          name: tip-provenance-${{ x }}\n"
+            "          path: .provenance/checkpoint-provenance.json\n")
+    [(name, path, cond)] = _upload_steps(text)
+    assert name.startswith("tip-provenance-${{") and path != f".provenance/{cli.tip_file(EV)}"
+    assert "!cancelled()" not in cond and "always()" not in cond
 
 
 def test_outputs_validate_shas(tmp_path):

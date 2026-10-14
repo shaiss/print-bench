@@ -136,7 +136,8 @@ def test_guard_refuses_delete(sb):
     files = _evidence()
     del files["receipts/2026/08/10/1.a1.json.gz"]
     new = sb.commit(files, base, modes=GUARD_MODES)
-    with pytest.raises(GuardViolation, match=r"^D receipts/2026/08/10/1\.a1\.json\.gz"):
+    # The D rule's own text: with the rule deleted the "only A/M" rule would still refuse a "D …".
+    with pytest.raises(GuardViolation, match=r"^D receipts/2026/08/10/1\.a1\.json\.gz: add-only evidence never deletes"):
         guard_diff(sb.git, base, new)
 
 
@@ -513,7 +514,10 @@ def test_fetch_all_tracks_the_remote_exactly(sb):
     sb.git.fetch_all()
     assert sb.git.rev_parse(f"refs/remotes/origin/{EVIDENCE_REF}") is None
     assert gitstore.remote_tip(sb.git, EVIDENCE_REF) is None
-    assert sb.git.fetch(c) in (True, False)  # by-sha fetch never raises for "not served"
+    # A by-sha fetch of an object origin does not hold answers False (not raise) — the contract
+    # recover relies on — and leaves nothing local.
+    absent = "1" * 40
+    assert sb.git.fetch(absent) is False and not sb.git.has_commit(absent)
 
 
 def test_selftest_cases_all_hold():
@@ -525,8 +529,69 @@ def test_selftest_cases_all_hold():
 
 
 def test_selftest_guard_case_can_fail():
-    """Negative control: a mutation the guard accepts makes its selftest case report False."""
-    assert gitstore._guard_case(lambda d: dict(d, **{"raw/pr/7.json.gz": b"new"}))() is False
+    """Negative controls: a mutation the guard accepts makes its selftest case report False, and so
+    does a refusal by a DIFFERENT rule than the case names (each case pins its own rule)."""
+    heads = gitstore.GUARD_RULE_HEADS
+    assert gitstore._guard_case(lambda d: dict(d, **{"raw/pr/7.json.gz": b"new"}), "")() is False
+
+    def drop(d):
+        d.pop("raw/pr/1.json.gz")
+        return d
+
+    def guard_change(d):
+        return dict(d, **{"vercel.json": b'{"x": 1}\n'})
+    assert gitstore._guard_case(drop, heads["D"].format(path="raw/pr/1.json.gz"))() is True
+    assert gitstore._guard_case(drop, heads["M"].format(path="raw/pr/1.json.gz"))() is False
+    assert gitstore._guard_case(guard_change, heads["guard"].format(path="vercel.json"))() is True
+    # The guard-file change is ALSO an M outside state.json: only the guard rule's head counts.
+    assert gitstore._guard_case(guard_change, heads["M"].format(path="vercel.json"))() is False
+
+
+def test_selftest_cases_fail_without_their_rule(monkeypatch):
+    """Each guard selftest case fails when its own rule is removed from guard_diff, even though a
+    later rule still refuses the same change (the D → "only A/M" and guard → "M" fall-throughs),
+    and the token case fails when redact() is disabled."""
+    real = gitstore.guard_diff
+
+    def without(rule):
+        def guard(git, old, new, mutable=gitstore.MUTABLE_EVIDENCE_PATHS):
+            try:
+                return real(git, old, new, mutable)
+            except gitstore.GuardViolation as exc:
+                if str(exc).startswith(rule + " "):
+                    # Re-run the rest of the rules for that change: what a deleted rule leaves.
+                    msg = str(exc)
+                    path = msg.split(" ", 1)[1].split(":", 1)[0]
+                    if rule == "D":
+                        raise gitstore.GuardViolation(f"D {path}: only additions are allowed") from None
+                    if rule == "guard":
+                        raise gitstore.GuardViolation(f"M {path}: only state.json may be modified") from None
+                    return []
+                raise
+        return guard
+    cases = dict(gitstore.selftest_cases())
+    for rule, label in (("D", "gitstore guard refuses D"), ("guard", "gitstore guard refuses a guard-file change"),
+                        ("0B", "gitstore guard refuses a 0-byte blob"),
+                        ("M", "gitstore guard refuses M outside state.json")):
+        assert cases[label]() is True
+        monkeypatch.setattr(gitstore, "guard_diff", without(rule))
+        assert cases[label]() is False, rule
+        monkeypatch.setattr(gitstore, "guard_diff", real)
+    label = "gitstore failing push error carries neither token nor base64"
+    assert cases[label]() is True
+    monkeypatch.setattr(gitstore, "redact", lambda text, secrets: text)
+    assert cases[label]() is False
+
+
+def test_token_is_never_in_a_repr():
+    """The credential rule does not depend on caller discipline: repr() (an f-string, a debugger, a
+    pytest locals dump) of a Git or a Client never carries the token."""
+    from provenance import github
+    git = gitstore.Git(".", token="ghs_LEAKME")
+    client = github.Client(repo="o/r", token="ghs_LEAKME",
+                           budget=github.Budget(max_requests=None, floor=500, pace=False))
+    for obj in (git, client):
+        assert "ghs_LEAKME" not in repr(obj) and "ghs_LEAKME" not in f"{obj}" and obj.token == "ghs_LEAKME"
 
 
 def test_iter_changes_parses_and_refuses():

@@ -462,7 +462,7 @@ class Git:
 
     repo_dir: str
     env: dict[str, str] = field(default_factory=dict)
-    token: str = ""
+    token: str = field(default="", repr=False)
     _commits: dict = field(default_factory=dict, init=False, repr=False)
     _fplog: dict = field(default_factory=dict, init=False, repr=False)
     _catfile: Optional[_CatFile] = field(default=None, init=False, repr=False)
@@ -1048,6 +1048,16 @@ def _empty_tree(git: Git) -> str:
     return git.run("mktree", input=b"").decode("ascii").strip()
 
 
+#: The head of each guard rule's message (``guard_diff`` raises ``<head>`` + its detail); the
+#: selftest matches a refusal on its rule's head, so a case cannot pass through another rule.
+GUARD_RULE_HEADS = {
+    "D": "D {path}: add-only evidence never deletes a path",
+    "guard": "guard {path}: the guard files never change after bootstrap",
+    "M": "M {path}: only ",
+    "0B": "0B {path}: a blob may never be (or become) empty",
+}
+
+
 def guard_diff(git: Git, old_commit: Optional[str], new_commit: str,
                mutable: frozenset[str] = MUTABLE_EVIDENCE_PATHS) -> list[TreeChange]:
     """The pre-push guard. Returns the change list (``[]`` = identical tree, push nothing);
@@ -1064,16 +1074,17 @@ def guard_diff(git: Git, old_commit: Optional[str], new_commit: str,
     sizes = git.blob_sizes(c.new_blob for c in changes if c.status in ("A", "M") and c.new_blob != zero)
     for c in changes:
         if c.status == "D":
-            raise GuardViolation(f"D {c.path}: add-only evidence never deletes a path")
+            raise GuardViolation(GUARD_RULE_HEADS["D"].format(path=c.path))
         if c.path in GUARD_FILES and old_commit is not None and c.status != "A":
-            raise GuardViolation(f"guard {c.path}: the guard files never change after bootstrap")
+            raise GuardViolation(GUARD_RULE_HEADS["guard"].format(path=c.path))
         if c.status in ("M", "T") and c.path not in mutable:
-            raise GuardViolation(f"M {c.path}: only {', '.join(sorted(mutable))} may be modified")
+            raise GuardViolation(GUARD_RULE_HEADS["M"].format(path=c.path)
+                                 + f"{', '.join(sorted(mutable))} may be modified")
         if c.status not in ("A", "M"):
             raise GuardViolation(f"{c.status} {c.path}: only additions (and the {', '.join(sorted(mutable))} "
                                  "modification) are allowed")
         if sizes.get(c.new_blob) == 0:
-            raise GuardViolation(f"0B {c.path}: a blob may never be (or become) empty")
+            raise GuardViolation(GUARD_RULE_HEADS["0B"].format(path=c.path))
     return changes
 
 
@@ -1258,7 +1269,11 @@ def _raises(exc: type, fn: Callable[[], object]) -> bool:
     return False
 
 
-def _guard_case(mutate: Callable[[dict], dict]) -> Callable[[], bool]:
+def _guard_case(mutate: Callable[[dict], dict], expect: str) -> Callable[[], bool]:
+    """True only when ``guard_diff`` refuses the mutation with a message STARTING ``expect`` — the
+    rule's own head (``"<rule> <path>: <rule text>"``), so a case pins its rule: with that rule
+    deleted a later rule may still refuse the same change (a D also fails "only A/M", a guard-file
+    M also fails "M outside state.json"), and the case must then report False."""
     def run() -> bool:
         with tempfile.TemporaryDirectory() as root:
             sb = _Sandbox(root)
@@ -1268,7 +1283,11 @@ def _guard_case(mutate: Callable[[dict], dict]) -> Callable[[], bool]:
             modes = {"scripts/vercel-ignore-build.sh": "100755"}
             old = sb.commit(base, None, modes=modes)
             new = sb.commit(mutate(dict(base)), old, modes=modes)
-            return _raises(GuardViolation, lambda: guard_diff(sb.git, old, new))
+            try:
+                guard_diff(sb.git, old, new)
+            except GuardViolation as exc:
+                return str(exc).startswith(expect)
+            return False
     return run
 
 
@@ -1298,18 +1317,28 @@ def _rejected_push_is_foreign() -> bool:
 
 
 def _push_error_free_of_token() -> bool:
-    token = "ghs_SELFTESTTOKEN"
+    # A token whose header base64 is path-safe (no "/", "+" or "=" padding), so BOTH secrets can sit
+    # verbatim in the remote path and git's own stderr echoes them: without redact() they would
+    # reach the message. The raw push below proves git does echo them (else the case is vacuous).
+    token = "ghs_SELFTEST_TOKEN"
+    cred, b64 = credential_env(token)
+    if not re.fullmatch(r"[A-Za-z0-9]+", b64):
+        return False
     with tempfile.TemporaryDirectory() as root:
         sb = _Sandbox(root)
         a = sb.commit({"FORMAT": b"a\n"}, None)
         git = Git(sb.work, env={"GIT_ALLOW_PROTOCOL": "https:file"}, token=token)
-        git.run("remote", "set-url", "origin", os.path.join(root, "missing.git"))
+        git.run("remote", "set-url", "origin", os.path.join(root, f"x-{token}-{b64}", "missing.git"))
+        spec = f"{a}:refs/heads/{EVIDENCE_REF}"
+        raw = git.run_full("push", "--porcelain", "--no-verify", "origin", spec, env=cred)
+        echoed = raw.stderr.decode("utf-8", "replace")
+        if raw.returncode == 0 or token not in echoed or b64 not in echoed:
+            return False
         try:
-            _push(git, EVIDENCE_REF, ["origin", f"{a}:refs/heads/{EVIDENCE_REF}"], retries=0)
+            _push(git, EVIDENCE_REF, ["origin", spec], retries=0)
         except GitError as exc:
             msg = str(exc)
-            _, b64 = credential_env(token)
-            return token not in msg and b64 not in msg
+            return token not in msg and b64 not in msg and "***" in msg
         return False
 
 
@@ -1335,10 +1364,12 @@ def selftest_cases() -> list:
         return d
 
     cases: list = [
-        ("gitstore guard refuses D", _guard_case(drop)),
-        ("gitstore guard refuses M outside state.json", _guard_case(modify)),
-        ("gitstore guard refuses a 0-byte blob", _guard_case(empty)),
-        ("gitstore guard refuses a guard-file change", _guard_case(guard_change)),
+        ("gitstore guard refuses D", _guard_case(drop, GUARD_RULE_HEADS["D"].format(path="raw/pr/1.json.gz"))),
+        ("gitstore guard refuses M outside state.json",
+         _guard_case(modify, GUARD_RULE_HEADS["M"].format(path="receipts/2026/08/10/1.a1.json.gz"))),
+        ("gitstore guard refuses a 0-byte blob", _guard_case(empty, GUARD_RULE_HEADS["0B"].format(path="state.json"))),
+        ("gitstore guard refuses a guard-file change",
+         _guard_case(guard_change, GUARD_RULE_HEADS["guard"].format(path="vercel.json"))),
         ("gitstore guard allows A + state.json M; identical tree = no push", _guard_allows_state_and_adds),
         ("gitstore rejected push raises ForeignTip", _rejected_push_is_foreign),
         ("gitstore failing push error carries neither token nor base64", _push_error_free_of_token),

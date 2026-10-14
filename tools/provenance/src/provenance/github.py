@@ -210,7 +210,7 @@ class Client:
     """GET-only GitHub client for one repository. Implements ``protocols.GitHubAPI``."""
 
     repo: str
-    token: str
+    token: str = field(repr=False)
     budget: Budget
     cache_dir: Optional[str] = None
     transport: Transport = field(default=urllib_transport)
