@@ -584,6 +584,11 @@ surfaces studies awaiting a read live in
     one gate run into one JSON record (scores, per-design gate wall time,
     preview budget headroom, what was skipped); `report` renders the
     committed log into `telemetry/REPORT.md`
+  - `provenance.sh` — the repo-script face of the provenance harvester
+    ([docs/provenance.md](docs/provenance.md)): `--selftest` runs its offline
+    negative controls (the add-only guard, tip continuity, the recover refusal,
+    the membership and trust rules); any other subcommand passes through to
+    `python3 -m provenance` with the workflow's `PYTHONPATH`
   - `release-bundle.sh` — builds a versioned, self-describing release bundle
     per design (the gated STLs + a `manifest.json` of per-part SHA-256
     checksums and the README's machine-readable print settings + a zip); the
@@ -684,6 +689,13 @@ surfaces studies awaiting a read live in
   scan (it writes only local scratch the workflow consumes); the workflow's
   one `github-script` step is the GitHub write — see its
   [README](tools/andon/README.md)
+- `tools/provenance/` — the keyless, deterministic provenance harvester
+  behind every design page's "How it was made"
+  ([docs/provenance.md](docs/provenance.md)): freezes run receipts and
+  digested PR / brief / release payloads (prose replaced by digests) onto the
+  add-only `provenance` data branch, and derives per-design who/how views and
+  one site bundle onto the squashed `provenance-site` ref; GET-only, no LLM,
+  tip-continuity checked — see its [README](tools/provenance/README.md)
 - `tools/agent-memory/` — per-agent episodic memory for the autonomy
   routines (agentic memory Slice 1a, issue #429 — see
   [docs/agentic-memory.md](docs/agentic-memory.md)): one content-hashed JSON
