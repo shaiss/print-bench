@@ -10,12 +10,13 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 import subprocess
 import sys
 
 import pytest
 
-from conftest import FIXTURES, REPO, receipt_paths
+from conftest import FIXTURES, REPO, main_history, receipt_paths
 
 PROSE_KEYS = {"body", "message"}
 
@@ -51,6 +52,58 @@ def test_receipt_paths_agree_with_their_runs():
         run = doc["run"]
         y, m, d = run["created_at"][:10].split("-")
         assert p.relative_to(FIXTURES).as_posix() == f"receipts/{y}/{m}/{d}/{run['id']}.a{run['run_attempt']}.json.gz"
+
+
+def test_main_history_carries_what_the_fake_git_needs():
+    """Every main row has sha, parents, committer date + e-mail and subject (merge method, main subject and the
+    direct-commit rule read them); main's root is the 2026-07-31 bootstrap commit."""
+    rows = main_history()["commits"]
+    assert len(rows) > 800
+    for row in rows:
+        assert set(row) == {"committed_at", "committer_email", "parents", "sha", "subject", "subject_pr"}
+        assert re.fullmatch(r"[0-9a-f]{40}", row["sha"]) and isinstance(row["subject"], str)
+    by_sha = {r["sha"]: r for r in rows}
+    merge = by_sha["521d092813b78a88bd9a74b1052cfef1f230d86b"]
+    assert merge["subject"].endswith("(#636)") and merge["subject_pr"] == 636
+    assert merge["committer_email"] == "noreply@github.com"
+    pr196 = by_sha["43030db97b7ec0a17c70c1727288efed7130e4d7"]
+    assert pr196["subject"].startswith("Merge PR #196:") and pr196["subject_pr"] is None and len(pr196["parents"]) == 2
+
+
+def test_design_files_are_main_copies():
+    """design-files/<d>/ holds only PM.md / NOTES.md / team.conf of the three golden designs."""
+    found = sorted(p.relative_to(FIXTURES / "design-files").as_posix()
+                   for p in (FIXTURES / "design-files").rglob("*") if p.is_file())
+    assert found == ["calibration-cube/NOTES.md", "calibration-cube/PM.md", "calibration-cube/team.conf",
+                     "nuggs-vent-cap/NOTES.md", "sbc-case/NOTES.md", "sbc-case/PM.md", "sbc-case/team.conf"]
+
+
+def _has_fixture_main() -> bool:
+    try:
+        return subprocess.run(["git", "-C", str(REPO), "cat-file", "-e", "521d092813b78a88bd9a74b1052cfef1f230d86b"],
+                              capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not _has_fixture_main(), reason="the checkout does not hold 521d092 (shallow clone)")
+def test_design_files_match_main_521d092():
+    """Each copy is byte-identical to the file at #636's merge (only checkable with full history)."""
+    for p in sorted((FIXTURES / "design-files").rglob("*")):
+        if p.is_file():
+            rel = p.relative_to(FIXTURES / "design-files").as_posix()
+            res = subprocess.run(["git", "-C", str(REPO), "show", f"521d092813b78a88bd9a74b1052cfef1f230d86b:designs/{rel}"],
+                                 capture_output=True, check=True)
+            assert res.stdout == p.read_bytes(), rel
+
+
+def test_acceptance_fixture_shape():
+    """tests/fixtures/acceptance.json: the re-baselined NVC-12 tuple with its derivation and the golden it replaces."""
+    spec = json.loads((FIXTURES / "acceptance.json").read_text(encoding="utf-8"))
+    nvc12 = spec["NVC-12"]
+    assert set(nvc12) == {"derivation", "expected", "golden", "keys", "pr", "same_source_as_golden_third"}
+    assert len(nvc12["keys"]) == len(nvc12["expected"]) == len(nvc12["golden"]) == 4
+    assert all(isinstance(line, str) and line for line in nvc12["derivation"])
 
 
 @pytest.mark.skipif(not (os.environ.get("PROVENANCE_RAW_DIR") and os.environ.get("PROVENANCE_SNAPSHOT_DIR")),
