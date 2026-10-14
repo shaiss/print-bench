@@ -25,7 +25,7 @@ Rules (docs/provenance.md §API budget):
   ``Budget.floor`` (``rate_floor``, 500): a scheduled run raises
   :class:`BudgetExhausted`; a self-paced dispatch (``Budget.pace``) sleeps
   until ``X-RateLimit-Reset`` + 5 s, unless that would pass
-  ``Budget.deadline_epoch`` (the CAPTURE deadline: job start +
+  ``Budget.deadline_epoch`` (the CAPTURE deadline: plan start +
   ``dispatch_max_minutes`` − ``derive_reserve_minutes``), in which case
   it raises :class:`BudgetExhausted`. The floor is checked BEFORE the next
   request (the response that crossed it is still returned) and reads the REST
@@ -43,9 +43,13 @@ Rules (docs/provenance.md §API budget):
   a runs list filtered by ``created``/``branch``/``event``/``status``/
   ``actor``/``head_sha``/``check_suite_id``. The client exposes
   ``total_count`` per page (:meth:`Client.iter_pages`) so ``receipts.list_runs``
-  can window by day and halve a capped window; nothing else in the package
-  sends those filters (the gate's runs list is unfiltered, the artifact scan
-  uses the repo-wide ``/actions/artifacts``).
+  can window by day and halve a capped window, and so ``freeze._capture_pr``'s
+  one other filtered list — ``ci.yml`` runs by ``branch=<head_ref>`` — can
+  compare the rows it got with ``total_count`` and mark the record
+  ``ci-runs-truncated`` when it was capped or short (a fork PR from ``main``,
+  a long-lived reused branch). Nothing else sends those filters (the gate's
+  runs list is unfiltered, the artifact scan uses the repo-wide
+  ``/actions/artifacts``).
 * **Secrets in errors** — :class:`APIError` and :class:`Truncated` carry
   status, method and path only; the ``Authorization`` value never reaches an
   exception, a log line or the ETag cache (cache files hold ``{etag, body}``).

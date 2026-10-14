@@ -123,6 +123,32 @@ def test_after_merge_flag():
     pb = episodes.assign(before, rs, pr=9, merged_at=merged)
     assert (pb.episode, pb.head_sha) == ("R:9:aaaaaaaa", None)          # before every push: the first round
     assert episodes.assign(before, [], pr=9, merged_at=None).episode == "M:9"
+    # Round 2 (low): an M:-only kind is never "posted after merge" — a production deploy follows the
+    # merge by definition (NVC's deployment:7003033324 read after_merge=true); a review after it does.
+    deploy = {"id": "deployment:1", "kind": "deploy.production", "ts": "2026-01-03T00:00:15Z", "sha": SHA["c"]}
+    pd = episodes.assign(deploy, rs, pr=9, merged_at=merged)
+    assert (pd.episode, pd.after_merge) == ("M:9", False)
+    closed = {"id": "pr:9:closed", "kind": "pr.closed", "ts": "2026-01-03T00:00:01Z", "sha": None}
+    assert episodes.assign(closed, rs, pr=9, merged_at=merged).after_merge is False
+
+
+def test_reviewer_job_and_status_follow_their_head_sha():
+    """Round 2 (medium): job.reviewer / status.reviewer_signoff land in the round whose heads hold their
+    sha (head_sha that round's head, never stale), even when their ts falls in a later round; a folded
+    regen head counts; a sha in no round's heads falls back to the ts rule. Control: a review.signoff
+    with the same ts and sha still follows the ts rule (and is flagged stale)."""
+    rs = [_round("R:9:aaaaaaaa", SHA["a"], "2026-01-01T00:00:00Z", heads=(SHA["a"], SHA["c"])),
+          _round("R:9:bbbbbbbb", SHA["b"], "2026-01-02T00:00:00Z")]
+    late_ts = "2026-01-02T06:00:00Z"                                    # inside round b's span
+    for kind in sorted(episodes.HEAD_SHA_KINDS):
+        for sha in (SHA["a"], SHA["c"]):                                 # the author head, a folded regen head
+            p = episodes.assign({"id": "x", "kind": kind, "ts": late_ts, "sha": sha}, rs, pr=9, merged_at=None)
+            assert (p.episode, p.head_sha, p.stale_sha) == ("R:9:aaaaaaaa", SHA["a"], False), (kind, sha)
+        gone = episodes.assign({"id": "x", "kind": kind, "ts": late_ts, "sha": SHA["d"]}, rs, pr=9, merged_at=None)
+        assert (gone.episode, gone.head_sha) == ("R:9:bbbbbbbb", SHA["b"])   # fallback: the ts rule
+    signoff = episodes.assign({"id": "x", "kind": "review.signoff", "ts": late_ts, "sha": SHA["a"]}, rs,
+                              pr=9, merged_at=None)
+    assert (signoff.episode, signoff.stale_sha) == ("R:9:bbbbbbbb", True)
 
 
 def test_assign_episode_forms():

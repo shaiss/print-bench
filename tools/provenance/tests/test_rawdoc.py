@@ -76,3 +76,18 @@ def test_commit_projection_keeps_trailers_not_message():
                                                                "verification": {"verified": True, "reason": "valid", "payload": "prose", "signature": "sig"}}}])[0]
     assert "prose" not in repr(c) and "sig" not in repr(c)
     assert c["commit"]["message"]["trailers"][0]["value"].startswith("Claude Opus 5.5")
+
+
+def test_status_description_survives_only_from_the_actions_bot():
+    """Integration review round 2 (low): a reviewer-signoff status description is stored verbatim only
+    when the Actions bot created it (REST or GraphQL login spelling) — scripts/reviewer-signoff.sh's fixed
+    sentences. Any other creator's (a statuses:write PAT's free text) is null; any other context's too."""
+    base = {"context": "reviewer-signoff", "created_at": "2026-10-05T18:15:15Z", "id": 1, "state": "success",
+            "description": "Jane + Drik signed off on abc12345"}
+    for bot in ({"login": "github-actions[bot]"}, {"login": "github-actions"}, {"login": " GitHub-Actions[bot] "}):
+        assert rawdoc.project_status(dict(base, creator=bot))["description"] == base["description"], bot
+    for other in ({"login": "shaiss"}, {"login": "github-actions-evil[bot]"}, None, {}):
+        out = rawdoc.project_status(dict(base, creator=other))
+        assert out["description"] is None, other
+    assert rawdoc.project_status(dict(base, context="ci/vercel",
+                                      creator={"login": "github-actions[bot]"}))["description"] is None

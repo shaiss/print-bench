@@ -49,12 +49,12 @@ default-branch checkout when `state.json` has not recorded it.
 ## Module map
 
 See the docstring of `src/provenance/__init__.py` for the module → role →
-owner table. `canonical`, `digest`, `steps`, `rawdoc` and `protocols` are
-implemented in full (every fixture's bytes depend on them), as is the pure
-tip-continuity rule `gitstore.continuity_verdict` with its shared case table
-`tests/fixtures/continuity_cases.json` (Reeve's detector passes the same
-table); the rest are interface skeletons with complete docstrings until the
-P0/P1 builders land them.
+owner table. Every module is implemented (`INTEGRATED = True` there): each
+module docstring is that module's spec, and docs/provenance.md is the design
+of record. The pure tip-continuity rule `gitstore.continuity_verdict` — marks
+ordered by upload time, with the evidence ref's checkpoint-ancestry
+cross-check — shares its case table `tests/fixtures/continuity_cases.json`
+with Reeve's `provenance-foreign-tip` port, which passes every row.
 
 ## Tests
 

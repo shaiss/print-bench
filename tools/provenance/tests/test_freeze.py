@@ -598,6 +598,23 @@ def test_truncated_listings_are_recorded():
     assert {"commits-truncated", "files-truncated"} <= set(doc["incomplete"])
 
 
+def test_capped_ci_runs_branch_listing_is_recorded():
+    """Round 2 (low): the ci.yml runs list filtered by branch is capped at 1,000 by GitHub. A listing
+    whose total_count is >= 1,000, or disagrees with the rows listed, marks the record
+    ci-runs-truncated — the rows that did arrive are still kept (push evidence); an exact listing does
+    not (control). The document still satisfies the contract (the tag is in its closed vocabulary)."""
+    cap = {"run_id": 0, "harvester": "t", "digest": "body-digest@1"}
+    runs = [rest_run(101, C1, at(-30, T0)), rest_run(102, C2, at(-10, T0))]
+    for total, flagged in ((2, False), (1500, True), (3, True)):
+        w = pr_world()
+        w.set("/actions/workflows/ci.yml/runs", {"total_count": total, "workflow_runs": runs})
+        doc = freeze.capture_pr(w.fake(), N, revision=1, captured=cap,
+                                snapshot_runs=lambda: [], snapshot_statuses=lambda sha: None)
+        assert ("ci-runs-truncated" in doc["incomplete"]) is flagged, total
+        assert [r["id"] for r in doc["ci_runs"]] == [101, 102], total
+        assert _ORIGINAL_VALIDATE("raw-pr@1", doc) == [], total
+
+
 def test_no_design_files_is_skipped():
     """A closed PR touching no designs/ path is recorded in state.skipped.pr with its closed_at and never captured."""
     gh = pr_world(files=("docs/provenance.md", "scripts/x.sh")).fake()

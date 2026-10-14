@@ -116,10 +116,11 @@
       "tips": {"provenance": "4646464646464646464646464646464646464646",
                "provenance-site": "4444444444444444444444444444444444444444"},
       "marks": [
-        {"seq": 12, "kind": "tip", "ref": "provenance-site", "sha": "4444444444444444444444444444444444444444", "run_id": 1012},
-        {"seq": 11, "kind": "tip", "ref": "provenance", "sha": "4343434343434343434343434343434343434343", "run_id": 1012}
+        {"seq": 12, "created": 1786858200, "kind": "tip", "ref": "provenance-site", "sha": "4444444444444444444444444444444444444444", "run_id": 1012},
+        {"seq": 11, "created": 1786858200, "kind": "tip", "ref": "provenance", "sha": "4343434343434343434343434343434343434343", "run_id": 1012}
       ],
       "parents": {},
+      "ancestry": {},
       "scan": {"pages": 1, "runs_verified": 1, "marks_rejected": 0},
       "state": {
         "pending": {"pr": {"902": {"closed_at": "2026-08-14T12:00:00Z", "due_at": "2026-08-14T18:00:00Z", "defer_until": "2026-08-15T12:00:00Z", "reasons": ["in-flight-run"]}}, "brief": {}},

@@ -29,6 +29,7 @@ HARVEST_STEPS = [
     "Checkpoint the derived tip",
     "Verdict",
     "Verdict (derive)",
+    "Verdict (receipts)",
     "Summary",
 ]
 
@@ -104,7 +105,7 @@ def run_blocks(text: str) -> list[str]:
 def test_reader_sees_the_whole_file(text):
     assert job_names(text) == ["gate", "harvest"]
     assert [n for n, _ in steps(job_block(text, "harvest"))] == HARVEST_STEPS
-    assert len(run_blocks(text)) == 6
+    assert len(run_blocks(text)) == 7
 
 
 # --- the pins ----------------------------------------------------------------
@@ -262,6 +263,12 @@ def test_step_order_intents_publish_checkpoints_verdict(text):
     assert re.search(r"^        if: (.+)$", derive, re.MULTILINE).group(1) == (
         "${{ !cancelled() && steps.plan.outputs.derive_error == 'true' }}")
     assert re.search(r"^\s+exit 1$", derive, re.MULTILINE) and "::error::" in derive
+    # An isolated receipts failure (receipts.py "Failure isolation") publishes everything else, then
+    # fails the job here — after the checkpoints (cli's receipts_error output).
+    rec = s["Verdict (receipts)"]
+    assert re.search(r"^        if: (.+)$", rec, re.MULTILINE).group(1) == (
+        "${{ !cancelled() && steps.plan.outputs.receipts_error == 'true' }}")
+    assert re.search(r"^\s+exit 1$", rec, re.MULTILINE) and "::error::" in rec
     assert "if: always()" in s["Summary"] and "GITHUB_STEP_SUMMARY" in s["Summary"]
     assert ".provenance/summary.md" in s["Summary"]
 

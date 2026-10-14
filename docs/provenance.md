@@ -230,10 +230,12 @@ evidence: a new extractor version simply produces a new derived tree.
 **Fetching, once.** At the start of the plan step `Git.fetch_all()` fetches,
 token-less (the repository is public; the checkout uses
 `persist-credentials: false`), both data refs and
-`+refs/pull/*/head:refs/remotes/pull/*/head`. Nothing fetches after that:
-derive reads only what is local, so its output is a pure function of
-(evidence, main, the fetched PR-ref set) rather than flapping with a per-sha
-fetch. A commit still missing is permanently missing — 67 of the 1,289
+`+refs/pull/*/head:refs/remotes/pull/*/head`. Nothing else fetches after
+that — the one exception is the newest evidence checkpoint `C`, fetched by
+sha when the evidence tip failed continuity and does not reach it (§Tip
+continuity, Acting; and `recover`) — so derive reads only what is local and
+its output is a pure function of (evidence, main, the fetched PR-ref set)
+rather than flapping with a per-sha fetch. A commit still missing is permanently missing — 67 of the 1,289
 distinct auto-review run heads in the #843 snapshot are in no PR's commit
 list (force-pushed away) — and is a deterministic basis `none` with
 `incomplete: codebasis-unavailable:<sha8>`. If the bulk fetch itself fails,
@@ -311,16 +313,46 @@ days, content `intent@1` / `checkpoint@1`):
   **including a no-op one**, naming the tip it has just verified (pushed by
   itself, or unchanged and accepted).
 
-**Scanning** (`gitstore.scan_marks`). One newest-first read of the
-repository's artifact list (`GET /actions/artifacts`; 6,519 artifacts on
-2026-10-14, about 70 a day, so one page of 100 covers about 34 hours and
-normally reaches the newest checkpoint), stopping at the first verified
-`tip-` mark for each ref or at `continuity_horizon_days` (90). A mark counts
-only if its run is verified: the artifact's `workflow_run` is on `main` with
-a `head_sha` on main's first-parent history, and `GET /actions/runs/{id}`
-shows `path == .github/workflows/provenance.yml` and `event` ∈ {`schedule`,
-`workflow_dispatch`}. Ordering is by artifact id (upload order), so a late
-re-run attempt of an old run orders by when it actually uploaded.
+**Ordering: upload time, not artifact id.** The artifact list is sorted by
+artifact id, but ids are **not** monotonic in upload time: of 817 small
+artifacts measured GET-only (2026-08-31 → 2026-10-14), 258 were uploaded ≥ 5
+minutes before some lower-id artifact, 45 ≥ 30 minutes and 3 ≥ 60 minutes —
+worst 3,843 s (run 37221929629's `telemetry-record`, a LOWER id than run
+37217895189's `stls`, uploaded 64 minutes later). Ordering by id let a
+genuine newer tip read **foreign** and a forced rollback to the previous,
+higher-id checkpoint read **ok** — without deleting anything, by anyone
+holding `contents: write`. Marks therefore order by `(created, id)`
+(`gitstore.mark_order`): the artifact's `created_at` (its upload time, 1 s
+resolution) first, the id only to break a same-second tie. Within a run the
+intent is uploaded before the push and the checkpoint after it, and the
+concurrency group starts the next run after this one ends, so strict upload
+order holds between every pair the rule compares; a late re-run attempt of an
+old run orders by when it actually uploaded.
+
+**Scanning** (`gitstore.scan_marks`). The repository's artifact list (`GET
+/actions/artifacts`; 6,519 artifacts on 2026-10-14, about 70 a day, so one
+page of 100 covers about 34 hours) is read in its own (id) order, and the scan
+does **not** stop at the first verified `tip-` mark per ref: it reads on until
+every ref has a verified tip **and** the oldest artifact seen is more than 6
+hours (`MARK_ORDER_SLACK_SECONDS`, well above the measured 64-minute worst
+inversion) older than the oldest of those refs' newest tips — so no unread,
+lower-id artifact can be newer — or until `continuity_horizon_days` (90). In
+steady state that is still one page. A mark counts only if its run is
+verified: the artifact's `workflow_run` is on `main` with a `head_sha` on
+main's first-parent history, and `GET /actions/runs/{id}` shows `path ==
+.github/workflows/provenance.yml` and `event` ∈ {`schedule`,
+`workflow_dispatch`}.
+
+**The clock-free cross-check** (`gitstore.checkpoint_conflicts`). The
+evidence ref is fast-forward-only, so every genuine checkpoint is an
+ancestor of every later one. On an otherwise-**ok** evidence verdict the
+newest checkpoint `C` must therefore equal or descend from every other
+verified evidence checkpoint the scan read (`git merge-base --is-ancestor`;
+Reeve: `GET /compare/{other}...{C}` answering `identical` or `ahead`). One it
+does not descend from is a **mark-order conflict**: the verdict is
+**foreign**, `conflicts` names it, and `C` is neither built on, derived from
+nor a `recover` target until a human inspects the artifact list. The
+derived ref is parentless and relies on upload order alone.
 
 **Deciding** (`gitstore.continuity_verdict`, pure, implemented with the
 scaffold; Reeve's `provenance-foreign-tip` ports it and both suites run the
@@ -333,6 +365,7 @@ shared table `tools/provenance/tests/fixtures/continuity_cases.json`). With
 | evidence: its first-parent chain reaches `C` through commits that are each an intent declared **after** `C` (a run pushed and died before checkpointing) | **ok** |
 | derived: an intent declared after `C` | **ok** |
 | present, anything else — a forged commit, or a **rollback** to an older checkpoint or intent | **foreign** |
+| evidence: would be **ok**, but `C` does not descend from another verified checkpoint (a mark-order conflict) | **foreign** (`conflicts`) |
 | absent, `C` exists | **deleted** |
 | present, no checkpoint in the horizon | **unanchored** |
 | absent, no checkpoint in the horizon | **bootstrap** |
@@ -341,8 +374,10 @@ Counting checkpoints rather than runs is what lets a quiet day — or a
 disarmed month, whose scheduled runs are skipped outright — leave the live
 tip anchored: the old "last 20 runs" window let it age out after about 20
 hours and then treated an absent ref as a bootstrap. Only the newest
-checkpoint anchors, so the rule is monotonic: a ref forced back to an older
-genuine sha is refused.
+checkpoint **by upload time** anchors, so the rule is monotonic: a ref forced
+back to an older genuine sha is refused, whatever the two checkpoints'
+artifact ids — and if the clock itself were ever wrong, the evidence ref's
+ancestry cross-check refuses the result instead of accepting it.
 
 **Acting** (cli step 2):
 
@@ -350,18 +385,25 @@ genuine sha is refused.
 - evidence **bootstrap** → the root is created only by a dispatch carrying
   `bootstrap=true`; otherwise `::error::`, exit 3. Never automatic;
 - evidence **foreign / deleted / unanchored** → no evidence is written and
-  the receipts and freeze passes are skipped; derive runs from `C` (fetched
-  with the foreign tip when it is an ancestor) and `provenance-site` is
-  pushed; the job then fails (exit 3) after the checkpoints are uploaded. A
-  forged derived tip is therefore replaced at the next run even while the
-  evidence ref is forged. If `C` cannot be obtained, nothing is pushed;
+  the receipts and freeze passes are skipped; derive runs from `C` and
+  `provenance-site` is pushed; the job then fails (exit 3) after the
+  checkpoints are uploaded. `C` is local when the foreign tip descends from
+  it; when it does not (the ref deleted, or forced onto history that does not
+  contain `C`) the plan **fetches `C` by sha** — every run starts from a fresh
+  checkout that holds only what the refs reach — and then re-runs the
+  checkpoint cross-check with `C`'s history local (`cli._checkpoint_usable`).
+  A forged derived tip is therefore replaced at the next run even while the
+  evidence ref is forged or gone. If GitHub cannot serve `C`, or `C` has a
+  mark-order conflict, derive is skipped and nothing is pushed to the derived
+  ref (`::error::`);
 - derived not **ok** → recomputed and overwritten (`::error::` for foreign or
   deleted, `::notice::` for bootstrap or unanchored); derived **ok** → pushed
   only when its actual blobs differ from the new tree.
 
 **Recovery** (`recover confirm_sha=<sha40>`, dispatch only): refused unless
-the evidence verdict is **foreign** or **deleted** and `confirm_sha` equals
-`C`. It force-with-leases `C` over the current tip (or recreates the ref) —
+the evidence verdict is **foreign** or **deleted**, `confirm_sha` equals
+`C`, and `C` (fetched by sha when not local) has no mark-order conflict. It
+force-with-leases `C` over the current tip (or recreates the ref) —
 the only non-fast-forward write to the evidence ref. Because it can only
 restore the state the harvester itself last verified, a write-access
 dispatcher (an agent included) gains nothing by running it; an Environment
@@ -374,11 +416,13 @@ any clone that holds it restores continuity by pushing exactly `C` — tip ==
 
 - a forged `provenance-site` tip is live until the next harvest run — at most
   about an hour once armed, but until the next dispatch while disarmed
-  (before P2) — whatever the evidence ref's state; the exception is a forger
-  who also makes `C` unfetchable, which leaves the forged derived tip until a
-  human acts. Before P3 nothing reads the derived ref; after it, the content
-  is escaped structured fields with constructed permalinks, so the harm is
-  false attribution, not script injection;
+  (before P2) — whatever the evidence ref's state, deleted or forced off
+  `C`'s history included (the plan fetches `C` by sha). It outlives the next
+  run only when GitHub genuinely cannot serve `C` by sha any more (its
+  objects collected after it became unreachable), or `C` has a mark-order
+  conflict — then until a human acts. Before P3 nothing reads the derived
+  ref; after it, the content is escaped structured fields with constructed
+  permalinks, so the harm is false attribution, not script injection;
 - a rollback to `C` itself is accepted: it undoes only the pushes of runs that
   died before checkpointing, which the next run redoes from the cursors;
 - checkpoints expire after 90 days: a harvester that has published nothing
@@ -468,8 +512,11 @@ value failing its pattern is dropped, never truncated; ≤ 12), `digest`.
 
 A run's `display_title` (the PR title or commit subject GitHub shows), PR and issue **titles** (public metadata the owner set; needed by the
 stacked-base membership rule and never rendered except main's squash subject,
-owner decision 5), branch names, status descriptions **of the
-`reviewer-signoff` context only** (our own fixed sentences), workflow/job/step
+owner decision 5), branch names, status descriptions **of Actions-bot-created
+`reviewer-signoff` statuses only** (our own fixed sentences, from
+`scripts/reviewer-signoff.sh`; any other creator's description is stored
+`null`, because whoever holds `statuses: write` could otherwise write 140
+characters of free text into add-only evidence), workflow/job/step
 names and committer names/emails as in git history. Everything else that is
 free text is a digest.
 
@@ -494,7 +541,9 @@ content is captured by a richer endpoint).
 
 `incomplete` (closed patterns): `settle-deferred`,
 `deployment-not-terminal`, `graphql-unavailable`, `threads-unavailable`,
-`brief-open`, `commits-truncated` (> 250), `files-truncated` (> 3000),
+`brief-open`, `commits-truncated` (> 250), `ci-runs-truncated` (the
+filtered `ci.yml` branch listing capped at 1,000 or short of its
+`total_count`), `files-truncated` (> 3000),
 `force-pushed-heads`, `no-ci-runs`, `statuses-unavailable:<sha8>`,
 `receipts-missing:<run_id>`, `codebasis-unavailable:<sha8>`.
 
@@ -516,12 +565,25 @@ GitHub returns **at most 1,000 results** for a runs list filtered by
 `created`, `branch`, `event` or `status`, and auto-review alone has 1,434
 completed non-skipped runs in the snapshot, so every window must return
 exactly its `total_count` rows, and a window with `total_count ≥ 1000` is
-halved recursively (to one minute, then the pass fails rather than
-truncating). No other filter is sent. Every run with `status == completed`
-and `conclusion != skipped` whose receipt path is absent gets one
+halved recursively (to one minute, then that workflow's listing fails
+rather than truncating). No other filter is sent. Every run with `status ==
+completed` and `conclusion != skipped` whose receipt path is absent gets one
 `GET /actions/runs/<id>/jobs?filter=all` (paged; every attempt). Runs still
 queued or in progress hold the cursor back for the next pass. A fresh
 cursor is the snapshot's end (set by the ingest), else `backfill_since`.
+
+**Failure isolation.** A failure costs only its own run or workflow, never
+the pass: a jobs GET that still fails after the client's retries (a
+persistent 5xx, a 403 — anything but a 404/410 "gone" or a budget stop) is
+recorded and treated like an in-flight run (the cursor holds at it, so the
+next pass retries it) while the pass goes on to the next run; a window whose
+listing fails (`total_count` disagreeing twice, a one-minute window still
+capped, an API error) is recorded, that workflow's cursor is set to the
+failing window's start, and the pass goes on to the next workflow. The plan
+names both in the summary and `plan.json` (`counts.receipts.failed` /
+`errors`), outputs `receipts_error=true` and still exits 0, so the ingest,
+every other receipt and the freezes are published and checkpointed; the
+workflow's `Verdict (receipts)` step then fails the job.
 
 **The agent-step grammar** (`steps.py`, version 1) — a closed list of
 anchored patterns, one per naming era, each with a fixture:
@@ -870,12 +932,22 @@ folded regen heads, `commits` = all their commits, `pushed_at`, `start` =
 
 **Assignment.** `brief.*` → `E0:brief:<n>` (a `brief.closed` closed by a PR's
 merge → `M:<pr>`); `pr.merged`, `pr.closed`, `deploy.production` → `M:<pr>`;
-`commit.*` → the round holding the commit; every other PR event → the round
-whose `pushed_at` is the latest ≤ `ts` (the first round if `ts` precedes every
-push); direct-to-main commits → `C:<sha8>`; committed rows → `D:<date>`.
-`head_sha` = the live pushed head at `ts`; `stale_sha` = the event's marker
-sha is not one of its round's `heads`; `after_merge` = `ts > merged_at`
-(the event stays in its live round).
+`commit.*` → the round holding the commit; `job.reviewer` and
+`status.reviewer_signoff` (their `sha` is the head the reviewer job ran on /
+the status was posted to) → the round whose `heads` hold that sha, `head_sha`
+that round's head — a reviewer job or `reviewer-signoff` status about head X
+that starts or posts after head Y was pushed judged X's round, which is where
+the audit golden puts every one of them (the ts rule misplaced 3 + 3
+nuggs-vent-cap and 8 + 9 sbc-case jobs + statuses a round late, unflagged;
+integration review round 2), falling back to the ts rule when the sha is in
+no round's `heads`; every other PR event → the round whose `pushed_at` is the
+latest ≤ `ts` (the first round if `ts` precedes every push); direct-to-main
+commits → `C:<sha8>`; committed rows → `D:<date>`. `head_sha` = the live
+pushed head at `ts` (for the two head-sha kinds, the head of the round they
+were placed in); `stale_sha` = the event's marker sha is not one of its
+round's `heads`; `after_merge` = `ts > merged_at` for an event kept in a live
+round (it stays there) — never for `pr.merged` / `pr.closed` /
+`deploy.production`, which follow the merge by definition.
 
 **verifies.** A `review.signoff`'s `edges.verifies` = the
 `commit.design|fix|human` shas at or before its marker sha in commit order and
@@ -1102,7 +1174,7 @@ newline, no floats anywhere (refused), no NaN.
 
 Event sort key: `(ts, precision rank [day < second], source rank, numeric
 github id, sub-index, id)` — source rank is the id prefix order `issue, pr,
-timeline, commit, issuecomment, status, run, job, deployment, release, row`;
+timeline, commit, issuecomment, review, status, run, job, deployment, release, row`;
 the github id is the first all-digit `:`-segment after the prefix (else 0);
 the sub-index is the last all-digit segment when it is not the id. The site's
 adapter (P3a) sorts with the same rule (contract `sort_key`).
@@ -1116,12 +1188,12 @@ sibling workflow.
 |---|---|
 | scheduled cap | `scheduled_max_requests` (400) non-304 responses; the request that would exceed it is not sent |
 | floor | when `X-RateLimit-Remaining` < `rate_floor` (500): a scheduled run stops cleanly; a dispatch sleeps until `X-RateLimit-Reset` + 5 s |
-| capture deadline | a dispatch stops capturing at job start + `dispatch_max_minutes` (330) − `derive_reserve_minutes` (1: twice the derive time the integration dry run measured — 13–17 s over the full #843 ingest plus the fixture PRs — rounded up to a minute; a full ~200-PR backfill projects to ~3–4 minutes, inside the 20 minutes between 330 and `timeout-minutes: 350`); derive and publish run after it, inside `timeout-minutes: 350`; cursors resume on the next dispatch |
+| capture deadline | a dispatch stops capturing at the plan step's start (its one clock read, after the full-history checkout) + `dispatch_max_minutes` (330) − `derive_reserve_minutes` (8: sized to the case the reserve protects, a dispatch that reaches the deadline — a full backfill — whose derive projects to ~3–4 minutes from the integration dry run's 13–17 s over the full #843 ingest plus the fixture PRs at ~0.9 s per PR record; twice that, rounded up); derive and publish run after it, inside `timeout-minutes: 350`, the 20 minutes between 330 and 350 left for the checkout and a large publish; cursors resume on the next dispatch |
 | ETag | `If-None-Match` on every GET from `<out-dir>/etag-cache/`; a 304 is free and not counted |
 | retries | 5xx, 403/429 with `Retry-After` or a secondary-limit message, socket timeouts: 3 retries (2/4/8 s); 401/404/410/422 not retried |
 | pagination | `per_page=100`; `rel="next"` followed only on `api.github.com`; more than `max_pages` raises rather than truncating |
 | filtered-list cap | a runs list filtered by `created`/`branch`/`event`/`status` returns at most 1,000 results: receipts window by UTC day, assert `total_count`, halve at ≥ 1,000 (§Receipts); the gate's runs list is unfiltered; the continuity scan reads the repo-wide artifact list |
-| continuity scan | about one artifact page per 1.4 days since the newest checkpoint (one page in steady state) + one run GET per candidate run |
+| continuity scan | about one artifact page per 1.4 days since the newest checkpoint, read on until an artifact 6 h older than the newest tips (one page in steady state) + one run GET per candidate run + (evidence, ok verdict) the ancestry of each other distinct checkpoint (local git; Reeve one `compare` GET each) |
 | nothing new | a run with nothing new writes nothing (tested) |
 
 Measured costs: 4,089 runs of the nine watched workflows since 2026-07-31
@@ -1146,8 +1218,8 @@ duplicate / colonless / malformed lines fail with `path:lineno`; integers only).
 | `deploy_wait_hours` | 2 | wait for a terminal Production deployment |
 | `scheduled_max_requests` | 400 | scheduled request cap |
 | `rate_floor` | 500 | rate-limit floor |
-| `dispatch_max_minutes` | 330 | a dispatch's capture budget from job start (with the reserve below) |
-| `derive_reserve_minutes` | 1 | kept after capture for derive + publish; twice the integration dry run's measured derive (13–17 s), rounded up; the P2 backfill re-measures |
+| `dispatch_max_minutes` | 330 | a dispatch's capture budget from the plan step's start (with the reserve below) |
+| `derive_reserve_minutes` | 8 | kept after capture for derive + publish; twice the projected derive of a full ~200-PR backfill (~3–4 min from the dry run's 13–17 s plus ~0.9 s per PR record), rounded up; the P2 backfill re-measures |
 | `backfill_since` | 2026-07-31 | earliest `since`; floor of a fresh PR/brief cursor |
 | `ambiguity_window_minutes` | 15 | code-basis ambiguity window |
 | `edit_grace_seconds` | 60 | an edit at least this long after creation → `claimed` |
@@ -1232,7 +1304,10 @@ pushes only) plus read on `actions`, `pull-requests`, `issues`, `statuses`,
      foreign evidence tip — after the derived overwrite and the checkpoints;
      a second verdict step fails it (exit 1) when the plan reports
      `derive_error` (a derive layer raised: the evidence was published and
-     checkpointed, `provenance-site` was not rebuilt);
+     checkpointed, `provenance-site` was not rebuilt), and a third (exit 1)
+     when it reports `receipts_error` (a run's jobs GET or a workflow's
+     listing failed after retries — isolated, §Receipts; everything else was
+     published and checkpointed);
   7. **summary** (`if: always()`) — `.provenance/summary.md` →
      `$GITHUB_STEP_SUMMARY`: mode, requests used / 304s, receipts full/stub,
      units frozen / pending / deferred / re-captured, `unknown.step` and
@@ -1264,9 +1339,9 @@ three). Runtime: the runner's system Python, stdlib only, no pip.
 
 | Where | What | Builder |
 |---|---|---|
-| `tools/reeve` | `ROUTINE_WORKFLOWS += provenance.yml` (routine-dead). Detector `provenance-foreign-tip`: either ref's verdict under the continuity rule — a port of `gitstore.continuity_verdict` over the same artifact scan (`GET /actions/artifacts`, run verification, `git/ref/heads/<ref>`, `GET /git/commits/<sha>` for first parents), passing every row of the shared `tools/provenance/tests/fixtures/continuity_cases.json` so the two implementations cannot drift (a mark's run head is checked by reachability, §Tip continuity residuals); `foreign`, `deleted` and `unanchored` are findings. Detector `provenance-lag`: (a) the oldest pending unit past its anchor `+ provenance_lag_hours` (`GET contents/state.json?ref=provenance`) — the anchor is `due_at`, or `defer_until` for a unit deferred by design (every reason `in-flight-run` or `deployment-pending`), and (b) the **stall check** — one page of `/pulls?state=closed&sort=updated&direction=desc`: any PR closed more than `settle_hours + max_defer_hours + provenance_lag_hours` ago, last updated more than `provenance_lag_hours` ago and not before `backfill_since`, that is in none of frozen (the `raw/pr` tree listing), `pending` or `skipped` means the harvester has stopped seeing PRs (dropped schedule slots, a failing gate, a dead job) even though nothing is pending. Both report "not evaluated" only while `PROVENANCE_ENABLED` is unset (reeve.yml passes the variable's raw value, the andon pattern), offline, or when the armed gather itself failed (named in the reason; the rest of the report still renders); once armed, an absent ref is a finding. Every read lives in ONE module, `tools/reeve/src/reeve/provenance.py` (the read lens allow-lists it). Golden report pairs updated, each detector with a positive and a negative control; `provenance_lag_hours` key in its conf parser | H6 |
+| `tools/reeve` | `ROUTINE_WORKFLOWS += provenance.yml` (routine-dead). Detector `provenance-foreign-tip`: either ref's verdict under the continuity rule — a port of `gitstore.continuity_verdict` (upload-time mark order, the 6 h read-on, the checkpoint cross-check) over the same artifact scan (`GET /actions/artifacts`, run verification, `git/ref/heads/<ref>`, `GET /git/commits/<sha>` for first parents, `GET /compare/{other}...{C}` for the evidence checkpoint's ancestry), passing every row of the shared `tools/provenance/tests/fixtures/continuity_cases.json` so the two implementations cannot drift (a mark's run head is checked by reachability, §Tip continuity residuals); `foreign`, `deleted` and `unanchored` are findings. Detector `provenance-lag`: (a) the oldest pending unit past its anchor `+ provenance_lag_hours` (`GET contents/state.json?ref=provenance`) — the anchor is `due_at`, or `defer_until` for a unit deferred by design (every reason `in-flight-run` or `deployment-pending`), and (b) the **stall check** — one page of `/pulls?state=closed&sort=updated&direction=desc`: any PR closed more than `settle_hours + max_defer_hours + provenance_lag_hours` ago, last updated more than `provenance_lag_hours` ago and not before `backfill_since`, that is in none of frozen (the `raw/pr` tree listing), `pending` or `skipped` means the harvester has stopped seeing PRs (dropped schedule slots, a failing gate, a dead job) even though nothing is pending. Both report "not evaluated" only while `PROVENANCE_ENABLED` is unset (reeve.yml passes the variable's raw value, the andon pattern), offline, or when the armed gather itself failed (named in the reason; the rest of the report still renders); once armed, an absent ref is a finding. Every read lives in ONE module, `tools/reeve/src/reeve/provenance.py` (the read lens allow-lists it). Golden report pairs updated, each detector with a positive and a negative control; `provenance_lag_hours` key in its conf parser | H6 |
 | `scripts/cadence-sync-check.sh` | `ROUTINES += provenance` (conf raw cron `29 * * * *` ↔ the workflow's single-quoted literal) | H6 |
-| `scripts/ci-classify.sh` | new output `provenance_tests` (true for `tools/provenance/*`, `.github/provenance.conf`, `.github/workflows/provenance.yml`, `.github/data-branch-guard/*`, `site/lib/provenance-contract*`, `site/test/fixtures/provenance-bundle.json`, `scripts/provenance.sh`, the drift-pinned `scripts/reviewer-posted.sh` / `coach-lock-check.sh` / `reviewer-signoff.sh` / `.claude/reviewer-post/reviewer_mcp.py`, `tools/model-registry/*`, `audits/provenance-2026-10/fixtures/*`, `audits/provenance-2026-10/rescue/*` (the pinned snapshot), `site/lib/timeline.mjs`, `ci.yml`), and a second output `provenance_read_lens` (any change under `scripts/`, `tools/`, `.github/`, `.claude/` or `site/` — the read lens's scan roots — on which `provenance-tests` runs only `test_read_lens.py`, so a new data-ref reader fails its own PR, not the post-merge push); `tools/provenance/*` and `.github/provenance.conf` join the soft-infra and required-context lists; the reeve-tests trigger also fires on `tools/provenance/tests/fixtures/continuity_cases.json`; the header's output count and the `--selftest` rows. (The timeline.mjs ↔ Python row parity itself runs in `site-build`, on every PR — §Episodes.) | H6 |
+| `scripts/ci-classify.sh` | new output `provenance_tests` (true for `tools/provenance/*`, `.github/provenance.conf`, `.github/workflows/provenance.yml`, `.github/data-branch-guard/*`, `site/lib/provenance-contract*`, `site/test/fixtures/provenance-bundle.json`, `scripts/provenance.sh`, the drift-pinned `scripts/reviewer-posted.sh` / `coach-lock-check.sh` / `reviewer-signoff.sh` / `.claude/reviewer-post/reviewer_mcp.py`, `tools/model-registry/*`, `audits/provenance-2026-10/fixtures/*`, `audits/provenance-2026-10/rescue/*` (the pinned snapshot), `site/lib/timeline.mjs`, Reeve's port `tools/reeve/src/reeve/provenance.py`, `ci.yml`), and a second output `provenance_read_lens` (any change under `scripts/`, `tools/`, `.github/`, `.claude/` or `site/` — the read lens's scan roots — on which `provenance-tests` runs only `test_read_lens.py` plus the sub-second pins that read files under those roots — `scripts/check.sh`'s selftest line, the watched workflows' existence, Reeve's mirrored deferral reasons and mark-order slack — so a new data-ref reader, or a change that breaks one of those pins, fails its own PR, not the post-merge push); `tools/provenance/*` and `.github/provenance.conf` join the soft-infra and required-context lists; the reeve-tests trigger also fires on `tools/provenance/tests/fixtures/continuity_cases.json`, `.github/provenance.conf` and `tools/provenance/src/provenance/freeze.py` (reeve's suite text-pins all three), and the provenance-tests trigger on `tools/reeve/src/reeve/provenance.py` (the harvester's suite pins Reeve's port back); the header's output count and the `--selftest` rows. (The timeline.mjs ↔ Python row parity itself runs in `site-build`, on every PR — §Episodes.) | H6 |
 | `.github/workflows/ci.yml` | a `provenance-tests` job (`python3 -m pytest tools/provenance -q`, or the read lens alone) gated on either output and listed in `ci-ok`'s `needs` (`scripts/ci-ok-guard.sh`) | H6 |
 | `scripts/check.sh` | `scripts/provenance.sh --selftest` | H6 |
 | `CLAUDE.md`, `README.md` | the `tools/provenance/` bullets, `provenance.sh` in the scripts bullet, this document in the docs bullet (landed with the scaffold; `scripts/docs-check.sh`) | scaffold |
@@ -1303,7 +1378,9 @@ the refs exist — this build pushes nothing.
 |---|---|---|---|
 | A routine with the owner PAT pushes to `provenance` (forged commit or rollback) | tip continuity at the next run; Reeve `provenance-foreign-tip` | no evidence written; the derived ref is recomputed from the newest checkpoint and overwritten; the run goes red (exit 3) | inspect; `recover confirm_sha=<newest checkpoint>` |
 | A forged `provenance-site` tip | tip continuity / `same_content`; Reeve | overwritten at the next run with `::error::`, whatever the evidence ref's state; until then (and until the next dispatch while disarmed) it can show false attribution (escaped fields only; nothing reads it before P3) | automatic |
-| The `provenance` ref is deleted | continuity verdict `deleted` | run red; never re-bootstrapped | `recover` to the newest checkpoint, or push exactly that sha from any clone |
+| The `provenance` ref is deleted | continuity verdict `deleted` | run red; never re-bootstrapped; the derived ref is still rebuilt from `C`, fetched by sha | `recover` to the newest checkpoint, or push exactly that sha from any clone |
+| Artifact ids out of upload order (measured up to 64 min) | ordering by `(created_at, id)`; the scan reads on 6 h past the newest tips | none: a genuine newer tip stays ok, a rollback to an older higher-id checkpoint is foreign | none needed |
+| The newest checkpoint does not descend from another verified one (a mark-order conflict) | `checkpoint_conflicts` (evidence) | verdict foreign with `conflicts`; no evidence, no derive, `recover` refused; run red | inspect the artifact list; push the true newest checkpoint from a clone that holds it |
 | Harvester published nothing for 90 days (checkpoints expired) | Reeve `provenance-lag` stall check and `routine-dead` long before | verdict `unanchored`: refused (no run may re-anchor a tip nobody verified) | rename the old ref (it keeps its history), then dispatch `harvest bootstrap=true`: a new root, the ingest re-runs from main, and PRs re-freeze from GitHub plus what the snapshot holds |
 | A guard rule would break | `guard_diff` | exit 4, nothing pushed | a bug: fix the writer, never the guard |
 | `.github/data-branch-guard/*` changes on main | guard drift check | `::warning::`; the evidence ref keeps its bootstrap bytes, the derived ref takes the new ones | none needed; a re-root only if the evidence ref must carry the new guard |
@@ -1312,7 +1389,8 @@ the refs exist — this build pushes nothing.
 | The bulk PR-head fetch fails | `fetch_all` | evidence still published, no derived push that run (`derive_skipped`) | next run |
 | A derive layer raises (a bug in views/bundle/episodes/serving, or a blame that does not cover a design file) | plan step `::error::`, `derive_error=true` | evidence still published and checkpointed, no derived push; the derive verdict step fails the job after the checkpoints | fix the bug; the next run rebuilds `provenance-site` |
 | Rate-limit floor / request cap / capture deadline (the continuity scan included) | `BudgetExhausted` | clean stop, cursors saved, exit 0; a stop inside the continuity scan is a no-op plan (old == new == the fetched tip, verdict unknown) that publishes and checkpoints nothing | next run / next dispatch |
-| A filtered runs list would hit GitHub's 1,000-result cap | `total_count` check | the window is halved; a one-minute window still capped fails the pass loudly | none expected (a minute holds far fewer than 1,000 runs) |
+| A filtered runs list would hit GitHub's 1,000-result cap | `total_count` check | the window is halved; a one-minute window still capped fails that workflow's listing loudly (receipts pass error, below) | none expected (a minute holds far fewer than 1,000 runs) |
+| Receipts pass error — a run's jobs GET or a workflow's listing still fails after the client's retries (a persistent 5xx, a 403, `total_count` disagreeing twice) | `receipts_error=true`, `::error::` per failure, `counts.receipts.failed` / `errors` in `plan.json` | isolated to that run / workflow: its cursor holds at the failure, every other receipt, the ingest and the freezes are published and checkpointed; `Verdict (receipts)` fails the job | none for a transient; the next pass retries. A persistent one stays red hourly until fixed (or until GitHub deletes the run — then a 404, `gone`) |
 | A scheduled run would evict a pending dispatch | the `gate` job | the schedule skips that hour | none needed |
 | GraphQL unavailable | `GraphQLUnavailable` | `incomplete: graphql-unavailable`, thread counts absent | `refreeze` later |
 | A watched run still in flight at 24 h | settle | frozen with `incomplete: settle-deferred` | `refreeze` |
@@ -1429,9 +1507,11 @@ work plan):
 
 22. **Checkpoints, not a run window.** Tip continuity anchors on the newest
     `tip-<ref>-<sha>` checkpoint, uploaded by every successful publish
-    including no-op ones and found by one newest-first read of the repo's
-    artifact list; the rule is monotonic, so a rollback to an older genuine
-    sha is refused, and nothing bootstraps without `bootstrap=true`.
+    including no-op ones and found by reading the repo's artifact list; the
+    rule is monotonic in upload time (`created_at`, never the artifact id,
+    which round 2 of the integration review measured out of order by up to
+    64 minutes), so a rollback to an older genuine sha is refused, and nothing
+    bootstraps without `bootstrap=true`.
 23. **`recover` restores only the newest checkpoint**, and only while the tip
     fails continuity; an Environment gate on it is optional, not wired.
 24. **A foreign evidence tip no longer freezes the derived ref**: derive runs
@@ -1440,7 +1520,8 @@ work plan):
 25. **The ingest is not a mode and reads only main**, pinned by
     `snapshot_manifest_sha256`; tar members are regular, flat `*.json.gz`
     files read with `extractfile`.
-26. **One bulk, token-less fetch at job start**; derive never fetches, and a
+26. **One bulk, token-less fetch at job start**; derive fetches nothing but,
+    on a foreign evidence tip, the newest checkpoint `C` by sha, and a
     commit missing after it is a deterministic basis `none` — not a
     fail-closed derive, which the 67 force-pushed-away auto-review heads in
     the snapshot would have wedged forever.

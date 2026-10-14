@@ -272,11 +272,17 @@ classify() {
         # continuity_cases.json) joins too: reeve's provenance-foreign-tip
         # detector ports gitstore.continuity_verdict and its tests run every
         # row of that one file, so a table edit must re-run BOTH suites or the
-        # two implementations could drift apart unseen.
+        # two implementations could drift apart unseen. So do the two other
+        # harvester files reeve's suite text-pins: .github/provenance.conf
+        # (test_committed_provenance_conf_is_readable reads the committed
+        # values; reeve.yml reads the file at runtime) and the harvester's
+        # freeze.py (test_defer_reasons_mirror_the_harvester reads its
+        # REASON_* / CAPTURE_FAILED literals).
         tools/reeve/*|.github/reeve.conf|\
         telemetry/reeve-greenlights.ndjson|.github/data-branch-guard/*|\
         .github/workflows/reeve.yml|scripts/preview-budget.sh|\
         tools/provenance/tests/fixtures/continuity_cases.json|\
+        .github/provenance.conf|tools/provenance/src/provenance/freeze.py|\
         .github/workflows/ci.yml) rvtests=true ;;
       esac
       case "$f" in
@@ -289,10 +295,13 @@ classify() {
         # parser the serving join reuses, the audit's golden timelines, the
         # pinned #843 snapshot it ingests (a byte change there must fail the
         # pin test, not ship silently) and site/lib/timeline.mjs (the row
-        # parser its committed-row extraction mirrors). So a change to any of
-        # them re-runs it. (The timeline.mjs ↔ Python row parity itself runs
-        # in site-build, on every PR.)
-        tools/provenance/*|.github/provenance.conf|\
+        # parser its committed-row extraction mirrors) and Reeve's port
+        # (tools/reeve/src/reeve/provenance.py — test_freeze.py and
+        # test_gitstore.py text-pin its DEFER_REASONS and its mark-order slack
+        # to the harvester's). So a change to any of them re-runs it. (The
+        # timeline.mjs ↔ Python row parity itself runs in site-build, on every
+        # PR.)
+        tools/provenance/*|.github/provenance.conf|tools/reeve/src/reeve/provenance.py|\
         .github/workflows/provenance.yml|.github/data-branch-guard/*|\
         site/lib/provenance-contract*|site/test/fixtures/provenance-bundle.json|\
         scripts/provenance.sh|scripts/reviewer-posted.sh|scripts/coach-lock-check.sh|\
@@ -837,17 +846,25 @@ selftest() {
   #     moves no mesh and no pixels. Its suite reads files outside the tool
   #     (the workflow and conf, the trust-port drift-pinned scripts, the
   #     pinned #843 snapshot, the site contract and timeline.mjs), so each of
-  #     those re-runs it; the shared continuity table re-runs reeve's suite as
-  #     well (its provenance-foreign-tip port runs every row). A reeve-only or
-  #     docs-only change does not.
-  out="$(run "tools/provenance/src/provenance/freeze.py")"
+  #     those re-runs it; the shared continuity table, the committed conf and
+  #     freeze.py re-run reeve's suite as well (its port runs every table row,
+  #     reads the conf's values and mirrors freeze.py's deferral reasons), and
+  #     Reeve's port re-runs the harvester's suite (which pins it back). A
+  #     reeve-only (any other reeve file) or docs-only change does not.
+  out="$(run "tools/provenance/src/provenance/canonical.py")"
   check "provenance-only" "$out" \
     "provenance_tests=true" "gate=true" "gate_designs=" \
     "printcheck_tests=true" "scad=true" "regen=false" "reeve_tests=false" \
     "model_registry_tests=false"
   out="$(run ".github/provenance.conf")"
   check "provenance-conf" "$out" \
-    "provenance_tests=true" "gate=true" "gate_designs=" "scad=true" "regen=false"
+    "provenance_tests=true" "reeve_tests=true" "gate=true" "gate_designs=" "scad=true" "regen=false"
+  out="$(run "tools/provenance/src/provenance/freeze.py")"
+  check "provenance-freeze-reruns-reeve" "$out" \
+    "provenance_tests=true" "reeve_tests=true" "gate_designs="
+  out="$(run "tools/reeve/src/reeve/provenance.py")"
+  check "reeve-port-reruns-provenance" "$out" \
+    "provenance_tests=true" "reeve_tests=true" "provenance_read_lens=true"
   out="$(run ".github/workflows/provenance.yml")"
   check "provenance-workflow" "$out" \
     "provenance_tests=true" "model_registry_tests=true" "gate=true" "gate_designs="

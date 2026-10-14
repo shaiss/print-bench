@@ -188,6 +188,62 @@ def test_selection_is_by_runs_list_not_step_name():
     assert rp3.gone == 1 and rp3.files == {}
 
 
+def test_a_failing_run_or_listing_is_isolated_not_fatal():
+    """Integration review round 2 (medium): the panel's reproduction — a jobs GET answered 502 after
+    the client's retries (here: an APIError with status 502) for the OLDEST listed run — used to raise
+    out of the pass, so every hourly run failed on the same run and nothing else was ever captured.
+    Now: run 101 is recorded in ``failed`` and holds the cursor, run 102 and the second workflow are
+    captured; a second workflow whose LISTING keeps disagreeing with total_count (Truncated) is
+    recorded in ``errors`` with its cursor held at the failing window, and the third workflow is still
+    captured. The next pass, healthy, captures exactly what was left."""
+    rows = {"design-run.yml": [_run(101, "2026-10-12T01:00:00Z"), _run(102, "2026-10-12T02:00:00Z")],
+            "oracle.yml": [_run(201, "2026-10-12T01:30:00Z", wf="oracle.yml")],
+            "chunker.yml": [_run(301, "2026-10-12T03:00:00Z", wf="chunker.yml")]}
+    jobs = {rid: [_job(rid * 10, [("Run via Z.AI (GLM, chain link 1)", "success")])] for rid in (101, 102, 201, 301)}
+    healthy = _Runs(rows, jobs)
+    broken = {"jobs-101": True, "list-oracle": True}
+
+    def responder(path, params):
+        if path == "/actions/runs/101/jobs" and broken["jobs-101"]:
+            raise APIError("HTTP 502 GET /actions/runs/101/jobs", status=502)
+        if path == "/actions/workflows/oracle.yml/runs" and broken["list-oracle"]:
+            out = healthy(path, params)
+            return dict(out, total_count=out["total_count"] + 1)        # disagrees twice → Truncated
+        return healthy(path, params)
+
+    fake = FakeGitHub(responder=responder)
+    cur = {"design-run.yml": "2026-10-12T00:00:00Z", "oracle.yml": "2026-10-12T00:00:00Z",
+           "chunker.yml": "2026-10-12T00:00:00Z"}
+    kw = dict(workflows=("design-run.yml", "oracle.yml", "chunker.yml"), since=None, until=None,
+              now="2026-10-12T12:00:00Z", lookback_hours=2, default_cursor="2026-07-31T00:00:00Z")
+    rp = receipts.harvest_receipts(fake, cursors=dict(cur), exists=lambda p: False, **kw)
+    assert sorted(rp.files) == sorted(receipts.receipt_path(r) for r in (rows["design-run.yml"][1],
+                                                                          rows["chunker.yml"][0]))
+    assert rp.failed == [{"created_at": "2026-10-12T01:00:00Z", "error": "APIError: HTTP 502 GET /actions/runs/101/jobs",
+                          "run_id": 101, "workflow": "design-run.yml"}]
+    assert [(e["workflow"], e["window"], e["error"].split(":")[0]) for e in rp.errors] == [
+        ("oracle.yml", "2026-10-11T22:00:00Z", "Truncated")]
+    assert rp.cursors["design-run.yml"] == "2026-10-12T01:00:00Z"        # held at the failed run
+    assert rp.cursors.get("oracle.yml", cur["oracle.yml"]) == cur["oracle.yml"]  # first window: kept
+    assert rp.cursors["chunker.yml"] == "2026-10-12T03:00:00Z" and not rp.budget_stopped
+    # Healthy again: the next pass captures exactly the two that were left.
+    broken.update({"jobs-101": False, "list-oracle": False})
+    have = set(rp.files)
+    rp2 = receipts.harvest_receipts(fake, cursors=dict(cur, **rp.cursors), exists=have.__contains__, **kw)
+    assert sorted(rp2.files) == sorted(receipts.receipt_path(r) for r in (rows["design-run.yml"][0],
+                                                                           rows["oracle.yml"][0]))
+    assert rp2.failed == [] and rp2.errors == []
+    # A listing failure past the first window holds the cursor at THAT window's start.
+    def second_window_fails(path, params):
+        if path == "/actions/workflows/oracle.yml/runs" and params["created"].startswith("2026-10-12T00:00:00Z"):
+            raise APIError("HTTP 503 GET /actions/workflows/oracle.yml/runs", status=503)
+        return healthy(path, params)
+    rp3 = receipts.harvest_receipts(FakeGitHub(responder=second_window_fails), cursors=dict(cur),
+                                    exists=lambda p: False, **kw)
+    assert rp3.cursors["oracle.yml"] == "2026-10-12T00:00:00Z" and rp3.errors[0]["window"] == "2026-10-12T00:00:00Z"
+    assert receipts.receipt_path(rows["chunker.yml"][0]) in rp3.files
+
+
 def test_windows_halve_at_the_1000_cap():
     """Critique 8: a FakeGitHub responder that answers any created=A..B window holding more than 1,000 runs with total_count >= 1000 and only the first 1,000 rows: list_runs halves until every window is under the cap, returns all 2,500 runs exactly once, and only ever sends the created filter; a window whose rows != total_count is retried once then raises Truncated; a one-minute window still capped raises Truncated."""
     t0 = datetime(2026, 10, 12, tzinfo=timezone.utc)

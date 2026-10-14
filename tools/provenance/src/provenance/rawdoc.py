@@ -6,8 +6,9 @@ response is projected onto a closed field list (contract ``raw-pr@1``,
 replaced by a digest (:mod:`provenance.digest`). Projection does three jobs:
 
 * **no prose** — ``body``/``message`` fields become digests; a status
-  ``description`` survives only for the ``reviewer-signoff`` context (our own
-  fixed sentences); verification payloads/signatures, patches and
+  ``description`` survives only for a ``reviewer-signoff`` status the Actions
+  bot created (our own fixed sentences — :func:`project_status`); verification
+  payloads/signatures, patches and
   ``author_association`` are dropped;
 * **no volatility** — reaction counts, avatar/URL templates, node ids and
   nested repository objects never reach a stored byte, so a refreeze of an
@@ -47,8 +48,8 @@ RUN_FIELDS = (
     "html_url", "display_title",
 )
 
-#: Status contexts whose ``description`` is kept verbatim (our own fixed
-#: sentences); every other context's description is dropped (``null``).
+#: Status contexts whose ``description`` is kept verbatim when the Actions bot created the status
+#: (our own fixed sentences); every other context's — and another creator's — is dropped (``null``).
 STATUS_DESCRIPTION_CONTEXTS = frozenset({"reviewer-signoff"})
 
 #: Timeline events that are dropped: their content is captured by a richer
@@ -229,14 +230,31 @@ def project_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda r: (r["created_at"] or "", r["id"] or 0))
 
 
+def _actions_bot(name: Optional[str]) -> bool:
+    """``github-actions[bot]`` (REST) / ``github-actions`` (GraphQL) — trust.is_actions_bot's rule,
+    restated here so the raw projection imports nothing above it."""
+    if not isinstance(name, str):
+        return False
+    n = name.strip().lower()
+    return (n[:-5] if n.endswith("[bot]") else n) == "github-actions"
+
+
 def project_status(s: dict[str, Any]) -> dict[str, Any]:
-    """One commit status (``/commits/{sha}/statuses`` item or a #843 snapshot row)."""
+    """One commit status (``/commits/{sha}/statuses`` item or a #843 snapshot row).
+
+    ``description`` survives only for a :data:`STATUS_DESCRIPTION_CONTEXTS` status the Actions bot
+    created — the fixed sentences ``scripts/reviewer-signoff.sh`` posts. Any other creator (a
+    statuses:write PAT, any workflow granted ``statuses: write``) could write 140 characters of free
+    text, and evidence is add-only forever, so theirs is stored ``null`` (its reason then reads
+    ``other``; its trust tier is already ``claimed``/``login``)."""
     context = s.get("context")
+    creator = login(s.get("creator"))
+    keep = context in STATUS_DESCRIPTION_CONTEXTS and _actions_bot(creator)
     return {
         "context": context,
         "created_at": s.get("created_at"),
-        "creator": login(s.get("creator")),
-        "description": s.get("description") if context in STATUS_DESCRIPTION_CONTEXTS else None,
+        "creator": creator,
+        "description": s.get("description") if keep else None,
         "id": s.get("id"),
         "state": s.get("state"),
         "target_url": s.get("target_url"),

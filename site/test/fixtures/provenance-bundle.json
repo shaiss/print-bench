@@ -1,5 +1,5 @@
 {
- "content_sha256": "08252dbf5ea4928eb717e556864fa147adcc8f58af434efec01ad035f77d5411",
+ "content_sha256": "5ffd29028d0fed2b233f5328659391cfae146d1689736c661cc1c3dc38f2ae60",
  "contract": 1,
  "evidence_sha": "0000000000000000000000000000000000000000",
  "extractor": "provenance-extract 1",
@@ -1614,7 +1614,7 @@
      "url": "https://github.com/shaiss/print-bench/issues/501"
     },
     {
-     "after_merge": true,
+     "after_merge": false,
      "edges": {
       "verifies": []
      },
@@ -2825,7 +2825,7 @@
   }
  },
  "views_sha256": {
-  "alpha-clip": "b7b9cfe053578c23da8847374534ff5beb55f7764efae0731dbb7f283591163e",
+  "alpha-clip": "7c232464871e278ed958028c93cc3bf16e1811f37e13ce0aa29c01e138a5c822",
   "beta-hinge": "4d9449f4d61034cc33b53e62ffaaf136bf47f153fb90ee491672733bc99bcf3c",
   "gamma-stand": "675939e0f84f7bb395dc00aa73b94254f4d3b1a0acd20294e17271f03706d6b2"
  }

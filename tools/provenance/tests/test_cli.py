@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from _gitstore_helpers import MINI, NOW_EPOCH, REPO_SLUG, Harness
+from _gitstore_helpers import ALLOW, MINI, NOW_EPOCH, REPO_SLUG, Harness
 from conftest import REPO, needs
 
 from provenance import canonical, cli, contract, freeze, github, gitstore
@@ -72,6 +72,7 @@ def test_harvest_dry_run_writes_plan_not_pushes(h, monkeypatch, capsys):
     code, out = h.plan("--bootstrap", "--dry-run", *SNAP)
     assert code == 0, capsys.readouterr().err
     assert out == {"budget_stopped": "false", "derive_error": "false", "derive_skipped": "false", "dry_run": "true",
+                   "receipts_error": "false",
                    "evidence_changed": "false", "evidence_sha": "", "foreign_tip": "false", "mode": "harvest",
                    "site_changed": "false", "site_sha": ""}
     plan = h.plan_doc()
@@ -130,6 +131,41 @@ def test_budget_stop_exits_zero(h, capsys):
     h.freeze = lambda gh, **kw: freeze.FreezePlan(budget_stopped=True)
     code, out = h.plan()
     assert code == 0 and out["budget_stopped"] == "true"
+
+
+def test_receipts_failure_is_isolated_and_red_after_publish(h, capsys):
+    """Integration review round 2 (medium), end to end: one run's jobs GET fails (502 after the
+    client's retries) — the plan still exits 0 with receipts_error=true, the healthy run's receipt is
+    published and checkpointed, the cursor holds at the failed run, plan.json names it, and the
+    workflow's Verdict (receipts) step is what turns the job red. The next run, healthy, captures it."""
+    c, _ = _bootstrap(h)
+    h.add_live_run("design-run.yml", 901, "2026-10-13T10:00:00Z")
+    h.add_live_run("design-run.yml", 902, "2026-10-13T11:00:00Z")
+    respond = h.fake.responder
+
+    def flaky(path, params):
+        if path == "/actions/runs/901/jobs":
+            raise github.APIError("HTTP 502 GET /actions/runs/901/jobs", status=502)
+        return respond(path, params)
+    h.fake.responder = flaky
+    capsys.readouterr()
+    r = h.cycle()
+    err = capsys.readouterr().err
+    assert r["plan"] == 0 and r["publish"] == 0 and r["plan_out"]["receipts_error"] == "true"
+    assert "::error::receipts: jobs GET for design-run.yml run 901 failed" in err
+    plan = h.plan_doc()
+    assert plan["receipts_error"] is True
+    assert [f["run_id"] for f in plan["counts"]["receipts"]["failed"]] == [901]
+    tip = r["pub_out"]["evidence_tip"]
+    assert tip and tip != c and h.sb.remote(EV) == tip
+    files = h.sb.files_at(tip)
+    assert "receipts/2026/10/13/902.a1.json.gz" in files and "receipts/2026/10/13/901.a1.json.gz" not in files
+    assert _state(h, tip)["cursors"]["receipts"]["design-run.yml"] == "2026-10-13T10:00:00Z"
+    assert "receipts FAILED: design-run.yml run 901" in (h.out / "summary.md").read_text()
+    h.fake.responder = respond
+    r2 = h.cycle()
+    assert r2["plan_out"]["receipts_error"] == "false"
+    assert "receipts/2026/10/13/901.a1.json.gz" in h.sb.files_at(r2["pub_out"]["evidence_tip"])
 
 
 def test_scan_budget_stop_is_a_clean_noop_through_publish(h, monkeypatch, capsys):
@@ -239,6 +275,66 @@ def test_foreign_evidence_tip_derives_from_checkpoint(h, capsys):
     assert pcode == 0 and pub == {"evidence_tip": "", "foreign_tip": "true", "site_tip": site}
     assert h.sb.remote(EV) == f and h.sb.remote(DV) == site
     assert not (h.out / f"tip-{EV}.json").exists() and (h.out / f"tip-{DV}.json").exists()
+
+
+def _reclone(h, *, prune: bool = False) -> None:
+    """Replace the harness checkout with a fresh ``--no-local`` clone of origin — what each production
+    run starts from (actions/checkout + fetch_all): only what origin's refs reach is local. The bare
+    origin serves an unreachable sha on request (``uploadpack.allowAnySHA1InWant``; the local
+    transport's protocol v2 does so anyway), as GitHub does for a commit it still holds; ``prune``
+    first expires origin's reflogs and gc's it, so an unreachable sha is GONE (unservable)."""
+    import shutil
+
+    from _gitstore_helpers import sh
+    sh(h.sb.root, "--git-dir", str(h.sb.origin), "config", "uploadpack.allowAnySHA1InWant", "true")
+    if prune:
+        sh(h.sb.root, "--git-dir", str(h.sb.origin), "reflog", "expire", "--expire=now", "--all")
+        sh(h.sb.root, "--git-dir", str(h.sb.origin), "gc", "-q", "--prune=now")
+    h.sb.git.close()                    # its cat-file process and commit memo belong to the old clone
+    shutil.rmtree(h.sb.checkout)
+    sh(h.sb.root, "clone", "-q", "--no-local", str(h.sb.origin), str(h.sb.checkout))
+    h.sb.git = gitstore.Git(str(h.sb.checkout), env=ALLOW)
+
+
+@pytest.mark.parametrize("how", ["deleted", "orphan"])
+def test_foreign_tip_derive_fetches_the_checkpoint_by_sha(h, capsys, how):
+    """Panel round 2 (medium): the evidence ref is deleted, or force-pushed to a commit that does not
+    descend from the newest checkpoint C, AND a forged provenance-site is planted; every run starts from
+    a fresh clone that does not hold C. The plan fetches C by sha, derives from it and replaces the
+    forged derived tip on the NEXT run (the docs' promise); a second run leaves the replacement alone.
+    Negative control: once origin no longer holds C (pruned), derive is skipped and a re-planted forged
+    tip survives with an ::error:: — the residual docs/provenance.md names (C genuinely unservable)."""
+    c, _ = _bootstrap(h)
+    for _ in range(2):
+        assert h.cycle()["pub_out"]["evidence_tip"] == c
+    if how == "deleted":
+        h.sb.delete(EV)
+    else:
+        h.sb.push(h.sb.commit({"FORMAT": b"orphan\n"}, None), EV, force=True)
+    g = h.sb.commit({"FORMAT": b"forged\n"}, None)
+    h.sb.push(g, DV, force=True)
+
+    for i in range(2):
+        _reclone(h)
+        assert h.sb.git.run_full("cat-file", "-e", c).returncode != 0      # C is not in the fresh clone
+        r = h.cycle()
+        assert r["plan"] == 0 and r["plan_out"]["foreign_tip"] == "true", r
+        assert h.plan_doc()["refs"][EV]["verdict"] == ("deleted" if how == "deleted" else "foreign")
+        assert r["plan_out"]["derive_skipped"] == "false" and h.plan_doc()["derived_from"] == c
+        site = h.sb.remote(DV)
+        assert site != g and json.loads(h.sb.files_at(site)["site/bundle.json"])["evidence_sha"] == c
+        assert r["plan_out"]["site_changed"] == ("true" if i == 0 else "false")  # replaced, then left alone
+
+    g2 = h.sb.commit({"FORMAT": b"forged again\n"}, None)                # negative control
+    h.sb.push(g2, DV, force=True)
+    _reclone(h, prune=True)
+    capsys.readouterr()
+    r = h.cycle()
+    err = capsys.readouterr().err
+    assert r["plan"] == 0 and r["plan_out"]["foreign_tip"] == "true" and r["plan_out"]["derive_skipped"] == "true"
+    assert r["plan_out"]["site_changed"] == "false" and h.sb.remote(DV) == g2
+    assert "could not be rebuilt this run" in err
+    assert f"derive skipped: evidence checkpoint {c[:8]} is not fetchable from origin" in (h.out / "summary.md").read_text()
 
 
 def test_forged_derived_tip_is_replaced(h, capsys):
@@ -396,6 +492,44 @@ def test_recover_needs_the_newest_checkpoint(h, monkeypatch, capsys):
     assert code == 0 and h.plan_doc()["refs"][EV]["old"] is None
     pcode, pub = h.publish()
     assert pcode == 0 and h.sb.remote(EV) == c2
+
+
+def test_checkpoint_order_conflict_is_foreign_and_unrecoverable(h, capsys):
+    """Panel round 2 (high), the clock-free cross-check end to end: c1 → c2 genuine, then the ref is
+    forced back to c1 AND the artifact list's clock misorders c1's checkpoints after c2's (the case
+    upload-time ordering alone cannot see). The created rule alone would read the rollback ok; the
+    ancestry check finds the newest checkpoint c1 not descending from verified checkpoint c2, so the
+    verdict is foreign with that conflict, derive is skipped (never derived from a conflicted C), and
+    recover refuses c1. Control: with the clock honest the same rollback is plain foreign, no conflict,
+    and recover to c2 plans."""
+    c1, _ = _bootstrap(h)
+    h.add_live_run("design-run.yml", 711, "2026-10-13T10:00:00Z")
+    c2 = h.cycle()["pub_out"]["evidence_tip"]
+    assert h.sb.git.parents(c2) == [c1]
+    h.sb.push(c1, EV, force=True)                                         # the rollback
+    code, _ = h.plan()
+    ev = h.plan_doc()["refs"][EV]
+    assert code == 0 and ev["verdict"] == "foreign" and ev["checkpoint"] == c2      # control: honest clock
+    code, _ = h.plan("--confirm-sha", c1, mode="recover")
+    assert code == 3
+    code, _ = h.plan("--confirm-sha", c2, mode="recover")
+    assert code == 0 and h.plan_doc()["refs"][EV]["new"] == c2
+    for a in h.art.items:                                                  # the clock lies: c1 newest
+        if a["name"] == gitstore.tip_name(EV, c1):
+            a["created_at"] = "2026-10-14T11:30:00Z"
+    h.art._publish()
+    capsys.readouterr()
+    code, out = h.plan()
+    err = capsys.readouterr().err
+    plan = h.plan_doc()
+    assert code == 0 and out["foreign_tip"] == "true" and plan["refs"][EV]["verdict"] == "foreign"
+    assert plan["refs"][EV]["checkpoint"] == c1 and out["derive_skipped"] == "true"
+    assert "mark-order conflict" in err and c2[:8] in err
+    assert "mark-order conflict" in (h.out / "summary.md").read_text()
+    capsys.readouterr()
+    code, _ = h.plan("--confirm-sha", c1, mode="recover")
+    assert code == 3 and "mark-order conflict" in capsys.readouterr().err
+    assert not (h.out / "plan.json").exists() and h.sb.remote(EV) == c1
 
 
 def test_publish_order_and_rejection(h, monkeypatch, capsys):

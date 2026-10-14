@@ -130,7 +130,7 @@ pulled or for how long. `andon.yml` — hourly at :43 UTC and on
 `workflow_dispatch` (with a `dry_run` input that prints the decision and
 writes nothing) — is that record. It is keyless, conf-less, holds
 `issues: write` on its one job, pins itself to the default branch, and is
-deliberately **not** in `cadence-sync-check.sh`'s twelve-routine roster (the
+deliberately **not** in `cadence-sync-check.sh`'s thirteen-routine roster (the
 `growth-board-sync.yml` precedent: a lightweight reconcile, not an armed
 routine). It is also **never gated on the cord** — the tool's tests pin the
 absence of the gate leg on its job.

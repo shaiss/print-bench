@@ -1542,7 +1542,7 @@
      "t": "list",
      "of": {
       "t": "str",
-      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
      },
      "unique": true,
      "sorted": true
@@ -1695,7 +1695,7 @@
      "t": "list",
      "of": {
       "t": "str",
-      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
      },
      "unique": true,
      "sorted": true
@@ -1793,7 +1793,7 @@
      "t": "list",
      "of": {
       "t": "str",
-      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
      },
      "unique": true,
      "sorted": true
@@ -1854,7 +1854,7 @@
      "t": "list",
      "of": {
       "t": "str",
-      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
      },
      "unique": true,
      "sorted": true
@@ -2320,7 +2320,7 @@
      "t": "list",
      "of": {
       "t": "str",
-      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
      },
      "unique": true,
      "sorted": true
@@ -2903,7 +2903,7 @@
      "t": "list",
      "of": {
       "t": "str",
-      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
      },
      "unique": true,
      "sorted": true

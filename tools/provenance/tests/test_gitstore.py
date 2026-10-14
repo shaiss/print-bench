@@ -22,20 +22,74 @@ CASES = json.loads((FIXTURES / "continuity_cases.json").read_text(encoding="utf-
 
 @pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
 def test_continuity_table(case):
-    from provenance.gitstore import Mark, continuity_verdict
+    from provenance.gitstore import Mark, continuity_verdict, parents_is_ancestor
     kw = {"max_chain": case["max_chain"]} if "max_chain" in case else {}
     v = continuity_verdict(ref=case["ref"], tip=case["tip"], marks=[Mark(**m) for m in case["marks"]],
-                           first_parent=lambda s: case["parents"].get(s), **kw)
+                           first_parent=lambda s: case["parents"].get(s),
+                           is_ancestor=parents_is_ancestor(case["parents"]), **kw)
     assert v.verdict == case["expect"], v.reason
     if "chain" in case:
         assert list(v.chain) == case["chain"]
+    assert list(v.conflicts) == case.get("conflicts", [])
     assert v.accepted == (case["expect"] == "ok")
+
+
+def test_continuity_table_orders_by_upload_time_not_artifact_id():
+    """The panel's measured inversion (2026-10-04: a LOWER artifact id uploaded 3,843 s later) is in
+    the table both ways round, and replaying it with id order — the pre-fix rule — flips both verdicts,
+    so the rows cannot pass by accident."""
+    from provenance.gitstore import Mark, continuity_verdict
+    by_name = {c["name"]: c for c in CASES}
+    genuine = by_name["upload-order-beats-artifact-id-genuine-newer-tip"]
+    rollback = by_name["foreign-rollback-to-a-higher-id-older-checkpoint"]
+    for case, want in ((genuine, "ok"), (rollback, "foreign")):
+        marks = [Mark(**m) for m in case["marks"]]
+        assert sorted(marks, key=lambda m: m.seq) != sorted(marks, key=lambda m: m.created)
+        assert continuity_verdict(ref=case["ref"], tip=case["tip"], marks=marks,
+                                  first_parent=case["parents"].get).verdict == want
+        # The id-ordered replay: created forced into id order → the opposite verdict.
+        by_id = [Mark(**dict(m, created=m["seq"])) for m in case["marks"]]
+        assert continuity_verdict(ref=case["ref"], tip=case["tip"], marks=by_id,
+                                  first_parent=case["parents"].get).verdict != want
+
+
+def test_checkpoint_conflict_needs_is_ancestor_and_spares_the_derived_ref():
+    """Without is_ancestor the cross-check is skipped (the pure rule alone); the derived ref is
+    parentless and never checked; an is_ancestor answering None (unknown) is a conflict."""
+    from provenance.gitstore import Mark, checkpoint_conflicts, continuity_verdict
+    case = next(c for c in CASES if c["name"] == "foreign-checkpoint-order-conflict")
+    marks = [Mark(**m) for m in case["marks"]]
+    assert continuity_verdict(ref=case["ref"], tip=case["tip"], marks=marks,
+                              first_parent=case["parents"].get).verdict == "ok"
+    v = continuity_verdict(ref=case["ref"], tip=case["tip"], marks=marks, first_parent=case["parents"].get,
+                           is_ancestor=lambda a, d: None)
+    assert v.verdict == "foreign" and v.conflicts and "mark-order conflict" in v.reason
+    site = [Mark(**dict(m, ref="provenance-site")) for m in case["marks"]]
+    assert checkpoint_conflicts(ref="provenance-site", checkpoint=case["tip"], marks=site,
+                                is_ancestor=lambda a, d: False) == ()
 
 
 def test_continuity_table_covers_every_verdict_and_both_refs():
     from provenance.gitstore import VERDICTS
     assert {c["expect"] for c in CASES} == set(VERDICTS)
     assert {c["ref"] for c in CASES} == {"provenance", "provenance-site"}
+
+
+def test_reeve_mirrors_the_mark_order_slack():
+    """Reeve's port mirrors gitstore.MARK_ORDER_SLACK_SECONDS (the tools stay independently installable):
+    the two scans must read on equally far past an id inversion. Pinned from this side, and
+    scripts/ci-classify.sh re-runs this suite when tools/reeve/src/reeve/provenance.py changes."""
+    import ast
+    import re
+
+    from conftest import REPO
+    from provenance.gitstore import MARK_ORDER_SLACK_SECONDS
+    text = (REPO / "tools" / "reeve" / "src" / "reeve" / "provenance.py").read_text(encoding="utf-8")
+    m = re.search(r"^MARK_ORDER_SLACK_SECONDS = (.+)$", text, re.MULTILINE)
+    assert m, "tools/reeve/src/reeve/provenance.py lost MARK_ORDER_SLACK_SECONDS"
+    tree = ast.parse(m.group(1), mode="eval")
+    assert all(isinstance(n, (ast.Expression, ast.BinOp, ast.Mult, ast.Constant)) for n in ast.walk(tree))
+    assert eval(compile(tree, "<reeve>", "eval"), {"__builtins__": {}}) == MARK_ORDER_SLACK_SECONDS
 
 
 def test_mark_names_round_trip_and_refuse():
@@ -203,7 +257,7 @@ def _verified_page(arts):
 
 
 def test_scan_marks_reads_the_artifact_list(sb):
-    """scan_marks over a FakeGitHub /actions/artifacts with 150 unrelated artifacts (site, stls…) before the checkpoint: pages until a VERIFIED tip mark per ref, then stops; a mark from a run on another branch, with event pull_request, path other than provenance.yml, or head_sha off main's first-parent history is rejected (counted); the horizon stops paging."""
+    """scan_marks over a FakeGitHub /actions/artifacts with 150 unrelated artifacts (site, stls…) before the checkpoint: pages until a VERIFIED tip mark per ref AND an artifact 6 h older than those tips has been seen (ids are not upload-ordered, so nothing unread can then be newer), then stops; a mark from a run on another branch, with event pull_request, path other than provenance.yml, or head_sha off main's first-parent history is rejected (counted); the horizon stops paging."""
     main = sb.main_sha
     off_main = "f" * 40
     c, d, x = "c" * 40, "d" * 40, "e" * 40
@@ -231,15 +285,17 @@ def test_scan_marks_reads_the_artifact_list(sb):
         art(9_796, gitstore.tip_name(EVIDENCE_REF, "4" * 40), 5, head=off_main),  # off main: rejected
         art(9_795, gitstore.tip_name(EVIDENCE_REF, c), 1),
         art(9_794, gitstore.tip_name(DERIVED_REF, d), 1),
-        art(9_793, gitstore.tip_name(DERIVED_REF, "9" * 40), 1),        # beyond the stop: never read
+        art(9_793, gitstore.tip_name(DERIVED_REF, "9" * 40), 1, created="2026-10-14T03:30:00Z"),  # older: read, loses
+        art(9_792, "telemetry-record", 99, created="2026-10-14T03:00:00Z"),  # 7 h before the tips: settles the scan
     ]
     page3 = [art(1, gitstore.tip_name(EVIDENCE_REF, "8" * 40), 1)]
     fake.pages[("/actions/artifacts", frozenset())] = [_verified_page(page1), _verified_page(page2),
                                                       _verified_page(page3)]
     marks, counts = gitstore.scan_marks(fake, sb.git, now_epoch=NOW_EPOCH, horizon_days=90)
     assert [(m.kind, m.ref, m.sha) for m in marks] == [
-        ("intent", EVIDENCE_REF, x), ("tip", EVIDENCE_REF, c), ("tip", DERIVED_REF, d)]
-    assert [m.seq for m in marks] == sorted((m.seq for m in marks), reverse=True)
+        ("intent", EVIDENCE_REF, x), ("tip", EVIDENCE_REF, c), ("tip", DERIVED_REF, d),
+        ("tip", DERIVED_REF, "9" * 40)]
+    assert [gitstore.mark_order(m) for m in marks] == sorted((gitstore.mark_order(m) for m in marks), reverse=True)
     assert counts["pages"] == 2 and counts["marks_rejected"] == 4
     artifact_gets = [c_ for c_ in fake.calls if c_[0] == "/actions/artifacts"]
     assert [c_[1]["page"] for c_ in artifact_gets] == ["1", "2"]                # page 3 never requested
@@ -247,6 +303,7 @@ def test_scan_marks_reads_the_artifact_list(sb):
     assert len(run_gets) == len(set(run_gets)) == 3                             # each run verified once
     v = continuity_verdict(ref=EVIDENCE_REF, tip=c, marks=marks, first_parent=lambda s: None)
     assert v.verdict == "ok"
+    assert continuity_verdict(ref=DERIVED_REF, tip=d, marks=marks, first_parent=lambda s: None).verdict == "ok"
 
     # The horizon: an old checkpoint (and everything after the page that reached it) is ignored.
     fake2 = FakeGitHub(responses=dict(fake.responses))
@@ -257,6 +314,46 @@ def test_scan_marks_reads_the_artifact_list(sb):
     marks2, counts2 = gitstore.scan_marks(fake2, sb.git, now_epoch=NOW_EPOCH, horizon_days=90)
     assert marks2 == [] and counts2["pages"] == 1
     assert continuity_verdict(ref=EVIDENCE_REF, tip=c, marks=marks2, first_parent=lambda s: None).verdict == "unanchored"
+
+
+def test_scan_marks_reads_past_an_id_inversion(sb):
+    """The panel's measured inversion, through the scan: the OLDER checkpoints (16:46) carry the HIGHER
+    ids and sit on page 1; the genuine newer ones (17:50) have lower ids and sit on page 2. The old rule
+    (stop at the first verified tip per ref in list order) anchored on page 1's — a genuine tip read
+    foreign and a rollback read ok. The scan now reads on until an artifact 6 h older than the newest
+    tips is seen (page 2's filler), picks the newest by upload time, and never requests page 3."""
+    main = sb.main_sha
+    e1, e2, s1, s2 = "61" * 20, "62" * 20, "63" * 20, "64" * 20
+    fake = FakeGitHub()
+    fake.responses[("/actions/runs/1", frozenset())] = {
+        "event": "schedule", "head_branch": "main", "head_sha": main, "id": 1, "path": gitstore.WORKFLOW_PATH}
+    fake.responses[("/actions/runs/2", frozenset())] = {
+        "event": "schedule", "head_branch": "main", "head_sha": main, "id": 2, "path": gitstore.WORKFLOW_PATH}
+
+    def art(seq, name, run_id, created):
+        return {"created_at": created, "id": seq, "name": name,
+                "workflow_run": {"head_branch": "main", "head_sha": main, "id": run_id}}
+
+    page1 = [art(11309400085, gitstore.tip_name(DERIVED_REF, s1), 1, "2026-10-13T16:46:06Z"),
+             art(11309400084, gitstore.tip_name(EVIDENCE_REF, e1), 1, "2026-10-13T16:46:05Z")]
+    page2 = [art(11309379811, gitstore.tip_name(DERIVED_REF, s2), 2, "2026-10-13T17:50:09Z"),
+             art(11309379810, gitstore.tip_name(EVIDENCE_REF, e2), 2, "2026-10-13T17:50:08Z"),
+             art(11309379790, gitstore.intent_name(EVIDENCE_REF, e2), 2, "2026-10-13T17:49:50Z"),
+             art(11309300000, "stls", 99, "2026-10-13T08:00:00Z")]
+    page3 = [art(1, gitstore.tip_name(EVIDENCE_REF, "8" * 40), 1, "2026-10-13T19:00:00Z")]
+    fake.pages[("/actions/artifacts", frozenset())] = [_verified_page(page1), _verified_page(page2),
+                                                      _verified_page(page3)]
+    marks, counts = gitstore.scan_marks(fake, sb.git, now_epoch=NOW_EPOCH, horizon_days=90)
+    assert counts["pages"] == 2
+    assert [c_[1]["page"] for c_ in fake.calls if c_[0] == "/actions/artifacts"] == ["1", "2"]
+    assert [(m.kind, m.sha) for m in marks][:2] == [("tip", s2), ("tip", e2)]
+    parents = {e2: e1}
+    anc = gitstore.parents_is_ancestor(parents)
+    for ref, genuine, rolled_back in ((EVIDENCE_REF, e2, e1), (DERIVED_REF, s2, s1)):
+        ok = continuity_verdict(ref=ref, tip=genuine, marks=marks, first_parent=parents.get, is_ancestor=anc)
+        assert ok.verdict == "ok" and ok.checkpoint == genuine, ok.reason
+        back = continuity_verdict(ref=ref, tip=rolled_back, marks=marks, first_parent=parents.get, is_ancestor=anc)
+        assert back.verdict == "foreign", back.reason
 
 
 def _tip(sb, ref):

@@ -27,10 +27,16 @@ Subcommands (docs/provenance.md §Workflow):
        ``--bootstrap`` (else ``::error::``, exit 3); ``foreign`` / ``deleted`` /
        ``unanchored`` → ``foreign_tip=true``: steps 3–6 are skipped (no
        evidence change is planned) and derive runs from the newest
-       checkpointed evidence commit ``C``
-       (fetched with the foreign tip when it is an ancestor; derive is skipped
-       if ``C`` is not local), so a forged derived tip is replaced even while
-       the evidence ref is forged (critique item 5). ``--bootstrap`` with any
+       checkpointed evidence commit ``C`` — fetched BY SHA when the foreign
+       tip does not reach it (a deleted ref, a force-push off its history;
+       :func:`_checkpoint_usable`), so a forged derived tip is replaced even
+       while the evidence ref is forged or gone (critique item 5); derive is
+       skipped only if GitHub cannot serve ``C`` or ``C`` has a checkpoint
+       (mark-order) conflict. The evidence verdict runs
+       ``gitstore.checkpoint_conflicts`` (``is_ancestor`` = local git): a
+       newest checkpoint that does not descend from every other verified
+       evidence checkpoint makes the verdict ``foreign`` and is never built on,
+       derived from or recovered to. ``--bootstrap`` with any
        other verdict is an error (exit 1). The derived verdict only decides the
        message: a non-``ok`` derived tip is overwritten with ``::error::``
        (``foreign``/``deleted``) or ``::notice::`` (``bootstrap``/``unanchored``).
@@ -42,7 +48,12 @@ Subcommands (docs/provenance.md §Workflow):
     3. **ingest** — ``ingest.needs_ingest(state, snapshot_id)`` → ``ingest.
        read_snapshot(snapshot_dir, …, pin)`` + ``plan_ingest`` (≈ 0 requests).
     4. **receipts** — ``receipts.harvest_receipts`` over every watched
-       workflow from its cursor (or ``--since``), day-windowed.
+       workflow from its cursor (or ``--since``), day-windowed. A failed jobs
+       GET or listing is isolated to its run / workflow (receipts.py "Failure
+       isolation"): ``::error::`` + summary lines, ``counts.receipts.failed`` /
+       ``errors`` in plan.json, ``receipts_error=true`` — the plan still exits
+       0 and everything else is published; the workflow's ``Verdict
+       (receipts)`` step fails the job after the checkpoints.
     5. unless ``--receipts-only``: **freeze** — ``freeze.plan_freezes``
        (settle/defer, re-capture of a changed terminal state, PR/brief/release
        capture; ``--pr`` restricts it to the named PRs; ``--since`` lowers the
@@ -72,8 +83,9 @@ Subcommands (docs/provenance.md §Workflow):
     ``publish``. ``--dry-run`` plans and outputs both ``*_changed`` false.
     A ``github.BudgetExhausted`` in 3–5 ends capture cleanly: what was
     captured is planned, the cursors record where to resume, exit 0 with a
-    ``::notice::``. A dispatch's capture deadline is job start +
-    ``dispatch_max_minutes`` − ``derive_reserve_minutes`` (critique item 22);
+    ``::notice::``. A dispatch's capture deadline is this step's start (the
+    one clock read, after the checkout) + ``dispatch_max_minutes`` −
+    ``derive_reserve_minutes`` (critique item 22);
     ``now`` is read once here and passed down.
 ``refreeze``
     ``--pr N [--dry-run] --out-dir DIR`` — capture PR ``N`` again as
@@ -86,7 +98,8 @@ Subcommands (docs/provenance.md §Workflow):
     AND ``SHA`` equals the newest evidence checkpoint ``C`` (critique item
     4): it can only restore the state the harvester itself last verified, so
     a write-access dispatcher — an agent included — gains nothing by running
-    it. ``C`` is fetched by sha if not local (``recover`` only). Plans a
+    it. ``C`` is fetched by sha if not local, and refused when it has a
+    checkpoint (mark-order) conflict. Plans a
     ``--force-with-lease`` of ``C`` over the current tip (or a create when
     absent); ``publish`` performs it.
 ``publish``
@@ -126,7 +139,7 @@ Subcommands (docs/provenance.md §Workflow):
 
 ``$GITHUB_OUTPUT`` (``--gh-output``): ``mode``, ``dry_run``, ``foreign_tip``,
 ``evidence_changed``, ``evidence_sha``, ``site_changed``, ``site_sha``,
-``derive_skipped``, ``derive_error``, ``budget_stopped`` (plan modes); ``evidence_tip``,
+``derive_skipped``, ``derive_error``, ``receipts_error``, ``budget_stopped`` (plan modes); ``evidence_tip``,
 ``site_tip``, ``foreign_tip`` (publish); ``go`` (gate). Every sha output is
 validated 40-hex before it is written (the workflow puts them in artifact
 names). ``evidence_sha`` / ``site_sha`` are the sha a ref WILL move to when its
@@ -137,7 +150,7 @@ plan-mode command first removes every one of them, so a refused run can never
 leave an older plan for ``publish``):
 
 * ``plan.json`` — ``{"format": "plan@1", "mode", "dry_run", "foreign_tip",
-  "derive_skipped", "derive_error", "derived_from": sha|null, "budget_stopped", "run_id",
+  "derive_skipped", "derive_error", "receipts_error", "derived_from": sha|null, "budget_stopped", "run_id",
   "run_attempt", "refs": {"provenance": {"old", "new", "changed",
   "would_change", "verdict", "checkpoint"}, "provenance-site": {…}}, "counts"}``.
   ``old`` is the tip the plan saw, ``new`` the sha the ref should hold after
@@ -167,8 +180,8 @@ token is ``$GH_TOKEN`` (read scopes for the plan modes; ``contents: write``
 is used by ``publish`` alone, through ``gitstore``'s env-only credential).
 
 Exit codes: 0 ok (a clean budget stop, the continuity scan's included; "nothing
-to do"; and a plan with ``foreign_tip`` or ``derive_error`` — for those two the
-workflow's verdict step fails the job after the checkpoints are uploaded); 1
+to do"; and a plan with ``foreign_tip``, ``derive_error`` or ``receipts_error`` —
+for those the workflow's verdict steps fail the job after the checkpoints are uploaded); 1
 validation/contract failure, bad input, or a push transport failure; 2
 argparse error; 3 tip-continuity refusal (bootstrap without the flag,
 recover refused, a rejected or raced push); 4 guard violation (an add-only
@@ -349,7 +362,7 @@ MAIN_REF = "refs/remotes/origin/main"
 #: Output names whose value must be "" or a 40-hex sha (they become artifact names).
 SHA_OUTPUTS = frozenset({"evidence_sha", "site_sha", "evidence_tip", "site_tip"})
 BOOL_OUTPUTS = frozenset({"dry_run", "foreign_tip", "evidence_changed", "site_changed",
-                          "derive_skipped", "derive_error", "budget_stopped", "go"})
+                          "derive_skipped", "derive_error", "receipts_error", "budget_stopped", "go"})
 
 
 def intent_file(ref: str) -> str:
@@ -494,8 +507,11 @@ class _NoDeadline:
             self.budget.deadline_epoch = self.saved
 
 
-def _scan(ctx: _Ctx, gh: object, git: gitstore.Git) -> tuple[gitstore.Continuity, gitstore.Continuity, dict]:
-    """Step 2: the artifact scan and both verdicts (local git answers first parents)."""
+def _scan(ctx: _Ctx, gh: object,
+          git: gitstore.Git) -> tuple[gitstore.Continuity, gitstore.Continuity, dict, list]:
+    """Step 2: the artifact scan and both verdicts (local git answers first parents and, for the
+    evidence ref's checkpoint-conflict cross-check, ancestry). Returns the marks too: a foreign
+    plan re-runs the cross-check once ``C`` is local (:func:`_checkpoint_usable`)."""
     with _NoDeadline(gh):
         marks, counts = gitstore.scan_marks(gh, git, now_epoch=_epoch(ctx.now),
                                             horizon_days=ctx.conf.continuity_horizon_days,
@@ -506,13 +522,44 @@ def _scan(ctx: _Ctx, gh: object, git: gitstore.Git) -> tuple[gitstore.Continuity
         return parents[0] if parents else None
 
     ev = gitstore.continuity_verdict(ref=EV, tip=git.rev_parse(f"refs/remotes/origin/{EV}"),
-                                     marks=marks, first_parent=first_parent)
+                                     marks=marks, first_parent=first_parent, is_ancestor=git.is_ancestor)
     dv = gitstore.continuity_verdict(ref=DV, tip=git.rev_parse(f"refs/remotes/origin/{DV}"),
                                      marks=marks, first_parent=first_parent)
     ctx.summary.append(f"- continuity: evidence **{ev.verdict}** (tip {_short(ev.tip)}, checkpoint "
                        f"{_short(ev.checkpoint)}) · derived **{dv.verdict}** (tip {_short(dv.tip)}, "
                        f"checkpoint {_short(dv.checkpoint)}) · scan {counts}")
-    return ev, dv, counts
+    if ev.conflicts:
+        _err(f"evidence checkpoint {_short(ev.checkpoint)} does not descend from verified checkpoint(s) "
+             f"{', '.join(_short(x) for x in ev.conflicts)}: a mark-order conflict — it is neither built on, "
+             "derived from nor recoverable to until a human inspects the artifact list")
+    return ev, dv, counts, marks
+
+
+def _checkpoint_usable(git: gitstore.Git, ev: gitstore.Continuity, marks: list) -> tuple[bool, str]:
+    """Can the newest evidence checkpoint ``C`` serve as a derive base / ``recover`` target?
+
+    ``C`` is fetched BY SHA when it is not local (a fresh checkout holds only what the refs
+    reach, so a deleted ref or one forced off ``C``'s history leaves ``C`` unfetched); then the
+    checkpoint-conflict cross-check runs with ``C``'s whole history local — every other verified
+    evidence checkpoint must be an ancestor (one that is not, or is not local after the fetch,
+    is a conflict). ``(False, reason)`` when ``C`` is absent, unfetchable or conflicted."""
+    c = ev.checkpoint
+    if c is None:
+        return False, "no evidence commit to derive from (no checkpoint in the horizon)"
+    if ev.conflicts:
+        return False, f"checkpoint {_short(c)} has a mark-order conflict"
+    if not git.has_commit(c):
+        try:
+            git.fetch(c)
+        except gitstore.GitError:
+            pass
+        if not git.has_commit(c):
+            return False, f"evidence checkpoint {_short(c)} is not fetchable from origin"
+    bad = gitstore.checkpoint_conflicts(ref=EV, checkpoint=c, marks=marks, is_ancestor=git.is_ancestor)
+    if bad:
+        return False, (f"checkpoint {_short(c)} does not descend from verified checkpoint(s) "
+                       f"{', '.join(_short(x) for x in bad)} (a mark-order conflict)")
+    return True, ""
 
 
 def _intent(ctx: _Ctx, ref: str, sha: str, parent: Optional[str]) -> dict:
@@ -538,7 +585,7 @@ def _ref_entry(old: Optional[str], new: Optional[str], changed: bool, dry_run: b
 
 def _emit_plan(ctx: _Ctx, *, mode: str, dry_run: bool, foreign_tip: bool, derive_skipped: bool,
                derived_from: Optional[str], budget_stopped: bool, refs: dict, counts: dict,
-               parents: dict, derive_error: bool = False) -> None:
+               parents: dict, derive_error: bool = False, receipts_error: bool = False) -> None:
     """Step 8: plan.json, the intent files of every ref that would move, summary, outputs."""
     for ref in (EV, DV):
         try:
@@ -551,7 +598,8 @@ def _emit_plan(ctx: _Ctx, *, mode: str, dry_run: bool, foreign_tip: bool, derive
                         _intent(ctx, ref, r["new"], parents.get(ref)))
     plan = {"budget_stopped": budget_stopped, "counts": counts, "derive_error": derive_error,
             "derive_skipped": derive_skipped, "derived_from": derived_from, "dry_run": dry_run,
-            "foreign_tip": foreign_tip, "format": PLAN_FORMAT, "mode": mode, "refs": refs,
+            "foreign_tip": foreign_tip, "format": PLAN_FORMAT, "mode": mode,
+            "receipts_error": receipts_error, "refs": refs,
             "run_attempt": ctx.run_attempt, "run_id": ctx.run_id}
     _write_json(os.path.join(ctx.out_dir, PLAN_FILE), plan)
     ev, dv = refs[EV], refs[DV]
@@ -566,7 +614,8 @@ def _emit_plan(ctx: _Ctx, *, mode: str, dry_run: bool, foreign_tip: bool, derive
         "mode": mode, "dry_run": dry_run, "foreign_tip": foreign_tip,
         "evidence_changed": ev["changed"], "evidence_sha": ev["new"] if ev["changed"] else "",
         "site_changed": dv["changed"], "site_sha": dv["new"] if dv["changed"] else "",
-        "derive_skipped": derive_skipped, "derive_error": derive_error, "budget_stopped": budget_stopped,
+        "derive_skipped": derive_skipped, "derive_error": derive_error, "receipts_error": receipts_error,
+        "budget_stopped": budget_stopped,
     })
 
 
@@ -661,7 +710,7 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
 
     # 2. continuity.
     try:
-        ev, dv, scan_counts = _scan(ctx, gh, git)
+        ev, dv, scan_counts, marks = _scan(ctx, gh, git)
     except github.BudgetExhausted as exc:
         return _noop_plan(ctx, git, mode, dry_run, f"budget stopped before tip continuity could be judged ({exc})")
     if bootstrap and ev.verdict != "bootstrap":
@@ -689,6 +738,7 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
     guard = gitstore.guard_blobs(ctx.repo_dir)
     counts: dict[str, object] = {"requests": 0, "not_modified": 0}
     budget_stopped = False
+    receipts_error = False
     ev_new: Optional[str] = ev.tip
     ev_changed = False
 
@@ -737,6 +787,23 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
                                f"{rp.windows} windows ({rp.skipped_runs} skipped, {rp.in_progress} in progress)")
             for step_name, n in sorted(rp.suspicious.items()):
                 ctx.summary.append(f"- unknown.step ×{n}: `{step_name}`")
+            # Isolated failures (receipts.py "Failure isolation"): reported, the cursors hold at them,
+            # and the workflow's Verdict (receipts) step goes red AFTER this run's evidence lands.
+            if rp.failed or rp.errors:
+                receipts_error = True
+                counts["receipts"]["failed"] = sorted(rp.failed, key=lambda f: (f["workflow"], f["created_at"],
+                                                                                 f["run_id"]))
+                counts["receipts"]["errors"] = sorted(rp.errors, key=lambda e: (e["workflow"], e["window"]))
+                for f in counts["receipts"]["failed"]:
+                    _err(f"receipts: jobs GET for {f['workflow']} run {f['run_id']} failed ({f['error']}); "
+                         "the cursor holds at it and the next pass retries it")
+                    ctx.summary.append(f"- receipts FAILED: {f['workflow']} run {f['run_id']} — {f['error']} "
+                                       "(retried next pass)")
+                for e in counts["receipts"]["errors"]:
+                    _err(f"receipts: listing {e['workflow']} from {e['window']} failed ({e['error']}); "
+                         "its cursor holds at that window and the other workflows were captured")
+                    ctx.summary.append(f"- receipts FAILED: listing {e['workflow']} from {e['window']} — "
+                                       f"{e['error']} (retried next pass)")
 
         # 5. freeze / refreeze.
         if not budget_stopped and ((mode == "harvest" and not receipts_only) or mode == "refreeze"):
@@ -810,13 +877,20 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
     site_changed = False
     derive_error = False
     if not derive_skipped:
-        if derived_from is None:
+        if foreign_tip:
+            # C is fetched by sha when the foreign tip does not reach it (a deleted ref, a force-push
+            # off its history) and cross-checked against every other verified checkpoint.
+            usable, why = _checkpoint_usable(git, ev, marks)
+            if not usable:
+                derive_skipped = True
+                reasons.append(why)
+        elif derived_from is None:
             derive_skipped = True
             reasons.append("no evidence commit to derive from (no checkpoint in the horizon)")
         elif not git.has_commit(derived_from):
             derive_skipped = True
             reasons.append(f"evidence commit {_short(derived_from)} is not local")
-        elif main_sha is None:
+        if not derive_skipped and main_sha is None:
             derive_skipped = True
             reasons.append("main is not local")
     if not derive_skipped:
@@ -875,7 +949,8 @@ def _run_plan(ctx: _Ctx, *, mode: str, inputs: Inputs, bootstrap: bool = False,
     }
     _emit_plan(ctx, mode=mode, dry_run=dry_run, foreign_tip=foreign_tip, derive_skipped=derive_skipped,
                derived_from=derived_from if not derive_skipped else None, budget_stopped=budget_stopped,
-               refs=refs, counts=counts, parents={EV: base, DV: None}, derive_error=derive_error)
+               refs=refs, counts=counts, parents={EV: base, DV: None}, derive_error=derive_error,
+               receipts_error=receipts_error)
     return EXIT_OK
 
 
@@ -1033,7 +1108,7 @@ def cmd_recover(args: argparse.Namespace) -> int:
         gh = make_client(args, ctx.conf, scheduled=False, deadline_epoch=None)
         ctx.summary.append(f"- mode **recover** · now {ctx.now} · run {ctx.run_id}.{ctx.run_attempt}")
         git.fetch_data_refs()
-        ev, dv, _ = _scan(ctx, gh, git)
+        ev, dv, _, marks = _scan(ctx, gh, git)
         if ev.verdict not in ("foreign", "deleted"):
             _err(f"recover refused: the evidence verdict is {ev.verdict} ({ev.reason}); recover runs only "
                  "while the evidence tip fails continuity (foreign or deleted)")
@@ -1045,11 +1120,13 @@ def cmd_recover(args: argparse.Namespace) -> int:
             _write_summary(ctx, "recover")
             return EXIT_FOREIGN_TIP
         c = ev.checkpoint
-        if not git.has_commit(c):
-            git.fetch(c)
-        if not git.has_commit(c):
-            _err(f"recover: checkpoint {c} is not fetchable from origin; push exactly that sha from any "
-                 "clone that holds it (tip == checkpoint is ok)")
+        usable, why = _checkpoint_usable(git, ev, marks)
+        if not usable:
+            if "fetchable" in why:
+                _err(f"recover: checkpoint {c} is not fetchable from origin; push exactly that sha from any "
+                     "clone that holds it (tip == checkpoint is ok)")
+            else:
+                _err(f"recover refused: {why} — the newest checkpoint is not trusted; inspect the artifact list")
             _write_summary(ctx, "recover")
             return EXIT_FOREIGN_TIP
         parents = git.parents(c)

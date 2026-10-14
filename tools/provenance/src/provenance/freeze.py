@@ -58,7 +58,9 @@ capture through ``rawdoc``):
 4. ``/issues/{n}/comments``; 5. ``/pulls/{n}/reviews``; 6. ``/pulls/{n}/comments``;
 7. ``/issues/{n}/timeline``; 8. GraphQL threads (``GraphQLUnavailable`` →
 ``graphql-unavailable``, ``threads.total`` 0, source ``graphql``);
-9. ``/actions/workflows/ci.yml/runs?branch=<head_ref>`` — rows kept when
+9. ``/actions/workflows/ci.yml/runs?branch=<head_ref>`` (a FILTERED list:
+``total_count`` checked against the rows listed; ≥ 1,000 or a mismatch →
+``ci-runs-truncated``) — rows kept when
 ``pull_requests`` holds ``n`` or ``head_sha`` is a PR commit — UNIONED with
 the ingested snapshot listing (``raw/snapshot/<id>/runs/ci.yml.json.gz``,
 same filter) by run id, live winning; 10. ``/commits/{sha}/statuses`` for
@@ -305,6 +307,11 @@ def raw_path(kind: str, key: str, revision: int) -> str:
     return f"raw/{kind}/{text}{suffix}.json.gz"
 
 
+#: GitHub's result cap for a FILTERED runs list (github.py), and the pages it spans.
+CI_RUNS_LIST_CAP = 1000
+CI_RUNS_MAX_PAGES = 11
+
+
 def _captured(run_id: int) -> dict[str, Any]:
     return {"digest": DIGEST_VERSION, "harvester": HARVESTER, "run_id": int(run_id)}
 
@@ -514,8 +521,23 @@ def _capture_pr(gh: GitHubAPI, number: int, *, revision: int, captured: dict[str
 
     live_runs: list[dict[str, Any]] = []
     if head_ref:
-        listed = _items(gh.get_paged("/actions/workflows/ci.yml/runs", {"branch": head_ref},
-                                     key="workflow_runs"), "workflow_runs") or []
+        # A runs list filtered by branch is capped at 1,000 results by GitHub (github.py) — a fork
+        # PR from `main`, or a long-lived reused branch, can exceed it. total_count is compared with
+        # what was listed; a capped or short listing marks the record ``ci-runs-truncated`` and the
+        # rows that did arrive are still unioned with the snapshot and the previous revision (ci_runs
+        # is push evidence for the rounds, so a silent cut could drop rounds).
+        listed: list[Any] = []
+        total: Optional[int] = None
+        try:
+            for items, page_total in gh.iter_pages("/actions/workflows/ci.yml/runs", {"branch": head_ref},
+                                                   key="workflow_runs", max_pages=CI_RUNS_MAX_PAGES):
+                if total is None:
+                    total = page_total
+                listed.extend(items or [])
+        except Truncated:
+            incomplete.add("ci-runs-truncated")
+        if total is not None and (total >= CI_RUNS_LIST_CAP or len(listed) != total):
+            incomplete.add("ci-runs-truncated")
         live_runs = rawdoc.project_runs(r for r in listed if isinstance(r, dict) and _ours(r))
     snap_runs = [r for r in snapshot_runs() or ()
                  if r.get("head_branch") == head_ref and _ours(r)]

@@ -1046,7 +1046,7 @@
    "url": "https://github.com/shaiss/print-bench/pull/510"
   },
   {
-   "after_merge": true,
+   "after_merge": false,
    "edges": {
     "verifies": []
    },

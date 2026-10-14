@@ -52,7 +52,7 @@ drifts. Read the outputs and run §2 accordingly:
 | `concept_preview_tests` | `pytest tools/concept-preview/tests` |
 | `agent_memory_tests` | `pytest tools/agent-memory/tests` |
 | `provenance_tests` | `pytest tools/provenance` |
-| `provenance_read_lens` | `pytest tools/provenance/tests/test_read_lens.py` (the data-ref read lens alone; redundant when `provenance_tests` is true) |
+| `provenance_read_lens` | `pytest tools/provenance/tests/test_read_lens.py` plus the four scan-root pins ci.yml lists (`test_selftest.py::test_check_sh_runs_the_selftest`, `test_conf.py::test_watched_workflows_exist`, `test_freeze.py::test_reeve_mirrors_the_deferral_reasons`, `test_gitstore.py::test_reeve_mirrors_the_mark_order_slack`) — redundant when `provenance_tests` is true |
 
 The classifier already applies everything this section used to spell out by
 hand — the geo/soft-infra split, blast radius (a changed design drags in its
@@ -98,7 +98,11 @@ python -m pytest tools/andon/tests -q                # if andon_tests=true
 python -m pytest tools/concept-preview/tests -q      # if concept_preview_tests=true
 python -m pytest tools/agent-memory/tests -q         # if agent_memory_tests=true
 python -m pytest tools/provenance -q                 # if provenance_tests=true
-python -m pytest tools/provenance/tests/test_read_lens.py -q   # if provenance_read_lens=true (and provenance_tests is not)
+python -m pytest tools/provenance/tests/test_read_lens.py \
+  'tools/provenance/tests/test_selftest.py::test_check_sh_runs_the_selftest' \
+  'tools/provenance/tests/test_conf.py::test_watched_workflows_exist' \
+  'tools/provenance/tests/test_freeze.py::test_reeve_mirrors_the_deferral_reasons' \
+  'tools/provenance/tests/test_gitstore.py::test_reeve_mirrors_the_mark_order_slack' -q   # if provenance_read_lens=true (and provenance_tests is not)
 ```
 
 The `if <output>=true` conditions above are exactly §1's table — read them off

@@ -985,14 +985,24 @@ jobs:
         # (test_workflow.py), the reviewer-posted.sh / coach-lock-check.sh
         # trust-port drift pins and the pinned #843 snapshot's ingest checks —
         # which is why those files re-run this job (scripts/ci-classify.sh).
-        # Read-lens-only mode when just a scan root moved.
+        # Read-lens-only mode when just a scan root moved: the lens plus the
+        # sub-second pins that read files under those roots without being on
+        # the full suite's trigger list (scripts/check.sh's selftest line, the
+        # watched workflows' existence, Reeve's mirrored deferral reasons and
+        # mark-order slack) — so a PR that breaks one fails its own checks,
+        # not the post-merge push. Keep this list in step with the preflight
+        # skill's provenance_read_lens row.
         env:
           FULL_SUITE: ${{ needs.changes.outputs.provenance_tests }}
         run: |
           if [ "$FULL_SUITE" = "true" ]; then
             python -m pytest tools/provenance -q
           else
-            python -m pytest tools/provenance/tests/test_read_lens.py -q
+            python -m pytest tools/provenance/tests/test_read_lens.py \
+              'tools/provenance/tests/test_selftest.py::test_check_sh_runs_the_selftest' \
+              'tools/provenance/tests/test_conf.py::test_watched_workflows_exist' \
+              'tools/provenance/tests/test_freeze.py::test_reeve_mirrors_the_deferral_reasons' \
+              'tools/provenance/tests/test_gitstore.py::test_reeve_mirrors_the_mark_order_slack' -q
           fi
 
   model-registry-tests:

@@ -310,6 +310,18 @@ jobs:
           echo "::error::provenance: derive raised (see the Plan step); evidence was published and checkpointed, provenance-site was not rebuilt"
           exit 1
 
+      - name: Verdict (receipts)
+        # A jobs GET or a runs listing failed after the client's retries (a
+        # persistent 5xx, a 403, a list whose total_count disagreed twice):
+        # receipts.py isolates it to that run / workflow, holds its cursor
+        # there (the next pass retries it) and the plan publishes everything
+        # else. Red after the checkpoints, so one bad run never stalls capture
+        # for every other run and never stays green.
+        if: ${{ !cancelled() && steps.plan.outputs.receipts_error == 'true' }}
+        run: |
+          echo "::error::provenance: the receipts pass could not capture some runs (see the Plan step); everything else was published and checkpointed, and the next pass retries them"
+          exit 1
+
       - name: Summary
         if: always()
         run: |

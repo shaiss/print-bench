@@ -42,7 +42,7 @@ def test_committed_conf_parses_with_decision_9_values():
     assert c.enabled is True
     assert (c.settle_hours, c.max_defer_hours, c.deploy_wait_hours) == (6, 24, 2)
     assert (c.scheduled_max_requests, c.rate_floor) == (400, 500)
-    assert (c.dispatch_max_minutes, c.derive_reserve_minutes) == (330, 1)
+    assert (c.dispatch_max_minutes, c.derive_reserve_minutes) == (330, 8)
     assert c.backfill_since == "2026-07-31"
     assert c.cadence == "29 * * * *"
     assert (c.ambiguity_window_minutes, c.edit_grace_seconds) == (15, 60)
@@ -152,3 +152,18 @@ def test_watched_workflows_exist():
     c = conf.load(str(CONF))
     missing = [w for w in c.watched_workflows if not (REPO / ".github" / "workflows" / w).is_file()]
     assert missing == []
+
+
+def test_reeve_reads_backfill_since_with_the_same_grammar():
+    """Round 2 (low): Reeve's provenance lens parses this conf's backfill_since itself (the tools stay
+    independently installable). Its regex must be this parser's, or a valid YYYY-MM-DDTHH:MM:SSZ
+    commit makes Reeve's armed gather fail daily — both detectors silently "not evaluated". Pinned
+    from this side; scripts/ci-classify.sh re-runs this suite when Reeve's port changes."""
+    import re
+
+    from conftest import REPO
+    from provenance import conf as conf_mod
+    text = (REPO / "tools" / "reeve" / "src" / "reeve" / "provenance.py").read_text(encoding="utf-8")
+    m = re.search(r'^_DATE_RE = re\.compile\(r"([^"]+)"\)$', text, re.MULTILINE)
+    assert m, "tools/reeve/src/reeve/provenance.py lost _DATE_RE"
+    assert m.group(1) == conf_mod._DATE_RE.pattern

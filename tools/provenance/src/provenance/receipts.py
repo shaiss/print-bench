@@ -59,6 +59,22 @@ run whose jobs GET was refused, or the window whose listing was) or the
 oldest incomplete run before it, so the next pass lists exactly what is not
 yet receipted. A workflow that listed no run keeps its cursor.
 
+**Failure isolation** (integration review round 2). A failure that is not a
+budget stop costs only its own run or workflow, never the pass: a jobs GET
+that fails after the client's retries (any :class:`github.APIError` but
+404/410, or :class:`github.Truncated`) is recorded in ``failed`` and treated
+like an incomplete run — the cursor holds at its ``created_at`` so the next
+pass retries it — and the pass continues with the next run; a window whose
+LISTING fails (:class:`github.Truncated` — ``total_count`` disagreeing twice, a
+one-minute window still capped — or an ``APIError``) is recorded in
+``errors``, that workflow's cursor is set to the failing window's start (the
+budget stop's resume rule; never forward past the live cursor on an explicit
+``--since``/``--until`` pass) and the pass continues with the next workflow.
+The CLI reports both, outputs ``receipts_error``, and the workflow's
+``Verdict (receipts)`` step fails the job AFTER the evidence (the ingest, every
+other receipt, the freezes) is published and checkpointed — so one bad run
+can neither stall capture for everyone nor stay green.
+
 **Identity is content** (critique item 19): two receipts are the same when
 their DECOMPRESSED canonical JSON is byte-identical; ``.gz`` bytes are
 storage only (deflate output differs between zlib builds — the runner's and a
@@ -166,6 +182,11 @@ class ReceiptPass:
     suspicious: dict[str, int] = field(default_factory=dict)
     budget_stopped: bool = False
     gone: int = 0
+    #: Runs whose jobs GET failed (not 404/410, not a budget stop): ``{workflow, run_id,
+    #: created_at, error}``, sorted; each holds its workflow's cursor so the next pass retries it.
+    failed: list[dict[str, Any]] = field(default_factory=list)
+    #: Workflows whose listing failed: ``{workflow, window, error}``; cursor held at ``window``.
+    errors: list[dict[str, Any]] = field(default_factory=list)
 
 
 def run_windows(start: str, end: str) -> list[tuple[str, str]]:
@@ -233,7 +254,9 @@ def harvest_receipts(gh: GitHubAPI, *, workflows: tuple[str, ...], cursors: dict
     ``budget_stopped=True`` and cursors that resume exactly where it stopped.
     ``since``/``until`` accept ``YYYY-MM-DD`` (a whole day) or RFC3339 seconds;
     ``end`` is clamped to ``now``. A jobs GET answered 404/410 (the run was
-    deleted between listing and fetching) is counted in ``gone`` and skipped.
+    deleted between listing and fetching) is counted in ``gone`` and skipped;
+    any other failed jobs GET goes to ``failed`` and a failed listing to
+    ``errors`` (module docstring, "Failure isolation") — neither raises.
     """
     rp = ReceiptPass()
     explicit = bool(since or until)
@@ -248,10 +271,16 @@ def harvest_receipts(gh: GitHubAPI, *, workflows: tuple[str, ...], cursors: dict
         incomplete: list[str] = []
         newest: Optional[str] = None
         stop_at: Optional[str] = None
+        listing_failed = False
         try:
             for a, b in run_windows(start, end):
                 stop_at = a
-                runs = list_runs(gh, wf, a, b)
+                try:
+                    runs = list_runs(gh, wf, a, b)
+                except (APIError, Truncated) as exc:
+                    rp.errors.append({"error": _describe(exc), "window": a, "workflow": wf})
+                    listing_failed = True
+                    break
                 rp.windows += 1
                 rp.listed += len(runs)
                 for run in runs:
@@ -271,11 +300,15 @@ def harvest_receipts(gh: GitHubAPI, *, workflows: tuple[str, ...], cursors: dict
                     try:
                         jobs = gh.get_paged(f"/actions/runs/{run['id']}/jobs", {"filter": "all"},
                                             key="jobs")
-                    except APIError as exc:
-                        if getattr(exc, "status", None) in (404, 410):
+                    except (APIError, Truncated) as exc:
+                        if isinstance(exc, APIError) and getattr(exc, "status", None) in (404, 410):
                             rp.gone += 1
                             continue
-                        raise
+                        # Isolated: this run is retried by the next pass (the cursor holds at it).
+                        rp.failed.append({"created_at": created, "error": _describe(exc),
+                                          "run_id": run["id"], "workflow": wf})
+                        incomplete.append(created)
+                        continue
                     doc = build_receipt(wf, run, jobs, SOURCE_LIVE)
                     rp.files[path] = canonical.dumps_gz(doc)
                     if doc["kind"] == "full":
@@ -284,9 +317,17 @@ def harvest_receipts(gh: GitHubAPI, *, workflows: tuple[str, ...], cursors: dict
                         rp.stub += 1
                     for name in doc["suspicious_steps"]:
                         rp.suspicious[name] = rp.suspicious.get(name, 0) + 1
-            stop_at = None
+            if not listing_failed:
+                stop_at = None
         except BudgetExhausted:
             rp.budget_stopped = True
+        if listing_failed and not rp.budget_stopped:
+            resume = min([stop_at] + incomplete)
+            if explicit and old:
+                resume = min(resume, old)       # an explicit pass never moves a cursor forward on a failure
+            if not (resume == start and old is not None and not since):
+                rp.cursors[wf] = resume
+            continue
         if rp.budget_stopped:
             resume = min([stop_at] + incomplete) if stop_at else (min(incomplete) if incomplete else None)
             # Stopped before anything of this workflow was listed: the cursor already says
@@ -300,6 +341,12 @@ def harvest_receipts(gh: GitHubAPI, *, workflows: tuple[str, ...], cursors: dict
         elif newest is not None:
             rp.cursors[wf] = max(newest, old) if (explicit and old) else newest
     return rp
+
+
+def _describe(exc: Exception) -> str:
+    """One short line for a failure record (an ``APIError``/``Truncated`` carries status, method
+    and path only — never a token)."""
+    return f"{type(exc).__name__}: {str(exc).splitlines()[0][:200] if str(exc) else ''}"
 
 
 def load_receipt(data: bytes) -> dict[str, Any]:

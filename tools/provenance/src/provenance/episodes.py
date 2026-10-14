@@ -59,6 +59,15 @@ objects only — so the extractor (which has the raw document) and
 * committed rows (``decision.pm_log``, ``decision.notes_log``,
   ``field_test``, ``changelog``) and ``release`` → ``D:<YYYY-MM-DD>`` (the
   row's date / the publication day);
+* ``job.reviewer`` and ``status.reviewer_signoff`` (:data:`HEAD_SHA_KINDS`:
+  their ``sha`` is the head the reviewer job ran on / the status was posted
+  to) → the round whose ``heads`` hold that sha, ``head_sha`` that round's
+  head — a reviewer job or a ``reviewer-signoff`` status about head X that
+  starts or posts after head Y was pushed judged X's round, not Y's (the
+  audit golden places all 54 + 22 / 58 + 20 / 52 + 20 of them so; the ts
+  rule misplaced 3 + 3 nuggs-vent-cap and 8 + 9 sbc-case ones a round late,
+  unflagged). A sha in no round's ``heads`` (a force-pushed-away head) falls
+  back to the ts rule below;
 * every other PR event → the round whose ``pushed_at`` is the latest one
   ``<= ts`` (a folded regen push never starts a round, so it belongs to its
   round's span), or the FIRST round when ``ts`` precedes every push
@@ -75,7 +84,10 @@ MARKER sha (``review.signoff``, ``triage.verdict``, ``coach.lock`` — the sha
 the marker names) that is not among its round's ``heads`` (NVC-8: Drik's
 sign-off naming ``9a751b26`` lands in ``R:636:f4e36eb9``); false for every
 other event. ``after_merge`` = ``merged_at`` is set and ``ts > merged_at``
-(the event stays in its live round).
+for an event kept in a live round (it stays there); never for an
+``M:<pr>``-only kind (:data:`MERGE_KINDS` — a production deploy follows the
+merge by definition, so the flag would only be noise on the very loose ends
+it exists to surface).
 
 **verifies** (:func:`verifies_edges`, ``review.signoff`` only): the
 ``commit.design``/``commit.fix``/``commit.human`` shas after the previous
@@ -178,6 +190,9 @@ REGEN_TRAILER = "Preview-Diff"
 
 #: Kinds whose ``sha`` is the sha a marker names (``stale_sha`` reads them).
 MARKER_SHA_KINDS = frozenset({"review.signoff", "triage.verdict", "coach.lock"})
+#: Kinds whose ``sha`` is the PR head they ran on / were posted to: placed in the round whose
+#: ``heads`` hold it (module docstring), the ts rule only as the fallback.
+HEAD_SHA_KINDS = frozenset({"job.reviewer", "status.reviewer_signoff"})
 #: Kinds that live in the merge episode of their PR.
 MERGE_KINDS = frozenset({"pr.merged", "pr.closed", "deploy.production"})
 #: Committed-row kinds (day episodes) and the release (its publication day).
@@ -355,9 +370,14 @@ def assign(event: dict[str, Any], rounds_: list[Round], *, pr: Optional[int],
         holder = next((r for r in rounds_ if event.get("sha") in r.commits), None)
         if holder is not None:
             return Placement(holder.id, _group_head(holder, event["sha"]), False, after_merge)
+    if kind in HEAD_SHA_KINDS and event.get("sha"):
+        holder = next((r for r in rounds_ if event["sha"] in r.heads), None)
+        if holder is not None:
+            return Placement(holder.id, holder.head, False, after_merge)
     live = _live_round(rounds_, ts)
     if kind in MERGE_KINDS or not rounds_:
-        return Placement(f"M:{pr}", live.head if live else None, False, after_merge)
+        return Placement(f"M:{pr}", live.head if live else None, False,
+                         after_merge and kind not in MERGE_KINDS)
     target = live if live is not None else rounds_[0]
     sha = event.get("sha")
     stale = kind in MARKER_SHA_KINDS and sha is not None and sha not in target.heads

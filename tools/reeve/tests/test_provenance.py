@@ -33,20 +33,53 @@ E_C, E_FORGED, S_C = "43" * 20, "46" * 20, "44" * 20
 
 # --- the shared continuity table, row for row ---------------------------------
 
+def _walk_is_ancestor(parents, limit=64):
+    """The table's ``is_ancestor``: a first-parent walk over its ``parents`` map (the evidence ref
+    is linear) — the same walk as tools/provenance's ``gitstore.parents_is_ancestor``."""
+    def is_ancestor(a, d):
+        sha = d
+        for _ in range(limit):
+            if sha == a:
+                return True
+            sha = parents.get(sha)
+            if sha is None:
+                return False
+        return False
+    return is_ancestor
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
 def test_continuity_port_agrees_with_the_shared_table(case):
     kw = {"max_chain": case["max_chain"]} if "max_chain" in case else {}
     v = provenance.continuity_verdict(ref=case["ref"], tip=case["tip"], marks=case["marks"],
-                                      first_parent=lambda s: case["parents"].get(s), **kw)
+                                      first_parent=lambda s: case["parents"].get(s),
+                                      is_ancestor=_walk_is_ancestor(case["parents"]), **kw)
     assert v["verdict"] == case["expect"], v["reason"]
     if "chain" in case:
         assert v["chain"] == case["chain"]
+    assert v["conflicts"] == case.get("conflicts", [])
 
 
 def test_shared_table_covers_every_verdict_and_both_refs():
     assert {c["expect"] for c in CASES} == set(provenance.VERDICTS)
     assert {c["ref"] for c in CASES} == set(provenance.REFS)
-    assert len(CASES) >= 23
+    assert len(CASES) >= 31
+    # The id-inversion rows and the conflict rows are present (round 2: upload-time order).
+    names = {c["name"] for c in CASES}
+    assert {"upload-order-beats-artifact-id-genuine-newer-tip", "foreign-rollback-to-a-higher-id-older-checkpoint",
+            "foreign-checkpoint-order-conflict"} <= names
+
+
+def test_port_orders_by_upload_time_not_artifact_id():
+    """The measured inversion replayed with id order flips the verdict — the rows cannot pass by accident."""
+    for name, want in (("upload-order-beats-artifact-id-genuine-newer-tip", "ok"),
+                       ("foreign-rollback-to-a-higher-id-older-checkpoint", "foreign")):
+        case = next(c for c in CASES if c["name"] == name)
+        assert provenance.continuity_verdict(ref=case["ref"], tip=case["tip"], marks=case["marks"],
+                                             first_parent=case["parents"].get)["verdict"] == want
+        by_id = [dict(m, created=m["seq"]) for m in case["marks"]]
+        assert provenance.continuity_verdict(ref=case["ref"], tip=case["tip"], marks=by_id,
+                                             first_parent=case["parents"].get)["verdict"] != want
 
 
 def test_port_refuses_an_unknown_ref():
@@ -65,8 +98,9 @@ def test_mark_names_parse_and_refuse():
 
 # --- the two detectors (pure) ----------------------------------------------------
 
-def mark(seq, kind, ref, sha, run_id=1000):
-    return {"seq": seq, "kind": kind, "ref": ref, "sha": sha, "run_id": run_id}
+def mark(seq, kind, ref, sha, run_id=1000, created=None):
+    return {"seq": seq, "created": 1786860000 + seq if created is None else created, "kind": kind,
+            "ref": ref, "sha": sha, "run_id": run_id}
 
 
 def block(**over):
@@ -276,6 +310,22 @@ def test_conf_reader_refuses_rather_than_defaulting(text, pattern):
         provenance.read_conf(text)
 
 
+@pytest.mark.parametrize("value,ok", [
+    ("2026-07-31", True), ("2026-07-31T00:00:00Z", True), ("2026-07-31T12:34:56Z", True),
+    ("2026-07-31T00:00:00", False), ("2026-07-31T25:00:00Z", False), ("2026-07-31 00:00:00Z", False),
+])
+def test_conf_reader_accepts_exactly_the_harvester_s_backfill_grammar(value, ok):
+    """Round 2 (low): tools/provenance's conf accepts backfill_since as YYYY-MM-DD[THH:MM:SSZ]; Reeve's
+    reader must accept the same set, or a valid timestamp-form commit blinds both detectors (the armed
+    gather would fail on every run). The harvester's suite pins the two regexes equal."""
+    text = _CONF_OK.replace("2026-07-31", value)
+    if ok:
+        assert provenance.read_conf(text)["backfill_since"] == value
+    else:
+        with pytest.raises(ValueError, match=r"YYYY-MM-DD\[THH:MM:SSZ\]"):
+            provenance.read_conf(text)
+
+
 @pytest.mark.parametrize("enabled,variable,expected", [
     (True, "true", True), (True, "TRUE", True), (True, "True", True),
     (True, " true", False), (True, "1", False), (True, "", False), (True, None, False),
@@ -318,6 +368,7 @@ def _art(aid, name, run_id, branch="main", created="2026-08-16T05:30:00Z"):
 
 
 MAIN_SHA, TAG_SHA = "e1" * 20, "7a" * 20
+T0530 = int(datetime(2026, 8, 16, 5, 30, tzinfo=timezone.utc).timestamp())   # _art's default created_at
 
 
 def _compare(sha):
@@ -395,8 +446,9 @@ def test_gather_armed_reads_the_closed_set_of_endpoints(monkeypatch):
                             now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
     assert out["armed"] is True
     assert out["tips"] == {"provenance": E_FORGED, "provenance-site": S_C}
-    assert out["marks"] == [mark(17, "tip", "provenance-site", S_C, 80),
-                            mark(16, "tip", "provenance", E_C, 80)]
+    assert out["marks"] == [mark(17, "tip", "provenance-site", S_C, 80, T0530),
+                            mark(16, "tip", "provenance", E_C, 80, T0530)]
+    assert out["ancestry"] == {}                    # a foreign tip asks no ancestry question
     assert out["scan"] == {"pages": 1, "runs_verified": 1, "marks_rejected": 2}
     assert out["parents"] == {}                     # the forged tip is not a declared intent
     assert out["frozen_prs"] == [371, 636]
@@ -410,7 +462,7 @@ def test_gather_armed_reads_the_closed_set_of_endpoints(monkeypatch):
     allowed = re.compile(
         r"https://api\.github\.com/repos/o/r/(git/ref/heads/(provenance|provenance-site)"
         r"|actions/artifacts\?per_page=100|actions/runs/[0-9]+|git/commits/[0-9a-f]{40}"
-        r"|compare/[0-9a-f]{40}\.\.\.main\?per_page=1"
+        r"|compare/[0-9a-f]{40}\.\.\.(main|[0-9a-f]{40})\?per_page=1"
         r"|git/trees/[0-9a-f]{40}|git/blobs/[0-9a-f]{40}|contents/state\.json\?ref=[0-9a-f]{40}"
         r"|pulls\?state=closed&sort=updated&direction=desc&per_page=100)")
     assert seen and all(allowed.fullmatch(u) for u in seen), seen
@@ -472,6 +524,7 @@ def test_gather_rejects_marks_of_a_run_dispatched_on_a_tag_named_main(monkeypatc
             w[_compare(TAG_SHA)] = {"status": status}
         w[_api(f"/contents/state.json?ref={forged}")] = w.pop(_api(f"/contents/state.json?ref={E_FORGED}"))
         w[_api(f"/git/commits/{forged}")] = w.pop(_api(f"/git/commits/{E_FORGED}"))
+        w[_api(f"/compare/{E_C}...{forged}?per_page=1")] = {"status": "ahead"}   # forged sits on E_C
         return w
 
     def run(status):
@@ -490,8 +543,55 @@ def test_gather_rejects_marks_of_a_run_dispatched_on_a_tag_named_main(monkeypatc
             ("provenance", "foreign")], status
     for status in ("ahead", "identical"):                                  # negative controls
         out, _ = run(status)
-        assert out["marks"][0] == mark(30, "tip", "provenance", forged, 81), status
+        assert out["marks"][0] == mark(30, "tip", "provenance", forged, 81, T0530), status
         assert provenance.foreign_tip(out) == [], status
+
+
+def test_gather_orders_marks_by_upload_time_across_an_id_inversion(monkeypatch):
+    """Round 2 (high), Reeve's half: the OLDER checkpoints carry the HIGHER artifact ids and fill page
+    1; the genuine newer ones (lower ids) sit on page 2. Stopping at the first verified tip per ref (the
+    old rule) anchored on page 1's and called the genuine tip foreign. The scan now reads on until an
+    artifact 6 h older than the newest tips is seen, never requests page 3, and the genuine tip is ok."""
+    world = _world()
+    old_e, old_s = "61" * 20, "63" * 20
+    world[_api("/git/ref/heads/provenance")] = {"object": {"sha": E_C}}
+    world[_api(f"/contents/state.json?ref={E_C}")] = world.pop(_api(f"/contents/state.json?ref={E_FORGED}"))
+    world[_api(f"/git/commits/{E_C}")] = world.pop(_api(f"/git/commits/{E_FORGED}"))
+    world[_api(f"/compare/{old_e}...{E_C}?per_page=1")] = {"status": "ahead"}
+    page1 = {"artifacts": [_art(900, f"tip-provenance-site-{old_s}", 80, created="2026-08-16T03:00:01Z"),
+                           _art(899, f"tip-provenance-{old_e}", 80, created="2026-08-16T03:00:00Z")]}
+    page2 = {"artifacts": [_art(17, f"tip-provenance-site-{S_C}", 80, created="2026-08-16T05:30:00Z"),
+                           _art(16, f"tip-provenance-{E_C}", 80, created="2026-08-16T05:30:00Z"),
+                           _art(15, "stls", 79, created="2026-08-15T20:00:00Z")]}
+    p2, p3 = _api("/actions/artifacts?per_page=100&page=2"), _api("/actions/artifacts?per_page=100&page=3")
+    pages = {_api("/actions/artifacts?per_page=100"): (page1, f'<{p2}>; rel="next"'),
+             p2: (page2, f'<{p3}>; rel="next"'),
+             p3: ({"artifacts": [_art(1, f"tip-provenance-{'98' * 20}", 80)]}, "")}
+    seen: list[str] = []
+
+    def fake(url, token):
+        seen.append(url)
+        if url in pages:
+            return copy.deepcopy(pages[url][0]), pages[url][1]
+        if url in world:
+            return copy.deepcopy(world[url]), ""
+        raise _NotFound(url)
+
+    monkeypatch.setattr(github, "_get", fake)
+    out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true",
+                            now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
+    assert out["scan"]["pages"] == 2 and p3 not in seen
+    assert [m["sha"] for m in out["marks"]][:2] == [S_C, E_C]
+    assert out["ancestry"] == {f"{old_e}...{E_C}": True}
+    assert provenance.foreign_tip(out) == []
+    # The clock-free cross-check, Reeve's side: GitHub says E_C does NOT descend from old_e.
+    world[_api(f"/compare/{old_e}...{E_C}?per_page=1")] = {"status": "diverged"}
+    seen.clear()
+    out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true",
+                            now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
+    found = provenance.foreign_tip(out)
+    assert [(f["ref"], f["verdict"]) for f in found] == [("provenance", "foreign")]
+    assert "mark-order conflict" in found[0]["reason"]
 
 
 def test_artifact_page_cap_is_derived_from_the_horizon():

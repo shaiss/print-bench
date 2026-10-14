@@ -11,9 +11,14 @@ detectors, and every read they need lives here, so the #646 read lens
   so it is mirrored, not imported), and ``tests/test_provenance.py`` runs it
   over every row of the ONE shared table,
   ``tools/provenance/tests/fixtures/continuity_cases.json`` — the two
-  implementations cannot drift apart without one suite going red.
-  ``foreign``, ``deleted`` and ``unanchored`` are findings; once armed, so is
-  ``bootstrap`` (an absent ref the harvester has never published).
+  implementations cannot drift apart without one suite going red. Marks order
+  by UPLOAD TIME (:func:`mark_order`: the artifact's ``created_at``, the id
+  only for a same-second tie — artifact ids are not monotonic in upload
+  time), and the evidence verdict carries the harvester's clock-free
+  cross-check (:func:`checkpoint_conflicts`, ancestry answered by ``GET
+  /compare/{other}...{C}``). ``foreign``, ``deleted`` and ``unanchored`` are
+  findings; once armed, so is ``bootstrap`` (an absent ref the harvester has
+  never published).
 * ``provenance-lag`` — (a) the oldest pending unit in the evidence ref's
   ``state.json`` past its anchor + ``provenance_lag_hours``: the anchor is
   ``due_at``, or ``defer_until`` for a unit LEGITIMATELY deferred (every
@@ -44,9 +49,13 @@ and gathered, an absent ref is a finding, never a skip.
 
 **The reads** (all GET, through ``github._get`` — the package's one network
 seam, so the tests monkeypatch it and nothing leaves the process): the two
-tips (``/git/ref/heads/<ref>``); the repo-wide artifact list, newest first,
-until each ref has a verified checkpoint or the horizon passes (bounded by
-:func:`max_artifact_pages`, derived from the horizon); each candidate mark's
+tips (``/git/ref/heads/<ref>``); the repo-wide artifact list in the API's
+(artifact-id) order until each ref has a verified checkpoint AND an artifact
+:data:`MARK_ORDER_SLACK_SECONDS` older than the oldest of those has been
+seen, or the horizon passes (bounded by :func:`max_artifact_pages`, derived
+from the horizon); the ancestry of each other verified evidence checkpoint
+against the newest (``/compare/{other}...{C}``, only on an otherwise-``ok``
+verdict); each candidate mark's
 run (``/actions/runs/{id}``: ``path``, ``event``, ``head_branch``,
 ``head_sha``) and that run's commit on the default branch
 (``/compare/{head_sha}...{default}``); the first parents a continuity walk
@@ -117,8 +126,13 @@ STALL_SHOWN = 10
 #: Length cap of a gather-failure reason (the report's "not evaluated" line).
 ERROR_SHOWN = 200
 
+#: tools/provenance's ``gitstore.MARK_ORDER_SLACK_SECONDS``, mirrored: the bound on how much
+#: older a lower-id artifact may be than a higher-id one (worst measured: 3,843 s).
+MARK_ORDER_SLACK_SECONDS = 6 * 3600
+
 _SHA40_RE = re.compile(r"[0-9a-f]{40}")
-_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+#: The harvester conf's ``backfill_since`` grammar, exactly tools/provenance's ``conf._DATE_RE``.
+_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)?")
 _RAW_PR_RE = re.compile(r"([1-9][0-9]{0,6})(?:\.r[0-9]{1,4})?\.json\.gz")
 _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 
@@ -141,37 +155,70 @@ def parse_mark_name(name: str) -> Optional[tuple[str, str, str]]:
     return None
 
 
+def mark_order(m: dict[str, Any]) -> tuple[int, int]:
+    """Marks order by ``(created, seq)`` — upload time first, the artifact id only for a tie
+    (tools/provenance's ``gitstore.mark_order``)."""
+    return (int(m["created"]), int(m["seq"]))
+
+
+def checkpoint_conflicts(*, ref: str, checkpoint: str, marks: Iterable[dict[str, Any]],
+                         is_ancestor: Callable[[str, str], Optional[bool]]) -> list[str]:
+    """The verified evidence checkpoints ``checkpoint`` neither equals nor descends from, sorted
+    (``gitstore.checkpoint_conflicts``; anything but ``True`` from ``is_ancestor`` is a conflict;
+    the parentless derived ref is never checked)."""
+    if ref != EVIDENCE_REF:
+        return []
+    others = sorted({m["sha"] for m in marks
+                     if m.get("ref") == ref and m.get("kind") == "tip" and m["sha"] != checkpoint})
+    return [x for x in others if is_ancestor(x, checkpoint) is not True]
+
+
 def continuity_verdict(*, ref: str, tip: Optional[str], marks: Iterable[dict[str, Any]],
                        first_parent: Callable[[str], Optional[str]],
+                       is_ancestor: Optional[Callable[[str, str], Optional[bool]]] = None,
                        max_chain: int = 24) -> dict[str, Any]:
     """The tip-continuity rule — a port of tools/provenance's ``gitstore.continuity_verdict``.
 
-    ``marks`` are VERIFIED marks (``{seq, kind, ref, sha, run_id}``) within the horizon;
-    ``first_parent(sha)`` answers the evidence chain walk. Returns ``{ref, verdict, tip,
-    checkpoint, chain, reason}``; ``verdict`` is one of :data:`VERDICTS`.
+    ``marks`` are VERIFIED marks (``{seq, created, kind, ref, sha, run_id}``) within the horizon,
+    ordered by :func:`mark_order`; ``first_parent(sha)`` answers the evidence chain walk;
+    ``is_ancestor`` (``None`` skips it) runs :func:`checkpoint_conflicts` on an otherwise-``ok``
+    evidence verdict. Returns ``{ref, verdict, tip, checkpoint, chain, conflicts, reason}``;
+    ``verdict`` is one of :data:`VERDICTS`.
     """
     if ref not in REFS:
         raise ValueError(f"unknown ref {ref!r}")
 
-    def out(verdict: str, checkpoint: Optional[str], chain: Iterable[str], reason: str) -> dict:
+    def out(verdict: str, checkpoint: Optional[str], chain: Iterable[str], reason: str,
+            conflicts: Iterable[str] = ()) -> dict:
         return {"ref": ref, "verdict": verdict, "tip": tip, "checkpoint": checkpoint,
-                "chain": list(chain), "reason": reason}
+                "chain": list(chain), "conflicts": list(conflicts), "reason": reason}
 
     mine = [m for m in marks if m.get("ref") == ref]
-    tips = sorted((m for m in mine if m.get("kind") == "tip"), key=lambda m: m["seq"], reverse=True)
+    tips = sorted((m for m in mine if m.get("kind") == "tip"), key=mark_order, reverse=True)
     if not tips:
         if tip is None:
             return out("bootstrap", None, (), "ref absent, no checkpoint in the horizon")
         return out("unanchored", None, (), "no checkpoint in the horizon")
     c = tips[0]
+
+    def accept(chain: Iterable[str], reason: str) -> dict:
+        bad = (checkpoint_conflicts(ref=ref, checkpoint=c["sha"], marks=mine, is_ancestor=is_ancestor)
+               if is_ancestor is not None else [])
+        if bad:
+            return out("foreign", c["sha"], chain,
+                       f"newest checkpoint {c['sha'][:8]} does not descend from verified checkpoint "
+                       f"{bad[0][:8]}" + (f" (+{len(bad) - 1} more)" if len(bad) > 1 else "")
+                       + " — a mark-order conflict", bad)
+        return out("ok", c["sha"], chain, reason)
+
     if tip is None:
         return out("deleted", c["sha"], (), f"ref absent; newest checkpoint {c['sha'][:8]}")
     if tip == c["sha"]:
-        return out("ok", c["sha"], (), "tip is the newest checkpoint")
-    newer = {m["sha"] for m in mine if m.get("kind") == "intent" and m["seq"] > c["seq"]}
+        return accept((), "tip is the newest checkpoint")
+    newer = {m["sha"] for m in mine if m.get("kind") == "intent" and mark_order(m) > mark_order(c)}
     if ref == DERIVED_REF:
         if tip in newer:
-            return out("ok", c["sha"], (tip,), "declared after the newest checkpoint")
+            return accept((tip,), "declared after the newest checkpoint")
         return out("foreign", c["sha"], (),
                    f"{tip[:8]} is neither checkpoint {c['sha'][:8]} nor declared after it")
     chain: list[str] = []
@@ -183,8 +230,7 @@ def continuity_verdict(*, ref: str, tip: Optional[str], marks: Iterable[dict[str
         chain.append(sha)
         parent = first_parent(sha)
         if parent == c["sha"]:
-            return out("ok", c["sha"], chain,
-                       f"{len(chain)} declared commit(s) on checkpoint {c['sha'][:8]}")
+            return accept(chain, f"{len(chain)} declared commit(s) on checkpoint {c['sha'][:8]}")
         if parent is None:
             break
         sha = parent
@@ -229,7 +275,7 @@ def read_conf(text: str, where: str = CONF_PATH) -> dict[str, Any]:
             raise ValueError(f"{where}: {key!r} must be a non-negative integer")
         out[key] = int(found[key])
     if not _DATE_RE.fullmatch(found["backfill_since"]) or _ts(found["backfill_since"]) is None:
-        raise ValueError(f"{where}: 'backfill_since' must be a YYYY-MM-DD date")
+        raise ValueError(f"{where}: 'backfill_since' must be YYYY-MM-DD[THH:MM:SSZ]")
     out["backfill_since"] = found["backfill_since"]
     return out
 
@@ -250,10 +296,13 @@ def foreign_tip(block: dict[str, Any]) -> list[dict[str, Any]]:
     """``provenance-foreign-tip`` findings: every ref whose verdict is not ``ok``."""
     parents = block.get("parents") or {}
     marks = block.get("marks") or []
+    # The gather recorded every ancestry answer the evidence verdict asked for ("<a>...<d>").
+    ancestry = block.get("ancestry")
+    is_ancestor = (lambda a, d: ancestry.get(f"{a}...{d}")) if isinstance(ancestry, dict) else None
     findings = []
     for ref in REFS:
         v = continuity_verdict(ref=ref, tip=(block.get("tips") or {}).get(ref), marks=marks,
-                               first_parent=parents.get)
+                               first_parent=parents.get, is_ancestor=is_ancestor)
         if v["verdict"] == "ok":
             continue
         findings.append({"ref": ref, "verdict": v["verdict"],
@@ -383,12 +432,19 @@ def _on_default_branch(repo: str, token: str, sha: str, default_branch: str,
 
 def _scan_marks(repo: str, token: str, *, now: datetime, horizon_days: int,
                 default_branch: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Verified marks, newest first by :func:`mark_order`, from the artifact list (module
+    docstring): pages in the API's artifact-id order — NOT upload order — until every ref has a
+    verified tip and an artifact :data:`MARK_ORDER_SLACK_SECONDS` older than the oldest of those
+    refs' newest tips has been seen (so nothing unread can be newer), the horizon passes, or the
+    list ends (tools/provenance's ``gitstore.scan_marks``)."""
     horizon = now - timedelta(days=horizon_days)
     max_pages = max_artifact_pages(horizon_days)
     marks: list[dict[str, Any]] = []
     runs: dict[int, bool] = {}
     reach: dict[str, bool] = {}
     counts = {"pages": 0, "runs_verified": 0, "marks_rejected": 0}
+    newest_tip: dict[str, dict[str, Any]] = {}
+    oldest_seen: Optional[datetime] = None
     url: Optional[str] = _api(repo, "/actions/artifacts?per_page=100")
     while url:
         counts["pages"] += 1
@@ -403,11 +459,13 @@ def _scan_marks(repo: str, token: str, *, now: datetime, horizon_days: int,
         past_horizon = False
         for art in items:
             created = _ts(art.get("created_at") or "")
+            if created is not None:
+                oldest_seen = created if oldest_seen is None else min(oldest_seen, created)
             if created is not None and created < horizon:
                 past_horizon = True
                 continue
             parsed = parse_mark_name(art.get("name") or "")
-            if parsed is None:
+            if parsed is None or created is None:
                 continue
             wr = art.get("workflow_run") or {}
             run_id = wr.get("id")
@@ -429,18 +487,23 @@ def _scan_marks(repo: str, token: str, *, now: datetime, horizon_days: int,
                 counts["marks_rejected"] += 1
                 continue
             kind, ref, sha = parsed
-            marks.append({"seq": int(art["id"]), "kind": kind, "ref": ref, "sha": sha,
-                          "run_id": run_id})
-        have = {m["ref"] for m in marks if m["kind"] == "tip"}
-        if past_horizon or have >= set(REFS):
+            m = {"seq": int(art["id"]), "created": int(created.timestamp()), "kind": kind, "ref": ref,
+                 "sha": sha, "run_id": run_id}
+            marks.append(m)
+            if kind == "tip" and (ref not in newest_tip or mark_order(m) > mark_order(newest_tip[ref])):
+                newest_tip[ref] = m
+        settled = (set(newest_tip) >= set(REFS) and oldest_seen is not None
+                   and oldest_seen.timestamp() + MARK_ORDER_SLACK_SECONDS
+                   < min(newest_tip[r]["created"] for r in REFS))
+        if past_horizon or settled:
             break
-        m = _LINK_NEXT_RE.search(link or "")
-        url = m.group(1) if m else None
+        m_next = _LINK_NEXT_RE.search(link or "")
+        url = m_next.group(1) if m_next else None
         if url is not None and not url.startswith(_api(repo, "/")):
             # The token rides on every request: never follow a next link off this repo's API.
             raise RuntimeError("artifact-list next link points off api.github.com/repos/"
                                f"{repo} — refusing to follow it")
-    marks.sort(key=lambda m: m["seq"], reverse=True)
+    marks.sort(key=mark_order, reverse=True)
     return marks, counts
 
 
@@ -499,7 +562,8 @@ def gather(repo: str, token: str, *, root: str = ".", variable: Optional[str] = 
 
     Disarmed → ``{"armed": false, "reason": …}`` with NO request sent and the conf read
     only when the variable arms it. Armed → the tips, the verified marks (newest first),
-    the first parents the continuity walk asked for, the scan counts, ``state.json``'s
+    the first parents the continuity walk asked for, the ancestry answers its checkpoint
+    cross-check asked for (``"<a>...<d>": bool``), the scan counts, ``state.json``'s
     pending / skipped, the frozen PR numbers and one closed-PR page. Any failure once the
     variable arms it → ``{"armed": true, "error": <one defused line>}``: both detectors then
     read "not evaluated" with that reason and every other detector still reports."""
@@ -533,7 +597,18 @@ def _gather_armed(repo: str, token: str, *, root: str, variable: str, now: Optio
         parents[sha] = _first_parent(repo, token, sha, memo)
         return parents[sha]
 
-    continuity_verdict(ref=EVIDENCE_REF, tip=tips[EVIDENCE_REF], marks=marks, first_parent=walk)
+    ancestry: dict[str, bool] = {}
+
+    def is_ancestor(a: str, d: str) -> bool:
+        # GET /compare/{a}...{d}: "identical" or "ahead" (d is a's descendant) — recorded so the
+        # pure detector replays exactly these answers.
+        if f"{a}...{d}" not in ancestry:
+            body = _get_or_none(_api(repo, f"/compare/{a}...{d}?per_page=1"), token)
+            ancestry[f"{a}...{d}"] = isinstance(body, dict) and body.get("status") in ON_BRANCH_STATUSES
+        return ancestry[f"{a}...{d}"]
+
+    continuity_verdict(ref=EVIDENCE_REF, tip=tips[EVIDENCE_REF], marks=marks, first_parent=walk,
+                       is_ancestor=is_ancestor)
     evidence = tips[EVIDENCE_REF]
     state = _state(repo, token, evidence) if evidence else {}
     frozen = _frozen_prs(repo, token, evidence, memo) if evidence else []
@@ -547,5 +622,5 @@ def _gather_armed(repo: str, token: str, *, root: str, variable: str, now: Optio
             "conf": {"settle_hours": conf["settle_hours"],
                      "max_defer_hours": conf["max_defer_hours"],
                      "backfill_since": conf["backfill_since"]},
-            "tips": tips, "marks": marks, "parents": parents, "scan": counts,
+            "tips": tips, "marks": marks, "parents": parents, "ancestry": ancestry, "scan": counts,
             "state": state, "frozen_prs": frozen, "closed_prs": closed}

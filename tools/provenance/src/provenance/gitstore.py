@@ -14,9 +14,10 @@ tree: PR objects are read with ``show`` / ``merge-tree --write-tree`` only.
 (:meth:`Git.fetch_all`): both data refs and ``+refs/pull/*/head:refs/remotes/
 pull/*/head`` (the repository is public, so an anonymous fetch reads every
 PR head; with ``persist-credentials: false`` no credential exists to send).
-Nothing fetches after that — derive reads only what is local, so its answer
-is a pure function of (evidence, main, the fetched PR-ref set) (critique
-item 9). The bulk PR-head fetch is bounded by the repository's total object
+Nothing else fetches after that — except, when the evidence tip failed
+continuity, the newest checkpoint ``C`` by sha (``recover``, and a foreign
+plan's derive base) — so derive's answer is a pure function of (evidence,
+main, the fetched PR-ref set) (critique item 9). The bulk PR-head fetch is bounded by the repository's total object
 size (268 MB on 2026-10-14, most of it already in the ``fetch-depth: 0``
 checkout); P2 measures its real cost. If it FAILS the run still publishes
 evidence but publishes no derived tree (fail closed: ``derive_skipped``).
@@ -81,24 +82,46 @@ Every harvest job uploads small artifacts named by :func:`mark_name`:
 sha is harmless), and ``tip-<ref>-<sha40>`` — the CHECKPOINT — after every
 successful publish, including a no-op one, naming the verified current tip.
 :func:`scan_marks` reads them from ``GET /actions/artifacts`` (repo-wide,
-newest first; measured ~70 artifacts/day, so one page usually reaches the
-newest checkpoint), keeping only marks whose run is verified as a
-default-branch harvester run (``path == .github/workflows/provenance.yml``,
-``event`` ∈ {schedule, workflow_dispatch}, ``head_branch == main``,
-``head_sha`` on main's first-parent history), within
-``continuity_horizon_days`` (90 — artifact retention). The decision itself
-is the PURE :func:`continuity_verdict` (implemented here; Reeve's
-``provenance-foreign-tip`` ports it, and both suites run the shared table
-``tests/fixtures/continuity_cases.json`` so the two cannot drift):
+listed in artifact-id order, newest first; measured ~70 artifacts/day, so one
+page usually reaches the newest checkpoint), keeping only marks whose run is
+verified as a default-branch harvester run (``path ==
+.github/workflows/provenance.yml``, ``event`` ∈ {schedule,
+workflow_dispatch}, ``head_branch == main``, ``head_sha`` on main's
+first-parent history), within ``continuity_horizon_days`` (90 — artifact
+retention).
+
+**Order is upload time, not artifact id.** Artifact ids are NOT monotonic in
+upload time: of 817 small artifacts measured GET-only (2026-08-31 →
+2026-10-14), 45 were uploaded ≥ 30 min before some lower-id artifact and the
+worst inversion was 3,843 s. Ordering by id let a genuine newer tip read
+foreign and a rollback to an older, higher-id checkpoint read ok. Marks
+therefore order by :func:`mark_order` = ``(created, seq)`` — the artifact's
+``created_at`` (its upload time, 1 s resolution) first, the id only to break a
+same-second tie — and the scan does not stop at the first tip in list order:
+it pages on until every needed ref has a verified tip AND the oldest artifact
+seen is more than :data:`MARK_ORDER_SLACK_SECONDS` (6 h, well above the
+measured 64 min) older than the oldest of those newest tips, so no unread
+(lower-id) artifact can be newer than them. For the evidence ref a clock-free
+cross-check backs the clock: the ref is fast-forward-only, so the newest
+checkpoint ``C`` must equal or descend from every other verified evidence
+checkpoint read (:func:`checkpoint_conflicts`, ``is_ancestor`` = ``git
+merge-base --is-ancestor``); one that it does not descend from makes the
+verdict **foreign** with ``conflicts`` naming it.
+
+The decision itself is the PURE :func:`continuity_verdict` (implemented here;
+Reeve's ``provenance-foreign-tip`` ports it, and both suites run the shared
+table ``tests/fixtures/continuity_cases.json`` so the two cannot drift):
 
 * **ok** — the tip IS the newest checkpoint ``C``, or (evidence) its
   first-parent chain reaches ``C`` through shas that are each a declared
   intent uploaded AFTER ``C`` (a run that pushed and died before
-  checkpointing), or (derived) it is such an intent. Counting checkpoints,
-  not runs, is what keeps a quiet day — or a disarmed week — from expiring
-  the evidence of the live tip (the old "last 20 runs" window did).
-* **foreign** — present but not accepted: a forged commit, or a ROLLBACK to an
-  older declared sha (monotonic: only the newest checkpoint anchors).
+  checkpointing), or (derived) it is such an intent; and (evidence, when
+  ``is_ancestor`` is given) ``C`` has no checkpoint conflict. Counting
+  checkpoints, not runs, is what keeps a quiet day — or a disarmed week — from
+  expiring the evidence of the live tip (the old "last 20 runs" window did).
+* **foreign** — present but not accepted: a forged commit, a ROLLBACK to an
+  older declared sha (monotonic in upload time: only the newest checkpoint
+  anchors), or (evidence) a checkpoint order conflict.
 * **deleted** — absent while a checkpoint exists. **unanchored** — present
   with no checkpoint in the horizon. **bootstrap** — absent with no
   checkpoint: the evidence root is created only by a dispatch carrying
@@ -106,7 +129,8 @@ is the PURE :func:`continuity_verdict` (implemented here; Reeve's
   recreated.
 
 Owner: H1 (the I/O); ``continuity_verdict`` and the name helpers are
-architect-implemented and frozen.
+architect-implemented (the upload-time order and the checkpoint-conflict
+cross-check are the integrator's round-2 delta, ported to Reeve with them).
 """
 
 from __future__ import annotations
@@ -208,9 +232,13 @@ class PushResult:
 class Mark:
     """One verified continuity artifact.
 
-    ``seq`` — the artifact id (monotonic in upload time; ordering uses it, not
-    the run id, so a late re-run attempt of an old run orders by when it
-    actually uploaded). ``kind`` ``intent`` | ``tip``; ``run_id`` for the summary.
+    ``created`` — the artifact's ``created_at`` as a UTC epoch (its upload time);
+    ``seq`` — the artifact id. Marks order by :func:`mark_order` ``(created,
+    seq)``: upload time first, because artifact ids are NOT monotonic in upload
+    time (inversions over an hour were measured — module docstring), the id only
+    breaking a same-second tie. Not the run id either, so a late re-run attempt of
+    an old run orders by when it actually uploaded. ``kind`` ``intent`` | ``tip``;
+    ``run_id`` for the summary.
     """
 
     seq: int
@@ -218,6 +246,7 @@ class Mark:
     ref: str
     sha: str
     run_id: int
+    created: int
 
 
 @dataclass(frozen=True)
@@ -230,6 +259,10 @@ class Continuity:
     checkpoint: Optional[str]
     chain: tuple[str, ...] = ()
     reason: str = ""
+    #: Verified evidence checkpoints ``checkpoint`` does not descend from (a mark-order
+    #: conflict, :func:`checkpoint_conflicts`): the verdict is then ``foreign`` and the
+    #: newest checkpoint is NOT trusted as a derive base or a ``recover`` target.
+    conflicts: tuple[str, ...] = ()
 
     @property
     def accepted(self) -> bool:
@@ -237,6 +270,17 @@ class Continuity:
 
 
 VERDICTS = ("ok", "foreign", "deleted", "unanchored", "bootstrap")
+
+#: The bound on how much older than a newer-id artifact a lower-id one may have been
+#: uploaded (artifact ids are not monotonic in upload time; the worst inversion measured
+#: on 2026-10-14 was 3,843 s). :func:`scan_marks` reads on until the oldest artifact seen
+#: is this much older than every needed ref's newest tip.
+MARK_ORDER_SLACK_SECONDS = 6 * 3600
+
+
+def mark_order(m: "Mark") -> tuple[int, int]:
+    """The order of marks: ``(created, seq)`` — upload time, then the artifact id for a tie."""
+    return (m.created, m.seq)
 
 
 def _is_sha(s: str) -> bool:
@@ -278,29 +322,60 @@ def parse_intent_name(name: str) -> Optional[tuple[str, str]]:
     return (m[1], m[2]) if m and m[0] == "intent" else None
 
 
+def checkpoint_conflicts(*, ref: str, checkpoint: str, marks: Iterable[Mark],
+                         is_ancestor: Callable[[str, str], Optional[bool]]) -> tuple[str, ...]:
+    """The clock-free cross-check of the evidence ref (pure): the verified ``tip`` marks of
+    ``ref`` whose sha ``checkpoint`` neither equals nor descends from, sorted. The evidence ref
+    is fast-forward-only, so every genuine checkpoint is an ancestor of every later one; a
+    conflict means the upload-time order picked the wrong newest checkpoint (or history was
+    rewritten) and ``checkpoint`` must not be trusted. ``is_ancestor(a, d)`` — "is ``a`` an
+    ancestor of ``d``" — answers from local git (``merge-base --is-ancestor``) or ``GET
+    /compare/{a}...{d}`` (Reeve); anything but ``True`` is a conflict. The derived ref is
+    parentless (never checked: ``()``)."""
+    if ref != EVIDENCE_REF:
+        return ()
+    others = sorted({m.sha for m in marks if m.ref == ref and m.kind == "tip" and m.sha != checkpoint})
+    return tuple(x for x in others if is_ancestor(x, checkpoint) is not True)
+
+
 def continuity_verdict(*, ref: str, tip: Optional[str], marks: Iterable[Mark],
                        first_parent: Callable[[str], Optional[str]],
+                       is_ancestor: Optional[Callable[[str, str], Optional[bool]]] = None,
                        max_chain: int = 24) -> Continuity:
-    """The tip-continuity rule (pure; architect-implemented, frozen; shared table in
-    ``tests/fixtures/continuity_cases.json``). ``marks`` are VERIFIED marks within the horizon;
-    ``first_parent(sha)`` answers from local git (harvester) or ``GET /git/commits`` (Reeve)."""
+    """The tip-continuity rule (pure; architect-implemented; shared table in
+    ``tests/fixtures/continuity_cases.json``). ``marks`` are VERIFIED marks within the horizon,
+    ordered by :func:`mark_order` (upload time, never the artifact id alone);
+    ``first_parent(sha)`` answers from local git (harvester) or ``GET /git/commits`` (Reeve);
+    ``is_ancestor`` (evidence only; ``None`` skips it) runs :func:`checkpoint_conflicts` on an
+    otherwise-``ok`` verdict, which then reads ``foreign`` with ``conflicts`` set."""
     if ref not in REFS:
         raise ValueError(f"unknown ref {ref!r}")
     mine = [m for m in marks if m.ref == ref]
-    tips = sorted((m for m in mine if m.kind == "tip"), key=lambda m: m.seq, reverse=True)
+    tips = sorted((m for m in mine if m.kind == "tip"), key=mark_order, reverse=True)
     if not tips:
         if tip is None:
             return Continuity(ref, "bootstrap", None, None, reason="ref absent, no checkpoint in the horizon")
         return Continuity(ref, "unanchored", tip, None, reason="no checkpoint in the horizon")
     c = tips[0]
+
+    def accept(chain: tuple[str, ...], reason: str) -> Continuity:
+        bad = checkpoint_conflicts(ref=ref, checkpoint=c.sha, marks=mine,
+                                   is_ancestor=is_ancestor) if is_ancestor is not None else ()
+        if bad:
+            return Continuity(ref, "foreign", tip, c.sha, chain, conflicts=bad,
+                              reason=f"newest checkpoint {c.sha[:8]} does not descend from verified checkpoint "
+                                     f"{bad[0][:8]}" + (f" (+{len(bad) - 1} more)" if len(bad) > 1 else "")
+                                     + " — a mark-order conflict")
+        return Continuity(ref, "ok", tip, c.sha, chain, reason=reason)
+
     if tip is None:
         return Continuity(ref, "deleted", None, c.sha, reason=f"ref absent; newest checkpoint {c.sha[:8]}")
     if tip == c.sha:
-        return Continuity(ref, "ok", tip, c.sha, reason="tip is the newest checkpoint")
-    newer = {m.sha for m in mine if m.kind == "intent" and m.seq > c.seq}
+        return accept((), "tip is the newest checkpoint")
+    newer = {m.sha for m in mine if m.kind == "intent" and mark_order(m) > mark_order(c)}
     if ref == DERIVED_REF:
         if tip in newer:
-            return Continuity(ref, "ok", tip, c.sha, (tip,), reason="declared after the newest checkpoint")
+            return accept((tip,), "declared after the newest checkpoint")
         return Continuity(ref, "foreign", tip, c.sha,
                           reason=f"{tip[:8]} is neither checkpoint {c.sha[:8]} nor declared after it")
     chain: list[str] = []
@@ -312,8 +387,7 @@ def continuity_verdict(*, ref: str, tip: Optional[str], marks: Iterable[Mark],
         chain.append(sha)
         parent = first_parent(sha)
         if parent == c.sha:
-            return Continuity(ref, "ok", tip, c.sha, tuple(chain),
-                              reason=f"{len(chain)} declared commit(s) on checkpoint {c.sha[:8]}")
+            return accept(tuple(chain), f"{len(chain)} declared commit(s) on checkpoint {c.sha[:8]}")
         if parent is None:
             break
         sha = parent
@@ -534,7 +608,9 @@ class Git:
     # -- fetching (token-less) ----------------------------------------------------
     def fetch(self, refspec: str) -> bool:
         """Token-less ``git fetch --no-tags origin <refspec>``; False (not raise) when the remote lacks it.
-        Used by ``fetch_all`` and by ``recover`` for the checkpoint sha; NEVER by derive."""
+        Used by ``fetch_all``, and for the newest evidence checkpoint's sha by ``recover`` and by a
+        foreign-tip plan's derive (``cli._checkpoint_usable``) — the one fetch after the bulk one,
+        and only of ``C``, a sha the harvester itself verified."""
         args = ("fetch", "--no-tags", "--no-write-fetch-head", "origin", refspec)
         proc = self.run_full(*args)
         if proc.returncode == 0:
@@ -1156,17 +1232,22 @@ def remote_tip(git: Git, ref: str) -> Optional[str]:
 def scan_marks(gh: GitHubAPI, git: Git, *, now_epoch: int, horizon_days: int,
                main_ref: str = "refs/remotes/origin/main",
                need: tuple[str, ...] = REFS) -> tuple[list[Mark], dict[str, int]]:
-    """``(verified marks newest first, counts)`` from ``GET /actions/artifacts`` (module docstring).
+    """``(verified marks newest first by mark_order, counts)`` from ``GET /actions/artifacts``.
 
-    Pages newest-first (``gh.iter_pages``) and stops once every ref in ``need``
-    has a verified ``tip`` mark, or the page's oldest artifact is older than the
-    horizon. Each candidate run is verified once: the artifact's
-    ``workflow_run`` gives ``head_branch`` / ``head_sha`` (pre-filter:
+    Pages in the API's order (artifact id, descending — NOT upload order, module
+    docstring) and stops after the page on which (a) every ref in ``need`` has a
+    verified ``tip`` mark and the oldest artifact seen so far was uploaded more
+    than :data:`MARK_ORDER_SLACK_SECONDS` before the OLDEST of those refs' newest
+    tips (by :func:`mark_order`) — so no unread, lower-id artifact can be newer
+    than any of them — or (b) the page's oldest artifact is older than the
+    horizon, or (c) the list ends. Each candidate run is verified once: the
+    artifact's ``workflow_run`` gives ``head_branch`` / ``head_sha`` (pre-filter:
     ``main``, on ``git.first_parent_log(main_ref)``), then ``GET
     /actions/runs/{id}`` confirms ``path == WORKFLOW_PATH`` and ``event in
-    MARK_EVENTS``. ``counts`` = {pages, runs_verified, marks_rejected} for the
-    summary. The cost is about one page per 1.4 days since the newest checkpoint
-    (6,519 artifacts on 2026-10-14; 100 cover ~34 h).
+    MARK_EVENTS``. ``counts`` = {pages, runs_checked, runs_verified,
+    marks_rejected} for the summary. The cost is about one page per 1.4 days
+    since the newest checkpoint plus, usually, nothing more (a page spans ~34 h,
+    far more than the 6 h slack) — 6,519 artifacts on 2026-10-14; 100 cover ~34 h.
 
     The run object is checked too (``head_branch``, ``head_sha`` on main's first
     parents), not only the artifact's embedded ``workflow_run``. ``runs_verified``
@@ -1178,7 +1259,8 @@ def scan_marks(gh: GitHubAPI, git: Git, *, now_epoch: int, horizon_days: int,
     counts = {"pages": 0, "runs_checked": 0, "runs_verified": 0, "marks_rejected": 0}
     verdicts: dict[int, bool] = {}
     marks: list[Mark] = []
-    found_tip: set[str] = set()
+    newest_tip: dict[str, Mark] = {}
+    oldest_seen: Optional[int] = None
 
     def run_ok(run_id: int) -> bool:
         if run_id not in verdicts:
@@ -1192,7 +1274,6 @@ def scan_marks(gh: GitHubAPI, git: Git, *, now_epoch: int, horizon_days: int,
                 counts["runs_verified"] += 1
         return verdicts[run_id]
 
-    done = False
     for items, _ in gh.iter_pages("/actions/artifacts", None, key="artifacts", max_pages=1000):
         counts["pages"] += 1
         oldest_in_page: Optional[int] = None
@@ -1200,6 +1281,7 @@ def scan_marks(gh: GitHubAPI, git: Git, *, now_epoch: int, horizon_days: int,
             created = _epoch(art.get("created_at"))
             if created is not None:
                 oldest_in_page = created if oldest_in_page is None else min(oldest_in_page, created)
+                oldest_seen = created if oldest_seen is None else min(oldest_seen, created)
             parsed = parse_mark_name(str(art.get("name") or ""))
             if parsed is None:
                 continue
@@ -1213,15 +1295,15 @@ def scan_marks(gh: GitHubAPI, git: Git, *, now_epoch: int, horizon_days: int,
                     or wr.get("head_sha") not in on_main or not run_ok(run_id)):
                 counts["marks_rejected"] += 1
                 continue
-            marks.append(Mark(seq=seq, kind=kind, ref=ref, sha=sha, run_id=run_id))
-            if kind == "tip":
-                found_tip.add(ref)
-            if all(r in found_tip for r in need):
-                done = True
-                break
-        if done or (oldest_in_page is not None and oldest_in_page < horizon) or not items:
+            m = Mark(seq=seq, kind=kind, ref=ref, sha=sha, run_id=run_id, created=created)
+            marks.append(m)
+            if kind == "tip" and (ref not in newest_tip or mark_order(m) > mark_order(newest_tip[ref])):
+                newest_tip[ref] = m
+        settled = (all(r in newest_tip for r in need) and oldest_seen is not None
+                   and oldest_seen + MARK_ORDER_SLACK_SECONDS < min(newest_tip[r].created for r in need))
+        if settled or (oldest_in_page is not None and oldest_in_page < horizon) or not items:
             break
-    marks.sort(key=lambda m: m.seq, reverse=True)
+    marks.sort(key=mark_order, reverse=True)
     return marks, counts
 
 
@@ -1385,10 +1467,28 @@ def selftest_cases() -> list:
         def row(case: dict = case) -> bool:
             kw = {"max_chain": case["max_chain"]} if "max_chain" in case else {}
             v = continuity_verdict(ref=case["ref"], tip=case["tip"], marks=[Mark(**m) for m in case["marks"]],
-                                   first_parent=lambda s: case["parents"].get(s), **kw)
-            return v.verdict == case["expect"] and ("chain" not in case or list(v.chain) == case["chain"])
+                                   first_parent=lambda s: case["parents"].get(s),
+                                   is_ancestor=parents_is_ancestor(case["parents"]), **kw)
+            return (v.verdict == case["expect"] and ("chain" not in case or list(v.chain) == case["chain"])
+                    and list(v.conflicts) == case.get("conflicts", []))
         cases.append((f"gitstore continuity {case['name']}", row))
     return cases
+
+
+def parents_is_ancestor(parents: dict, limit: int = 64) -> Callable[[str, str], bool]:
+    """``is_ancestor`` over a ``{sha: first parent}`` map (the shared continuity table's
+    ``parents``): walk first parents from the descendant. The evidence ref is linear, so the
+    first-parent walk IS its ancestry; Reeve's suite uses the same walk over the same map."""
+    def is_ancestor(a: str, d: str) -> bool:
+        sha: Optional[str] = d
+        for _ in range(limit):
+            if sha == a:
+                return True
+            sha = parents.get(sha)
+            if sha is None:
+                return False
+        return False
+    return is_ancestor
 
 
 _ = subprocess  # the one module allowed to import it (tests/test_purity.py)

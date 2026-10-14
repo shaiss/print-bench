@@ -259,6 +259,47 @@ def test_cc7_no_triage(harvest):
     assert events_of(harvest["prs"][634], "triage.verdict") == []
 
 
+def _job_id(event):
+    return (event.get("runtime") or {}).get("job_id") or int(event["url"].rsplit("/", 1)[-1])
+
+
+@pytest.mark.parametrize("pr,job_id,status_key,episode", [
+    (636, 111242886927, ("2026-10-03T16:26:57Z", "77cbb164fc6160a80512f9d59088b00379c2d148"), "R:636:9a751b26"),
+    (397, 97392593592, ("2026-08-24T09:59:36Z", "fe81ea22d04d7c5654231aa6fea76eccf89045f9"), "R:397:1b40f873"),
+])
+def test_reviewer_jobs_and_statuses_sit_in_the_round_of_their_head(harvest, pr, job_id, status_key, episode):
+    """Integration review round 2 (medium): a reviewer job / reviewer-signoff status about head X that
+    starts or posts after head Y was pushed belongs to X's round (the golden's placement), not the round
+    live at its ts — which put these a round late, unflagged. One shifted job and one shifted status per
+    fixture PR, pinned to the golden episode, with stale_sha false."""
+    events = harvest["prs"][pr]["events"]
+    job = next(e for e in events if e["kind"] == "job.reviewer" and _job_id(e) == job_id)
+    status = next(e for e in events if e["kind"] == "status.reviewer_signoff" and (e["ts"], e["sha"]) == status_key)
+    for e in (job, status):
+        assert e["episode"] == episode and e["stale_sha"] is False, e["id"]
+        assert e["head_sha"] == next(r["head"] for r in harvest["prs"][pr]["rounds"] if r["id"] == episode)
+
+
+def test_every_reviewer_job_and_status_matches_the_golden_episode(harvest):
+    """The whole sweep behind the pins above: every job.reviewer (by job id) and status.reviewer_signoff
+    (by ts + sha) of the three audited designs lands in the golden's episode — 54 + 22, 58 + 20, 52 + 20."""
+    designs = {"nuggs-vent-cap": (636,), "sbc-case": (371, 397), "calibration-cube": (634,)}
+    for design, prs in designs.items():
+        gold = golden(design)["events"]
+        g_jobs = {e["refs"]["job_id"]: e["episode"] for e in gold if e["kind"] == "job.reviewer"}
+        g_stat = collections.defaultdict(set)
+        for e in gold:
+            if e["kind"] == "status.reviewer_signoff":
+                g_stat[(e["ts"], e["sha"])].add(e["episode"])
+        mine = [e for pr in prs for e in harvest["prs"][pr]["events"]]
+        jobs = [(_job_id(e), e["episode"]) for e in mine if e["kind"] == "job.reviewer" and _job_id(e) in g_jobs]
+        stats = [((e["ts"], e["sha"]), e["episode"]) for e in mine
+                 if e["kind"] == "status.reviewer_signoff" and (e["ts"], e["sha"]) in g_stat]
+        assert len(jobs) == len(g_jobs) and len(stats) == sum(1 for e in gold if e["kind"] == "status.reviewer_signoff")
+        assert [j for j in jobs if g_jobs[j[0]] != j[1]] == [], design
+        assert [s_ for s_ in stats if s_[1] not in g_stat[s_[0]]] == [], design
+
+
 def test_every_stored_event_is_placed(harvest):
     """After place() no stored event lacks an episode (the derive order's invariant)."""
     for rec in list(harvest["prs"].values()) + list(harvest["briefs"].values()):
