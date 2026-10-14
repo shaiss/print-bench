@@ -9,6 +9,7 @@
     reeve greenlight-poll    # poll prior greenlights' reactions; push approvals
     reeve greenlight-context  # the drafter's precedent digest (log + owner replies)
     reeve greenlight-append   # records for newly-resolved rounds + the updated log
+    reeve greenlights-merge   # restore seed records the data branch's log lost
 
 ``report`` is the pure, tested core; ``gather`` is the thin file read; ``run``
 composes them. The workflow stays a few lines of glue with no policy of its
@@ -51,6 +52,14 @@ greenlighted thread's resolution state, derives the records for rounds that
 resolved and are not yet recorded (``greenlights.derive_records``, pure), and
 writes the updated log; the push to the ``telemetry`` data branch is trusted
 workflow bash, so this package still writes nothing.
+
+``greenlights-merge`` is the two branch builders' repair step (ci.yml's
+telemetry roll-up and reeve.yml's ``observe``): it puts back any record of
+the default-branch seed that the data branch's log lost
+(``greenlights.merge_logs``), keeping every tip record byte-for-byte. Offline
+and stdlib-only, so ci.yml runs it uninstalled (``PYTHONPATH=tools/reeve/src
+python3 -m reeve greenlights-merge ...``); a tip it cannot parse exits 1
+having written nothing, and the builder pushes the tip unchanged.
 """
 
 from __future__ import annotations
@@ -389,6 +398,40 @@ def cmd_greenlight_append(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_greenlights_merge(args: argparse.Namespace) -> int:
+    """`greenlights-merge`: restore the seed records the data branch's log lost.
+
+    Reads ``--tip`` (the data branch's copy) and ``--seed`` (the default
+    branch's committed seed), and writes ``greenlights.merge_logs`` of the two
+    to ``--out`` — which may be ``--tip`` itself. Both are parsed strictly
+    BEFORE anything is written, so a malformed input exits 1 through
+    ``main``'s error handler with ``--out`` untouched; the write itself goes
+    through a sibling temp file and an atomic rename, so a reader never sees a
+    half-written log either. The restored count is printed and appended to
+    ``$GITHUB_OUTPUT`` as ``restored=`` (the ``appended=`` precedent), so a
+    builder can push a repair even when nothing new was appended.
+    """
+    tip_text = _read_text(args.tip)
+    merged = greenlights.merge_logs(
+        tip_text, _read_text(args.seed), tip_where=args.tip, seed_where=args.seed
+    )
+    total = len(greenlights.parse_log(merged))
+    restored = total - len(greenlights.parse_log(tip_text))
+    tmp = f"{args.out}.merge-tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(merged)
+    os.replace(tmp, args.out)
+    sys.stdout.write(
+        f"restored {restored} seed record(s) the tip lacked — "
+        f"{total} record(s) in {args.out}\n"
+    )
+    gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a", encoding="utf-8") as fh:
+            fh.write(f"restored={restored}\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reeve", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -487,6 +530,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_app.add_argument("--gh-output",
                        help="path to append `appended=` (defaults to $GITHUB_OUTPUT)")
     p_app.set_defaults(func=cmd_greenlight_append)
+
+    p_merge = sub.add_parser("greenlights-merge",
+                             help="restore seed records the data branch's log lost")
+    p_merge.add_argument("--tip", required=True,
+                         help="the data branch's precedent log (the live copy)")
+    p_merge.add_argument("--seed", required=True,
+                         help="the default branch's committed precedent-log seed")
+    p_merge.add_argument("--out", required=True,
+                         help="where to write the merged log (may be --tip itself)")
+    p_merge.add_argument("--gh-output",
+                         help="path to append `restored=` (defaults to $GITHUB_OUTPUT)")
+    p_merge.set_defaults(func=cmd_greenlights_merge)
 
     return parser
 

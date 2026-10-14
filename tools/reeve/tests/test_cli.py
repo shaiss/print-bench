@@ -511,3 +511,104 @@ def test_greenlight_append_refuses_a_malformed_log(tmp_path, monkeypatch, capsys
                "--ledger", str(tmp_path / "ledger.conf")])
     assert rc == 1
     assert "error:" in capsys.readouterr().err
+
+
+# greenlights-merge: the two branch builders' repair step (ci.yml's telemetry
+# roll-up, reeve.yml's observe). Offline — no gather, no token.
+
+_SEED = pathlib.Path(__file__).resolve().parents[3] / "telemetry" / "reeve-greenlights.ndjson"
+
+
+def test_greenlights_merge_restores_the_seed_into_an_empty_tip(tmp_path, capsys):
+    # The live defect: the data branch carried the empty blob.
+    tip = tmp_path / "tip.ndjson"
+    tip.write_text("", encoding="utf-8")
+    out = tmp_path / "out.ndjson"
+    gh_out = tmp_path / "gh_output"
+    rc = main(["greenlights-merge", "--tip", str(tip), "--seed", str(_SEED),
+               "--out", str(out), "--gh-output", str(gh_out)])
+    assert rc == 0
+    assert out.read_bytes() == _SEED.read_bytes()  # exactly the seed
+    assert "restored 6 seed record(s)" in capsys.readouterr().out
+    assert gh_out.read_text(encoding="utf-8") == "restored=6\n"
+
+
+def test_greenlights_merge_in_place_leaves_a_complete_tip_byte_identical(
+    tmp_path, capsys
+):
+    # --out == --tip, the way both builders call it; a tip that already holds
+    # every seed issue (plus an observer append) is rewritten to its own bytes.
+    tip = tmp_path / "reeve-greenlights.ndjson"
+    grown = _SEED.read_text(encoding="utf-8") + _gl.render_line(
+        {"issue": 501, "verdict": "yes", "reasoning": "appended by the observer",
+         "owner_reaction": "none observed", "outcome": "closed",
+         "recorded_at": "2026-09-01T05:53:04Z"}) + "\n"
+    tip.write_text(grown, encoding="utf-8")
+    gh_out = tmp_path / "gh_output"
+    rc = main(["greenlights-merge", "--tip", str(tip), "--seed", str(_SEED),
+               "--out", str(tip), "--gh-output", str(gh_out)])
+    assert rc == 0
+    assert tip.read_text(encoding="utf-8") == grown
+    assert "restored 0 seed record(s)" in capsys.readouterr().out
+    assert gh_out.read_text(encoding="utf-8") == "restored=0\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "gh_output", "reeve-greenlights.ndjson"]  # no temp file left behind
+
+
+def test_greenlights_merge_refuses_a_malformed_tip_and_writes_nothing(
+    tmp_path, capsys
+):
+    # NEGATIVE CONTROL: exit 1 with --out untouched — the builder then keeps
+    # the tip's bytes and warns, never pushing a "repaired" log over them.
+    tip = tmp_path / "reeve-greenlights.ndjson"
+    bad = '{"issue": 501}\n'
+    tip.write_text(bad, encoding="utf-8")
+    gh_out = tmp_path / "gh_output"
+    rc = main(["greenlights-merge", "--tip", str(tip), "--seed", str(_SEED),
+               "--out", str(tip), "--gh-output", str(gh_out)])
+    assert rc == 1
+    assert "error:" in capsys.readouterr().err
+    assert tip.read_text(encoding="utf-8") == bad
+    assert not gh_out.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["reeve-greenlights.ndjson"]
+
+
+def test_greenlights_merge_refuses_a_missing_tip_file(tmp_path, capsys):
+    out = tmp_path / "out.ndjson"
+    rc = main(["greenlights-merge", "--tip", str(tmp_path / "absent.ndjson"),
+               "--seed", str(_SEED), "--out", str(out)])
+    assert rc == 1
+    assert "error:" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_greenlights_merge_requires_tip_seed_and_out():
+    import pytest
+    for argv in (["greenlights-merge", "--seed", "s", "--out", "o"],
+                 ["greenlights-merge", "--tip", "t", "--out", "o"],
+                 ["greenlights-merge", "--tip", "t", "--seed", "s"]):
+        with pytest.raises(SystemExit):
+            main(argv)
+
+
+def test_python_dash_m_reeve_runs_the_cli_uninstalled(tmp_path):
+    # ci.yml's roll-up never pip-installs reeve: it runs
+    # `PYTHONPATH=tools/reeve/src python3 -m reeve greenlights-merge ...`, which
+    # needs the package's __main__.py. Run exactly that shape in a subprocess.
+    import os
+    import subprocess
+    import sys
+
+    tip = tmp_path / "tip.ndjson"
+    tip.write_text("", encoding="utf-8")
+    out = tmp_path / "out.ndjson"
+    src = pathlib.Path(__file__).resolve().parents[1] / "src"
+    env = {k: v for k, v in os.environ.items() if k != "GITHUB_OUTPUT"}
+    env["PYTHONPATH"] = str(src)
+    proc = subprocess.run(
+        [sys.executable, "-m", "reeve", "greenlights-merge", "--tip", str(tip),
+         "--seed", str(_SEED), "--out", str(out)],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert out.read_bytes() == _SEED.read_bytes()
