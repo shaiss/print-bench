@@ -1399,31 +1399,70 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           url="https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # seed_file <path>: the data branch tip's copy of <path> when the tip
+          # carries one, else main's committed seed (HEAD:<path>) — written
+          # through a temp file and a rename, never by redirecting straight onto
+          # <path>. A bare `git show FETCH_HEAD:<path> > <path>` truncates the
+          # committed seed BEFORE git looks the path up, so a tip missing <path>
+          # left a 0-byte file that the tree below then pushed — which is how
+          # the precedent log's live copy went empty. Falling back to HEAD (not
+          # "leave it") also resets a contended retry to the committed seed
+          # rather than the previous attempt's output.
+          seed_file() {
+            local src=HEAD
+            if git cat-file -e "FETCH_HEAD:$1" 2>/dev/null; then src=FETCH_HEAD; fi
+            git show "${src}:$1" > "$1.seed"
+            mv "$1.seed" "$1"
+          }
+          gl=telemetry/reeve-greenlights.ndjson
+          # Main's committed precedent-log seed, set aside before any attempt
+          # overwrites the checkout's copy — the reference the merge restores from.
+          gl_seed="${RUNNER_TEMP}/reeve-greenlights.seed.ndjson"
+          cp "$gl" "$gl_seed"
           for attempt in 1 2 3; do
             # Seed the accumulating log from the data branch's tip if it exists;
             # the committed seed already in the checkout is the first-run fallback.
-            # The precedent log rides along UNCHANGED (issue #445): it is reeve's
-            # to append (reeve.yml's observe job), and re-seeding it here merely
-            # preserves whatever records the observer already pushed — without
-            # this line the two-file mktree below would rebuild the branch
-            # WITHOUT the file and silently delete them.
+            # The precedent log rides along (issue #445): it is reeve's to append
+            # (reeve.yml's observe job), and re-seeding it here preserves whatever
+            # records the observer already pushed — a tree built WITHOUT the file
+            # would silently delete them.
             lease=""
             if git fetch "$url" "$DATA_BRANCH" 2>/dev/null; then
-              git show FETCH_HEAD:telemetry/log.ndjson > telemetry/log.ndjson
-              git show FETCH_HEAD:telemetry/reeve-greenlights.ndjson \
-                > telemetry/reeve-greenlights.ndjson 2>/dev/null || true
+              seed_file telemetry/log.ndjson
+              seed_file "$gl"
               lease="$(git rev-parse FETCH_HEAD)"
+            fi
+            # Put back any seed record the tip lost (a tip emptied by the old
+            # truncating seed read re-seeds empty forever otherwise), keeping
+            # every tip record byte-for-byte. Uninstalled: this job never
+            # pip-installs reeve, and the merge is stdlib-only. A tip the strict
+            # parser rejects is pushed exactly as it is — never "repaired" into
+            # data loss — with a warning for a human.
+            if ! PYTHONPATH=tools/reeve/src python3 -m reeve greenlights-merge \
+                --tip "$gl" --seed "$gl_seed" --out "$gl"; then
+              echo "::warning::the ${DATA_BRANCH} branch's ${gl} failed reeve's strict parse — carrying its bytes unchanged; repair it by hand"
             fi
             cat telemetry-record.ndjson >> telemetry/log.ndjson
             ./scripts/telemetry.sh report --out telemetry/REPORT.md
-            # Build a three-file tree with plumbing (never touching main's index
+            # Build the five-path tree with plumbing (never touching main's index
             # or working tree), commit it as a single squashed root commit, and
-            # push.
+            # push: the three telemetry files, plus the data-branch Vercel guard
+            # hashed from its committed files (never inline copies). Vercel runs
+            # the project's Ignored Build Step, `bash scripts/vercel-ignore-build.sh`,
+            # in the PUSHED commit's tree; without a scripts/ there it exits 127,
+            # which Vercel reads as "build", so every data push cost a preview.
+            # The root vercel.json disables git deployments of the commit; the
+            # stub script exits 0 (skip) should the project setting still run.
+            # reeve's tests/test_learning_wiring.py pins this tree to the
+            # observer's in reeve.yml, path for path.
             log_blob="$(git hash-object -w telemetry/log.ndjson)"
             rpt_blob="$(git hash-object -w telemetry/REPORT.md)"
             gl_blob="$(git hash-object -w telemetry/reeve-greenlights.ndjson)"
+            vercel_blob="$(git hash-object -w .github/data-branch-guard/vercel.json)"
+            ignore_blob="$(git hash-object -w .github/data-branch-guard/vercel-ignore-build.sh)"
             subtree="$(printf '100644 blob %s\tlog.ndjson\n100644 blob %s\tREPORT.md\n100644 blob %s\treeve-greenlights.ndjson\n' "$log_blob" "$rpt_blob" "$gl_blob" | git mktree)"
-            root="$(printf '040000 tree %s\ttelemetry\n' "$subtree" | git mktree)"
+            scripts_tree="$(printf '100755 blob %s\tvercel-ignore-build.sh\n' "$ignore_blob" | git mktree)"
+            root="$(printf '100644 blob %s\tvercel.json\n040000 tree %s\tscripts\n040000 tree %s\ttelemetry\n' "$vercel_blob" "$scripts_tree" "$subtree" | git mktree)"
             commit="$(git commit-tree "$root" -m "Telemetry: gate runs through ${GITHUB_RUN_ID}")"
             # --force-with-lease keyed to the fetched tip makes a concurrent
             # default-branch run (which advanced the branch) fail the push instead
