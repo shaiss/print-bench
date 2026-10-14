@@ -214,27 +214,184 @@ export function inlineMarkdown(text) {
 }
 
 /**
- * Render a markdown fragment that is shown AWAY from its source file — a
- * charter excerpt on a PM's People-page card, a decision-log row on a design's
- * timeline. Same inline render as inlineMarkdown (emphasis, code spans), but
- * relative-href links are flattened to their text first: a charter's
- * `[x](../sibling/)` resolves against the charter's own directory, not the page
- * that aggregates it here, so left live it 404s (a PM card's parent-design
- * link did exactly that). Absolute (`http(s)://`) and site-rooted (`/…`) links
- * resolve the same everywhere, so they are kept.
+ * Href allowed to stay live on an aggregated excerpt surface.
+ * http(s) absolutes and site-rooted paths (`/…`) resolve the same on every
+ * page; everything else (relative, `//…`, `javascript:`, `data:`, …) does not.
+ */
+function isExcerptSafeHref(href) {
+  if (!href || /[\0-\x1F\x7F\s]/.test(href)) return false;
+  if (href.startsWith("/") && !href.startsWith("//")) return true;
+  return /^https?:\/\//i.test(href);
+}
+
+/**
+ * Parse `[text](href)` starting at `openBracket` (index of `[`).
+ * The closing `]` is the one followed by `(` (so `[[x]](…)` is text=`[x]`,
+ * matching CommonMark/Marked — the shape D1's javascript: payload uses).
+ * Href parentheses are balanced so `http://example.com/foo_(bar)` works.
+ * Returns null when the shape is incomplete. Linear in the span it covers.
+ */
+function parseBracketLink(src, openBracket) {
+  if (src[openBracket] !== "[") return null;
+  let search = openBracket + 1;
+  let closeBracket = -1;
+  while (search < src.length) {
+    const q = src.indexOf("]", search);
+    if (q < 0) return null;
+    if (src[q + 1] === "(") {
+      closeBracket = q;
+      break;
+    }
+    search = q + 1;
+  }
+  if (closeBracket < 0) return null;
+  let j = closeBracket + 2;
+  let depth = 1;
+  while (j < src.length && depth > 0) {
+    const ch = src[j];
+    if (ch === "\n" || ch === "\r") return null;
+    if (ch === "(") depth += 1;
+    else if (ch === ")") depth -= 1;
+    j += 1;
+  }
+  if (depth !== 0) return null;
+  return {
+    text: src.slice(openBracket + 1, closeBracket),
+    href: src.slice(closeBracket + 2, j - 1),
+    end: j,
+  };
+}
+
+/**
+ * Linear-time safe inline renderer for excerpts shown away from their source
+ * file (People-page charter cards, design timeline rows).
+ *
+ * Deliberately does NOT call Marked: its emphasis tokenizer is recursive and
+ * stack-overflows / goes super-linear on crafted `*` runs (audit finding D1).
+ * This scanner advances through the input once, emits only escaped text plus a
+ * closed set of inline tags, never writes `javascript:` (or other non-http(s))
+ * hrefs, and never emits `<img>` (aggregated surfaces have no asset pipeline).
+ *
+ * Kept live: absolute `http(s)://` and site-rooted `/…` links. Flattened to
+ * their text: relative hrefs (a charter's `[x](../sibling/)` would 404 against
+ * the aggregating page), protocol-relative `//…`, and every other scheme.
  */
 export function inlineExcerpt(text) {
-  // Escape HTML FIRST so a stray tag can never survive as live markup — Marked
-  // passes raw `<script>` through, so these aggregated surfaces keep their
-  // injection guard only if nothing reaches the parser as HTML. escapeHtml
-  // leaves markdown punctuation (* ` [ ] ( )) untouched, so emphasis, code
-  // spans and the link flatten below still work on the escaped text.
-  const escaped = escapeHtml(String(text || ""));
-  const flattened = escaped.replace(
-    /\[([^\]]*)\]\((?!https?:\/\/|\/)[^)]*\)/g,
-    "$1",
-  );
-  return inlineMarkdown(flattened);
+  return renderExcerpt(String(text || ""));
+}
+
+function renderExcerpt(src) {
+  let out = "";
+  let i = 0;
+  const n = src.length;
+  // Once a delimiter's closer is known absent from the remainder, skip
+  // re-scanning for it — keeps adversarial runs of `[` / `*` / `` ` `` at O(n).
+  let linksPossible = true;
+  let strongPossible = true;
+  let emPossible = true;
+  let codePossible = true;
+
+  while (i < n) {
+    const c = src[i];
+
+    // Image ![alt](href) — never <img>; render the alt as inline text.
+    if (c === "!" && linksPossible && src[i + 1] === "[") {
+      const parsed = parseBracketLink(src, i + 1);
+      if (parsed) {
+        out += renderExcerpt(parsed.text);
+        i = parsed.end;
+        continue;
+      }
+    }
+
+    // Link [text](href)
+    if (c === "[" && linksPossible) {
+      if (src.indexOf("](", i + 1) < 0) {
+        linksPossible = false;
+      } else {
+        const parsed = parseBracketLink(src, i);
+        if (parsed) {
+          const href = parsed.href.trim();
+          const body = renderExcerpt(parsed.text);
+          if (isExcerptSafeHref(href)) {
+            out += `<a href="${escapeHtml(href)}" rel="noopener noreferrer">${body}</a>`;
+          } else {
+            out += body;
+          }
+          i = parsed.end;
+          continue;
+        }
+      }
+    }
+
+    // Code span `...` (no newlines; empty span is not a match)
+    if (c === "`" && codePossible) {
+      const close = src.indexOf("`", i + 1);
+      if (close < 0) {
+        codePossible = false;
+      } else if (close > i + 1 && !src.slice(i + 1, close).includes("\n")) {
+        out += `<code>${escapeHtml(src.slice(i + 1, close))}</code>`;
+        i = close + 1;
+        continue;
+      }
+    }
+
+    // Strong **...** — walk closers forward; one failing scan clears the flag.
+    if (c === "*" && strongPossible && src[i + 1] === "*") {
+      let from = i + 2;
+      let matched = false;
+      for (;;) {
+        const close = src.indexOf("**", from);
+        if (close < 0) {
+          strongPossible = false;
+          break;
+        }
+        if (close > i + 2) {
+          const inner = src.slice(i + 2, close);
+          if (!inner.includes("\n")) {
+            out += `<strong>${renderExcerpt(inner)}</strong>`;
+            i = close + 2;
+            matched = true;
+            break;
+          }
+        }
+        from = close + 2;
+      }
+      if (matched) continue;
+    }
+
+    // Emphasis *...* (single asterisks; content has no `*`)
+    if (c === "*" && emPossible) {
+      const close = src.indexOf("*", i + 1);
+      if (close < 0) {
+        emPossible = false;
+      } else if (close > i + 1) {
+        const inner = src.slice(i + 1, close);
+        if (!inner.includes("\n") && !inner.includes("*")) {
+          out += `<em>${renderExcerpt(inner)}</em>`;
+          i = close + 1;
+          continue;
+        }
+      }
+    }
+
+    // Underscore emphasis _..._
+    if (c === "_") {
+      const close = src.indexOf("_", i + 1);
+      if (close > i + 1) {
+        const inner = src.slice(i + 1, close);
+        if (!inner.includes("\n") && !inner.includes("_")) {
+          out += `<em>${renderExcerpt(inner)}</em>`;
+          i = close + 1;
+          continue;
+        }
+      }
+    }
+
+    out += escapeHtml(c);
+    i += 1;
+  }
+  return out;
 }
 
 /** Same fragment with all markup removed — for <title>/<meta> attributes. */
