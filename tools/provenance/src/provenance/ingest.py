@@ -87,9 +87,18 @@ Owner: H1. Pure except for reading ``snapshot_dir`` (files only; no git).
 
 from __future__ import annotations
 
+import gzip
+import hashlib
+import json
+import os
 import re
+import tarfile
+import zlib
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
+
+from . import canonical, rawdoc
+from .receipts import build_receipt, receipt_path
 
 REQUIRED_FILES = ("MANIFEST.sha256", "runs.tar", "jobs.tar", "sha.tar")
 IGNORED_FILES = ("prcommits.tar", "pulls.json.gz", "workflows.json.gz", "capture.py", "README.md")
@@ -137,26 +146,218 @@ class IngestPlan:
     state_entry: dict[str, Any] = field(default_factory=dict)
 
 
+_MANIFEST_LINE_RE = re.compile(r"([0-9a-f]{64})  ([A-Za-z0-9._-]+)")
+_SNAPSHOT_ID_RE = re.compile(r"pr[0-9]+")
+_SHA_RE = re.compile(r"[0-9a-f]{40}")
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def verify_manifest(snapshot_dir: str, expected_manifest_sha256: str) -> str:
     """Check the pin, then every MANIFEST.sha256 line; return the manifest's own sha256.
     Raises IngestError on a pin mismatch (even for an internally consistent directory),
-    a line mismatch, or a missing required file."""
-    raise NotImplementedError("builder H1")
+    a line mismatch, or a missing required file.
+
+    Every required tar must also be LISTED in the manifest — a tar the pinned
+    manifest does not cover would be unauthenticated however its bytes look.
+    """
+    for name in REQUIRED_FILES:
+        if not os.path.isfile(os.path.join(snapshot_dir, name)):
+            raise IngestError(f"snapshot: required file {name} is missing")
+    manifest_path = os.path.join(snapshot_dir, "MANIFEST.sha256")
+    with open(manifest_path, "rb") as fh:
+        manifest = fh.read()
+    digest = hashlib.sha256(manifest).hexdigest()
+    if digest != expected_manifest_sha256:
+        raise IngestError(f"snapshot: MANIFEST.sha256 digest {digest} is not the pinned "
+                          f"snapshot_manifest_sha256 {expected_manifest_sha256}")
+    listed: dict[str, str] = {}
+    for lineno, line in enumerate(manifest.decode("utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        m = _MANIFEST_LINE_RE.fullmatch(line)
+        if m is None:
+            raise IngestError(f"snapshot: MANIFEST.sha256:{lineno}: malformed line")
+        want, name = m.groups()
+        if name in listed:
+            raise IngestError(f"snapshot: MANIFEST.sha256:{lineno}: {name} listed twice")
+        listed[name] = want
+        path = os.path.join(snapshot_dir, name)
+        if not os.path.isfile(path):
+            raise IngestError(f"snapshot: {name} (MANIFEST.sha256:{lineno}) is missing")
+        got = _sha256_file(path)
+        if got != want:
+            raise IngestError(f"snapshot: {name} sha256 {got} does not match MANIFEST.sha256:{lineno}")
+    for name in REQUIRED_FILES:
+        if name != "MANIFEST.sha256" and name not in listed:
+            raise IngestError(f"snapshot: {name} is not covered by MANIFEST.sha256")
+    return digest
+
+
+def _members(path: str) -> list[tuple[str, Any]]:
+    """``[(name, parsed JSON)]`` of one snapshot tar — regular, flat ``*.json.gz`` members only,
+    read with ``extractfile`` (nothing is ever written to disk)."""
+    out: list[tuple[str, Any]] = []
+    try:
+        with tarfile.open(path, mode="r:") as tf:
+            for member in tf.getmembers():
+                if not member.isreg():
+                    raise IngestError(f"snapshot: {os.path.basename(path)} member {member.name!r} "
+                                      "is not a regular file")
+                if MEMBER_RE.fullmatch(member.name) is None:
+                    raise IngestError(f"snapshot: {os.path.basename(path)} member {member.name!r} "
+                                      f"does not match {MEMBER_RE.pattern}")
+                fh = tf.extractfile(member)
+                if fh is None:
+                    raise IngestError(f"snapshot: {member.name!r} is unreadable")
+                try:
+                    value = json.loads(gzip.decompress(fh.read()).decode("utf-8"))
+                except (OSError, EOFError, zlib.error, UnicodeDecodeError, ValueError) as exc:
+                    raise IngestError(f"snapshot: {member.name!r} is not gzip JSON ({type(exc).__name__})") from None
+                out.append((member.name, value))
+    except tarfile.TarError as exc:
+        raise IngestError(f"snapshot: {os.path.basename(path)} is not a tar ({exc})") from None
+    return out
+
+
+def _stem(name: str) -> str:
+    return name[: -len(".json.gz")]
 
 
 def read_snapshot(snapshot_dir: str, snapshot_id: str, expected_manifest_sha256: str) -> SnapshotData:
-    """Verify, then parse the tars (``extractfile`` only; regular members; :data:`MEMBER_RE`)."""
-    raise NotImplementedError("builder H1")
+    """Verify, then parse the tars (``extractfile`` only; regular members; :data:`MEMBER_RE`).
+
+    ``snapshot_end`` is the latest ``created_at`` of any ``runs.tar`` row (every
+    workflow, skipped rows included) — the instant the snapshot is complete up to.
+    """
+    if not _SNAPSHOT_ID_RE.fullmatch(snapshot_id or ""):
+        raise IngestError(f"snapshot id {snapshot_id!r} does not match pr<N>")
+    digest = verify_manifest(snapshot_dir, expected_manifest_sha256)
+    runs: dict[str, list[dict[str, Any]]] = {}
+    end = ""
+    for name, rows in _members(os.path.join(snapshot_dir, "runs.tar")):
+        if not isinstance(rows, list):
+            raise IngestError(f"snapshot: runs.tar/{name} is not a list of runs")
+        runs[_stem(name)] = rows
+        for r in rows:
+            created = r.get("created_at") if isinstance(r, dict) else None
+            if isinstance(created, str) and created > end:
+                end = created
+    if not end:
+        raise IngestError("snapshot: runs.tar holds no run")
+    jobs: dict[int, list[dict[str, Any]]] = {}
+    for name, doc in _members(os.path.join(snapshot_dir, "jobs.tar")):
+        if not isinstance(doc, dict) or not isinstance(doc.get("jobs"), list):
+            raise IngestError(f"snapshot: jobs.tar/{name} is not {{run_id, jobs}}")
+        run_id = doc.get("run_id")
+        if not isinstance(run_id, int) or str(run_id) != _stem(name):
+            raise IngestError(f"snapshot: jobs.tar/{name} names run {run_id!r}")
+        jobs[run_id] = doc["jobs"]
+    statuses: dict[str, list[dict[str, Any]]] = {}
+    check_runs: dict[str, int] = {}
+    for name, doc in _members(os.path.join(snapshot_dir, "sha.tar")):
+        sha = doc.get("sha") if isinstance(doc, dict) else None
+        if not isinstance(sha, str) or not _SHA_RE.fullmatch(sha) or sha != _stem(name):
+            raise IngestError(f"snapshot: sha.tar/{name} names sha {sha!r}")
+        statuses[sha] = list(doc.get("statuses") or [])
+        check_runs[sha] = len(doc.get("check_runs") or [])
+    return SnapshotData(snapshot_id=snapshot_id, manifest_sha256=digest, snapshot_end=end,
+                        runs=runs, jobs=jobs, statuses=statuses, check_runs=check_runs)
 
 
 def needs_ingest(state: dict[str, Any], snapshot_id: str) -> bool:
     """True when ``state.ingested[snapshot_id]`` is absent or its ``version`` < :data:`INGEST_VERSION`."""
-    raise NotImplementedError("builder H1")
+    entry = (state.get("ingested") or {}).get(snapshot_id)
+    if not isinstance(entry, dict):
+        return True
+    version = entry.get("version")
+    return not isinstance(version, int) or version < INGEST_VERSION
+
+
+def _content(path: str, data: bytes) -> bytes:
+    """Content identity: the decompressed bytes of a ``*.json.gz`` blob, else the bytes."""
+    if path.endswith(".json.gz"):
+        try:
+            return gzip.decompress(data)
+        except (OSError, EOFError, zlib.error):
+            return data
+    return data
 
 
 def plan_ingest(data: SnapshotData, *, watched: tuple[str, ...], commit: str,
                 cursors: dict[str, str],
                 existing: Callable[[str], Optional[bytes]]) -> IngestPlan:
     """The mapping table of the module docstring. ``existing(path)`` reads the evidence tree;
-    ``cursors`` are the current receipts cursors (raised to ``snapshot_end``, never lowered)."""
-    raise NotImplementedError("builder H1")
+    ``cursors`` are the current receipts cursors (raised to ``snapshot_end``, never lowered).
+
+    Counts: ``receipts_full``/``receipts_stub`` are NEW receipts planned,
+    ``receipts_existing`` receipts already present with identical content,
+    ``conflicts`` paths present with other content (never modified);
+    ``state_entry.receipts`` / ``statuses`` / ``runs_listings`` count every
+    mapped file the evidence holds afterwards (planned + identical).
+    """
+    sid = data.snapshot_id
+    plan = IngestPlan()
+    held = {"receipts": 0, "statuses": 0, "runs_listings": 0}
+
+    def offer(path: str, blob: bytes, kind: str) -> bool:
+        present = existing(path)
+        if present is None:
+            plan.files[path] = blob
+            held[kind] += 1
+            return True
+        if _content(path, present) == _content(path, blob):
+            held[kind] += 1
+            if kind == "receipts":
+                plan.receipts_existing += 1
+            return False
+        plan.conflicts += 1
+        return False
+
+    watched_set = set(watched)
+    for wf in sorted(data.runs):
+        if wf not in watched_set:
+            continue
+        for row in sorted(data.runs[wf], key=lambda r: (r.get("created_at") or "", r.get("id") or 0)):
+            if row.get("status") != "completed" or row.get("conclusion") == "skipped":
+                plan.skipped_runs += 1
+                continue
+            jobs = data.jobs.get(row.get("id"))
+            if jobs is None:
+                plan.missing_jobs += 1
+                continue
+            doc = build_receipt(wf, row, jobs, f"snapshot:{sid}")
+            if offer(receipt_path(row), canonical.dumps_gz(doc), "receipts"):
+                if doc["kind"] == "full":
+                    plan.receipts_full += 1
+                else:
+                    plan.receipts_stub += 1
+    if "ci.yml" in data.runs:
+        doc = {"format": RUNS_FORMAT, "runs": rawdoc.project_runs(data.runs["ci.yml"]),
+               "snapshot": sid, "workflow": "ci.yml"}
+        offer(f"raw/snapshot/{sid}/runs/ci.yml.json.gz", canonical.dumps_gz(doc), "runs_listings")
+    for sha in sorted(data.statuses):
+        rows = data.statuses[sha]
+        if not rows:
+            continue
+        doc = {"check_runs_dropped": data.check_runs.get(sha, 0), "format": STATUSES_FORMAT,
+               "sha": sha, "snapshot": sid, "statuses": rawdoc.project_statuses(rows)}
+        offer(f"raw/snapshot/{sid}/statuses/{sha}.json.gz", canonical.dumps_gz(doc), "statuses")
+    plan.statuses = held["statuses"]
+    plan.runs_listings = held["runs_listings"]
+    for wf in watched:
+        cur = cursors.get(wf)
+        if cur is None or cur < data.snapshot_end:
+            plan.cursors[wf] = data.snapshot_end
+    plan.state_entry = {
+        "commit": commit, "manifest_sha256": data.manifest_sha256, "receipts": held["receipts"],
+        "runs_listings": held["runs_listings"], "snapshot_end": data.snapshot_end,
+        "statuses": held["statuses"], "version": INGEST_VERSION,
+    }
+    return plan
