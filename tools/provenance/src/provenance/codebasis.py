@@ -6,22 +6,43 @@ Implements ``protocols.CodeBasis`` for the serving join (docs/provenance.md
 * :meth:`GitCodeBasis.basis_for` — schedule/dispatch → ``Basis("head",
   run_head_sha)``; ``auto-review.yml`` + ``pull_request`` →
   ``Basis("merge", head, main@created_at)``; ``oracle.yml`` +
-  ``pull_request`` → ``Basis("main", None, main@checkout.started_at)`` (the
+  ``pull_request`` → ``Basis("main", head, main@checkout.started_at)`` (the
   job checks out ``base.ref`` by name when its checkout step runs — critique
-  item 26; without a checkout interval: ``created_at``, marked ambiguous);
+  item 26; without a checkout interval: ``created_at``, marked ambiguous;
+  the head is carried for the workflow text, below);
   any other workflow/event → ``head``. ``main@T`` comes from
   ``GitReader.first_parent_log("refs/remotes/origin/main")`` (last commit
   with committer epoch ``<= T``). ``ambiguous`` (with ``reason``) when a
   first-parent main commit touching ``.github/models/registry.conf`` or the
   run's workflow file lies in ``(created_at − window, created_at]`` (merge)
-  or ``[checkout start − window, checkout end + window]`` (main), or
-  (``merge``) when ``merge_tree_read`` reports a conflict on either file.
+  or ``[checkout start − window, checkout end + window]`` (main; for the
+  workflow file the interval reaches back to ``created_at − window``), or
+  when ``merge_tree_read`` reports a conflict on either file (merge) or on
+  the workflow file (main).
   A needed commit absent locally (``has_commit`` false after the job-start
   fetch — never fetched here, critique item 9) → ``unavailable=<sha>``; the
   join answers basis ``none`` and adds ``codebasis-unavailable:<sha8>``.
   Memoized per ``(workflow, kind, main8, head8)``.
 * :meth:`GitCodeBasis.file_at` — ``show(head, path)``, or the merge-tree
-  result, or ``show(main, path)``; cached per (basis, path).
+  result, or ``show(main, path)`` — except a ``main`` basis that carries a
+  head reads ``.github/workflows/*`` from the merge tree; cached per (basis,
+  path).
+
+**The oracle's two halves** (review round 2, issue 5). A ``pull_request``
+run executes the workflow DEFINITION from the PR's merge commit
+(``GITHUB_SHA``), while ``oracle.yml``'s checkout step checks out
+``base.ref`` by name — so the ``model_registry resolve <chain>`` literal
+(and the step's ``--model`` output) is the merge commit's text, executed
+against main@checkout's registry. ``file_at`` therefore reads the workflow
+from ``merge_tree_read(main@checkout, head)`` and the registry from
+main@checkout. That merge tree equals the one GitHub built from
+main@created_at whenever no main commit touched the workflow between the
+two instants (a 3-way merge of one file depends only on its base, ours and
+theirs blobs) — which is exactly what the widened workflow window
+(``created_at − window`` … ``checkout end + window``) makes ambiguous
+otherwise. A head missing locally is ``unavailable`` here as it is for an
+auto-review merge basis: a PR that edited ``oracle.yml`` would otherwise be
+judged against main's text (a guess).
 * :meth:`GitCodeBasis.chain_models` — parses the registry text with
   tools/model-registry's OWN parser (``model_registry.registry.Registry.load``
   on a temp file; the parser is strict, so a historical registry that fails
@@ -31,7 +52,8 @@ Implements ``protocols.CodeBasis`` for the serving join (docs/provenance.md
 **What the memo holds.** The memo per ``(workflow, kind, main, head)`` (full
 shas — the 8-char forms name the same partition without a collision risk)
 holds what is a function of those four alone: the head's availability and,
-for ``merge``, the two ``merge_tree_read`` results (content + conflict) —
+for ``merge``, the two ``merge_tree_read`` results (content + conflict; for
+``main`` the workflow's one) —
 so a run of reviews on one PR head at one main costs one merge-tree per
 file. The time-window ambiguity is NOT memoized: it depends on the run's own
 ``created_at`` / checkout interval, so two runs that share ``(main, head)``
@@ -111,9 +133,11 @@ class GitCodeBasis:
                 return sha
         return None
 
-    def _touched_between(self, workflow: str, lo: int, hi: int, *, lo_open: bool) -> bool:
-        """A first-parent main commit touching the registry or the workflow lies in the interval."""
-        for _sha, e in self._log((REGISTRY_PATH, WORKFLOW_DIR + workflow)):
+    def _touched_between(self, workflow: str, lo: int, hi: int, *, lo_open: bool,
+                         paths: Optional[tuple[str, ...]] = None) -> bool:
+        """A first-parent main commit touching ``paths`` (default: the registry and the workflow)
+        lies in the interval."""
+        for _sha, e in self._log(paths or (REGISTRY_PATH, WORKFLOW_DIR + workflow)):
             if e is None:
                 continue
             if (lo < e if lo_open else lo <= e) and e <= hi:
@@ -128,13 +152,15 @@ class GitCodeBasis:
         if hit is not None:
             return hit
         out: dict = {"unavailable": None, "conflicts": []}
-        need = [s for s in ((head,) if kind == "head" else (main,) if kind == "main" else (main, head)) if s]
+        need = [s for s in ((head,) if kind == "head" else (main, head)) if s]
         missing = [s for s in need if not self.git.has_commit(s)]
         if missing:
             # The head is the commit a force-push can take away; name it first.
             out["unavailable"] = head if head in missing else missing[0]
-        elif kind == "merge" and main and head:
-            for path in (REGISTRY_PATH, WORKFLOW_DIR + workflow):
+        elif kind in ("merge", "main") and main and head:
+            # merge: both files come from the merge tree; main: only the workflow does.
+            paths = (REGISTRY_PATH, WORKFLOW_DIR + workflow) if kind == "merge" else (WORKFLOW_DIR + workflow,)
+            for path in paths:
                 if self._merge_read(main, head, path)[1]:
                     out["conflicts"].append(path)
         self._cache[key] = out
@@ -174,31 +200,32 @@ class GitCodeBasis:
             if self._touched_between(workflow, created - window, created, lo_open=True):
                 return Basis("merge", head, main, ambiguous=True, reason="main-changed-before-created")
             return Basis("merge", head, main)
-        # kind == "main" (oracle pull_request): main at the checkout step's start.
+        # kind == "main" (oracle pull_request): the registry from main at the checkout step's
+        # start, the workflow text from the merge tree (module docstring, "The oracle's two halves").
         interval = None
         if checkout is not None:
             t0, t1 = ts_epoch(checkout[0]), ts_epoch(checkout[1])
             if t0 is not None and t1 is not None:
                 interval = (t0, max(t0, t1))
-        if interval is None:
-            if created is None:
-                return Basis("main", None, None, reason="no-main")
-            main = self._main_at(created)
-            if main is None:
-                return Basis("main", None, None, reason="no-main")
-            c = self._content(workflow, kind, main, None)
-            if c["unavailable"]:
-                return Basis("main", None, main, unavailable=c["unavailable"])
-            return Basis("main", None, main, ambiguous=True, reason="no-checkout-step")
-        main = self._main_at(interval[0])
+        anchor = interval[0] if interval is not None else created
+        main = self._main_at(anchor) if anchor is not None else None
         if main is None:
-            return Basis("main", None, None, reason="no-main")
-        c = self._content(workflow, kind, main, None)
+            return Basis("main", head, None, reason="no-main")
+        if head is None:
+            return Basis("main", None, main, reason="no-head-sha")
+        c = self._content(workflow, kind, main, head)
         if c["unavailable"]:
-            return Basis("main", None, main, unavailable=c["unavailable"])
-        if self._touched_between(workflow, interval[0] - window, interval[1] + window, lo_open=False):
-            return Basis("main", None, main, ambiguous=True, reason="main-changed-near-checkout")
-        return Basis("main", None, main)
+            return Basis("main", head, main, unavailable=c["unavailable"])
+        if c["conflicts"]:
+            return Basis("main", head, main, ambiguous=True, reason="merge-conflict")
+        if interval is None:
+            return Basis("main", head, main, ambiguous=True, reason="no-checkout-step")
+        lo, hi = interval[0] - window, interval[1] + window
+        wf_lo = min(created, interval[0]) - window if created is not None else lo
+        if (self._touched_between(workflow, lo, hi, lo_open=False, paths=(REGISTRY_PATH,))
+                or self._touched_between(workflow, wf_lo, hi, lo_open=False, paths=(WORKFLOW_DIR + workflow,))):
+            return Basis("main", head, main, ambiguous=True, reason="main-changed-near-checkout")
+        return Basis("main", head, main)
 
     def file_at(self, basis: Basis, path: str) -> Optional[bytes]:
         if basis.unavailable:
@@ -210,7 +237,12 @@ class GitCodeBasis:
         if basis.kind == "head" and basis.head_sha:
             data = self.git.show(basis.head_sha, path)
         elif basis.kind == "main" and basis.main_sha:
-            data = self.git.show(basis.main_sha, path)
+            if basis.head_sha and path.startswith(WORKFLOW_DIR):
+                # The workflow definition GitHub ran: the PR's merge commit, not the checkout.
+                content, conflicted = self._merge_read(basis.main_sha, basis.head_sha, path)
+                data = None if conflicted else content
+            else:
+                data = self.git.show(basis.main_sha, path)
         elif basis.kind == "merge" and basis.head_sha and basis.main_sha:
             content, conflicted = self._merge_read(basis.main_sha, basis.head_sha, path)
             data = None if conflicted else content

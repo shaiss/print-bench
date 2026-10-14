@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import copy
 import functools
+import gzip
+import json
 import re
 
 import pytest
 
 import _serving_helpers as H
-from conftest import OWNER, OWNER_LOGIN, REPO_NAME, FIXTURES, contract, needs, raw_brief, raw_pr, \
+from conftest import GOLDEN, OWNER, OWNER_LOGIN, REPO_NAME, FIXTURES, contract, needs, raw_brief, raw_pr, \
     receipt, receipt_paths, receipts
 from fakes import FakeCodeBasis, FakeCommit, FakeGitReader
 from provenance import contract as contract_mod, serving, steps
@@ -167,6 +169,30 @@ def test_owner_artifacts_need_the_claimed_issue():
         ("window", DESIGN_RUN, 3, "glm-4.6")
 
 
+def test_two_locks_on_one_issue_are_one_claim():
+    """Review round 2, issue 4: brief #281's SHIP-LOCKs 5315682248 (11:54:09Z) and 5316408268 (13:02:28Z) both lie in design-run run 32026482297's link window (11:52:11–13:02:53) — one issue, so one claim, and PR #316's OWNER open at 13:02:05Z on claude/issue-281-nuggs-hopper becomes the run's (trust window). Locks on two DISTINCT issues in one run's windows still claim nothing."""
+    idx = index()
+    b = H.brief_from_raw(raw_brief(281))
+    locks = [e for e in b["events"] if e["kind"] == "brief.claimed"
+             and serving.containing_windows(idx, ts=e["ts"], roles=serving.SHIP_ROLES, author_login=OWNER_LOGIN,
+                                            owner_login=OWNER_LOGIN)[0].run_id == 32026482297]
+    assert [(e["id"], e["ts"]) for e in locks] == [("issuecomment:5315682248", "2026-08-17T11:54:09Z"),
+                                                   ("issuecomment:5316408268", "2026-08-17T13:02:28Z")]
+    claims = run_claims([b], idx, owner_login=OWNER_LOGIN)
+    assert claims[32026482297] == 281
+    raw = raw_pr(316)
+    assert (raw["pull"]["head"]["ref"], raw["pull"]["created_at"]) == ("claude/issue-281-nuggs-hopper", "2026-08-17T13:02:05Z")
+    e = annotate_record(H.pr_from_raw(raw, [H.pr_opened(raw)]), idx, H.fixture_codebasis(), owner_login=OWNER_LOGIN,
+                        claims=claims)["events"][0]
+    assert (e["trust"], e["trust_basis"], e["runtime"]["run_id"]) == ("window", "window:run 32026482297", 32026482297)
+    for lock in locks:
+        assert ev(annotate(b, idx=idx, briefs=[b]), lock["id"])["runtime"]["run_id"] == 32026482297
+    # Negative control: a second issue's lock in the same window → the run claims nothing.
+    other = H.brief_record(282, [H.event("issuecomment:9000000282", "brief.claimed", "2026-08-17T12:30:00Z",
+                                         login=OWNER_LOGIN, issue=282, fields={"design_name": None})])
+    assert 32026482297 not in run_claims([b, other], idx, owner_login=OWNER_LOGIN)
+
+
 def test_nvc5_reviewers_glm53():
     """NVC-5: the 12 verified sign-offs on #636 resolve to glm-5.3 via chain review link 1 at the merge-tree basis."""
     so = H.signoffs_from_raw(raw_pr(636))
@@ -182,6 +208,97 @@ def test_nvc5_reviewers_glm53():
     # The 13 owner-token sign-offs gain nothing (NVC-6's other half).
     owner = [e for e in out["events"] if e["signals"]["login"] == OWNER_LOGIN]
     assert len(owner) == 13 and all(e["runtime"]["model"] is None and e["trust"] == "claimed" for e in owner)
+
+
+@functools.lru_cache(maxsize=None)
+def _snapshot() -> tuple:
+    """Every receipt of the committed #843 snapshot (the real, concurrent run set; ~3 s)."""
+    return tuple(H.snapshot_receipts())
+
+
+#: #636 sign-off -> (the PR's own run whose window holds it, other PRs' runs whose windows also do).
+CONCURRENT = {"issuecomment:6113266518": (38170476665, (38165474200,)),
+              "issuecomment:6114336402": (38177985892, (38174908441, 38177914382))}
+
+
+def test_reviewer_windows_are_scoped_to_the_prs_runs():
+    """Review round 2, issue 1: auto-review runs of other PRs overlap #636's. Run 38165474200 (PR #674) holds Jane sign-off 6113266518 beside #636's own run 38170476665; runs 38177914382 (#737) and 38174908441 (#674) hold 6114336402 beside 38177985892. Scoped to the record's PR's runs (serving.window_belongs: pull_requests holds the PR, or head_branch == head_ref within the PR's window — #636's runs carry an empty pull_requests), NVC-5 stays 12/12 glm-5.3 and job.reviewer posted stays Jane 6 / Drik 4; with the PR's own receipt missing, the other PR's run is never the answer."""
+    wanted = {r for _, rs in CONCURRENT.values() for r in rs}
+    other = [r for r in _snapshot() if r["run"]["id"] in wanted]
+    assert {r["run"]["id"]: r["run"]["pull_requests"] for r in other} == \
+        {38165474200: [674], 38174908441: [674], 38177914382: [737]}
+    idx = index(*other)
+    rec = rec636()
+    so = H.signoffs_from_raw(raw_pr(636))
+    for cid, (own, others) in CONCURRENT.items():
+        e = next(x for x in so if x["id"] == cid)
+        cands = serving.containing_windows(idx, ts=e["ts"], roles=frozenset({"jane"}),
+                                           author_login=e["signals"]["login"], owner_login=OWNER_LOGIN)
+        # The hazard: time + role + identity alone puts the sign-off in two or three runs' windows.
+        assert sorted(w.run_id for w in cands) == sorted((own, *others)), cid
+        assert serving.pick_window(cands, e["ts"]) == ("ambiguous", None)
+        assert [w.run_id for w in cands if serving.window_belongs(w, rec)] == [own]
+        assert receipt(own)["run"]["pull_requests"] == [] and receipt(own)["run"]["head_branch"] == BRANCH
+    out = annotate(rec636(*so), idx=idx)
+    verified = [e for e in out["events"] if e["trust"] == "verified"]
+    assert len(verified) == 12 and {(e["runtime"]["chain"], e["runtime"]["model"]) for e in verified} == {("review", "glm-5.3")}
+    for cid, (own, _) in CONCURRENT.items():
+        assert ev(out, cid)["runtime"]["run_id"] == own
+    jobs = receipt_events(out, idx, cb636(), owner=OWNER, repo=REPO_NAME)
+    assert {r: sum(1 for j in jobs if j["runtime"]["role"] == r and j["fields"]["posted"]) for r in ("jane", "drik")} == \
+        {"jane": 6, "drik": 4}
+    assert not any(j["runtime"]["run_id"] in (38165474200, 38174908441, 38177914382) for j in jobs)
+    assert not any(str(r) in p for r in (38165474200, 38174908441, 38177914382) for p in out["evidence"]["receipts"])
+    # Negative control: the PR's own receipt missing → the other PR's run is the ONLY candidate by
+    # time and identity, and the sign-off is still not attributed to it (no window, never a guess).
+    cid = "issuecomment:6113266518"
+    gone = ReceiptIndex([r for r in list(_receipts()) + other if r["run"]["id"] != 38170476665])
+    e = next(x for x in so if x["id"] == cid)
+    assert [w.run_id for w in serving.containing_windows(gone, ts=e["ts"], roles=frozenset({"jane"}),
+                                                         author_login=e["signals"]["login"],
+                                                         owner_login=OWNER_LOGIN)] == [38165474200]
+    lone = ev(annotate(rec636(e), idx=gone), cid)
+    assert (lone["runtime"]["run_id"], lone["runtime"]["model"], lone["runtime"]["model_basis"], lone["trust"]) == \
+        (None, None, "none", "verified")
+    # A reviewer window is never a candidate on a non-PR record; a ship-role window is not PR-scoped.
+    jane_w = next(w for w in idx.windows() if w.run_id == 38170476665 and w.role == "jane")
+    assert serving.window_belongs(jane_w, rec) and not serving.window_belongs(jane_w, brief592())
+    assert not serving.window_belongs(jane_w, H.pr_record(674, [], head_ref="claude/issue-667-sand-bath",
+                                                          created_at="2026-10-01T00:00:00Z", closed_at=None))
+    ship_w = H.window_of(idx, DESIGN_RUN, "Run via Z.AI (GLM, chain link 1)", attempt=2)
+    assert serving.window_belongs(ship_w, brief592()) and serving.window_belongs(ship_w, rec)
+    # A branch-name-only match outside the PR's [created_at, closed_at] is another PR on a reused branch.
+    reused = dict(rec636(), created_at="2026-10-12T00:00:00Z", closed_at=None)
+    assert not serving.window_belongs(jane_w, reused)
+
+
+def test_reviewer_join_on_the_whole_snapshot():
+    """Review round 2, issue 1, on EVERY receipt of the #843 snapshot (3,738, the real concurrency): #636's 12 verified sign-offs → glm-5.3 at chain review link 1 (NVC-5); #634's Actions-bot sign-offs join Jane 3 + Drik 2, the audit golden's calibration-cube join_stats; all 14 of #397's Actions-bot Drik sign-offs join (one window each; the model there is the code basis's business, not the window's). The snapshot-built receipts of the 166 fixture runs ARE the fixture receipts."""
+    snap = _snapshot()
+    assert len(snap) == 3738
+    by_id = {r["run"]["id"]: r for r in snap}
+    assert all(serving.canonical.dumps(by_id[r["run"]["id"]]) == serving.canonical.dumps(r) for r in _receipts())
+    idx = ReceiptIndex(snap)
+    out = annotate(rec636(*H.signoffs_from_raw(raw_pr(636))), idx=idx)
+    verified = [e for e in out["events"] if e["trust"] == "verified"]
+    assert len(verified) == 12
+    assert {(e["runtime"]["chain"], e["runtime"]["chain_link"], e["runtime"]["model"]) for e in verified} == {("review", 1, "glm-5.3")}
+    jobs = receipt_events(out, idx, cb636(), owner=OWNER, repo=REPO_NAME)
+    assert {r: sum(1 for j in jobs if j["runtime"]["role"] == r and j["fields"]["posted"]) for r in ("jane", "drik")} == \
+        {"jane": 6, "drik": 4}
+    stats = json.load(gzip.open(GOLDEN / "join_stats.json.gz"))["calibration-cube"]
+    for n, want in ((634, {"jane": stats["jane:joined"], "drik": stats["drik:joined"]}), (397, {"drik": 14})):
+        raw = raw_pr(n)
+        cb = H.pr_codebasis(snap, raw["pull"]["head"]["ref"])
+        bot = [e for e in H.signoffs_from_raw(raw) if e["signals"]["login"] == "github-actions[bot]"]
+        got = annotate_record(H.pr_from_raw(raw, bot), idx, cb, owner_login=OWNER_LOGIN, claims={})["events"]
+        joined = {}
+        for e in got:
+            assert e["runtime"]["run_id"] is not None, (n, e["id"])
+            assert by_id[e["runtime"]["run_id"]]["run"]["head_branch"] == raw["pull"]["head"]["ref"]
+            joined[e["runtime"]["role"]] = joined.get(e["runtime"]["role"], 0) + 1
+        assert joined == want, n
+    assert (stats["jane:artifacts"], stats["drik:artifacts"]) == (3, 2)
 
 
 def _review_registry_git(registry: bytes) -> GitCodeBasis:
@@ -269,15 +386,22 @@ def _oracle_receipt(*, checkout_delay: int, glm: bool = False) -> dict:
     return r
 
 
-def _oracle_git(*, change_at: int) -> FakeGitReader:
+ORACLE_HEAD = receipt(32548387083)["run"]["head_sha"]
+
+
+def _oracle_git(*, change_at: int, head_wf: bytes = ORACLE_WF) -> FakeGitReader:
+    """main m0 (T−2h, oracle-anthropic = claude-opus-4-8), m1 (T+change_at, claude-sonnet-5), m2
+    (T+4h); the run's PR head carries ``head_wf`` as its oracle.yml — the merge tree's text."""
     t = ts_epoch("2026-08-22T03:13:28Z")
     m0, m1, m2 = "1" * 40, "2" * 40, "3" * 40
     wf = ".github/workflows/oracle.yml"
+    merged = {wf: head_wf}
     return FakeGitReader([
         FakeCommit(m0, [], t - 7200, files={REGISTRY: _oracle_registry("claude-opus-4-8"), wf: ORACLE_WF}, changed=[REGISTRY, wf]),
         FakeCommit(m1, [m0], t + change_at, files={REGISTRY: _oracle_registry("claude-sonnet-5"), wf: ORACLE_WF}, changed=[REGISTRY]),
         FakeCommit(m2, [m1], t + 4 * 3600, files={REGISTRY: _oracle_registry("claude-sonnet-5"), wf: ORACLE_WF}, changed=["README.md"]),
-    ], refs={H.MAIN_REF: m2})
+        FakeCommit(ORACLE_HEAD, [m0], t - 60, files={wf: head_wf}, changed=[wf] if head_wf != ORACLE_WF else []),
+    ], refs={H.MAIN_REF: m2}, merges={(m, ORACLE_HEAD): (dict(merged), set()) for m in (m0, m1, m2)})
 
 
 def _oracle_review(r: dict) -> dict:
@@ -292,7 +416,7 @@ def _oracle_review(r: dict) -> dict:
 
 
 def test_oracle_resolves_against_main_at_checkout():
-    """Critique 26: an oracle pull_request run created at T whose checkout step started at T+40 min resolves against main@(T+40 min) — a registry change landing between T and T+40 min is the one it read; a registry change within 15 min either side of the checkout step → ambiguous; its two resolve literals are discriminated by the step provider group."""
+    """Critique 26: an oracle pull_request run created at T whose checkout step started at T+40 min resolves against main@(T+40 min) — a registry change landing between T and T+40 min is the one it read; a registry change within 15 min either side of the checkout step → ambiguous; its two resolve literals — the PR merge commit's text, not main's (review round 2, issue 5) — are discriminated by the step provider group."""
     r = _oracle_receipt(checkout_delay=40 * 60)
     idx = ReceiptIndex([r])
     cb = GitCodeBasis(_oracle_git(change_at=20 * 60))       # registry change at T+20 min
@@ -314,6 +438,24 @@ def test_oracle_resolves_against_main_at_checkout():
     bad = FakeCodeBasis(default=Basis("main", None, "1" * 40), files={("main", None, "1" * 40, ".github/workflows/oracle.yml"):
                         ORACLE_WF.replace(b"oracle-anthropic", b"oracle-x").replace(b"oracle-glm", b"oracle-y")})
     assert resolve(w, bad).model_basis == "ambiguous"
+    # Review round 2, issue 5: the literals are the PR MERGE COMMIT's text, not main's. A PR whose
+    # oracle.yml renames the anthropic chain is judged against its own literals (the pick
+    # oracle-anthropic is no longer among them → ambiguous), though main's text would have named it.
+    renamed = ORACLE_WF.replace(b"resolve oracle-anthropic", b"resolve oracle-claude")
+    reader = _oracle_git(change_at=20 * 60, head_wf=renamed)
+    pr_cb = GitCodeBasis(reader)
+    e = annotate_record(_oracle_review(r), idx, pr_cb, owner_login=OWNER_LOGIN, claims={})["events"][0]
+    assert (e["runtime"]["model"], e["runtime"]["model_basis"]) == (None, "ambiguous")
+    b = pr_cb.basis_for("oracle.yml", "pull_request", ORACLE_HEAD, r["run"]["created_at"], checkout=w.checkout)
+    assert serving.chain_literals(pr_cb.file_at(b, ".github/workflows/oracle.yml").decode()) == ["oracle-claude", "oracle-glm"]
+    assert serving.chain_literals(reader.show("2" * 40, ".github/workflows/oracle.yml").decode()) == \
+        ["oracle-anthropic", "oracle-glm"]
+    # ...and with the head gone (force-pushed away) the text is unknown: none + unavailable, never main's text.
+    gone = _oracle_git(change_at=20 * 60)
+    del gone.commits[ORACLE_HEAD]
+    out = annotate_record(_oracle_review(r), idx, GitCodeBasis(gone), owner_login=OWNER_LOGIN, claims={})
+    assert (out["events"][0]["runtime"]["model_basis"], out["incomplete"]) == \
+        ("none", [f"codebasis-unavailable:{ORACLE_HEAD[:8]}"])
 
 
 def test_pre_326_inline_pin():
@@ -332,6 +474,155 @@ def test_pre_326_inline_pin():
     # Negative control: no such step in that job → no pin, basis none.
     nope = serving.StepWindow(**{**w.__dict__, "job_name": "Explain a disarmed run"})
     assert (resolve(nope, GitCodeBasis(H.fixture_git())).model_basis) == "none"
+
+
+E2_RUN = 31939632623
+
+
+def _e2_git(registry: str = H.REGISTRY_E2) -> tuple[FakeGitReader, str]:
+    """Main (2 h before run 31939632623's created_at) and the run's head 14745efd both carry
+    auto-review.yml + registry.conf as at 14745efd; the merge tree of the two is the same files."""
+    created = ts_epoch("2026-08-16T09:39:49Z")
+    main = "5" * 40
+    files = {REGISTRY: registry.encode(), ".github/workflows/auto-review.yml": H.AUTO_REVIEW_E2.encode()}
+    git = FakeGitReader([FakeCommit(main, [], created - 7200, files=dict(files), changed=sorted(files)),
+                         FakeCommit(H.E2_HEAD, [main], created - 6, files=dict(files))],
+                        refs={H.MAIN_REF: main}, merges={(main, H.E2_HEAD): (dict(files), set())})
+    return git, main
+
+
+def test_e2_registry_output_model():
+    """Review round 2, issue 2: run 31939632623 (2026-08-16, head 14745efd) ran '/drik-review via Z.AI GLM 5.2', whose --model is ${{ needs.design-changes.outputs.model1 }} — no literal pin. registry_pin traces model1 → design-changes' `model1: ${{ steps.chain.outputs.link1_model }}` → step `chain`'s `model_registry resolve review`, so the model is review[0] = glm-5.2 (registry@14745efd: glm-5.2, glm-5.1, glm-4.6, claude-opus-4-8), chain_link 1, basis step-window+registry@merge(…); the job.reviewer gets job-link+registry@merge(…)."""
+    r = next(x for x in _snapshot() if x["run"]["id"] == E2_RUN)
+    assert (r["run"]["head_sha"], r["run"]["event"], r["workflow"]) == (H.E2_HEAD, "pull_request", "auto-review.yml")
+    idx = ReceiptIndex([r])
+    w = next(x for x in idx.windows() if x.role == "drik")
+    assert (w.step_name, w.step.era, w.job_name) == ("/drik-review via Z.AI GLM 5.2", "E2", "Drik review (fitness for purpose)")
+    text = H.AUTO_REVIEW_E2
+    assert serving.inline_pin(text, w.job_name, w.step_name) is None          # the pre-fix answer: no model
+    for label, link in (("Z.AI GLM 5.2", 1), ("Z.AI GLM 5.1", 2), ("Z.AI GLM 4.6", 3), ("Anthropic Opus 4.8", 4)):
+        assert serving.registry_pin(text, w.job_name, f"/drik-review via {label}") == ("review", link)
+    git, main = _e2_git()
+    j = resolve(w, GitCodeBasis(git))
+    assert (j.model, j.chain, j.chain_link, j.links_not_served, j.provider, j.model_basis) == \
+        ("glm-5.2", "review", 1, 0, "zai", f"step-window+registry@merge({main[:8]}+14745efd)")
+    # The Opus link, had it been the one that ran: review[3], links 1–3 did not serve.
+    opus = serving.StepWindow(**{**w.__dict__, "step_name": "/drik-review via Anthropic Opus 4.8",
+                                 "step": steps.parse_step_name("/drik-review via Anthropic Opus 4.8")})
+    j4 = resolve(opus, GitCodeBasis(git))
+    assert (j4.model, j4.chain_link, j4.links_not_served, j4.provider) == ("claude-opus-4-8", 4, 3, "anthropic")
+    # Job level: the Drik job's last link that ran is the 5.2 step.
+    rec = H.pr_record(231, [], head_ref=r["run"]["head_branch"], created_at="2026-08-16T00:00:00Z", closed_at=None)
+    drik = next(e for e in receipt_events(rec, idx, GitCodeBasis(git), owner=OWNER, repo=REPO_NAME)
+                if e["runtime"]["role"] == "drik")
+    assert (drik["runtime"]["model"], drik["runtime"]["chain_link"], drik["runtime"]["model_basis"]) == \
+        ("glm-5.2", 1, f"job-link+registry@merge({main[:8]}+14745efd)")
+    # Cross-check: a registry whose review chain starts with glm-5.1 contradicts the '5.2' label —
+    # the basis (or the name) is not what ran, so nothing is claimed.
+    swapped = H.REGISTRY_E2.replace("models = glm-5.2, glm-5.1,", "models = glm-5.1, glm-5.2,")
+    assert swapped != H.REGISTRY_E2
+    js = resolve(w, GitCodeBasis(_e2_git(swapped)[0]))
+    assert (js.model, js.model_basis, js.chain, js.chain_link) == (None, "ambiguous", "review", 1)
+    # Negative control: without a registry at the basis the model is unreadable (basis none, counted).
+    files = {".github/workflows/auto-review.yml": H.AUTO_REVIEW_E2.encode()}
+    bare = FakeGitReader([FakeCommit(main, [], ts_epoch("2026-08-16T07:39:49Z"), files=dict(files), changed=sorted(files)),
+                          FakeCommit(H.E2_HEAD, [main], ts_epoch("2026-08-16T09:39:43Z"), files=dict(files))],
+                         refs={H.MAIN_REF: main}, merges={(main, H.E2_HEAD): (dict(files), set())})
+    jb = resolve(w, GitCodeBasis(bare))
+    assert (jb.model, jb.model_basis, jb.chain, jb.unavailable) == (None, "none", "review", H.E2_HEAD)
+
+
+@pytest.mark.parametrize("label,want", [
+    ("/jane-review via Z.AI GLM 5.2", "glm-5.2"), ("/pm triage via Z.AI GLM 4.6", "glm-4.6"),
+    ("/drik-review via Anthropic Opus 4.8", "claude-opus-4-8"), ("/design-coach via Anthropic Sonnet 5", "claude-sonnet-5"),
+    ("/jane-review via Anthropic Haiku 4.5", "claude-haiku-4-5"),
+    ("/jane-review via Anthropic 5", None),                         # a bare number names no Anthropic model
+    ("/jane-review via Z.AI GLM (chain link 1)", None),             # E3: no label
+    ("Run via Z.AI (GLM)", None),                                   # E1: no label
+])
+def test_e2_label_model(label, want):
+    assert serving.e2_label_model(steps.parse_step_name(label)) == want
+
+
+REG_WF = """name: R
+jobs:
+  resolve:
+    name: Resolve
+    outputs:
+      model1: ${{ steps.chain.outputs.link1_model }}
+      model2: ${{ steps.chain.outputs.link2_model }}
+      flat: ${{ vars.MODEL }}
+      other: ${{ steps.twice.outputs.link1_model }}
+    steps:
+      - name: Resolve the chain
+        id: chain
+        run: |
+          # model_registry resolve not-this-one
+          python3 -m model_registry resolve review --gh-output "$GITHUB_OUTPUT"
+      - name: Two literals
+        id: twice
+        run: python3 -m model_registry resolve a && python3 -m model_registry resolve b
+  use:
+    name: Use
+    steps:
+      - name: Needs output
+        run: claude --model ${{ needs.resolve.outputs.model2 }}
+      - name: Step output
+        id: local
+        run: |
+          python3 -m model_registry resolve scout
+          claude --model ${{ steps.local.outputs.link3_model }}
+      - name: Flat output
+        run: claude --model ${{ needs.resolve.outputs.flat }}
+      - name: Vars
+        run: claude --model ${{ vars.MODEL }}
+      - name: Two literals
+        run: claude --model ${{ needs.resolve.outputs.other }}
+      - name: Unknown job
+        run: claude --model ${{ needs.nope.outputs.model1 }}
+      - name: Unknown step id
+        run: claude --model ${{ steps.nope.outputs.link1_model }}
+      - name: Commented
+        # claude --model ${{ needs.resolve.outputs.model1 }}
+        run: claude
+"""
+
+
+@pytest.mark.parametrize("step,want", [
+    ("Needs output", ("review", 2)),          # needs.<job>.outputs.<out> → that job's link output; comment skipped
+    ("Step output", ("scout", 3)),            # steps.<id>.outputs.link<N>_model in the same job
+    ("Flat output", None),                    # an output that is not a chain link
+    ("Vars", None),
+    ("Two literals", None),                   # the resolve step must carry exactly one literal
+    ("Unknown job", None),
+    ("Unknown step id", None),
+    ("Commented", None),
+])
+def test_registry_pin_scanner(step, want):
+    assert serving.registry_pin(REG_WF, "Use", step) == want
+
+
+def test_registry_pin_agrees_with_the_e3_step_names_in_the_fixture_workflows():
+    """On every committed fixture workflow blob, each E3 agent step's --model traces to (chain, link) with link == the step name's chain link and chain == the chain resolve() picks from the workflow's literals — the scanner reads the real files the way the step names say."""
+    seen = 0
+    for sha, paths in H.codebasis_index().items():
+        for path in paths:
+            if not path.startswith(".github/workflows/"):
+                continue
+            text = H.codebasis_blob(sha, path).decode()
+            wfname = path.rsplit("/", 1)[1]
+            wf = serving._Workflow(text)
+            for key, name, k, e in wf.jobs:
+                for i, nxt in wf._steps((k, e)):
+                    p = steps.parse_step_name(serving._item_name(wf.struct, i, nxt) or "")
+                    if p is None or p.era != "E3":
+                        continue
+                    stepname = serving._item_name(wf.struct, i, nxt)
+                    lits = serving.chain_literals(text)
+                    chain = lits[0] if len(lits) == 1 else serving.CHAIN_DISCRIMINATORS.get((wfname, p.lead, p.provider))
+                    assert serving.registry_pin(text, name or key, stepname) == (chain, p.link), (sha[:8], path, stepname)
+                    seen += 1
+    assert seen >= 60
 
 
 def test_overlapping_windows_are_ambiguous():
@@ -471,6 +762,17 @@ def test_trailer_claimed_model():
     # Negative controls: an unnamed Claude co-author names no model; Cursor is a platform.
     assert serving.trailer_runtime({"trailer_coauthors": ["Claude <noreply@anthropic.com>"]}) is None
     assert serving.trailer_runtime({"trailer_coauthors": []}) is None
+    # 'Claude Code' (31 commits, e.g. 0987cd1 on #738) names the harness, never a model.
+    code = {"trailer_coauthors": ["Claude Code <noreply@anthropic.com>"]}
+    assert serving.trailer_runtime(code) == {"harness": "claude-code", "model": None, "model_basis": "none"}
+    assert serving.trailer_runtime({"trailer_coauthors": ["Claude Code <noreply@anthropic.com>",
+                                                         "Claude Opus 4.8 <noreply@anthropic.com>"]}) == \
+        {"harness": "claude-code", "model": "Claude Opus 4.8", "model_basis": "trailer"}
+    cc = copy.deepcopy(c)
+    cc["signals"]["trailer_coauthors"] = list(code["trailer_coauthors"])
+    e = ev(annotate(rec636(cc)), cc["id"])
+    assert (e["runtime"]["model"], e["runtime"]["model_basis"], e["runtime"]["harness"], e["trust"], e["trust_basis"]) == \
+        (None, "none", "claude-code", "claimed", "trailer")
     assert serving.trailer_runtime({"trailer_coauthors": ["Cursor Agent <cursoragent@cursor.com>"]}) == \
         {"platform": "cursor", "harness": "cursor-agent", "model": None, "model_basis": "none"}
     two = serving.trailer_runtime({"trailer_coauthors": ["Claude Opus 4.8 <noreply@anthropic.com>",

@@ -11,9 +11,14 @@ consumes — any contract-valid event@1), and the code basis is
 from __future__ import annotations
 
 import copy
+import gzip
+import importlib.util
+import json
+import posixpath
+import tarfile
 from typing import Any, Iterable, Optional
 
-from conftest import OWNER, OWNER_LOGIN, REPO_NAME, codebasis_blob, codebasis_index, main_history
+from conftest import OWNER, OWNER_LOGIN, REPO, REPO_NAME, TESTS, codebasis_blob, codebasis_index, main_history
 from fakes import FakeCommit, FakeGitReader
 from provenance import codebasis, serving
 from provenance.serving import ts_epoch
@@ -21,6 +26,54 @@ from provenance.serving import ts_epoch
 MAIN_REF = "refs/remotes/origin/main"
 REGISTRY = ".github/models/registry.conf"
 ACTIONS_BOT = "github-actions[bot]"
+#: The committed #843 snapshot (main 411a756) — every watched run's jobs before retention.
+RESCUE = REPO / "audits" / "provenance-2026-10" / "rescue"
+WATCHED = ("auto-review.yml", "backlog-burn.yml", "chunker.yml", "design-run.yml", "labeler.yml",
+           "oracle.yml", "product-scout.yml", "spike-converter.yml", "wright.yml")
+
+
+# ---------------------------------------------------------------------------
+# Receipts for the whole #843 snapshot (the real, concurrent run set).
+
+def _reference_build_receipt():
+    """``tests/dev/build_fixtures.py::build_receipt`` — the reference every committed fixture
+    receipt was built with (receipts.build_receipt must reproduce it byte for byte)."""
+    spec = importlib.util.spec_from_file_location("_provenance_build_fixtures", TESTS / "dev" / "build_fixtures.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.build_receipt
+
+
+def snapshot_receipts(run_ids: Optional[Iterable[int]] = None) -> list[dict[str, Any]]:
+    """receipt@1 for every completed, non-skipped watched run of the committed #843 snapshot
+    (``rescue/runs.tar`` + ``rescue/jobs.tar``, read with ``extractfile`` only), or only for
+    ``run_ids``. ~3 s for all 3,738 — the concurrent other-PR runs the 166 fixture receipts
+    leave out (review round 2, issue 1)."""
+    build = _reference_build_receipt()
+    wanted = None if run_ids is None else set(run_ids)
+    runs: dict[int, tuple[str, dict]] = {}
+    with tarfile.open(RESCUE / "runs.tar") as tf:
+        for m in tf.getmembers():
+            wf = posixpath.basename(m.name)[: -len(".json.gz")]
+            if m.isfile() and wf in WATCHED:
+                for run in json.loads(gzip.decompress(tf.extractfile(m).read())):
+                    if wanted is None or run["id"] in wanted:
+                        runs[run["id"]] = (wf, run)
+    out = []
+    with tarfile.open(RESCUE / "jobs.tar") as tf:
+        for m in tf.getmembers():
+            name = posixpath.basename(m.name)
+            if not (m.isfile() and name.endswith(".json.gz") and name.split(".")[0].isdigit()):
+                continue
+            hit = runs.get(int(name.split(".")[0]))
+            if hit is None:
+                continue
+            wf, run = hit
+            if run.get("status") != "completed" or run.get("conclusion") == "skipped":
+                continue
+            jobs = json.loads(gzip.decompress(tf.extractfile(m).read()))["jobs"]
+            out.append(build(wf, run, jobs, "snapshot:pr843"))
+    return sorted(out, key=lambda r: r["run"]["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -251,3 +304,207 @@ def shifted_receipt(receipt: dict, *, run_id: int, seconds: int, workflow: Optio
 def window_of(index: serving.ReceiptIndex, run_id: int, step_name: str, attempt: Optional[int] = None):
     return next(w for w in index.windows() if w.run_id == run_id and w.step_name == step_name
                 and (attempt is None or w.attempt == attempt))
+
+# ---------------------------------------------------------------------------
+# auto-review.yml + registry.conf at 14745efd (run 31939632623's PR head, 2026-08-16).
+
+#: The head of run 31939632623 (an E2 auto-review pull_request run: '/drik-review via Z.AI GLM 5.2').
+E2_HEAD = "14745efd2042c9b13709b168d2a97110e00a3d30"
+#: Verbatim lines of ``.github/workflows/auto-review.yml`` at :data:`E2_HEAD` (full file sha256
+#: a1f71872…41c4): the name, ``on:``, ``jobs:``, ``design-changes`` up to its chain-resolve step, and
+#: the whole ``drik-review`` job; each elided range is a whole-line comment saying so. The E2 steps
+#: read ``--model ${{ needs.design-changes.outputs.model<N> }}`` — no literal pin (review round 2,
+#: issue 2).
+AUTO_REVIEW_E2 = """name: Auto design review (Jane / Drik / coach)
+# [excerpt: lines 2-44 elided]
+on:
+  pull_request:
+    types:
+      - opened
+      - ready_for_review
+      - synchronize
+      - reopened
+
+# [excerpt: lines 53-63 elided]
+jobs:
+# [excerpt: lines 65-68 elided]
+  design-changes:
+    name: Check for design file changes
+    runs-on: ubuntu-latest
+    # Honour the opt-out label before doing any work.
+    if: >-
+      !contains(github.event.pull_request.labels.*.name, 'no-auto-review')
+      && !github.event.pull_request.draft
+    outputs:
+      designs_changed: ${{ steps.check.outputs.designs_changed }}
+      changed_designs: ${{ steps.check.outputs.changed_designs }}
+      is_new_round: ${{ steps.round.outputs.is_new_round }}
+      # The reviewer fallback chain, sourced from .github/models/registry.conf
+      # (issue #206) instead of hardcoded per job. Reordering or swapping a model
+      # within the chain is now a registry edit; the drift-guard test
+      # (tools/model-registry/tests/test_workflow_drift.py) pins these to the
+      # registry so the two cannot diverge. The per-provider secret wiring stays
+      # literal in each ship step below (the Actions constraint).
+      model1: ${{ steps.chain.outputs.link1_model }}
+      model2: ${{ steps.chain.outputs.link2_model }}
+      model3: ${{ steps.chain.outputs.link3_model }}
+      model4: ${{ steps.chain.outputs.link4_model }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Resolve the ordered model ids for the `review` chain from the committed
+      # registry. Stdlib-only, so it runs straight from the checkout with no pip
+      # step in front of the review pipeline; a malformed registry fails loudly
+      # here (and is caught pre-merge by the model-registry tests + `check`).
+      - name: Resolve the reviewer model chain (issue #206)
+        id: chain
+        env:
+          PYTHONPATH: tools/model-registry/src
+        run: |
+          python3 -m model_registry resolve review --gh-output "$GITHUB_OUTPUT"
+
+# [excerpt: lines 107-292 elided]
+  drik-review:
+    name: Drik review (fitness for purpose)
+    needs: design-changes
+    if: >-
+      needs.design-changes.outputs.designs_changed == 'true'
+      && needs.design-changes.outputs.is_new_round == 'true'
+    runs-on: ubuntu-latest
+    # Provider fallback chain — see the jane-review job for the rationale and
+    # ordering (Z.AI glm-5.2 → glm-5.1 → glm-4.6 → Anthropic claude-opus-4-8;
+    # first success wins; a missing key degrades gracefully). Issue #206.
+    env:
+      HAS_ZAI: ${{ secrets.ZAI_KEY != '' }}
+      HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: /drik-review via Z.AI GLM 5.2
+        id: p1
+        if: env.HAS_ZAI == 'true'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model1 }}
+          prompt: >-
+            /drik-review ${{ github.event.pull_request.number }}
+
+      - name: /drik-review via Z.AI GLM 5.1
+        id: p2
+        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model2 }}
+          prompt: >-
+            /drik-review ${{ github.event.pull_request.number }}
+
+      - name: /drik-review via Z.AI GLM 4.6
+        id: p3
+        if: env.HAS_ZAI == 'true' && steps.p1.outcome != 'success' && steps.p2.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        env:
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
+          API_TIMEOUT_MS: "3000000"
+        with:
+          anthropic_api_key: ${{ secrets.ZAI_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model3 }}
+          prompt: >-
+            /drik-review ${{ github.event.pull_request.number }}
+
+      - name: /drik-review via Anthropic Opus 4.8
+        id: p4
+        if: >-
+          env.HAS_ANTHROPIC == 'true'
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@7ff6806c8ebd129a7043b947af920074d3819dc8  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode bypassPermissions --model ${{ needs.design-changes.outputs.model4 }}
+          prompt: >-
+            /drik-review ${{ github.event.pull_request.number }}
+
+      - name: No provider key configured
+        if: env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
+        run: |
+          echo "::notice::Neither ZAI_KEY nor ANTHROPIC_API_KEY is set — skipping /drik-review for PR #${{ github.event.pull_request.number }}"
+
+      - name: Every configured provider failed
+        if: >-
+          (env.HAS_ZAI == 'true' || env.HAS_ANTHROPIC == 'true')
+          && steps.p1.outcome != 'success'
+          && steps.p2.outcome != 'success'
+          && steps.p3.outcome != 'success'
+          && steps.p4.outcome != 'success'
+        run: |
+          echo "::error::/drik-review failed on every configured provider (Z.AI glm-5.2 → glm-5.1 → glm-4.6 → Anthropic claude-opus-4-8). See the failed step logs above."
+          exit 1
+
+"""
+#: ``.github/models/registry.conf`` at :data:`E2_HEAD` from its first stanza on (the leading
+#: comment block elided): ``[chain:review] = glm-5.2, glm-5.1, glm-4.6, claude-opus-4-8``.
+REGISTRY_E2 = """[provider:zai]
+secret   = ZAI_KEY
+base_url = https://api.z.ai/api/anthropic
+notes    = Z.AI GLM family via the Anthropic-compatible endpoint. Cheap, fast,
+           best-effort for routing a Claude Code skill to a non-Claude model.
+
+[provider:anthropic]
+secret   = ANTHROPIC_API_KEY
+notes    = Anthropic native endpoint. Frontier quality; the last-resort link.
+
+# ── Models (ordered preference is expressed by the chains, not here) ──────────
+
+[model:glm-5.2]
+provider = zai
+notes    = First choice for review: newest GLM, cheapest capable option. Good
+           enough for the reviewer personas' verification passes at a fraction of
+           frontier cost.
+
+[model:glm-5.1]
+provider = zai
+notes    = Fallback if 5.2 is unavailable — prior GLM, near-equivalent quality.
+
+[model:glm-4.6]
+provider = zai
+notes    = Last GLM fallback: older, larger context, still capable enough for a
+           review when the newer GLMs are down.
+
+[model:claude-opus-4-8]
+provider = anthropic
+notes    = Frontier final fallback. Highest quality (and cost); reached only when
+           every GLM link failed, so a review is never silently lost.
+
+# ── Chains (named, ordered — the thing a job routes to) ───────────────────────
+
+# The reviewer personas (jane / drik / coach) in auto-review.yml. GLM first,
+# cheapest-capable to oldest, then Anthropic frontier as the never-lose-a-review
+# backstop. Migrating auto-review onto this chain changed nothing that runs today.
+[chain:review]
+models = glm-5.2, glm-5.1, glm-4.6, claude-opus-4-8
+"""

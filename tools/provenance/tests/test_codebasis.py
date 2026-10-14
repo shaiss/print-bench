@@ -7,6 +7,8 @@ Owner: H4. Each test's docstring is its acceptance criterion
 
 from __future__ import annotations
 
+from typing import Optional
+
 import pytest
 
 from _serving_helpers import MAIN_REF, REGISTRY, fixture_codebasis, fixture_git
@@ -68,23 +70,40 @@ def test_merge_basis_for_auto_review():
     assert GitCodeBasis(git).file_at(Basis("merge", F4E3, M0987), REGISTRY) == b"merged"
 
 
-def _oracle_git() -> FakeGitReader:
+ORACLE = ".github/workflows/oracle.yml"
+MAIN_WF = b"jobs:\n  oracle:\n    steps:\n      - run: python3 -m model_registry resolve oracle-glm\n"
+PR_WF = MAIN_WF.replace(b"oracle-glm", b"oracle-zai")      # the PR head edits the resolve literal
+
+
+def _oracle_git(*, wf_change_at: Optional[int] = None, conflict: bool = False) -> FakeGitReader:
+    """main m0 (T−2h, V1), m1 (T+20 min, V2: a registry change), m2 (T+3h, README); the PR head
+    ``f`` edits oracle.yml. ``wf_change_at`` (seconds after T) inserts a main commit touching
+    oracle.yml between m1 and m2."""
     t = ts_epoch("2026-08-22T03:13:28Z")
-    m0, m1, m2 = _sha("1"), _sha("2"), _sha("3")
-    return FakeGitReader([
-        FakeCommit(m0, [], t - 7200, files={REGISTRY: V1}, changed=[REGISTRY]),
-        FakeCommit(m1, [m0], t + 20 * 60, files={REGISTRY: V2}, changed=[REGISTRY]),
-        FakeCommit(m2, [m1], t + 3 * 3600, files={REGISTRY: V2}, changed=["README.md"]),
-    ], refs={MAIN_REF: m2})
+    m0, m1, m2, head = _sha("1"), _sha("2"), _sha("3"), _sha("f")
+    commits = [
+        FakeCommit(m0, [], t - 7200, files={REGISTRY: V1, ORACLE: MAIN_WF}, changed=[REGISTRY, ORACLE]),
+        FakeCommit(m1, [m0], t + 20 * 60, files={REGISTRY: V2, ORACLE: MAIN_WF}, changed=[REGISTRY]),
+        FakeCommit(head, [m0], t - 60, files={REGISTRY: V1, ORACLE: PR_WF}, changed=[ORACLE]),
+    ]
+    tip = m1
+    if wf_change_at is not None:
+        commits.append(FakeCommit(_sha("4"), [m1], t + wf_change_at, files={REGISTRY: V2, ORACLE: MAIN_WF + b"#\n"},
+                                  changed=[ORACLE]))
+        tip = _sha("4")
+    commits.append(FakeCommit(m2, [tip], t + 3 * 3600, files={REGISTRY: V2, ORACLE: MAIN_WF}, changed=["README.md"]))
+    merged = {REGISTRY: V2, ORACLE: PR_WF}
+    merges = {(m, head): (dict(merged), {ORACLE} if conflict else set()) for m in (m0, m1, _sha("4"))}
+    return FakeGitReader(commits, refs={MAIN_REF: m2}, merges=merges)
 
 
 def test_main_basis_for_oracle_uses_checkout():
-    """oracle pull_request with checkout=(started, completed) → Basis('main', None, main@started); without a checkout interval → main@created_at, ambiguous (reason 'no-checkout-step')."""
+    """oracle pull_request with checkout=(started, completed) → Basis('main', head, main@started); without a checkout interval → main@created_at, ambiguous (reason 'no-checkout-step')."""
     cb = GitCodeBasis(_oracle_git())
     created = "2026-08-22T03:13:28Z"
     b = cb.basis_for("oracle.yml", "pull_request", _sha("f"), created,
                      checkout=("2026-08-22T03:53:28Z", "2026-08-22T03:53:31Z"))
-    assert b == Basis("main", None, _sha("2"))
+    assert b == Basis("main", _sha("f"), _sha("2"))
     assert cb.chain_models(b, "oracle-glm") == ("glm-4.6",)
     no_co = cb.basis_for("oracle.yml", "pull_request", _sha("f"), created)
     assert (no_co.main_sha, no_co.ambiguous, no_co.reason) == (_sha("1"), True, "no-checkout-step")
@@ -92,6 +111,31 @@ def test_main_basis_for_oracle_uses_checkout():
     near = cb.basis_for("oracle.yml", "pull_request", _sha("f"), created,
                         checkout=("2026-08-22T03:20:00Z", "2026-08-22T03:23:28Z"))
     assert (near.main_sha, near.ambiguous, near.reason) == (_sha("1"), True, "main-changed-near-checkout")
+
+
+def test_oracle_workflow_text_is_the_merge_commits():
+    """Review round 2, issue 5: a pull_request run executes the workflow DEFINITION from the PR merge commit while oracle.yml checks out base.ref — so file_at(main basis, oracle.yml) reads merge_tree_read(main@checkout, head) (the PR's edited resolve literal) and the registry stays main@checkout's. A conflict on the workflow is ambiguous; a main commit touching oracle.yml between created_at and the checkout (here at T+22 min, 18 min before a 40-min-late checkout — outside the ±15 min registry window) is ambiguous; a missing head is unavailable."""
+    created = "2026-08-22T03:13:28Z"
+    late = ("2026-08-22T03:53:28Z", "2026-08-22T03:53:31Z")
+    cb = GitCodeBasis(_oracle_git())
+    b = cb.basis_for("oracle.yml", "pull_request", _sha("f"), created, checkout=late)
+    assert cb.file_at(b, ORACLE) == PR_WF                    # the merge commit's text...
+    assert cb.file_at(b, REGISTRY) == V2                     # ...the checkout's registry
+    assert cb.file_at(Basis("main", None, _sha("2")), ORACLE) == MAIN_WF   # negative control: main alone
+    clash = GitCodeBasis(_oracle_git(conflict=True)).basis_for("oracle.yml", "pull_request", _sha("f"), created, checkout=late)
+    assert (clash.ambiguous, clash.reason) == (True, "merge-conflict")
+    moved = GitCodeBasis(_oracle_git(wf_change_at=22 * 60)).basis_for("oracle.yml", "pull_request", _sha("f"), created,
+                                                                      checkout=late)
+    assert (moved.ambiguous, moved.reason) == (True, "main-changed-near-checkout")
+    # Negative control: a REGISTRY-only commit that far before the checkout is not ambiguous —
+    # the registry is read at the checkout, so only its ±15 min window matters.
+    git = _oracle_git(wf_change_at=22 * 60)
+    git.commits[_sha("4")].changed = [REGISTRY]
+    assert GitCodeBasis(git).basis_for("oracle.yml", "pull_request", _sha("f"), created, checkout=late).ambiguous is False
+    git = _oracle_git()
+    del git.commits[_sha("f")]
+    gone = GitCodeBasis(git).basis_for("oracle.yml", "pull_request", _sha("f"), created, checkout=late)
+    assert (gone.unavailable, gone.main_sha) == (_sha("f"), _sha("2"))
 
 
 def test_registry_change_within_the_window_before_created_is_ambiguous():
