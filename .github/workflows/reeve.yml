@@ -110,7 +110,10 @@ jobs:
       # the run-health gather (src/reeve/github.py) lists workflow runs and
       # open PRs; its GETs are uncaught, so a missing scope would hard-fail
       # the run rather than degrade — grant the reads explicitly (the
-      # groomer's reasoning)
+      # groomer's reasoning). The provenance gather (src/reeve/provenance.py,
+      # armed only) needs no more: the artifact list and runs (actions), the
+      # data-ref tips, commits, trees and state.json (contents) and one
+      # closed-PR page (pull-requests).
       actions: read
       pull-requests: read
     steps:
@@ -198,11 +201,20 @@ jobs:
           # below so a dash-leading value is read as the value, never as an
           # option that would exit 2 and red the keyless daily report.
           AI_ANDON_CORD: ${{ vars.AI_ANDON_CORD }}
+          # The provenance harvester's live arming key (docs/provenance.md
+          # §Registration), handed over RAW the same way: its two detectors
+          # (provenance-foreign-tip, provenance-lag) read "not evaluated" — and
+          # send no request — unless it casefolds to 'true', GitHub's own
+          # compare; armed, an absent data ref is a finding. The `=` form below
+          # for the same dash-leading-value reason as --andon.
+          PROVENANCE_ENABLED: ${{ vars.PROVENANCE_ENABLED }}
         run: |
           # GET-only run-health reads via src/reeve/github.py (the groomer's
-          # pattern); the sticky upsert remains the sole write.
+          # pattern) and src/reeve/provenance.py (the one module that reads the
+          # harvester's data refs); the sticky upsert remains the sole write.
           reeve run --root . --repo "$GITHUB_REPOSITORY" \
             --conf .github/reeve.conf --andon="$AI_ANDON_CORD" \
+            --provenance-enabled="$PROVENANCE_ENABLED" \
             --out report.md > /dev/null
           {
             echo "## Reeve — bench health"

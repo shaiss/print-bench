@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "provenance"
+version = "0.1.0"
+description = "Keyless, deterministic provenance harvester for print-bench designs: freezes PR/brief/run evidence onto the add-only `provenance` branch and derives per-design who/how views onto `provenance-site` (docs/provenance.md)"
+license = "CC-BY-SA-4.0"
+requires-python = ">=3.10"
+# Stdlib-only on purpose: provenance.yml runs this on the runner's system
+# Python straight from the checkout (PYTHONPATH=tools/provenance/src, plus
+# tools/model-registry/src for the registry parser the serving join reuses),
+# with no pip step in front of it — the same rule tools/andon, tools/reeve,
+# tools/backlog-groomer and tools/growth keep.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=9.1.1"]
+
+[project.scripts]
+provenance = "provenance.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
