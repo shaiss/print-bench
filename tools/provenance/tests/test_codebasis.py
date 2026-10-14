@@ -1,7 +1,8 @@
 """codebasis — GitCodeBasis over a FakeGitReader built from fixtures/codebasis + fixtures/main_history.
 
 Owner: H4. Each placeholder's docstring is its acceptance criterion
-(docs/provenance.md, final plan P0/P1a–e); replace the skip with the test.
+(docs/provenance.md, final plan P0/P1a–e, the critique round's items 9 and
+26); replace the skip with the test.
 """
 
 from __future__ import annotations
@@ -20,8 +21,18 @@ def test_merge_basis_for_auto_review():
 
 
 @pytest.mark.skip(reason="builder: implement")
+def test_main_basis_for_oracle_uses_checkout():
+    """oracle pull_request with checkout=(started, completed) → Basis('main', None, main@started); without a checkout interval → main@created_at, ambiguous (reason 'no-checkout-step')."""
+
+
+@pytest.mark.skip(reason="builder: implement")
 def test_conflict_on_registry_is_ambiguous():
     """merge_tree_read reports registry.conf conflicted → ambiguous."""
+
+
+@pytest.mark.skip(reason="builder: implement")
+def test_missing_head_is_unavailable():
+    """A head sha the GitReader does not have → Basis.unavailable == that sha (never a fetch); memoized per (workflow, kind, main8, head8)."""
 
 
 @pytest.mark.skip(reason="builder: implement")

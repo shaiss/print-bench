@@ -1,4 +1,4 @@
-"""``state.json`` — the evidence branch's one mutable file: cursors, pending units, versions.
+"""``state.json`` — the evidence branch's one mutable file: cursors, pending units, skips, versions.
 
 Shape (contract ``state@1``)::
 
@@ -9,9 +9,19 @@ Shape (contract ``state@1``)::
                  "briefs_updated": ts|null, "releases_published": ts|null},
      "pending": {"pr": {"<n>": {"closed_at", "due_at", "defer_until", "reasons": []}},
                  "brief": {"<n>": {...}}},
-     "frozen": {"pr": {"<n>": <highest revision>}, "brief": {...}, "release": {"<tag>": 1}},
-     "skipped": {"pr": [<closed PRs that touch no designs/ file>]},
-     "ingested": {"pr843": {"manifest_sha256", "receipts", "statuses", "runs_listings"}}}
+     "skipped": {"pr": {"<n>": {"closed_at": ts}}},
+     "ingested": {"pr843": {"manifest_sha256", "commit", "version", "snapshot_end",
+                            "receipts", "statuses", "runs_listings"}}}
+
+**Frozen units are NOT here** (critique items 11, 28): which PR / brief /
+release is frozen, and at which revision, is read from the evidence tree's
+``raw/`` paths by :func:`frozen_from_paths` — one source of truth, so state
+and tree cannot drift, and state.json stays small (it no longer grows by one
+entry per frozen unit). The terminal state a unit was frozen with
+(``closed_at``/``merged_at``, a brief's ``state``) is read from the stored raw
+document itself when the closed listing shows a change (freeze.py).
+``skipped.pr`` keeps each skipped PR's ``closed_at`` so a PR that is
+reopened, gains design files and closes again is re-evaluated.
 
 Rules:
 
@@ -21,16 +31,20 @@ Rules:
   nothing new writes byte-identical state and pushes nothing.
 * **The only M.** ``gitstore.guard_diff`` allows a modification of this
   path and no other.
+* **Size.** ~1 KB of cursors plus ``pending`` (a handful of entries) plus
+  ``skipped.pr`` (~35 B per non-design PR, ≈ 40 KB/year at the measured
+  rate); each evidence commit rewrites it and git stores successive versions
+  as deltas (docs/provenance.md §Sizes).
 * **Readers outside the package.** Reeve's ``provenance-lag`` detector reads
-  ``pending`` (oldest ``due_at``) through its own GET-only seam; keep the
-  field names stable (contract version bump otherwise).
+  ``pending`` and ``skipped`` (plus the ``raw/pr`` tree listing) through its own
+  GET-only seam; keep the field names stable (contract version bump otherwise).
 
 Every function here is pure (``now`` is a parameter). Owner: H1.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 STATE_PATH = "state.json"
 STATE_FORMAT = "state@1"
@@ -58,13 +72,24 @@ def set_pending(state: dict[str, Any], kind: str, key: str, *, closed_at: Option
     raise NotImplementedError("builder H1")
 
 
-def set_frozen(state: dict[str, Any], kind: str, key: str, revision: int) -> None:
-    """Record a frozen unit (removes it from ``pending``)."""
+def clear_pending(state: dict[str, Any], kind: str, key: str) -> None:
+    """Drop a unit from ``pending`` (it froze this run)."""
     raise NotImplementedError("builder H1")
 
 
-def next_revision(state: dict[str, Any], kind: str, key: str) -> int:
-    """1 for a never-frozen unit, else the recorded revision + 1."""
+def set_skipped(state: dict[str, Any], pr: int, closed_at: str) -> None:
+    """Record a closed PR that touches no ``designs/`` file (``skipped.pr[n] = {closed_at}``)."""
+    raise NotImplementedError("builder H1")
+
+
+def frozen_from_paths(paths: Iterable[str]) -> dict[str, dict[str, int]]:
+    """``{"pr": {"636": 2}, "brief": {...}, "release": {...}}`` — the highest revision of every
+    ``raw/<kind>/<key>[.r<K>].json.gz`` path (revision 1 = the bare path)."""
+    raise NotImplementedError("builder H1")
+
+
+def next_revision(frozen: dict[str, dict[str, int]], kind: str, key: str) -> int:
+    """1 for a never-frozen unit, else the highest revision + 1."""
     raise NotImplementedError("builder H1")
 
 

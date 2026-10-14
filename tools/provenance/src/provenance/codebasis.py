@@ -6,15 +6,20 @@ Implements ``protocols.CodeBasis`` for the serving join (docs/provenance.md
 * :meth:`GitCodeBasis.basis_for` — schedule/dispatch → ``Basis("head",
   run_head_sha)``; ``auto-review.yml`` + ``pull_request`` →
   ``Basis("merge", head, main@created_at)``; ``oracle.yml`` +
-  ``pull_request`` → ``Basis("main", None, main@created_at)``; any other
-  workflow/event → ``head``. ``main@T`` comes from
+  ``pull_request`` → ``Basis("main", None, main@checkout.started_at)`` (the
+  job checks out ``base.ref`` by name when its checkout step runs — critique
+  item 26; without a checkout interval: ``created_at``, marked ambiguous);
+  any other workflow/event → ``head``. ``main@T`` comes from
   ``GitReader.first_parent_log("refs/remotes/origin/main")`` (last commit
   with committer epoch ``<= T``). ``ambiguous`` (with ``reason``) when a
   first-parent main commit touching ``.github/models/registry.conf`` or the
-  run's workflow file lies in ``(T - window, T]``, or (``merge``) when
-  ``merge_tree_read`` reports a conflict on either file, or when a needed
-  commit cannot be fetched (``ensure_commit`` false → ``reason:
-  "missing-commit"``).
+  run's workflow file lies in ``(created_at − window, created_at]`` (merge)
+  or ``[checkout start − window, checkout end + window]`` (main), or
+  (``merge``) when ``merge_tree_read`` reports a conflict on either file.
+  A needed commit absent locally (``has_commit`` false after the job-start
+  fetch — never fetched here, critique item 9) → ``unavailable=<sha>``; the
+  join answers basis ``none`` and adds ``codebasis-unavailable:<sha8>``.
+  Memoized per ``(workflow, kind, main8, head8)``.
 * :meth:`GitCodeBasis.file_at` — ``show(head, path)``, or the merge-tree
   result, or ``show(main, path)``; cached per (basis, path).
 * :meth:`GitCodeBasis.chain_models` — parses the registry text with
@@ -52,7 +57,7 @@ class GitCodeBasis:
     _cache: dict = field(default_factory=dict)
 
     def basis_for(self, workflow: str, event: str, run_head_sha: Optional[str],
-                  run_created_at: str) -> Basis:
+                  run_created_at: str, checkout: Optional[tuple[str, str]] = None) -> Basis:
         raise NotImplementedError("builder H4")
 
     def file_at(self, basis: Basis, path: str) -> Optional[bytes]:

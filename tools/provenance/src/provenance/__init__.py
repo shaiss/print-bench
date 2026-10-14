@@ -1,4 +1,4 @@
-"""provenance — the keyless, deterministic harvester behind every design's "How it was made".
+"""provenance — the keyless, deterministic who/how harvester (the site's "How it was made" reads it in P3).
 
 Design of record: ``docs/provenance.md``. Closed contract:
 ``site/lib/provenance-contract.json``. Policy: ``.github/provenance.conf``.
@@ -13,10 +13,12 @@ window, onto two data refs:
   Actions jobs response of every agent-bearing run, because GitHub now deletes
   runs after 90 days), digested API payloads per frozen PR / brief / release
   (bodies replaced by digests — prose is never stored), the ingested #843
-  snapshot, and ``state.json`` (cursors, pending units). Every push is a
-  fast-forward guarded by a diff-tree check (no deletes, no modifications
-  except ``state.json``) and by tip continuity (the tip must be a sha a
-  previous default-branch run declared in an intent artifact).
+  snapshot (read from main, pinned by its manifest digest), and
+  ``state.json`` (cursors, pending units, skips). Every push is a fast-forward
+  guarded by a diff-tree check (no deletes, no modifications except
+  ``state.json``) and by tip continuity (the tip must be the newest
+  ``tip-<ref>-<sha>`` checkpoint a default-branch run uploaded, or a commit
+  a later run declared on top of it).
 * ``provenance-site`` — DERIVED, one squashed parentless commit: records,
   per-design views and the single ``site/bundle.json`` the site reads at
   deploy time, recomputed every run as a pure function of (evidence tip,
@@ -30,16 +32,17 @@ by the scaffold because every builder's fixtures depend on its bytes):
 ==============  =====  ==========================================================
 module          owner  role
 ==============  =====  ==========================================================
-protocols *     arch   the seams: GitReader, TreeReader, GitHubAPI, CodeBasis, Basis
+protocols *     arch   the seams: GitReader, TreeReader, GitHubAPI, CodeBasis, Basis, Round
 canonical *     H2     canonical JSON, deterministic gzip, the event sort key
 digest *        H2     body / commit-message digests (what replaces prose)
 steps *         H4     the agent-step grammar (four naming eras, fail-safe)
 rawdoc *        H3     REST payload → raw@1 projections
 github          H1     the ONLY network module: GET-only + one GraphQL query
 gitstore        H1     the ONLY git module: read primitives, add-only writer,
-                       diff-tree guard, pushes, tip continuity
+                       diff-tree guard, pushes, tip continuity (the pure
+                       ``continuity_verdict`` is architect-implemented)
 receipts        H1     runs-list selection → receipt@1 (full or stub)
-ingest          H1     the #843 snapshot → receipts/ and raw/snapshot/
+ingest          H1     the #843 snapshot (main, pinned) → receipts/, raw/snapshot/
 state           H1     state.json model: cursors, pending, frozen
 cli             H1     argparse + orchestration of every mode
 contract        H2     Python validator for the closed contract

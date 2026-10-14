@@ -16,23 +16,28 @@ change and must be agreed, not made unilaterally.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional, Protocol, runtime_checkable
+from typing import Any, Iterable, Iterator, Optional, Protocol, runtime_checkable
 
 
 @runtime_checkable
 class GitReader(Protocol):
     """Read-only local git. Every method is total: a missing object answers
     ``None``/``[]``/``False``, never raises — callers record the gap
-    (``incomplete``/basis ``none``) instead of crashing a harvest."""
+    (``incomplete``/basis ``none``) instead of crashing a harvest.
+
+    NO method fetches. Everything derive reads is fetched ONCE, token-less, at
+    the start of the plan step (``gitstore.Git.fetch_all``: both data refs and
+    ``+refs/pull/*/head``); a commit still missing after that is permanently
+    missing (force-pushed away — 67 of 1,289 distinct auto-review run heads in
+    the #843 snapshot are in no PR's commit list) and answers ``None``, which
+    makes the derived answer deterministic for a given (evidence, main, PR-ref
+    set) instead of flapping with a per-sha fetch (critique item 9)."""
 
     def rev_parse(self, rev: str) -> Optional[str]:
         """Full 40-hex sha of ``rev`` (``refs/remotes/origin/main``, a sha prefix …) or ``None``."""
 
     def has_commit(self, sha: str) -> bool:
         """True when the commit object is present locally."""
-
-    def ensure_commit(self, sha: str) -> bool:
-        """Make ``sha`` present (``git fetch origin <sha>`` when missing); True on success."""
 
     def show(self, rev: str, path: str) -> Optional[bytes]:
         """Bytes of ``path`` at ``rev`` (``git show rev:path``), ``None`` when absent."""
@@ -42,6 +47,10 @@ class GitReader(Protocol):
 
     def subject(self, sha: str) -> Optional[str]:
         """The commit's subject line (first line of the message), stripped."""
+
+    def committer_email(self, sha: str) -> Optional[str]:
+        """The committer e-mail (``%ce``). ``noreply@github.com`` marks a commit GitHub created
+        (a rebase merge, a web edit) — extract.extract_direct_commits never makes one a direct record."""
 
     def committed_epoch(self, sha: str) -> Optional[int]:
         """Committer date as a UTC epoch second."""
@@ -70,8 +79,11 @@ class GitReader(Protocol):
         ``path_conflicted`` as basis ``ambiguous``.
         """
 
-    def blame_commits(self, rev: str, path: str) -> list[str]:
-        """``git blame --porcelain rev -- path`` reduced to one commit sha per line (index 0 = line 1)."""
+    def blame_lines(self, rev: str, path: str) -> list[tuple[str, int]]:
+        """``git blame --porcelain rev -- path``: one ``(commit sha, ORIGINAL line number in that
+        commit)`` per line of the file at ``rev`` (index 0 = line 1). The original line, not the
+        line at ``rev``, is what a committed row's ``fields.line`` and permalink carry, so a row
+        does not change when lines above it move (critique item 6)."""
 
     def list_dir(self, rev: str, prefix: str) -> list[str]:
         """Immediate child names of directory ``prefix`` at ``rev`` (``git ls-tree --name-only``), sorted."""
@@ -104,6 +116,15 @@ class GitHubAPI(Protocol):
                   key: Optional[str] = None, max_pages: int = 50) -> list[Any]:
         """Every page of a list endpoint concatenated (``key`` unwraps ``{key: [...]}`` pages)."""
 
+    def iter_pages(self, path: str, params: Optional[dict[str, str]] = None,
+                   key: Optional[str] = None,
+                   max_pages: int = 50) -> Iterator[tuple[list[Any], Optional[int]]]:
+        """Lazily, one GET per page in API order: ``(items, total_count)`` per page —
+        ``total_count`` is the response's own field (``None`` when it has none). The caller
+        stops early by not iterating further (the artifact scan of tip continuity pages
+        newest-first only until it has its checkpoints); past ``max_pages`` raises
+        ``github.Truncated``."""
+
     def graphql_pr_threads(self, number: int) -> dict[str, Any]:
         """``{"nodes": [{first_comment_id, resolved, outdated}], "last_edited_at": ts|None}``
         via the ONE read-only GraphQL query; raises ``github.GraphQLUnavailable`` on 403/5xx."""
@@ -117,11 +138,16 @@ class Basis:
     """The code a run executed, for the serving join (docs/provenance.md §Serving-model join).
 
     ``kind`` — ``head`` (schedule/dispatch: ``run.head_sha``), ``merge``
-    (auto-review pull_request: ``git merge-tree`` of ``main_sha`` with
-    ``head_sha``) or ``main`` (oracle pull_request: ``main_sha``).
+    (auto-review pull_request: ``git merge-tree`` of ``main_sha`` =
+    main@created_at with ``head_sha``) or ``main`` (oracle pull_request:
+    ``main_sha`` = main at the checkout step's ``started_at``).
     ``ambiguous`` — True when the reconstruction cannot be trusted (merge
-    conflict on the file, or a main commit touching registry/workflow within
-    the ambiguity window before the run); ``reason`` says which.
+    conflict on the file; a main commit touching registry/workflow within
+    the ambiguity window before ``created_at`` (merge) or within ± the window
+    of the checkout step's interval (main)); ``reason`` says which.
+    ``unavailable`` — a commit the basis needs is not in the local object
+    store after the job-start fetch (force-pushed away): the join answers
+    basis ``none`` and the record gains ``codebasis-unavailable:<sha8>``.
     """
 
     kind: str
@@ -129,6 +155,7 @@ class Basis:
     main_sha: Optional[str]
     ambiguous: bool = False
     reason: Optional[str] = None
+    unavailable: Optional[str] = None
 
 
 @runtime_checkable
@@ -136,8 +163,12 @@ class CodeBasis(Protocol):
     """What the serving join needs from history (``codebasis.GitCodeBasis`` implements it)."""
 
     def basis_for(self, workflow: str, event: str, run_head_sha: Optional[str],
-                  run_created_at: str) -> Basis:
-        """The :class:`Basis` of one run."""
+                  run_created_at: str,
+                  checkout: Optional[tuple[str, str]] = None) -> Basis:
+        """The :class:`Basis` of one run. ``checkout`` is the ``(started_at, completed_at)`` of
+        the ``actions/checkout`` step of the job that resolved the chain (from the same
+        receipt): ``oracle.yml`` checks out ``pull_request.base.ref`` BY NAME when that step
+        runs, so its basis is main at that instant, not at ``run_created_at`` (critique item 26)."""
 
     def file_at(self, basis: Basis, path: str) -> Optional[bytes]:
         """``path`` as that run saw it (head tree, merge-tree result, or main), ``None`` when unknown."""
@@ -145,6 +176,24 @@ class CodeBasis(Protocol):
     def chain_models(self, basis: Basis, chain: str) -> Optional[tuple[str, ...]]:
         """The model ids of ``[chain:<chain>]`` in ``.github/models/registry.conf`` at ``basis``,
         parsed with tools/model-registry's own parser; ``None`` when absent/unparseable."""
+
+
+@dataclass(frozen=True)
+class Round:
+    """One review round — the in-memory form of the contract ``round`` type.
+
+    Shared by extract/episodes (H3, who build them), serving (H4) and views (H5):
+    records store rounds as contract dicts; ``episodes.rounds_from_record``
+    converts back, ``episodes.round_dict`` forwards (critique item 14).
+    """
+
+    id: str
+    head: str
+    heads: tuple[str, ...]
+    commits: tuple[str, ...]
+    pushed_at: Optional[str]
+    start: Optional[str]
+    end: Optional[str]
 
 
 def iter_sorted(items: Iterable[Any]) -> list[Any]:

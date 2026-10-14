@@ -25,7 +25,8 @@ Rules (docs/provenance.md §API budget):
   ``Budget.floor`` (``rate_floor``, 500): a scheduled run raises
   :class:`BudgetExhausted`; a self-paced dispatch (``Budget.pace``) sleeps
   until ``X-RateLimit-Reset`` + 5 s, unless that would pass
-  ``Budget.deadline_epoch`` (start + ``dispatch_max_minutes``), in which case
+  ``Budget.deadline_epoch`` (the CAPTURE deadline: job start +
+  ``dispatch_max_minutes`` − ``derive_reserve_minutes``), in which case
   it raises :class:`BudgetExhausted`.
 * **Retries** — a 5xx, a 403/429 carrying ``Retry-After`` or a secondary
   rate-limit message, or a socket timeout is retried up to 3 times with
@@ -34,12 +35,29 @@ Rules (docs/provenance.md §API budget):
 * **Headers** — ``Accept: application/vnd.github+json``,
   ``X-GitHub-Api-Version: 2022-11-28``, ``User-Agent: print-bench-provenance``,
   ``Authorization: Bearer $GH_TOKEN`` when a token is set.
+* **Filtered lists cap at 1,000** — GitHub returns at most 1,000 results for
+  a runs list filtered by ``created``/``branch``/``event``/``status``/
+  ``actor``/``head_sha``/``check_suite_id``. The client exposes
+  ``total_count`` per page (:meth:`Client.iter_pages`) so ``receipts.list_runs``
+  can window by day and halve a capped window; nothing else in the package
+  sends those filters (the gate's runs list is unfiltered, the artifact scan
+  uses the repo-wide ``/actions/artifacts``).
+* **Secrets in errors** — :class:`APIError` and :class:`Truncated` carry
+  status, method and path only; the ``Authorization`` value never reaches an
+  exception, a log line or the ETag cache (cache files hold ``{etag, body}``).
 * **GraphQL** — one query document (:data:`GRAPHQL_QUERY`), variables only;
   used for review-thread resolution counts and ``lastEditedAt``. A 403 or
   ``errors`` payload raises :class:`GraphQLUnavailable`; the freezer then
   records ``incomplete: graphql-unavailable`` (the sandbox the scaffold was
   built in returns 403 for every GraphQL call — the fixtures carry
-  ``threads.source: "ccr-fixture"`` instead).
+  ``threads.source: "ccr-fixture"`` instead; the production parser is
+  therefore tested on canned GraphQL responses, paging included, in
+  tests/test_github.py — critique item 27).
+
+The package's modules use only the :class:`provenance.protocols.GitHubAPI`
+surface (``get``, ``get_paged``, ``iter_pages`` and the two GraphQL calls) and
+build their own paths, so ``tests/fakes.FakeGitHub`` stands in for every one
+of them; this client carries no endpoint wrappers.
 
 Owner: H1. Implements :class:`provenance.protocols.GitHubAPI`.
 """
@@ -51,7 +69,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
 API_ROOT = "https://api.github.com"
 GRAPHQL_URL = "https://api.github.com/graphql"
@@ -111,7 +129,8 @@ class Budget:
 
     ``max_requests`` — ``None`` = unlimited (a dispatch without ``max_requests``);
     ``floor`` — the ``X-RateLimit-Remaining`` floor; ``pace`` — sleep instead of
-    stopping at the floor (dispatch); ``deadline_epoch`` — stop pacing past it.
+    stopping at the floor (dispatch); ``deadline_epoch`` — the capture deadline:
+    no request is sent past it and no pacing sleep may cross it.
     ``used`` counts non-304 responses; ``not_modified`` counts 304s.
     """
 
@@ -152,6 +171,12 @@ class Client:
         """All pages (``per_page=100``) concatenated; ``key`` unwraps ``{key: [...]}``; raises :class:`Truncated`."""
         raise NotImplementedError("builder H1")
 
+    def iter_pages(self, path: str, params: Optional[dict[str, str]] = None,
+                   key: Optional[str] = None,
+                   max_pages: int = 50) -> Iterator[tuple[list[Any], Optional[int]]]:
+        """Lazy pages ``(items, total_count)`` in API order (``protocols.GitHubAPI.iter_pages``)."""
+        raise NotImplementedError("builder H1")
+
     def graphql_pr_threads(self, number: int) -> dict[str, Any]:
         """``{"nodes": [{first_comment_id, resolved, outdated}], "last_edited_at": ts|None}``
         (paging ``reviewThreads`` with ``$after``); :class:`GraphQLUnavailable` on refusal."""
@@ -163,29 +188,4 @@ class Client:
 
     def _graphql(self, variables: dict[str, Any]) -> dict[str, Any]:
         """The single non-GET request in the package: the GraphQL query, read-only. H1."""
-        raise NotImplementedError("builder H1")
-
-    # -- endpoint wrappers (each one GET or one paged GET) --------------------
-
-    def list_workflow_runs(self, workflow: str, *, created: Optional[str] = None,
-                           branch: Optional[str] = None, event: Optional[str] = None,
-                           status: Optional[str] = None, max_pages: int = 50) -> list[dict[str, Any]]:
-        """``/actions/workflows/{workflow}/runs`` (``created`` is GitHub's ``created=`` filter,
-        e.g. ``>=2026-10-01T00:00:00Z``), all pages, ``workflow_runs`` unwrapped."""
-        raise NotImplementedError("builder H1")
-
-    def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
-        """``/actions/runs/{id}/jobs?filter=all`` — every attempt's jobs, complete objects."""
-        raise NotImplementedError("builder H1")
-
-    def run_artifacts(self, run_id: int) -> list[dict[str, Any]]:
-        """``/actions/runs/{id}/artifacts`` (names only are used: intent artifacts)."""
-        raise NotImplementedError("builder H1")
-
-    def closed_pulls_updated_since(self, since: Optional[str]) -> list[dict[str, Any]]:
-        """``/pulls?state=closed&sort=updated&direction=desc``, paged until ``updated_at < since``."""
-        raise NotImplementedError("builder H1")
-
-    def issues_updated_since(self, label: str, since: Optional[str]) -> list[dict[str, Any]]:
-        """``/issues?labels=<label>&state=all&sort=updated&direction=desc&since=<since>`` (PRs filtered out)."""
         raise NotImplementedError("builder H1")

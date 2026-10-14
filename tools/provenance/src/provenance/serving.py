@@ -23,13 +23,46 @@ and backlog-burn windows). Two windows of the SAME job (a boundary second
 shared by link k and k+1) resolve to the earlier link only when the artifact
 ts is strictly inside it; on the exact boundary → ``ambiguous``.
 
+**2b. The owner's token needs a correlating key** (critique item 15). The
+ship routines post and open PRs with the OWNER's PAT, so an OWNER-authored
+artifact inside a design-run/backlog-burn window may equally be the owner's
+own attended work. Such an artifact is attributed only through the issue the
+run CLAIMED: :func:`run_claims` maps each ship-routine run to the one issue
+``N`` whose OWNER-authored ``brief.claimed`` (SHIP-LOCK) lies in that run's
+windows — the selector claims one issue per run, so a run whose windows hold
+two or more such SHIP-LOCKs claims nothing. Then:
+
+* the ``brief.claimed`` itself is attributed iff it is that run's claim;
+* an OWNER ``brief.shipped|declined|deferred|withdrawn`` on issue ``N`` iff
+  the run claimed ``N``;
+* an OWNER ``pr.opened`` / ``commit.*`` iff the PR's ``head_ref`` is
+  ``claude/issue-<N>-…`` and the run claimed ``N``;
+* otherwise the trust stays ``login`` (an owner PR on any other branch inside
+  a design-run window, a run that declined without claiming).
+
+Bot-authored artifacts (``github-actions[bot]``, ``claude[bot]``) keep the
+plain containment rule. Run 34661448637 claimed #592 (SHIP-LOCK 00:35:31Z in
+link 1) and #636's head is ``claude/issue-592-nuggs-vent-cap``, so NVC-3/NVC-4
+hold under the key. Claims come from brief records only, so the owner-PAT
+events of a backlog-burn run on a non-brief issue stay ``login`` — honest,
+not guessed.
+
 **3. Code basis** (``CodeBasis.basis_for``): schedule / workflow_dispatch →
 ``head`` (run.head_sha, exact); auto-review.yml pull_request → ``merge``
-(``git merge-tree --write-tree <main@created_at> <run.head_sha>``);
-oracle.yml pull_request → ``main`` (main@created_at). ``main@T`` = the last
-first-parent main commit with committer date ``<= T``. ``ambiguous`` when
-merge-tree conflicts on registry.conf or the workflow file, or a main commit
-touching either landed in ``(T - ambiguity_window_minutes, T]``.
+(``git merge-tree --write-tree <main@created_at> <run.head_sha>`` — the
+design-changes job resolves the chain on the merge ref); oracle.yml
+pull_request → ``main`` at the ``actions/checkout`` step's ``started_at``
+(the job checks out ``pull_request.base.ref`` BY NAME when that step runs,
+which can be long after ``created_at`` on a busy queue — critique item 26;
+the step comes from the same receipt job). ``main@T`` = the last first-parent
+main commit with committer date ``<= T``. ``ambiguous`` when merge-tree
+conflicts on registry.conf or the workflow file, or a main commit touching
+either lies in ``(created_at − window, created_at]`` (merge) or in
+``[started_at − window, completed_at + window]`` of the checkout step (main).
+A commit the basis needs that is not local after the job-start fetch (a
+force-pushed-away head) → basis ``none`` and ``incomplete:
+codebasis-unavailable:<sha8>`` — deterministic, never a fetch (critique item
+9). Bases are memoized per ``(workflow, kind, main8, head8)``.
 
 **4. Chain and model** (:func:`resolve`):
 
@@ -73,7 +106,9 @@ reviewer/coach/oracle JOB in the receipts of the PR's head branch
 (``run.head_branch == head_ref`` or the run's ``pull_requests`` holds the
 PR) whose job has an agent step that ran; ``fields.posted`` = some event of
 the record is attributed to that job; ``links_tried`` = agent steps that ran.
-Trust ``verified`` / basis ``receipt``. Acceptance: NVC-2 (remy,
+Trust ``verified`` / basis ``receipt``. They are returned UNPLACED
+(``episode``/``head_sha`` ``None``, ``stale_sha``/``after_merge`` false):
+``episodes.place`` assigns them (the derive order in episodes.py). Acceptance: NVC-2 (remy,
 34112970240, glm-5.2), NVC-3 (9a751b26, glm-4.6, link 3), NVC-5 (12,
 [glm-5.3]).
 
@@ -164,6 +199,8 @@ class StepWindow:
     step: AgentStep
     started: str
     completed: str
+    #: ``(started_at, completed_at)`` of the job's first ``actions/checkout`` step (oracle basis), or None
+    checkout: Optional[tuple[str, str]] = None
 
     @property
     def role(self) -> Optional[str]:
@@ -231,9 +268,22 @@ def trailer_runtime(signals: dict[str, Any]) -> Optional[dict[str, Any]]:
     raise NotImplementedError("builder H4")
 
 
+#: The ship routines whose OWNER-authored artifacts need a claimed-issue key (§2b).
+SHIP_ROLES = frozenset({"design-run", "backlog-burn"})
+CLAIM_BRANCH_RE = re.compile(r"claude/issue-([0-9]{1,7})-")
+
+
+def run_claims(brief_records: list[dict[str, Any]], index: ReceiptIndex, *,
+               owner_login: str) -> dict[int, int]:
+    """``{ship-routine run id: claimed issue}`` (§2b): the unique OWNER ``brief.claimed`` inside
+    that run's windows; runs with zero or several are absent."""
+    raise NotImplementedError("builder H4")
+
+
 def annotate_record(record: dict[str, Any], index: ReceiptIndex, codebasis: CodeBasis, *,
-                    owner_login: str) -> dict[str, Any]:
-    """A NEW record with every event's runtime joined and window trust applied (§2–6)."""
+                    owner_login: str, claims: dict[int, int]) -> dict[str, Any]:
+    """A NEW record with every event's runtime joined and window trust applied (§2–6, the §2b
+    key from ``claims``)."""
     raise NotImplementedError("builder H4")
 
 

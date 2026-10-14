@@ -586,7 +586,7 @@ surfaces studies awaiting a read live in
     committed log into `telemetry/REPORT.md`
   - `provenance.sh` — the repo-script face of the provenance harvester
     ([docs/provenance.md](docs/provenance.md)): `--selftest` runs its offline
-    negative controls (the add-only guard, tip continuity, the recover refusal,
+    negative controls (the add-only guard, tip continuity, the push refusals,
     the membership and trust rules); any other subcommand passes through to
     `python3 -m provenance` with the workflow's `PYTHONPATH`
   - `release-bundle.sh` — builds a versioned, self-describing release bundle
@@ -690,8 +690,8 @@ surfaces studies awaiting a read live in
   one `github-script` step is the GitHub write — see its
   [README](tools/andon/README.md)
 - `tools/provenance/` — the keyless, deterministic provenance harvester
-  behind every design page's "How it was made"
-  ([docs/provenance.md](docs/provenance.md)): freezes run receipts and
+  whose bundle every design page's "How it was made" will read (P3, not yet
+  built) ([docs/provenance.md](docs/provenance.md)): freezes run receipts and
   digested PR / brief / release payloads (prose replaced by digests) onto the
   add-only `provenance` data branch, and derives per-design who/how views and
   one site bundle onto the squashed `provenance-site` ref; GET-only, no LLM,

@@ -11,33 +11,42 @@ stores no floats, and policy values should not drift by float repr).
 
 Keys (:data:`KEYS`; defaults are owner decision 9):
 
-=========================  ==========  =======================================================
-key                        default     meaning
-=========================  ==========  =======================================================
-enabled                    false       the in-git half of the two-key arming (schedule only)
-cadence                    (required)  raw 5-field cron, == provenance.yml's ``- cron:``
-settle_hours               6           closed → due
-max_defer_hours            24          deferred → forced freeze with incomplete[]
-deploy_wait_hours          2           wait for a terminal Production deployment
-scheduled_max_requests     400         request cap of one scheduled run
-rate_floor                 500         X-RateLimit-Remaining floor (stop / sleep)
-dispatch_max_minutes       330         self-paced dispatch stop (5.5 h)
-backfill_since             2026-07-31  earliest ``--since`` accepted (YYYY-MM-DD)
-ambiguity_window_minutes   15          serving code-basis ambiguity window
-edit_grace_seconds         60          comment edit → claimed
-receipt_lookback_hours     48          receipts re-list window (re-run attempts)
-intent_window_runs         20          tip-continuity search depth
-watched_workflows          (required)  comma list of ``*.yml`` names, unique
-snapshot_id                pr843       ``pr<N>``
-snapshot_ref               (required)  branch holding the snapshot
-snapshot_path              (required)  directory inside it
-=========================  ==========  =======================================================
+==========================  ===========  =======================================================
+key                         default      meaning
+==========================  ===========  =======================================================
+enabled                     false        the in-git half of the two-key arming; a dispatch needs only this
+cadence                     (required)   raw 5-field cron, == provenance.yml's ``- cron: '…'``
+settle_hours                6            closed → due
+max_defer_hours             24           deferred → forced freeze with incomplete[]
+deploy_wait_hours           2            wait for a terminal Production deployment
+scheduled_max_requests      400          request cap of one scheduled run
+rate_floor                  500          X-RateLimit-Remaining floor (stop / sleep)
+dispatch_max_minutes        330          a dispatch's CAPTURE stops at job start + this − the reserve
+derive_reserve_minutes      30           kept for derive + publish after capture; replaced by 2× the
+                                         measured derive time of the integration dry run
+backfill_since              2026-07-31   earliest ``--since`` accepted, and the PR/brief cursor floor
+ambiguity_window_minutes    15           serving code-basis ambiguity window
+edit_grace_seconds          60           comment edit → claimed
+receipt_lookback_hours      48           receipts re-list window (re-run attempts)
+continuity_horizon_days     90           how far back the checkpoint scan reads (= artifact retention)
+watched_workflows           (required)   comma list of ``*.yml`` names, unique
+snapshot_id                 pr843        ``pr<N>``: the evidence subtree and receipts' ``source``
+snapshot_dir                (required)   the snapshot's directory IN THE MAIN CHECKOUT
+snapshot_commit             (required)   40-hex: the main commit that merged it (recorded in state)
+snapshot_manifest_sha256    (required)   64-hex: sha256 of its MANIFEST.sha256 — the authenticity pin
+==========================  ===========  =======================================================
+
+There is no ref or branch key for the snapshot and no dispatch input can
+name one (critique item 2): the ingest reads only the default-branch
+checkout, and :func:`ingest.verify_manifest` refuses a directory whose
+manifest does not hash to the pin.
 
 Reeve's ``provenance-lag`` threshold is Reeve's own key (``provenance_lag_hours`` in
 ``.github/reeve.conf``, default 3) — one owner per policy value.
 
 ``scripts/cadence-sync-check.sh`` reads ``cadence`` with its own house
-reader; ``python3 -m provenance config --get <key>`` prints one parsed value.
+reader; nothing else reads this file but :func:`load` (there is no
+``config --get`` subcommand — critique item 31).
 
 Owner: H6. Pure (``parse`` takes text; ``load`` reads one file).
 """
@@ -51,10 +60,10 @@ DEFAULT_PATH = ".github/provenance.conf"
 
 KEYS = (
     "enabled", "cadence", "settle_hours", "max_defer_hours", "deploy_wait_hours",
-    "scheduled_max_requests", "rate_floor", "dispatch_max_minutes", "backfill_since",
-    "ambiguity_window_minutes", "edit_grace_seconds", "receipt_lookback_hours",
-    "intent_window_runs", "watched_workflows", "snapshot_id",
-    "snapshot_ref", "snapshot_path",
+    "scheduled_max_requests", "rate_floor", "dispatch_max_minutes", "derive_reserve_minutes",
+    "backfill_since", "ambiguity_window_minutes", "edit_grace_seconds", "receipt_lookback_hours",
+    "continuity_horizon_days", "watched_workflows", "snapshot_id", "snapshot_dir",
+    "snapshot_commit", "snapshot_manifest_sha256",
 )
 
 
@@ -74,19 +83,23 @@ class Config:
     scheduled_max_requests: int
     rate_floor: int
     dispatch_max_minutes: int
+    derive_reserve_minutes: int
     backfill_since: str
     ambiguity_window_minutes: int
     edit_grace_seconds: int
     receipt_lookback_hours: int
-    intent_window_runs: int
+    continuity_horizon_days: int
     watched_workflows: tuple[str, ...]
     snapshot_id: str
-    snapshot_ref: str
-    snapshot_path: str
+    snapshot_dir: str
+    snapshot_commit: str
+    snapshot_manifest_sha256: str
 
 
 def parse(text: str, path: str = DEFAULT_PATH) -> Config:
-    """Parse conf text (module docstring rules)."""
+    """Parse conf text (module docstring rules). ``snapshot_dir`` must be a relative POSIX path
+    without ``..``; ``snapshot_commit`` 40-hex; ``snapshot_manifest_sha256`` 64-hex;
+    ``derive_reserve_minutes`` < ``dispatch_max_minutes``."""
     raise NotImplementedError("builder H6")
 
 
@@ -95,11 +108,8 @@ def load(path: str = DEFAULT_PATH) -> Config:
     raise NotImplementedError("builder H6")
 
 
-def get(config: Config, key: str) -> str:
-    """One value rendered for ``config --get`` (lists comma-joined, bools ``true``/``false``)."""
-    raise NotImplementedError("builder H6")
-
-
 def armed(conf_enabled: bool, variable: Optional[str]) -> bool:
-    """The two-key schedule arming: conf ``enabled`` AND ``PROVENANCE_ENABLED == "true"``."""
+    """The two-key schedule arming: conf ``enabled`` AND ``PROVENANCE_ENABLED`` casefolds to
+    ``"true"`` (GitHub's expression ``==`` is case-insensitive, so ``True``/``TRUE`` arm the
+    YAML leg too — the two legs must agree; critique item 20)."""
     raise NotImplementedError("builder H6")

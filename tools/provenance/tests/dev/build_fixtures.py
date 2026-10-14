@@ -32,7 +32,8 @@ differs (the H2/H3 parity check after a digest or projection change).
 The raw capture is produced by the GET-only scratch script
 ``<scratch>/harvester/bin/capture_raw.py`` (+ ``capture_main.py``); the
 snapshot dir is the extracted ``runs.tar``/``jobs.tar``/``sha.tar`` of the
-#843 evidence branch (``ccr-d0be94c3-o4sati-rescue``).
+#843 snapshot, on main since merge commit 411a756 at
+``audits/provenance-2026-10/rescue/``.
 """
 
 from __future__ import annotations
@@ -178,10 +179,10 @@ def build_pr(raw, snap, n):
             [{"first_comment_id": (t.get("comment_ids") or [None])[0], "outdated": t.get("outdated"),
               "resolved": t.get("resolved")} for t in ccr], "ccr-fixture", None)
     body = rawdoc.project_pull(pull)
-    briefs = list(body["body"]["refs_closes"])
+    linked = list(body["body"]["refs_closes"])
     m = re.match(r"^claude/issue-([0-9]+)-", head_ref or "")
     if m:
-        briefs.append(int(m.group(1)))
+        linked.append(int(m.group(1)))
     return rawdoc.raw_pr_doc(
         number=n, revision=1, captured=CAPTURED, incomplete=incomplete, pull=body,
         files=rawdoc.project_files(raw.get(f"/pulls/{n}/files") or []),
@@ -191,8 +192,15 @@ def build_pr(raw, snap, n):
         issue_comments=rawdoc.project_issue_comments(raw.get(f"/issues/{n}/comments") or []),
         timeline=rawdoc.project_timeline(raw.get(f"/issues/{n}/timeline") or []),
         threads=threads, ci_runs=rawdoc.project_runs(ci_runs), statuses=statuses,
-        deployments=deployments, briefs=briefs,
+        deployments=deployments, linked_issues=linked,
     ), head_ref
+
+
+def _carried_design_brief(doc):
+    """The issue carries, or once carried, the design-brief label (freeze.capture_brief's rule)."""
+    if "design-brief" in (doc["issue"].get("labels") or []):
+        return True
+    return any(t.get("event") == "labeled" and t.get("label") == "design-brief" for t in doc["timeline"])
 
 
 def build_brief(raw, n):
@@ -346,13 +354,13 @@ def build(raw_root, snap, out):
     for n in FIXTURE_PRS:
         doc, head_ref = build_pr(raw, snap, n)
         head_refs.add(head_ref)
-        briefs |= set(doc["briefs"])
+        briefs |= set(doc["linked_issues"])
         anchors.append(_iso(doc["pull"]["created_at"]))
         write_gz(os.path.join(out, "raw", "pr", f"{n}.json.gz"), doc)
     for b in sorted(briefs):
         doc = build_brief(raw, b)
-        if doc is None:
-            continue
+        if doc is None or not _carried_design_brief(doc):
+            continue  # freeze's rule (critique item 24): a linked issue is a brief only with the label
         anchors.append(_iso(doc["issue"]["created_at"]))
         anchors.extend(_iso(c["created_at"]) for c in doc["comments"] if c["body"]["lead"] == "ship_lock")
         write_gz(os.path.join(out, "raw", "brief", f"{b}.json.gz"), doc)

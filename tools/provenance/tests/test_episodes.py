@@ -35,8 +35,18 @@ def test_verifies_edges():
 
 
 @pytest.mark.skip(reason="builder: implement")
-def test_decision_rows_ports_match_timeline_mjs():
-    """parse_pm_decision_log/field_test/changelog select exactly the lines site/lib/timeline.mjs selects over every designs/*/PM.md and NOTES.md (run node when on PATH; else over committed copies)."""
+def test_decision_rows_select_the_documented_lines():
+    """parse_pm_decision_log / parse_field_test_log / parse_changelog / parse_notes_decisions over synthetic texts: header + separator + rows until a blank or pipe-less line, a real YYYY-MM-DD first cell, ### headings by date, dated top-level bullets only. The cross-stack parity proof is site/test/provenance-rows.test.mjs (H3), run by the site-build job on every PR (critique 25)."""
+
+
+@pytest.mark.skip(reason="builder: implement")
+def test_rows_use_the_original_line_and_adding_commit():
+    """Critique 6: a row whose blame is (sha S, original line 12) carries fields.line 12, added_in_sha S and url blob/S/designs/<d>/PM.md#L12; inserting lines above it on a later main commit changes neither (same row event bytes)."""
+
+
+@pytest.mark.skip(reason="builder: implement")
+def test_place_assigns_unplaced_events():
+    """Critique 14: place() gives a job.reviewer event (episode None, ts inside round 3) episode R:<pr>:<round3 head8>, head_sha, after_merge per merged_at; already-placed events are unchanged; rounds_from_record(round_dict(r)) == r for every round of #636."""
 
 
 @pytest.mark.skip(reason="builder: implement")

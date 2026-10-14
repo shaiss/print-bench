@@ -2,13 +2,13 @@
  "contract": "print-bench-provenance-contract",
  "version": 1,
  "doc": "docs/provenance.md",
- "note": "The closed, machine-readable contract for the provenance harvester's stored shapes. Python (tools/provenance/src/provenance/contract.py) and Node (site/lib/provenance-contract.mjs) validate against THIS file with hand-rolled validators; no JSON Schema dependency. Type language: see 'typelang'. Every 'obj' is closed (extra keys invalid) and every listed field is required (nullable where 'null': true) unless listed under 'optional_fields'. Patterns are written without anchors and always FULL-match (Python re.fullmatch; JS new RegExp('^(?:'+p+')$')).",
+ "note": "The closed, machine-readable contract for the provenance harvester's stored shapes. Python (tools/provenance/src/provenance/contract.py) and Node (site/lib/provenance-contract.mjs) validate against THIS file with hand-rolled validators; no JSON Schema dependency. Type language: see 'typelang'. Every 'obj' is closed (extra keys invalid) and every listed field is required (nullable where 'null': true) unless listed under 'optional_fields'. Patterns are written without anchors and always FULL-match (Python re.fullmatch; JS new RegExp('^(?:'+p+')$')). Content identity and every stored digest (evidence_ref.raw_sha256, receipt parity, the ingest's identical-vs-conflict test, TreeBuilder.add on a .json.gz path) are defined on the DECOMPRESSED canonical JSON bytes; gzip bytes are storage only and may differ across zlib builds.",
  "typelang": {
   "str": "string; optional 're' (full-match, ASCII-only pattern) and 'max' (an upper bound on the number of Unicode CODE POINTS — Python len(s), JS [...s].length, never JS s.length)",
   "int": "integer (never a bool, never a float); optional 'min'/'max' inclusive",
   "bool": "true/false",
   "enum": "one of 'of' (strings)",
-  "list": "array of 'of'; optional 'max' length, 'unique' (by canonical JSON), 'sorted' (ascending by value)",
+  "list": "array of 'of'; optional 'max' length; 'unique' — no two elements with the same canonical JSON (sorted keys at every depth, no whitespace: Python json.dumps(v, sort_keys=True, separators=(',', ':'), ensure_ascii=False); Node must stringify with recursively sorted keys, never plain JSON.stringify); 'sorted' — ascending, comparing ints numerically and strings by Unicode CODE POINT (Python '<'; Node must compare [...a] against [...b] code point by code point, never the default UTF-16 sort or localeCompare); a 'sorted' list is always homogeneous (all ints or all strings)",
   "obj": "closed object: exactly the keys of 'fields' (+ any of 'optional_fields'); all 'fields' required",
   "open": "object that must carry 'fields' (typed) and may carry any other key (opaque complete API objects)",
   "map": "object whose keys full-match 'key' and whose values are 'of'; optional 'max' entries",
@@ -34,7 +34,8 @@
   "state": "state@1",
   "intent": "intent@1",
   "body_digest": "body-digest@1",
-  "message_digest": "message-digest@1"
+  "message_digest": "message-digest@1",
+  "checkpoint": "checkpoint@1"
  },
  "enums": {
   "kind": [
@@ -1222,7 +1223,7 @@
    "line": {
     "t": "int",
     "min": 1,
-    "tag": "D"
+    "tag": "J"
    },
    "line_sha256": {
     "t": "ref",
@@ -1238,7 +1239,6 @@
    "added_in_sha": {
     "t": "ref",
     "to": "sha40",
-    "null": true,
     "tag": "J"
    }
   },
@@ -1253,7 +1253,7 @@
    "line": {
     "t": "int",
     "min": 1,
-    "tag": "D"
+    "tag": "J"
    },
    "line_sha256": {
     "t": "ref",
@@ -1269,7 +1269,6 @@
    "added_in_sha": {
     "t": "ref",
     "to": "sha40",
-    "null": true,
     "tag": "J"
    }
   },
@@ -1284,7 +1283,7 @@
    "line": {
     "t": "int",
     "min": 1,
-    "tag": "D"
+    "tag": "J"
    },
    "line_sha256": {
     "t": "ref",
@@ -1300,7 +1299,6 @@
    "added_in_sha": {
     "t": "ref",
     "to": "sha40",
-    "null": true,
     "tag": "J"
    }
   },
@@ -1315,7 +1313,7 @@
    "line": {
     "t": "int",
     "min": 1,
-    "tag": "D"
+    "tag": "J"
    },
    "line_sha256": {
     "t": "ref",
@@ -1331,7 +1329,6 @@
    "added_in_sha": {
     "t": "ref",
     "to": "sha40",
-    "null": true,
     "tag": "J"
    }
   },
@@ -1614,6 +1611,15 @@
      "t": "str",
      "max": 255,
      "null": true
+    },
+    "linked_issues": {
+     "t": "list",
+     "of": {
+      "t": "int",
+      "min": 1
+     },
+     "unique": true,
+     "sorted": true
     },
     "briefs": {
      "t": "list",
@@ -1909,10 +1915,6 @@
     "extractor": {
      "t": "str",
      "re": "provenance-extract [0-9]+"
-    },
-    "main_sha": {
-     "t": "ref",
-     "to": "sha40"
     },
     "aliases": {
      "t": "obj",
@@ -2322,7 +2324,7 @@
      "unique": true,
      "sorted": true
     },
-    "briefs": {
+    "linked_issues": {
      "t": "list",
      "of": {
       "t": "int",
@@ -3362,46 +3364,21 @@
       }
      }
     },
-    "frozen": {
-     "t": "obj",
-     "fields": {
-      "pr": {
-       "t": "map",
-       "key": "[0-9]+",
-       "of": {
-        "t": "int",
-        "min": 1
-       }
-      },
-      "brief": {
-       "t": "map",
-       "key": "[0-9]+",
-       "of": {
-        "t": "int",
-        "min": 1
-       }
-      },
-      "release": {
-       "t": "map",
-       "key": "[A-Za-z0-9._-]{1,100}",
-       "of": {
-        "t": "int",
-        "min": 1
-       }
-      }
-     }
-    },
     "skipped": {
      "t": "obj",
      "fields": {
       "pr": {
-       "t": "list",
+       "t": "map",
+       "key": "[0-9]+",
        "of": {
-        "t": "int",
-        "min": 1
-       },
-       "unique": true,
-       "sorted": true
+        "t": "obj",
+        "fields": {
+         "closed_at": {
+          "t": "ref",
+          "to": "ts"
+         }
+        }
+       }
       }
      }
     },
@@ -3414,6 +3391,18 @@
        "manifest_sha256": {
         "t": "ref",
         "to": "hex64"
+       },
+       "commit": {
+        "t": "ref",
+        "to": "sha40"
+       },
+       "version": {
+        "t": "int",
+        "min": 1
+       },
+       "snapshot_end": {
+        "t": "ref",
+        "to": "ts"
        },
        "receipts": {
         "t": "int",
@@ -3456,6 +3445,36 @@
      "t": "ref",
      "to": "sha40",
      "null": true
+    },
+    "run_id": {
+     "t": "int",
+     "min": 1
+    },
+    "run_attempt": {
+     "t": "int",
+     "min": 1
+    }
+   }
+  },
+  "checkpoint@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "checkpoint@1"
+     ]
+    },
+    "ref": {
+     "t": "enum",
+     "of": [
+      "provenance",
+      "provenance-site"
+     ]
+    },
+    "sha": {
+     "t": "ref",
+     "to": "sha40"
     },
     "run_id": {
      "t": "int",

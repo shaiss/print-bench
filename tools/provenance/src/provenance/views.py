@@ -4,7 +4,9 @@
 view exists for EVERY ``designs/<name>/`` directory with an entry
 ``<name>.scad`` at the harvest's main sha — including a design with no PR,
 brief or row (an empty view, so the site shows "No recorded build history"
-rather than "settling" forever).
+rather than "settling" forever). The view does NOT carry the main sha (the
+bundle's meta does): a main push that touches no ``designs/`` file must leave
+every view byte-identical (critique item 6).
 
 What lands in a design's view:
 
@@ -24,7 +26,8 @@ What lands in a design's view:
 
 Events are de-duplicated by ``id`` (a brief event reached through two PRs is
 one event) and sorted by ``canonical.event_sort_key``. ``episodes`` is
-``episodes.episodes_of`` over the view's events. ``counts``: events, rounds
+``episodes.episodes_of`` over the view's events and the member records'
+rounds (``episodes.rounds_from_record``). ``counts``: events, rounds
 (``R:`` episodes), prs, maintenance rows, sign-offs by tier
 (verified/window/claimed), triage events, and ``job.reviewer`` events with
 ``posted: false`` ("ran, posted nothing").
@@ -47,7 +50,7 @@ def design_names(git: GitReader, main_sha: str) -> list[str]:
 
 
 def build_view(design: str, *, records: list[dict[str, Any]], rows: list[dict[str, Any]],
-               main_sha: str, owner: str, repo: str) -> dict[str, Any]:
+               owner: str, repo: str) -> dict[str, Any]:
     """One view@1 (module docstring)."""
     raise NotImplementedError("builder H5")
 

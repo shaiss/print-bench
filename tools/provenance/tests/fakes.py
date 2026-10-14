@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Iterator, Optional
 
 
 @dataclass
@@ -20,7 +20,9 @@ class FakeCommit:
     subject: str = ""
     files: dict[str, bytes] = field(default_factory=dict)   # full tree at this commit
     changed: list[str] = field(default_factory=list)
-    blame: dict[str, list[str]] = field(default_factory=dict)  # path -> per-line commit sha
+    #: path -> per-line (commit sha, ORIGINAL line number in that commit), index 0 = line 1
+    blame: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
+    committer_email: str = "noreply@github.com"
 
 
 class FakeGitReader:
@@ -31,12 +33,10 @@ class FakeGitReader:
     """
 
     def __init__(self, commits: list[FakeCommit], refs: Optional[dict[str, str]] = None,
-                 merges: Optional[dict[tuple[str, str], tuple[dict[str, bytes], set[str]]]] = None,
-                 fetchable: Optional[set[str]] = None) -> None:
+                 merges: Optional[dict[tuple[str, str], tuple[dict[str, bytes], set[str]]]] = None) -> None:
         self.commits = {c.sha: c for c in commits}
         self.refs = dict(refs or {})
         self.merges = dict(merges or {})
-        self.fetchable = set(fetchable or ())
 
     def _c(self, rev: str) -> Optional[FakeCommit]:
         sha = self.refs.get(rev, rev)
@@ -52,9 +52,6 @@ class FakeGitReader:
     def has_commit(self, sha: str) -> bool:
         return sha in self.commits
 
-    def ensure_commit(self, sha: str) -> bool:
-        return sha in self.commits or sha in self.fetchable
-
     def show(self, rev: str, path: str) -> Optional[bytes]:
         c = self._c(rev)
         return c.files.get(path) if c else None
@@ -66,6 +63,10 @@ class FakeGitReader:
     def subject(self, sha: str) -> Optional[str]:
         c = self._c(sha)
         return c.subject if c else None
+
+    def committer_email(self, sha: str) -> Optional[str]:
+        c = self._c(sha)
+        return c.committer_email if c else None
 
     def committed_epoch(self, sha: str) -> Optional[int]:
         c = self._c(sha)
@@ -101,9 +102,9 @@ class FakeGitReader:
             return None, True
         return files.get(path), False
 
-    def blame_commits(self, rev: str, path: str) -> list[str]:
+    def blame_lines(self, rev: str, path: str) -> list[tuple[str, int]]:
         c = self._c(rev)
-        return list(c.blame.get(path, [])) if c else []
+        return [tuple(x) for x in c.blame.get(path, [])] if c else []
 
     def list_dir(self, rev: str, prefix: str) -> list[str]:
         c = self._c(rev)
@@ -131,17 +132,34 @@ class FakeGitHub:
 
     ``calls`` records every request; ``budget`` (when set) raises the
     exception given in ``exhausted_with`` after that many calls.
+    ``responder(path, params)`` (optional) answers any key absent from
+    ``responses`` — e.g. a runs list that returns ``total_count >= 1000`` for
+    a wide ``created=`` window (critique item 8). ``pages[(path, frozenset(params))]``
+    holds a list of canned pages for :meth:`iter_pages` (each page a response
+    dict or list); one call is recorded per page actually served.
     """
 
     def __init__(self, responses: Optional[dict[tuple[str, frozenset], Any]] = None,
                  threads: Optional[dict[int, Any]] = None, edited: Optional[dict[int, Optional[str]]] = None,
-                 budget: Optional[int] = None, exhausted_with: Optional[type] = None) -> None:
+                 budget: Optional[int] = None, exhausted_with: Optional[type] = None,
+                 responder: Optional[Callable[[str, dict], Any]] = None,
+                 pages: Optional[dict[tuple[str, frozenset], list[Any]]] = None) -> None:
         self.responses = dict(responses or {})
         self.threads = dict(threads or {})
         self.edited = dict(edited or {})
         self.budget = budget
         self.exhausted_with = exhausted_with
+        self.responder = responder
+        self.pages = dict(pages or {})
         self.calls: list[tuple[str, dict]] = []
+
+    def _answer(self, path: str, params: Optional[dict]) -> Any:
+        key = self._key(path, params)
+        if key in self.responses:
+            return self.responses[key]
+        if self.responder is not None:
+            return self.responder(path, dict(params or {}))
+        return None
 
     def _tick(self, path: str, params: Optional[dict]) -> None:
         if self.budget is not None and len(self.calls) >= self.budget:
@@ -153,15 +171,30 @@ class FakeGitHub:
 
     def get(self, path: str, params: Optional[dict[str, str]] = None) -> Any:
         self._tick(path, params)
-        return json.loads(json.dumps(self.responses.get(self._key(path, params))))
+        return json.loads(json.dumps(self._answer(path, params)))
 
     def get_paged(self, path: str, params: Optional[dict[str, str]] = None,
                   key: Optional[str] = None, max_pages: int = 50) -> list[Any]:
         self._tick(path, params)
-        data = self.responses.get(self._key(path, params)) or []
+        data = self._answer(path, params) or []
         if key and isinstance(data, dict):
             data = data.get(key, [])
         return json.loads(json.dumps(data))
+
+    def iter_pages(self, path: str, params: Optional[dict[str, str]] = None,
+                   key: Optional[str] = None,
+                   max_pages: int = 50) -> Iterator[tuple[list[Any], Optional[int]]]:
+        canned = self.pages.get(self._key(path, params))
+        if canned is None:
+            canned = [self._answer(path, params) or []]
+        for i, page in enumerate(canned):
+            if i >= max_pages:
+                from provenance.github import Truncated
+                raise Truncated(f"fake: more than {max_pages} pages")
+            self._tick(path, dict(params or {}, page=str(i + 1)))
+            total = page.get("total_count") if isinstance(page, dict) else None
+            items = page.get(key, []) if (key and isinstance(page, dict)) else page
+            yield json.loads(json.dumps(items)), total
 
     def graphql_pr_threads(self, number: int) -> dict[str, Any]:
         self._tick("graphql", {"number": number})
@@ -186,7 +219,7 @@ class FakeCodeBasis:
         self.chains = dict(chains or {})
         self.default = default
 
-    def basis_for(self, workflow, event, run_head_sha, run_created_at):
+    def basis_for(self, workflow, event, run_head_sha, run_created_at, checkout=None):
         b = self.bases.get((workflow, event, run_head_sha, run_created_at), self.default)
         if b is None:
             from provenance.protocols import Basis

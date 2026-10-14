@@ -3,9 +3,12 @@
 Each case is a ``(label, callable)`` returning ``True`` when the rule held
 (the guard fired, the refusal refused). The suite collects
 ``gitstore.selftest_cases()`` (guard D / M / 0-byte / guard-file change,
-identical tree pushes nothing, tip continuity foreign / deleted / bootstrap
-/ declared, recover refusing an undeclared sha — in a throwaway repo, no
-network), ``membership.selftest_cases()`` and ``trust.selftest_cases()``,
+identical tree pushes nothing, every row of
+``tests/fixtures/continuity_cases.json`` — ok / foreign / rollback / deleted /
+unanchored / bootstrap — a rejected push raising ForeignTip, a failing push's
+error free of the token and its base64 — in a throwaway repo with a local
+bare remote, no network), ``membership.selftest_cases()`` and
+``trust.selftest_cases()``,
 prints one ``selftest ok|FAIL <label>`` line per case and returns 0 only
 when every case held (house selftest format, cf. reviewer-posted.sh).
 

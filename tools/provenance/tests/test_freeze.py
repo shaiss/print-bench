@@ -1,7 +1,8 @@
-"""freeze — settle/defer/refreeze (P1e).
+"""freeze — settle/defer/re-capture/refreeze (P1e).
 
 Owner: H6. Each placeholder's docstring is its acceptance criterion
-(docs/provenance.md, final plan P0/P1a–e); replace the skip with the test.
+(docs/provenance.md, final plan P0/P1a–e, the critique round's items 10,
+11, 24); replace the skip with the test.
 """
 
 from __future__ import annotations
@@ -35,6 +36,21 @@ def test_refreeze_adds_r2_and_modifies_nothing():
 
 
 @pytest.mark.skip(reason="builder: implement")
+def test_refreeze_after_retention_keeps_rounds():
+    """Critique 10: a refreeze whose live /actions/workflows/ci.yml/runs, /commits/{sha}/statuses and /deployments all answer empty (GitHub deleted them) carries r1's ci_runs, statuses and deployments into r2 by id, so episodes.rounds(r2) == episodes.rounds(r1); a live row with an r1 id wins."""
+
+
+@pytest.mark.skip(reason="builder: implement")
+def test_changed_terminal_state_is_recaptured():
+    """Critique 11: a PR frozen closed-unmerged (r1 pull.merged_at null) that the closed listing now shows merged goes back through settle and freezes r2 once due; a frozen PR whose listing differs only in updated_at (a late comment) is NOT recaptured; a skipped PR with a new closed_at is re-evaluated; a brief frozen with brief-open that is now closed gets r2 after settle."""
+
+
+@pytest.mark.skip(reason="builder: implement")
+def test_linked_issue_becomes_a_brief_only_with_the_label():
+    """Critique 24: a PR linking #N (closes #N) where #N never carried design-brief captures no raw/brief/N (capture_brief returns None); with a timeline 'labeled design-brief' event (label since removed) it does."""
+
+
+@pytest.mark.skip(reason="builder: implement")
 def test_capture_unions_snapshot_rows():
     """capture_pr unions snapshot ci runs and statuses by id, live winning on a collision."""
 
@@ -46,7 +62,7 @@ def test_capture_fetches_statuses_for_every_commit():
 
 @pytest.mark.skip(reason="builder: implement")
 def test_no_design_files_is_skipped():
-    """A closed PR touching no designs/ path is recorded in state.skipped.pr and never captured."""
+    """A closed PR touching no designs/ path is recorded in state.skipped.pr with its closed_at and never captured."""
 
 
 @pytest.mark.skip(reason="builder: implement")

@@ -7,10 +7,10 @@
 #   scripts/provenance.sh --selftest
 #     The offline negative-control suite (python3 -m provenance selftest): the
 #     add-only guard (D / M outside state.json / 0-byte blob / guard-file
-#     change), tip continuity (foreign / deleted / bootstrap / declared),
-#     recover refusing an undeclared sha, the membership-rule and trust-rule
-#     negatives. No network, no GitHub token, a throwaway temp repo. Run by
-#     scripts/check.sh.
+#     change), every row of the tip-continuity table (ok / foreign / rollback /
+#     deleted / unanchored / bootstrap), a rejected push refused, no token in a
+#     failing push's error, the membership-rule and trust-rule negatives. No
+#     network, no GitHub token, a throwaway temp repo. Run by scripts/check.sh.
 #
 #   scripts/provenance.sh <subcommand> [args…]
 #     Passes through to `python3 -m provenance` with the PYTHONPATH the

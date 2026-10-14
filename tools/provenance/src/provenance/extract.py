@@ -84,10 +84,30 @@ with ``last_edited_at`` set is ``claimed``.
 **Releases** (:func:`extract_release`): one ``release`` event; ``designs``
 = the designs on main whose name prefixes an asset name (``<d>-…``/``<d>.…``).
 
-**Direct-to-main commits** (:func:`extract_direct_commits`): first-parent
-main commits touching ``designs/`` that belong to no frozen PR (not a PR
-merge commit, not in any PR's commit list); membership by
-``membership.classify_pr`` over ``changed_paths``; trailer runtime as claimed.
+**Direct-to-main commits** (:func:`extract_direct_commits`; critique item 7).
+A first-parent main commit touching ``designs/`` is a DIRECT commit only when
+all three hold: (1) its subject carries no PR reference — no squash ``(#N)``
+suffix and no ``Merge pull request #N`` (``digest.message_digest``'s
+``subject_pr`` rule); (2) its committer is not GitHub (``committer_email !=
+noreply@github.com``) — GitHub commits a rebase merge's rewritten commits
+(and web edits), which belong to a PR whose own commit list never holds
+those new shas; (3) it is in no frozen PR's commit list. A ``(#N)`` commit
+whose PR is not frozen yet (inside its settle window, or before the P2
+backfill reaches it) therefore yields NO record — the site's checkout-derived
+"settling" state covers it — instead of a ``C:`` record that would vanish
+when the PR freezes (false history plus churn). Measured on main since
+2026-07-31: 366 of 372 first-parent commits carry ``(#N)``; of the other six,
+five are the owner-committed 07-31/08-01 bootstrap commits (real direct
+commits) and one is ``43030db9`` "Merge PR #196: …" — committed by GitHub with
+a subject neither PR pattern matches, which rule (2) keeps from becoming a
+false direct record.
+Membership by ``membership.classify_pr`` over ``changed_paths``; trailer
+runtime as claimed.
+
+**Linked issues vs briefs** (critique item 24). ``record.linked_issues`` =
+``raw.linked_issues``; ``record.briefs`` = those with a ``raw/brief/<n>``
+document in the evidence (``ctx.brief_numbers``) — only design briefs are
+captured, so a backlog-burn PR's ``autonomy-ok`` issue stays a number.
 
 Records carry ``extractor`` = :data:`EXTRACTOR_VERSION` and are sorted by
 ``canonical.event_sort_key``. Owner: H3.
@@ -112,7 +132,10 @@ class ExtractContext:
     (owner-token detection); ``git`` — main's history (merge method, main
     subject, blame); ``main_sha`` — the harvest's main; ``design_names`` —
     ``designs/*/`` on main; ``merge_shas`` — ``{merge sha: pr}`` of frozen
-    PRs (brief close attribution); ``edit_grace_seconds`` — conf.
+    PRs (brief close attribution); ``brief_numbers`` — issues with a
+    ``raw/brief/`` document (``record.briefs``); ``edit_grace_seconds`` — conf.
+    ``main_sha`` is used for READING main (design names, rows, merge method),
+    never stored in a record or view (critique item 6).
     """
 
     owner: str
@@ -122,6 +145,7 @@ class ExtractContext:
     main_sha: str
     design_names: frozenset[str]
     merge_shas: dict[str, int] = field(default_factory=dict)
+    brief_numbers: frozenset[int] = frozenset()
     edit_grace_seconds: int = 60
 
 
@@ -150,8 +174,18 @@ def extract_release(raw_release: dict[str, Any], ctx: ExtractContext) -> dict[st
     raise NotImplementedError("builder H3")
 
 
-def extract_direct_commits(ctx: ExtractContext, pr_commit_shas: set[str]) -> list[dict[str, Any]]:
-    """record@1:commit for each first-parent main commit touching designs/ outside any PR."""
+#: The committer e-mail of every commit GitHub itself creates (squash/merge/rebase merges, web edits).
+GITHUB_COMMITTER = "noreply@github.com"
+
+
+def is_direct_commit(git: GitReader, sha: str, frozen_pr_commits: set[str]) -> bool:
+    """The three-part rule of the module docstring (pure over ``git``)."""
+    raise NotImplementedError("builder H3")
+
+
+def extract_direct_commits(ctx: ExtractContext, frozen_pr_commits: set[str]) -> list[dict[str, Any]]:
+    """record@1:commit for each first-parent main commit touching designs/ that
+    :func:`is_direct_commit` accepts."""
     raise NotImplementedError("builder H3")
 
 
@@ -162,5 +196,7 @@ def empty_runtime(platform: str = "unknown") -> dict[str, Any]:
 
 def url_for(ctx: ExtractContext, kind: str, **ids: Any) -> str:
     """Construct a permalink (kinds: issue, issuecomment, pull, pr_commit, commit, run, job,
-    release, blob). Every id is validated numeric / 40-hex / slug; anything else raises ValueError."""
+    release, blob). Every id is validated numeric / 40-hex / slug; anything else raises ValueError.
+    ``blob`` is ``blob/<added_in_sha>/designs/<d>/<file>#L<original line>`` — the commit that
+    added the row and its line THERE, so the URL never changes with main (critique item 6)."""
     raise NotImplementedError("builder H3")

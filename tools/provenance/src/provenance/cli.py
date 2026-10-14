@@ -7,88 +7,129 @@ tools/model-registry/src``. Dispatch inputs reach the code ONLY through
 regex-checks every one before use (docs/actions-security.md: a value from
 ``${{ inputs.* }}`` is never interpolated into a ``run:`` script).
 
+Dispatch modes are exactly ``harvest``, ``refreeze`` and ``recover`` (owner
+decision 12). The #843 snapshot ingest is not a mode: ``harvest`` performs it
+when ``state.ingested`` lacks it (critique item 17).
+
 Subcommands (docs/provenance.md §Workflow):
 
 ``harvest``
-    the default mode (schedule, or dispatch with ``mode=harvest``):
-    ``[--since D] [--until D] [--pr N,N…] [--receipts-only] [--max-requests N]
-    [--dry-run] [--scheduled] --out-dir DIR``. Steps, in order:
+    schedule, or dispatch ``mode=harvest``: ``[--since D] [--until D]
+    [--pr N,N…] [--receipts-only] [--max-requests N] [--dry-run] [--scheduled]
+    [--bootstrap] [--snapshot-dir DIR] --out-dir DIR``. Steps, in order:
 
-    1. fetch both data refs (``gitstore.Git.fetch``); read the evidence tip;
-    2. **tip continuity** — ``gitstore.declared_intents`` +
-       ``gitstore.check_tip_continuity``; a foreign evidence tip is an
-       ``::error::`` and exit 3 with nothing written;
-    3. receipts pass (``receipts.harvest_receipts``) over every watched
-       workflow from its cursor (or ``--since``);
-    4. unless ``--receipts-only``: the freeze pass (``freeze.plan_freezes``:
-       settle/defer decisions, PR/brief/release capture; ``--pr`` restricts
-       it to the named PRs and skips the settle wait for none of them);
-    5. assemble the new evidence commit with ``gitstore.TreeBuilder`` (add-only)
-       and run ``gitstore.guard_diff`` against the old tip;
-    6. derive (``extract`` → ``serving`` → ``episodes`` → ``views`` →
-       ``bundle``) from the NEW evidence tree + main, build the
-       ``provenance-site`` commit, and compare content with the current
-       derived tip (``bundle.same_content``);
-    7. write ``<out-dir>/plan.json`` (refs, old tips, new commits, counts) and
-       one ``<out-dir>/intent-<ref>.json`` per ref that will move, and append
-       ``evidence_changed``/``evidence_sha``/``site_changed``/``site_sha``/
-       ``summary`` lines to ``$GITHUB_OUTPUT`` (``--gh-output``).
+    1. **fetch** — ``gitstore.Git.fetch_all()``, token-less: both data refs and
+       every PR head. A failed PR-head fetch sets ``derive_skipped`` (the
+       evidence half still runs; no derived push this run).
+    2. **continuity** — ``gitstore.scan_marks`` then
+       ``gitstore.continuity_verdict`` for both refs. Evidence verdict:
+       ``ok`` → build on the tip; ``bootstrap`` → create the root ONLY with
+       ``--bootstrap`` (else ``::error::``, exit 3); ``foreign`` / ``deleted`` /
+       ``unanchored`` → ``foreign_tip=true``: steps 3–6 are skipped (no
+       evidence change is planned) and derive runs from the newest
+       checkpointed evidence commit ``C``
+       (fetched with the foreign tip when it is an ancestor; derive is skipped
+       if ``C`` is not local), so a forged derived tip is replaced even while
+       the evidence ref is forged (critique item 5). ``--bootstrap`` with any
+       other verdict is an error (exit 1). The derived verdict only decides the
+       message: a non-``ok`` derived tip is overwritten with ``::error::``
+       (``foreign``/``deleted``) or ``::notice::`` (``bootstrap``/``unanchored``).
+    3. **ingest** — ``ingest.needs_ingest(state, snapshot_id)`` → ``ingest.
+       read_snapshot(snapshot_dir, …, pin)`` + ``plan_ingest`` (≈ 0 requests).
+    4. **receipts** — ``receipts.harvest_receipts`` over every watched
+       workflow from its cursor (or ``--since``), day-windowed.
+    5. unless ``--receipts-only``: **freeze** — ``freeze.plan_freezes``
+       (settle/defer, re-capture of a changed terminal state, PR/brief/release
+       capture; ``--pr`` restricts it to the named PRs).
+    6. **evidence commit** — ``gitstore.TreeBuilder`` (add-only; guard files
+       only at bootstrap) + ``gitstore.guard_diff`` against the old tip
+       (``[]`` → evidence unchanged). Guard drift from main → ``::warning::``.
+    7. **derive** — ``bundle.derive`` from the evidence commit just built
+       (or ``C`` when foreign) + main, ``gitstore.DerivedTreeBuilder``, and
+       ``site_changed = not derived_continuity.accepted or not
+       bundle.same_content(<current derived tree>, new files)`` — the tip's
+       actual blobs are compared, never its ``content_sha256`` field.
+    8. **plan** — ``<out-dir>/plan.json``, ``<out-dir>/intent-<ref>.json`` per
+       ref that will move, ``<out-dir>/summary.md``, and ``$GITHUB_OUTPUT``
+       lines (below).
 
-    Nothing is pushed: the workflow uploads the intent artifacts, then runs
-    ``publish``. ``--dry-run`` stops after step 7 and sets both ``*_changed``
-    outputs false. A ``github.BudgetExhausted`` anywhere in 3–4 ends the pass
-    cleanly: whatever was captured is planned, the cursors record where to
-    resume, exit 0 with a ``::notice::``.
-``ingest``
-    ``(--snapshot-dir DIR | --ref REF [--path P]) [--dry-run] --out-dir DIR``
-    — the #843 snapshot ingest (``ingest.plan_ingest``), then steps 5–7 as in
-    ``harvest``. Idempotent: a second ingest of the same snapshot plans no
-    evidence change.
+    Nothing is pushed: the workflow uploads the intents, then runs
+    ``publish``. ``--dry-run`` plans and outputs both ``*_changed`` false.
+    A ``github.BudgetExhausted`` in 3–5 ends capture cleanly: what was
+    captured is planned, the cursors record where to resume, exit 0 with a
+    ``::notice::``. A dispatch's capture deadline is job start +
+    ``dispatch_max_minutes`` − ``derive_reserve_minutes`` (critique item 22);
+    ``now`` is read once here and passed down.
 ``refreeze``
     ``--pr N [--dry-run] --out-dir DIR`` — capture PR ``N`` again as
-    ``raw/pr/<N>.r<K+1>.json.gz`` (no settle wait), then steps 5–7.
-``publish``
-    ``--out-dir DIR`` — push what ``plan.json`` says: ``provenance``
-    fast-forward only (``gitstore.push_fast_forward``), ``provenance-site``
-    with ``--force-with-lease`` on the planned old tip
-    (``gitstore.push_force_with_lease``). Re-checks that each remote tip
-    still equals the planned old tip first.
+    ``raw/pr/<N>.r<K+1>.json.gz`` (no settle wait; retention-bound sections
+    carried from revision K — freeze.refreeze), then steps 6–8 (after 1–2;
+    a non-``ok`` evidence verdict refuses).
 ``recover``
-    ``--confirm-sha SHA`` — break-glass: reset ``provenance`` to ``SHA``,
-    which must itself be a declared intent (``declared_intents``) and a
-    descendant-or-equal of nothing foreign; force-with-lease on the current
-    tip. The only non-fast-forward write to the evidence ref; needs a human
-    dispatch (docs/provenance.md §Tip continuity, recovery).
+    ``--confirm-sha SHA --out-dir DIR`` — break-glass, evidence ref only.
+    Refused (exit 3) unless the evidence verdict is ``foreign`` or ``deleted``
+    AND ``SHA`` equals the newest evidence checkpoint ``C`` (critique item
+    4): it can only restore the state the harvester itself last verified, so
+    a write-access dispatcher — an agent included — gains nothing by running
+    it. ``C`` is fetched by sha if not local (``recover`` only). Plans a
+    ``--force-with-lease`` of ``C`` over the current tip (or a create when
+    absent); ``publish`` performs it.
+``publish``
+    ``--out-dir DIR`` — push what ``plan.json`` says, IN ORDER (critique item
+    21): (1) ``provenance`` fast-forward only (``gitstore.push_fast_forward``;
+    recover: force-with-lease); (2) only if (1) pushed, was unchanged, or the
+    plan derived from ``C`` (``foreign_tip``): ``provenance-site`` with
+    ``--force-with-lease`` on the planned old tip. Each remote tip is
+    re-checked == the planned old tip first. Any rejection or moved tip →
+    ``::error::``, exit 3, nothing further pushed; a transport failure after
+    retries → exit 1. On success writes ``<out-dir>/checkpoints.json`` and the
+    outputs ``evidence_tip`` / ``site_tip`` — the VERIFIED tips the workflow
+    uploads as ``tip-<ref>-<sha>`` checkpoints (empty for a ref left foreign or
+    unpublished) — and ``foreign_tip``; the workflow's final verdict step fails
+    the job when ``foreign_tip`` is true, after the checkpoints are uploaded.
 ``gate``
-    ``--scheduled [--armed-var VALUE]`` — the workflow's ``gate`` job. A
-    schedule needs both keys (``conf.armed(enabled, PROVENANCE_ENABLED)``);
-    then one runs-list GET for
-    queued/in-progress ``workflow_dispatch`` runs of provenance.yml; appends
-    ``go=false`` when any exists (a scheduled harvest must not evict an
-    operator's pending dispatch from the concurrency group), else
-    ``go=true``. Without ``--scheduled`` (a dispatch) always ``go=true``.
+    ``[--scheduled] [--armed-var VALUE]`` — the workflow's ``gate`` job.
+    ``go`` = conf ``enabled`` (a dispatch — the house convention, critique
+    item 20) AND, on a schedule, ``conf.armed(enabled, PROVENANCE_ENABLED)``
+    AND no other provenance.yml run is waiting: ONE unfiltered runs-list GET
+    (``/actions/workflows/provenance.yml/runs``, newest 100), filtered
+    client-side to runs other than this one whose ``status`` ∈ {queued,
+    in_progress, pending, waiting, requested} — a run blocked on the
+    concurrency group reports ``pending``/``waiting``, not ``queued`` — so a
+    scheduled harvest never evicts an operator's pending dispatch.
 ``check``
-    ``(--ref provenance|provenance-site | --dir DIR) [--kind evidence|derived]``
-    — validate a tree against the contract: FORMAT, guard-file bytes,
-    every blob's shape, receipt paths agreeing with their run ids, bundle
-    digests. Exit 1 on the first class of failure, listing them all.
+    ``--dir DIR --kind evidence|derived`` — validate a tree against the
+    contract: FORMAT, guard-file presence and mode (``::warning::`` on drift
+    from main's ``.github/data-branch-guard/*``), every blob's shape, receipt
+    paths agreeing with their run ids, raw revisions contiguous from 1, the
+    bundle's ``views_sha256`` / ``content_sha256`` recomputed from the tree.
+    Exit 1 on the first class of failure, listing them all. (No ``--ref``:
+    the integrator checks out a ref into a directory — critique item 31.)
 ``selftest``
     the offline negative-control suite (``selftest.run``) — what
     ``scripts/provenance.sh --selftest`` and check.sh run.
-``config``
-    ``--get KEY [--path FILE]`` — print one parsed conf value.
+
+``$GITHUB_OUTPUT`` (``--gh-output``): ``mode``, ``dry_run``, ``foreign_tip``,
+``evidence_changed``, ``evidence_sha``, ``site_changed``, ``site_sha``,
+``derive_skipped``, ``budget_stopped`` (plan modes); ``evidence_tip``,
+``site_tip``, ``foreign_tip`` (publish); ``go`` (gate). Every sha output is
+validated 40-hex before it is written (the workflow puts them in artifact
+names).
 
 Common options: ``--repo OWNER/NAME`` (default ``$GITHUB_REPOSITORY``),
 ``--run-id`` / ``--run-attempt`` (default ``$GITHUB_RUN_ID`` /
 ``$GITHUB_RUN_ATTEMPT``; recorded in intents and ``captured.run_id``),
 ``--gh-output FILE`` (default ``$GITHUB_OUTPUT``), ``--conf FILE`` (default
-``.github/provenance.conf``), ``--repo-dir DIR`` (default ``.``).
+``.github/provenance.conf``), ``--repo-dir DIR`` (default ``.``). The API
+token is ``$GH_TOKEN`` (read scopes for the plan modes; ``contents: write``
+is used by ``publish`` alone, through ``gitstore``'s env-only credential).
 
-Exit codes: 0 ok (including a clean budget stop and "nothing to do"); 1
-validation/contract failure or bad input; 2 argparse error; 3 tip-continuity
-refusal (foreign tip — the run goes red); 4 guard violation (an add-only rule
-would have been broken — nothing pushed); 5 push rejected after retries
-(``::warning::``; the cursors redo the work next run).
+Exit codes: 0 ok (including a clean budget stop, "nothing to do", and a plan
+with ``foreign_tip`` — the workflow fails the job after publishing); 1
+validation/contract failure, bad input, or a push transport failure; 2
+argparse error; 3 tip-continuity refusal (bootstrap without the flag,
+recover refused, a rejected or raced push); 4 guard violation (an add-only
+rule would have been broken — nothing pushed).
 
 Owner: H1. This module (with ``github.py``) is the only one that may read the
 clock (``datetime.now``), which it passes down as ``now`` everywhere.
@@ -109,16 +150,15 @@ DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)?
 PR_LIST_RE = re.compile(r"[0-9]{1,7}(,[0-9]{1,7}){0,49}")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 CAP_RE = re.compile(r"[0-9]{1,5}")
-REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
-PATH_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
-SNAPSHOT_ID_RE = re.compile(r"pr[0-9]{1,7}")
 REPO_RE = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
 
 EXIT_OK = 0
 EXIT_INVALID = 1
 EXIT_FOREIGN_TIP = 3
 EXIT_GUARD = 4
-EXIT_PUSH_REJECTED = 5
+
+#: Run statuses that mean "another provenance.yml run is waiting for the group".
+WAITING_STATUSES = frozenset({"queued", "in_progress", "pending", "waiting", "requested"})
 
 
 class InputError(ValueError):
@@ -127,16 +167,13 @@ class InputError(ValueError):
 
 @dataclass(frozen=True)
 class Inputs:
-    """Validated harvest/ingest/refreeze/recover inputs."""
+    """Validated harvest/refreeze/recover inputs."""
 
     since: Optional[str] = None
     until: Optional[str] = None
     prs: tuple[int, ...] = ()
     max_requests: Optional[int] = None
     confirm_sha: Optional[str] = None
-    snapshot_ref: Optional[str] = None
-    snapshot_path: Optional[str] = None
-    snapshot_id: Optional[str] = None
 
 
 def _check(name: str, value: Optional[str], rx: re.Pattern[str]) -> Optional[str]:
@@ -149,30 +186,24 @@ def _check(name: str, value: Optional[str], rx: re.Pattern[str]) -> Optional[str
 
 def validate_inputs(*, since: Optional[str] = None, until: Optional[str] = None,
                     pr: Optional[str] = None, max_requests: Optional[str] = None,
-                    confirm_sha: Optional[str] = None, snapshot_ref: Optional[str] = None,
-                    snapshot_path: Optional[str] = None,
-                    snapshot_id: Optional[str] = None) -> Inputs:
-    """Regex-validate every dispatch input (implemented by the scaffold; H1 keeps it).
+                    confirm_sha: Optional[str] = None) -> Inputs:
+    """Regex-validate every free-text dispatch input (implemented by the scaffold; H1 keeps it).
 
-    ``..`` is refused in ``snapshot_ref``/``snapshot_path`` on top of the
-    pattern (no path traversal through ``git show <ref>:<path>``).
+    There is no ref, path or snapshot input (critique item 2): the snapshot is
+    read from the default-branch checkout only. Booleans (``receipts_only``,
+    ``dry_run``, ``bootstrap``) are workflow ``type: boolean`` inputs mapped to
+    flags by the workflow, never free text.
     """
     s = _check("since", since, DATE_RE)
     u = _check("until", until, DATE_RE)
     p = _check("pr", pr, PR_LIST_RE)
     c = _check("max_requests", max_requests, CAP_RE)
     sha = _check("confirm_sha", confirm_sha, SHA_RE)
-    ref = _check("snapshot_ref", snapshot_ref, REF_RE)
-    path = _check("snapshot_path", snapshot_path, PATH_RE)
-    sid = _check("snapshot_id", snapshot_id, SNAPSHOT_ID_RE)
-    for name, val in (("snapshot_ref", ref), ("snapshot_path", path)):
-        if val is not None and ".." in val:
-            raise InputError(f"input {name} may not contain '..'")
     return Inputs(
         since=s, until=u,
         prs=tuple(sorted({int(x) for x in p.split(",")})) if p else (),
         max_requests=int(c) if c is not None else None,
-        confirm_sha=sha, snapshot_ref=ref, snapshot_path=path, snapshot_id=sid,
+        confirm_sha=sha,
     )
 
 
@@ -189,7 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--out-dir", default=".provenance")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    h = sub.add_parser("harvest", parents=[common], help="receipts + freeze + derive (plan only)")
+    h = sub.add_parser("harvest", parents=[common], help="ingest (once) + receipts + freeze + derive (plan only)")
     h.add_argument("--since", default="")
     h.add_argument("--until", default="")
     h.add_argument("--pr", default="")
@@ -198,14 +229,10 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("--dry-run", action="store_true")
     h.add_argument("--scheduled", action="store_true",
                    help="apply the scheduled cap (scheduled_max_requests) and never sleep")
-
-    i = sub.add_parser("ingest", parents=[common], help="ingest the #843 Actions/status snapshot")
-    src = i.add_mutually_exclusive_group(required=True)
-    src.add_argument("--snapshot-dir", default="")
-    src.add_argument("--ref", default="")
-    i.add_argument("--path", default="")
-    i.add_argument("--snapshot-id", default="")
-    i.add_argument("--dry-run", action="store_true")
+    h.add_argument("--bootstrap", action="store_true",
+                   help="create the evidence root (only when the ref is absent and no checkpoint exists)")
+    h.add_argument("--snapshot-dir", default="",
+                   help="tests/local only: read the snapshot from DIR instead of the conf's snapshot_dir")
 
     r = sub.add_parser("refreeze", parents=[common], help="capture one PR again as a new revision")
     r.add_argument("--pr", required=True)
@@ -213,55 +240,58 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("publish", parents=[common], help="push what plan.json says")
 
-    rc = sub.add_parser("recover", parents=[common], help="break-glass: reset provenance to a declared intent")
+    rc = sub.add_parser("recover", parents=[common],
+                        help="break-glass: restore provenance to its newest checkpoint")
     rc.add_argument("--confirm-sha", required=True)
 
-    g = sub.add_parser("gate", parents=[common], help="should the scheduled harvest run?")
+    g = sub.add_parser("gate", parents=[common], help="should this run's harvest job run?")
     g.add_argument("--scheduled", action="store_true")
     g.add_argument("--armed-var", default=os.environ.get("PROVENANCE_ENABLED", ""),
                    help="the PROVENANCE_ENABLED repo variable's raw value (schedule's second key)")
 
-    c = sub.add_parser("check", parents=[common], help="validate a data-ref tree against the contract")
-    tgt = c.add_mutually_exclusive_group(required=True)
-    tgt.add_argument("--ref", choices=("provenance", "provenance-site"))
-    tgt.add_argument("--dir")
-    c.add_argument("--kind", choices=("evidence", "derived"))
+    c = sub.add_parser("check", parents=[common], help="validate a data-ref tree (a directory) against the contract")
+    c.add_argument("--dir", required=True)
+    c.add_argument("--kind", choices=("evidence", "derived"), required=True)
 
     sub.add_parser("selftest", help="offline negative-control suite")
-
-    cf = sub.add_parser("config", help="print one .github/provenance.conf value")
-    cf.add_argument("--get", required=True)
-    cf.add_argument("--path", default=".github/provenance.conf")
     return ap
 
 
+def utcnow() -> str:
+    """The one clock read of a run (RFC3339 UTC seconds). Tests monkeypatch it. H1."""
+    raise NotImplementedError("builder H1: clock")
+
+
+def make_client(args: argparse.Namespace, conf: object, *, scheduled: bool,
+                deadline_epoch: Optional[float]) -> object:
+    """The ``protocols.GitHubAPI`` for this run (``github.Client`` with ``$GH_TOKEN``, the
+    budget from the conf / ``--max-requests``, the ETag cache under ``--out-dir``). The
+    orchestration tests monkeypatch it to return a ``tests.fakes.FakeGitHub``. H1."""
+    raise NotImplementedError("builder H1: client factory")
+
+
 def cmd_harvest(args: argparse.Namespace) -> int:
-    """``harvest`` — steps 1–7 of the module docstring. H1."""
+    """``harvest`` — steps 1–8 of the module docstring. H1."""
     raise NotImplementedError("builder H1: harvest orchestration")
 
 
-def cmd_ingest(args: argparse.Namespace) -> int:
-    """``ingest`` — ``ingest.plan_ingest`` then steps 5–7. H1."""
-    raise NotImplementedError("builder H1: ingest orchestration")
-
-
 def cmd_refreeze(args: argparse.Namespace) -> int:
-    """``refreeze`` — ``freeze.refreeze`` then steps 5–7. H1 (wiring) / H6 (freeze.refreeze)."""
+    """``refreeze`` — ``freeze.refreeze`` then steps 6–8. H1 (wiring) / H6 (freeze.refreeze)."""
     raise NotImplementedError("builder H1: refreeze orchestration")
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
-    """``publish`` — push per ``plan.json``. H1."""
+    """``publish`` — ordered pushes per ``plan.json``, then checkpoints.json. H1."""
     raise NotImplementedError("builder H1: publish")
 
 
 def cmd_recover(args: argparse.Namespace) -> int:
-    """``recover`` — the break-glass reset. H1."""
+    """``recover`` — plan the break-glass restore to the newest checkpoint. H1."""
     raise NotImplementedError("builder H1: recover")
 
 
 def cmd_gate(args: argparse.Namespace) -> int:
-    """``gate`` — go/no-go for the scheduled harvest. H1."""
+    """``gate`` — go/no-go for this run's harvest job. H1."""
     raise NotImplementedError("builder H1: gate")
 
 
@@ -276,15 +306,9 @@ def cmd_selftest(args: argparse.Namespace) -> int:
     return selftest.run()
 
 
-def cmd_config(args: argparse.Namespace) -> int:
-    """``config --get`` — print one value from ``conf.load``. H6."""
-    raise NotImplementedError("builder H6: config --get")
-
-
 COMMANDS = {
-    "harvest": cmd_harvest, "ingest": cmd_ingest, "refreeze": cmd_refreeze, "publish": cmd_publish,
+    "harvest": cmd_harvest, "refreeze": cmd_refreeze, "publish": cmd_publish,
     "recover": cmd_recover, "gate": cmd_gate, "check": cmd_check, "selftest": cmd_selftest,
-    "config": cmd_config,
 }
 
 

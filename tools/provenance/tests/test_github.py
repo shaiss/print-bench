@@ -1,7 +1,8 @@
 """github.Client — GET-only, ETag, cap, floor, pacing, pagination (docs/provenance.md §API budget).
 
 Owner: H1. Each placeholder's docstring is its acceptance criterion
-(docs/provenance.md, final plan P0/P1a–e); replace the skip with the test.
+(docs/provenance.md, final plan P0/P1a–e, the critique round's items);
+replace the skip with the test.
 """
 
 from __future__ import annotations
@@ -21,12 +22,17 @@ def test_request_cap_raises_before_sending():
 
 @pytest.mark.skip(reason="builder: implement")
 def test_scheduled_floor_stops_and_dispatch_floor_sleeps():
-    """Remaining < rate_floor: pace=False raises BudgetExhausted; pace=True calls sleep(reset - now + 5) and continues; a sleep that would pass deadline_epoch raises instead."""
+    """Remaining < rate_floor: pace=False raises BudgetExhausted; pace=True calls sleep(reset - now + 5) and continues; a sleep that would pass deadline_epoch (the capture deadline) raises instead."""
 
 
 @pytest.mark.skip(reason="builder: implement")
 def test_link_next_is_followed_on_api_host_only():
     """rel=next on api.github.com is followed (including a /repositories/<id>/ link rewritten to /repos/<owner>/<repo>/); a next link to any other host is refused."""
+
+
+@pytest.mark.skip(reason="builder: implement")
+def test_iter_pages_is_lazy_and_reports_total_count():
+    """iter_pages yields (items, total_count) one GET per page and sends no further request once the caller stops iterating (the artifact scan's early stop); past max_pages raises Truncated."""
 
 
 @pytest.mark.skip(reason="builder: implement")
@@ -41,9 +47,14 @@ def test_retries_5xx_and_secondary_limits_not_404():
 
 @pytest.mark.skip(reason="builder: implement")
 def test_graphql_unavailable_on_403():
-    """A 403 or an errors payload from the GraphQL endpoint raises GraphQLUnavailable; the normaliser maps reviewThreads nodes to {first_comment_id, resolved, outdated}."""
+    """A 403 or an errors payload from the GraphQL endpoint raises GraphQLUnavailable."""
+
+
+@pytest.mark.skip(reason="builder: implement")
+def test_graphql_parser_on_canned_responses():
+    """Critique 27: the production parser — exercised nowhere else, the sandbox returns 403 — maps canned reviewThreads responses (two pages via pageInfo.endCursor, an outdated thread, a thread with no comments) to {nodes: [{first_comment_id, resolved, outdated}], last_edited_at}, and an issue response to lastEditedAt."""
 
 
 @pytest.mark.skip(reason="builder: implement")
 def test_token_never_logged():
-    """APIError messages carry status and path, never the Authorization header value."""
+    """APIError / Truncated messages and the ETag cache files carry status, method and path, never the Authorization header value."""

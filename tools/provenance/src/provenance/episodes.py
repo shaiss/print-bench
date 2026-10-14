@@ -69,8 +69,11 @@ events from main at the harvest's main sha:
   ``decision.notes_log`` (new; nuggs-vent-cap's nine rows from L233).
 
 Each carries ``fields`` ``{file, line, line_sha256 (sha256 of the line's
-text), added_in_sha, added_in_pr}``: ``git blame`` gives the sha that added
-the line; ``added_in_pr`` is that sha's PR — the first-parent main commit
+text), added_in_sha, added_in_pr}``: ``GitReader.blame_lines`` gives the sha
+that added the line AND the line's number in that commit — ``line`` is that
+ORIGINAL line and the ``url`` is ``blob/<added_in_sha>/designs/<d>/<file>#L<line>``,
+so neither changes when main moves (critique item 6; ``added_in_sha`` is
+required — blame over the full-history checkout always resolves); ``added_in_pr`` is that sha's PR — the first-parent main commit
 that contains it, read from its subject ``(#N)`` (squash) or ``Merge pull
 request #N`` (merge), else, for a rebase merge, the PR record whose commit
 list holds the sha (``commit_to_pr``). The id is
@@ -78,6 +81,25 @@ list holds the sha (``commit_to_pr``). The id is
 identical text), so a row keeps its id when lines above it move; the site
 matches rows by ``line_sha256``, never by line number. No row text is
 stored (the site renders committed text from its own checkout).
+
+**Parity with site/lib/timeline.mjs** (critique item 25). The three ports are
+pinned to timeline.mjs by ``site/test/provenance-rows.test.mjs``: it runs
+timeline.mjs AND this module (``python3`` with ``PYTHONPATH=tools/provenance/
+src``) over every ``designs/*/PM.md`` / ``NOTES.md`` in the checkout and
+asserts identical line selection. It lives in the site's suite, not in
+``provenance-tests``, because timeline.mjs imports ``marked`` (through
+markdown.mjs) and so needs ``site/node_modules``; the ``site-build`` job runs
+``npm --prefix site test`` on EVERY PR (the site/lib/lineage.mjs ↔
+tools/lineage precedent, python3 preinstalled), so a drift on either side
+fails a required check.
+
+**Placement after the join** (:func:`place`; critique item 14). The derive
+order is fixed: ``extract_*`` (events placed from the raw document) →
+``serving.annotate_record`` → ``serving.receipt_events`` (``job.reviewer``
+events, returned UNPLACED: ``episode``/``head_sha`` ``None``) →
+:func:`place` (assigns every unplaced event with :func:`assign` over
+:func:`rounds_from_record`) → ``views``. Records are stored only after
+:func:`place`, so every stored event has an episode.
 
 Owner: H3. Pure (git through ``protocols.GitReader``).
 """
@@ -87,7 +109,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .protocols import GitReader
+from .protocols import GitReader, Round
 
 #: Byte-identical to scripts/reviewer-signoff.sh (drift-pinned).
 REGEN_SUBJECT = "CI: regenerate previews and product pages"
@@ -103,19 +125,6 @@ class Push:
     pushed_at: Optional[str]
     commits: tuple[str, ...]
     regen: bool
-
-
-@dataclass(frozen=True)
-class Round:
-    """One review round (contract ``round``)."""
-
-    id: str
-    head: str
-    heads: tuple[str, ...]
-    commits: tuple[str, ...]
-    pushed_at: Optional[str]
-    start: Optional[str]
-    end: Optional[str]
 
 
 @dataclass
@@ -146,6 +155,24 @@ def rounds(raw_pr: dict[str, Any]) -> list[Round]:
 def assign(event: dict[str, Any], rounds_: list[Round], *, pr: Optional[int],
            merged_at: Optional[str]) -> Placement:
     """The episode placement of one event (module docstring)."""
+    raise NotImplementedError("builder H3")
+
+
+def round_dict(r: Round) -> dict[str, Any]:
+    """A :class:`protocols.Round` as the contract ``round`` object (lists, not tuples)."""
+    raise NotImplementedError("builder H3")
+
+
+def rounds_from_record(record: dict[str, Any]) -> list[Round]:
+    """The record's stored ``rounds`` back as :class:`protocols.Round` objects (inverse of
+    :func:`round_dict`; ``[]`` for a non-PR record)."""
+    raise NotImplementedError("builder H3")
+
+
+def place(record: dict[str, Any]) -> dict[str, Any]:
+    """A NEW record whose every event with ``episode is None`` is placed by :func:`assign` over
+    :func:`rounds_from_record` (``head_sha``, ``stale_sha``, ``after_merge`` set); already-placed
+    events are untouched; events re-sorted by ``canonical.event_sort_key``."""
     raise NotImplementedError("builder H3")
 
 
@@ -187,7 +214,8 @@ def parse_notes_decisions(text: str) -> list[Row]:
 
 def decision_rows(git: GitReader, main_sha: str, design: str, *, owner: str, repo: str,
                   commit_to_pr: dict[str, int]) -> list[dict[str, Any]]:
-    """event@1 rows for one design at ``main_sha`` (module docstring), with blame → PR."""
+    """event@1 rows for one design at ``main_sha`` (module docstring): ``GitReader.blame_lines``
+    → (added_in_sha, original line) → PR; nothing of ``main_sha`` is stored in a row."""
     raise NotImplementedError("builder H3")
 
 

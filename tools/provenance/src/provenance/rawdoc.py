@@ -315,10 +315,18 @@ def raw_pr_doc(*, number: int, revision: int, captured: dict[str, Any], incomple
                issue_comments: list[dict[str, Any]], timeline: list[dict[str, Any]],
                threads: dict[str, Any], ci_runs: list[dict[str, Any]],
                statuses: dict[str, list[dict[str, Any]]], deployments: list[dict[str, Any]],
-               briefs: list[int]) -> dict[str, Any]:
-    """Assemble one ``raw-pr@1`` document from ALREADY-PROJECTED parts."""
+               linked_issues: list[int]) -> dict[str, Any]:
+    """Assemble one ``raw-pr@1`` document from ALREADY-PROJECTED parts.
+
+    ``linked_issues`` = the PR body's ``refs_closes`` ∪ the ``claude/issue-<N>-*``
+    head-ref number — EVERY linked issue, brief or not. Which of them are design
+    briefs is decided at derive time from the evidence tree (an issue is a brief
+    iff ``raw/brief/<n>`` exists — freeze captures a linked issue as a brief only
+    if it carries or carried the ``design-brief`` label); the record splits
+    ``linked_issues`` from ``briefs`` (critique item 24).
+    """
     return {
-        "briefs": sorted(set(briefs)), "captured": captured, "ci_runs": ci_runs,
+        "captured": captured, "ci_runs": ci_runs, "linked_issues": sorted(set(linked_issues)),
         "commits": commits, "deployments": deployments, "files": files,
         "format": RAW_PR_FORMAT, "incomplete": sorted(set(incomplete)),
         "issue_comments": issue_comments, "pr": number, "pull": pull, "review_comments": review_comments,

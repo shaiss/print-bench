@@ -30,5 +30,10 @@ def test_events_deduped_and_sorted():
 
 
 @pytest.mark.skip(reason="builder: implement")
+def test_view_has_no_main_sha():
+    """Critique 6: view@1 carries no main_sha; build_view takes none."""
+
+
+@pytest.mark.skip(reason="builder: implement")
 def test_counts():
     """counts.signoffs by tier and jobs_posted_nothing match the events."""

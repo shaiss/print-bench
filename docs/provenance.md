@@ -13,7 +13,17 @@ registration) are being built against this document. Arming the schedule
 The approved plan this freezes is the red-teamed proposal recorded in the
 2026-10-13 provenance audit (`audits/provenance-2026-10/README.md`); where
 this document resolves something the plan left open, §Resolved questions
-says what and why.
+says what and why. It was revised once more after an adversarial review of
+the frozen design (2026-10-14; items 22–33 of §Resolved questions).
+
+**The deadline moved.** The #843 snapshot was merged to main on 2026-10-14
+(merge commit `411a7565`), so every run created up to 2026-10-13T06:13:35Z is
+durable in main's history whatever GitHub's retention does. P0 no longer
+races the 2026-10-30 expiry of the first runs; the real deadline is for runs
+created after the snapshot, the first of which expire about **2027-01-11**.
+And the ingest's scope decisions (no check runs; only the nine watched
+workflows) became reversible: a later ingest version can widen them from the
+same committed snapshot.
 
 ## Contents
 
@@ -84,21 +94,25 @@ Constraints it honours (audit design brief, "hard constraints"):
      ┌────────────────────────────┴───────────────────────────┐
      │  provenance.yml  (keyless, GITHUB_TOKEN only)          │
      │  gate job ─► harvest job (concurrency provenance-writer)│
-     │   1 fetch refs, tip continuity                          │
-     │   2 receipts pass (watched workflows' runs → jobs)      │
-     │   3 freeze pass (settled PRs / briefs / releases)       │
-     │   4 add-only evidence commit + diff-tree guard          │
-     │   5 derive records → views → bundle (pure)              │
-     │   6 plan.json + intent files → upload intent artifacts  │
-     │   7 publish: ff push provenance, lease push -site       │
+     │   1 token-less fetch: both refs + every PR head         │
+     │   2 tip continuity (newest tip-<ref> checkpoint)        │
+     │   3 ingest the #843 snapshot from main (first run only) │
+     │   4 receipts pass (watched workflows' runs → jobs)      │
+     │   5 freeze pass (settled PRs / briefs / releases)       │
+     │   6 add-only evidence commit + diff-tree guard          │
+     │   7 derive records → views → bundle (pure, no fetch)    │
+     │   8 plan.json + intents → upload intent artifacts       │
+     │   9 publish: ff push provenance, then lease push -site  │
+     │  10 upload tip-<ref>-<sha> checkpoints; verdict         │
      └───────────┬───────────────────────────────┬────────────┘
                  ▼                               ▼
    refs/heads/provenance               refs/heads/provenance-site
    EVIDENCE · linear · add-only         DERIVED · one squashed commit
    receipts/ raw/ state.json            records/ views/ site/bundle.json
                  │                               │
-                 └──── tip continuity: every tip must be a sha a ────┘
-                       previous default-branch run declared
+                 └── tip continuity: each tip must be the newest ──┘
+                     checkpoint a default-branch run uploaded, or a
+                     commit a later run declared on top of it
                                                  │
                                    site (P3): SITE_FETCH_PROVENANCE seam
                                    reads site/bundle.json at a pinned sha
@@ -113,30 +127,33 @@ Five parts, kept separate on purpose:
 3. **Derived** — the squashed `provenance-site` ref: records, per-design
    views and one bundle, recomputed as a pure function of (evidence tip, main
    sha, extractor version).
-4. **Tip continuity** — both refs' tips must be shas a default-branch
-   harvester run declared in an artifact; anything else is refused and
-   reported.
+4. **Tip continuity** — both refs' tips must be the newest checkpoint a
+   default-branch harvester run uploaded (or a commit a later run declared
+   on top of it); anything else is refused (evidence) or overwritten
+   (derived) and reported.
 5. **The site seam** (P3, not in this build) — reads the bundle by sha.
 
 ## Freeze units and settle rules
 
 Late activity never mutates a frozen unit. A unit is captured **once** into
-revision 1; only `refreeze` adds revision K ≥ 2; every reader folds the
-highest revision.
+revision 1; revision K ≥ 2 is added only by `refreeze` or when the unit's
+terminal state changes (a PR closed unmerged, reopened and merged; a brief
+reopened and closed again); every reader folds the highest revision.
 
 | Unit | Due | Freezes when | Stored |
 |---|---|---|---|
 | Run receipt | as soon as the runs list shows it `completed` | `conclusion != skipped`, workflow ∈ `watched_workflows` | `receipts/YYYY/MM/DD/<run_id>.a<attempt>.json.gz` (full or stub, §Receipts) |
-| PR | `closed_at + settle_hours` (6 h) | at/after due, **and** no watched run on its head branch is queued/in progress, **and** (merged) its Production deployment is terminal or `merged_at + deploy_wait_hours` (2 h) passed. Otherwise deferred; at `closed_at + max_defer_hours` (24 h) frozen anyway with `incomplete` naming why | `raw/pr/<n>.json.gz` (`raw-pr@1`) |
-| PR with no `designs/` file | — | never captured | `state.skipped.pr` |
-| Brief issue (`design-brief`) | `closed_at + settle_hours` | as a PR; an OPEN brief a frozen PR links is captured as revision 1 with `incomplete: brief-open` and captured again (next revision) once it closes and settles | `raw/brief/<n>.json.gz` (`raw-brief@1`) |
+| PR | `closed_at + settle_hours` (6 h) | at/after due, **and** no watched run on its head branch is queued/in progress, **and** (merged) its Production deployment is terminal or `merged_at + deploy_wait_hours` (2 h) passed. Otherwise deferred; at `closed_at + max_defer_hours` (24 h) frozen anyway with `incomplete` naming why. A frozen PR whose listed `closed_at`/`merged_at` differ from its stored revision's goes through settle again and freezes the next revision | `raw/pr/<n>.json.gz` (`raw-pr@1`) |
+| PR with no `designs/` file | — | never captured; re-evaluated if its `closed_at` changes | `state.skipped.pr[n] = {closed_at}` |
+| Brief issue (carries, or carried, `design-brief`) | `closed_at + settle_hours` | as a PR; an OPEN brief a frozen PR links is captured as revision 1 with `incomplete: brief-open` and captured again (next revision) once its `state`/`closed_at` change and it settles. A linked issue that never carried the label is not a brief | `raw/brief/<n>.json.gz` (`raw-brief@1`) |
 | Release | on publish (non-draft) | immediately | `raw/release/<tag>.json.gz` (`raw-release@1`) |
-| Direct-to-main commit | — | derived from local git; no API | `records/commit/<sha40>.json` only |
+| Direct-to-main commit | — | derived from local git; no API; only a first-parent main commit with no PR subject, not committed by GitHub, in no frozen PR (§Records) | `records/commit/<sha40>.json` only |
 
 Revision paths: revision 1 is `<key>.json.gz`; revision K ≥ 2 is
-`<key>.r<K>.json.gz`. `state.frozen.<kind>.<key>` records the highest
-revision. Settle times derive from `closed_at` (no wall clock is stored);
-`now` is read once by `cli.py` and passed down.
+`<key>.r<K>.json.gz`. Which units are frozen, at which revision, is read
+from these paths (`state.frozen_from_paths`) — never from `state.json`, so
+the two cannot drift. Settle times derive from `closed_at` (no wall clock is
+stored); `now` is read once by `cli.py` and passed down.
 
 ## Storage: the two refs
 
@@ -149,11 +166,11 @@ workflow.
 
 | Path | Contents |
 |---|---|
-| `vercel.json` | bytes of `.github/data-branch-guard/vercel.json` (mode 100644) |
-| `scripts/vercel-ignore-build.sh` | bytes of `.github/data-branch-guard/vercel-ignore-build.sh` (mode 100755) |
+| `vercel.json` | bytes of `.github/data-branch-guard/vercel.json` at bootstrap (mode 100644); never rewritten |
+| `scripts/vercel-ignore-build.sh` | bytes of `.github/data-branch-guard/vercel-ignore-build.sh` at bootstrap (mode 100755); never rewritten |
 | `README.md` | generated at bootstrap from a template in `gitstore.py` ("evidence data branch — never hand-edit; see docs/provenance.md"); never changed after |
 | `FORMAT` | `print-bench-provenance 1\n` |
-| `state.json` | `state@1` — cursors, pending units, frozen revisions, skipped PRs, ingest records, versions. No wall-clock stamp. The only path a push may modify |
+| `state.json` | `state@1` — cursors, pending units, skipped PRs (with `closed_at`), ingest records, versions. No wall-clock stamp, no frozen list (the `raw/` paths are the record). The only path a push may modify |
 | `receipts/YYYY/MM/DD/<run_id>.a<attempt>.json.gz` | `receipt@1`, day-sharded by the run's `created_at` (≤ ~230 entries per day directory, measured) |
 | `raw/pr/<n>[.r<K>].json.gz` | `raw-pr@1` |
 | `raw/brief/<n>[.r<K>].json.gz` | `raw-brief@1` |
@@ -162,8 +179,12 @@ workflow.
 | `raw/snapshot/<id>/statuses/<sha40>.json.gz` | `raw-snapshot-statuses@1` (from the #843 ingest) |
 
 Every `*.json.gz` is deterministic gzip (mtime 0, empty filename, level 9) of
-canonical JSON (§Canonical JSON). Each publish is one commit whose parent is
-the fetched tip, pushed fast-forward only.
+canonical JSON (§Canonical JSON). Content identity — the writer's
+same-content no-op, the ingest's identical-vs-conflict test, receipt parity
+and `evidence.raw_sha256` — is defined on the **decompressed** canonical JSON;
+the gzip bytes are storage only, because deflate output differs between zlib
+builds (a runner image's and a builder's Python need not agree). Each publish
+is one commit whose parent is the fetched tip, pushed fast-forward only.
 
 ### `provenance-site` — derived, squashed
 
@@ -179,19 +200,41 @@ the fetched tip, pushed fast-forward only.
 | `site/bundle.json` | `bundle@1` — every view plus `main_sha`, `evidence_sha`, `producer_run`, `content_sha256`, `views_sha256` |
 
 One parentless commit, pushed with `--force-with-lease` on the planned old
-tip. Rebuilt every run; a run whose `content_sha256` equals the current tip's
-pushes nothing (§Views). Re-extraction and refreeze never modify evidence: a
-new extractor version simply produces a new derived tree.
+tip. Rebuilt every run; it is pushed when the current tip is not an accepted
+checkpoint or its actual blobs differ from the new tree (§Views,
+`bundle.same_content`) — a main push that touches no `designs/` file changes
+nothing and pushes nothing. Re-extraction and refreeze never modify
+evidence: a new extractor version simply produces a new derived tree.
 
 ## The add-only guard
 
-`gitstore.py` is the only module that runs git. The evidence writer:
+`gitstore.py` is the only module that runs git. Every invocation sets
+`GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_ALLOW_PROTOCOL=https`
+(plus `file` in tests), `core.hooksPath=/dev/null`, `core.fsmonitor=false`,
+`safe.bareRepository=explicit`; PR objects are read with `show` and
+`merge-tree --write-tree` only, never checked out.
+
+**Fetching, once.** At the start of the plan step `Git.fetch_all()` fetches,
+token-less (the repository is public; the checkout uses
+`persist-credentials: false`), both data refs and
+`+refs/pull/*/head:refs/remotes/pull/*/head`. Nothing fetches after that:
+derive reads only what is local, so its output is a pure function of
+(evidence, main, the fetched PR-ref set) rather than flapping with a per-sha
+fetch. A commit still missing is permanently missing — 67 of the 1,289
+distinct auto-review run heads in the #843 snapshot are in no PR's commit
+list (force-pushed away) — and is a deterministic basis `none` with
+`incomplete: codebasis-unavailable:<sha8>`. If the bulk fetch itself fails,
+the run still publishes evidence but publishes no derived tree that run
+(`derive_skipped`).
+
+The evidence writer:
 
 1. **Temp index.** `TreeBuilder` sets a temporary `GIT_INDEX_FILE`, seeds it
    with `git read-tree <tip>` (empty at bootstrap), writes each new blob with
    `git hash-object -w --stdin` and stages it with `git update-index --add
    --cacheinfo <mode>,<blob>,<path>`. `add()` of a path that already exists
-   with the same blob is a no-op; with a different blob it raises
+   with the same **content** (decompressed for `*.json.gz`) is a no-op and
+   keeps the existing blob; with different content it raises
    `GuardViolation` at once. Only `replace()` may change a path, and only one
    in `MUTABLE_EVIDENCE_PATHS` (`state.json`). No existing file is ever
    written through the working tree, so the `git show … > file || true`
@@ -209,23 +252,32 @@ new extractor version simply produces a new derived tree.
    An identical tree means **push nothing**. A violation names the first
    offending path and rule; nothing is pushed; the run exits 4. Each rule has
    a negative control in `tests/test_gitstore.py` and in
-   `scripts/provenance.sh --selftest`.
+   `scripts/provenance.sh --selftest`. The guard files are written into the
+   evidence tree **once, at bootstrap**; the writer never re-adds them, so an
+   edit to `.github/data-branch-guard/*` on main cannot brick the evidence
+   writer — the drift is a `::warning::` (harvest summary, `check --kind
+   evidence`), and the derived tree always carries main's current bytes.
 4. **Push.** `git push origin <new>:refs/heads/provenance`, never forced.
-   A transport failure is retried up to 3 times with the **same** commit. A
-   non-fast-forward rejection is **not** rebuilt on the new remote tip (inside
-   the `provenance-writer` concurrency group only a foreign writer can move
-   the tip): the run re-fetches and runs tip continuity on the new tip — a
-   foreign tip is `::error::` and exit 3; a declared one (another harvester
-   run raced this one) is `::warning::` and exit 5, and the cursors redo the
-   work next run.
-5. **Credentials.** The checkout uses `persist-credentials: false`;
-   `gitstore` passes `GH_TOKEN` to `fetch`/`push` only, through `git -c
-   http.https://github.com/.extraheader=…` on that one invocation, never into
-   `.git/config` and never in a logged argument.
+   A transport failure is retried up to 3 times with the **same** commit,
+   then the run fails (exit 1). **Any** rejection is treated as foreign:
+   inside the `provenance-writer` concurrency group no other default-branch
+   harvester can move the tip, so a moved tip is foreign by construction —
+   `::error::`, exit 3, nothing rebuilt, `provenance-site` not pushed.
+5. **Credentials.** The checkout uses `persist-credentials: false`. Only the
+   two push functions send a token, and never in argv: the header goes
+   through the child's environment (`GIT_CONFIG_COUNT=1`,
+   `GIT_CONFIG_KEY_0=http.https://github.com/.extraheader`,
+   `GIT_CONFIG_VALUE_0=AUTHORIZATION: basic <b64>`), and `::add-mask::<b64>`
+   is printed once before the first push (Actions masks the raw token, not
+   its base64 form — the oracle.yml precedent). `GitError` messages are built
+   from a redacted argv and stderr, never the environment; a test pins that a
+   failing push's error contains neither the token nor its base64.
 
 The derived ref is written by `DerivedTreeBuilder` (a fresh empty index —
 nothing inherited) and pushed with `--force-with-lease=refs/heads/
-provenance-site:<planned old tip>`.
+provenance-site:<planned old tip>`, only after the evidence push succeeded,
+was unnecessary, or the plan derived from the newest checkpoint because the
+evidence tip is foreign (§Tip continuity); a lease failure is foreign too.
 
 ## Tip continuity
 
@@ -233,53 +285,100 @@ provenance-site:<planned old tip>`.
 `bypassPermissions` agents holding the owner PAT with `contents: write`; a
 ruleset cannot restrict a branch to the Actions bot. So "single writer"
 cannot be enforced at push time — it is checked at the next run instead.
+The forms it must catch: a forged commit on top of the tip, a forced
+**rollback** to an older genuine sha, a deleted ref, and a forged derived tip.
 
-**Declaring.** Before publishing, the harvest job uploads one tiny artifact
-per ref it will move, named `intent-<ref>-<sha40>` (`intent-provenance-…`,
-`intent-provenance-site-…`), retention 90 days, content `intent@1`
-(`{format, ref, sha, parent, run_id, run_attempt}`). The upload happens
-**between** the planning step and the publish step: a declared-but-never-
-pushed sha is harmless (nobody else holds that object).
+**Marks.** Each harvest job uploads two kinds of tiny artifact (retention 90
+days, content `intent@1` / `checkpoint@1`):
 
-**Checking** (`gitstore.declared_intents`, `check_tip_continuity`), at the
-start of every run, for each ref:
+- `intent-<ref>-<sha40>` — between planning and publishing, for each ref it
+  will move (a declared-but-never-pushed sha is harmless: nobody else holds
+  that object);
+- `tip-<ref>-<sha40>` — the **checkpoint**, after every successful publish
+  **including a no-op one**, naming the tip it has just verified (pushed by
+  itself, or unchanged and accepted).
 
-1. List the last `intent_window_runs` (20) runs of `provenance.yml` with
-   `head_branch == "main"` and `event` ∈ {`schedule`, `workflow_dispatch`},
-   newest first, keeping only runs whose `head_sha` is on main's
-   first-parent history (local git; fetch-depth 0).
-2. Read each run's artifact names (`GET /actions/runs/{id}/artifacts`),
-   newest run first, stopping as soon as the tip is found — usually 2 GETs.
-3. The tip must be one of the declared shas. Otherwise: `::error::`, nothing
-   is written, exit 3 (red). Reeve's `provenance-foreign-tip` detector reports
-   the same condition independently.
+**Scanning** (`gitstore.scan_marks`). One newest-first read of the
+repository's artifact list (`GET /actions/artifacts`; 6,519 artifacts on
+2026-10-14, about 70 a day, so one page of 100 covers about 34 hours and
+normally reaches the newest checkpoint), stopping at the first verified
+`tip-` mark for each ref or at `continuity_horizon_days` (90). A mark counts
+only if its run is verified: the artifact's `workflow_run` is on `main` with
+a `head_sha` on main's first-parent history, and `GET /actions/runs/{id}`
+shows `path == .github/workflows/provenance.yml` and `event` ∈ {`schedule`,
+`workflow_dispatch`}. Ordering is by artifact id (upload order), so a late
+re-run attempt of an old run orders by when it actually uploaded.
 
-| Tip state | Intents ever seen in the window | Verdict |
-|---|---|---|
-| present, declared | — | ok |
-| present, not declared | — | **foreign** → refuse (evidence); the derived ref is recomputed anyway and the foreign tip overwritten with `::error::` |
-| absent | none | **bootstrap** → create the root commit |
-| absent | some | **deleted** → refuse like a foreign tip |
+**Deciding** (`gitstore.continuity_verdict`, pure, implemented with the
+scaffold; Reeve's `provenance-foreign-tip` ports it and both suites run the
+shared table `tools/provenance/tests/fixtures/continuity_cases.json`). With
+`C` the newest verified checkpoint for the ref:
 
-**Recovery** (`recover --confirm-sha <sha40>`, dispatch only): reset
-`provenance` to a sha that is itself a declared intent, with
-`--force-with-lease` on the current tip — the only non-fast-forward write to
-the evidence ref. An undeclared sha is refused.
+| Tip | Verdict |
+|---|---|
+| equals `C` | **ok** |
+| evidence: its first-parent chain reaches `C` through commits that are each an intent declared **after** `C` (a run pushed and died before checkpointing) | **ok** |
+| derived: an intent declared after `C` | **ok** |
+| present, anything else — a forged commit, or a **rollback** to an older checkpoint or intent | **foreign** |
+| absent, `C` exists | **deleted** |
+| present, no checkpoint in the horizon | **unanchored** |
+| absent, no checkpoint in the horizon | **bootstrap** |
+
+Counting checkpoints rather than runs is what lets a quiet day — or a
+disarmed month, whose scheduled runs are skipped outright — leave the live
+tip anchored: the old "last 20 runs" window let it age out after about 20
+hours and then treated an absent ref as a bootstrap. Only the newest
+checkpoint anchors, so the rule is monotonic: a ref forced back to an older
+genuine sha is refused.
+
+**Acting** (cli step 2):
+
+- evidence **ok** → build on the tip;
+- evidence **bootstrap** → the root is created only by a dispatch carrying
+  `bootstrap=true`; otherwise `::error::`, exit 3. Never automatic;
+- evidence **foreign / deleted / unanchored** → no evidence is written and
+  the receipts and freeze passes are skipped; derive runs from `C` (fetched
+  with the foreign tip when it is an ancestor) and `provenance-site` is
+  pushed; the job then fails (exit 3) after the checkpoints are uploaded. A
+  forged derived tip is therefore replaced at the next run even while the
+  evidence ref is forged. If `C` cannot be obtained, nothing is pushed;
+- derived not **ok** → recomputed and overwritten (`::error::` for foreign or
+  deleted, `::notice::` for bootstrap or unanchored); derived **ok** → pushed
+  only when its actual blobs differ from the new tree.
+
+**Recovery** (`recover confirm_sha=<sha40>`, dispatch only): refused unless
+the evidence verdict is **foreign** or **deleted** and `confirm_sha` equals
+`C`. It force-with-leases `C` over the current tip (or recreates the ref) —
+the only non-fast-forward write to the evidence ref. Because it can only
+restore the state the harvester itself last verified, a write-access
+dispatcher (an agent included) gains nothing by running it; an Environment
+with required reviewers on it (the lever docs/actions-security.md names) is
+therefore optional and not wired. If `C` is no longer fetchable from GitHub,
+any clone that holds it restores continuity by pushing exactly `C` — tip ==
+`C` is **ok**.
 
 **Residuals** (documented in `docs/actions-security.md`):
 
-- a forged `provenance-site` tip can reach one Vercel deploy before the next
-  harvest overwrites it (the site resolves the tip without API access). The
-  content is limited to escaped structured fields with constructed
-  permalinks, so the harm is false attribution, not script injection;
-- intent artifacts expire after 90 days: a harvester stalled that long leaves
-  no declared intent, and the next run refuses until a human re-bootstraps
-  (rename the old ref, let the next run bootstrap, then re-ingest). Reeve's
-  `provenance-lag` flags a stall long before that;
+- a forged `provenance-site` tip is live until the next harvest run — at most
+  about an hour once armed, but until the next dispatch while disarmed
+  (before P2) — whatever the evidence ref's state; the exception is a forger
+  who also makes `C` unfetchable, which leaves the forged derived tip until a
+  human acts. Before P3 nothing reads the derived ref; after it, the content
+  is escaped structured fields with constructed permalinks, so the harm is
+  false attribution, not script injection;
+- a rollback to `C` itself is accepted: it undoes only the pushes of runs that
+  died before checkpointing, which the next run redoes from the cursors;
+- checkpoints expire after 90 days: a harvester that has published nothing
+  for 90 days leaves no anchor, and the next run reports **unanchored**
+  (refused) until a human renames the old ref and re-bootstraps — no run may
+  re-anchor a tip nobody verified. Reeve's `provenance-lag` stall check and
+  `routine-dead` flag a stall long before that;
 - the default-branch `if:` and checkout ref are defense in depth only: a
   dispatcher who selects another ref runs that ref's YAML (docs/actions-
-  security.md). The control that holds is that such a run cannot declare an
-  intent a main run accepts.
+  security.md). The control that holds is that such a run's marks are not
+  accepted (head branch, first-parent history, workflow path and event);
+- the one harvest job both parses untrusted API payloads and holds
+  `contents: write` (§Workflow explains why it is not split).
 
 ## The evidence digest
 
@@ -374,7 +473,8 @@ content is captured by a richer endpoint).
 `receipts-missing:<run_id>`, `codebasis-unavailable:<sha8>`.
 
 `captured` = `{run_id, harvester, digest}` (the fixtures use run 0 /
-`fixture`).
+`fixture`). `raw-pr@1.linked_issues` = the body's `refs_closes` ∪ the
+`claude/issue-<N>-*` head-ref number — every linked issue, brief or not.
 
 ## Receipts
 
@@ -383,12 +483,19 @@ link served — and GitHub now deletes it after 90 days. Receipts copy it.
 
 **Selection** — from the runs **list**, never by step name. For each
 workflow in `watched_workflows` (auto-review, backlog-burn, chunker,
-design-run, labeler, oracle, product-scout, spike-converter, wright):
-`GET /actions/workflows/<wf>/runs?created=>=<cursor − receipt_lookback_hours>`
-(all pages; under `--since`, oldest window first). Every run with `status ==
-completed` and `conclusion != skipped` whose receipt path is absent gets one
+design-run, labeler, oracle, product-scout, spike-converter, wright), the
+span `[cursor − receipt_lookback_hours, until or now]` is listed in UTC-day
+windows, `GET /actions/workflows/<wf>/runs?created=<A>..<B>` (all pages).
+GitHub returns **at most 1,000 results** for a runs list filtered by
+`created`, `branch`, `event` or `status`, and auto-review alone has 1,434
+completed non-skipped runs in the snapshot, so every window must return
+exactly its `total_count` rows, and a window with `total_count ≥ 1000` is
+halved recursively (to one minute, then the pass fails rather than
+truncating). No other filter is sent. Every run with `status == completed`
+and `conclusion != skipped` whose receipt path is absent gets one
 `GET /actions/runs/<id>/jobs?filter=all` (paged; every attempt). Runs still
-queued or in progress hold the cursor back for the next pass.
+queued or in progress hold the cursor back for the next pass. A fresh
+cursor is the snapshot's end (set by the ingest), else `backfill_since`.
 
 **The agent-step grammar** (`steps.py`, version 1) — a closed list of
 anchored patterns, one per naming era, each with a fixture:
@@ -433,31 +540,41 @@ differ only in `source`.
 **Path.** `receipts/YYYY/MM/DD/<run_id>.a<run_attempt>.json.gz`, the date of
 `run.created_at` (UTC). A later re-run attempt is a new path; readers use the
 highest attempt. A re-run of a run older than `receipt_lookback_hours` is not
-re-captured (documented residual).
+re-captured (documented residual). Receipt parity with the fixtures and
+receipt identity are on the decompressed canonical JSON.
 
 ## INGEST: the #843 snapshot
 
-The repository's first runs expire from about 2026-10-30. PR #843 (branch
-`ccr-d0be94c3-o4sati-rescue`, directory `audits/provenance-2026-10/rescue/`)
-holds a GET-only snapshot taken 2026-10-13: `runs.tar` (one `<workflow>.json.gz`
-per workflow, every run since 2026-08-01, 19,890 rows), `jobs.tar` (one
-`<run_id>.json.gz` = `{run_id, jobs}` per non-skipped run of an agent-bearing
-workflow, 4,485 runs), `sha.tar` (one `<sha>.json.gz` = `{sha, statuses,
-check_runs}` per PR commit and head, 1,992 shas), `prcommits.tar`,
-`pulls.json.gz`, `workflows.json.gz`, `capture.py`, `MANIFEST.sha256`.
+PR #843 holds a GET-only snapshot taken 2026-10-13 of every run created
+2026-08-01T16:59Z → 2026-10-13T06:13:35Z: `runs.tar` (one `<workflow>.json.gz`
+per workflow, 19,890 rows), `jobs.tar` (one `<run_id>.json.gz` = `{run_id,
+jobs}` per non-skipped run of an agent-bearing workflow, 4,485 runs), `sha.tar`
+(one `<sha>.json.gz` = `{sha, statuses, check_runs}` per PR commit and head,
+1,992 shas), `prcommits.tar`, `pulls.json.gz`, `workflows.json.gz`,
+`capture.py`, `MANIFEST.sha256`. It was **merged to main** on 2026-10-14
+(merge commit `411a7565e1c6c8f2b96edf631286ceac798d7887`) and lives at
+`audits/provenance-2026-10/rescue/`; its branch is deleted.
 
-**Locating it.** Dispatch `mode=ingest`. The snapshot ref and path default to
-the conf's `snapshot_ref` / `snapshot_path` and may be overridden by the
-`snapshot_ref` / `snapshot_path` inputs (validated, no `..`). `ingest.
-materialize_from_ref` (through `gitstore`) runs `git fetch origin <ref>` and
-`git show <ref>:<path>/<file>` for each manifest file into a temp directory.
-Locally, `--snapshot-dir DIR` reads an extracted directory. The snapshot id
-(`pr843`, conf `snapshot_id`) names the evidence subtree and the receipts'
-`source`.
+**Not a mode.** The dispatch modes stay harvest, refreeze and recover (owner
+decision 12). `harvest` ingests automatically when `state.ingested.pr843` is
+absent or records an older ingest version — in practice at the bootstrap
+dispatch — at about zero API cost. The snapshot is read **only** from the
+default-branch checkout's `snapshot_dir` (conf): no ref, branch or path
+input exists, so nothing a dispatcher or a PAT-holding agent types can point
+the ingest at bytes a human did not merge (`--snapshot-dir` exists for tests
+and local dry-runs). The snapshot id (`pr843`, conf `snapshot_id`) names the
+evidence subtree and the receipts' `source`.
 
-**Verification first.** Every line of `MANIFEST.sha256` is recomputed;
-`runs.tar`, `jobs.tar` and `sha.tar` are required. A mismatch or a missing
-file aborts the ingest with nothing planned.
+**Authenticity, then integrity.** `MANIFEST.sha256` sits in the tree it
+verifies, so on its own it proves only integrity. `ingest.verify_manifest`
+first requires `sha256(MANIFEST.sha256)` to equal the conf's
+`snapshot_manifest_sha256` pin (`c713379b…51c7`), then recomputes every line;
+`runs.tar`, `jobs.tar` and `sha.tar` are required. An internally consistent
+directory whose manifest is not the pin, a mismatch or a missing file aborts
+the ingest with nothing planned. Tar members are read with `extractfile`
+only; a member that is not a regular file or whose name does not full-match
+`[A-Za-z0-9._-]+\.json\.gz` is refused. `snapshot_commit` is recorded in
+`state.ingested` as provenance.
 
 **Mapping** (`S` = `pr843`):
 
@@ -468,24 +585,31 @@ file aborts the ingest with nothing planned.
 | `sha.tar/<sha>.json.gz` with ≥ 1 status | `raw/snapshot/S/statuses/<sha>.json.gz` | `raw-snapshot-statuses@1`: statuses projected (descriptions kept only for `reviewer-signoff`), `check_runs_dropped` = the member's check-run count (1,689 files, 758 KB gz) |
 | `prcommits.tar`, `pulls.json.gz`, `workflows.json.gz`, `capture.py`, `README.md` | — | not ingested: `/pulls/{n}/commits` and `/pulls` are outside Actions retention and are re-read at freeze; per-SHA check runs are not part of the design (never rendered) |
 
-`state.json` `ingested.S` records `{manifest_sha256, receipts, statuses,
-runs_listings}`.
+These scope cuts are now reversible: the snapshot is permanent in main's
+history, so a later `INGEST_VERSION` can add the dropped check runs, or the
+agent-bearing workflows outside the watched nine (lifestyle-shot,
+product-still, lifestyle-clip, which write designs' AI previews), as an
+add-only ingest of the new paths.
 
-**Idempotence.** A planned path already present with identical bytes is
-skipped; present with different bytes (a live receipt captured first) is
-counted as a `conflict` and never modified — the add-only rule wins. A second
-ingest of the same snapshot plans no file and pushes nothing.
+**Cursors.** The ingest raises every watched workflow's receipts cursor to the
+snapshot's end (the latest row `created_at`, 2026-10-13T06:13:35Z), so the
+first live pass lists from `snapshot end − receipt_lookback_hours`
+(2026-10-11T06:13:35Z) rather than from 2026-07-31.
+
+`state.json` `ingested.S` records `{manifest_sha256, commit, version,
+snapshot_end, receipts, statuses, runs_listings}`.
+
+**Idempotence** — on content. A planned path already present with identical
+decompressed bytes is skipped; present with different content (a live
+receipt captured first) is counted as a `conflict` and never modified — the
+add-only rule wins. A second ingest of the same snapshot and version plans
+no file and pushes nothing.
 
 **Consumption.** `freeze.capture_pr` unions the snapshot's ci.yml rows (same
 branch/commit filter) into a PR's `ci_runs` and `raw/snapshot/S/statuses/<sha>`
 into its `statuses`, by id, live rows winning. A PR frozen in the P2 backfill
 therefore keeps its pushed heads and per-round `reviewer-signoff` statuses
 after GitHub deleted them.
-
-**Order of operations.** P0 merges → dispatch `ingest` (≈ 0 API requests; one
-`git fetch` of the snapshot ref) → dispatch `harvest receipts_only=true
-since=2026-07-31` for runs after the snapshot window (or runs the snapshot
-lacks) → P1e merges → the owner arms (P2).
 
 ## Capture sequences
 
@@ -507,8 +631,10 @@ lacks) → P1e merges → the owner arms (P2).
     §Episodes)
 11. merged: `/deployments?sha=<merge>&environment=Production` and each
     deployment's `/statuses`
-12. `briefs` = the PR body's `refs_closes` ∪ the `claude/issue-<N>-*` head-ref
-    number
+12. `linked_issues` = the PR body's `refs_closes` ∪ the `claude/issue-<N>-*`
+    head-ref number; each is captured as a brief only if it carries or
+    carried `design-brief` (`/issues/{N}` + its timeline's `labeled`
+    events) — a backlog-burn PR's `autonomy-ok` issue stays a number
 
 Per-SHA check runs are not read (54% of the audit's full profile, never
 rendered). `registry.conf` and workflow files are read with local git.
@@ -516,10 +642,22 @@ rendered). `registry.conf` and workflow files are read with local git.
 **Brief** (`capture_brief`): `/issues/{b}`, comments, timeline, GraphQL
 `lastEditedAt`. **Release**: the `/releases` row itself.
 
+**Later revisions** (`refreeze`, or a changed terminal state) re-read
+everything live, then union the retention-bound sections — `ci_runs`,
+`statuses`, `deployments` — from the previous revision by id, live winning:
+a refreeze more than 90 days after close (when GitHub has deleted the runs
+and statuses) keeps the pushed heads, and so the rounds, the previous
+revision froze. Comments, reviews, timeline, commits and files are taken
+live (a comment deleted since stays in the earlier revision only).
+
 **Selection** (`plan_freezes`): `/pulls?state=closed&sort=updated&direction=
-desc` paged until `updated_at` < the PR cursor (minus the settle window), and
+desc` paged until `updated_at` < the PR cursor (minus the settle window; a
+fresh cursor is `backfill_since`), and
 `/issues?labels=design-brief&state=all&sort=updated&since=<cursor>`; with
-`--pr`, only those PRs.
+`--pr`, only those PRs. A listed PR that is already frozen is compared with
+its stored revision's `closed_at`/`merged_at` (a brief's `state`/`closed_at`);
+only a difference re-enters settle — comment-only activity changes
+`updated_at` and nothing else.
 
 ## Records and events
 
@@ -583,7 +721,8 @@ spelling), `fuse`, `edited`; `triage.verdict` `designs`, `act_now`, `queue`,
 `reason` (`signed-off`, `fuse-acknowledged`, `not-signed`, `stale`, `blocked`,
 `fuse-unacknowledged`, `overridden`, `other`); `job.reviewer` `conclusion`,
 `posted`, `links_tried`; `ci.gate` `conclusion`, `event`; committed rows
-`file`, `line`, `line_sha256`, `added_in_pr`, `added_in_sha`;
+`file`, `line` (the line's number in `added_in_sha`, from `blame
+--porcelain`), `line_sha256`, `added_in_pr`, `added_in_sha` (required);
 `deploy.production` `state`, `deployment_id`; `release` `tag`, `prerelease`,
 `assets`.
 
@@ -609,14 +748,31 @@ whether an owner-login event was a human click or an owner-token session
 
 | Kind | Key | Extra fields |
 |---|---|---|
-| `pr` | PR number | `state`, `created_at`, `closed_at`, `merged_at`, `merge_commit_sha`, `merge_method`, `head_ref`, `base_ref`, `briefs`, `designs` (`{design: {membership, kinds}}`), `rounds`, `threads` (`{total, resolved}`), `noise_counts`, `unknown`, `evidence` |
+| `pr` | PR number | `state`, `created_at`, `closed_at`, `merged_at`, `merge_commit_sha`, `merge_method`, `head_ref`, `base_ref`, `linked_issues` (every linked issue), `briefs` (those with a `raw/brief/` document — design briefs only), `designs` (`{design: {membership, kinds}}`), `rounds`, `threads` (`{total, resolved}`), `noise_counts`, `unknown`, `evidence` |
 | `brief` | issue number | `issue`, `state`, `state_reason`, `created_at`, `closed_at`, `labels`, `design_name`, `prs`, `evidence` |
 | `commit` | sha40 | `sha`, `committed_at`, `designs`, `evidence` (`source: git`) |
 | `release` | tag | `tag`, `published_at`, `designs`, `evidence` |
 
 Every record carries `format`, `kind`, `key`, `extractor`
 (`provenance-extract 1`), `incomplete` and `events` (sorted by the event sort
-key). `evidence` = `{raw, raw_sha256, revision, receipts, source}`.
+key). `evidence` = `{raw, raw_sha256, revision, receipts, source}`
+(`raw_sha256` over the decompressed document). No record or view carries
+main's sha: a main push that touches no `designs/` file must leave every
+record and view byte-identical (the derived ref would otherwise churn on
+every push to main).
+
+**Direct-to-main commits** (`commit` records). A first-parent main commit
+touching `designs/` is direct only when its subject carries no PR reference
+(no squash `(#N)`, no `Merge pull request #N`), its committer is not GitHub
+(`noreply@github.com` — GitHub commits squash, merge and rebase merges and web
+edits), and it is in no frozen PR's commit list. A `(#N)` commit whose PR is
+not yet frozen — inside its settle window, or before the P2 backfill reaches
+it — yields no record (the site's "settling" state covers it), rather than a
+`C:` record that would vanish when the PR freezes. Measured on main since
+2026-07-31: 366 of 372 first-parent commits carry `(#N)`; the other six are
+five owner-committed bootstrap commits (real direct commits) and `43030db9`
+"Merge PR #196: …", which GitHub committed under a subject neither pattern
+matches — the committer rule keeps it from becoming a false direct record.
 
 The event-source table (which raw field yields which kind, id, ts, sha and
 url), the commit-kind rules and the platform rules are in the docstring of
@@ -694,19 +850,39 @@ sha is not one of its round's `heads`; `after_merge` = `ts > merged_at`
 `commit.design|fix|human` shas at or before its marker sha in commit order and
 after the same family's previous sign-off sha.
 
+**Placement after the join.** The derive order is fixed: extract (events
+placed from the raw document) → `serving.annotate_record` →
+`serving.receipt_events` (the `job.reviewer` events, returned unplaced) →
+`episodes.place` (assigns every unplaced event over
+`episodes.rounds_from_record`) → views. Records are stored only after
+placement, so every stored event has an episode. `protocols.Round` is the one
+in-memory round type extract, serving and views share.
+
 **Committed rows** (`episodes.decision_rows`), parsed from main at the
 harvest's main sha with line-for-line ports of `site/lib/timeline.mjs`:
 `PM.md ## Decision log` table rows → `decision.pm_log`; `NOTES.md ## Field
 test log` `### YYYY-MM-DD — …` → `field_test`; `NOTES.md ## Changelog` `###
 <v> — YYYY-MM-DD — <t>` → `changelog`; and, new, `NOTES.md ## Decisions log`
 / `## Decision log` dated top-level bullets → `decision.notes_log`. Each row's
-`added_in_sha` comes from `git blame`; `added_in_pr` from the first-parent
+`added_in_sha` and `line` come from `git blame --porcelain` (the commit that
+added the line and its number there), and its URL is
+`blob/<added_in_sha>/designs/<d>/<file>#L<line>` — none of which moves when
+main moves; `added_in_pr` from the first-parent
 main commit containing it (`(#N)` squash or `Merge pull request #N`), or, for
 a rebase-merged sha, from the PR record whose commits hold it. Row ids hash
 the line's text, so a row keeps its id when lines above it move; the site
 matches rows by `line_sha256` and renders the committed text from its own
 checkout. Rows read "charter decision (PM.md) · added in PR #N" — "added in",
 never "by" (#496).
+
+**Parity with `site/lib/timeline.mjs`.** `site/test/provenance-rows.test.mjs`
+runs timeline.mjs and the Python ports (`python3`, `PYTHONPATH=
+tools/provenance/src`) over every `designs/*/PM.md` and `NOTES.md` and asserts
+the same line selection. It lives in the site's suite because timeline.mjs
+imports `marked` (through `markdown.mjs`) and so needs `site/node_modules`;
+the `site-build` job runs `npm --prefix site test` on every PR, so either
+side drifting fails a required check (the `site/lib/lineage.mjs` ↔
+`tools/lineage` precedent).
 
 ## Serving-model join
 
@@ -726,6 +902,18 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    bot). One window → attributed; none → `none`; windows of two or more runs →
    `ambiguous`. An owner-token sign-off inside a reviewer window is never
    attributed to it.
+   **The owner's token needs a key.** An OWNER-authored artifact inside a
+   design-run or backlog-burn window may be the owner's own attended work, so
+   it is attributed only through the issue that run claimed: `run_claims`
+   maps a run to the one issue whose OWNER SHIP-LOCK (`brief.claimed`) lies in
+   its windows (the selector claims one issue per run; a run with two such
+   SHIP-LOCKs claims nothing). The SHIP-LOCK itself, OWNER `brief.*` events on
+   that issue, and OWNER `pr.opened` / `commit.*` on a `claude/issue-<N>-…`
+   branch whose N is the claimed issue get `window`; anything else stays
+   `login` (an owner PR on another branch inside a routine window, a run that
+   declined without claiming). Bot-authored artifacts keep the plain rule.
+   Run 34661448637 claimed #592 and #636's head is
+   `claude/issue-592-nuggs-vent-cap`, so NVC-3 and NVC-4 hold.
 3. **Code basis** — what each run checked out:
    - `schedule` / `workflow_dispatch` (design-run, backlog-burn and the other
      routines): `run.head_sha`, exact;
@@ -733,11 +921,19 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
      the merge ref and resolved the chain there, so `git merge-tree
      --write-tree <main@created_at> <run.head_sha>`, reading
      `.github/models/registry.conf` and the workflow from that tree;
-   - `pull_request` in `oracle.yml`: base main, so `main@created_at`;
+   - `pull_request` in `oracle.yml`: the job checks out
+     `pull_request.base.ref` **by name when its checkout step runs**, which can
+     be long after `created_at` on a busy queue, so main at that step's
+     `started_at` (from the same receipt job);
    - `main@T` = the last first-parent main commit with committer date ≤ T;
    - `ambiguous` when merge-tree conflicts on either file, or a main commit
      touching either landed within `ambiguity_window_minutes` (15) before
-     `created_at` (the merge ref GitHub built may predate it).
+     `created_at` (merge: the merge ref GitHub built may predate it) or within
+     15 minutes either side of the checkout step (main);
+   - a commit the basis needs that is not local after the job-start fetch (a
+     force-pushed-away head) → basis `none`, `incomplete:
+     codebasis-unavailable:<sha8>` — never a fetch. Bases are memoized per
+     `(workflow, kind, main8, head8)`.
 4. **Chain and model.** E3: the chain is the workflow's `model_registry
    resolve <chain>` literal at the basis (`oracle.yml` and `wright.yml` carry
    two; `CHAIN_DISCRIMINATORS` picks by lead and provider and the pick must be
@@ -802,20 +998,28 @@ record where the design is a `member`, every event of each brief linked to it
 slug go to `aliases`), its direct-to-main commit records, its committed rows
 and its releases; `regen-only` and `sweep` PRs become `maintenance` rows.
 Events are de-duplicated by id and sorted by the sort key; `episodes` and
-`counts` are derived.
+`counts` are derived. A view carries no `main_sha` (the bundle's meta does).
 
 **Bundle** (`bundle.py`, `bundle@1`): all views, `main_sha`, `evidence_sha`,
 `producer_run`, `views_sha256` and `content_sha256` — a digest of the records'
 digests, the views' digests and the extractor version, i.e. of everything
-except the three meta fields. A run whose `content_sha256` equals the current
-derived tip's pushes nothing, so `main_sha` reads "the main commit these views
-were last recomputed against". No cursors, no pending list, no wall clock.
+except the three meta fields — for the site's own integrity check. The push
+decision never trusts that field: `bundle.same_content` reads the current
+derived tip's actual blobs and requires the same paths, every path but
+`site/bundle.json` byte-identical, and the bundle equal once its three meta
+fields are removed; the tree is pushed when the tip is not an accepted
+checkpoint or that comparison fails. A forged tip that copies the real
+`content_sha256` but alters a view is therefore replaced. Because nothing but
+the bundle's meta depends on main's sha, `main_sha` reads "the main commit
+these views were last recomputed against". No cursors, no pending list, no
+wall clock.
 
-**Python↔Node parity.** `tests/test_bundle.py` regenerates
-`site/test/fixtures/provenance-bundle.json` from committed synthetic records
-(`tools/provenance/tests/fixtures/records/`: hand-authored, contract-valid,
-every record kind and event field set) with fixed meta (main `521d0928…`, evidence `"0"×40`, run 1) and asserts byte
-equality with the committed file; `site/lib/provenance-contract.mjs` and
+**Python↔Node parity.** `tests/test_bundle.py` rebuilds
+`site/test/fixtures/provenance-bundle.json` in memory from committed synthetic
+records (`tools/provenance/tests/fixtures/records/`: hand-authored,
+contract-valid, every record kind and event field set) with fixed meta (main
+`521d0928…`, evidence `"0"×40`, run 1) and asserts byte equality with the
+committed file (it writes the file only under `PROVENANCE_UPDATE_FIXTURES=1`); `site/lib/provenance-contract.mjs` and
 `contract.py` must both accept it and both reject a copy with one extra
 field. The site ignores unknown kinds and fields (forward compatibility); the
 validators do not.
@@ -842,18 +1046,20 @@ sibling workflow.
 |---|---|
 | scheduled cap | `scheduled_max_requests` (400) non-304 responses; the request that would exceed it is not sent |
 | floor | when `X-RateLimit-Remaining` < `rate_floor` (500): a scheduled run stops cleanly; a dispatch sleeps until `X-RateLimit-Reset` + 5 s |
-| dispatch deadline | `dispatch_max_minutes` (330 = 5.5 h); cursors resume on the next dispatch |
+| capture deadline | a dispatch stops capturing at job start + `dispatch_max_minutes` (330) − `derive_reserve_minutes` (30, to be replaced by twice the derive time measured in the integration dry run); derive and publish run after it, inside `timeout-minutes: 350`; cursors resume on the next dispatch |
 | ETag | `If-None-Match` on every GET from `<out-dir>/etag-cache/`; a 304 is free and not counted |
 | retries | 5xx, 403/429 with `Retry-After` or a secondary-limit message, socket timeouts: 3 retries (2/4/8 s); 401/404/410/422 not retried |
 | pagination | `per_page=100`; `rel="next"` followed only on `api.github.com`; more than `max_pages` raises rather than truncating |
+| filtered-list cap | a runs list filtered by `created`/`branch`/`event`/`status` returns at most 1,000 results: receipts window by UTC day, assert `total_count`, halve at ≥ 1,000 (§Receipts); the gate's runs list is unfiltered; the continuity scan reads the repo-wide artifact list |
+| continuity scan | about one artifact page per 1.4 days since the newest checkpoint (one page in steady state) + one run GET per candidate run |
 | nothing new | a run with nothing new writes nothing (tested) |
 
 Measured costs: 4,089 runs of the nine watched workflows since 2026-07-31
 (351 skipped) → about 3,740 jobs GETs + 45 list pages for receipts, of which
-the #843 ingest covers everything through 2026-10-13 at ≈ 0 requests; about
-3,700 GETs for the 202 design-touching PRs and 52 briefs; a full backfill is
-about 7,500 requests ≈ 15 h self-paced, or about two dispatches after the
-ingest; incremental per merge 17–25.
+the #843 ingest covers everything through 2026-10-13T06:13Z at ≈ 0 requests;
+about 3,700 GETs for the 202 design-touching PRs and 52 briefs; a full
+backfill is about 3,800 requests after the ingest ≈ 8 h self-paced (two
+dispatches); incremental per merge 17–25.
 
 ## Conf keys
 
@@ -863,77 +1069,113 @@ duplicate / colonless / malformed lines fail with `path:lineno`; integers only).
 
 | Key | Value | Meaning |
 |---|---|---|
-| `enabled` | `true` | the in-git half of the schedule's two-key arming; dispatch needs only this |
-| `cadence` | `29 * * * *` | raw cron, identical to provenance.yml's `- cron:` |
+| `enabled` | `true` | the in-git half of the schedule's two-key arming; a dispatch needs only this |
+| `cadence` | `29 * * * *` | raw cron, identical to provenance.yml's `- cron: '29 * * * *'` |
 | `settle_hours` | 6 | closed → due (≈ 4× the measured 1.42 h settle) |
 | `max_defer_hours` | 24 | deferred → frozen with `incomplete` |
 | `deploy_wait_hours` | 2 | wait for a terminal Production deployment |
 | `scheduled_max_requests` | 400 | scheduled request cap |
 | `rate_floor` | 500 | rate-limit floor |
-| `dispatch_max_minutes` | 330 | self-paced dispatch stop |
-| `backfill_since` | 2026-07-31 | earliest `since` |
+| `dispatch_max_minutes` | 330 | a dispatch's capture budget from job start (with the reserve below) |
+| `derive_reserve_minutes` | 30 | kept after capture for derive + publish; set from the measured dry run |
+| `backfill_since` | 2026-07-31 | earliest `since`; floor of a fresh PR/brief cursor |
 | `ambiguity_window_minutes` | 15 | code-basis ambiguity window |
 | `edit_grace_seconds` | 60 | an edit at least this long after creation → `claimed` |
 | `receipt_lookback_hours` | 48 | receipts re-list window (re-run attempts) |
-| `intent_window_runs` | 20 | tip-continuity search depth |
+| `continuity_horizon_days` | 90 | how far back the checkpoint scan reads (= artifact retention) |
 | `watched_workflows` | the nine | runs that get receipts |
 | `snapshot_id` | `pr843` | ingest subtree / receipt source |
-| `snapshot_ref` | `ccr-d0be94c3-o4sati-rescue` | the ingest's default ref |
-| `snapshot_path` | `audits/provenance-2026-10/rescue` | the ingest's default path |
+| `snapshot_dir` | `audits/provenance-2026-10/rescue` | the snapshot's directory in the main checkout |
+| `snapshot_commit` | `411a7565e1c6c8f2b96edf631286ceac798d7887` | the merge that brought it to main (recorded) |
+| `snapshot_manifest_sha256` | `c713379b96e22480ebf40d5046adcee63802de5f47b82e1b3fea5eb63f1151c7` | the authenticity pin: sha256 of its `MANIFEST.sha256` |
 
-The live arming key is the `PROVENANCE_ENABLED` repository variable (unset =
-disarmed — the house two-key convention of `.github/reeve.conf` and
-`.github/backlog-groomer.conf`). Reeve's `provenance-lag` threshold is Reeve's
-own `provenance_lag_hours` in `.github/reeve.conf` (default 3).
+There is no ref or path key for the snapshot and no `config --get`
+subcommand. The live arming key is the `PROVENANCE_ENABLED` repository
+variable (unset = disarmed — the house two-key convention of
+`.github/reeve.conf` and `.github/backlog-groomer.conf`; compared
+case-insensitively in both the YAML and `conf.armed`). Reeve's
+`provenance-lag` threshold is Reeve's own `provenance_lag_hours` in
+`.github/reeve.conf` (default 3).
 
 ## Workflow
 
 `.github/workflows/provenance.yml`, "Provenance harvest (keyless)".
 
-**Triggers.** `schedule: '29 * * * *'` (two-key armed) and `workflow_dispatch`
-with inputs `mode` (choice: `harvest` | `ingest` | `refreeze` | `recover`),
-`since`, `until`, `pr`, `receipts_only` (boolean), `max_requests`, `dry_run`
-(boolean), `confirm_sha`, `snapshot_ref`, `snapshot_path`. Rescue and backfill
-are both `harvest` with `since`. Re-extraction needs no mode: the derived ref
-is recomputed whenever the extractor version changes.
+**Triggers.** `schedule: - cron: '29 * * * *'` (single-quoted — the form
+`cadence-sync-check.sh` reads; two-key armed) and `workflow_dispatch` with
+inputs `mode` (choice: `harvest` | `refreeze` | `recover` — owner decision 12;
+the ingest is part of `harvest`), `since`, `until`, `pr`, `receipts_only`
+(boolean), `max_requests`, `dry_run` (boolean), `bootstrap` (boolean),
+`confirm_sha`. Rescue and backfill are both `harvest` with `since`.
+Re-extraction needs no mode: the derived ref is recomputed whenever the
+extractor version changes.
 
 **Inputs** reach the code only through `env:` and are passed as CLI
-arguments, where `cli.validate_inputs` full-matches each: dates
-`[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)?`, pr
-`[0-9]{1,7}(,[0-9]{1,7}){0,49}`, sha `[0-9a-f]{40}`, cap `[0-9]{1,5}`, ref and
-path `[A-Za-z0-9][A-Za-z0-9._/-]{0,199}` without `..`, snapshot id
-`pr[0-9]{1,7}`. No `${{ inputs.… }}` appears inside a `run:` block.
+arguments, where `cli.validate_inputs` full-matches each free-text one:
+dates `[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)?`, pr
+`[0-9]{1,7}(,[0-9]{1,7}){0,49}`, sha `[0-9a-f]{40}`, cap `[0-9]{1,5}`; the
+booleans become flags. No `${{ inputs.… }}` or `${{ steps.… }}` appears
+inside a `run:` block.
 
 **Permissions.** Workflow default `contents: read`. The `gate` job: `contents:
 read`, `actions: read`. The `harvest` job adds `contents: write` (data-ref
 pushes only) plus read on `actions`, `pull-requests`, `issues`, `statuses`,
-`checks`, `deployments`.
+`deployments` (no `checks`: nothing reads check runs).
 
 **Jobs.**
 
-- `gate` — no concurrency group. Checks out the default branch, runs
-  `provenance gate`: on a schedule, `go=true` only when the conf's `enabled`
-  and `vars.PROVENANCE_ENABLED == 'true'` agree **and** one runs-list GET finds
-  no queued or in-progress `workflow_dispatch` run of provenance.yml
-  (GitHub keeps one pending run per concurrency group and a newly queued run
-  replaces it — without this job the :29 schedule would silently cancel an
-  operator's pending ingest, backfill or refreeze); on a dispatch, `go` =
-  the conf's `enabled`.
+- `gate` — no concurrency group; job-level `if: github.event_name ==
+  'workflow_dispatch' || vars.PROVENANCE_ENABLED == 'true'`, so a disarmed
+  schedule's run is skipped outright (every job skipped: it costs nothing and
+  uploads nothing). Checks out the default branch, runs `provenance gate`:
+  `go` = the conf's `enabled`, and on a schedule also `conf.armed` and no
+  OTHER provenance.yml run whose status is `queued`, `in_progress`, `pending`,
+  `waiting` or `requested` in one unfiltered runs-list GET (a run blocked on
+  the concurrency group reports `pending`/`waiting`; GitHub keeps one pending
+  run per group and a newly queued run replaces it — without this check the
+  :29 schedule would silently cancel an operator's pending backfill or
+  refreeze).
 - `harvest` — `needs: gate`, `if: needs.gate.outputs.go == 'true' &&
   github.ref_name == github.event.repository.default_branch`, job-level
   `concurrency: {group: provenance-writer, cancel-in-progress: false}`,
-  `timeout-minutes: 350`. Steps: checkout (`ref` = default branch,
-  `fetch-depth: 0`, `persist-credentials: false`); **plan** (`python3 -m
-  provenance <mode> … --out-dir .provenance`, env `GH_TOKEN`, `PYTHONPATH=
-  tools/provenance/src:tools/model-registry/src`); **declare** (two
-  `actions/upload-artifact` steps, `name: intent-<ref>-<sha>`, `retention-
-  days: 90`, each `if:` its ref changed); **publish** (`python3 -m provenance
-  publish`); **recover** (mode `recover` only, instead of plan/declare/
-  publish); **summary** (`.provenance/summary.md` → `$GITHUB_STEP_SUMMARY`:
-  mode, requests used / 304s, receipts full/stub, units frozen / pending /
-  deferred, `unknown.step` and `unknown.marker` counts, ingest counts, any
-  skip reason, the evidence and derived shas, and the packed sizes of both
-  refs).
+  `timeout-minutes: 350`. Steps:
+  1. checkout (`ref` = default branch, `fetch-depth: 0`,
+     `persist-credentials: false`);
+  2. **plan** — `python3 -m provenance <harvest|refreeze|recover> … --out-dir
+     .provenance`, env `GH_TOKEN` (read use only), `PYTHONPATH=
+     tools/provenance/src:tools/model-registry/src`; it performs the
+     token-less bulk fetch itself;
+  3. **declare** — two `actions/upload-artifact` steps, `name:
+     intent-<ref>-<sha>`, `retention-days: 90`, each `if:` its ref changed;
+  4. **publish** — `python3 -m provenance publish`, env `GH_TOKEN` (the only
+     step that pushes);
+  5. **checkpoint** — two `actions/upload-artifact` steps, `name:
+     tip-<ref>-<sha>`, `retention-days: 90`, each `if:` publish named a
+     verified tip for that ref (a no-op run checkpoints too);
+  6. **verdict** — fails the job (exit 3, `::error::`) when the plan found a
+     foreign evidence tip — after the derived overwrite and the checkpoints;
+  7. **summary** (`if: always()`) — `.provenance/summary.md` →
+     `$GITHUB_STEP_SUMMARY`: mode, requests used / 304s, receipts full/stub,
+     units frozen / pending / deferred / re-captured, `unknown.step` and
+     `unknown.marker` counts, ingest counts, continuity verdicts and the
+     checkpoint shas, guard drift, any skip reason, the evidence and derived
+     shas, and the packed sizes of both refs.
+
+**One job, not two.** Splitting into a read-only `plan` job and a
+`contents: write` `publish` job would keep the write token away from the
+process that parses untrusted payloads, but Actions concurrency cannot hold a
+lock across two jobs: with both jobs in `provenance-writer`, a later run's
+`plan` can start between this run's `plan` and `publish` (planning against a
+tip that is about to move), and a newly queued job replaces the group's one
+pending job — a later `plan` would cancel this run's pending `publish`. So
+the harvest stays one job, and the residual is recorded in
+`docs/actions-security.md`: the process that parses API payloads and runs
+`git merge-tree` on fetched PR objects holds `contents: write` for this
+repository's unprotected branches. Mitigations: the token reaches only the
+plan and publish steps' environment, pushes go through `gitstore` alone with
+an env-only credential, git runs with hooks, fsmonitor and non-https
+transports disabled, no PR content is checked out, and the payload parsing is
+stdlib JSON.
 
 **Keyless.** No `secrets.` reference, no claude-code-action, no
 `AI_ANDON_CORD` gate leg (`tools/provenance/tests/test_workflow.py` pins all
@@ -943,15 +1185,15 @@ three). Runtime: the runner's system Python, stdlib only, no pip.
 
 | Where | What | Builder |
 |---|---|---|
-| `tools/reeve` | `ROUTINE_WORKFLOWS += provenance.yml` (routine-dead); detector `provenance-lag` (the oldest pending unit past `due_at + provenance_lag_hours`, from one `GET contents/state.json?ref=provenance`); detector `provenance-foreign-tip` (either ref's tip not among the declared intents — `git/ref/heads/<ref>` + the provenance.yml runs' artifacts); both "not evaluated" offline or before the ref exists; golden report pairs updated, each detector with a positive and a negative control; `provenance_lag_hours` key in its conf parser | H6 |
-| `scripts/cadence-sync-check.sh` | `ROUTINES += provenance` (conf raw cron `29 * * * *` ↔ the workflow literal) | H6 |
-| `scripts/ci-classify.sh` | new output `provenance_tests` (true for `tools/provenance/*`, `.github/provenance.conf`, `.github/workflows/provenance.yml`, `.github/data-branch-guard/*`, `site/lib/provenance-contract*`, `site/test/fixtures/provenance-bundle.json`, `scripts/provenance.sh`, the drift-pinned `scripts/reviewer-posted.sh` / `coach-lock-check.sh` / `reviewer-signoff.sh` / `.claude/reviewer-post/reviewer_mcp.py`, `tools/model-registry/*`, `audits/provenance-2026-10/fixtures/*`, `ci.yml`); `tools/provenance/*` and `.github/provenance.conf` join the soft-infra and required-context lists; the header's output count and the `--selftest` rows | H6 |
+| `tools/reeve` | `ROUTINE_WORKFLOWS += provenance.yml` (routine-dead). Detector `provenance-foreign-tip`: either ref's verdict under the continuity rule — a port of `gitstore.continuity_verdict` over the same artifact scan (`GET /actions/artifacts`, run verification, `git/ref/heads/<ref>`, `GET /git/commits/<sha>` for first parents), passing every row of the shared `tools/provenance/tests/fixtures/continuity_cases.json` so the two implementations cannot drift; `foreign`, `deleted` and `unanchored` are findings. Detector `provenance-lag`: (a) the oldest pending unit past `due_at + provenance_lag_hours` (`GET contents/state.json?ref=provenance`), and (b) the **stall check** — one page of `/pulls?state=closed&sort=updated&direction=desc`: any PR closed more than `settle_hours + max_defer_hours + provenance_lag_hours` ago that is in none of frozen (the `raw/pr` tree listing), `pending` or `skipped` means the harvester has stopped seeing PRs (dropped schedule slots, a failing gate, a dead job) even though nothing is pending. Both report "not evaluated" only while `PROVENANCE_ENABLED` is unset (reeve.yml passes the variable's raw value, the andon pattern) or offline; once armed, an absent ref is a finding. Every read lives in ONE module, `tools/reeve/src/reeve/provenance.py` (the read lens allow-lists it). Golden report pairs updated, each detector with a positive and a negative control; `provenance_lag_hours` key in its conf parser | H6 |
+| `scripts/cadence-sync-check.sh` | `ROUTINES += provenance` (conf raw cron `29 * * * *` ↔ the workflow's single-quoted literal) | H6 |
+| `scripts/ci-classify.sh` | new output `provenance_tests` (true for `tools/provenance/*`, `.github/provenance.conf`, `.github/workflows/provenance.yml`, `.github/data-branch-guard/*`, `site/lib/provenance-contract*`, `site/test/fixtures/provenance-bundle.json`, `scripts/provenance.sh`, the drift-pinned `scripts/reviewer-posted.sh` / `coach-lock-check.sh` / `reviewer-signoff.sh` / `.claude/reviewer-post/reviewer_mcp.py`, `tools/model-registry/*`, `audits/provenance-2026-10/fixtures/*`, `audits/provenance-2026-10/rescue/*` (the pinned snapshot), `site/lib/timeline.mjs`, `ci.yml`); `tools/provenance/*` and `.github/provenance.conf` join the soft-infra and required-context lists; the reeve-tests trigger also fires on `tools/provenance/tests/fixtures/continuity_cases.json`; the header's output count and the `--selftest` rows. (The timeline.mjs ↔ Python row parity itself runs in `site-build`, on every PR — §Episodes.) | H6 |
 | `.github/workflows/ci.yml` | a `provenance-tests` job (`python3 -m pytest tools/provenance -q`) gated on that output and listed in `ci-ok`'s `needs` (`scripts/ci-ok-guard.sh`) | H6 |
 | `scripts/check.sh` | `scripts/provenance.sh --selftest` | H6 |
 | `CLAUDE.md`, `README.md` | the `tools/provenance/` bullets, `provenance.sh` in the scripts bullet, this document in the docs bullet (landed with the scaffold; `scripts/docs-check.sh`) | scaffold |
-| `docs/actions-security.md` | a row: provenance.yml holds `contents: write` via `GITHUB_TOKEN`, is keyless and dispatchable; the default-branch `if:` is defense in depth; tip continuity is the control; the forged-derived-tip residual | H6 |
+| `docs/actions-security.md` | a row: provenance.yml holds `contents: write` via `GITHUB_TOKEN`, is keyless and dispatchable; the default-branch `if:` is defense in depth; tip continuity (checkpoints, monotonic) is the control; the residuals of §Tip continuity — a forged derived tip lives until the next run (until the next dispatch while disarmed), a rollback to the newest checkpoint is accepted, the single job parses untrusted payloads while holding `contents: write` (§Workflow), and the optional Environment lever for `recover` | H6 |
 | `docs/andon-cord.md` | a coverage row: provenance.yml is keyless and keeps running while the cord is pulled | H6 |
-| `tools/provenance/tests/test_read_lens.py` | fails if anything outside `site/`, `tools/provenance/`, Reeve's two detectors and the workflow reads either ref (#646) | H6 |
+| `tools/provenance/tests/test_read_lens.py` | live with the scaffold (architect-owned): the two pinned patterns, one negative control per form, and the allow-list (`tools/provenance/`, the workflow, `tools/reeve/src/reeve/provenance.py`, `tools/reeve/tests/`, `site/lib/provenance-*`, `site/test/`) — #646 | arch |
 
 ## Sizes
 
@@ -959,38 +1201,54 @@ Measured from the #843 snapshot with the real receipt writer (67 days,
 2026-08-01 → 10-13): 3,738 receipts = 3.9 MB gz (full 2.6 MB, stubs
 1.3 MB), the ci.yml listing 146 KB, 1,689 status files 758 KB — about 4.8 MB
 for the ingest. Annualised, receipts grow about 21 MB/year and raw PR/brief
-digests about 3 MB/year, under the 30 MB/year line at which the owner is to
-be asked about partitioning (the plan's P1e rule). Fourteen workflows check
-out with `fetch-depth: 0` and so fetch both refs; the derived ref is one
-squashed commit and adds only its current tree. P1e records the measured
-packed size of both refs (`git count-objects -vH` after a fresh `git fetch
-origin provenance provenance-site`) and the added fetch time of a full-depth
-checkout here once the refs exist.
+digests about 3 MB/year. `state.json` is rewritten by every evidence commit
+(about one an hour once armed, since some watched routine runs most hours):
+it holds about 1 KB of cursors, a handful of pending units and the skipped
+PRs (about 35 B each, ≈ 40 KB/year at the measured rate — frozen units are no
+longer listed in it), and git stores successive versions as deltas of a few
+hundred bytes, so its history adds well under 5 MB/year — under the 30
+MB/year line at which the owner is to be asked about partitioning (the plan's
+P1e rule) in total. Fourteen workflows check out with `fetch-depth: 0` and so
+fetch both refs; the derived ref is one squashed commit and adds only its
+current tree. The harvest job alone also fetches every PR head (bounded by the
+repository's total object size, 268 MB on 2026-10-14, most of which the
+checkout already holds). The measured packed size of both refs (`git
+count-objects -vH` after a fresh `git fetch origin provenance
+provenance-site`), the added fetch time of a full-depth checkout and the
+PR-head fetch time are recorded on the P2 checklist (§Acceptance map) once
+the refs exist — this build pushes nothing.
 
 ## Failure modes
 
 | Failure | Detection | Effect | Recovery |
 |---|---|---|---|
-| A routine with the owner PAT pushes to `provenance` | tip continuity at the next run; Reeve `provenance-foreign-tip` | run red (exit 3), nothing written | inspect; `recover confirm_sha=<last declared>` |
-| A forged `provenance-site` tip | tip continuity; Reeve | the next harvest overwrites it with `::error::`; one deploy may show false attribution (escaped fields only) | automatic on the next run |
-| The `provenance` ref is deleted | tip continuity (intents exist, ref absent) | run red | `recover` to a declared sha (if still fetchable) or re-bootstrap + re-ingest |
-| Harvester stalled > 90 days (intents expired) | Reeve `provenance-lag` long before | next run refuses | manual re-bootstrap (rename the ref, bootstrap, re-ingest) |
+| A routine with the owner PAT pushes to `provenance` (forged commit or rollback) | tip continuity at the next run; Reeve `provenance-foreign-tip` | no evidence written; the derived ref is recomputed from the newest checkpoint and overwritten; the run goes red (exit 3) | inspect; `recover confirm_sha=<newest checkpoint>` |
+| A forged `provenance-site` tip | tip continuity / `same_content`; Reeve | overwritten at the next run with `::error::`, whatever the evidence ref's state; until then (and until the next dispatch while disarmed) it can show false attribution (escaped fields only; nothing reads it before P3) | automatic |
+| The `provenance` ref is deleted | continuity verdict `deleted` | run red; never re-bootstrapped | `recover` to the newest checkpoint, or push exactly that sha from any clone |
+| Harvester published nothing for 90 days (checkpoints expired) | Reeve `provenance-lag` stall check and `routine-dead` long before | verdict `unanchored`: refused (no run may re-anchor a tip nobody verified) | rename the old ref (it keeps its history), then dispatch `harvest bootstrap=true`: a new root, the ingest re-runs from main, and PRs re-freeze from GitHub plus what the snapshot holds |
 | A guard rule would break | `guard_diff` | exit 4, nothing pushed | a bug: fix the writer, never the guard |
-| Non-fast-forward push from a racing harvester | push rejection + continuity | `::warning::`, exit 5 | cursors redo it next run |
-| Rate-limit floor / request cap | `BudgetExhausted` | clean stop, cursors saved, exit 0 | next run / next dispatch |
+| `.github/data-branch-guard/*` changes on main | guard drift check | `::warning::`; the evidence ref keeps its bootstrap bytes, the derived ref takes the new ones | none needed; a re-root only if the evidence ref must carry the new guard |
+| A push is rejected or the remote tip moved since the plan | `publish` | `::error::`, exit 3; nothing further pushed | inspect: inside the concurrency group only a foreign writer can move a tip |
+| Push transport failure after 3 retries | `publish` | exit 1; the declared intent is harmless | next run |
+| The bulk PR-head fetch fails | `fetch_all` | evidence still published, no derived push that run (`derive_skipped`) | next run |
+| Rate-limit floor / request cap / capture deadline | `BudgetExhausted` | clean stop, cursors saved, exit 0 | next run / next dispatch |
+| A filtered runs list would hit GitHub's 1,000-result cap | `total_count` check | the window is halved; a one-minute window still capped fails the pass loudly | none expected (a minute holds far fewer than 1,000 runs) |
 | A scheduled run would evict a pending dispatch | the `gate` job | the schedule skips that hour | none needed |
 | GraphQL unavailable | `GraphQLUnavailable` | `incomplete: graphql-unavailable`, thread counts absent | `refreeze` later |
 | A watched run still in flight at 24 h | settle | frozen with `incomplete: settle-deferred` | `refreeze` |
+| A PR reopened after it was frozen, or a brief reopened | the closed listing vs the stored revision | next revision once it closes again and settles | none needed |
+| Refreeze after GitHub deleted the runs and statuses | — | the retention-bound sections are carried from the previous revision | none needed |
 | A fifth step-naming era | `unknown.step` in the summary; receipts kept full | serving gives `none` for it | add the era to `steps.py` (version bump) |
 | A new marker family / lead line | `unknown.marker` counts | not rendered | extend markers/digest (version bump) + `refreeze` |
 | A historical `registry.conf` the strict parser refuses | basis `none`, `codebasis-unavailable` | model not shown | none — never guessed |
-| Overlapping routine windows | containment finds ≥ 2 runs | model null, `ambiguous`, dotted/unattributed | v2 receipt status |
-| A registry/workflow change on main within 15 min of a PR run | ambiguity window | `ambiguous` | none — never guessed |
+| A run head that was force-pushed away | not local after the fetch | basis `none`, `codebasis-unavailable:<sha8>` (5% of auto-review heads in the snapshot) | none — never guessed |
+| Overlapping routine windows, or an owner artifact without the claimed-issue key | containment / `run_claims` | model null or trust `login` | v2 receipt status |
+| A registry/workflow change on main within 15 min of a PR run (or of the Oracle's checkout) | ambiguity window | `ambiguous` | none — never guessed |
 | Force-pushed PR branch | heads missing from `/commits` | `incomplete: force-pushed-heads`; rounds by `pushed_at` | none |
 | Vercel builds a data-ref push | Vercel's own deployment state for the pushed sha | a preview deploy | the console's Ignored Build Step / git settings (owner) |
-| The snapshot does not match its manifest | `verify_manifest` | ingest refused | re-fetch the snapshot ref |
+| The snapshot does not match its pin or manifest | `verify_manifest` | ingest refused, nothing planned | inspect main's `audits/provenance-2026-10/rescue/` |
 | A re-run attempt older than 48 h | — | not re-captured | `harvest since=` |
-| GitHub's scheduled delivery drops slots | Reeve `routine-dead` / `provenance-lag` | catch-up at the next delivered slot (idempotent) | none |
+| GitHub's scheduled delivery drops slots | Reeve `routine-dead` / the `provenance-lag` stall check | catch-up at the next delivered slot (idempotent) | none |
 
 ## Out of scope (v2 and later)
 
@@ -1035,20 +1293,29 @@ Points the approved plan left open or stated differently, resolved here:
    last suffix marker is an MCP completion shape"; trust adds the author.
 7. **raw@1 payloads are closed projections**, not complete payloads, to keep
    prose and volatile fields out and make refreezes byte-stable.
-8. **Contended pushes are not rebuilt.** A rebuilt commit would carry no
-   declared intent; inside the concurrency group a moved tip can only be
-   foreign or a racing harvester, so the run warns and retries next hour.
+8. **Contended pushes are not rebuilt** and are foreign. A rebuilt commit
+   would carry no declared intent, and inside the concurrency group no other
+   default-branch harvester can move the tip, so any rejection is exit 3
+   (revised in the critique round: the earlier "declared → warning, exit 5"
+   case cannot occur).
 9. **Intents are declared between plan and publish**, as two CLI steps
-   (`harvest`/`ingest`/`refreeze` plan; `publish` pushes), with
+   (`harvest`/`refreeze`/`recover` plan; `publish` pushes), with
    `actions/upload-artifact` in between; a declared-but-unpushed sha is
-   harmless.
-10. **The bundle's no-op test ignores its meta fields** (`content_sha256`),
-    or every main push would churn the derived ref.
+   harmless. Checkpoints (`tip-<ref>-<sha>`) follow every successful publish.
+10. **The no-op test compares content, and nothing but the bundle's meta
+    depends on main.** Revised in the critique round: the view no longer
+    carries `main_sha` (it digested into `content_sha256`, so every main push
+    churned the derived ref), committed rows point at the commit that added
+    them, and `same_content` reads the tip's blobs instead of trusting its
+    `content_sha256` field.
 11. **Receipt paths carry the attempt** (`.a<attempt>`), so a re-run is a new
     add-only path rather than a modification.
 12. **Ingest scope**: watched-workflow receipts, the ci.yml listing and
     statuses only; check runs, PR commits and pulls are not ingested (re-
-    readable, or not part of the design). The snapshot stays on its branch.
+    readable, or not part of the design). Revised: the snapshot is on main
+    (merge commit `411a7565`), read only from the default-branch checkout and
+    pinned by its manifest digest; the scope is reversible by an ingest
+    version bump.
 13. **`codebasis.py` and `protocols.py` were added** to the module list:
     serving stays pure behind a `CodeBasis` protocol, and the git-backed
     implementation composes `gitstore`'s read primitives with the
@@ -1066,35 +1333,98 @@ Points the approved plan left open or stated differently, resolved here:
     constructed and GitHub has no per-deployment page; the deployment id is a
     field.
 19. **The house arming convention**: the conf ships `enabled: true` and the
-    `PROVENANCE_ENABLED` variable unset (disarmed); dispatches need only the
-    conf so the ingest can run before arming.
+    `PROVENANCE_ENABLED` variable unset (disarmed); a dispatch's `go` is the
+    conf's `enabled` alone, so the bootstrap and backfill can run before
+    arming; a disarmed schedule's run is skipped outright.
 20. **Reeve owns its lag threshold** (`provenance_lag_hours` in reeve.conf)
     rather than reading provenance.conf.
 21. **GraphQL in the sandbox** returns 403, so the fixtures carry thread
     counts from the sandbox's CCR review-thread route (`threads.source:
-    "ccr-fixture"`); production uses the one GraphQL query.
+    "ccr-fixture"`); production uses the one GraphQL query, tested on canned
+    responses.
+
+Resolved in the adversarial review of the frozen design (2026-10-14; the
+per-item dispositions, including the two rebutted fixes, are in the build's
+work plan):
+
+22. **Checkpoints, not a run window.** Tip continuity anchors on the newest
+    `tip-<ref>-<sha>` checkpoint, uploaded by every successful publish
+    including no-op ones and found by one newest-first read of the repo's
+    artifact list; the rule is monotonic, so a rollback to an older genuine
+    sha is refused, and nothing bootstraps without `bootstrap=true`.
+23. **`recover` restores only the newest checkpoint**, and only while the tip
+    fails continuity; an Environment gate on it is optional, not wired.
+24. **A foreign evidence tip no longer freezes the derived ref**: derive runs
+    from the newest checkpoint and the forged derived tip is overwritten, then
+    the run goes red.
+25. **The ingest is not a mode and reads only main**, pinned by
+    `snapshot_manifest_sha256`; tar members are regular, flat `*.json.gz`
+    files read with `extractfile`.
+26. **One bulk, token-less fetch at job start**; derive never fetches, and a
+    commit missing after it is a deterministic basis `none` — not a
+    fail-closed derive, which the 67 force-pushed-away auto-review heads in
+    the snapshot would have wedged forever.
+27. **The owner's token needs the claimed issue as a key** (§Serving-model
+    join), so an attended owner PR inside a routine window stays `login`.
+28. **Direct-to-main commits** exclude PR subjects, GitHub-committed commits
+    and frozen PRs' commits; an unfrozen PR's merge yields no record.
+29. **Frozen state lives in the tree's `raw/` paths**, not in `state.json`;
+    a changed terminal state (reopened, re-merged, re-closed) adds the next
+    revision; later revisions carry the retention-bound sections forward.
+30. **Content identity is the decompressed canonical JSON**, never gzip bytes.
+31. **Guard files are written once, at bootstrap**; drift from main is a
+    warning, never a bricked writer.
+32. **The harvest stays one job.** Actions concurrency cannot lock across a
+    plan job and a publish job (a later run's plan interleaves, and a newly
+    queued job replaces the group's one pending job); the residual is
+    recorded instead (§Workflow).
+33. **The timeline.mjs parity runs in the site's suite** (it needs
+    `marked`), which `site-build` runs on every PR; and the `ingest` and
+    `config` subcommands and `check --ref` are cut (N6).
 
 ## Acceptance map
 
 The plan's acceptance criteria and where each lives (every placeholder test's
 docstring states its criterion; skip markers are removed as builders land
-them).
+them; `tests/test_integration_complete.py` fails once integration flips its
+`INTEGRATED` flag if any stub or placeholder survives).
 
 | Phase | Criterion | Test |
 |---|---|---|
-| P0 | guard negatives: D, M under receipts/raw, raw file → 0 B | `test_gitstore.py::test_guard_refuses_*` |
-| P0 | foreign tip → `::error::`, nothing pushed, non-zero | `test_gitstore.py::test_tip_continuity_refuses_a_foreign_tip`, `test_cli.py::test_foreign_tip_exit_3` |
-| P0 | `recover` refuses an undeclared sha | `test_gitstore.py::test_recover_refuses_undeclared_sha` |
-| P0 | run 31364447108 stored complete; a disarmed run is a stub | `test_receipts.py`, `test_steps.py` |
-| P0 | workflow keyless, no inputs in `run:`, job-level permissions | `test_workflow.py` |
+| P0 | guard negatives: D, M under receipts/raw, raw file → 0 B, guard-file change | `test_gitstore.py::test_guard_refuses_*` |
+| P0 | tip continuity: the shared table (ok, quiet day, died-before-checkpoint, forged, rollback, deleted, unanchored, bootstrap, derived) | `test_gitstore.py::test_continuity_table` (live) |
+| P0 | foreign tip → `::error::`, nothing pushed to evidence, the derived ref rebuilt from the checkpoint, non-zero | `test_cli.py::test_foreign_evidence_tip_derives_from_checkpoint`, `test_forged_derived_tip_is_replaced` |
+| P0 | a quiet day keeps the tip; a deleted ref after it is refused; a rollback is refused | `test_gitstore.py::test_quiet_day_then_deleted_ref`, `test_rollback_to_an_older_declared_sha_is_refused` |
+| P0 | `recover` refuses while continuity holds, and any sha but the newest checkpoint | `test_cli.py::test_recover_*` |
+| P0 | bootstrap only with the flag; the ingest runs once, from the pinned snapshot | `test_cli.py::test_bootstrap_needs_the_flag`, `test_auto_ingest_runs_once`, `test_ingest.py` |
+| P0 | run 31364447108 stored complete; a disarmed run is a stub; windows survive the 1,000 cap | `test_receipts.py`, `test_steps.py` |
+| P0 | no token or its base64 in a failing push's error | `test_gitstore.py::test_push_error_never_carries_the_token` |
+| P0 | workflow keyless, no inputs in `run:`, job-level permissions, step order, modes | `test_workflow.py` |
 | P0 | purity: network only in github.py, git only in gitstore.py | `test_purity.py` (live) |
-| P0 | ingest: manifest, mapping, idempotence | `test_ingest.py` |
 | P1a | membership P/R on the tuned and held-out sets | `test_membership.py` |
 | P1a | CC-1, NVC-6, NVC-7, CC-6, verified = 12 | `test_acceptance.py`, `test_trust.py` |
 | P1a | every reviewer-posted.sh selftest row agrees; FOOTER drift pin | `test_trust.py`, `test_digest.py` (live) |
 | P1a | no fixture field outside the contract (no prose) | `test_contract.py`, `test_fixtures.py` (live) |
 | P1b | NVC-1, 8, 9, 11, 12b, 13, 14; SBC-1, 6, 7; CC-5, 7; NVC-12 re-baselined | `test_acceptance.py`, `test_episodes.py`, `test_extract.py` |
-| P1b | merge-method fixtures map blamed rows; extractor has no clock | `test_extract.py`, `test_purity.py` |
-| P1c | NVC-2, 3, 5; merge-tree basis; 5-minute ambiguity; oracle on main; pre-#326 pin; overlapping windows; basis always set | `test_serving.py`, `test_codebasis.py` |
-| P1d | fixture bundle byte-identical; both validators accept, both reject an extra field; one view per design; no-op rerun; foreign derived tip replaced | `test_bundle.py`, `test_views.py`, `test_gitstore.py` |
-| P1e | gate go=false with a queued dispatch; no-op pushes nothing; 2 h pending / 7 h frozen / 24 h forced; cap 5 stops and resumes; refreeze adds r2; cadence-sync; Reeve goldens; read lens | `test_workflow.py`, `test_freeze.py`, `test_github.py`, `test_receipts.py`, `test_read_lens.py`, tools/reeve tests, `cadence-sync-check.sh --selftest` |
+| P1b | merge-method fixtures map blamed rows (original line, adding commit); direct-commit rule; extractor has no clock | `test_extract.py`, `test_episodes.py`, `test_purity.py` |
+| P1b | timeline.mjs ↔ Python row parity over every design | `site/test/provenance-rows.test.mjs` (site-build, every PR) |
+| P1c | NVC-2, 3, 4, 5; merge-tree basis; 5-minute ambiguity; oracle at its checkout; pre-#326 pin; overlapping windows; owner key negatives; missing commit = none; basis always set | `test_serving.py`, `test_codebasis.py` |
+| P1d | fixture bundle byte-identical (in memory); both validators accept, both reject an extra field; one view per design; no-op rerun; a main commit outside designs/ pushes nothing; forged tip with a copied digest replaced | `test_bundle.py`, `test_views.py`, `test_cli.py` |
+| P1e | gate semantics; no-op pushes nothing; 2 h pending / 7 h frozen / 24 h forced; changed terminal state; refreeze after retention; cap 5 stops and resumes; refreeze adds r2; cadence-sync; Reeve goldens incl. the stall check and the shared continuity table; read lens | `test_cli.py`, `test_freeze.py`, `test_github.py`, `test_receipts.py`, `test_read_lens.py` (live), tools/reeve tests, `cadence-sync-check.sh --selftest` |
+
+**P2 checklist** (post-merge, live — this build pushes nothing, so these move
+here from P0 and P1e):
+
+- the bootstrap dispatch (`harvest bootstrap=true receipts_only=true`): the
+  root carries the guard files, the ingest's 3,738 receipts and 1,689 status
+  files, and receipts from 2026-10-11T06:13:35Z on; its summary's receipt
+  count equals the snapshot's watched rows ∪ the windowed live listing;
+- a repeat dispatch pushes no commit and uploads both checkpoints;
+- the backfill (`harvest since=2026-07-31`, ≈ two dispatches): no job exceeds
+  5.5 h, no sibling routine logs a rate-limit failure, and the measured derive
+  time replaces `derive_reserve_minutes`;
+- Vercel shows no deployment, or CANCELED, for every pushed sha;
+- the packed size of both refs, the full-depth checkout's added fetch time and
+  the PR-head fetch time are recorded here; projected evidence growth above
+  30 MB/year is raised to the owner;
+- arm `PROVENANCE_ENABLED` (owner decision 8).

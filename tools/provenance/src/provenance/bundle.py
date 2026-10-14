@@ -11,11 +11,22 @@
 * ``content_sha256`` = ``canonical.content_sha256({"records": {path:
   sha256}, "views_sha256": …, "extractor": …})`` — a digest of everything
   EXCEPT the three provenance-of-the-bundle fields (``main_sha``,
-  ``evidence_sha``, ``producer_run``). :func:`same_content` compares it with
-  the current derived tip's bundle: equal → the run pushes nothing, so a
-  main push that changes no view does not churn the derived ref and the
-  bundle's ``main_sha`` reads "the main commit these views were last
-  recomputed against".
+  ``evidence_sha``, ``producer_run``). It is for the site's own integrity
+  check; the no-op decision never trusts it (critique item 5).
+* **No churn** (critique item 6): nothing in a record or a view depends on
+  main's sha — the view has no ``main_sha`` (the bundle's meta does), and a
+  committed row's line and URL point at the commit that added it — so a main
+  push that touches no ``designs/`` file changes no record, no view and no
+  ``content_sha256``, and pushes nothing. ``main_sha`` then reads "the main
+  commit these views were last recomputed against".
+* :func:`same_content` compares the CURRENT derived tip's actual blobs with
+  the new tree: the same path set, every path except ``site/bundle.json``
+  byte-identical, and ``site/bundle.json`` equal once the three meta fields
+  are removed from both — so a forged tip that copies the real
+  ``content_sha256`` but alters a view is not "same content". The push
+  decision is ``site_changed = not derived_continuity.accepted or not
+  same_content(tip, new)`` (a non-checkpointed tip is overwritten even when
+  its content matches).
 * No cursors, no pending list, no wall clock: the bundle changes only when
   a view or a record changes.
 
@@ -34,15 +45,19 @@ with ``--force-with-lease`` (``gitstore.push_force_with_lease``):
 ``site/bundle.json``                bundle@1
 ==================================  ==========================================
 
-**Fixture parity** — ``tests/test_bundle.py`` regenerates
-``site/test/fixtures/provenance-bundle.json`` from the committed SYNTHETIC
-records under ``tools/provenance/tests/fixtures/records/`` (hand-authored,
-contract-valid, covering every record kind and every event field set — so
-the parity proof does not wait on the extractor) with fixed meta (``main_sha = 521d092813b78a88bd9a74b1052cfef1f230d86b``,
-``evidence_sha = "0"*40``, ``producer_run = 1``) and asserts byte equality
-with the committed file (the growth server-parity pattern); the Node
-validator (``site/lib/provenance-contract.mjs``) must accept that file and
-reject a copy with one extra field, as the Python validator does.
+**Fixture parity** — ``tests/test_bundle.py`` rebuilds
+``site/test/fixtures/provenance-bundle.json`` IN MEMORY from the committed
+SYNTHETIC records under ``tools/provenance/tests/fixtures/records/``
+(hand-authored, contract-valid, covering every record kind and every event
+field set) with fixed meta (``main_sha =
+521d092813b78a88bd9a74b1052cfef1f230d86b``, ``evidence_sha = "0"*40``,
+``producer_run = 1``) and asserts byte equality with the committed file; it
+writes the file only when ``PROVENANCE_UPDATE_FIXTURES=1`` is set (a test
+never writes into the repo by default — critique item 27). The test needs
+``episodes.episodes_of`` (H3) and so carries ``@needs``; the committed file is
+regenerated once at integration. The Node validator
+(``site/lib/provenance-contract.mjs``) must accept that file and reject a copy
+with one extra field, as the Python validator does.
 
 Owner: H5.
 """
@@ -66,8 +81,14 @@ def build_bundle(views: dict[str, dict[str, Any]], *, records: dict[str, bytes],
     raise NotImplementedError("builder H5")
 
 
-def same_content(old_bundle: Optional[dict[str, Any]], new_bundle: dict[str, Any]) -> bool:
-    """True when ``content_sha256`` is equal (meta fields ignored)."""
+#: The bundle fields that describe the bundle rather than its content.
+META_FIELDS = ("main_sha", "evidence_sha", "producer_run")
+
+
+def same_content(tip: Optional[TreeReader], new_files: dict[str, tuple[str, bytes]]) -> bool:
+    """True when the current derived tip (``None`` = absent → False) holds exactly ``new_files``
+    up to the bundle's :data:`META_FIELDS` (module docstring). Reads the tip's blobs; never its
+    ``content_sha256`` field. Modes are compared too."""
     raise NotImplementedError("builder H5")
 
 
@@ -98,15 +119,25 @@ def derive(evidence: TreeReader, *, git: GitReader, codebasis: CodeBasis, main_s
            edit_grace_seconds: int, guard: dict[str, tuple[str, bytes]]) -> DerivedTree:
     """The whole derivation, evidence tree → provenance-site tree (pure given its readers).
 
-    1. read every ``raw/**`` (highest revision per key) and ``receipts/**``;
-    2. ``extract.extract_pr`` / ``extract_brief`` / ``extract_release`` per raw doc,
-       ``extract.extract_direct_commits`` from main;
-    3. ``serving.ReceiptIndex(receipts)``; ``serving.annotate_record`` +
-       ``serving.receipt_events`` per PR record (H4);
-    4. ``views.build_views`` (rows via ``episodes.decision_rows``);
-    5. :func:`build_bundle` and :func:`derived_tree_files`.
+    ``evidence`` is the evidence commit the bundle will name — this run's new
+    commit, the unchanged tip, or the newest checkpoint when the tip is foreign
+    (cli step 2). The order is fixed (critique item 14):
 
-    The orchestrator (``cli.cmd_harvest``) calls this once per run and compares
-    ``bundle.content_sha256`` with the current derived tip (:func:`same_content`).
+    1. read every ``raw/**`` (highest revision per key) and ``receipts/**``
+       (highest attempt per run);
+    2. ``extract.extract_pr`` / ``extract_brief`` / ``extract_release`` per raw
+       doc (``ExtractContext.brief_numbers`` from the ``raw/brief/`` paths),
+       ``extract.extract_direct_commits`` from main;
+    3. ``serving.ReceiptIndex(receipts)``; ``claims = serving.run_claims(brief
+       records, …)``; ``serving.annotate_record(…, claims=claims)`` per record;
+       ``serving.receipt_events`` appended to each PR record (unplaced);
+    4. ``episodes.place`` per record — after this every event has an episode;
+    5. ``views.build_views`` (rows via ``episodes.decision_rows``, rounds via
+       ``episodes.rounds_from_record``);
+    6. :func:`build_bundle` and :func:`derived_tree_files`.
+
+    No fetch happens here: ``git`` reads only what the job-start fetch made
+    local (a missing commit is basis ``none``). The orchestrator compares the
+    result with the current derived tip via :func:`same_content`.
     """
     raise NotImplementedError("builder H5")
