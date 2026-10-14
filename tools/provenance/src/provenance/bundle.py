@@ -24,9 +24,11 @@
   commit these views were last recomputed against".
 * :func:`same_content` compares the CURRENT derived tip's actual blobs with
   the new tree: the same path set, every path except ``site/bundle.json``
-  byte-identical, and ``site/bundle.json`` equal once the three meta fields
-  are removed from both — so a forged tip that copies the real
-  ``content_sha256`` but alters a view is not "same content". The push
+  byte-identical, and ``site/bundle.json`` byte-equal (canonical JSON) once
+  the three meta fields are removed from both — so a forged tip that copies
+  the real ``content_sha256`` but alters a view, or swaps a ``1`` for
+  ``true``, is not "same content", and a tip bundle that cannot be parsed at
+  all (nested too deep, not UTF-8, …) is "different", never a crash. The push
   decision is ``site_changed = not derived_continuity.accepted or not
   same_content(tip, new)`` (a non-checkpointed tip is overwritten even when
   its content matches).
@@ -85,6 +87,8 @@ EVIDENCE_FORMAT_BYTES = b"print-bench-provenance 1\n"
 BUNDLE_PATH = "site/bundle.json"
 FORMAT_PATH = "FORMAT"
 BLOB_MODE = "100644"
+#: The workflow whose receipts verify a ``reviewer-signoff`` status (``ExtractContext.auto_review_run_ids``).
+AUTO_REVIEW_WORKFLOW = "auto-review.yml"
 
 #: The guard paths every derived tree carries and their modes — ``gitstore.GUARD_FILES``'s keys
 #: and modes, restated so this pure module never imports the git module (pinned equal by
@@ -149,26 +153,35 @@ def build_bundle(views: dict[str, dict[str, Any]], *, records: dict[str, bytes],
 META_FIELDS = ("main_sha", "evidence_sha", "producer_run")
 
 
-def _strip_meta(raw: Optional[bytes]) -> Optional[dict[str, Any]]:
-    """The bundle object minus :data:`META_FIELDS`, or ``None`` when ``raw`` is not a canonical
-    bundle whose meta fields are present and well-typed (fail closed: a tip that cannot be read
-    as the harvester writes it is never "the same content")."""
+def _strip_meta(raw: Optional[bytes]) -> Optional[bytes]:
+    """The canonical bytes of the bundle object minus :data:`META_FIELDS`, or ``None`` when
+    ``raw`` is not a canonical bundle whose meta fields are present and well-typed (fail closed:
+    a tip that cannot be read as the harvester writes it is never "the same content").
+
+    TOTAL over its input: the tip's bytes are whatever the branch holds, so ANY failure to read
+    them — not only a decode/JSON/type error but a ``RecursionError`` from a bundle nested deeper
+    than the parser or the canonical encoder recurses (about 3 KB of ``[`` suffices), or a
+    ``MemoryError`` — is ``None`` ("different"), never an exception out of :func:`same_content`
+    (the cli evaluates it outside derive's error handling, so a raise would abort the run before
+    anything, this run's evidence included, is published). The answer is compared as canonical
+    BYTES, not as Python values, so JSON ``true``/``1`` and ``false``/``0`` stay different
+    (``True == 1`` in Python)."""
     if raw is None:
         return None
     try:
         value = json.loads(raw.decode("utf-8"))
         if not isinstance(value, dict) or canonical.dumps_bytes(value) != raw:
             return None
-    except (UnicodeDecodeError, ValueError, TypeError):
-        return None
-    if not all(name in value for name in META_FIELDS):
-        return None
-    for name in ("main_sha", "evidence_sha"):
-        if not isinstance(value[name], str) or not _SHA40.fullmatch(value[name]):
+        if not all(name in value for name in META_FIELDS):
             return None
-    if not _is_int(value["producer_run"]) or value["producer_run"] < 1:
+        for name in ("main_sha", "evidence_sha"):
+            if not isinstance(value[name], str) or not _SHA40.fullmatch(value[name]):
+                return None
+        if not _is_int(value["producer_run"]) or value["producer_run"] < 1:
+            return None
+        return canonical.dumps_bytes({k: v for k, v in value.items() if k not in META_FIELDS})
+    except Exception:  # noqa: BLE001 — total by design (docstring): unreadable content is "different"
         return None
-    return {k: v for k, v in value.items() if k not in META_FIELDS}
 
 
 def same_content(tip: Optional[TreeReader], new_files: dict[str, tuple[str, bytes]]) -> bool:
@@ -180,7 +193,10 @@ def same_content(tip: Optional[TreeReader], new_files: dict[str, tuple[str, byte
     from ``ls-tree``); a reader that cannot report a mode cannot prove sameness, so the answer is
     then False (a push, never a missed forgery). The tip's bundle must be byte-canonical and
     carry well-typed meta fields — a duplicated key, a float or a missing ``main_sha`` is
-    "different".
+    "different" — and the two bundles minus their meta are compared as canonical bytes, so a
+    tip that swaps a ``1`` for ``true`` (or ``false`` for ``0``) is "different" too. Never raises
+    on the tip's CONTENT (:func:`_strip_meta` is total — a bundle nested too deep to parse is
+    "different"); an error of the reader itself (a failed ``git cat-file``) still propagates.
     """
     if tip is None:
         return False
@@ -197,7 +213,7 @@ def same_content(tip: Optional[TreeReader], new_files: dict[str, tuple[str, byte
             return False
         if path == BUNDLE_PATH:
             ours, theirs = _strip_meta(data), _strip_meta(held)
-            if ours is None or theirs is None or ours != theirs:
+            if ours is None or theirs is None or ours != theirs:   # canonical bytes, not values
                 return False
         elif held != data:
             return False
@@ -312,7 +328,8 @@ def derive(evidence: TreeReader, *, git: GitReader, codebasis: CodeBasis, main_s
     1. read every ``raw/**`` (highest revision per key) and ``receipts/**``
        (highest attempt per run);
     2. ``extract.extract_pr`` / ``extract_brief`` / ``extract_release`` per raw
-       doc (``ExtractContext.brief_numbers`` from the ``raw/brief/`` paths),
+       doc (``ExtractContext.brief_numbers`` from the ``raw/brief/`` paths,
+       ``ExtractContext.auto_review_run_ids`` from the receipts),
        ``extract.extract_direct_commits`` from main;
     3. ``serving.ReceiptIndex(receipts)``; ``claims = serving.run_claims(brief
        records, …)``; ``serving.annotate_record(…, claims=claims)`` per record;
@@ -326,10 +343,16 @@ def derive(evidence: TreeReader, *, git: GitReader, codebasis: CodeBasis, main_s
     local (a missing commit is basis ``none``). The orchestrator compares the
     result with the current derived tip via :func:`same_content`.
 
-    The context every extractor sees is built from the raw documents alone
-    (never from another extractor's output): ``merge_shas`` = ``{pull.
+    The context every extractor sees is built from the evidence documents
+    alone (never from another extractor's output): ``merge_shas`` = ``{pull.
     merge_commit_sha: pr}`` of the MERGED raw PRs, ``brief_numbers`` = the
-    ``raw/brief/`` keys, ``design_names`` = ``views.design_names`` at main;
+    ``raw/brief/`` keys, ``auto_review_run_ids`` = ``run.id`` of every
+    receipt whose ``workflow`` is ``auto-review.yml`` (full or stub — the
+    receipt is the Actions record that the run existed as that workflow; this
+    is ``trust.status_tier``'s receipt half, so without it no
+    ``status.reviewer_signoff`` could ever be ``verified``/
+    ``actions-status+receipt``), ``design_names`` = ``views.design_names`` at
+    main;
     the direct-commit rule's frozen PR commits and the rows' ``commit_to_pr``
     come from the raw PRs' ``commits`` (a commit in several PRs maps to the
     lowest-numbered MERGED one, else the lowest-numbered). Each phase runs
@@ -342,11 +365,13 @@ def derive(evidence: TreeReader, *, git: GitReader, codebasis: CodeBasis, main_s
 
     merge_shas = {doc["pull"]["merge_commit_sha"]: doc["pr"] for doc in raw_prs
                   if _merged(doc) and doc["pull"].get("merge_commit_sha")}
+    auto_review_run_ids = frozenset(r["run"]["id"] for r in receipts
+                                    if r.get("workflow") == AUTO_REVIEW_WORKFLOW)
     ctx = extract.ExtractContext(
         owner=owner, repo=repo, owner_login=owner_login, git=git, main_sha=main_sha,
         design_names=frozenset(_views.design_names(git, main_sha)), merge_shas=merge_shas,
         brief_numbers=frozenset(doc["number"] for doc in raw_briefs),
-        edit_grace_seconds=edit_grace_seconds)
+        edit_grace_seconds=edit_grace_seconds, auto_review_run_ids=auto_review_run_ids)
     commit_to_pr: dict[str, int] = {}
     for doc in sorted(raw_prs, key=lambda d: (not _merged(d), d["pr"])):
         for commit in doc.get("commits", []):

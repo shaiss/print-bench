@@ -1,5 +1,5 @@
 {
- "content_sha256": "83b46b3cb2b439213ed4464ad7626e5e7f21759eb95081ea0a12ecaad97b6946",
+ "content_sha256": "08252dbf5ea4928eb717e556864fa147adcc8f58af434efec01ad035f77d5411",
  "contract": 1,
  "evidence_sha": "0000000000000000000000000000000000000000",
  "extractor": "provenance-extract 1",
@@ -122,7 +122,7 @@
       "timeline:4101",
       "deployment:9001"
      ],
-     "head": null,
+     "head": "1921dcc9bfd4357fdddeb175189423b724334a73",
      "id": "M:510",
      "issue": null,
      "kind": "merge",
@@ -130,7 +130,7 @@
      "start": "2026-09-02T12:00:00Z"
     },
     {
-     "end": "2026-09-03T15:00:00Z",
+     "end": "2026-09-03T00:00:00Z",
      "events": [
       "release:9501"
      ],
@@ -139,7 +139,7 @@
      "issue": null,
      "kind": "day",
      "pr": null,
-     "start": "2026-09-03T15:00:00Z"
+     "start": "2026-09-03T00:00:00Z"
     },
     {
      "end": "2026-09-04T00:00:00Z",
@@ -2825,7 +2825,7 @@
   }
  },
  "views_sha256": {
-  "alpha-clip": "aaafedd05a73eebc8ae06bbfd6fb5abfc8cb7aac10f1a040c3bd502b26da6093",
+  "alpha-clip": "b7b9cfe053578c23da8847374534ff5beb55f7764efae0731dbb7f283591163e",
   "beta-hinge": "4d9449f4d61034cc33b53e62ffaaf136bf47f153fb90ee491672733bc99bcf3c",
   "gamma-stand": "675939e0f84f7bb395dc00aa73b94254f4d3b1a0acd20294e17271f03706d6b2"
  }

@@ -186,21 +186,79 @@ def test_view_has_no_main_sha(fake_episodes):
         assert FIXTURE_MAIN_SHA not in canonical.dumps(view)
 
 
-def test_build_views_is_independent_of_main_sha(monkeypatch, fake_episodes):
-    """Critique 6: the same records and rows against two main shas give byte-identical views."""
-    rows = h.synthetic_rows()
-    monkeypatch.setattr(episodes, "decision_rows",
-                        lambda git, main_sha, design, **kw: copy.deepcopy(rows.get(design, [])))
+_ADDED = "a" * 40          # the commit that added alpha-clip's committed rows
+_M2 = "1" * 40             # FIXTURE_MAIN_SHA + one commit touching only scripts/
+_M3 = "3" * 40             # _M2 + one commit appending a NOTES.md decision bullet
+_PM = ("# PM\n\n## Decision log\n\n| Date | Decision | Reason |\n| --- | --- | --- |\n"
+       "| 2026-09-01 | Keep the snap fit | The field test held |\n").encode()
+_NOTES = b"# Notes\n\n## Decisions log\n\n- 2026-09-02: Clearance 0.3 mm.\n"
+_NOTES_ROW = b"- 2026-09-21: Clearance 0.35 mm after the cold-room print.\n"
+
+
+def _blame_of(sha: str, data: bytes) -> list[tuple[str, int]]:
+    return [(sha, i + 1) for i in range(data.count(b"\n"))]
+
+
+def _rows_history(*, blame_names_main: bool = False) -> FakeGitReader:
+    """_ADDED (adds alpha-clip's PM.md + NOTES.md rows, subject (#510)) → FIXTURE_MAIN_SHA (a
+    designs/ README edit) → _M2 (scripts/ only) → _M3 (appends a NOTES.md bullet). Blame names
+    _ADDED for the old lines at every main — unless ``blame_names_main``, the shape a row keyed
+    on main instead of on the commit that added it would have at _M2 (a negative control)."""
     files = _design_tree(*h.synthetic_designs())
-    m1, m2 = FIXTURE_MAIN_SHA, "1" * 40
-    git = FakeGitReader([FakeCommit(sha=m1, files=files),
-                         FakeCommit(sha=m2, parents=[m1], files=dict(files, **{"scripts/x.sh": b"x"}),
-                                    changed=["scripts/x.sh"])])
-    a = views.build_views(h.synthetic_records(), git=git, main_sha=m1, owner=OWNER,
-                          repo=REPO_NAME, commit_to_pr={})
-    b = views.build_views(h.synthetic_records(), git=git, main_sha=m2, owner=OWNER,
-                          repo=REPO_NAME, commit_to_pr={})
+    pm, notes = "designs/alpha-clip/PM.md", "designs/alpha-clip/NOTES.md"
+    files.update({pm: _PM, notes: _NOTES})
+    blame = {pm: _blame_of(_ADDED, _PM), notes: _blame_of(_ADDED, _NOTES)}
+    m1_files = dict(files, **{"designs/alpha-clip/README.md": b"# alpha-clip\n"})
+    m2_files = dict(m1_files, **{"scripts/x.sh": b"true\n"})
+    m2_blame = ({pm: _blame_of(_M2, _PM), notes: _blame_of(_M2, _NOTES)} if blame_names_main
+                else blame)
+    m3_blame = dict(blame, **{notes: blame[notes] + [(_M3, _NOTES.count(b"\n") + 1)]})
+    return FakeGitReader([
+        FakeCommit(sha=_ADDED, subject="Add alpha-clip (#510)", files=files, changed=sorted(files),
+                   blame=blame),
+        FakeCommit(sha=FIXTURE_MAIN_SHA, parents=[_ADDED], subject="Tidy (#511)", files=m1_files,
+                   changed=["designs/alpha-clip/README.md"], blame=blame),
+        FakeCommit(sha=_M2, parents=[FIXTURE_MAIN_SHA], subject="Script (#512)", files=m2_files,
+                   changed=["scripts/x.sh"], blame=m2_blame),
+        FakeCommit(sha=_M3, parents=[_M2], subject="Log a decision (#513)",
+                   files=dict(m2_files, **{notes: _NOTES + _NOTES_ROW}), changed=[notes],
+                   blame=dict(m3_blame, **{pm: blame[pm]})),
+    ], refs={"main": _M3})
+
+
+def _views_at(git: FakeGitReader, main_sha: str) -> dict:
+    return views.build_views(h.synthetic_records(), git=git, main_sha=main_sha, owner=OWNER,
+                             repo=REPO_NAME, commit_to_pr={})
+
+
+@needs(episodes.decision_rows)
+def test_build_views_is_independent_of_main_sha(fake_episodes):
+    """Critique 6, through H3's REAL decision_rows (committed PM.md / NOTES.md rows located by
+    blame, not a stand-in that ignores main_sha): the same records against main M and M' = M + a
+    scripts/-only commit give byte-identical views that name neither main sha, every row naming
+    the commit that added it. Negative controls: a main commit that ADDS a decision row changes
+    that design's view (and only it), and a blame that named main instead of the adding commit
+    — a row leaking main's sha — would break the identity."""
+    git = _rows_history()
+    a, b = _views_at(git, FIXTURE_MAIN_SHA), _views_at(git, _M2)
     assert canonical.dumps_bytes(a) == canonical.dumps_bytes(b)
+    rows = [e for e in a["alpha-clip"]["events"] if e["kind"].startswith("decision.")]
+    assert sorted(e["kind"] for e in rows) == ["decision.notes_log", "decision.pm_log"]
+    assert {(e["fields"]["added_in_sha"], e["fields"]["added_in_pr"]) for e in rows} == {(_ADDED, 510)}
+    assert all(f"/blob/{_ADDED}/" in e["url"] for e in rows)
+    assert FIXTURE_MAIN_SHA not in canonical.dumps(a) and _M2 not in canonical.dumps(b)
+    # negative control 1: a main commit that adds a decision row changes alpha-clip's view only
+    c = _views_at(git, _M3)
+    assert [d for d in sorted(c) if canonical.dumps_bytes(c[d]) != canonical.dumps_bytes(b[d])] == [
+        "alpha-clip"]
+    added = [e for e in c["alpha-clip"]["events"] if e["kind"] == "decision.notes_log"
+             and e["fields"]["added_in_sha"] == _M3]
+    assert len(added) == 1 and added[0]["fields"]["added_in_pr"] == 513
+    assert c["alpha-clip"]["counts"]["events"] == a["alpha-clip"]["counts"]["events"] + 1
+    # negative control 2: rows keyed on main (blame naming _M2 itself) would differ
+    leaky = _views_at(_rows_history(blame_names_main=True), _M2)
+    assert canonical.dumps_bytes(leaky) != canonical.dumps_bytes(a)
+    assert _M2 in canonical.dumps(leaky["alpha-clip"])
 
 
 def test_counts(fake_episodes):

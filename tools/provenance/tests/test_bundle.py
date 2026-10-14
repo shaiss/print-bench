@@ -8,6 +8,7 @@ the ``@needs`` tests run the real composition at integration.
 
 from __future__ import annotations
 
+import collections
 import copy
 import json
 import os
@@ -21,7 +22,7 @@ from conftest import (FIXTURE_MAIN_SHA, GUARD_DIR, OWNER, OWNER_LOGIN, REPO, REP
 from fakes import FakeCodeBasis, FakeCommit, FakeGitReader, FakeTreeReader
 
 from provenance import (bundle, canonical, contract as contract_mod, episodes, extract,
-                        gitstore, serving, views)
+                        gitstore, serving, trust, views)
 
 GUARD = {
     "vercel.json": ("100644", (GUARD_DIR / "vercel.json").read_bytes()),
@@ -180,7 +181,7 @@ def test_python_and_node_validators_accept_and_reject(tmp_path):
 # ----------------------------------------------------------------------------- same_content
 
 def test_same_content_reads_the_tip_not_its_digest(fake_episodes):
-    """Critique 5: same_content(tip, files) is True for a tip that differs only in main_sha / evidence_sha / producer_run, and False for a forged tip whose bundle keeps the real content_sha256 field but alters one view (or one records/ blob, or one file mode)."""
+    """Critique 5: same_content(tip, files) is True for a tip that differs only in main_sha / evidence_sha / producer_run, and False for a forged tip whose bundle keeps the real content_sha256 field but alters one view (or one records/ blob, or one file mode, or swaps a 1 for true), and False — never an exception — for a tip bundle too deep to parse."""
     files, b = _tree_files()
     assert bundle.same_content(ModeTreeReader(files), files)
 
@@ -231,6 +232,30 @@ def test_same_content_reads_the_tip_not_its_digest(fake_episodes):
     assert not bundle.same_content(ModeTreeReader(with_bundle(b, raw=dup)), files)
     bad_meta = dict(b, producer_run=True)
     assert not bundle.same_content(ModeTreeReader(with_bundle(bad_meta)), files)
+    # a bool for an int (or an int for a bool) is a forgery Python's == cannot see: the
+    # comparison is of canonical bytes
+    assert b["contract"] == 1 and b["views"]["alpha-clip"]["counts"]["prs"] == 1
+    assert b["views"]["alpha-clip"]["events"][0]["stale_sha"] is False
+    for label, path, value in (("contract: true", ("contract",), True),
+                               ("counts.prs: true", ("views", "alpha-clip", "counts", "prs"), True),
+                               ("stale_sha: 0", ("views", "alpha-clip", "events", 0, "stale_sha"), 0)):
+        swapped = copy.deepcopy(b)
+        target = swapped
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        assert swapped == b and canonical.dumps_bytes(swapped) != canonical.dumps_bytes(b), label
+        assert not bundle.same_content(ModeTreeReader(with_bundle(swapped)), files), label
+    # a tip bundle that cannot be read at all is "different", never an exception: not UTF-8,
+    # or nested deeper than the parser (100 000) or the canonical encoder (1 500) recurses
+    assert not bundle.same_content(ModeTreeReader(with_bundle(b, raw=b"\xff\xfe{}")), files)
+    for depth in (1500, 100_000):
+        flat = canonical.dumps(dict(b, views={}))
+        assert '"views": {}' in flat
+        deep = flat.replace('"views": {}', '"views": ' + "[" * depth + "]" * depth, 1).encode()
+        with pytest.raises(RecursionError):
+            canonical.dumps_bytes(json.loads(deep))
+        assert not bundle.same_content(ModeTreeReader(with_bundle(b, raw=deep)), files), depth
     # no tip; a reader that cannot report modes cannot prove sameness
     assert not bundle.same_content(None, files)
     assert not bundle.same_content(FakeTreeReader({p: d for p, (_, d) in files.items()}), files)
@@ -367,10 +392,28 @@ def _synthetic_evidence():
         elif r["kind"] == "release":
             files[f"raw/release/{r['tag']}.json.gz"] = _gz({"format": "raw-release@1",
                                                             "tag": r["tag"], "revision": 1})
-    files["receipts/2026/09/01/3001.a1.json.gz"] = _gz({"run": {"id": 3001, "run_attempt": 1}})
-    files["receipts/2026/09/01/3002.a1.json.gz"] = _gz({"run": {"id": 3002, "run_attempt": 1}})
-    files["receipts/2026/09/01/3002.a2.json.gz"] = _gz({"run": {"id": 3002, "run_attempt": 2}})
+    files["receipts/2026/09/01/3001.a1.json.gz"] = _gz({"workflow": "auto-review.yml",
+                                                        "run": {"id": 3001, "run_attempt": 1}})
+    files["receipts/2026/09/01/3002.a1.json.gz"] = _gz({"workflow": "oracle.yml",
+                                                        "run": {"id": 3002, "run_attempt": 1}})
+    files["receipts/2026/09/01/3002.a2.json.gz"] = _gz({"workflow": "oracle.yml",
+                                                        "run": {"id": 3002, "run_attempt": 2}})
     return FakeTreeReader(files)
+
+
+def _context_with_receipt_run_ids(monkeypatch):
+    """H3's ``ExtractContext`` carries ``auto_review_run_ids`` (wip/h3); the scaffold's does not
+    yet. Until H3 is merged, give the scaffold's class that one field (default empty, as H3's)
+    so the unit tests exercise derive's real call; at integration this is a no-op, and the
+    @needs real-pipeline test below proves the field reaches ``trust.status_tier``."""
+    import dataclasses
+    if "auto_review_run_ids" in {f.name for f in dataclasses.fields(extract.ExtractContext)}:
+        return
+    shim = dataclasses.make_dataclass(
+        "ExtractContext",
+        [("auto_review_run_ids", frozenset, dataclasses.field(default=frozenset()))],
+        bases=(extract.ExtractContext,), frozen=True)
+    monkeypatch.setattr(extract, "ExtractContext", shim)
 
 
 class _Calls:
@@ -393,6 +436,7 @@ def _stub_pipeline(monkeypatch, *, lazy_place=False):
     by_key = {(r["kind"], r["key"]): r for r in h.synthetic_records()}
     rows = h.synthetic_rows()
     h.patch_episodes(monkeypatch)
+    _context_with_receipt_run_ids(monkeypatch)
 
     def extract_pr(doc, ctx):
         calls.add("extract_pr", doc["pr"], doc["revision"], ctx)
@@ -499,6 +543,10 @@ def test_derive_order(monkeypatch):
     assert ctx.merge_shas == merged and "9" * 40 not in ctx.merge_shas
     assert ctx.design_names == frozenset(h.synthetic_designs()) and ctx.main_sha == M1
     assert ctx.owner_login == OWNER_LOGIN and ctx.edit_grace_seconds == 60
+    # status_tier's receipt half: the auto-review.yml receipts' run ids, nothing else
+    assert ctx.auto_review_run_ids == frozenset({3001})
+    ctx_at = {"extract_pr": 3, "extract_brief": 2, "extract_release": 2, "extract_direct_commits": 1}
+    assert all(c[ctx_at[c[0]]] is ctx for c in log if c[0] in ctx_at)     # one context for all
     frozen = next(c for c in log if c[0] == "extract_direct_commits")[2]
     assert frozen == {s for r in h.synthetic_records() if r["kind"] == "pr"
                       for rd in r["rounds"] for s in rd["commits"]}
@@ -519,6 +567,31 @@ def test_derive_order(monkeypatch):
     assert tree.counts["views"] == 3 and tree.bundle == json.loads(tree.files[bundle.BUNDLE_PATH][1])
     assert (tree.bundle["main_sha"], tree.bundle["evidence_sha"], tree.bundle["producer_run"]) == (
         M1, "e" * 40, 5)
+
+
+def test_derive_passes_the_auto_review_receipts_run_ids(monkeypatch):
+    """ExtractContext.auto_review_run_ids = run.id of every auto-review.yml receipt (a stub too,
+    at its highest attempt) and of nothing else; negative control: the same evidence with no
+    auto-review.yml receipt hands extraction an empty set (no status can be receipt-verified)."""
+    calls = _stub_pipeline(monkeypatch)
+    evidence = _synthetic_evidence()
+    evidence.files["receipts/2026/09/02/3003.a1.json.gz"] = _gz(
+        {"workflow": "auto-review.yml", "kind": "stub", "run": {"id": 3003, "run_attempt": 1}})
+    evidence.files["receipts/2026/09/02/3003.a2.json.gz"] = _gz(
+        {"workflow": "auto-review.yml", "kind": "stub", "run": {"id": 3003, "run_attempt": 2}})
+    _derive(evidence)
+    ctxs = {c[-1].auto_review_run_ids for c in calls.log if c[0] in ("extract_pr", "extract_brief",
+                                                                      "extract_release")}
+    assert ctxs == {frozenset({3001, 3003})}
+    # negative control: every auto-review.yml receipt relabelled as another workflow
+    calls.log.clear()
+    for path in [p for p in evidence.files if p.startswith("receipts/")]:
+        doc = canonical.loads_gz(evidence.files[path])
+        if doc["workflow"] == "auto-review.yml":
+            evidence.files[path] = _gz(dict(doc, workflow="design-run.yml"))
+    _derive(evidence)
+    ctx = next(c for c in calls.log if c[0] == "extract_pr")[3]
+    assert ctx.auto_review_run_ids == frozenset()
 
 
 def test_derive_refuses_an_unplaced_event(monkeypatch):
@@ -573,30 +646,104 @@ def test_main_commit_outside_designs_changes_nothing(monkeypatch):
     assert not bundle.same_content(ModeTreeReader(on_m.files), on_grown.files)
 
 
-def _fixture_evidence():
+def _fixture_evidence(drop_workflow=None):
+    """The committed raw + receipt fixtures as an evidence tree (``drop_workflow``: leave out
+    every receipt of that workflow — a negative control's input)."""
     files = {}
     for kind in ("pr", "brief", "release"):
         for p in sorted((h.FIXTURES / "raw" / kind).glob("*.json.gz")):
             files[f"raw/{kind}/{p.name}"] = p.read_bytes()
     for p in receipt_paths():
-        files[str(p.relative_to(h.FIXTURES)).replace(os.sep, "/")] = p.read_bytes()
+        data = p.read_bytes()
+        if drop_workflow is not None and canonical.loads_gz(data).get("workflow") == drop_workflow:
+            continue
+        files[str(p.relative_to(h.FIXTURES)).replace(os.sep, "/")] = data
     return FakeTreeReader(files)
 
 
-@needs(extract.extract_pr, extract.extract_brief, extract.extract_release,
-       extract.extract_direct_commits, serving.ReceiptIndex, serving.run_claims,
-       serving.annotate_record, serving.receipt_events, episodes.place, episodes.decision_rows,
-       episodes.episodes_of, episodes.rounds_from_record)
+def _fixture_designs():
+    return sorted({f["filename"].split("/")[1] for n in (636, 371, 397, 634, 343, 316)
+                   for f in raw_pr(n)["files"] if f["filename"].startswith("designs/")
+                   and f["filename"].count("/") >= 2})
+
+
+M3 = "3" * 40           # M2 + one commit appending a decision row to one design's PM.md
+_PM = ("# PM\n\n## Decision log\n\n| Date | Decision | Reason |\n| --- | --- | --- |\n"
+       "| 2026-09-01 | Keep the snap fit | The field test held |\n").encode()
+_PM_ROW = b"| 2026-09-20 | Thicken the wall | The drop test cracked it |\n"
+
+
+def _main_git_with_rows(designs):
+    """``_main_git``'s M1 -> M2 (scripts/ only) with a committed decision row in the first
+    design's PM.md, added in M1 (blame names M1 at every main), plus M3 = M2 + a commit
+    appending a second row (blame: M1's lines, then M3's)."""
+    files = {f"designs/{d}/{d}.scad": b"cube(1);\n" for d in designs}
+    pm = f"designs/{designs[0]}/PM.md"
+    files[pm] = _PM
+    old = [(M1, i + 1) for i in range(_PM.count(b"\n"))]
+    m2_files = dict(files, **{"scripts/x.sh": b"true\n"})
+    return FakeGitReader([
+        FakeCommit(sha=M1, files=files, changed=sorted(files), committer_email="noreply@github.com",
+                   blame={pm: old}),
+        FakeCommit(sha=M2, parents=[M1], files=m2_files, changed=["scripts/x.sh"],
+                   committer_email="owner@example.invalid", blame={pm: old}),
+        FakeCommit(sha=M3, parents=[M2], subject="Log a decision (#640)",
+                   files=dict(m2_files, **{pm: _PM + _PM_ROW}), changed=[pm],
+                   blame={pm: old + [(M3, len(old) + 1)]}),
+    ], refs={"main": M3})
+
+
+_REAL_PIPELINE = (extract.extract_pr, extract.extract_brief, extract.extract_release,
+                  extract.extract_direct_commits, serving.ReceiptIndex, serving.run_claims,
+                  serving.annotate_record, serving.receipt_events, episodes.place,
+                  episodes.decision_rows, episodes.episodes_of, episodes.rounds_from_record)
+
+
+@needs(*_REAL_PIPELINE)
 def test_main_commit_outside_designs_changes_nothing_real():
     """The same property through the REAL extract/serving/episodes over the committed raw and
-    receipt fixtures: M' = M + a scripts/-only commit leaves every record and view byte-identical."""
-    designs = sorted({f["filename"].split("/")[1] for n in (636, 371, 397, 634, 343, 316)
-                      for f in raw_pr(n)["files"] if f["filename"].startswith("designs/")
-                      and f["filename"].count("/") >= 2})
-    git = _main_git(designs)
+    receipt fixtures plus a committed decision row on main: M' = M + a scripts/-only commit
+    leaves every record and view byte-identical (the row included — it names the commit that
+    added it, never main). Negative control: a main commit that ADDS a decision row changes that
+    design's view (and only it), so the identity above is not vacuous."""
+    designs = _fixture_designs()
+    git = _main_git_with_rows(designs)
     a = _derive(_fixture_evidence(), main_sha=M1, git=git)
     b = _derive(_fixture_evidence(), main_sha=M2, git=git)
     assert sorted(p for p in a.files if a.files[p] != b.files.get(p)) == [bundle.BUNDLE_PATH]
     assert a.bundle["content_sha256"] == b.bundle["content_sha256"]
     assert bundle.same_content(ModeTreeReader(a.files), b.files)
     assert all(e["episode"] is not None for r in a.records for e in r["events"])
+    view = f"views/{designs[0]}.json"
+
+    def pm_rows(tree):
+        return [e for e in json.loads(tree.files[view][1])["events"] if e["kind"] == "decision.pm_log"]
+
+    assert [r["fields"]["added_in_sha"] for r in pm_rows(b)] == [M1]
+    # negative control: M3 appends a row
+    c = _derive(_fixture_evidence(), main_sha=M3, git=git)
+    assert sorted(p for p in b.files if b.files[p] != c.files.get(p)) == [bundle.BUNDLE_PATH, view]
+    assert sorted(r["fields"]["added_in_sha"] for r in pm_rows(c)) == sorted([M1, M3])
+    assert b.bundle["content_sha256"] != c.bundle["content_sha256"]
+    assert not bundle.same_content(ModeTreeReader(b.files), c.files)
+
+
+def _signoff_status_tiers(tree):
+    return collections.Counter((e["trust"], e["trust_basis"]) for r in tree.records
+                               for e in r["events"] if e["kind"] == "status.reviewer_signoff")
+
+
+@needs(*_REAL_PIPELINE, trust.status_tier)
+def test_derive_receipt_verifies_reviewer_signoff_statuses_real():
+    """Through the REAL pipeline over the committed fixtures, every status.reviewer_signoff is
+    verified/actions-status+receipt: derive hands extraction the auto-review.yml receipts' run
+    ids (ExtractContext.auto_review_run_ids), the receipt half of trust.status_tier. Negative
+    control: the same evidence without its auto-review.yml receipts verifies none of them."""
+    git = _main_git(_fixture_designs())
+    tiers = _signoff_status_tiers(_derive(_fixture_evidence(), git=git))
+    assert sum(tiers.values()) > 0
+    assert set(tiers) == {("verified", "actions-status+receipt")}, tiers
+    without = _signoff_status_tiers(_derive(_fixture_evidence(drop_workflow="auto-review.yml"),
+                                            git=git))
+    assert sum(without.values()) == sum(tiers.values())
+    assert ("verified", "actions-status+receipt") not in without, without
