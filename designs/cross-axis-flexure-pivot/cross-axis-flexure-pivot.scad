@@ -133,7 +133,9 @@ module checks() {
     assert(probe_d * sin(alpha) - t / 2 >= probe_r + 0.5,
            "pocket probes no longer clear the beams — move them or shrink probe_r");
     assert(probe_d - (t / 2) / sin(alpha) - max(root_fillet, 0.5 * t) >= probe_r + 0.5,
-           "pocket probes collide with weld fillets — move them or shrink fillet/probe");
+           "±x pocket probes collide with weld fillets — move them or shrink fillet/probe");
+    assert(probe_d - (t / 2) / cos(alpha) - max(root_fillet, 0.5 * t) >= probe_r + 0.5,
+           "±y pocket probes collide with weld fillets — move them or shrink fillet/probe");
     // coupon guards
     assert(min(coupon_ts) >= 0.5, "coupon rows under 0.5 mm will not extrude");
     assert(max(coupon_ts) <= 1.6, "coupon rows over 1.6 mm stop being a flexure ladder");
@@ -210,19 +212,20 @@ module notch_fillet_2d(f, psi) {
 }
 
 // Four re-entrant corners of the welded X. Corners sit on the angle
-// bisectors (the ±x / ±y axes) at distance (t/2)/sin(alpha) from the
-// origin; x-bisector notches have air angle 2*alpha, y-bisector notches
-// have 180-2*alpha. Same fatigue rule as the ring roots.
+// bisectors (±x / ±y) at the beam half-width measured along that axis:
+// x-bisector notches at (t/2)/sin(alpha), y-bisector at (t/2)/cos(alpha)
+// (equal at alpha = 45). Air angles 2*alpha and 180-2*alpha respectively.
 module weld_fillets_2d() {
     f = max(root_fillet, 0.5 * t);
-    r_c = (t / 2) / sin(alpha);
+    r_x = (t / 2) / sin(alpha);
+    r_y = (t / 2) / cos(alpha);
     for (a = [0, 180])
         rotate([0, 0, a])
-            translate([r_c, 0])
+            translate([r_x, 0])
                 notch_fillet_2d(f, 2 * alpha);
     for (a = [90, 270])
         rotate([0, 0, a])
-            translate([r_c, 0])
+            translate([r_y, 0])
                 notch_fillet_2d(f, 180 - 2 * alpha);
 }
 

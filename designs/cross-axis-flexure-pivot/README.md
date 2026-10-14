@@ -58,9 +58,10 @@ plastic over the full ring wall instead of folding the beams.
   echoed stiffness and stress). PLA works and feels snappier (higher E), but
   is far worse in cyclic flexure; the coupon's PETG/PLA twins exist so you
   can rank them on *your* printer rather than take this page's word.
-- **Layer height:** 0.2 mm. The beams are 0.8 mm — four layers — and their
-  layer faces are the fatigue-critical surface; go finer if you have the
-  patience, not coarser.
+- **Layer height:** 0.2 mm (the 8 mm part height is ~40 layers). Beam
+  thickness `t` is **in the bed plane** — the stock 0.8 mm is two
+  extrusion widths (0.4 mm nozzle), not a layer count; go finer on layer
+  height if you want, not coarser.
 - **Infill:** 15–20 % — the arcs and tabs are chunky and the beams are
   effectively all-perimeter.
 - **Supports:** none — the whole part is one bed-plane silhouette extruded

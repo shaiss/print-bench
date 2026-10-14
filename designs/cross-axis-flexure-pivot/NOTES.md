@@ -103,7 +103,8 @@ F_handle = K·θ/tab_cx     = 195.047·0.698132/25.5  = 5.340 N
   composed wrongly, two of eight roots silently had no fillet.
 - **Weld-corner fillets (r ≥ 0.5·t)** — the four re-entrant corners of the X
   carry the same fatigue rule as the ring roots. `weld_fillets_2d()` places a
-  `notch_fillet_2d` on each bisector (air angle 2·α on ±x, 180−2·α on ±y).
+  `notch_fillet_2d` on each bisector — offset `(t/2)/sin α` on ±x and
+  `(t/2)/cos α` on ±y (equal at 45°); air angles 2·α and 180−2·α.
   Review blocker on PR #644: the page quoted leaf K/σ while the sharp weld
   was the highest-moment real estate and the coupon never saw it.
 
