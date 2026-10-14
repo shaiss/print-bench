@@ -156,11 +156,51 @@ def completion_sha(marker: Marker) -> Optional[str]:
     return sha if sha is not None and _SHA_RE.fullmatch(sha) else None
 
 
+_IGNORED_OWN_RE = re.compile(IGNORED_OWN_FAMILIES_RE)
+_TS_RE = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})(?:T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)?")
+
+
+def is_known_family(family: str) -> bool:
+    """True for one of :data:`KNOWN_FAMILIES` or an ignored own family (full match)."""
+    return family in KNOWN_FAMILIES or _IGNORED_OWN_RE.fullmatch(family) is not None
+
+
 def unknown_families(author_login: Optional[str], owner_login: str, marker_lines: list[str]) -> list[str]:
-    """Families to count as ``unknown.marker`` for one body (our identities only)."""
-    raise NotImplementedError("builder H2")
+    """Families to count as ``unknown.marker`` for one body (our identities only).
+
+    Our identities are the Actions bot (``trust.is_actions_bot``) and the repo
+    owner (case-insensitive); any other author's markers — CodeRabbit's
+    ``*_start``/``*_end``, ``qodo:*`` — return ``[]``. One entry per unknown
+    marker LINE, in body order (a family repeated in one body counts each
+    time), so the caller's ``Counter`` is ``record.unknown.markers``.
+    """
+    from .trust import is_actions_bot  # bound lazily so trust may import this module
+
+    login = author_login.strip().lower() if isinstance(author_login, str) else ""
+    ours = is_actions_bot(author_login) or (bool(login) and login == (owner_login or "").strip().lower())
+    if not ours:
+        return []
+    out = []
+    for line in marker_lines:
+        marker = parse_marker(line)
+        if marker is not None and not is_known_family(marker.family):
+            out.append(marker.family)
+    return out
 
 
 def era_of(created_at: str) -> str:
-    """The era name for a timestamp (``M1``..``M5``) — documentation helper for fixtures."""
-    raise NotImplementedError("builder H2")
+    """The era name for a timestamp (``M1``..``M5``) — documentation helper for fixtures.
+
+    The last era whose ``since`` date is on or before the timestamp's UTC
+    date; anything before M2 (including the 2026-07-31 bootstrap) is M1.
+    A string that is neither a contract ``ts`` nor a ``date`` raises ValueError.
+    """
+    m = _TS_RE.fullmatch(created_at) if isinstance(created_at, str) else None
+    if m is None:
+        raise ValueError(f"era_of: not a UTC timestamp or date: {created_at!r}")
+    day = m.group(1)
+    name = ERAS[0].name
+    for era in ERAS:
+        if era.since <= day:
+            name = era.name
+    return name
