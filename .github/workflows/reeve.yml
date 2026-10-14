@@ -699,7 +699,7 @@ jobs:
           # already-greenlighted refusal keeps that link from re-drafting a
           # thread the dead one finished).
           REEVE_GREENLIGHT_STATE: ${{ runner.temp }}/reeve-greenlight-posts
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -736,7 +736,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REEVE_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
           REEVE_GREENLIGHT_STATE: ${{ runner.temp }}/reeve-greenlight-posts
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -761,7 +761,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REEVE_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
           REEVE_GREENLIGHT_STATE: ${{ runner.temp }}/reeve-greenlight-posts
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
