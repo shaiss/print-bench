@@ -27,6 +27,8 @@ JANE/DRIK_SIGNOFF marker                                                        
 or lead ``coach_lock``
 ``issue_comments[]`` lead coach_round   coach.round              ``issuecomment:<id>``       same, sha null
 ``issue_comments[]`` ORACLE_REVIEW      oracle.review            ``issuecomment:<id>``       same, sha null
+``reviews[]`` (a PR review body) by     the same kinds as an     ``review:<id>``             submitted_at / the same sha /
+the same selection as an issue comment  issue comment                                        ``pull/<n>#pullrequestreview-<id>``
 ``statuses[sha]`` context               status.reviewer_signoff  ``status:<id>``             created_at / sha / ``pull/<n>/commits/<sha>``
 ``reviewer-signoff`` (except "no design
 changes" → noise)
@@ -62,10 +64,31 @@ fields: ``family``, ``verdict``, ``fuse``, ``edited``; ``triage.verdict``:
 ``rows``, ``completion_marker`` (a ``PM_TRIAGE_DONE`` line is present),
 ``edited``. ``edited`` = ``updated_at − created_at >= edit_grace_seconds``.
 
+A PR review body (``reviews[]``) is selected EXACTLY like an issue comment —
+"one attribute grammar parses all five" eras, and the M3 era (08-23/24) posted
+Jane's sign-offs with ``gh pr review``: on #371 + #397 fifteen of the
+sbc-case design's 31 sign-offs (every Jane sign-off on #397, one on #371)
+exist only as review bodies (the audit golden's ``#pullrequestreview-`` rows,
+pinned by tests/test_acceptance.py). Its id is ``review:<id>``, its ``ts``
+``submitted_at`` (a pending review has none and yields nothing), its ``app``
+null and it is never ``edited`` (the REST review has no ``updated_at``).
+
 **Trust** at extraction: marker events take ``trust.comment_tier`` (H2's
-port of reviewer-posted.sh / coach-lock-check.sh); ``status.reviewer_signoff``
+port of reviewer-posted.sh / coach-lock-check.sh) — for a REVIEW body capped
+at ``claimed``/``marker:no-suffix`` (:data:`REVIEW_TIER_CAP`): reviewer-posted.sh
+reads ONLY issue comments, the reviewer MCP's sole write target ("review
+bodies and line comments are out of scope; a planted marker there cannot
+satisfy the walk/stamp"), so a review can never be the MCP-suffixed artifact
+the verified rule names, even when its digest ends with that suffix (one #397
+review does); serving may still lift it to ``window``. ``status.reviewer_signoff``
 takes ``trust.status_tier`` with ``ctx.auto_review_run_ids`` (the run ids of
-the evidence's ``auto-review.yml`` receipts — ``bundle.derive`` passes them);
+the evidence's ``auto-review.yml`` receipts — ``bundle.derive`` passes them)
+and ``owner_login=ctx.owner_login`` (H2's signature: it names the owner's own
+statuses ``marker:owner-token``),
+and its runtime join (``run_id`` + ``workflow: auto-review.yml``, the
+target_url's run) is made only when that tier is
+``verified``/``actions-status+receipt`` — the rule's own conclusion, so an
+owner-token status pointing at an auto-review run gets no runtime;
 ``ci.gate`` is ``verified``/``receipt`` (the run object is the Actions
 record itself); a commit with an agent trailer (``Co-Authored-By: Claude…``
 / ``Cursor…``, ``Claude-Session``) is ``claimed``/``trailer``; an edited
@@ -82,17 +105,25 @@ author name ``github-actions[bot]``/``claude[bot]``) → ``commit.design``;
 author login == the repo owner and no agent trailer → ``commit.human``;
 otherwise ``commit.fix``.
 
-**Platform** (``runtime.platform``, D; first rule wins): regen and
-builder-bot-authored commits and Actions-bot comments/statuses →
-``github-actions``; author login ``claude`` or a ``Claude-Session`` trailer →
+**Platform** (``runtime.platform``, D; first rule wins): regen commits,
+commits authored by a builder bot (author login or commit author name
+``github-actions[bot]``/``claude[bot]``), and every other event whose login is
+the Actions bot (``github-actions[bot]``/``github-actions``) or ``claude[bot]``
+→ ``github-actions``. ``claude[bot]`` is claude-code-action's identity (the
+Claude app's installation token inside an Actions job — the same identity the
+builder-commit rule already places on ``github-actions``), so its comments
+and reviews are Actions-hosted too; the GitHub app ``claude`` on a comment by
+a non-bot login (a user-token post via the app) is what the app rule below
+maps to ``claude-code``. Then: author login ``claude`` or a ``Claude-Session`` trailer →
 ``claude-code``; ``cursoragent`` / ``cursor[bot]`` / a ``Cursor`` co-author →
 ``cursor``; ``Copilot`` / ``copilot-*`` → ``copilot``; ``coderabbitai[bot]``
 → ``coderabbit``; ``vercel[bot]`` → ``vercel``; committer ``web-flow`` →
 ``github-web``; then the comment's GitHub app (``github-actions``,
 ``claude`` → ``claude-code``, ``cursor``, ``copilot*``, ``coderabbitai``,
 ``vercel``); else ``unknown``. ``runtime.harness`` (D): ``claude-code`` for
-the ``claude-code`` platform, ``claude-code-action`` for a commit authored by
-``claude[bot]``, ``cursor-agent`` for a Cursor commit, else null.
+the ``claude-code`` platform, ``claude-code-action`` for a commit (author
+name) or a comment/review (login) authored by ``claude[bot]``,
+``cursor-agent`` for a Cursor commit, else null.
 
 **Noise** — never events, counted into ``noise_counts`` by the closed keys
 (contract ``enums.noise_key``; zero counts omitted): a comment that is no
@@ -101,8 +132,9 @@ event is, first match, lead ``bugbot_limit``/``qodo_paused``/
 (``markers.STICKY_FAMILIES``) → ``sticky.*``; a third-party bot author (a
 ``Bot`` / ``…[bot]`` login other than ``github-actions[bot]``/``claude[bot]``)
 → ``comment.bot.<coderabbit|cursor|qodo|vercel|entelligence|copilot|other>``
-(by login, then app); else ``comment.unclassified``. Reviews → an empty body
-``review.empty_wrapper``, a bot ``review.bot``, else ``review.human``; review
+(by login, then app); else ``comment.unclassified``. Reviews that are no
+event → an empty body ``review.empty_wrapper``, a bot ``review.bot``, else
+``review.human``; review
 comments → ``review_comment.bot|human``; statuses other than
 reviewer-signoff → ``status.coderabbit`` / ``status.vercel`` (by context or
 creator) / ``status.other``, and the reviewer-signoff "no design changes"
@@ -184,7 +216,10 @@ from .protocols import GitReader
 EXTRACTOR_VERSION = "provenance-extract 1"
 RECORD_FORMAT = "record@1"
 BUILDER_BOTS = frozenset({"github-actions[bot]", "claude[bot]"})
+#: The Actions bot's REST and GraphQL spellings plus claude-code-action's ``claude[bot]``: the
+#: logins the platform rule puts on ``github-actions`` and the noise rule never calls third-party.
 OUR_BOTS = frozenset({"github-actions[bot]", "github-actions", "claude[bot]"})
+CLAUDE_APP_BOT = "claude[bot]"
 
 
 @dataclass(frozen=True)
@@ -228,9 +263,11 @@ _TAG_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _OWNER_RE = re.compile(r"[A-Za-z0-9-]+")
 _REPO_RE = re.compile(r"[A-Za-z0-9._-]+")
 _SESSION_RE = re.compile(r"https://claude\.ai/code/session_[A-Za-z0-9]{8,64}")
+#: The contract's ``types.url.re`` WITH H3's requested delta (the ``#pullrequestreview-<id>``
+#: anchor of a review-sourced event); tests/test_extract.py pins it to the delta-applied contract.
 _URL_RE = re.compile(
     r"https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/(issues/[0-9]+(#issuecomment-[0-9]+)?"
-    r"|pull/[0-9]+(/commits/[0-9a-f]{40}|#issuecomment-[0-9]+)?|commit/[0-9a-f]{40}"
+    r"|pull/[0-9]+(/commits/[0-9a-f]{40}|#issuecomment-[0-9]+|#pullrequestreview-[0-9]+)?|commit/[0-9a-f]{40}"
     r"|actions/runs/[0-9]+(/job/[0-9]+)?|releases/tag/[A-Za-z0-9._-]+"
     r"|blob/[0-9a-f]{40}/designs/[a-z0-9-]+/(PM|NOTES)\.md#L[0-9]+)")
 _TITLE_SLUG_RE = re.compile(r"Design brief: ([a-z0-9][a-z0-9-]{0,63})(?=$|\s)")
@@ -256,6 +293,11 @@ BRIEF_LEAD_KINDS = {"ship_lock": "brief.claimed", "shipped": "brief.shipped",
                     "declined": "brief.declined", "deferred": "brief.deferred",
                     "ship_lock_withdrawn": "brief.withdrawn"}
 CLOSE_REFERENCE_SECONDS = 60
+#: ``trust.status_tier``'s verified result — the only status tier that carries a runtime join.
+STATUS_RECEIPT_TIER = ("verified", "actions-status+receipt")
+#: A review body's ceiling: reviewer-posted.sh reads ONLY issue comments ("a planted marker
+#: there cannot satisfy the walk/stamp"), so a review is never the MCP-suffixed artifact.
+REVIEW_TIER_CAP = ("claimed", "marker:no-suffix")
 
 
 def _login(obj: Any) -> Optional[str]:
@@ -334,6 +376,7 @@ def build_url(owner: str, repo: str, kind: str, **ids: Any) -> str:
         return value
 
     shapes = {"issue": {"number"}, "issuecomment": {"number", "comment"}, "pull": {"number"},
+              "review": {"number", "review"},
               "pr_commit": {"number", "sha"}, "commit": {"sha"}, "run": {"run"},
               "job": {"run", "job"}, "release": {"tag"}, "blob": {"sha", "design", "file", "line"}}
     if kind not in shapes:
@@ -350,6 +393,8 @@ def build_url(owner: str, repo: str, kind: str, **ids: Any) -> str:
         tail = f"pull/{num('number')}"
         if ids.get("comment") is not None:
             tail += f"#issuecomment-{num('comment')}"
+    elif kind == "review":
+        tail = f"pull/{num('number')}#pullrequestreview-{num('review')}"
     elif kind == "pr_commit":
         tail = f"pull/{num('number')}/commits/{sha('sha')}"
     elif kind == "commit":
@@ -377,13 +422,14 @@ def build_url(owner: str, repo: str, kind: str, **ids: Any) -> str:
 
 
 def url_for(ctx: ExtractContext, kind: str, **ids: Any) -> str:
-    """Construct a permalink (kinds: issue, issuecomment, pull, pr_commit, commit, run, job,
+    """Construct a permalink (kinds: issue, issuecomment, pull, review, pr_commit, commit, run, job,
     release, blob). Every id is validated numeric / 40-hex / slug; anything else raises ValueError.
     ``blob`` is ``blob/<added_in_sha>/designs/<d>/<file>#L<original line>`` — the commit that
     added the row and its line THERE, so the URL never changes with main (critique item 6).
 
     Ids by kind: ``issue(number)``, ``issuecomment(number, comment)`` (an issue thread),
-    ``pull(number[, comment])`` (a PR, or a comment on its thread), ``pr_commit(number, sha)``,
+    ``pull(number[, comment])`` (a PR, or a comment on its thread), ``review(number, review)``
+    (``pull/<n>#pullrequestreview-<id>``, a PR review body), ``pr_commit(number, sha)``,
     ``commit(sha)``, ``run(run)``, ``job(run, job)``, ``release(tag)``,
     ``blob(sha, design, file, line)``; a missing or extra id raises ValueError."""
     return build_url(ctx.owner, ctx.repo, kind, **ids)
@@ -448,10 +494,15 @@ def _platform(*, login: Optional[str] = None, app: Optional[str] = None,
     return "unknown"
 
 
-def _runtime(platform: str, *, harness: Optional[str] = None, **joined: Any) -> dict[str, Any]:
+def _runtime(platform: str, *, harness: Optional[str] = None, login: Optional[str] = None,
+             **joined: Any) -> dict[str, Any]:
+    """The pre-serving runtime; ``login`` — the event's author login, for the ``claude[bot]``
+    harness rule of the module docstring."""
     out = empty_runtime(platform)
     if harness is None and platform == "claude-code":
         harness = "claude-code"
+    if harness is None and (login or "").lower() == CLAUDE_APP_BOT:
+        harness = "claude-code-action"
     out["harness"] = harness
     out.update(joined)
     return out
@@ -649,14 +700,33 @@ def _count_unknown(counts: dict[str, int], unknown: dict[str, int], author: Opti
 
 
 def _comment_event(comment: dict[str, Any], pr: int, ctx: ExtractContext) -> Optional[dict[str, Any]]:
-    """review.signoff | triage.verdict | coach.lock | coach.round | oracle.review, or None."""
-    dg = comment["body"]
-    ident, created = comment.get("id"), _ts(comment.get("created_at"))
+    """review.signoff | triage.verdict | coach.lock | coach.round | oracle.review from an issue
+    comment, or None."""
+    return _marker_event(comment, pr, ctx, source="issuecomment")
+
+
+def _review_event(review: dict[str, Any], pr: int, ctx: ExtractContext) -> Optional[dict[str, Any]]:
+    """The same kinds from a PR review body (``review:<id>``, ts ``submitted_at``; a pending review
+    with no ``submitted_at`` yields nothing), trust capped at :data:`REVIEW_TIER_CAP`."""
+    return _marker_event(review, pr, ctx, source="review")
+
+
+def _marker_event(item: dict[str, Any], pr: int, ctx: ExtractContext, *,
+                  source: str) -> Optional[dict[str, Any]]:
+    """One event from a body that carries an event marker or an event lead (module docstring);
+    ``source`` is ``issuecomment`` (an issue comment) or ``review`` (a PR review body: no ``app``,
+    no ``updated_at`` — a review is never edited — and never ``verified``)."""
+    dg = item["body"]
+    if source == "review":
+        created_raw, updated_raw, app = item.get("submitted_at"), None, None
+    else:
+        created_raw, updated_raw, app = item.get("created_at"), item.get("updated_at"), _app(item.get("app"))
+    ident, created = item.get("id"), _ts(created_raw)
     if not isinstance(ident, int) or isinstance(ident, bool) or ident < 1 or created is None:
         return None
-    user, app = comment.get("user"), _app(comment.get("app"))
+    user = item.get("user")
     login = _login(user)
-    edited = _edited(comment.get("created_at"), comment.get("updated_at"), ctx.edit_grace_seconds)
+    edited = _edited(created_raw, updated_raw, ctx.edit_grace_seconds)
     marker = _select_marker(dg)
     all_lines = _parsed(list(dg.get("marker_lines") or []) + list(dg.get("suffix_markers") or []))
     sha: Optional[str] = None
@@ -694,15 +764,20 @@ def _comment_event(comment: dict[str, Any], pr: int, ctx: ExtractContext) -> Opt
         return None
     if family is not None:
         tier = trust.comment_tier(kind=kind, login=login, owner_login=ctx.owner_login, digest=dg,
-                                  created_at=comment.get("created_at"),
-                                  updated_at=comment.get("updated_at"),
+                                  created_at=created_raw, updated_at=updated_raw,
                                   edit_grace_seconds=ctx.edit_grace_seconds, marker_sha=sha)
+        if source == "review" and tier[0] == "verified":
+            tier = REVIEW_TIER_CAP
     else:
         tier = ("claimed", "marker:edited") if edited and login else _login_trust(login)
     signals = _signals(app=app, login=login, login_type=_login_type(user), marker=family)
-    return _event(ident=f"issuecomment:{ident}", ts=created, kind=kind,
-                  url=url_for(ctx, "pull", number=pr, comment=ident), signals=signals, tier=tier,
-                  runtime=_runtime(_platform(login=login, app=app)), fields=fields, pr=pr, sha=sha)
+    if source == "review":
+        url = url_for(ctx, "review", number=pr, review=ident)
+    else:
+        url = url_for(ctx, "pull", number=pr, comment=ident)
+    return _event(ident=f"{source}:{ident}", ts=created, kind=kind, url=url, signals=signals, tier=tier,
+                  runtime=_runtime(_platform(login=login, app=app), login=login), fields=fields,
+                  pr=pr, sha=sha)
 
 
 # ---------------------------------------------------------------------------
@@ -752,10 +827,14 @@ def _status_event(status: dict[str, Any], sha: str, pr: int, ctx: ExtractContext
     if not isinstance(ident, int) or ident < 1 or ts is None or state not in STATUS_STATES or not _sha(sha):
         return None
     creator = _login(status.get("creator"))
-    tier = trust.status_tier(status, set(ctx.auto_review_run_ids))
+    tier = trust.status_tier(status, set(ctx.auto_review_run_ids), owner_login=ctx.owner_login)
     joined: dict[str, Any] = {}
     run_id = _run_id_of(status.get("target_url"), ctx)
-    if run_id is not None and run_id in ctx.auto_review_run_ids:
+    # The runtime join is the trust rule's own conclusion: only a status the rule verified as an
+    # Actions-bot status on an auto-review receipt run names that run. An owner-token (or any
+    # other writer's) status pointing at the same run gets no runtime, so trust and runtime
+    # can never disagree.
+    if tier == STATUS_RECEIPT_TIER and run_id is not None and run_id in ctx.auto_review_run_ids:
         joined = {"run_id": run_id, "workflow": "auto-review.yml"}
     return _event(ident=f"status:{ident}", ts=ts, kind="status.reviewer_signoff",
                   url=url_for(ctx, "pr_commit", number=pr, sha=sha),
@@ -894,7 +973,10 @@ def extract_pr(raw_pr: dict[str, Any], ctx: ExtractContext) -> dict[str, Any]:
     for review in raw_pr.get("reviews") or []:
         _count_unknown(noise, unknown_markers, _login(review.get("user")), ctx.owner_login,
                        review["body"].get("marker_lines") or [])
-        if review["body"].get("length") == 0:
+        event = _review_event(review, n, ctx)
+        if event is not None:
+            events.append(event)
+        elif review["body"].get("length") == 0:
             _bump(noise, "review.empty_wrapper")
         elif _is_bot(review.get("user")):
             _bump(noise, "review.bot")
@@ -1032,7 +1114,7 @@ def extract_brief(raw_brief: dict[str, Any], ctx: ExtractContext) -> dict[str, A
                              signals=_signals(app=comment_app, login=login,
                                               login_type=_login_type(comment.get("user"))),
                              tier=("claimed", "marker:edited") if edited and login else _login_trust(login),
-                             runtime=_runtime(_platform(login=login, app=comment_app)),
+                             runtime=_runtime(_platform(login=login, app=comment_app), login=login),
                              fields=fields, issue=n, pr=pr))
     closes = [e for e in timeline if e.get("event") == "closed" and isinstance(e.get("id"), int)
               and _ts(e.get("created_at"))]

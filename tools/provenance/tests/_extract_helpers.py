@@ -17,12 +17,14 @@ assertion depends on such a function's VALUES carries ``@needs(...)`` instead.
 from __future__ import annotations
 
 import calendar
+import copy
+import json
 import pathlib
 from typing import Any, Optional
 
 import pytest
 
-from conftest import (FIXTURE_MAIN_SHA, FIXTURES, OWNER, OWNER_LOGIN, REPO, REPO_NAME, _is_scaffold_stub,
+from conftest import (CONTRACT, FIXTURE_MAIN_SHA, FIXTURES, OWNER, OWNER_LOGIN, REPO, REPO_NAME, _is_scaffold_stub,
                       codebasis_blob, codebasis_index, main_history, raw_brief, raw_pr, raw_release, receipts)
 from fakes import FakeCommit, FakeGitReader
 
@@ -33,6 +35,52 @@ FIXTURE_BRIEFS = (281, 342, 363, 592)
 MAIN_REF = "refs/remotes/origin/main"
 REGISTRY = ".github/models/registry.conf"
 DESIGN_FILES = FIXTURES / "design-files"
+
+
+#: H3's requested delta to the FROZEN contract (site/lib/provenance-contract.json) — review-sourced
+#: events: ``(dotted path, the text there now, its replacement)``. The integrator applies it (and the
+#: matching ``canonical.SOURCE_RANK`` line, H2's file, which test_canonical pins to the contract);
+#: :func:`contract_with_delta` applies it in memory until then and is a no-op afterwards.
+CONTRACT_DELTA = (
+    ("types.url.re", "|pull/[0-9]+(/commits/[0-9a-f]{40}|#issuecomment-[0-9]+)?|",
+     "|pull/[0-9]+(/commits/[0-9a-f]{40}|#issuecomment-[0-9]+|#pullrequestreview-[0-9]+)?|"),
+    ("types.event_id.re", "|issuecomment:[0-9]+|", "|issuecomment:[0-9]+|review:[0-9]+|"),
+)
+#: ``enums.source_rank`` (and ``canonical.SOURCE_RANK``) gain ``review`` right after this prefix.
+SOURCE_RANK_AFTER = "issuecomment"
+
+
+def _at(data: dict[str, Any], dotted: str) -> tuple[dict[str, Any], str]:
+    *parents, leaf = dotted.split(".")
+    for key in parents:
+        data = data[key]
+    return data, leaf
+
+
+def delta_state(contract: dict[str, Any]) -> str:
+    """``pending`` (no part applied), ``applied`` (every part, exactly), else ``partial``."""
+    values = [(_at(contract, dotted)[0][_at(contract, dotted)[1]], old, new) for dotted, old, new in CONTRACT_DELTA]
+    rank = contract["enums"]["source_rank"]
+    if all(new in v for v, _, new in values) and "review" in rank \
+            and rank.index("review") == rank.index(SOURCE_RANK_AFTER) + 1:
+        return "applied"
+    if all(old in v and new not in v for v, old, new in values) and "review" not in rank:
+        return "pending"
+    return "partial"
+
+
+def contract_with_delta() -> dict[str, Any]:
+    """The contract JSON with :data:`CONTRACT_DELTA` applied (a deep copy; idempotent)."""
+    data = copy.deepcopy(json.loads(CONTRACT.read_text(encoding="utf-8")))
+    for dotted, old, new in CONTRACT_DELTA:
+        holder, leaf = _at(data, dotted)
+        if new not in holder[leaf]:
+            assert holder[leaf].count(old) == 1, (dotted, old)
+            holder[leaf] = holder[leaf].replace(old, new)
+    rank = data["enums"]["source_rank"]
+    if "review" not in rank:
+        rank.insert(rank.index(SOURCE_RANK_AFTER) + 1, "review")
+    return data
 
 
 def epoch(ts: str) -> int:
@@ -142,7 +190,7 @@ def _classify_standin(paths: list[str], *, title: str, merged: bool) -> dict[str
 #: (module, function, neutral stand-in) for the other builders' functions extraction calls.
 STANDINS = (
     (trust, "comment_tier", lambda **kw: ("login", "login")),
-    (trust, "status_tier", lambda status, run_ids: ("login", "login")),
+    (trust, "status_tier", lambda status, run_ids, *, owner_login: ("login", "login")),
     (markers, "unknown_families", lambda author, owner, lines: []),
     (membership, "classify_pr", _classify_standin),
 )
@@ -231,7 +279,7 @@ def design_rows(design: str) -> list[dict[str, Any]]:
         if text is not None:
             path = f"designs/{design}/{name}"
             files[path] = text.encode("utf-8")
-            blame[path] = [(FIXTURE_MAIN_SHA, i + 1) for i in range(len(text.split("\n")))]
+            blame[path] = [(FIXTURE_MAIN_SHA, i + 1) for i in range(episodes.git_line_count(files[path]))]
     git = FakeGitReader([FakeCommit(FIXTURE_MAIN_SHA, [], 0, "Add design (#636)", files=files, blame=blame)])
     return episodes.decision_rows(git, FIXTURE_MAIN_SHA, design, owner=OWNER, repo=REPO_NAME, commit_to_pr={})
 

@@ -13,6 +13,8 @@ import hashlib
 import json
 import re
 
+import pytest
+
 from conftest import OWNER, REPO, REPO_NAME, golden, raw_pr
 from fakes import FakeCommit, FakeGitReader
 from _extract_helpers import design_file, events_of, fixture_ctx, pr_record, standins  # noqa: F401  (standins is a fixture)
@@ -282,13 +284,34 @@ def test_rows_use_the_original_line_and_adding_commit():
     assert row["id"] == f"row:d:PM.md:{sha256[:16]}:0" and row["episode"] == "D:2026-08-01"
     assert (row["ts"], row["ts_precision"], row["trust"]) == ("2026-08-01T00:00:00Z", "day", "none")
     assert SHA["6"] not in canonical.dumps(a) and SHA["7"] not in canonical.dumps(b)
-    # Identical text twice → occurrence index 0 and 1; a line with no blame entry is skipped.
+    # Identical text twice → occurrence index 0 and 1 (the third row has its own text).
     twice = (b"## Decision log\n\n| Date | Decision | Reason |\n|---|---|---|\n"
              b"| 2026-08-01 | Same | r |\n| 2026-08-01 | Same | r |\n| 2026-08-02 | Third | r |\n")
     git.commits[SHA["8"]] = FakeCommit(SHA["8"], [SHA["7"]], 5, "z (#24)", files={"designs/d/PM.md": twice},
-                                       blame={"designs/d/PM.md": [(s, i + 1) for i in range(6)]})
+                                       blame={"designs/d/PM.md": [(s, i + 1) for i in range(7)]})
     rows = episodes.decision_rows(git, SHA["8"], "d", owner=OWNER, repo=REPO_NAME, commit_to_pr={})
-    assert sorted(r["id"].rsplit(":", 1)[1] for r in rows) == ["0", "1"]
+    assert sorted(r["id"].rsplit(":", 1)[1] for r in rows) == ["0", "0", "1"]
+    assert episodes.git_line_count(twice) == 7 and episodes.git_line_count(twice[:-1]) == 7
+    assert episodes.git_line_count(b"") == 0 and episodes.git_line_count(b"x") == 1
+
+
+def test_rows_fail_closed_when_blame_does_not_cover_the_file():
+    """A file holding rows whose blame is shorter than the file, longer than it, or empty (a failed
+    `git blame` reads as []) raises BlameUnavailable — derive aborts like a failed bulk fetch; no
+    row is silently dropped. A file with no rows needs no blame at all (the control)."""
+    pm = (b"## Decision log\n\n| Date | Decision | Reason |\n|---|---|---|\n"
+          b"| 2026-08-01 | Keep | r |\n| 2026-08-02 | Also | r |\n")
+    full = [(SHA["1"], i + 1) for i in range(episodes.git_line_count(pm))]
+
+    def rows(blame, text=pm):
+        git = FakeGitReader([FakeCommit(SHA["1"], [], 1, "Add (#5)", files={"designs/d/PM.md": text},
+                                        blame={"designs/d/PM.md": blame})])
+        return episodes.decision_rows(git, SHA["1"], "d", owner=OWNER, repo=REPO_NAME, commit_to_pr={})
+    assert len(rows(full)) == 2                                          # the positive control
+    for broken in (full[:-1], [], full + [(SHA["1"], 7)]):
+        with pytest.raises(episodes.BlameUnavailable):
+            rows(broken)
+    assert rows([], text=b"# PM\n\nno decision log here\n") == []        # no rows: blame never consulted
 
 
 def test_place_assigns_unplaced_events(standins):
@@ -365,6 +388,47 @@ def test_force_pushed_heads_incomplete(standins):
     raw["incomplete"] = ["commits-truncated"]
     assert extract.extract_pr(raw, fixture_ctx())["incomplete"] == ["commits-truncated"]
     assert pr_record(371)["incomplete"] == []
+
+
+def test_final_head_without_push_evidence_falls_back_to_its_commit_date(standins):
+    """#371 with the final head 69c14983's ci runs and statuses removed (a degraded capture:
+    no-ci-runs + statuses-unavailable): the final round's pushed_at is 69c14983's committer date
+    (23:41:38, a lower bound four seconds before its first status), so the previous round ends
+    there and the three sign-offs naming the live head land in R:371:69c14983, not stale. Negative
+    controls: a committer date not after every other push, or a final head absent from commits,
+    keeps pushed_at None."""
+    raw = raw_pr(371)
+    final = raw["pull"]["head"]["sha"]
+    assert final.startswith("69c14983")
+    raw["ci_runs"] = [r for r in raw["ci_runs"] if r["head_sha"] != final]
+    raw["statuses"] = {sha: v for sha, v in raw["statuses"].items() if sha != final}
+    rs = episodes.rounds(raw)
+    assert [(r.id, r.pushed_at, r.end) for r in rs] == [
+        ("R:371:1c91268b", "2026-08-23T17:20:54Z", "2026-08-23T23:41:38Z"),
+        ("R:371:69c14983", "2026-08-23T23:41:38Z", raw["pull"]["merged_at"])]
+    rec = extract.extract_pr(raw, fixture_ctx())
+    naming = [e for e in rec["events"] if e["kind"] == "review.signoff" and e["sha"] == final]
+    assert len(naming) == 3                                              # Drik + Jane (comment) + Jane (review)
+    assert all((e["episode"], e["stale_sha"], e["head_sha"]) == ("R:371:69c14983", False, final) for e in naming)
+    # Controls: the fallback is refused when it is not later than every other push …
+    early = copy.deepcopy(raw)
+    for c in early["commits"]:
+        if c["sha"] == final:
+            c["commit"]["committer"]["date"] = "2026-08-23T17:20:00Z"
+    assert episodes.push_times(early)[final] is None
+    stale = extract.extract_pr(early, fixture_ctx())
+    assert {e["stale_sha"] for e in stale["events"] if e["kind"] == "review.signoff" and e["sha"] == final} == {True}
+    # … falls back to the author date when there is no committer date …
+    no_committer = copy.deepcopy(raw)
+    for c in no_committer["commits"]:
+        if c["sha"] == final:
+            c["commit"]["committer"] = None
+    assert episodes.push_times(no_committer)[final] == "2026-08-23T23:41:38Z"
+    # … and is absent for a final head not in commits; a head WITH push evidence never uses it.
+    gone = copy.deepcopy(raw)
+    gone["commits"] = [c for c in gone["commits"] if c["sha"] != final]
+    assert episodes.push_times(gone)[final] is None
+    assert episodes.push_times(raw_pr(371))[final] == "2026-08-23T23:41:42Z"
 
 
 def test_regen_first_push_is_its_own_round():

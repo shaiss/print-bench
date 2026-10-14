@@ -16,27 +16,56 @@ import pytest
 
 from conftest import CONTRACT, FIXTURE_MAIN_SHA, OWNER, OWNER_LOGIN, REPO_NAME, needs, raw_brief, raw_pr
 from fakes import FakeCommit, FakeGitReader
-from _extract_helpers import (FIXTURE_BRIEFS, FIXTURE_PRS, brief_record, events_of, fixture_ctx, fixture_git,
-                              pr_record, release_record, standins)  # noqa: F401  (standins is a fixture)
+from _extract_helpers import (CONTRACT_DELTA, FIXTURE_BRIEFS, FIXTURE_PRS, SOURCE_RANK_AFTER, brief_record,
+                              contract_with_delta, delta_state, events_of, fixture_ctx, fixture_git, pr_record,
+                              release_record, standins)  # noqa: F401  (standins is a fixture)
 
 from provenance import canonical, contract, episodes, extract, markers, membership, trust
 
-URL_RE = re.compile(json.loads(CONTRACT.read_text(encoding="utf-8"))["types"]["url"]["re"])
+#: The contract's url pattern WITH H3's requested review delta (a no-op once the integrator applies it).
+DELTA_CONTRACT = contract_with_delta()
+URL_RE = re.compile(DELTA_CONTRACT["types"]["url"]["re"])
+EVENT_ID_RE = re.compile(DELTA_CONTRACT["types"]["event_id"]["re"])
 SHA = {c: c * 40 for c in "abcdef0123456789"}
 
 
 @needs(contract.validate, contract.load_contract)
 def test_pr_records_validate(standins):
-    """extract_pr over every fixture raw PR yields a record that contract.check('record@1:pr') accepts."""
+    """extract_pr over every fixture raw PR yields a record that contract.check('record@1:pr') accepts
+    (the contract with H3's requested review delta applied — review:<id> events)."""
     ctx = fixture_ctx(fixture_git())
     for n in FIXTURE_PRS:
-        assert contract.validate("record@1:pr", pr_record(n, ctx)) == [], n
+        assert contract.validate("record@1:pr", pr_record(n, ctx), DELTA_CONTRACT) == [], n
     for b in FIXTURE_BRIEFS:
-        assert contract.validate("record@1:brief", brief_record(b, ctx)) == [], b
-    assert contract.validate("record@1:release", release_record(ctx=ctx)) == []
+        assert contract.validate("record@1:brief", brief_record(b, ctx), DELTA_CONTRACT) == [], b
+    assert contract.validate("record@1:release", release_record(ctx=ctx), DELTA_CONTRACT) == []
     broken = pr_record(636, ctx)
     broken["events"][0]["extra"] = 1
-    assert contract.validate("record@1:pr", broken) != []
+    assert contract.validate("record@1:pr", broken, DELTA_CONTRACT) != []
+    if delta_state(json.loads(CONTRACT.read_text(encoding="utf-8"))) == "pending":
+        # The control the delta exists for: the frozen contract refuses a review-sourced event.
+        assert contract.validate("record@1:pr", pr_record(397, ctx)) != []
+
+
+def test_requested_contract_delta_is_exact(standins):
+    """The frozen contract is either untouched by H3's review delta (pending) or carries every
+    part of it exactly (applied) — never half of it; extraction's url pattern is the delta-applied
+    contract's, and every extracted event id full-matches the delta-applied event_id pattern."""
+    frozen = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    assert delta_state(frozen) in ("pending", "applied")
+    assert delta_state(DELTA_CONTRACT) == "applied" and delta_state(contract_with_delta()) == "applied"
+    rank = DELTA_CONTRACT["enums"]["source_rank"]
+    assert rank[rank.index(SOURCE_RANK_AFTER) + 1] == "review" and rank.count("review") == 1
+    assert extract._URL_RE.pattern == DELTA_CONTRACT["types"]["url"]["re"]
+    assert len(CONTRACT_DELTA) == 2
+    half = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    half["enums"]["source_rank"] = list(rank)                            # rank applied, the regexes not
+    if delta_state(frozen) == "pending":
+        assert delta_state(half) == "partial"                             # the check can fail
+    ctx = fixture_ctx(fixture_git())
+    for n in FIXTURE_PRS:
+        for e in pr_record(n, ctx)["events"]:
+            assert EVENT_ID_RE.fullmatch(e["id"]), e["id"]
 
 
 def test_every_event_has_a_constructed_url(standins):
@@ -68,6 +97,7 @@ def test_url_for_refuses_bad_ids():
     assert extract.url_for(ctx, "issuecomment", number=592, comment=7) == base + "issues/592#issuecomment-7"
     assert extract.url_for(ctx, "pull", number=636) == base + "pull/636"
     assert extract.url_for(ctx, "pull", number=636, comment=9) == base + "pull/636#issuecomment-9"
+    assert extract.url_for(ctx, "review", number=397, review=5) == base + "pull/397#pullrequestreview-5"
     assert extract.url_for(ctx, "pr_commit", number=636, sha=SHA["a"]) == base + f"pull/636/commits/{SHA['a']}"
     assert extract.url_for(ctx, "commit", sha=SHA["b"]) == base + f"commit/{SHA['b']}"
     assert extract.url_for(ctx, "job", run=1, job=2) == base + "actions/runs/1/job/2"
@@ -79,7 +109,9 @@ def test_url_for_refuses_bad_ids():
            ("issue", {"number": 1, "extra": 2}), ("pr_commit", {"number": 1}),
            ("blob", {"sha": SHA["a"], "design": "Bad", "file": "PM.md", "line": 1}),
            ("blob", {"sha": SHA["a"], "design": "d", "file": "README.md", "line": 1}),
-           ("release", {"tag": "v 2"}), ("run", {"run": -1})]
+           ("release", {"tag": "v 2"}), ("run", {"run": -1}),
+           ("review", {"number": 397}), ("review", {"number": 397, "review": "5"}),
+           ("review", {"number": 397, "review": 5, "comment": 6})]
     for kind, ids in bad:
         with pytest.raises(ValueError):
             extract.url_for(ctx, kind, **ids)
@@ -370,15 +402,15 @@ def test_comment_marker_selection(standins):
 
 def test_trust_is_delegated(monkeypatch, standins):
     """Marker events take trust.comment_tier (marker sha passed); reviewer-signoff statuses take
-    trust.status_tier with ctx.auto_review_run_ids; ci.gate is verified/receipt."""
+    trust.status_tier with ctx.auto_review_run_ids and owner_login; ci.gate is verified/receipt."""
     calls, status_calls = [], []
 
     def tier(**kw):
         calls.append(kw)
         return ("verified", "actions-bot+suffix")
 
-    def stier(status, ids):
-        status_calls.append((status["id"], frozenset(ids)))
+    def stier(status, ids, *, owner_login):
+        status_calls.append((status["id"], frozenset(ids), owner_login))
         return ("verified", "actions-status+receipt")
     monkeypatch.setattr(trust, "comment_tier", tier)
     monkeypatch.setattr(trust, "status_tier", stier)
@@ -388,7 +420,7 @@ def test_trust_is_delegated(monkeypatch, standins):
     call = next(c for c in calls if c["marker_sha"] == "9a751b26e18dac7f9c8c9464fd37a2e4c6c63f2c")
     assert call["kind"] == "review.signoff" and call["login"] == "github-actions[bot]" and call["owner_login"] == OWNER_LOGIN
     assert len(calls) == 25 + 6                                          # sign-offs + triages, nothing else
-    assert status_calls and all(ids == frozenset({38161046420}) for _, ids in status_calls)
+    assert status_calls and all(ids == frozenset({38161046420}) and who == OWNER_LOGIN for _, ids, who in status_calls)
     stale = next(e for e in rec["events"] if e["id"] == "status:56095459342")
     assert stale["runtime"]["run_id"] == 38161046420 and stale["runtime"]["workflow"] == "auto-review.yml"
     assert stale["fields"] == {"reason": "stale", "state": "failure", "verdict": "BLOCK"}
@@ -438,3 +470,139 @@ def test_pr_record_shape(standins):
     assert rec2["evidence"]["raw"] == "raw/pr/636.r2.json.gz" and rec2["threads"] is None
     opened = events_of(rec, "pr.opened")[0]
     assert opened["fields"] == {"draft": True}                           # opened as draft: ready_for_review follows
+
+
+def test_review_bodies_yield_signoffs(standins):
+    """A PR review body is selected like an issue comment (the M3 era posted Jane with `gh pr
+    review`): #397's 14 Jane review sign-offs and #371's one become review.signoff events with id
+    review:<id>, ts submitted_at, the marker's sha (not the review's commit_id), url
+    pull/<n>#pullrequestreview-<id>, never edited; reviews with no event marker stay noise."""
+    for n, want in ((371, 1), (397, 14)):
+        raw = raw_pr(n)
+        marked = {r["id"]: r for r in raw["reviews"] if any("_SIGNOFF" in m for m in r["body"]["marker_lines"])}
+        assert len(marked) == want
+        rec = pr_record(n)
+        got = {e["id"]: e for e in events_of(rec, "review.signoff") if e["id"].startswith("review:")}
+        assert set(got) == {f"review:{i}" for i in marked}
+        for ident, review in marked.items():
+            e = got[f"review:{ident}"]
+            sha = markers.parse_signoff(markers.parse_marker(review["body"]["marker_lines"][-1]))["sha"]
+            assert (e["ts"], e["sha"], e["fields"]["family"], e["fields"]["edited"]) == (
+                review["submitted_at"], sha, "JANE_SIGNOFF", False)
+            assert e["url"] == f"https://github.com/{OWNER}/{REPO_NAME}/pull/{n}#pullrequestreview-{ident}"
+            assert e["signals"]["login"] == "github-actions[bot]" and e["signals"]["app"] is None
+            assert e["runtime"]["platform"] == "github-actions" and e["episode"].startswith(f"R:{n}:")
+        noise = rec["noise_counts"]
+        assert noise["review.bot"] == 1                                      # the Copilot review only
+        assert noise["review.empty_wrapper"] == {371: 4, 397: 29}[n]
+    odd = next(e for e in events_of(pr_record(397), "review.signoff") if e["id"] == "review:5009969812")
+    assert odd["sha"].startswith("8ebc3443")                             # the marker's sha, not commit_id 99fdc73d
+    # A pending review (no submitted_at) yields nothing and is counted.
+    raw = raw_pr(371)
+    for r in raw["reviews"]:
+        if r["id"] == 5003707361:
+            r["submitted_at"] = None
+    rec = extract.extract_pr(raw, fixture_ctx())
+    assert "review:5003707361" not in {e["id"] for e in rec["events"]} and rec["noise_counts"]["review.bot"] == 2
+    # A PM_TRIAGE marker in a review body is a triage.verdict the same way (synthetic: no fixture has one).
+    triage = {"body": {"digest": "body-digest@1", "footer_ok": False, "head_marker": None, "lead": None,
+                       "lead_fields": {}, "length": 40, "marker_lines": [f"<!-- PM_TRIAGE design=sbc-case sha={SHA['a']} -->"],
+                       "refs_closes": [], "sha256": "0" * 64, "suffix_markers": [], "suffix_ok": False,
+                       "table_verdicts": ["act-now", "decline"]},
+              "commit_id": SHA["b"], "id": 77, "state": "COMMENTED", "submitted_at": "2026-08-24T01:00:00Z",
+              "user": {"login": "github-actions[bot]", "type": "Bot"}}
+    ev = extract._review_event(triage, 371, fixture_ctx())
+    assert (ev["id"], ev["kind"], ev["sha"], ev["fields"]["designs"], ev["fields"]["act_now"]) == (
+        "review:77", "triage.verdict", SHA["a"], ["sbc-case"], 1)
+
+
+def test_review_trust_is_capped_below_verified(monkeypatch, standins):
+    """reviewer-posted.sh reads only issue comments, so a review body is never verified: with
+    comment_tier answering verified for everything, the issue-comment sign-offs stay verified and
+    every review-sourced one is claimed/marker:no-suffix (incl. #397's review whose digest ends
+    with the MCP suffix); a non-verified tier passes through unchanged."""
+    calls = []
+
+    def tier(**kw):
+        calls.append(kw)
+        return ("verified", "actions-bot+suffix")
+    monkeypatch.setattr(trust, "comment_tier", tier)
+    signoffs = events_of(pr_record(397), "review.signoff")
+    assert {e["trust"] for e in signoffs if e["id"].startswith("issuecomment:")} == {"verified"}
+    capped = [e for e in signoffs if e["id"].startswith("review:")]
+    assert len(capped) == 14 and {(e["trust"], e["trust_basis"]) for e in capped} == {("claimed", "marker:no-suffix")}
+    suffixed = next(r for r in raw_pr(397)["reviews"] if r["body"]["suffix_ok"])
+    assert next(e for e in capped if e["id"] == f"review:{suffixed['id']}")["trust"] == "claimed"
+    review_call = next(c for c in calls if c["created_at"] == suffixed["submitted_at"])
+    assert review_call["updated_at"] is None and review_call["kind"] == "review.signoff"
+    monkeypatch.setattr(trust, "comment_tier", lambda **kw: ("claimed", "marker:owner-token"))
+    assert {e["trust_basis"] for e in events_of(pr_record(397), "review.signoff")} == {"marker:owner-token"}
+
+
+def _signoff_statuses(raw: dict, run: int) -> dict:
+    """Two reviewer-signoff statuses naming the same auto-review run: one by the Actions bot (id
+    11), one created from the owner's token (id 12)."""
+    sha = sorted(raw["statuses"])[0]
+    base = {"context": "reviewer-signoff", "created_at": "2026-10-05T18:15:15Z",
+            "description": "Jane blocked (verdict=block)", "state": "failure",
+            "target_url": f"https://github.com/{OWNER}/{REPO_NAME}/actions/runs/{run}", "updated_at": None}
+    raw["statuses"][sha] = raw["statuses"][sha] + [dict(base, id=11, creator="github-actions[bot]"),
+                                                   dict(base, id=12, creator=OWNER_LOGIN)]
+    return raw
+
+
+def test_status_runtime_join_follows_the_trust_rule(monkeypatch, standins):
+    """The reviewer-signoff status runtime join (run_id + auto-review.yml) is made only when
+    status_tier verified the status as an Actions-bot status on an auto-review receipt run: an
+    owner-created status whose target_url names the same receipt run gets no runtime."""
+    run = 38161046420
+
+    def faithful(status, ids, *, owner_login):                           # status_tier's rule, by creator
+        ok = status.get("creator") in ("github-actions[bot]", "github-actions")
+        return ("verified", "actions-status+receipt") if ok and run in ids else ("login", "login")
+    monkeypatch.setattr(trust, "status_tier", faithful)
+    rec = extract.extract_pr(_signoff_statuses(raw_pr(636), run), fixture_ctx(auto_review_run_ids=frozenset({run})))
+    bot, owner = (next(e for e in rec["events"] if e["id"] == f"status:{i}") for i in (11, 12))
+    assert (bot["runtime"]["run_id"], bot["runtime"]["workflow"], bot["trust"]) == (run, "auto-review.yml", "verified")
+    assert (owner["runtime"]["run_id"], owner["runtime"]["workflow"], owner["trust"]) == (None, None, "login")
+    rec = extract.extract_pr(_signoff_statuses(raw_pr(636), run), fixture_ctx(auto_review_run_ids=frozenset()))
+    assert next(e for e in rec["events"] if e["id"] == "status:11")["runtime"]["run_id"] is None
+
+
+@needs(trust.status_tier)
+def test_status_runtime_join_with_the_real_tier(standins):
+    """The same split through H2's real status_tier: an owner-created status on an auto-review run is not joined."""
+    run = 38161046420
+    rec = extract.extract_pr(_signoff_statuses(raw_pr(636), run), fixture_ctx(auto_review_run_ids=frozenset({run})))
+    bot, owner = (next(e for e in rec["events"] if e["id"] == f"status:{i}") for i in (11, 12))
+    assert bot["runtime"]["run_id"] == run and bot["trust"] == "verified"
+    assert owner["runtime"]["run_id"] is None and owner["trust"] != "verified"
+
+
+def test_platform_rules():
+    """The platform rule order of the module docstring, with the claude[bot] cases: its comments
+    are claude-code-action inside Actions (github-actions, harness claude-code-action), a user-login
+    comment via the claude app is claude-code, an unknown bot is unknown."""
+    p = extract._platform
+    assert p(login="github-actions[bot]") == p(login="github-actions") == "github-actions"
+    assert p(login="claude[bot]") == "github-actions"
+    assert p(login=OWNER_LOGIN, app="claude") == "claude-code"
+    assert p(login="claude") == "claude-code"
+    assert p(login="cursor[bot]") == "cursor" and p(login="coderabbitai[bot]") == "coderabbit"
+    assert p(login="someone[bot]") == "unknown" and p(login=OWNER_LOGIN) == "unknown"
+    assert p(login="x", author_name="claude[bot]") == "github-actions"          # a builder commit by name
+    assert p(login="x", committer_login="web-flow") == "github-web"
+    comment = {"app": "claude", "body": {"digest": "body-digest@1", "footer_ok": False, "head_marker": None,
+                                         "lead": "coach_round", "lead_fields": {"round": 2, "round_sub": None},
+                                         "length": 10, "marker_lines": [], "refs_closes": [], "sha256": "0" * 64,
+                                         "suffix_markers": [], "suffix_ok": False, "table_verdicts": []},
+               "created_at": "2026-10-11T17:57:29Z", "id": 42, "updated_at": None,
+               "user": {"login": "claude[bot]", "type": "Bot"}}
+    ev = extract._comment_event(comment, 636, fixture_ctx())
+    assert (ev["runtime"]["platform"], ev["runtime"]["harness"]) == ("github-actions", "claude-code-action")
+    comment["user"] = {"login": OWNER_LOGIN, "type": "User"}
+    ev = extract._comment_event(comment, 636, fixture_ctx())
+    assert (ev["runtime"]["platform"], ev["runtime"]["harness"]) == ("claude-code", "claude-code")
+    comment["user"], comment["app"] = {"login": "github-actions[bot]", "type": "Bot"}, None
+    ev = extract._comment_event(comment, 636, fixture_ctx())
+    assert (ev["runtime"]["platform"], ev["runtime"]["harness"]) == ("github-actions", None)

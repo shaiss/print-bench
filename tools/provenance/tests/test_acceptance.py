@@ -6,6 +6,11 @@ receipt_events → place (the serving steps once H4's join exists). A check
 whose value depends on another builder's function carries ``@needs`` and runs
 at integration; the structural checks run now (``standins`` covers H2's
 still-unimplemented calls) and again, unchanged, at integration.
+
+Beyond the 21: ``test_sbc_signoffs_include_review_bodies`` pins the sbc-case
+design's 31 sign-offs to the golden by (id, ts, sha) — 15 of them exist only
+as PR review bodies, which no audit check counted, so an extractor that
+dropped reviews as noise passed all 21.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ import json
 
 import pytest
 
-from conftest import CONTRACT, FIXTURES, OWNER_LOGIN, golden_full, needs, raw_pr
+from conftest import CONTRACT, FIXTURES, OWNER_LOGIN, golden, golden_full, needs, raw_pr
 from _extract_helpers import design_rows, events_of, handle, harvest as run_harvest, standins  # noqa: F401
 
 from provenance import codebasis, membership, serving, trust, views
@@ -119,7 +124,7 @@ def test_nvc11_deploy(harvest):
 
 
 def test_nvc12_noise_rebaselined(harvest):
-    """NVC-12 (re-baselined): (noise_counts['comment.bugbot_limit'], ['comment.qodo_paused'], ['timeline.deployed'], ['status.coderabbit']) equals the tuple committed in tests/fixtures/acceptance.json with its derivation (the golden's 21, 1, 46, 33 counted per-SHA check runs and the Deployments API, which the harvester does not read)."""
+    """NVC-12 (re-baselined): (noise_counts['comment.bugbot_limit'], ['comment.qodo_paused'], ['timeline.deployed'], ['status.coderabbit']) equals the tuple committed in tests/fixtures/acceptance.json with its derivation. Three elements equal the golden's (21, 1, 33); the third moves source: the golden's 46 deploy.preview rows are the 46 Vercel commit statuses (same (sha, ts) set), which the harvester keeps as noise status.vercel = 46 (pinned here), while the tuple's third element is the timeline's preview deployments, timeline.deployed = 22."""
     spec = json.loads((FIXTURES / "acceptance.json").read_text(encoding="utf-8"))["NVC-12"]
     noise = harvest["prs"][spec["pr"]]["noise_counts"]
     assert tuple(noise.get(k, 0) for k in spec["keys"]) == tuple(spec["expected"]) == (21, 1, 22, 33)
@@ -183,11 +188,37 @@ def test_sbc6_coach_rounds(harvest):
 
 
 def test_sbc7_threads_reexpressed(harvest):
-    """SBC-7 (re-expressed): #397 threads (total 26, resolved 6) — reply-text claims are not stored."""
+    """SBC-7 (re-expressed): the sbc-case design's review threads across #371 + #397 (total 26, resolved 6 — #371 4/0, #397 22/6) — reply-text claims are not stored."""
     threads = [harvest["prs"][n]["threads"] for n in (371, 397)]               # the sbc-case design: both PRs
     assert (sum(t["total"] for t in threads), sum(t["resolved"] for t in threads)) == (26, 6)
     assert harvest["prs"][397]["threads"] == {"resolved": 6, "total": 22}
     assert set(harvest["prs"][397]["threads"]) == {"total", "resolved"}       # counts only, no reply prose
+    assert harvest["prs"][371]["threads"] == {"resolved": 0, "total": 4}
+
+
+def _golden_event_id(url: str) -> str:
+    """The harvester id of a golden event from its anchor (#issuecomment-N / #pullrequestreview-N)."""
+    anchor = url.rsplit("#", 1)[1]
+    kind, _, number = anchor.rpartition("-")
+    return {"issuecomment": "issuecomment", "pullrequestreview": "review"}[kind] + ":" + number
+
+
+def test_sbc_signoffs_include_review_bodies(harvest):
+    """sbc-case: 31 review.signoff events over #371 + #397 — the golden's 31, matched by (id, ts, sha):
+    16 from issue comments (#371: 2, #397: 14 Drik) and 15 from PR review bodies, every one a Jane
+    sign-off (#371: 1, #397: 14 — every Jane sign-off on #397), the M3 era's `gh pr review` posts."""
+    ours = [e for n in (371, 397) for e in events_of(harvest["prs"][n], "review.signoff")]
+    gold = [e for e in golden("sbc-case")["events"] if e["kind"] == "review.signoff"]
+    assert len(ours) == len(gold) == 31
+    assert ({(e["id"], e["ts"], e["sha"]) for e in ours}
+            == {(_golden_event_id(e["url"]), e["ts"], e["sha"]) for e in gold})
+    reviews = [e for e in ours if e["id"].startswith("review:")]
+    assert len(reviews) == 15 and {e["fields"]["family"] for e in reviews} == {"JANE_SIGNOFF"}
+    assert collections.Counter(e["pr"] for e in reviews) == {371: 1, 397: 14}
+    on_397 = [e for e in ours if e["pr"] == 397]
+    assert all(e["id"].startswith("review:") for e in on_397 if e["fields"]["family"] == "JANE_SIGNOFF")
+    assert collections.Counter(e["pr"] for e in ours if e["id"].startswith("issuecomment:")) == {371: 2, 397: 14}
+    assert all(e["trust"] != "verified" for e in reviews)                  # a review body is never verified
 
 
 @pytest.mark.skip(reason="P3c: SBC-8 is a site test (actors.conf / #496), not in this build")

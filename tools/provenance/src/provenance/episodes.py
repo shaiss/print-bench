@@ -6,7 +6,16 @@
 CodeRabbit post one per pushed head even when ci.yml did not run — PR
 #634's three one-second web commits are each a round only by this rule).
 Its ``pushed_at`` is the earliest of those runs' ``created_at`` and those
-statuses' ``created_at`` (``None`` for a final head with no run or status).
+statuses' ``created_at``. A final head with no run and no status (a degraded
+capture: ``no-ci-runs`` plus ``statuses-unavailable:<sha8>``) falls back to
+its commit's committer date (author date when absent) — a lower bound, since
+a commit exists before it is pushed, and seconds early for an agent push
+(#371's final head 69c14983: committed 23:41:38, first status 23:41:42) —
+accepted only when it is later than every other pushed head's time (the
+final head is the last push); otherwise, or when the final head is not in
+``commits``, ``None``. Without the fallback the final round would never be
+live, so sign-offs naming the live head would land in the previous round
+flagged ``stale_sha``.
 A pushed head missing from ``commits`` (force-pushed away) still forms a
 push, with no commits, and the record gains ``incomplete:
 force-pushed-heads`` (``extract.extract_pr``; not when ``commits-truncated``,
@@ -102,8 +111,12 @@ text — the raw line as ``text.split("\\n")`` yields it), added_in_sha,
 added_in_pr}``: ``GitReader.blame_lines`` gives the sha that added the line
 AND the line's number in that commit — ``line`` is that ORIGINAL line and
 the ``url`` is ``blob/<added_in_sha>/designs/<d>/<file>#L<line>``, so neither
-changes when main moves (critique item 6; ``added_in_sha`` is required — a
-row whose line has no blame entry is skipped); ``added_in_pr`` is that sha's
+changes when main moves (critique item 6; ``added_in_sha`` is required —
+blame over the full-history checkout always resolves, so a blame that does
+not cover the file line for line, ``[]`` from a failed ``git blame``
+included, raises :class:`BlameUnavailable` and derive aborts like a failed
+bulk fetch: failing closed instead of publishing a view whose rows silently
+vanished); ``added_in_pr`` is that sha's
 PR — the first-parent main commit that contains it (the sha itself when it
 is on the first-parent chain, else the oldest first-parent MERGE commit it
 is an ancestor of), read from its subject ``(#N)`` (squash) or ``Merge pull
@@ -172,6 +185,13 @@ ROW_KINDS = frozenset({"decision.pm_log", "decision.notes_log", "field_test", "c
 DAY_KINDS = ROW_KINDS | {"release"}
 #: Commit kinds a sign-off's ``verifies`` edge can cover.
 VERIFIABLE_COMMIT_KINDS = frozenset({"commit.design", "commit.fix", "commit.human"})
+_TS_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+
+
+class BlameUnavailable(RuntimeError):
+    """``GitReader.blame_lines`` does not cover a committed file that holds rows (a failed blame
+    reads as ``[]``). Derive must abort — fail closed, like a failed bulk fetch — never publish a
+    view with that file's rows silently missing."""
 
 
 @dataclass(frozen=True)
@@ -221,7 +241,25 @@ def push_times(raw_pr: dict[str, Any]) -> dict[str, Optional[str]]:
     final = ((raw_pr.get("pull") or {}).get("head") or {}).get("sha")
     if final:
         times.setdefault(final, [])
-    return {sha: (min(ts) if ts else None) for sha, ts in times.items()}
+    out = {sha: (min(ts) if ts else None) for sha, ts in times.items()}
+    if final and out[final] is None:
+        out[final] = _final_head_fallback(raw_pr, final, out)
+    return out
+
+
+def _final_head_fallback(raw_pr: dict[str, Any], final: str,
+                         known: dict[str, Optional[str]]) -> Optional[str]:
+    """The final head's committer (else author) date when later than every other push (docstring)."""
+    commit = next((c for c in raw_pr.get("commits") or [] if c.get("sha") == final), None)
+    if commit is None:
+        return None
+    inner = commit.get("commit") or {}
+    stamp = (inner.get("committer") or {}).get("date") or (inner.get("author") or {}).get("date")
+    if not isinstance(stamp, str) or not _TS_RE.fullmatch(stamp):
+        return None
+    if any(ts is not None and ts >= stamp for sha, ts in known.items() if sha != final):
+        return None
+    return stamp
 
 
 def pushes(raw_pr: dict[str, Any]) -> list[Push]:
@@ -608,10 +646,18 @@ class _AddedIn:
         return self._memo[sha]
 
 
+def git_line_count(data: bytes) -> int:
+    """The number of lines ``git blame`` reports for a blob: one per ``\\n``, plus a final line
+    without one."""
+    return data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
+
+
 def decision_rows(git: GitReader, main_sha: str, design: str, *, owner: str, repo: str,
                   commit_to_pr: dict[str, int]) -> list[dict[str, Any]]:
     """event@1 rows for one design at ``main_sha`` (module docstring): ``GitReader.blame_lines``
-    → (added_in_sha, original line) → PR; nothing of ``main_sha`` is stored in a row."""
+    → (added_in_sha, original line) → PR; nothing of ``main_sha`` is stored in a row. Raises
+    :class:`BlameUnavailable` when a file that holds rows has a blame whose length is not its line
+    count (``[]`` included) — fail closed, never a row silently dropped."""
     from . import extract  # lazy: extract imports this module
 
     added_in = _AddedIn(git, main_sha, commit_to_pr)
@@ -626,10 +672,12 @@ def decision_rows(git: GitReader, main_sha: str, design: str, *, owner: str, rep
         if not found:
             continue
         blame = git.blame_lines(main_sha, path)
+        lines = git_line_count(data)
+        if len(blame) != lines:
+            raise BlameUnavailable(f"decision rows: blame of {path} at {main_sha[:8]} has "
+                                   f"{len(blame)} entries for {lines} lines ({len(found)} rows)")
         occurrences: dict[str, int] = {}
         for row in found:
-            if row.line - 1 >= len(blame):
-                continue
             added_sha, original_line = blame[row.line - 1]
             line_sha = hashlib.sha256(row.text.encode("utf-8")).hexdigest()
             k = occurrences.get(line_sha, 0)
