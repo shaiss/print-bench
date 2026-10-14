@@ -1,0 +1,2832 @@
+{
+ "content_sha256": "08252dbf5ea4928eb717e556864fa147adcc8f58af434efec01ad035f77d5411",
+ "contract": 1,
+ "evidence_sha": "0000000000000000000000000000000000000000",
+ "extractor": "provenance-extract 1",
+ "format": "bundle@1",
+ "main_sha": "521d092813b78a88bd9a74b1052cfef1f230d86b",
+ "producer_run": 1,
+ "views": {
+  "alpha-clip": {
+   "aliases": {
+    "briefs": [
+     501
+    ],
+    "slugs": []
+   },
+   "briefs": [
+    501
+   ],
+   "commits": [],
+   "counts": {
+    "events": 32,
+    "jobs_posted_nothing": 1,
+    "maintenance": 1,
+    "prs": 1,
+    "rounds": 2,
+    "signoffs": {
+     "claimed": 2,
+     "verified": 1,
+     "window": 1
+    },
+    "triage": 1
+   },
+   "design": "alpha-clip",
+   "episodes": [
+    {
+     "end": "2026-09-02T12:10:00Z",
+     "events": [
+      "issue:501:filed",
+      "issuecomment:6100",
+      "issuecomment:6101",
+      "issuecomment:6102",
+      "issuecomment:6103"
+     ],
+     "head": null,
+     "id": "E0:brief:501",
+     "issue": 501,
+     "kind": "brief",
+     "pr": null,
+     "start": "2026-08-30T08:00:00Z"
+    },
+    {
+     "end": "2026-09-01T00:00:00Z",
+     "events": [
+      "row:alpha-clip:NOTES.md:b4e3870803579d86:0",
+      "row:alpha-clip:PM.md:b0a48f6535f68786:0"
+     ],
+     "head": null,
+     "id": "D:2026-09-01",
+     "issue": null,
+     "kind": "day",
+     "pr": null,
+     "start": "2026-09-01T00:00:00Z"
+    },
+    {
+     "end": "2026-09-01T11:20:00Z",
+     "events": [
+      "pr:510:opened",
+      "commit:ec1106426ae2d873449f3f10d9555a9ab4a5681f",
+      "timeline:4001",
+      "commit:d8124f9b65aa4d3470ad1565d66595442412cc43",
+      "run:5001",
+      "commit:93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8",
+      "job:7001",
+      "job:7002",
+      "issuecomment:6001",
+      "issuecomment:6002",
+      "issuecomment:6004"
+     ],
+     "head": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "id": "R:510:d8124f9b",
+     "issue": null,
+     "kind": "round",
+     "pr": 510,
+     "start": "2026-09-01T10:05:00Z"
+    },
+    {
+     "end": "2026-09-02T12:00:00Z",
+     "events": [
+      "commit:8d0cb8246d9d22d647cc666ac312ec015cecba88",
+      "commit:3a2e8af57157749f8add8878afa16af8992e91ca",
+      "issuecomment:6003",
+      "status:8001",
+      "issuecomment:6005",
+      "issuecomment:6006",
+      "issuecomment:6007",
+      "issuecomment:6008"
+     ],
+     "head": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "R:510:3a2e8af5",
+     "issue": null,
+     "kind": "round",
+     "pr": 510,
+     "start": "2026-09-01T11:20:00Z"
+    },
+    {
+     "end": "2026-09-02T00:00:00Z",
+     "events": [
+      "row:alpha-clip:NOTES.md:76c8ab71a4251d54:0"
+     ],
+     "head": null,
+     "id": "D:2026-09-02",
+     "issue": null,
+     "kind": "day",
+     "pr": null,
+     "start": "2026-09-02T00:00:00Z"
+    },
+    {
+     "end": "2026-09-02T12:05:00Z",
+     "events": [
+      "pr:510:merged",
+      "timeline:4101",
+      "deployment:9001"
+     ],
+     "head": "1921dcc9bfd4357fdddeb175189423b724334a73",
+     "id": "M:510",
+     "issue": null,
+     "kind": "merge",
+     "pr": 510,
+     "start": "2026-09-02T12:00:00Z"
+    },
+    {
+     "end": "2026-09-03T00:00:00Z",
+     "events": [
+      "release:9501"
+     ],
+     "head": null,
+     "id": "D:2026-09-03",
+     "issue": null,
+     "kind": "day",
+     "pr": null,
+     "start": "2026-09-03T00:00:00Z"
+    },
+    {
+     "end": "2026-09-04T00:00:00Z",
+     "events": [
+      "row:alpha-clip:NOTES.md:3ca0c159a1f2e9bc:0"
+     ],
+     "head": null,
+     "id": "D:2026-09-04",
+     "issue": null,
+     "kind": "day",
+     "pr": null,
+     "start": "2026-09-04T00:00:00Z"
+    }
+   ],
+   "events": [
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:501",
+     "fields": {
+      "design_name": null
+     },
+     "head_sha": null,
+     "id": "issue:501:filed",
+     "issue": 501,
+     "kind": "brief.filed",
+     "pr": null,
+     "runtime": {
+      "attempt": 1,
+      "chain": "scout",
+      "chain_link": 2,
+      "harness": "claude-code-action",
+      "job": "scout",
+      "job_id": 6800,
+      "links_not_served": 1,
+      "model": "glm-5.1",
+      "model_basis": "step-window+registry@head(4074a42d)",
+      "platform": "github-actions",
+      "provider": "zai",
+      "role": "product-scout",
+      "run_id": 2001,
+      "workflow": "product-scout.yml"
+     },
+     "sha": null,
+     "signals": {
+      "app": "github-actions",
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "window",
+     "trust_basis": "window:run 2001",
+     "ts": "2026-08-30T08:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/501"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:501",
+     "fields": {
+      "design_name": "alpha-clip"
+     },
+     "head_sha": null,
+     "id": "issuecomment:6100",
+     "issue": 501,
+     "kind": "brief.claimed",
+     "pr": null,
+     "runtime": {
+      "attempt": 1,
+      "chain": null,
+      "chain_link": null,
+      "harness": "claude-code-action",
+      "job": "ship",
+      "job_id": 6900,
+      "links_not_served": null,
+      "model": "claude-opus-4-8",
+      "model_basis": "provider-step+inline-pin@07eba1ee",
+      "platform": "github-actions",
+      "provider": "anthropic",
+      "role": "backlog-burn",
+      "run_id": 2500,
+      "workflow": "backlog-burn.yml"
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": "SHIP-LOCK",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "window",
+     "trust_basis": "window:run 2500",
+     "ts": "2026-08-31T06:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/501#issuecomment-6100"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:501",
+     "fields": {
+      "design_name": "alpha-clip"
+     },
+     "head_sha": null,
+     "id": "issuecomment:6101",
+     "issue": 501,
+     "kind": "brief.declined",
+     "pr": null,
+     "runtime": {
+      "attempt": 1,
+      "chain": null,
+      "chain_link": null,
+      "harness": "claude-code-action",
+      "job": "ship",
+      "job_id": 6900,
+      "links_not_served": null,
+      "model": "claude-opus-4-8",
+      "model_basis": "provider-step+inline-pin@07eba1ee",
+      "platform": "github-actions",
+      "provider": "anthropic",
+      "role": "backlog-burn",
+      "run_id": 2500,
+      "workflow": "backlog-burn.yml"
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "window",
+     "trust_basis": "window:run 2500",
+     "ts": "2026-08-31T06:10:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/501#issuecomment-6101"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "D:2026-09-01",
+     "fields": {
+      "added_in_pr": 510,
+      "added_in_sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+      "file": "NOTES.md",
+      "line": 40,
+      "line_sha256": "b4e3870803579d868919d3d5627b059679845610aeb4e4865ca7158e18d059fb"
+     },
+     "head_sha": null,
+     "id": "row:alpha-clip:NOTES.md:b4e3870803579d86:0",
+     "issue": null,
+     "kind": "decision.notes_log",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": null,
+      "login_type": null,
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "none",
+     "trust_basis": "none",
+     "ts": "2026-09-01T00:00:00Z",
+     "ts_precision": "day",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/blob/d8124f9b65aa4d3470ad1565d66595442412cc43/designs/alpha-clip/NOTES.md#L40"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "D:2026-09-01",
+     "fields": {
+      "added_in_pr": 510,
+      "added_in_sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+      "file": "PM.md",
+      "line": 12,
+      "line_sha256": "b0a48f6535f687861382edd943610c079b2a8c344874d0cd4f3b47ee652ea866"
+     },
+     "head_sha": null,
+     "id": "row:alpha-clip:PM.md:b0a48f6535f68786:0",
+     "issue": null,
+     "kind": "decision.pm_log",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": null,
+      "login_type": null,
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "none",
+     "trust_basis": "none",
+     "ts": "2026-09-01T00:00:00Z",
+     "ts_precision": "day",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/blob/d8124f9b65aa4d3470ad1565d66595442412cc43/designs/alpha-clip/PM.md#L12"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:501",
+     "fields": {
+      "design_name": "alpha-clip"
+     },
+     "head_sha": null,
+     "id": "issuecomment:6102",
+     "issue": 501,
+     "kind": "brief.claimed",
+     "pr": null,
+     "runtime": {
+      "attempt": 1,
+      "chain": "design-run",
+      "chain_link": 1,
+      "harness": "claude-code-action",
+      "job": "design-run",
+      "job_id": 7000,
+      "links_not_served": 0,
+      "model": "glm-5.2",
+      "model_basis": "step-window+registry@head(027d0589)",
+      "platform": "github-actions",
+      "provider": "zai",
+      "role": "design-run",
+      "run_id": 3001,
+      "workflow": "design-run.yml"
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": "SHIP-LOCK",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "window",
+     "trust_basis": "window:run 3001",
+     "ts": "2026-09-01T08:55:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/501#issuecomment-6102"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "draft": true
+     },
+     "head_sha": null,
+     "id": "pr:510:opened",
+     "issue": null,
+     "kind": "pr.opened",
+     "pr": 510,
+     "runtime": {
+      "attempt": 1,
+      "chain": "design-run",
+      "chain_link": 1,
+      "harness": "claude-code-action",
+      "job": "design-run",
+      "job_id": 7000,
+      "links_not_served": 0,
+      "model": "glm-5.2",
+      "model_basis": "step-window+registry@head(027d0589)",
+      "platform": "github-actions",
+      "provider": "zai",
+      "role": "design-run",
+      "run_id": 3001,
+      "workflow": "design-run.yml"
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "window",
+     "trust_basis": "window:run 3001",
+     "ts": "2026-09-01T09:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "parents": 1,
+      "signature_verified": true
+     },
+     "head_sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "id": "commit:ec1106426ae2d873449f3f10d9555a9ab4a5681f",
+     "issue": null,
+     "kind": "commit.design",
+     "pr": 510,
+     "runtime": {
+      "attempt": 1,
+      "chain": "design-run",
+      "chain_link": 1,
+      "harness": "claude-code-action",
+      "job": "design-run",
+      "job_id": 7000,
+      "links_not_served": 0,
+      "model": "glm-5.2",
+      "model_basis": "step-window+registry@head(027d0589)",
+      "platform": "github-actions",
+      "provider": "zai",
+      "role": "design-run",
+      "run_id": 3001,
+      "workflow": "design-run.yml"
+     },
+     "sha": "ec1106426ae2d873449f3f10d9555a9ab4a5681f",
+     "signals": {
+      "app": null,
+      "commit_author_email": "claude[bot]@users.noreply.github.com",
+      "commit_author_name": "claude[bot]",
+      "committer_login": "web-flow",
+      "login": "claude[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "window",
+     "trust_basis": "window:run 3001",
+     "ts": "2026-09-01T09:10:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510/commits/ec1106426ae2d873449f3f10d9555a9ab4a5681f"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {},
+     "head_sha": null,
+     "id": "timeline:4001",
+     "issue": null,
+     "kind": "pr.ready_for_review",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-01T09:30:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "parents": 1,
+      "signature_verified": false
+     },
+     "head_sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "id": "commit:d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "issue": null,
+     "kind": "commit.fix",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": "claude-code",
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": "Claude Opus 5.5",
+      "model_basis": "trailer",
+      "platform": "claude-code",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "signals": {
+      "app": null,
+      "commit_author_email": "owner@example.invalid",
+      "commit_author_name": "Owner",
+      "committer_login": "shaiss",
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [
+       "Claude Opus 5.5 <noreply@anthropic.com>"
+      ],
+      "trailer_session": "https://claude.ai/code/session_01SyntheticFixture0001"
+     },
+     "stale_sha": false,
+     "trust": "claimed",
+     "trust_basis": "trailer",
+     "ts": "2026-09-01T09:50:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510/commits/d8124f9b65aa4d3470ad1565d66595442412cc43"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "conclusion": "success",
+      "event": "pull_request"
+     },
+     "head_sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "id": "run:5001",
+     "issue": null,
+     "kind": "ci.gate",
+     "pr": 510,
+     "runtime": {
+      "attempt": 1,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "github-actions",
+      "provider": null,
+      "role": null,
+      "run_id": 5001,
+      "workflow": "ci.yml"
+     },
+     "sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "verified",
+     "trust_basis": "receipt",
+     "ts": "2026-09-01T10:05:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/actions/runs/5001"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "preview_diff": "all-noise"
+     },
+     "head_sha": "93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8",
+     "id": "commit:93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8",
+     "issue": null,
+     "kind": "commit.regen",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "github-actions",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8",
+     "signals": {
+      "app": null,
+      "commit_author_email": "41898282+github-actions[bot]@users.noreply.github.com",
+      "commit_author_name": "github-actions[bot]",
+      "committer_login": "github-actions[bot]",
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": true,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-01T10:20:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510/commits/93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "conclusion": "success",
+      "links_tried": 1,
+      "posted": true
+     },
+     "head_sha": "93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8",
+     "id": "job:7001",
+     "issue": null,
+     "kind": "job.reviewer",
+     "pr": 510,
+     "runtime": {
+      "attempt": 1,
+      "chain": "review",
+      "chain_link": 1,
+      "harness": "claude-code-action",
+      "job": "jane",
+      "job_id": 7001,
+      "links_not_served": 0,
+      "model": "glm-5.2",
+      "model_basis": "job-link+registry@merge(027d0589+d8124f9b)",
+      "platform": "github-actions",
+      "provider": "zai",
+      "role": "jane",
+      "run_id": 3002,
+      "workflow": "auto-review.yml"
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "verified",
+     "trust_basis": "receipt",
+     "ts": "2026-09-01T10:29:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/actions/runs/3002/job/7001"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "conclusion": "failure",
+      "links_tried": 6,
+      "posted": false
+     },
+     "head_sha": "93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8",
+     "id": "job:7002",
+     "issue": null,
+     "kind": "job.reviewer",
+     "pr": 510,
+     "runtime": {
+      "attempt": 1,
+      "chain": "review",
+      "chain_link": 6,
+      "harness": "claude-code-action",
+      "job": "drik",
+      "job_id": 7002,
+      "links_not_served": 5,
+      "model": "claude-haiku-4-5",
+      "model_basis": "job-link+registry@head(d8124f9b)",
+      "platform": "github-actions",
+      "provider": "anthropic",
+      "role": "drik",
+      "run_id": 3002,
+      "workflow": "auto-review.yml"
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "verified",
+     "trust_basis": "receipt",
+     "ts": "2026-09-01T10:29:30Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/actions/runs/3002/job/7002"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": [
+       "ec1106426ae2d873449f3f10d9555a9ab4a5681f",
+       "d8124f9b65aa4d3470ad1565d66595442412cc43"
+      ]
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "edited": false,
+      "family": "JANE_SIGNOFF",
+      "fuse": "none",
+      "verdict": "pass"
+     },
+     "head_sha": "93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8",
+     "id": "issuecomment:6001",
+     "issue": null,
+     "kind": "review.signoff",
+     "pr": 510,
+     "runtime": {
+      "attempt": 1,
+      "chain": "review",
+      "chain_link": 1,
+      "harness": "claude-code-action",
+      "job": "jane",
+      "job_id": 7001,
+      "links_not_served": 0,
+      "model": "glm-5.2",
+      "model_basis": "step-window+registry@merge(027d0589+d8124f9b)",
+      "platform": "github-actions",
+      "provider": "zai",
+      "role": "jane",
+      "run_id": 3002,
+      "workflow": "auto-review.yml"
+     },
+     "sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "signals": {
+      "app": "github-actions",
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": "JANE_SIGNOFF",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "verified",
+     "trust_basis": "actions-bot+suffix",
+     "ts": "2026-09-01T10:30:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510#issuecomment-6001"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": [
+       "ec1106426ae2d873449f3f10d9555a9ab4a5681f",
+       "d8124f9b65aa4d3470ad1565d66595442412cc43"
+      ]
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "edited": false,
+      "family": "DRIK_SIGNOFF",
+      "fuse": "acknowledged",
+      "verdict": "block"
+     },
+     "head_sha": "93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8",
+     "id": "issuecomment:6002",
+     "issue": null,
+     "kind": "review.signoff",
+     "pr": 510,
+     "runtime": {
+      "attempt": 1,
+      "chain": "review",
+      "chain_link": 1,
+      "harness": "claude-code-action",
+      "job": "drik",
+      "job_id": 7002,
+      "links_not_served": 0,
+      "model": "glm-5.2",
+      "model_basis": "step-window+registry@merge(027d0589+d8124f9b)",
+      "platform": "github-actions",
+      "provider": "zai",
+      "role": "drik",
+      "run_id": 3002,
+      "workflow": "auto-review.yml"
+     },
+     "sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "signals": {
+      "app": "github-actions",
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": "DRIK_SIGNOFF",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "window",
+     "trust_basis": "window:run 3002",
+     "ts": "2026-09-01T10:31:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510#issuecomment-6002"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:d8124f9b",
+     "fields": {
+      "act_now": 1,
+      "completion_marker": true,
+      "decline": 0,
+      "designs": [
+       "alpha-clip"
+      ],
+      "edited": false,
+      "no_action": 1,
+      "queue": 2,
+      "rows": 4
+     },
+     "head_sha": "93729257f9f7d16c3fbd8b0ffcc7c09cb9dd8aa8",
+     "id": "issuecomment:6004",
+     "issue": null,
+     "kind": "triage.verdict",
+     "pr": 510,
+     "runtime": {
+      "attempt": 1,
+      "chain": "review",
+      "chain_link": 2,
+      "harness": "claude-code-action",
+      "job": "pm-triage",
+      "job_id": 7003,
+      "links_not_served": 1,
+      "model": "glm-5.1",
+      "model_basis": "step-window+registry@merge(027d0589+d8124f9b)",
+      "platform": "github-actions",
+      "provider": "zai",
+      "role": "pm",
+      "run_id": 3002,
+      "workflow": "auto-review.yml"
+     },
+     "sha": "d8124f9b65aa4d3470ad1565d66595442412cc43",
+     "signals": {
+      "app": "github-actions",
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": "PM_TRIAGE",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "verified",
+     "trust_basis": "actions-bot+suffix",
+     "ts": "2026-09-01T10:40:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510#issuecomment-6004"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:3a2e8af5",
+     "fields": {
+      "parents": 2
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "commit:8d0cb8246d9d22d647cc666ac312ec015cecba88",
+     "issue": null,
+     "kind": "commit.merge_main",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "8d0cb8246d9d22d647cc666ac312ec015cecba88",
+     "signals": {
+      "app": null,
+      "commit_author_email": "owner@example.invalid",
+      "commit_author_name": "Owner",
+      "committer_login": "shaiss",
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-01T11:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510/commits/8d0cb8246d9d22d647cc666ac312ec015cecba88"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:3a2e8af5",
+     "fields": {
+      "parents": 1,
+      "signature_verified": true
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "commit:3a2e8af57157749f8add8878afa16af8992e91ca",
+     "issue": null,
+     "kind": "commit.human",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "github-web",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "signals": {
+      "app": null,
+      "commit_author_email": "owner@example.invalid",
+      "commit_author_name": "Owner",
+      "committer_login": "web-flow",
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-01T11:10:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510/commits/3a2e8af57157749f8add8878afa16af8992e91ca"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": [
+       "3a2e8af57157749f8add8878afa16af8992e91ca"
+      ]
+     },
+     "episode": "R:510:3a2e8af5",
+     "fields": {
+      "edited": false,
+      "family": "DRIK_SIGNOFF",
+      "fuse": null,
+      "verdict": "pass"
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "issuecomment:6003",
+     "issue": null,
+     "kind": "review.signoff",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "8d0cb8246d9d22d647cc666ac312ec015cecba88",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": "DRIK_SIGNOFF",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": true,
+     "trust": "claimed",
+     "trust_basis": "marker:owner-token",
+     "ts": "2026-09-01T11:25:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510#issuecomment-6003"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:3a2e8af5",
+     "fields": {
+      "reason": "signed-off",
+      "state": "success",
+      "verdict": "PASS"
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "status:8001",
+     "issue": null,
+     "kind": "status.reviewer_signoff",
+     "pr": 510,
+     "runtime": {
+      "attempt": 2,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "github-actions",
+      "provider": null,
+      "role": null,
+      "run_id": 3003,
+      "workflow": "auto-review.yml"
+     },
+     "sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": "reviewer-signoff",
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "verified",
+     "trust_basis": "actions-status+receipt",
+     "ts": "2026-09-01T11:30:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510/commits/3a2e8af57157749f8add8878afa16af8992e91ca"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:3a2e8af5",
+     "fields": {
+      "completion_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+      "edited": false
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "issuecomment:6005",
+     "issue": null,
+     "kind": "coach.lock",
+     "pr": 510,
+     "runtime": {
+      "attempt": 2,
+      "chain": "review",
+      "chain_link": 3,
+      "harness": "claude-code-action",
+      "job": "coach",
+      "job_id": 7004,
+      "links_not_served": 2,
+      "model": "glm-4.6",
+      "model_basis": "step-window+registry@merge(027d0589+d8124f9b)",
+      "platform": "github-actions",
+      "provider": "zai",
+      "role": "coach",
+      "run_id": 3003,
+      "workflow": "auto-review.yml"
+     },
+     "sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "signals": {
+      "app": "github-actions",
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": "COACH_LOCK",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "verified",
+     "trust_basis": "actions-bot+suffix",
+     "ts": "2026-09-01T11:40:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510#issuecomment-6005"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:3a2e8af5",
+     "fields": {
+      "round": 2,
+      "sub": "a"
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "issuecomment:6006",
+     "issue": null,
+     "kind": "coach.round",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "ambiguous",
+      "platform": "github-actions",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": "github-actions",
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "ambiguous",
+     "trust_basis": "ambiguous",
+     "ts": "2026-09-01T11:45:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510#issuecomment-6006"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:3a2e8af5",
+     "fields": {
+      "edited": true
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "issuecomment:6007",
+     "issue": null,
+     "kind": "oracle.review",
+     "pr": 510,
+     "runtime": {
+      "attempt": 1,
+      "chain": "oracle-anthropic",
+      "chain_link": 1,
+      "harness": "claude-code-action",
+      "job": "oracle",
+      "job_id": 7005,
+      "links_not_served": 0,
+      "model": "claude-sonnet-5",
+      "model_basis": "step-window+registry@main(027d0589)",
+      "platform": "github-actions",
+      "provider": "anthropic",
+      "role": "oracle",
+      "run_id": 3004,
+      "workflow": "oracle.yml"
+     },
+     "sha": null,
+     "signals": {
+      "app": "github-actions",
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": "ORACLE_REVIEW",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "claimed",
+     "trust_basis": "marker:edited",
+     "ts": "2026-09-01T11:50:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510#issuecomment-6007"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "D:2026-09-02",
+     "fields": {
+      "added_in_pr": 510,
+      "added_in_sha": "1921dcc9bfd4357fdddeb175189423b724334a73",
+      "file": "NOTES.md",
+      "line": 60,
+      "line_sha256": "76c8ab71a4251d5421ebe64e356905b3b9170f74007c6989a1ffabd3af810f8b"
+     },
+     "head_sha": null,
+     "id": "row:alpha-clip:NOTES.md:76c8ab71a4251d54:0",
+     "issue": null,
+     "kind": "changelog",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "1921dcc9bfd4357fdddeb175189423b724334a73",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": null,
+      "login_type": null,
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "none",
+     "trust_basis": "none",
+     "ts": "2026-09-02T00:00:00Z",
+     "ts_precision": "day",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/blob/1921dcc9bfd4357fdddeb175189423b724334a73/designs/alpha-clip/NOTES.md#L60"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "M:510",
+     "fields": {
+      "main_subject": "Add design: alpha-clip (#510)",
+      "merge_method": "squash",
+      "merged_by_login": "shaiss"
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "pr:510:merged",
+     "issue": null,
+     "kind": "pr.merged",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "1921dcc9bfd4357fdddeb175189423b724334a73",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-02T12:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "M:510",
+     "fields": {
+      "closed_by_pr": 510,
+      "design_name": "alpha-clip",
+      "state_reason": "completed"
+     },
+     "head_sha": null,
+     "id": "timeline:4101",
+     "issue": 501,
+     "kind": "brief.closed",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-02T12:00:30Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/501"
+    },
+    {
+     "after_merge": true,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "M:510",
+     "fields": {
+      "deployment_id": 9001,
+      "state": "success"
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "deployment:9001",
+     "issue": null,
+     "kind": "deploy.production",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "vercel",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "1921dcc9bfd4357fdddeb175189423b724334a73",
+     "signals": {
+      "app": "vercel",
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "vercel[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "none",
+     "trust_basis": "none",
+     "ts": "2026-09-02T12:05:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/commit/1921dcc9bfd4357fdddeb175189423b724334a73"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:501",
+     "fields": {
+      "design_name": "alpha-clip",
+      "shipped_pr": 510
+     },
+     "head_sha": null,
+     "id": "issuecomment:6103",
+     "issue": 501,
+     "kind": "brief.shipped",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-02T12:10:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/501#issuecomment-6103"
+    },
+    {
+     "after_merge": true,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:510:3a2e8af5",
+     "fields": {
+      "edited": false,
+      "family": "JANE_SIGNOFF",
+      "fuse": null,
+      "verdict": "fail"
+     },
+     "head_sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "id": "issuecomment:6008",
+     "issue": null,
+     "kind": "review.signoff",
+     "pr": 510,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "cursor",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "3a2e8af57157749f8add8878afa16af8992e91ca",
+     "signals": {
+      "app": "cursor",
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "cursor[bot]",
+      "login_type": "Bot",
+      "marker": "JANE_SIGNOFF",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "claimed",
+     "trust_basis": "marker:other-author",
+     "ts": "2026-09-02T12:30:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/510#issuecomment-6008"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "D:2026-09-03",
+     "fields": {
+      "assets": 3,
+      "prerelease": false,
+      "tag": "v1.0"
+     },
+     "head_sha": null,
+     "id": "release:9501",
+     "issue": null,
+     "kind": "release",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "1921dcc9bfd4357fdddeb175189423b724334a73",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-03T15:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/releases/tag/v1.0"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "D:2026-09-04",
+     "fields": {
+      "added_in_pr": null,
+      "added_in_sha": "d63588d44d5248bae73e9487528a9387c269726b",
+      "file": "NOTES.md",
+      "line": 55,
+      "line_sha256": "3ca0c159a1f2e9bc995b9a9d2be1a20b9394f0ad18bbb60ee9282a3b6d016fa2"
+     },
+     "head_sha": null,
+     "id": "row:alpha-clip:NOTES.md:3ca0c159a1f2e9bc:0",
+     "issue": null,
+     "kind": "field_test",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "d63588d44d5248bae73e9487528a9387c269726b",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": null,
+      "login_type": null,
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "none",
+     "trust_basis": "none",
+     "ts": "2026-09-04T00:00:00Z",
+     "ts_precision": "day",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/blob/d63588d44d5248bae73e9487528a9387c269726b/designs/alpha-clip/NOTES.md#L55"
+    }
+   ],
+   "extractor": "provenance-extract 1",
+   "format": "view@1",
+   "maintenance": [
+    {
+     "at": "2026-09-07T09:00:00Z",
+     "membership": "regen-only",
+     "pr": 512,
+     "url": "https://github.com/shaiss/print-bench/pull/512"
+    }
+   ],
+   "prs": [
+    510
+   ],
+   "releases": [
+    {
+     "published_at": "2026-09-03T15:00:00Z",
+     "tag": "v1.0",
+     "url": "https://github.com/shaiss/print-bench/releases/tag/v1.0"
+    }
+   ]
+  },
+  "beta-hinge": {
+   "aliases": {
+    "briefs": [
+     520,
+     530
+    ],
+    "slugs": [
+     "b-hinge"
+    ]
+   },
+   "briefs": [
+    520,
+    530
+   ],
+   "commits": [
+    "d63588d44d5248bae73e9487528a9387c269726b"
+   ],
+   "counts": {
+    "events": 14,
+    "jobs_posted_nothing": 0,
+    "maintenance": 1,
+    "prs": 2,
+    "rounds": 2,
+    "signoffs": {
+     "claimed": 0,
+     "verified": 0,
+     "window": 0
+    },
+    "triage": 0
+   },
+   "design": "beta-hinge",
+   "episodes": [
+    {
+     "end": "2026-09-08T08:00:00Z",
+     "events": [
+      "issue:520:filed",
+      "issuecomment:6201",
+      "issuecomment:6202",
+      "issuecomment:6203",
+      "timeline:4201"
+     ],
+     "head": null,
+     "id": "E0:brief:520",
+     "issue": 520,
+     "kind": "brief",
+     "pr": null,
+     "start": "2026-09-04T08:00:00Z"
+    },
+    {
+     "end": "2026-09-06T08:00:00Z",
+     "events": [
+      "pr:511:opened",
+      "commit:9c2641696b53850e8137ab6b3dd50e5f8584fadb"
+     ],
+     "head": "9c2641696b53850e8137ab6b3dd50e5f8584fadb",
+     "id": "R:511:9c264169",
+     "issue": null,
+     "kind": "round",
+     "pr": 511,
+     "start": "2026-09-05T08:06:00Z"
+    },
+    {
+     "end": "2026-09-06T09:00:00Z",
+     "events": [
+      "pr:513:opened",
+      "commit:d2b8d19e7503aaa2c0406a17c34476c3cb371b68"
+     ],
+     "head": "d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+     "id": "R:513:d2b8d19e",
+     "issue": null,
+     "kind": "round",
+     "pr": 513,
+     "start": "2026-09-05T09:11:00Z"
+    },
+    {
+     "end": "2026-09-06T08:00:00Z",
+     "events": [
+      "pr:511:closed"
+     ],
+     "head": null,
+     "id": "M:511",
+     "issue": null,
+     "kind": "merge",
+     "pr": 511,
+     "start": "2026-09-06T08:00:00Z"
+    },
+    {
+     "end": "2026-09-06T09:00:00Z",
+     "events": [
+      "pr:513:closed"
+     ],
+     "head": null,
+     "id": "M:513",
+     "issue": null,
+     "kind": "merge",
+     "pr": 513,
+     "start": "2026-09-06T09:00:00Z"
+    },
+    {
+     "end": "2026-09-09T08:00:00Z",
+     "events": [
+      "issue:530:filed"
+     ],
+     "head": null,
+     "id": "E0:brief:530",
+     "issue": 530,
+     "kind": "brief",
+     "pr": null,
+     "start": "2026-09-09T08:00:00Z"
+    },
+    {
+     "end": "2026-09-10T00:00:00Z",
+     "events": [
+      "row:beta-hinge:NOTES.md:99598792501a6ebb:0"
+     ],
+     "head": null,
+     "id": "D:2026-09-10",
+     "issue": null,
+     "kind": "day",
+     "pr": null,
+     "start": "2026-09-10T00:00:00Z"
+    },
+    {
+     "end": "2026-09-10T08:00:00Z",
+     "events": [
+      "commit:d63588d44d5248bae73e9487528a9387c269726b"
+     ],
+     "head": "d63588d44d5248bae73e9487528a9387c269726b",
+     "id": "C:d63588d4",
+     "issue": null,
+     "kind": "commit",
+     "pr": null,
+     "start": "2026-09-10T08:00:00Z"
+    }
+   ],
+   "events": [
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:520",
+     "fields": {
+      "design_name": null
+     },
+     "head_sha": null,
+     "id": "issue:520:filed",
+     "issue": 520,
+     "kind": "brief.filed",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-04T08:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/520"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:520",
+     "fields": {
+      "design_name": "b-hinge"
+     },
+     "head_sha": null,
+     "id": "issuecomment:6201",
+     "issue": 520,
+     "kind": "brief.claimed",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "ambiguous",
+      "platform": "github-actions",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": "SHIP-LOCK",
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "ambiguous",
+     "trust_basis": "ambiguous",
+     "ts": "2026-09-04T09:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/520#issuecomment-6201"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:520",
+     "fields": {
+      "design_name": "b-hinge"
+     },
+     "head_sha": null,
+     "id": "issuecomment:6202",
+     "issue": 520,
+     "kind": "brief.deferred",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-04T10:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/520#issuecomment-6202"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:520",
+     "fields": {
+      "design_name": "b-hinge"
+     },
+     "head_sha": null,
+     "id": "issuecomment:6203",
+     "issue": 520,
+     "kind": "brief.withdrawn",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-04T11:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/520#issuecomment-6203"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:511:9c264169",
+     "fields": {
+      "draft": false
+     },
+     "head_sha": null,
+     "id": "pr:511:opened",
+     "issue": null,
+     "kind": "pr.opened",
+     "pr": 511,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-05T08:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/511"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:511:9c264169",
+     "fields": {
+      "parents": 1,
+      "signature_verified": false
+     },
+     "head_sha": "9c2641696b53850e8137ab6b3dd50e5f8584fadb",
+     "id": "commit:9c2641696b53850e8137ab6b3dd50e5f8584fadb",
+     "issue": null,
+     "kind": "commit.design",
+     "pr": 511,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "github-actions",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "9c2641696b53850e8137ab6b3dd50e5f8584fadb",
+     "signals": {
+      "app": null,
+      "commit_author_email": "claude[bot]@users.noreply.github.com",
+      "commit_author_name": "claude[bot]",
+      "committer_login": "github-actions[bot]",
+      "login": "claude[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-05T08:05:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/511/commits/9c2641696b53850e8137ab6b3dd50e5f8584fadb"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:513:d2b8d19e",
+     "fields": {
+      "draft": true
+     },
+     "head_sha": null,
+     "id": "pr:513:opened",
+     "issue": null,
+     "kind": "pr.opened",
+     "pr": 513,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "copilot",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "Copilot",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-05T09:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/513"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "R:513:d2b8d19e",
+     "fields": {
+      "parents": 1,
+      "signature_verified": false
+     },
+     "head_sha": "d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+     "id": "commit:d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+     "issue": null,
+     "kind": "commit.fix",
+     "pr": 513,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": "cursor-agent",
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "trailer",
+      "platform": "cursor",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+     "signals": {
+      "app": null,
+      "commit_author_email": "cursoragent@cursor.com",
+      "commit_author_name": "Cursor Agent",
+      "committer_login": "web-flow",
+      "login": "cursoragent",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [
+       "Cursor Agent <cursoragent@cursor.com>"
+      ],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "claimed",
+     "trust_basis": "trailer",
+     "ts": "2026-09-05T09:10:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/513/commits/d2b8d19e7503aaa2c0406a17c34476c3cb371b68"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "M:511",
+     "fields": {},
+     "head_sha": "9c2641696b53850e8137ab6b3dd50e5f8584fadb",
+     "id": "pr:511:closed",
+     "issue": null,
+     "kind": "pr.closed",
+     "pr": 511,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-06T08:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/511"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "M:513",
+     "fields": {},
+     "head_sha": "d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+     "id": "pr:513:closed",
+     "issue": null,
+     "kind": "pr.closed",
+     "pr": 513,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-06T09:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/pull/513"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:520",
+     "fields": {
+      "closed_by_pr": null,
+      "design_name": "b-hinge",
+      "state_reason": "not_planned"
+     },
+     "head_sha": null,
+     "id": "timeline:4201",
+     "issue": 520,
+     "kind": "brief.closed",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-08T08:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/520"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:530",
+     "fields": {
+      "design_name": null
+     },
+     "head_sha": null,
+     "id": "issue:530:filed",
+     "issue": 530,
+     "kind": "brief.filed",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "claimed",
+     "trust_basis": "marker:edited",
+     "ts": "2026-09-09T08:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/530"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "D:2026-09-10",
+     "fields": {
+      "added_in_pr": null,
+      "added_in_sha": "d63588d44d5248bae73e9487528a9387c269726b",
+      "file": "NOTES.md",
+      "line": 8,
+      "line_sha256": "99598792501a6ebb9ac0f0233053931037de0f8c9aa89fe6ec3418b67502154c"
+     },
+     "head_sha": null,
+     "id": "row:beta-hinge:NOTES.md:99598792501a6ebb:0",
+     "issue": null,
+     "kind": "changelog",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "d63588d44d5248bae73e9487528a9387c269726b",
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": null,
+      "login_type": null,
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "none",
+     "trust_basis": "none",
+     "ts": "2026-09-10T00:00:00Z",
+     "ts_precision": "day",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/blob/d63588d44d5248bae73e9487528a9387c269726b/designs/beta-hinge/NOTES.md#L8"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "C:d63588d4",
+     "fields": {
+      "parents": 1,
+      "signature_verified": false
+     },
+     "head_sha": null,
+     "id": "commit:d63588d44d5248bae73e9487528a9387c269726b",
+     "issue": null,
+     "kind": "commit.human",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": "d63588d44d5248bae73e9487528a9387c269726b",
+     "signals": {
+      "app": null,
+      "commit_author_email": "owner@example.invalid",
+      "commit_author_name": "Owner",
+      "committer_login": "shaiss",
+      "login": "shaiss",
+      "login_type": "User",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-10T08:00:00Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/commit/d63588d44d5248bae73e9487528a9387c269726b"
+    }
+   ],
+   "extractor": "provenance-extract 1",
+   "format": "view@1",
+   "maintenance": [
+    {
+     "at": "2026-09-07T09:00:00Z",
+     "membership": "sweep",
+     "pr": 512,
+     "url": "https://github.com/shaiss/print-bench/pull/512"
+    }
+   ],
+   "prs": [
+    511,
+    513
+   ],
+   "releases": []
+  },
+  "gamma-stand": {
+   "aliases": {
+    "briefs": [],
+    "slugs": []
+   },
+   "briefs": [],
+   "commits": [],
+   "counts": {
+    "events": 0,
+    "jobs_posted_nothing": 0,
+    "maintenance": 0,
+    "prs": 0,
+    "rounds": 0,
+    "signoffs": {
+     "claimed": 0,
+     "verified": 0,
+     "window": 0
+    },
+    "triage": 0
+   },
+   "design": "gamma-stand",
+   "episodes": [],
+   "events": [],
+   "extractor": "provenance-extract 1",
+   "format": "view@1",
+   "maintenance": [],
+   "prs": [],
+   "releases": []
+  }
+ },
+ "views_sha256": {
+  "alpha-clip": "b7b9cfe053578c23da8847374534ff5beb55f7764efae0731dbb7f283591163e",
+  "beta-hinge": "4d9449f4d61034cc33b53e62ffaaf136bf47f153fb90ee491672733bc99bcf3c",
+  "gamma-stand": "675939e0f84f7bb395dc00aa73b94254f4d3b1a0acd20294e17271f03706d6b2"
+ }
+}

@@ -1,0 +1,291 @@
+{
+ "closed_at": "2026-09-08T08:00:00Z",
+ "created_at": "2026-09-04T08:00:00Z",
+ "design_name": "b-hinge",
+ "events": [
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "E0:brief:520",
+   "fields": {
+    "design_name": null
+   },
+   "head_sha": null,
+   "id": "issue:520:filed",
+   "issue": 520,
+   "kind": "brief.filed",
+   "pr": null,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "unknown",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": null,
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "shaiss",
+    "login_type": "User",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-04T08:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/issues/520"
+  },
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "E0:brief:520",
+   "fields": {
+    "design_name": "b-hinge"
+   },
+   "head_sha": null,
+   "id": "issuecomment:6201",
+   "issue": 520,
+   "kind": "brief.claimed",
+   "pr": null,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "ambiguous",
+    "platform": "github-actions",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": null,
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "shaiss",
+    "login_type": "User",
+    "marker": "SHIP-LOCK",
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "ambiguous",
+   "trust_basis": "ambiguous",
+   "ts": "2026-09-04T09:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/issues/520#issuecomment-6201"
+  },
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "E0:brief:520",
+   "fields": {
+    "design_name": "b-hinge"
+   },
+   "head_sha": null,
+   "id": "issuecomment:6202",
+   "issue": 520,
+   "kind": "brief.deferred",
+   "pr": null,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "unknown",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": null,
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "shaiss",
+    "login_type": "User",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-04T10:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/issues/520#issuecomment-6202"
+  },
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "E0:brief:520",
+   "fields": {
+    "design_name": "b-hinge"
+   },
+   "head_sha": null,
+   "id": "issuecomment:6203",
+   "issue": 520,
+   "kind": "brief.withdrawn",
+   "pr": null,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "unknown",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": null,
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "shaiss",
+    "login_type": "User",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-04T11:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/issues/520#issuecomment-6203"
+  },
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "E0:brief:520",
+   "fields": {
+    "closed_by_pr": null,
+    "design_name": "b-hinge",
+    "state_reason": "not_planned"
+   },
+   "head_sha": null,
+   "id": "timeline:4201",
+   "issue": 520,
+   "kind": "brief.closed",
+   "pr": null,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "unknown",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": null,
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "shaiss",
+    "login_type": "User",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-08T08:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/issues/520"
+  }
+ ],
+ "evidence": {
+  "raw": "raw/brief/520.json.gz",
+  "raw_sha256": "0387e151cf3a66823f2718a4dd0c211df16381c724a448cf6ed286bde5419d55",
+  "receipts": [],
+  "revision": 1,
+  "source": "evidence"
+ },
+ "extractor": "provenance-extract 1",
+ "format": "record@1",
+ "incomplete": [],
+ "issue": 520,
+ "key": "520",
+ "kind": "brief",
+ "labels": [
+  "design-brief",
+  "needs-decision"
+ ],
+ "prs": [
+  511
+ ],
+ "state": "closed",
+ "state_reason": "not_planned"
+}
