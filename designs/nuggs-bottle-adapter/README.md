@@ -22,30 +22,59 @@ bottles in seconds; wash and refill the bottle, not the habitat plumbing.
 
 **Which bottles fit:** PCO-1881 is the standard Coke/Pepsi soda neck — not
 every "water bottle" uses it. Before you commit filament: if the cap from a
-Coke bottle fits yours, or the neck measures about 28 mm inside, you're on
-PCO-1881; when unsure, the coupon is the proof.
+Coke bottle fits yours, or the neck measures about 28 mm across the threads
+(the orifice is ~22 mm), you're on PCO-1881; when unsure, the coupon is the
+proof.
 
 ## Print settings
 
 - **Material:** PLA (dry service) or PETG if you hand-wash warm — family N7 still
   applies; see Use & care
-- **Layer height:** 0.2 mm with a 0.4 mm nozzle — the thread ridges are 3
-  layers wide; coarser loses the thread
+- **Layer height:** 0.2 mm with a 0.4 mm nozzle (0.42 mm line width) — the
+  thread ridges are 3 layers wide; coarser loses the thread, and a 0.45 mm
+  line-width profile can slip under the coupon's engraved label strokes
 - **Infill:** 15% (all working surfaces are perimeters)
 - **Supports:** none needed — steepest surface is the 44° interior funnel
+- **Brim:** none — a stock Auto-brim can weld a skirt onto the port-stub
+  sector tips (the surface the coupon fit is judged on)
 - **Orientation:** as rendered, port down on the coupling sector tips
 - **Seam:** random (or rear) — an aligned seam stacks a ridge inside the
-  threaded bore that can catch the bottle at one spot in the turn
+  threaded bore that can catch the bottle at one spot in the turn. Use the
+  same seam on the coupon: a ridge inside a test ring adds drag at one spot
+  in the turn and can read as a false "too tight" when you're ranking rings
+  by feel
 - **First layers:** the sector tips print as separate islands and merge into
   the ring a few layers up — normal for the NUGGS family pose; keep supports
   off anyway
 - **PETG note:** expect some droop on the 44° funnel ceiling — cosmetic only,
-  the flow path is set by the land opening
-- **Print first:** the coupon, and set `bottle_tol` from the ring that grips
-  a real bottle best (see below). The coupon being heavier and slower than
-  the adapter body is intentional: a full throat rehearsal (port stub +
-  bottle rings), not a bug to "fix" (~4 h 57 m / 62.55 g vs the adapter's
-  ~4 h 10 m / 53.16 g)
+  the flow path is set by the land opening — and watch the ~10 mm flat
+  bridges across the port-stub sector gaps for sag on the first bridging
+  layers
+- **Print first:** the coupon, in **the same material as the adapter**
+  (PETG vs PLA moves this ladder by about one ring), and set `bottle_tol`
+  from the ring that grips a real bottle best (see below). Rings are marked
+  `15 / 22 / 30 / 38` (`= bottle_tol × 100`). The coupon being heavier and
+  slower than the adapter body is intentional: a full throat rehearsal
+  (port stub + bottle rings), not a bug to "fix" (~4 h 57 m / ~63 g vs
+  the adapter's ~4 h 10 m / 53.16 g)
+- **Bed:** the coupon strip is ~187 mm — keep it clear of the stock X1/P1
+  front-left exclusion (~18 × 28 mm) on “256” beds. The adapter alone fits
+  smaller beds; the coupon needs ~190 mm+
+
+![Whole coupon — port stub and four labelled rings](previews/coupon-overview.png)
+
+![Coupon ring with engraved tol numeral](previews/coupon.png)
+
+On dark filament the shadow-read engraving can be hard to see under kitchen
+light — dab acrylic paint or a white gel pen into the digits before you
+trust a ring number.
+
+Let the coupon cool to room temperature before ranking stations — and let
+the washed bottle cool too — warm plastic reads about half a station loose,
+so ranking warm tunes `bottle_tol` too tight. Shortlist coupon stations dry
+first, then re-check the shortlist with wet (soapy) fingers or a wet bottle
+before you commit — wash day is when the fit really gets used, and a
+station can feel a half-step looser wet.
 
 ## Parameters
 
@@ -65,9 +94,11 @@ override on the command line with `-D 'bottle_tol=0.22'`.
 
 ## Assembly & use
 
-1. Print and check the **coupon** first: screw a washed PCO-1881 bottle into
-   each labelled ring and find the tol that grips without cracking or
-   skipping; put that number in `bottle_tol` and print the adapter.
+1. Print and check the **coupon** first, in the same filament as the adapter:
+   screw a washed PCO-1881 bottle into each labelled ring (`15 / 22 / 30 / 38`
+   = `bottle_tol` × 100), shortlist dry, then re-check the shortlist wet
+   (soapy fingers / wet bottle) and pick the tol that grips without cracking
+   or skipping; put that number in `bottle_tol` and print the adapter.
 2. Screw the bottle into the adapter mouth-down until its lip seats on the
    land (about 1.8 turns from first contact). The bottle's weight rests on
    the printed land — the thread only keeps it from unscrewing. Any rotational
@@ -89,9 +120,10 @@ it (NUGGS family **N7**): ≤ 50 °C only, mild unscented dish soap is fine, rin
 and dry fully — **never a dishwasher** (the heated dry cycle exceeds even
 PETG, and a warped port is a narrowed bore).
 
-The printed bottle thread is the high-cycle joint on bottle swaps — expect on
-the order of hundreds of turn cycles a year once you're in the rhythm of
-refills. A ring of plastic dust under the bottle, or a grip that skips when
-you seat it, means **reprint the adapter** (~4 h 10 m and ~53 g per CI's
+The printed bottle thread is the high-cycle joint on bottle swaps — until the
+v1 field checks are ticked, treat endurance as an expectation tied to refill
+cadence (a weekly wash day is roughly 52 turn cycles a year), not a measured
+life. A ring of plastic dust under the bottle, or a grip that skips when you
+seat it, means **reprint the adapter** (~4 h 10 m and ~53 g per CI's
 printcheck numbers on this design) — cheap compared with a full bottle dropping
 from the port.

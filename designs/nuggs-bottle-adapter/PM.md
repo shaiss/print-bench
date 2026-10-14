@@ -23,10 +23,9 @@ which stays full standard.
 
 ## Out of scope
 
-**Deferred** — backlog, ranked: (1) O-ring/watertight sealing variant (brief
-left watertightness non-blocking; default is the printed land); (2) male
-cap-plug variant (brief's non-blocking question); (3) PCO-1880 (3-start)
-sibling finish — the parameter exists, a variant is a copy.
+**Deferred** — good ideas, not now; ranked in the backlog below. Never
+page/label polish ahead of the open v1 field checks (PR #813 R5/R6 re-rank —
+the label epic is done).
 
 **Never:** making the throat a transit path (the passage is the bottle's own
 orifice — widening it means the bottle falls through), and hand-tuning
@@ -42,3 +41,13 @@ and female from drifting apart).
       or skipping (field check), and `bottle_tol` is set to it
 - [x] NOTES.md records the single-start correction and the load-path
       correction against the brief
+
+## Backlog, ranked by user value
+
+| # | Item | Why this rank | Cost |
+|---|---|---|---|
+| B1 | Field-check: coupon port station locks a mating NUGGS module | Unproven N1 claim; gates every page promise until ticked | one print + one mating module |
+| B2 | Field-check: a coupon ring grips a real PCO-1881 bottle; set `bottle_tol` | Unproven N2/N5 claim; the next artifact is a bottle on a ring | one coupon + one bottle |
+| B3 | O-ring / watertight sealing variant | Wet-service ask; brief left watertightness non-blocking | derivative design |
+| B4 | Male cap-plug variant | Brief's non-blocking question | derivative design |
+| B5 | PCO-1880 (3-start) sibling finish | Parameter exists; a variant is a copy | derivative design |
