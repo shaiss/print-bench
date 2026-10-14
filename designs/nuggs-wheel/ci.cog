@@ -1,0 +1,12 @@
+# Assembled stand tip-over check (tools/cogcheck, issue #623).
+# Stand STL is the PRINT pose (port-down). Transform back to the USE frame
+# (foot on z=0): rotate([0,90,0]) then translate([0, stand_w/2, r_out])
+# with stand_w=100, r_out = bore/2+wall+lug_r = 48.4.
+# TIP-RISK is advisory WARN, never a hard fail.
+margin: 2.0
+
+part: nuggs-wheel-stand.stl | density: 1.24 | rotate: 0,90,0 | translate: 0,50,48.4
+
+# Wheel + axle ≈ 180 g at the axle in USE frame
+# arm_x = 0.55·168 = 92.4, arm near y=100−2.8, axle_z = 144
+mass: wheel-assembly | grams: 180 | at: 92.4, 85, 144
