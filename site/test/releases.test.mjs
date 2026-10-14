@@ -7,7 +7,8 @@
 // and the BEST-EFFORT fetch boundary driven by a stub `fetch` so no test touches
 // the network. The negative controls matter most — a fetch that starts throwing
 // on a 404 instead of degrading to "no downloads" would break every deploy, and
-// only these catch it.
+// one that reports a 401/403 as `empty` would pass a failed fetch off as "this
+// design has no release"; only these catch either.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -15,9 +16,11 @@ import assert from "node:assert/strict";
 import {
   manifestToDownloads,
   fetchLatestReleaseManifests,
+  designReleaseStatus,
   shouldFetchReleases,
   humanSize,
 } from "../lib/releases.mjs";
+import { SEAM, runSeam } from "../lib/seam.mjs";
 import { designPage } from "../lib/templates.mjs";
 
 const OWNER = "shaiss";
@@ -91,52 +94,104 @@ test("manifestToDownloads returns null for a missing or malformed manifest", () 
 
 // --- fetch boundary, driven by a stub `fetch` (never the network) ---
 
+// A route's value is the JSON body of a 200, an Error the fetch throws, or a
+// function returning the whole response (for a non-2xx or a broken body).
 function stubFetch(routes) {
   return async (url) => {
     if (!(url in routes)) return { ok: false, status: 404, json: async () => ({}) };
     const body = routes[url];
     if (body instanceof Error) throw body;
+    if (typeof body === "function") return body();
     return { ok: true, status: 200, json: async () => body };
   };
 }
+const httpError = (status, headers = {}) => () => ({
+  ok: false,
+  status,
+  headers: new Map(Object.entries(headers)),
+  json: async () => ({ message: "error" }),
+});
+const badJson = () => ({
+  ok: true,
+  status: 200,
+  json: async () => {
+    throw new SyntaxError("Unexpected token '<'");
+  },
+});
 
 const LATEST = "https://api.github.com/repos/shaiss/print-bench/releases/latest";
+const MF_URL =
+  "https://github.com/shaiss/print-bench/releases/download/v0.1/calibration-cube-v0.1.manifest.json";
+const RELEASE = {
+  tag_name: "v0.1",
+  assets: [
+    { name: "calibration-cube.stl", browser_download_url: "https://x/stl" }, // ignored (not a manifest)
+    { name: "calibration-cube-v0.1.manifest.json", browser_download_url: MF_URL },
+  ],
+};
 
-test("fetchLatestReleaseManifests reads *.manifest.json assets into a map", async () => {
-  const mfUrl =
-    "https://github.com/shaiss/print-bench/releases/download/v0.1/calibration-cube-v0.1.manifest.json";
-  const fetchImpl = stubFetch({
-    [LATEST]: {
-      tag_name: "v0.1",
-      assets: [
-        { name: "calibration-cube.stl", browser_download_url: "https://x/stl" }, // ignored (not a manifest)
-        { name: "calibration-cube-v0.1.manifest.json", browser_download_url: mfUrl },
-      ],
-    },
-    [mfUrl]: MANIFEST,
-  });
-  const map = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
-  assert.equal(map.size, 1);
-  assert.equal(map.get("calibration-cube").version, "v0.1");
+test("fetchLatestReleaseManifests reads *.manifest.json assets into an ok map", async () => {
+  const fetchImpl = stubFetch({ [LATEST]: RELEASE, [MF_URL]: MANIFEST });
+  const got = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
+  assert.equal(got.status, SEAM.OK);
+  assert.equal(got.items.size, 1);
+  assert.equal(got.items.get("calibration-cube").version, "v0.1");
+  assert.equal(designReleaseStatus(got, "calibration-cube"), SEAM.OK);
+  assert.equal(designReleaseStatus(got, "nuggs"), SEAM.EMPTY, "a design the release doesn't carry");
 });
 
-test("fetchLatestReleaseManifests returns empty when there is no release (404)", async () => {
-  const fetchImpl = stubFetch({}); // every URL 404s
-  const map = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
-  assert.equal(map.size, 0);
+test("fetchLatestReleaseManifests: no published release (404) is empty, not unavailable", async () => {
+  const got = await fetchLatestReleaseManifests({ fetchImpl: stubFetch({}), owner: OWNER, repo: REPO });
+  assert.equal(got.status, SEAM.EMPTY);
+  assert.equal(got.items.size, 0);
+  assert.equal(designReleaseStatus(got, "calibration-cube"), SEAM.EMPTY);
 });
 
-test("fetchLatestReleaseManifests degrades to empty on a network error", async () => {
+test("fetchLatestReleaseManifests: a release with no manifests is empty", async () => {
+  const fetchImpl = stubFetch({ [LATEST]: { tag_name: "v0.1", assets: [] } });
+  const got = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
+  assert.equal(got.status, SEAM.EMPTY);
+});
+
+test("fetchLatestReleaseManifests: a 403 / 401 on the release is unavailable for every design", async () => {
+  for (const [route, reason] of [
+    [httpError(403, { "x-ratelimit-remaining": "0" }), "HTTP 403, rate limited"],
+    [httpError(401), "HTTP 401"],
+  ]) {
+    const got = await fetchLatestReleaseManifests({
+      fetchImpl: stubFetch({ [LATEST]: route }),
+      owner: OWNER,
+      repo: REPO,
+    });
+    assert.equal(got.status, SEAM.UNAVAILABLE);
+    assert.equal(got.reason, reason);
+    assert.equal(got.items.size, 0);
+    assert.equal(designReleaseStatus(got, "calibration-cube"), SEAM.UNAVAILABLE);
+    assert.equal(designReleaseStatus(got, "anything-else"), SEAM.UNAVAILABLE, "can't say any design has no release");
+  }
+});
+
+test("fetchLatestReleaseManifests: a network error is unavailable, not a crash", async () => {
   const fetchImpl = stubFetch({ [LATEST]: new Error("getaddrinfo ENOTFOUND") });
-  const map = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
-  assert.equal(map.size, 0); // best-effort: a thrown fetch is "no downloads", not a crash
+  const got = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.match(got.reason, /^network error: /);
+  assert.equal(got.items.size, 0);
 });
 
-test("fetchLatestReleaseManifests skips one bad asset but keeps the rest", async () => {
+test("fetchLatestReleaseManifests: an unparseable release body is unavailable", async () => {
+  const fetchImpl = stubFetch({ [LATEST]: badJson });
+  const got = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "unparseable JSON body");
+});
+
+test("fetchLatestReleaseManifests keeps the good assets and marks only the bad one's design", async () => {
   const goodUrl = "https://github.com/shaiss/print-bench/releases/download/v0.1/good-v0.1.manifest.json";
   const badUrl = "https://github.com/shaiss/print-bench/releases/download/v0.1/bad-v0.1.manifest.json";
   const fetchImpl = stubFetch({
     [LATEST]: {
+      tag_name: "v0.1",
       assets: [
         { name: "bad-v0.1.manifest.json", browser_download_url: badUrl }, // 404 on fetch
         { name: "good-v0.1.manifest.json", browser_download_url: goodUrl },
@@ -145,8 +200,41 @@ test("fetchLatestReleaseManifests skips one bad asset but keeps the rest", async
     [goodUrl]: { design: "good", version: "v0.1", parts: [{ part: "a", file: "good.stl" }] },
     // badUrl intentionally absent → 404
   });
-  const map = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
-  assert.deepEqual([...map.keys()], ["good"]);
+  const got = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
+  assert.deepEqual([...got.items.keys()], ["good"], "one bad asset does not sink the rest");
+  assert.equal(got.status, SEAM.UNAVAILABLE, "but the failure is reported, not dropped");
+  assert.equal(got.reason, "HTTP 404");
+  assert.equal(designReleaseStatus(got, "good"), SEAM.OK);
+  assert.equal(designReleaseStatus(got, "bad"), SEAM.UNAVAILABLE);
+  assert.equal(designReleaseStatus(got, "other"), SEAM.EMPTY, "a design not in the release is unaffected");
+});
+
+test("fetchLatestReleaseManifests: a failed asset whose name names no design affects every design", async () => {
+  const oddUrl = "https://github.com/shaiss/print-bench/releases/download/v0.1/odd.manifest.json";
+  const fetchImpl = stubFetch({
+    [LATEST]: { tag_name: "v0.1", assets: [{ name: "odd.manifest.json", browser_download_url: oddUrl }] },
+    [oddUrl]: badJson,
+  });
+  const got = await fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(designReleaseStatus(got, "anything"), SEAM.UNAVAILABLE);
+});
+
+test("releases disabled (the local/CI default) is off, and nothing is fetched", async () => {
+  let fetched = false;
+  const fetchImpl = async () => {
+    fetched = true;
+    return { ok: true, status: 200, json: async () => RELEASE };
+  };
+  const got = await runSeam(
+    shouldFetchReleases({}),
+    () => fetchLatestReleaseManifests({ fetchImpl, owner: OWNER, repo: REPO }),
+    new Map()
+  );
+  assert.equal(got.status, SEAM.OFF);
+  assert.equal(fetched, false);
+  assert.equal(designReleaseStatus(got, "calibration-cube"), SEAM.OFF);
+  assert.equal(designReleaseStatus(null, "calibration-cube"), SEAM.OFF);
 });
 
 test("shouldFetchReleases: on for Vercel or explicit opt-in, off otherwise", () => {
@@ -194,6 +282,32 @@ test("designPage renders a Downloads block from a manifest", () => {
 test("designPage shows no Downloads block when there is no release", () => {
   const page = designPage(DESIGN_FIXTURE, { ...PAGE_OPTS, downloads: null });
   assert.ok(!page.includes("<h3>Downloads</h3>"));
+  // off (the default) and empty render exactly that same page
+  for (const releaseStatus of [SEAM.OFF, SEAM.EMPTY]) {
+    assert.equal(designPage(DESIGN_FIXTURE, { ...PAGE_OPTS, downloads: null, releaseStatus }), page);
+  }
+});
+
+test("designPage says the downloads couldn't be loaded when the release was unavailable", () => {
+  const page = designPage(DESIGN_FIXTURE, {
+    ...PAGE_OPTS,
+    downloads: null,
+    releaseStatus: SEAM.UNAVAILABLE,
+  });
+  assert.match(page, /<h3>Downloads<\/h3>/, "the block is not silently absent");
+  assert.match(page, /Release downloads couldn(&#39;|')t be loaded for this deploy/);
+  assert.ok(
+    page.includes('href="https://github.com/shaiss/print-bench/releases"'),
+    "points the reader at the releases list"
+  );
+  assert.ok(!page.includes("Download STLs"), "no download action for a release we couldn't read");
+});
+
+test("designPage: a design whose manifest DID load shows its downloads even if another's failed", () => {
+  const downloads = manifestToDownloads(MANIFEST, REPO_OPTS);
+  const page = designPage(DESIGN_FIXTURE, { ...PAGE_OPTS, downloads, releaseStatus: SEAM.OK });
+  assert.ok(page.includes("calibration-cube-v0.1.zip"));
+  assert.ok(!/couldn(&#39;|')t be loaded/.test(page));
 });
 
 test("humanSize renders B / KB / MB", () => {

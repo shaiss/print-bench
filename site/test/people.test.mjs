@@ -28,7 +28,9 @@ import {
   contributorRow,
   reviewedBy,
   historySlot,
+  HISTORY_UNAVAILABLE,
 } from "../lib/teams.mjs";
+import { SEAM } from "../lib/seam.mjs";
 
 const GH = "https://github.example/blob/main";
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -56,13 +58,22 @@ test("contributorRow emits one card per core member, in order", () => {
   assert.ok(html.indexOf("profile-shai") < html.indexOf("profile-vera"));
 });
 
-// --- reviewed-by (now points at People) ------------------------------------
+// --- the review-specialists line (points at People) -------------------------
 
 test("reviewedBy links specialists and the directory to /people/", () => {
   const html = reviewedBy([JANE]);
   assert.match(html, /href="\/people\/#profile-jane"/);
   assert.match(html, /href="\/people\/"/);
   assert.doesNotMatch(html, /\/shared\//);
+});
+
+test("reviewedBy says 'Review specialists', never the per-PR claim 'Reviewed by'", () => {
+  // One static line on every rostered page: who is AVAILABLE to review, not
+  // who reviewed this product or any PR. "Reviewed by →" read as the latter.
+  const html = reviewedBy([JANE]);
+  assert.match(html, /Review specialists <span aria-hidden="true">→<\/span>/, "keeps the arrow");
+  assert.match(html, />People<\/a>/, "keeps the People link");
+  assert.doesNotMatch(html, /Reviewed by/);
 });
 
 test("reviewedBy with no specialists renders nothing", () => {
@@ -122,9 +133,50 @@ test("REAL: the calibration-cube product page shows its team + build history", (
     "the team block precedes the action row in the header"
   );
   assert.match(html, /href="\/people\/#profile-vera"/, "core PM linked to their profile");
-  assert.match(html, /Reviewed by/);
+  assert.match(html, /Review specialists/);
   assert.match(html, /<ol class="timeline">/);
   assert.match(html, /size-marker/, "a real PM.md decision-log entry renders");
+  assert.ok(!html.includes(HISTORY_UNAVAILABLE), "no git seam ran, so no couldn't-load note");
+
+  // The same page on a deploy whose git-history fetch failed: the History tab
+  // says so, and the committed PM.md history still renders under the note.
+  const unavailable = designPage(cube, {
+    html: "<h1>calibration-cube</h1>",
+    toc: "",
+    githubBase: GH,
+    model: buildModel(REPO_ROOT, cube),
+    roster,
+    specialists: team.specialists,
+    events,
+    historyStatus: SEAM.UNAVAILABLE,
+    people: team.people,
+  });
+  const history = unavailable.slice(unavailable.indexOf('id="history"'));
+  assert.ok(history.includes(HISTORY_UNAVAILABLE), "the History section carries the note");
+  assert.match(history, /size-marker/, "committed events still render");
+});
+
+test("REAL: no rostered product page claims 'Reviewed by →'", () => {
+  const designs = readDesigns(REPO_ROOT);
+  const designNames = new Set(designs.map((d) => d.name));
+  const team = readTeam(REPO_ROOT, { onError: () => {}, designNames });
+  const rostered = designs.filter((d) => team.rosters.has(d.name));
+  assert.ok(rostered.length > 1, "the real repo has rostered designs to scan");
+  for (const d of rostered) {
+    const html = designPage(d, {
+      html: "<h1>x</h1>",
+      toc: "",
+      githubBase: GH,
+      model: buildModel(REPO_ROOT, d),
+      roster: team.rosters.get(d.name),
+      specialists: team.specialists,
+      people: team.people,
+    });
+    // compare the visible text, with tags stripped, as a reader sees it
+    const text = html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+    assert.ok(!/Reviewed by\s*→/.test(text), `${d.name}: no per-PR "Reviewed by →" claim`);
+    assert.match(text, /Review specialists → /, `${d.name}: the specialists line is present`);
+  }
 });
 
 test("REAL: a rosterless design's product page carries no contributions section", () => {

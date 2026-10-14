@@ -5,6 +5,7 @@ import { AVATAR_STYLES, AVATAR_BACKGROUND } from "./avatars.mjs";
 import { escapeHtml, inlineMarkdown, plainText } from "./markdown.mjs";
 import { hasConfigurator } from "./model.mjs";
 import { humanSize } from "./releases.mjs";
+import { SEAM } from "./seam.mjs";
 import { memberProfile, memberTeams } from "./profile.mjs";
 import { contributorRow, reviewedBy, historySlot } from "./teams.mjs";
 import {
@@ -117,13 +118,18 @@ export function setSiteUrl(v) {
 // (today: the open decision queue, via notifications.mjs) and calls this before
 // any page renders. Empty by default — a local/CI build has no network source,
 // so the bell renders deterministically as "all caught up", which is exactly
-// the standard empty-state a notification icon shows.
-let NOTIFICATIONS = { items: [], actions: [] };
+// the standard empty-state a notification icon shows. A deploy whose source
+// could not be fetched sets `unavailable` instead, and the bell says so.
+let NOTIFICATIONS = { items: [], actions: [], unavailable: [] };
 export function setNotifications(bundle) {
   NOTIFICATIONS =
     bundle && Array.isArray(bundle.items)
-      ? { items: bundle.items, actions: Array.isArray(bundle.actions) ? bundle.actions : [] }
-      : { items: [], actions: [] };
+      ? {
+          items: bundle.items,
+          actions: Array.isArray(bundle.actions) ? bundle.actions : [],
+          unavailable: Array.isArray(bundle.unavailable) ? bundle.unavailable : [],
+        }
+      : { items: [], actions: [], unavailable: [] };
 }
 
 // A stroke bell that inherits currentColor, so it themes with the nav the way
@@ -137,15 +143,21 @@ const BELL_SVG = `<svg class="notif-bell" viewBox="0 0 24 24" width="18" height=
  * (site.js only adds outside-click / Escape-to-close); the badge shows the count
  * and the tray lists each notification linking to the thing it's about. Always
  * rendered — an empty bell shows the "all caught up" state, the same as any
- * app's notification icon, so it never disappears and reappears.
+ * app's notification icon, so it never disappears and reappears. "All caught
+ * up" is a claim, though, so it is shown only when no source reported its
+ * fetch `unavailable`; otherwise the tray carries each source's
+ * couldn't-load line in its place.
  */
 function notificationBell() {
   const items = NOTIFICATIONS.items || [];
   const actions = NOTIFICATIONS.actions || [];
+  const unavailable = NOTIFICATIONS.unavailable || [];
   const count = items.length;
   const label =
     count === 0
-      ? "Notifications: none waiting"
+      ? unavailable.length
+        ? "Notifications: could not be loaded for this deploy"
+        : "Notifications: none waiting"
       : `Notifications: ${count} waiting`;
   const badge = count
     ? `<span class="notif-badge" data-notif-count>${escapeHtml(String(count))}</span>`
@@ -161,11 +173,17 @@ function notificationBell() {
         </li>`
     )
     .join("\n");
-  const body = count
+  const notes = unavailable
+    .map((m) => `      <p class="notif-empty notif-unavailable">${escapeHtml(m)}</p>`)
+    .join("\n");
+  const list = count
     ? `      <ul class="notif-list">
 ${rows}
       </ul>`
-    : `      <p class="notif-empty">You're all caught up.</p>`;
+    : "";
+  const body =
+    [list, notes].filter(Boolean).join("\n") ||
+    `      <p class="notif-empty">You're all caught up.</p>`;
   const foot = actions.length
     ? `      <div class="notif-foot">
 ${actions
@@ -505,8 +523,20 @@ function viewerPanel(design) {
  * not appear (the site's no-404 rule — an absent release is not a broken link).
  * Each part links to its STL release asset with size and a short SHA-256; the
  * full checksum rides in the title so a careful downloader can verify.
+ *
+ * The one exception to "absent means absent": when the deploy could not READ
+ * the release (`releaseStatus` "unavailable", releases.mjs designReleaseStatus),
+ * a missing block would read as "this design has no release". So the block
+ * renders as a short note instead, pointing at the releases list — a page never
+ * passes a failed fetch off as no downloads.
  */
-function downloadsBlock(downloads) {
+function downloadsBlock(downloads, releaseStatus = SEAM.OFF) {
+  if (!downloads && releaseStatus === SEAM.UNAVAILABLE) {
+    return `<div class="rail-block">
+    <h3>Downloads</h3>
+    <p class="rail-note">Release downloads couldn't be loaded for this deploy; the next deploy retries. Every release is listed on <a href="${GITHUB_REPO}/releases" rel="noopener noreferrer">GitHub</a>.</p>
+  </div>`;
+  }
   if (!downloads) return "";
   const rows = downloads.parts
     .map((p) => {
@@ -552,12 +582,16 @@ function lineageStrip(design) {
   return `<p class="lineage-strip">${nodes.join("")}<span class="lineage-node lineage-node-current">${escapeHtml(design.name)}</span></p>`;
 }
 
-export function designPage(design, { html, toc, githubBase, model, media = [], downloads = null, roster = null, specialists = [], events = [], people = new Map() }) {
+// releaseStatus / historyStatus are the deploy-time seams' per-page status
+// (seam.mjs: off | ok | empty | unavailable). Both default to "off", which
+// renders exactly the committed baseline; only "unavailable" changes a page —
+// the Downloads note above and historySlot's couldn't-load note.
+export function designPage(design, { html, toc, githubBase, model, media = [], downloads = null, releaseStatus = SEAM.OFF, roster = null, specialists = [], events = [], historyStatus = SEAM.OFF, people = new Map() }) {
   const showConfigurator = hasConfigurator(model);
   const src = `${githubBase}/${design.relDir}`;
   const rail = `<aside class="rail">
   ${toc ? `<div class="rail-block"><h3>On this page</h3>${toc}</div>` : ""}
-  ${downloadsBlock(downloads)}
+  ${downloadsBlock(downloads, releaseStatus)}
   <div class="rail-block">
     <h3>Source</h3>
     <ul>
@@ -630,7 +664,7 @@ ${showConfigurator ? configuratorPanel(design, model) : ""}`,
       ? {
           id: "history",
           label: "History",
-          body: historySlot(roster.design, { events, people }),
+          body: historySlot(roster.design, { events, people, gitStatus: historyStatus }),
         }
       : null,
   ].filter(Boolean);

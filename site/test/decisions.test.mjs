@@ -8,8 +8,10 @@
 // kind, length-capped titles, total on junk), and the BEST-EFFORT fetch
 // boundary driven by a stub `fetch` so no test touches the network. The
 // negative controls matter most — a fetch that starts throwing on a 404
-// instead of degrading to "no section" would break every deploy, and only
-// these catch it.
+// instead of degrading would break every deploy; one that reports a 401 as
+// `empty` tells every visitor "You're all caught up" about a queue nobody
+// read; and one that stops after the first page shows 30 of 53 decisions as
+// the whole queue (both measured). Only these catch them.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -19,6 +21,9 @@ import {
   searchToDecisions,
   fetchOpenDecisions,
 } from "../lib/decisions.mjs";
+import { SEAM, runSeam } from "../lib/seam.mjs";
+import { decisionsToNotifications } from "../lib/notifications.mjs";
+import { indexPage, setNotifications } from "../lib/templates.mjs";
 
 const OWNER = "shaiss";
 const REPO = "print-bench";
@@ -89,70 +94,237 @@ test("searchToDecisions is total on junk input", () => {
 
 // --- the fetch boundary, driven by a stub `fetch` (never the network) ---
 
+// A route's value is the JSON body of a 200, an Error the fetch throws, or a
+// function returning the whole response (for a non-2xx or a broken body).
 function stubFetch(routes) {
   return async (url) => {
     if (!(url in routes)) return { ok: false, status: 404, json: async () => ({}) };
     const body = routes[url];
     if (body instanceof Error) throw body;
+    if (typeof body === "function") return body();
     return { ok: true, status: 200, json: async () => body };
   };
 }
+const httpError = (status, headers = {}) => () => ({
+  ok: false,
+  status,
+  headers: new Map(Object.entries(headers)),
+  json: async () => ({ message: "error" }),
+});
+const badJson = () => ({
+  ok: true,
+  status: 200,
+  json: async () => {
+    throw new SyntaxError("Unexpected token '<'");
+  },
+});
 
-const QUEUE_URL = `https://api.github.com/search/issues?q=${encodeURIComponent(
-  `repo:${OWNER}/${REPO} is:open label:${LABEL}`
-)}&per_page=30&sort=created&order=ascending`;
+const pageUrl = (page, perPage = 100) =>
+  `https://api.github.com/search/issues?q=${encodeURIComponent(
+    `repo:${OWNER}/${REPO} is:open label:${LABEL}`
+  )}&per_page=${perPage}&page=${page}&sort=created&order=ascending`;
+const QUEUE_URL = pageUrl(1);
+const ISSUE_42 = item({ number: 42, title: "Loosen the coupon fit?", url: "https://github.com/o/r/issues/42" });
+const OPTS = { owner: OWNER, repo: REPO };
 
-test("fetchOpenDecisions returns the queue's items as decision rows", async () => {
+/** n decision items numbered from `from`. */
+function items(n, from = 1) {
+  return Array.from({ length: n }, (_, i) =>
+    item({ number: from + i, title: `decision ${from + i}`, url: `https://github.com/o/r/issues/${from + i}` })
+  );
+}
+
+test("fetchOpenDecisions returns the queue's items as an ok seam result", async () => {
   const fetchImpl = stubFetch({
-    [QUEUE_URL]: {
-      total_count: 1,
-      incomplete_results: false,
-      items: [item({ number: 42, title: "Loosen the coupon fit?", url: "https://github.com/o/r/issues/42" })],
-    },
+    [QUEUE_URL]: { total_count: 1, incomplete_results: false, items: [ISSUE_42] },
   });
-  const got = await fetchOpenDecisions({ fetchImpl, owner: OWNER, repo: REPO });
-  assert.equal(got.length, 1);
-  assert.equal(got[0].number, 42);
+  const got = await fetchOpenDecisions({ fetchImpl, ...OPTS });
+  assert.equal(got.status, SEAM.OK);
+  assert.equal(got.items.length, 1);
+  assert.equal(got.items[0].number, 42);
 });
 
-test("fetchOpenDecisions degrades to [] on a 404 / non-2xx (empty queue)", async () => {
-  const fetchImpl = stubFetch({}); // every URL 404s
-  const got = await fetchOpenDecisions({ fetchImpl, owner: OWNER, repo: REPO });
-  assert.deepEqual(got, []);
+test("fetchOpenDecisions asks for the API's maximum page size (100)", async () => {
+  const urls = [];
+  await fetchOpenDecisions({
+    fetchImpl: async (url) => {
+      urls.push(url);
+      return { ok: true, status: 200, json: async () => ({ total_count: 0, items: [] }) };
+    },
+    ...OPTS,
+  });
+  assert.deepEqual(urls, [QUEUE_URL], "one short page → one request");
+  assert.match(urls[0], /per_page=100&page=1/);
 });
 
-test("fetchOpenDecisions degrades to [] on a network error", async () => {
+test("fetchOpenDecisions follows pages: a two-page queue of 53 renders and counts 53", async () => {
+  // The measured undercount: one 30-row page was all it read, so a 53-decision
+  // queue showed 30. At the old page size the queue spans two pages.
+  const all = items(53);
+  const requested = [];
+  const routes = {
+    [pageUrl(1, 30)]: { total_count: 53, items: all.slice(0, 30) },
+    [pageUrl(2, 30)]: { total_count: 53, items: all.slice(30) }, // 23 — a short page
+  };
+  const stub = stubFetch(routes);
+  const fetchImpl = async (url) => {
+    requested.push(url);
+    return stub(url);
+  };
+  const got = await fetchOpenDecisions({ fetchImpl, ...OPTS, perPage: 30 });
+  assert.equal(got.status, SEAM.OK);
+  assert.equal(got.items.length, 53);
+  assert.deepEqual(got.items.map((r) => r.number), all.map((i) => i.number), "order preserved");
+  assert.equal(requested.length, 2, "stops at the short page — no third request");
+
+  // …and the bell renders and counts all 53.
+  setNotifications(
+    decisionsToNotifications({ status: got.status, rows: got.items, searchUrl: "https://github.com/o/r/q" })
+  );
+  try {
+    const html = indexPage([]);
+    assert.match(html, /class="notif-badge"[^>]*>53</, "badge counts 53");
+    assert.equal((html.match(/class="notif-item"/g) || []).length, 53, "53 rows rendered");
+    assert.match(html, /decision 53/);
+  } finally {
+    setNotifications(null);
+  }
+});
+
+test("fetchOpenDecisions stops once total_count items have arrived", async () => {
+  const all = items(60);
+  const requested = [];
+  const stub = stubFetch({
+    [pageUrl(1, 30)]: { total_count: 60, items: all.slice(0, 30) },
+    [pageUrl(2, 30)]: { total_count: 60, items: all.slice(30) }, // full page, but total reached
+  });
+  const got = await fetchOpenDecisions({
+    fetchImpl: async (url) => {
+      requested.push(url);
+      return stub(url);
+    },
+    ...OPTS,
+    perPage: 30,
+  });
+  assert.equal(got.items.length, 60);
+  assert.equal(requested.length, 2, "no third request past total_count");
+});
+
+test("fetchOpenDecisions caps pagination at 10 pages", async () => {
+  // A source that never ends (total_count missing, every page full) must not
+  // loop forever: 10 × 100 is the search API's own 1000-result ceiling.
+  let n = 0;
+  const got = await fetchOpenDecisions({
+    fetchImpl: async () => {
+      const page = items(5, 1 + 5 * n++);
+      return { ok: true, status: 200, json: async () => ({ items: page }) };
+    },
+    ...OPTS,
+    perPage: 5,
+  });
+  assert.equal(n, 10, "exactly maxPages requests");
+  assert.equal(got.items.length, 50);
+});
+
+test("fetchOpenDecisions de-duplicates a row the ranking repeats across pages", async () => {
+  const all = items(4);
+  const got = await fetchOpenDecisions({
+    fetchImpl: stubFetch({
+      [pageUrl(1, 2)]: { total_count: 4, items: all.slice(0, 2) },
+      [pageUrl(2, 2)]: { total_count: 4, items: [all[1], all[2]] }, // #2 again
+      [pageUrl(3, 2)]: { total_count: 4, items: [all[3]] },
+    }),
+    ...OPTS,
+    perPage: 2,
+  });
+  assert.deepEqual(got.items.map((r) => r.number), [1, 2, 3, 4]);
+});
+
+test("fetchOpenDecisions: a search that finds nothing is empty", async () => {
+  const fetchImpl = stubFetch({ [QUEUE_URL]: { total_count: 0, items: [] } });
+  const got = await fetchOpenDecisions({ fetchImpl, ...OPTS });
+  assert.deepEqual(got, { status: SEAM.EMPTY, items: [], reason: null });
+});
+
+test("fetchOpenDecisions: a 401 / 403 / 404 is unavailable, never empty", async () => {
+  for (const [route, reason] of [
+    [httpError(401), "HTTP 401"],
+    [httpError(403, { "x-ratelimit-remaining": "0" }), "HTTP 403, rate limited"],
+    [undefined, "HTTP 404"], // absent route → the stub's 404
+  ]) {
+    const fetchImpl = stubFetch(route ? { [QUEUE_URL]: route } : {});
+    const got = await fetchOpenDecisions({ fetchImpl, ...OPTS });
+    assert.equal(got.status, SEAM.UNAVAILABLE);
+    assert.equal(got.reason, reason);
+    assert.deepEqual(got.items, []);
+  }
+});
+
+test("fetchOpenDecisions: a network error is unavailable", async () => {
   const fetchImpl = stubFetch({ [QUEUE_URL]: new Error("getaddrinfo ENOTFOUND") });
-  const got = await fetchOpenDecisions({ fetchImpl, owner: OWNER, repo: REPO });
-  assert.deepEqual(got, []);
+  const got = await fetchOpenDecisions({ fetchImpl, ...OPTS });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.match(got.reason, /^network error: /);
 });
 
-test("fetchOpenDecisions degrades to [] when the body has no items array", async () => {
+test("fetchOpenDecisions: an unparseable body is unavailable", async () => {
+  const got = await fetchOpenDecisions({ fetchImpl: stubFetch({ [QUEUE_URL]: badJson }), ...OPTS });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "unparseable JSON body");
+});
+
+test("fetchOpenDecisions: a body with no items array is unavailable", async () => {
   // The search API returns a 200 with a message body on a rate limit, or an
-  // unexpected shape; neither must sink the build.
+  // unexpected shape; neither must sink the build — nor read as an empty queue.
   const fetchImpl = stubFetch({ [QUEUE_URL]: { message: "API rate limit exceeded" } });
-  const got = await fetchOpenDecisions({ fetchImpl, owner: OWNER, repo: REPO });
-  assert.deepEqual(got, []);
+  const got = await fetchOpenDecisions({ fetchImpl, ...OPTS });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "unexpected response body");
 });
 
-test("fetchOpenDecisions aborts a hung request after the timeout and returns []", async () => {
+test("fetchOpenDecisions: a failure on page 2 is unavailable — no partial queue", async () => {
+  const all = items(53);
+  const fetchImpl = stubFetch({
+    [pageUrl(1, 30)]: { total_count: 53, items: all.slice(0, 30) },
+    [pageUrl(2, 30)]: httpError(403, { "x-ratelimit-remaining": "0" }),
+  });
+  const got = await fetchOpenDecisions({ fetchImpl, ...OPTS, perPage: 30 });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "HTTP 403, rate limited on page 2");
+  assert.deepEqual(got.items, [], "30 of 53 is not shown as the queue");
+});
+
+test("fetchOpenDecisions aborts a hung request after the timeout: unavailable", async () => {
   // A fetch that never resolves on its own, but honors the abort signal the
   // way the platform fetch does — the bounded timeout must unstick the build.
   const hung = (_url, { signal } = {}) =>
     new Promise((_resolve, reject) => {
       signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
     });
-  const got = await fetchOpenDecisions({
-    fetchImpl: hung,
-    owner: OWNER,
-    repo: REPO,
-    timeoutMs: 20,
-  });
-  assert.deepEqual(got, []);
+  const got = await fetchOpenDecisions({ fetchImpl: hung, ...OPTS, timeoutMs: 20 });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "timeout after 20 ms");
 });
 
-test("fetchOpenDecisions returns [] without a fetch impl", async () => {
-  assert.deepEqual(await fetchOpenDecisions({ fetchImpl: null, owner: OWNER, repo: REPO }), []);
+test("fetchOpenDecisions without a fetch impl is unavailable, not a throw", async () => {
+  const got = await fetchOpenDecisions({ fetchImpl: null, ...OPTS });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.deepEqual(got.items, []);
+});
+
+test("decisions disabled (the local/CI default) is off, and nothing is fetched", async () => {
+  let fetched = false;
+  const got = await runSeam(shouldFetchDecisions({}), () =>
+    fetchOpenDecisions({
+      fetchImpl: async () => {
+        fetched = true;
+        return { ok: true, status: 200, json: async () => ({ items: [] }) };
+      },
+      ...OPTS,
+    })
+  );
+  assert.equal(got.status, SEAM.OFF);
+  assert.equal(fetched, false);
 });
 
 test("fetchOpenDecisions scopes the query to the repo and label", async () => {

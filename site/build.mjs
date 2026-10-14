@@ -33,7 +33,9 @@ import {
   shouldFetchReleases,
   fetchLatestReleaseManifests,
   manifestToDownloads,
+  designReleaseStatus,
 } from "./lib/releases.mjs";
+import { SEAM, runSeam, unavailableWarning } from "./lib/seam.mjs";
 import { readTimeline } from "./lib/timeline.mjs";
 import {
   shouldFetchHistory,
@@ -254,25 +256,41 @@ async function main() {
 
   // Release download links (issue #139). Best-effort and Vercel-scoped: on the
   // deploy (which has network) each design's latest-release manifest becomes
-  // per-part download links; locally and in CI the fetch is off, so the build
-  // stays deterministic and simply shows no downloads. Any failure here leaves
-  // the map empty — a missing release is never a broken build.
-  let releaseManifests = new Map();
-  if (shouldFetchReleases()) {
-    try {
-      releaseManifests = await fetchLatestReleaseManifests({
+  // per-part download links; locally and in CI the seam is `off`, so the build
+  // stays deterministic and simply shows no downloads. A failure never breaks
+  // the build, and it is never passed off as "no release" either: the seam
+  // reports `unavailable` (lib/seam.mjs), this logs a WARN, and the affected
+  // pages' Downloads block says it couldn't be loaded.
+  const releases = await runSeam(
+    shouldFetchReleases(),
+    () =>
+      fetchLatestReleaseManifests({
         owner: OWNER,
         repo: REPO,
         token: process.env.GITHUB_TOKEN,
-      });
-      console.log(
-        `      releases: ${releaseManifests.size} manifest(s) fetched for download links`
-      );
-    } catch (err) {
-      console.warn(
-        `      releases: fetch skipped (${err.message}) — product pages show no downloads`
-      );
-    }
+      }),
+    new Map()
+  );
+  const releaseManifests = releases.items;
+  if (releases.status === SEAM.OK) {
+    console.log(
+      `      releases: ${releaseManifests.size} manifest(s) fetched for download links`
+    );
+  } else if (releases.status === SEAM.EMPTY) {
+    console.log(`      releases: no release manifests published — product pages show no downloads`);
+  } else if (releases.status === SEAM.UNAVAILABLE) {
+    const scope = releases.unavailableDesigns;
+    console.warn(
+      unavailableWarning("releases", {
+        reasons: [releases.reason],
+        ...(scope instanceof Set ? { count: scope.size, noun: "design" } : {}),
+        effect: `${
+          scope instanceof Set ? "those" : "product"
+        } pages' Downloads block shows 'unavailable'${
+          releaseManifests.size ? `; ${releaseManifests.size} manifest(s) fetched` : ""
+        }`,
+      })
+    );
   }
 
   // Documents the site itself publishes, so links between them stay internal
@@ -347,57 +365,87 @@ async function main() {
   // Git history is the first deploy-time source folded into the timeline (the
   // #126 seam, now fed): each rostered design's own path-filtered commits over
   // the GitHub API. Best-effort and Vercel-scoped (shouldFetchHistory) exactly
-  // like release download links — locally and in CI no fetch runs, so the
+  // like release download links — locally and in CI the seam is `off`, so the
   // timeline stays committed-only and the build is byte-for-byte reproducible;
-  // on the deploy real commits appear, labelled `commit · git`.
+  // on the deploy real commits appear, labelled `commit · git`. Each design's
+  // seam status rides to its History tab: an `unavailable` fetch adds a
+  // couldn't-load note there (and a WARN here) instead of a misleading zero.
   const commitsByDesign = new Map();
-  if (shouldFetchHistory()) {
+  const historyStatus = new Map();
+  const historyEnabled = shouldFetchHistory();
+  if (historyEnabled) {
+    const reasons = [];
     for (const design of team.rosters.keys()) {
-      const commits = await fetchDesignCommits({
-        owner: OWNER,
-        repo: REPO,
-        design,
-        token: process.env.GITHUB_TOKEN,
-      });
-      if (commits.length) commitsByDesign.set(design, commits);
+      const got = await runSeam(historyEnabled, () =>
+        fetchDesignCommits({
+          owner: OWNER,
+          repo: REPO,
+          design,
+          token: process.env.GITHUB_TOKEN,
+        })
+      );
+      historyStatus.set(design, got.status);
+      if (got.status === SEAM.UNAVAILABLE) reasons.push(got.reason);
+      else if (got.items.length) commitsByDesign.set(design, got.items);
     }
     const total = [...commitsByDesign.values()].reduce((n, c) => n + c.length, 0);
-    console.log(`      history: ${total} commit(s) fetched for the team timeline`);
+    const fetched = historyStatus.size - reasons.length;
+    if (fetched) {
+      console.log(
+        `      history: ${total} commit(s) fetched for the team timeline` +
+          (reasons.length ? ` (${fetched} of ${historyStatus.size} design(s))` : "")
+      );
+    }
+    if (reasons.length) {
+      console.warn(
+        unavailableWarning("history", {
+          reasons,
+          count: reasons.length,
+          noun: "design",
+          effect: "History tabs show 'unavailable'",
+        })
+      );
+    }
   }
 
   // The read-only "Decisions awaiting a human" queue (issue #181, the surfacing
   // follow-up to the #161 HITL decision gate). Best-effort and Vercel-scoped
   // exactly like release download links and git history — on the deploy (which
-  // has network) the open needs-decision queue feeds the header notification
-  // bell; locally and in CI the fetch is off, so the build stays deterministic
-  // and the bell shows its "all caught up" empty state. Any failure here leaves
-  // the queue empty, so a rate-limited or offline deploy is never a broken
-  // build. Surfacing only: each notification links out to the issue; resolving
-  // still goes through /decide.
-  let decisionQueue = null;
-  if (shouldFetchDecisions()) {
-    try {
-      const rows = await fetchOpenDecisions({
-        owner: OWNER,
-        repo: REPO,
-        token: process.env.GITHUB_TOKEN,
-      });
-      if (rows.length) {
-        decisionQueue = {
-          rows,
-          searchUrl: `https://github.com/${OWNER}/${REPO}/issues?q=${encodeURIComponent(
-            "is:open label:needs-decision"
-          )}`,
-        };
-        console.log(`      decisions: ${rows.length} open decision(s) fetched for the queue`);
-      } else {
-        console.log(`      decisions: queue empty — notification bell shows "all caught up"`);
-      }
-    } catch (err) {
-      console.warn(
-        `      decisions: fetch skipped (${err.message}) — notification bell shows "all caught up"`
-      );
-    }
+  // has network) the open needs-decision queue, every page of it, feeds the
+  // header notification bell; locally and in CI the seam is `off`, so the build
+  // stays deterministic and the bell shows its "all caught up" empty state. A
+  // failure is never a broken build, and never an "all caught up" either: the
+  // seam reports `unavailable`, this logs a WARN, and the bell says it couldn't
+  // load the queue. Surfacing only: each notification links out to the issue;
+  // resolving still goes through /decide.
+  const decisions = await runSeam(shouldFetchDecisions(), () =>
+    fetchOpenDecisions({
+      owner: OWNER,
+      repo: REPO,
+      token: process.env.GITHUB_TOKEN,
+    })
+  );
+  let decisionQueue = null; // `off` → null → the bell renders exactly as before
+  if (decisions.status !== SEAM.OFF) {
+    decisionQueue = {
+      status: decisions.status,
+      rows: decisions.items,
+      searchUrl: `https://github.com/${OWNER}/${REPO}/issues?q=${encodeURIComponent(
+        "is:open label:needs-decision"
+      )}`,
+    };
+  }
+  if (decisions.status === SEAM.OK) {
+    console.log(`      decisions: ${decisions.items.length} open decision(s) fetched for the queue`);
+  } else if (decisions.status === SEAM.EMPTY) {
+    console.log(`      decisions: queue empty — notification bell shows "all caught up"`);
+  } else if (decisions.status === SEAM.UNAVAILABLE) {
+    console.warn(
+      unavailableWarning("decisions", {
+        reasons: [decisions.reason],
+        effect: `notification bell shows "Couldn't load the decision queue"`,
+      })
+    );
   }
 
   // Feed the header notification bell before any page renders (setNotifications
@@ -507,11 +555,13 @@ async function main() {
         model,
         media,
         downloads,
+        releaseStatus: designReleaseStatus(releases, design.name),
         // The team-contributions section: who built this product and its
         // build history, product-scoped. Only a rostered design gets one.
         roster: team.rosters.get(design.name) || null,
         specialists: team.specialists,
         events: timelines.get(design.name) ?? [],
+        historyStatus: historyStatus.get(design.name) ?? SEAM.OFF,
         people: team.people,
       }),
     });

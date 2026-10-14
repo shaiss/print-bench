@@ -12,9 +12,11 @@
 //   - searchToDecisions() is PURE: GitHub search-API issue objects → the
 //     render model a template section consumes. Unit-tested, no network.
 //   - fetchOpenDecisions() is the impure boundary: the open needs-decision
-//     queue over the GitHub search API, with an injectable `fetch`. BEST-EFFORT
-//     — any failure (offline, rate limit, non-2xx, unparseable body) yields []
-//     and the section simply doesn't render, never a broken build.
+//     queue over the GitHub search API, every page of it, with an injectable
+//     `fetch`. BEST-EFFORT — any failure (offline, rate limit, non-2xx,
+//     unparseable body) yields no rows, never a broken build — but it reports
+//     a seam status (seam.mjs) beside them, so an `unavailable` queue puts the
+//     bell in a "couldn't load" state instead of "You're all caught up".
 //
 // Determinism (the clarified site rule — build vs. deploy vs. served output):
 // the fetch is deploy-scoped (shouldFetchDecisions). A plain ./scripts/site.sh
@@ -22,6 +24,8 @@
 // which has network, is where the live queue appears. This is surfacing of real
 // repository state (open, labelled issues/PRs), not invention — every row links
 // to a real issue the label already keys on.
+
+import { SEAM, seamResult, fetchedResult, fetchJson } from "./seam.mjs";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -75,9 +79,15 @@ export function searchToDecisions(items) {
 /**
  * Impure boundary — the open `needs-decision` queue over the GitHub search
  * API, scoped to one repo so only THIS repository's parked decisions appear.
- * Best-effort: returns [] on any failure (no match, non-2xx, network error,
- * unparseable body), so the caller renders no section and the build never
- * breaks. `fetchImpl` is injectable so tests never touch the network; `token`
+ * Returns a seam result (seam.mjs) and never throws, so the build never breaks:
+ *   ok           items: every open decision row, across all pages
+ *   empty        the search ran and nothing is parked — "all caught up" is true
+ *   unavailable  items: [], with the failure class in `reason` — a non-2xx on
+ *                any page, network error, timeout, unparseable body or a body
+ *                with no `items` array. A page-2 failure is unavailable too:
+ *                showing the first page's rows as the whole queue is the
+ *                undercount this replaces, so no partial queue is returned.
+ * `fetchImpl` is injectable so tests never touch the network; `token`
  * (optional) lifts the unauthenticated rate limit but is never required for a
  * public repo.
  *
@@ -86,9 +96,13 @@ export function searchToDecisions(items) {
  * pipeline keys on (`docs/decision-gate.md`). Created-ascending so the oldest
  * parked decision leads the queue — the one waiting longest for a human.
  *
- * A bounded timeout keeps a hung connection from stalling the deploy build
- * (the same bound history.mjs added): abort after timeoutMs, and the
- * AbortError lands in the same best-effort catch as any other failure → [].
+ * Paginated: it requests `perPage` (the API's maximum, 100) per page and
+ * follows pages until a short page or `total_count` rows have arrived, capped
+ * at `maxPages` — 10 × 100 is the search API's own 1000-result ceiling. One
+ * page used to be all it read (30 rows), so a 53-decision queue showed 30.
+ * Rows are de-duplicated by number in case the ranking shifts between pages.
+ * Each page is bounded by `timeoutMs` (fetchJson), so a hung connection cannot
+ * stall the deploy build.
  */
 export async function fetchOpenDecisions({
   fetchImpl = globalThis.fetch,
@@ -96,27 +110,33 @@ export async function fetchOpenDecisions({
   repo,
   label = "needs-decision",
   token,
-  perPage = 30,
+  perPage = 100,
+  maxPages = 10,
   timeoutMs = 10000,
 } = {}) {
-  if (typeof fetchImpl !== "function") return [];
   const headers = { Accept: "application/vnd.github+json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const q = `repo:${owner}/${repo} is:open label:${label}`;
-  const url = `${GITHUB_API}/search/issues?q=${encodeURIComponent(
-    q
-  )}&per_page=${perPage}&sort=created&order=ascending`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetchImpl(url, { headers, signal: controller.signal });
-    if (!res || !res.ok) return []; // no match / rate limit / error → no section
-    const body = await res.json();
-    const items = body && Array.isArray(body.items) ? body.items : [];
-    return searchToDecisions(items);
-  } catch {
-    return []; // offline / DNS / rate limit / timeout → no section
-  } finally {
-    clearTimeout(timer);
+  const q = encodeURIComponent(`repo:${owner}/${repo} is:open label:${label}`);
+  const rows = [];
+  const seen = new Set();
+  for (let page = 1; page <= maxPages; page++) {
+    const url = `${GITHUB_API}/search/issues?q=${q}&per_page=${perPage}&page=${page}&sort=created&order=ascending`;
+    const got = await fetchJson(fetchImpl, url, { headers, timeoutMs });
+    const where = page > 1 ? ` on page ${page}` : "";
+    if (!got.ok) return seamResult(SEAM.UNAVAILABLE, [], `${got.reason}${where}`);
+    const body = got.body;
+    if (!body || !Array.isArray(body.items)) {
+      return seamResult(SEAM.UNAVAILABLE, [], `unexpected response body${where}`);
+    }
+    for (const row of searchToDecisions(body.items)) {
+      if (seen.has(row.number)) continue;
+      seen.add(row.number);
+      rows.push(row);
+    }
+    if (body.items.length < perPage) break; // a short page is the last one
+    // Every distinct decision the search counted has arrived. (A repeated row
+    // doesn't count toward it, so a ranking shift costs one more page, not a row.)
+    if (Number.isInteger(body.total_count) && rows.length >= body.total_count) break;
   }
+  return fetchedResult(rows);
 }
