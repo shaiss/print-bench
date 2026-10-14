@@ -78,6 +78,7 @@ emits the one notice.
 | `ci.yml` | the `Draft product pages that do not pass their gate (Claude API)` **step** of `regen` — previews, animations, product shots, the gallery and the commit-back all still run | the `AI andon cord — product-page drafting bypassed` step (only when the PR touched designs; a docs-only PR shows no cord notice in CI at all) |
 | `lifestyle-shot.yml`, `product-still.yml`, `lifestyle-clip.yml` | the `generate` job (the only `ZAI_KEY` spend), manual dispatch included; `detect` still runs its deterministic input validation | the `andon-notice` sibling — only when `detect` resolved a design to generate; when it emitted `[]` (the conf off, or no manifest moved) nothing was bypassed and no cord notice prints |
 | `model-smoke.yml` | the `smoke` job on both its paths (a registry-touching PR and a dispatch) | the `andon-notice` sibling |
+| `provenance.yml` | **nothing** — the who/how harvester is keyless (`GITHUB_TOKEN` only, no model, no provider call; `docs/provenance.md`), so it keeps recording while the cord is pulled: the evidence a pull would otherwise leave unrecorded is exactly what it exists to keep | no cord leg on either job, by design — `tools/provenance/tests/test_workflow.py` pins its absence (the `andon.yml` precedent) |
 
 ## What keeps running
 
@@ -89,8 +90,9 @@ its `observe` learning job, the groomer's deterministic report, the telemetry
 roll-up, the decide command (`decide.yml`), the release bundles, the security
 scan, the avatar and the two Projects-board syncs (`growth-board-sync.yml`,
 `roadmap-sync.yml`), auto-arm, the config and ci-gate comment commands, the
-print-result logger — and the reconciler itself, which must run while the cord
-is pulled to open the status issue and while it is released to close it.
+print-result logger, the keyless provenance harvester (`provenance.yml`) — and
+the reconciler itself, which must run while the cord is pulled to open the
+status issue and while it is released to close it.
 
 ## The noise contract
 

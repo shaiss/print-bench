@@ -246,6 +246,14 @@ def test_routine_workflows_pin_the_745_additions():
         )
 
 
+def test_routine_workflows_watch_the_provenance_harvester():
+    # docs/provenance.md §Registration: a schedule must be watched. The
+    # harvester's disarmed runs are all-skipped (never a hard failure), so the
+    # entry cannot false-alarm before arming; once armed, a death-streak of
+    # provenance.yml surfaces here like any routine's.
+    assert "provenance.yml" in github.ROUTINE_WORKFLOWS
+
+
 def test_missing_workflow_runs_key_raises(monkeypatch):
     # An error payload has no workflow_runs list — fail loud at the seam.
     monkeypatch.setattr(github, "_get", lambda url, token: ({"message": "Not Found"}, ""))

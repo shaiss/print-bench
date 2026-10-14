@@ -86,6 +86,11 @@
         {"conclusion": "success", "createdAt": "2026-08-16T05:23:00Z", "url": "https://github.com/o/r/actions/runs/314"},
         {"conclusion": "success", "createdAt": "2026-08-15T05:23:00Z", "url": "https://github.com/o/r/actions/runs/315"},
         {"conclusion": "success", "createdAt": "2026-08-14T05:23:00Z", "url": "https://github.com/o/r/actions/runs/316"}
+      ]},
+      {"file": "provenance.yml", "runs": [
+        {"conclusion": "skipped", "createdAt": "2026-08-16T05:29:00Z", "url": "https://github.com/o/r/actions/runs/317"},
+        {"conclusion": "skipped", "createdAt": "2026-08-16T04:29:00Z", "url": "https://github.com/o/r/actions/runs/318"},
+        {"conclusion": "skipped", "createdAt": "2026-08-16T03:29:00Z", "url": "https://github.com/o/r/actions/runs/319"}
       ]}
     ],
     "issues": [
@@ -104,6 +109,32 @@
       {"number": 745, "title": "Agent brief: extend Reeve routine-dead watch to forge + growth-board-sync", "labels": ["agent-brief", "autonomy-ok", "points-2"], "createdAt": "2026-08-11T05:00:00Z", "updatedAt": "2026-08-16T05:00:00Z", "url": "https://github.com/o/r/issues/745"}
     ],
     "openPRs": [],
-    "branches": ["main", "claude/issue-284-corroborated"]
+    "branches": ["main", "claude/issue-284-corroborated"],
+    "provenance": {
+      "armed": true,
+      "conf": {"settle_hours": 6, "max_defer_hours": 24, "backfill_since": "2026-07-31"},
+      "tips": {"provenance": "4646464646464646464646464646464646464646",
+               "provenance-site": "4444444444444444444444444444444444444444"},
+      "marks": [
+        {"seq": 12, "kind": "tip", "ref": "provenance-site", "sha": "4444444444444444444444444444444444444444", "run_id": 1012},
+        {"seq": 11, "kind": "tip", "ref": "provenance", "sha": "4343434343434343434343434343434343434343", "run_id": 1012}
+      ],
+      "parents": {},
+      "scan": {"pages": 1, "runs_verified": 1, "marks_rejected": 0},
+      "state": {
+        "pending": {"pr": {"902": {"closed_at": "2026-08-14T12:00:00Z", "due_at": "2026-08-14T18:00:00Z", "defer_until": "2026-08-15T12:00:00Z", "reasons": ["in-flight-run"]}}, "brief": {}},
+        "skipped": {"pr": {"800": {"closed_at": "2026-08-13T00:00:00Z"}}}
+      },
+      "frozen_prs": [371, 636],
+      "closed_prs": [
+        {"number": 650, "closed_at": "2026-08-02T00:00:00Z", "updated_at": "2026-08-16T05:00:00Z"},
+        {"number": 701, "closed_at": "2026-08-15T12:00:00Z", "updated_at": "2026-08-15T12:00:00Z"},
+        {"number": 902, "closed_at": "2026-08-14T12:00:00Z", "updated_at": "2026-08-14T12:00:00Z"},
+        {"number": 700, "closed_at": "2026-08-14T10:00:00Z", "updated_at": "2026-08-14T10:00:00Z"},
+        {"number": 636, "closed_at": "2026-08-13T08:00:00Z", "updated_at": "2026-08-13T08:00:00Z"},
+        {"number": 800, "closed_at": "2026-08-13T00:00:00Z", "updated_at": "2026-08-13T00:00:00Z"},
+        {"number": 120, "closed_at": "2026-05-01T00:00:00Z", "updated_at": "2026-07-01T00:00:00Z"}
+      ]
+    }
   }
 }

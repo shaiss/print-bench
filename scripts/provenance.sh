@@ -10,17 +10,17 @@
 #     change), every row of the tip-continuity table (ok / foreign / rollback /
 #     deleted / unanchored / bootstrap), a rejected push refused, no token in a
 #     failing push's error, the membership-rule and trust-rule negatives. No
-#     network, no GitHub token, a throwaway temp repo. Run by scripts/check.sh.
+#     network, no GitHub token, a throwaway temp repo. One `selftest ok|FAIL
+#     <label>` line per case; exits non-zero when any case failed or a module
+#     could not supply its cases (a missing case is a FAIL, never a skip). Run
+#     by scripts/check.sh.
 #
 #   scripts/provenance.sh <subcommand> [args…]
 #     Passes through to `python3 -m provenance` with the PYTHONPATH the
 #     workflow uses (tools/provenance/src + tools/model-registry/src).
 #
-# SCAFFOLD STATE: the package's modules are interface skeletons until the
-# P0/P1 builders land them (WORKPLAN, builder H6 owns this script). Until
-# then --selftest reports the scaffold and exits 0 so check.sh stays green;
-# H6 replaces the scaffold branch below with the real call and wires this
-# script into scripts/check.sh.
+# Stdlib only — no pip step: the package runs from the checkout on the system
+# Python, exactly as .github/workflows/provenance.yml runs it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -28,10 +28,9 @@ export PYTHONPATH="$PWD/tools/provenance/src:$PWD/tools/model-registry/src${PYTH
 
 case "${1:-}" in
   --selftest)
-    echo "ok    provenance --selftest: scaffold (builder H6 wires python3 -m provenance selftest)"
-    exit 0 ;;
+    exec python3 -m provenance selftest ;;
   ""|-h|--help)
-    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
     exit 0 ;;
   -*)
     echo "provenance.sh: unknown option $1" >&2

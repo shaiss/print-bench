@@ -16,7 +16,10 @@ SHIP-LOCK claims), the greenlight queue (issue #443: the open
 `needs-decision` issues and which already carry a greenlight marker — the
 input to the LLM drafter's trusted Select step, `cli.py greenlight-select`),
 and the greenlight rounds gather (issue #445: every greenlighted thread with
-its resolution state — the observer's snapshot). The package gained exactly
+its resolution state — the observer's snapshot). `provenance.py` is the one
+module that reads the provenance harvester's data refs (docs/provenance.md
+§Registration — the tip-continuity port and the lag/stall check, GET-only
+through `github.py`'s seam, and only while the harvester is armed). The package gained exactly
 one confined write seam in #444 — `pushthrough.py`, the greenlight loop's
 push-through (below) — and a test confines every HTTP write verb to that
 module alone; everything else stays GET-only by scan.

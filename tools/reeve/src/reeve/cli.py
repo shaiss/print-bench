@@ -19,8 +19,12 @@ unit-tested.
 
 ``gather`` and ``run`` take an optional ``--repo owner/name`` (issue #313):
 when set, the GET-only run-health read (``github.gather_run_health``) is
-attached to the snapshot as ``runHealth``. Without it the run stays entirely
-offline and the run-health detectors read "not evaluated".
+attached to the snapshot as ``runHealth``, and with it the provenance block
+(``provenance.gather``, docs/provenance.md §Registration) — which sends no
+request at all unless ``--provenance-enabled`` (default
+``$PROVENANCE_ENABLED``, the raw repo variable reeve.yml hands over) arms it.
+Without ``--repo`` the run stays entirely offline and the run-health
+detectors read "not evaluated".
 
 ``greenlight-select`` (issue #443) is the greenlight loop's trusted Select
 step: it lists the open ``needs-decision`` issues that carry no greenlight
@@ -107,9 +111,22 @@ def _gather(args: argparse.Namespace) -> dict[str, Any]:
         # cli.py in breach of the purity test. The offline default never
         # touches it.
         from .github import gather_run_health
+        from .provenance import gather as gather_provenance
 
         snapshot["runHealth"] = gather_run_health(args.repo, _token())
+        # The provenance harvester's block (docs/provenance.md §Registration):
+        # disarmed, it sends no request at all; armed, provenance.py is the one
+        # module that reads the harvester's data refs (the #646 read lens).
+        snapshot["runHealth"]["provenance"] = gather_provenance(
+            args.repo, _token(), root=args.root, variable=_provenance_enabled(args))
     return snapshot
+
+
+def _provenance_enabled(args: argparse.Namespace) -> str:
+    """The ``PROVENANCE_ENABLED`` repo variable's raw value: ``--provenance-enabled`` wins,
+    else ``$PROVENANCE_ENABLED`` (reeve.yml hands it over through env, the andon pattern)."""
+    raw = getattr(args, "provenance_enabled", None)
+    return raw if raw is not None else os.environ.get("PROVENANCE_ENABLED", "")
 
 
 def _andon_pulled(args: argparse.Namespace) -> bool:
@@ -453,12 +470,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_gather.add_argument("--root", default=".", help="repo root (default: .)")
     p_gather.add_argument("--repo", default=None,
                           help="owner/name — also gather GitHub run health (GET-only)")
+    p_gather.add_argument("--provenance-enabled", default=None,
+                          help="the PROVENANCE_ENABLED repo variable's raw value (default: "
+                               "$PROVENANCE_ENABLED); only 'true' (case-insensitive) arms the "
+                               "provenance detectors' reads")
     p_gather.set_defaults(func=cmd_gather)
 
     p_run = sub.add_parser("run", help="gather then report")
     p_run.add_argument("--root", default=".", help="repo root (default: .)")
     p_run.add_argument("--repo", default=None,
                        help="owner/name — also gather GitHub run health (GET-only)")
+    p_run.add_argument("--provenance-enabled", default=None,
+                       help="the PROVENANCE_ENABLED repo variable's raw value (default: "
+                            "$PROVENANCE_ENABLED); only 'true' (case-insensitive) arms the "
+                            "provenance detectors' reads")
     p_run.add_argument("--conf", help="policy file (default: built-in defaults)")
     p_run.add_argument("--out", help="also write the report to this file")
     p_run.add_argument("--andon", default=None,
