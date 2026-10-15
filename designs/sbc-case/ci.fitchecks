@@ -8,7 +8,14 @@
 #   interfere with the pilot walls.
 # fit-lid / fit-lid-crush: the lid seated 0.05 mm high must clear every wall
 #   and post; seated 1 mm low (a crushed seat) must overlap the wall tops.
+# fit-gpio-occupied / fit-gpio-leads (B7): a 51×8 mm 2×20 IDC envelope plus
+#   two Ø1.6 fan leads occupying the GPIO notch with the lid on must
+#   interfere (the housing hits the lid lip: 8 mm body vs 6.0 mm inner
+#   height). The leads alone must be empty — ASSEMBLY step 7 still has a
+#   path when the ribbon is not jammed through the notch.
 fit-pins empty
 fit-pins-shift interferes
 fit-lid empty
 fit-lid-crush interferes
+fit-gpio-occupied interferes
+fit-gpio-leads empty
