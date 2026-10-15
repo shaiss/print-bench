@@ -12,3 +12,7 @@ fit-pins empty
 fit-pins-shift interferes
 fit-lid empty
 fit-lid-crush interferes
+# fit-insert-seat / fit-insert-sink: stepped base-post bore (B4) — the nominal
+#   F1BM3 melt envelope clears; sunk 1 mm past the shoulder it hits the seat ring.
+fit-insert-seat empty
+fit-insert-sink interferes
