@@ -364,6 +364,49 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
+27. **B5 — register-lip lead-in chamfer (draft PR).** Jane, round 2 / PM B5:
+    the 2.5 mm register lip was a straight vertical outer knife-edge. Seating
+    the lid slightly crooked could catch on the cavity rim. Added
+    `lip_lead_chamfer = 0.45` mm (Customizer, tunable 0.4–0.5) on the lip's
+    **cavity tip** — assembled z = `base_top_z − lip_depth`, the outer
+    perimeter that enters the base first when lowering. Geometry: a full
+    `register_lip_profile()` depth intersected with
+    `register_lip_outer_envelope()` (45° scaled outer rounded-rect band + full
+    extrusion above) so only the outer perimeter tapers. Inner face and post
+    notches stay on the main profile (Drik R1 on the first draft caught a scaled
+    whole-profile band that pinched post clearance). **Not a fit fix** — the
+    existing `ci.fitchecks` still prove clearance; this is feel-only.
+    **Print pose:** the lid prints outer-face-down (`part="lid"`). The chamfer
+    sits on the **top** of the standing lip (furthest from the bed), a shallow
+    outward flare within the 45° support-free ceiling (N4), not a bridge across
+    the plate. The coupon inherits the same parameter (one source file).
+    After the outer-only chamfer fix, the lid crop's old **+X** face (at x ≈
+    −33.6) bisected the +Y lip through the chamfer band and left ~0.03 mm mesh
+    slivers (coupon 92/100; base/lid still 100/100). That was not the crop top at
+    18.2 mm (y = 38.7, past the lid outer at 38.1). Trimming +Y to 13.5 mm
+    cleared printcheck but left a ~0.15 mm fin and dropped most of the +Y lip
+    (Drik R2). **R2 fix:** move the lid crop +X to the lip inner and raise +Y to
+    the tallest axis-aligned box still 100/100 at default clearance. The
+    shipped crop's **+X** face sits at x ≈ −42.85 (−`lip_xi` + 0.15 mm
+    outboard), not the pre-R2 x ≈ −33.6 plane. **R3 fix (Drik):** derive
+    lid-crop +X/+Y from `lip_xi` / `lip_yi` (1.0 mm above inner +Y at
+    `fit_clearance_nominal`, pad shrinking 0.2 mm per +0.05 mm clearance above
+    nominal) instead of fixed literal crop sizes. At +0.10 above default the
+    coupon can still read 92/100 thin-wall from the crop plane — the full `lid`
+    part stays 100/100. The coupon rehearses −X wall register, the −X lip face,
+    the lower +Y lip band and lead-in on the straight −X seat. The outer
+    −X,+Y corner arc and the post-notch arc above that band are only on the full
+    lid. No fin; base/lid part STLs unchanged. **Docs round (2026-10-10, PM
+    triage `23adba3`):** `lip-lead` camera tightened in its first review round
+    (round-2b `notch` precedent — reframe before freeze); README states the
+    coupon stays honest to about +0.10 on `fit_clearance`; CAMERAS.md names fan
+    insert bosses. `sbc-case.scad` untouched.
+28. **B5 — PM triage `ffb2e81` (four act-nows):** `lip-lead` frozen as tightened;
+    `lip_lead_chamfer` assert [0, `lip_depth − 0.05`]; Customizer tooltip
+    set-and-leave; README layer-step clause on the parameter row; `## Field test
+    log` stub for B10 (nine fill-in rows, no invented results). Queued to B10
+    page reopening: satin-finish sentence, "at frame edge" caption word,
+    fattest-USB-C seating probe.
 
 ## Print settings
 
@@ -393,9 +436,13 @@ structure proof:
    `2 * insert_hole_radius(F1BM3)` from the vitamin, so tune by printer, not
    by editing the vitamin value.
 2. **Register fit:** flip the lid corner over and drop it onto the base
-   corner — the lip notch should pass the post and the lip face seat against
-   the wall with light friction, no force. Tight → `fit_clearance` +0.05
-   steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
+   corner — the −X lip face should seat against the wall with light friction,
+   no force (feel the B5 lead-in on the straight −X approach). The lead-in is
+   set-and-leave; tune `fit_clearance`, not the chamfer. The crop
+   includes the lower +Y lip band but not the full post notch or the outer
+   −X,+Y corner arc; confirm those on the full lid. Tight → `fit_clearance`
+   +0.05 steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM
+   printer.
 3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
    the standoff sample and hold firm.
 4. Only then print `base` (~2h45m) and `lid` (~1h40m) — the head-stamped gate
@@ -417,3 +464,25 @@ structure proof:
 - Fan screw length M3 × 20 = fan frame 11 + plate 2.5 + insert 5.8: the screw
   passes through the fan and the plate into the inner-face bosses (×10, the
   first draft's length, bottomed out in the plate before reaching the insert).
+
+## Field test log
+
+_Real prints of this design, newest at the bottom. See templates/FIELD-TEST.md
+and docs/print-feedback.md for the convention. Stub rows for B10 — fill in on
+the first real print; stamp the entry **with B5 lead-in @ 0.45**._
+
+### B10 — first real print (stub)
+
+- **Printed from:** _commit / version_
+- **Part(s):** _coupon + base + lid (+ fan assembly as built)_
+- **Slicer settings:** _profile · layer height · nozzle · material · infill · supports_
+- **SD swap (lid on):** _micro-SD card in / out through the −X open edge_
+- **Front-edge connectors:** _official USB-C PSU + both micro-HDMI + jack vs rim/skirt_
+- **Fan-lead landing:** _header pins vs 5 V/GND; wire count (2-wire vs 4-wire PWM)_
+- **Tether / reach-with-slack:** _does the fan lead reach with slack, or must it be unplugged to lift the lid?_
+- **1 a.m. noise:** _audible at desk distance with fan running_
+- **Lid seating feel:** _press over the posts, not the GPIO-notch span; does the register seat **start** straight on the B5 lead-in?_
+- **ASA chamfer edge (if ASA):** _one eye-and-fingertip look — outer lip edge whitening or wear after initial seatings_
+- **Result:** _what fit, what didn't, print-quality notes_
+- **Measured deviations:** _e.g. fit_clearance tune applied_
+- **Carry forward:** _printer.conf value(s) to update, or "none"_
