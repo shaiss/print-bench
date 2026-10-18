@@ -519,7 +519,7 @@ jobs:
         id: p1
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -586,7 +586,7 @@ jobs:
         id: p2
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -641,7 +641,7 @@ jobs:
         id: p3
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -701,7 +701,7 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: jane
@@ -759,7 +759,7 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: jane
@@ -818,7 +818,7 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: jane
@@ -1029,7 +1029,7 @@ jobs:
         id: p1
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1089,7 +1089,7 @@ jobs:
         id: p2
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1144,7 +1144,7 @@ jobs:
         id: p3
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1204,7 +1204,7 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: drik
@@ -1262,7 +1262,7 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: drik
@@ -1321,7 +1321,7 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: drik
@@ -1541,7 +1541,7 @@ jobs:
         id: p1
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1613,7 +1613,7 @@ jobs:
         id: p2
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1685,7 +1685,7 @@ jobs:
         id: p3
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1762,7 +1762,7 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: pm
@@ -1837,7 +1837,7 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: pm
@@ -1913,7 +1913,7 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: pm
@@ -2207,7 +2207,7 @@ jobs:
         id: p1
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -2410,7 +2410,7 @@ jobs:
         id: p2
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -2613,7 +2613,7 @@ jobs:
         id: p3
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -2826,7 +2826,7 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: coach
@@ -3038,7 +3038,7 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: coach
@@ -3252,7 +3252,7 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: coach
