@@ -117,7 +117,7 @@ crop artifact — the coupon stays honest to about +0.10; past that, tune on the
 ![Lid register lip lead-in chamfer at print pose](previews/lip-lead.png)
 
 *Lid at print pose (outer face down): 45° B5 lead-in on the cavity-entering edge
-of the −X register lip — 0.45 mm band; a fan insert boss in frame for scale.*
+of the −X register lip — the 0.45 mm band reads as a thin line at this framing.*
 
 ## Living with it
 
