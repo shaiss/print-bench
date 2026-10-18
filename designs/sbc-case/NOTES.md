@@ -477,7 +477,7 @@ the first real print; stamp the entry **with B5 lead-in @ 0.45**._
 - **Part(s):** _coupon + base + lid (+ fan assembly as built)_
 - **Slicer settings:** _profile · layer height · nozzle · material · infill · supports_
 - **SD swap (lid on):** _micro-SD card in / out through the −X open edge_
-- **Front-edge connectors:** _official USB-C PSU + both micro-HDMI + jack vs rim/skirt_
+- **Front-edge connectors:** _official USB-C PSU + the fattest USB-C in the bin (~18×8 mm overmold) + both micro-HDMI + jack vs rim/skirt_
 - **Fan-lead landing:** _header pins vs 5 V/GND; wire count (2-wire vs 4-wire PWM)_
 - **Tether / reach-with-slack:** _does the fan lead reach with slack, or must it be unplugged to lift the lid?_
 - **1 a.m. noise:** _audible at desk distance with fan running_
