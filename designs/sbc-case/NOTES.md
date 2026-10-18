@@ -471,7 +471,7 @@ _Real prints of this design, newest at the bottom. See templates/FIELD-TEST.md
 and docs/print-feedback.md for the convention. Stub rows for B10 — fill in on
 the first real print; stamp the entry **with B5 lead-in @ 0.45**._
 
-### B10 — first real print (stub)
+### 2026-10-10 — B10 first real print (stub)
 
 - **Printed from:** _commit / version_
 - **Part(s):** _coupon + base + lid (+ fan assembly as built)_
