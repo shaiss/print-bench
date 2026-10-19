@@ -656,6 +656,8 @@ jobs:
         # Skipped while a bundle is pending: the deliver job pushes, then
         # runs lock cleanup. Withdrawing here would drop the claim before
         # that push and the red gate would fail a run that is still in flight.
+        # A DECLINED / DECISION NEEDED / DEFERRED stop writes no bundle, so
+        # pending stays false and this cleanup still runs.
         if: >-
           always()
           && steps.policy.outputs.enabled == 'true'
@@ -944,9 +946,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          # Full history. A run that merged newer main puts that commit in
-          # the bundle's prerequisites; a depth-1 checkout does not have it,
-          # so the ancestry check would reject a legitimate bundle.
+          # Full history. Extra bundle prerequisites must be ancestors of
+          # START_SHA; a depth-1 checkout cannot see those ancestors.
           fetch-depth: 0
           ref: ${{ needs.run.outputs.start_sha }}
 
