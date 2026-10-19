@@ -2495,7 +2495,7 @@ def _outcome_expressions(text: str) -> dict[str, list[str]]:
     # (the CodeQL ReDoS finding on the original pattern) — one `\n` per line,
     # matched explicitly, keeps each repetition deterministic.
     for m in re.finditer(
-            r"^([ \t]+)(AGENT_OUTCOME|RUN|SHIP):[ \t]*\$\{\{(.+?)\}\}[ \t]*$",
+            r"^([ \t]+)(AGENT_OUTCOME|RUN|SHIP|walk_outcome):[ \t]*\$\{\{(.+?)\}\}[ \t]*$",
             text, re.MULTILINE | re.DOTALL):
         exprs.setdefault(m.group(2), []).append(m.group(3))
     return exprs
@@ -2758,7 +2758,9 @@ def test_routine_agent_outcome_is_assigned_identically_everywhere():
     lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
     assert lock_rows, "no SHIP-LOCK routine in the ROUTINES table"
     for row in lock_rows:
-        exprs = _outcome_expressions(_routine_job_text(_routine_text(row.workflow), row))
+        # design-run's lock cleanup lives in the settle job, so the two
+        # AGENT_OUTCOME assignments are not in the walk job. Scan the file.
+        exprs = _outcome_expressions(_routine_text(row.workflow))
         found = [e.strip() for e in exprs.get("AGENT_OUTCOME", [])]
         assert len(found) == 2, (
             f"{row.workflow}: expected AGENT_OUTCOME assigned exactly twice (lock "
@@ -3005,6 +3007,8 @@ def _normalize_cross_job_outputs(cond: str) -> str:
     repls = (
         ("needs.run.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
         ("needs.run.outputs.declined", "steps.lock_cleanup.outputs.declined"),
+        ("needs.settle.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
+        ("needs.settle.outputs.declined", "steps.lock_cleanup.outputs.declined"),
         ("needs.run.outputs.key_present", "steps.policy.outputs.key_present"),
         ("needs.run.outputs.enabled", "steps.policy.outputs.enabled"),
         ("needs.run.outputs.issue", "steps.select.outputs.issue"),
@@ -3059,6 +3063,10 @@ def _gate_without_leg(row: Routine, step_name: str, leg: str) -> str:
                .replace(r"steps\.bundle\.outputs\.", r"needs\.run\.outputs\."))
     if aliased != leg:
         patterns.append(aliased)
+    settled = leg.replace(
+        r"steps\.lock_cleanup\.outputs\.", r"needs\.settle\.outputs\.")
+    if settled != leg:
+        patterns.append(settled)
     matched = None
     for pat in patterns:
         matched = re.search(r"^[ \t]*&& " + pat + r"\n", chunk, re.MULTILINE)
@@ -3186,7 +3194,8 @@ def test_ship_lock_gate_guard_rejects_a_walk_clause():
         workflow = row.workflow
         text = _routine_text(workflow)
         job = _routine_job_text(text, row)
-        chunk = _gate_chunk(job, step_name)
+        gate_job = _job_containing_step(text, step_name)
+        chunk = _gate_chunk(gate_job, step_name)
         live = _live_walk_expression(job, workflow)
         leg = "&& steps.lock_cleanup.outputs.declined != 'true'\n"
         assert leg in chunk, (
@@ -3208,7 +3217,8 @@ def _live_walk_expression(job_text: str, workflow: str) -> str:
     hand-copied literal that silently stops matching (or keeps matching a
     dead substring) when the expression grows."""
     exprs = _outcome_expressions(job_text)
-    body = (exprs.get("AGENT_OUTCOME") or exprs.get("RUN") or exprs.get("SHIP"))
+    body = (exprs.get("AGENT_OUTCOME") or exprs.get("walk_outcome")
+            or exprs.get("RUN") or exprs.get("SHIP"))
     assert body, f"{workflow}: no walk-outcome expression to derive the mutation from"
     return body[0].strip()
 
@@ -3224,9 +3234,10 @@ def _stale_link1_copy(row: Routine) -> str:
     first = _walk_step_ids(_routine_ship_steps(job, row.resolve_id))[0]
     # EVERY occurrence must go stale together: mutating only one would leave
     # a healthy copy for the extractor/simulation and the control would pass
-    # vacuously. The expression appears at least twice in every routine (the
-    # record step's RUN/SHIP plus each exhaustion gate).
-    assert text.count(live) >= 2, (
+    # vacuously. design-run publishes the expression once, as the walk job's
+    # walk_outcome output; the settle job reads that output. Other routines
+    # still repeat it on the lock cleanup and the red step.
+    assert text.count(live) >= 1, (
         f"{workflow}: the live walk expression appears {text.count(live)} "
         "time(s) — the negative-control mutation would not represent the "
         "regression; update the derivation")

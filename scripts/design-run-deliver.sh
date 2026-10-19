@@ -2196,10 +2196,14 @@ p.write_bytes(data)
     echo "selftest: deliver step does not pin GIT_BIN" >&2
     exit 1
   }
-  grep -q 'actions/upload-artifact@v7' "$workflow" || {
-    echo "selftest: the bundle is not uploaded" >&2
+  grep -q 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' "$workflow" || {
+    echo "selftest: the bundle is not uploaded from the pinned v7 action" >&2
     exit 1
   }
+  if grep -q 'actions/upload-artifact@v7' "$workflow" || grep -q 'actions/checkout@v7' "$workflow" || grep -q 'actions/setup-python@v7' "$workflow"; then
+    echo "selftest: design-run.yml still uses a floating v7 action tag" >&2
+    exit 1
+  fi
   grep -q 'retention-days: 1' "$workflow" || {
     echo "selftest: the bundle artifact has no short retention" >&2
     exit 1
@@ -2218,10 +2222,14 @@ p.write_bytes(data)
     echo "selftest: delivery workflow_run does not name the design-run workflow" >&2
     exit 1
   }
-  grep -q 'actions/download-artifact@v7' "$deliver_workflow" || {
-    echo "selftest: the deliver workflow does not download the bundle" >&2
+  grep -q 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' "$deliver_workflow" || {
+    echo "selftest: the deliver workflow does not download the bundle from the pinned v7 action" >&2
     exit 1
   }
+  if grep -q 'actions/download-artifact@v7' "$deliver_workflow" || grep -q 'actions/checkout@v7' "$deliver_workflow"; then
+    echo "selftest: design-run-deliver.yml still uses a floating v7 action tag" >&2
+    exit 1
+  fi
   grep -q '\$GITHUB_WORKSPACE/scripts/design-run-deliver.sh' "$deliver_workflow" || {
     echo "selftest: the deliver workflow does not run the checkout script" >&2
     exit 1
@@ -2252,7 +2260,7 @@ p.write_bytes(data)
   ' "$deliver_workflow")"
   [ -n "$deliver_job" ] || { echo "selftest: could not extract the deliver job" >&2; exit 1; }
   printf '%s\n' "$deliver_job" | awk '
-    /uses: actions\/checkout@v7/ { found = 1; n = 0 }
+    /uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/ { found = 1; n = 0 }
     found { n++; if ($0 ~ /timeout-minutes: 2/) ok = 1 }
     found && n > 6 { exit }
     END { exit ok ? 0 : 1 }
@@ -2341,8 +2349,27 @@ p.write_bytes(data)
     exit 1
   fi
   pin_gates="$(grep -c "steps.pin.outcome == 'success'" "$deliver_workflow" || true)"
-  [ "$pin_gates" -ge 5 ] || {
-    echo "selftest: checkout, download, deliver, lock cleanup, and the red step are not all gated on the pin (found ${pin_gates})" >&2
+  [ "$pin_gates" -eq 3 ] || {
+    echo "selftest: download, deliver, and the red step must be gated on the pin, and lock cleanup must not be (found ${pin_gates})" >&2
+    exit 1
+  }
+  if awk '
+    /name: Release the SHIP-LOCK after delivery/ { found = 1; n = 0 }
+    found { n++; if ($0 ~ /steps.pin.outcome/) bad = 1 }
+    found && n > 12 { exit }
+    END { exit bad ? 1 : 0 }
+  ' "$deliver_workflow"; then
+    :
+  else
+    echo "selftest: lock cleanup is still gated on the delivery pin" >&2
+    exit 1
+  fi
+  grep -q 'metadata issue' "$deliver_workflow" || {
+    echo "selftest: deliver does not require the metadata issue to match the pre-agent lock" >&2
+    exit 1
+  }
+  grep -q 'Upload the delivery metadata' "$deliver_workflow" || {
+    echo "selftest: deliver does not require the trusted metadata upload step" >&2
     exit 1
   }
   grep -q 'show "$WORKFLOW_HEAD_SHA:scripts/routine-lock-cleanup.sh"' "$deliver_workflow" || {
@@ -2514,6 +2541,22 @@ EOF
     echo "selftest: the sudo disable step does not prove sudo is gone" >&2
     exit 1
   }
+  grep -q 'docker info' "$workflow" || {
+    echo "selftest: the sudo disable step does not prove docker is unreachable" >&2
+    exit 1
+  }
+  grep -q '/var/run/docker.sock' "$workflow" || {
+    echo "selftest: the sudo disable step does not remove the docker socket" >&2
+    exit 1
+  }
+  grep -q -- '--slurp' "$workflow" || {
+    echo "selftest: the label strip does not merge paginated event pages" >&2
+    exit 1
+  }
+  grep -q 'AGENT_WINDOW_END' "$workflow" || {
+    echo "selftest: the label strip does not bound the agent window" >&2
+    exit 1
+  }
   run_perms="$(awk '/^  run:/{p=1} p && /^  [A-Za-z]/ && !/^  run:/{exit} p' "$workflow")"
   # A pipe into grep -q dies with SIGPIPE under pipefail: the match is near
   # the top of the job and grep exits before printf finishes writing.
@@ -2548,10 +2591,14 @@ EOF
     echo "selftest: the label strip does not leave needs-decision alone" >&2
     exit 1
   }
-  grep -q 'name: Drop agent PATH and env plants' "$workflow" || {
-    echo "selftest: agent GITHUB_PATH and GITHUB_ENV plants are not dropped" >&2
+  grep -q '  settle:' "$workflow" || {
+    echo "selftest: label strip and lock cleanup are not in a fresh settle job" >&2
     exit 1
   }
+  if grep -q 'name: Drop agent PATH and env plants' "$workflow"; then
+    echo "selftest: the run job still claims to neutralize GITHUB_PATH and GITHUB_ENV" >&2
+    exit 1
+  fi
   dontask_n="$(grep -c -- '--permission-mode dontAsk --settings .claude/design-run-settings.json' "$workflow" || true)"
   [ "$dontask_n" -eq 5 ] || {
     echo "selftest: expected 5 dontAsk deny-backstop steps, found ${dontask_n}" >&2
@@ -2578,8 +2625,8 @@ EOF
     exit 1
   }
   reap_n="$(grep -c 'reap_should_kill()' "$workflow" || true)"
-  [ "$reap_n" -eq 2 ] || {
-    echo "selftest: expected the reaper predicate in the bundle and strip steps, found ${reap_n}" >&2
+  [ "$reap_n" -eq 1 ] || {
+    echo "selftest: expected the reaper predicate in the bundle step, found ${reap_n}" >&2
     exit 1
   }
   reap_a="$(awk '
@@ -2587,15 +2634,6 @@ EOF
     p { print }
     p && /^          \}$/ { exit }
   ' "$workflow")"
-  reap_b="$(awk '
-    /reap_should_kill\(\) \{/ { c++; if (c==2) p=1 }
-    p { print }
-    p && /^          \}$/ { exit }
-  ' "$workflow")"
-  [ "$reap_a" = "$reap_b" ] || {
-    echo "selftest: the two reap_should_kill copies differ" >&2
-    exit 1
-  }
   (
     eval "$reap_a"
     export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
@@ -2657,7 +2695,7 @@ EOF
     echo "selftest: deliver step does not drop GIT_CONFIG_PARAMETERS" >&2
     exit 1
   }
-  grep -q 'git --no-replace-objects -c core.hooksPath=/dev/null checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh' "$workflow" || {
+  grep -q 'git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/routine-lock-cleanup.sh"' "$workflow" || {
     echo "selftest: lock-cleanup restore is missing --no-replace-objects and hooksPath" >&2
     exit 1
   }

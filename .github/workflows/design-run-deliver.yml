@@ -2,11 +2,17 @@ name: Design run delivery
 
 # workflow_run runs THIS file from the default branch, with secrets, after
 # "Design run (scheduled idea→PR pipeline)" completes. It is the only
-# workflow that references secrets.GH_TOKEN. Nothing here is agent code:
-# the run job's metadata artifact was written from step outputs. The pin is
-# checked against the triggering commit, or through the compare API, before
-# anything is checked out from it. The bundle is data. The delivery script
-# is the default-branch history at that pin, not the agent's worktree copy.
+# workflow that references secrets.GH_TOKEN. Nothing here executes agent
+# code. design-run-meta is not trusted because the file exists or because
+# a step wrote JSON: an agent on the run job can upload that artifact name
+# first. This workflow reads the triggering run and accepts the metadata
+# only when that run's "Upload the delivery metadata" step succeeded, and
+# only when its issue matches the pre-agent design-run-lock artifact from
+# the same run. The pin is checked before anything is checked out from
+# start_sha. The bundle is data. The delivery script is the default-branch
+# history at that pin, not the agent's worktree copy. Lock cleanup reads
+# its script from the triggering head and still runs when the pin fails,
+# so a SHIP-LOCK is not left behind when delivery cannot start.
 #
 # Until this file is on the default branch the event has no workflow to
 # start. A pull_request or a non-default head branch does not deliver.
@@ -44,11 +50,47 @@ jobs:
       pull-requests: read
       actions: read
     steps:
+      - name: Read the triggering run's trusted steps
+        id: trusted
+        timeout-minutes: 2
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          GH_TOKEN: ${{ github.token }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          # The jobs API returns {jobs: [...]} per page. --slurp makes a
+          # list of those objects. Flatten the pages before counting.
+          jobs="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" | /usr/bin/jq -c 'map(.jobs // []) | add // []')"
+          step_conclusion() {
+            printf '%s' "$jobs" | /usr/bin/jq -r --arg step "$1" '[.[] | select(.name=="Pick one design-brief and run /design-run") | .steps[]? | select(.name==$step) | .conclusion] | .[0] // "absent"'
+          }
+          echo "meta_upload=$(step_conclusion "Upload the delivery metadata")" >> "$GITHUB_OUTPUT"
+          echo "lock_upload=$(step_conclusion "Publish the SHIP-LOCK context")" >> "$GITHUB_OUTPUT"
+
+      - name: Download the SHIP-LOCK context
+        id: lock
+        if: steps.trusted.outputs.lock_upload == 'success'
+        timeout-minutes: 2
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: design-run-lock
+          path: ${{ runner.temp }}/design-run-lock
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+        env:
+          NODE_OPTIONS: ""
+
       - name: Download the delivery metadata
         id: meta
-        continue-on-error: true
+        if: steps.trusted.outputs.meta_upload == 'success'
         timeout-minutes: 2
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: design-run-meta
           path: ${{ runner.temp }}/design-run-meta
@@ -58,10 +100,40 @@ jobs:
           NODE_OPTIONS: ""
 
       - name: Nothing to deliver
-        if: steps.meta.outcome != 'success'
+        if: steps.trusted.outputs.meta_upload != 'success' && steps.trusted.outputs.lock_upload != 'success'
         env:
           RUN_ID: ${{ github.event.workflow_run.id }}
-        run: echo "no design-run-meta artifact from run ${RUN_ID}; nothing to deliver"
+          META: ${{ steps.trusted.outputs.meta_upload }}
+          LOCK: ${{ steps.trusted.outputs.lock_upload }}
+        run: echo "run ${RUN_ID} did not publish a trusted lock (${LOCK}) or metadata (${META}); nothing to deliver"
+
+      - name: Read the SHIP-LOCK context
+        id: lock_parsed
+        if: steps.lock.outcome == 'success'
+        env:
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          lock="${RUNNER_TEMP}/design-run-lock/lock.json"
+          if [ -L "$lock" ] || [ ! -f "$lock" ]; then
+            echo "::error::SHIP-LOCK context is not a regular file" >&2
+            exit 1
+          fi
+          /usr/bin/jq -e '
+            (.issue | test("^[0-9]+$"))
+            and (.start_sha | test("^[0-9a-f]{40}$"))
+            and (.job_window_start | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+          ' "$lock" >/dev/null
+          {
+            echo "issue=$(/usr/bin/jq -r .issue "$lock")"
+            echo "start_sha=$(/usr/bin/jq -r .start_sha "$lock")"
+            echo "job_window_start=$(/usr/bin/jq -r .job_window_start "$lock")"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Read the delivery metadata
         id: parsed
@@ -92,6 +164,28 @@ jobs:
             echo "walk_outcome=$(jq -r .walk_outcome "$meta")"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Require the metadata issue to match the pre-agent lock
+        id: issue_ok
+        if: steps.parsed.outcome == 'success' && steps.lock_parsed.outcome == 'success'
+        env:
+          META_ISSUE: ${{ steps.parsed.outputs.issue }}
+          LOCK_ISSUE: ${{ steps.lock_parsed.outputs.issue }}
+          META_SHA: ${{ steps.parsed.outputs.start_sha }}
+          LOCK_SHA: ${{ steps.lock_parsed.outputs.start_sha }}
+          PATH: /usr/bin:/bin
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          if [ -z "${META_ISSUE:-}" ] || [ "$META_ISSUE" != "$LOCK_ISSUE" ]; then
+            echo "::error::metadata issue (${META_ISSUE:-empty}) does not match the pre-agent lock (${LOCK_ISSUE:-empty}) on this workflow_run" >&2
+            exit 1
+          fi
+          if [ -z "${META_SHA:-}" ] || [ "$META_SHA" != "$LOCK_SHA" ]; then
+            echo "::error::metadata start_sha does not match the pre-agent lock on this workflow_run" >&2
+            exit 1
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
       # No checkout yet. The artifact SHA is untrusted until this step
       # accepts it: equal to the triggering run's head (a default-branch
       # commit, per the job if), or a descendant of that head that the
@@ -100,7 +194,7 @@ jobs:
       # checked out. This step does not fetch.
       - name: Verify the delivery pin
         id: pin
-        if: steps.meta.outcome == 'success'
+        if: steps.issue_ok.outcome == 'success'
         timeout-minutes: 2
         env:
           START_SHA: ${{ steps.parsed.outputs.start_sha }}
@@ -160,8 +254,11 @@ jobs:
           echo "verified=ancestor" >> "$GITHUB_OUTPUT"
 
       - name: Checkout the default branch
-        if: steps.pin.outcome == 'success'
-        uses: actions/checkout@v7
+        # Not gated on the pin. A failed pin still needs this clone so lock
+        # cleanup can read the script from the triggering head. There is no
+        # ref: the default branch is what the runner checks out.
+        if: steps.lock_parsed.outcome == 'success' || steps.parsed.outcome == 'success'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         timeout-minutes: 2
         with:
           persist-credentials: false
@@ -170,7 +267,7 @@ jobs:
       - name: Download the design bundle
         if: steps.pin.outcome == 'success'
         timeout-minutes: 2
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: design-run-bundle
           path: ${{ runner.temp }}/design-run-bundle
@@ -283,18 +380,20 @@ jobs:
 
       - name: Release the SHIP-LOCK after delivery
         id: lock_cleanup
-        # Only after the pin step. A failed pin must not run a script from
-        # the artifact SHA. always() still releases the lock when delivery
-        # itself failed after a verified pin.
-        if: always() && steps.pin.outcome == 'success'
         timeout-minutes: 3
+        # Not gated on the pin. A failed pin, a missing metadata artifact,
+        # or a trusted upload that never succeeded must still release the
+        # claim. The script is the triggering head, never the artifact SHA.
+        # The issue comes from the pre-agent lock when that file downloaded,
+        # and from the trusted metadata otherwise.
+        if: always() && (steps.lock_parsed.outcome == 'success' || steps.parsed.outcome == 'success')
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE: ${{ steps.parsed.outputs.issue }}
-          WALK_OUTCOME: ${{ steps.parsed.outputs.walk_outcome }}
+          ISSUE: ${{ steps.lock_parsed.outputs.issue != '' && steps.lock_parsed.outputs.issue || steps.parsed.outputs.issue }}
+          WALK_OUTCOME: ${{ steps.parsed.outputs.walk_outcome != '' && steps.parsed.outputs.walk_outcome || 'failure' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
           WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          JOB_WINDOW_START: ${{ steps.parsed.outputs.job_window_start }}
+          JOB_WINDOW_START: ${{ steps.lock_parsed.outputs.job_window_start != '' && steps.lock_parsed.outputs.job_window_start || steps.parsed.outputs.job_window_start }}
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
           LD_PRELOAD: ""
