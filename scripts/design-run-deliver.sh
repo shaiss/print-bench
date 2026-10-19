@@ -2372,6 +2372,14 @@ p.write_bytes(data)
     echo "selftest: deliver does not require the trusted metadata upload step" >&2
     exit 1
   }
+  grep -q "always() && (steps.lock_parsed.outcome == 'success' || steps.parsed.outcome == 'success')" "$deliver_workflow" || {
+    echo "selftest: deliver checkout is skipped when an earlier step failed" >&2
+    exit 1
+  }
+  grep -q 'RUNNER_TEMP: \${{ runner.temp }}' "$workflow" || {
+    echo "selftest: post-agent steps do not pin RUNNER_TEMP to runner.temp" >&2
+    exit 1
+  }
   grep -q 'show "$WORKFLOW_HEAD_SHA:scripts/routine-lock-cleanup.sh"' "$deliver_workflow" || {
     echo "selftest: lock cleanup does not read the script from the triggering head" >&2
     exit 1

@@ -642,6 +642,9 @@ jobs:
           # The restored script lives in RUNNER_TEMP. It must operate on the
           # checkout, never on dirname($0)/.. (that is the runner work dir).
           DELIVER_WORKTREE: ${{ github.workspace }}
+          # Step env wins over a GITHUB_ENV plant. The upload steps read
+          # runner.temp, so the shell must write the bundle to that same path.
+          RUNNER_TEMP: ${{ runner.temp }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
           # Step output, not GITHUB_ENV: the agent can append to GITHUB_ENV.
@@ -859,6 +862,7 @@ jobs:
           BUNDLE_SHA256: ${{ steps.bundle.outputs.sha256 }}
           JOB_WINDOW_START: ${{ steps.job_window.outputs.start }}
           WALK_OUTCOME: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_zai_1.outcome == 'skipped' && steps.run_zai_2.outcome == 'skipped' && steps.run_zai_3.outcome == 'skipped' && steps.run_anthropic_4.outcome == 'skipped' && steps.run_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
+          RUNNER_TEMP: ${{ runner.temp }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""

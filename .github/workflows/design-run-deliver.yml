@@ -257,7 +257,10 @@ jobs:
         # Not gated on the pin. A failed pin still needs this clone so lock
         # cleanup can read the script from the triggering head. There is no
         # ref: the default branch is what the runner checks out.
-        if: steps.lock_parsed.outcome == 'success' || steps.parsed.outcome == 'success'
+        # always() is required. Without it GitHub ANDs this if with
+        # success(), so a failed pin skips the clone and lock cleanup
+        # then has no repo to read the script from.
+        if: always() && (steps.lock_parsed.outcome == 'success' || steps.parsed.outcome == 'success')
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         timeout-minutes: 2
         with:
