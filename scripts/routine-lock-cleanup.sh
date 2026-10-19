@@ -1356,12 +1356,12 @@ DECOY
   # -- #670 drift guard: both workflows restore before they run -------------
   # A workflow whose cleanup step runs the tree's copy would regress #670
   # silently, so pin the mechanism: the lock-cleanup step must restore the
-  # script from the job's start commit (START_SHA, bound to
-  # steps.start_ref.outputs.sha) BEFORE invoking it, the start_ref capture
-  # must precede every agent step (else the walk moves HEAD first), and the
-  # restore must unlink a symlink at the script path before checkout and
-  # install the git-show fallback with mv rather than a redirect onto the
-  # path (that redirect follows a symlink).
+  # script from the job's start commit (START_SHA) BEFORE invoking it, the
+  # start_ref capture must precede every agent step (else the walk moves
+  # HEAD first), and the restore must not follow a symlink. backlog-burn
+  # still unlinks a worktree symlink, checks the blob out, and installs the
+  # git-show fallback with mv. design-run's settle job never writes the
+  # worktree: it git-shows the blob into RUNNER_TEMP and executes that file.
   restore_in_block() {  # step-block text on stdin → 0 when the restore pins the script
     local block restore_ln invoke_ln unlink_ln
     block="$(cat)"
@@ -1387,6 +1387,17 @@ DECOY
       && ! printf '%s\n' "$block" \
         | grep -q '> scripts/routine-lock-cleanup.sh'
   }
+  settle_in_block() {  # step-block text on stdin → 0 for the fresh-job restore
+    local block
+    block="$(cat)"
+    printf '%s\n' "$block" | grep -q 'show "$START_SHA:scripts/routine-lock-cleanup.sh"' \
+      && printf '%s\n' "$block" | grep -q 'script="${RUNNER_TEMP}/routine-lock-cleanup.sh"' \
+      && printf '%s\n' "$block" | grep -q '\[ -L "$script" \]' \
+      && printf '%s\n' "$block" | grep -q '"$script" --repo' \
+      && printf '%s\n' "$block" | grep -q 'START_SHA: ${{ needs.run.outputs.start_sha }}' \
+      && ! printf '%s\n' "$block" | grep -q '> scripts/routine-lock-cleanup.sh' \
+      && ! printf '%s\n' "$block" | grep -q '\./scripts/routine-lock-cleanup.sh'
+  }
   capture_precedes_agent() {  # workflow file → 0 when start_sha is captured before the first agent step
     local cap_ln agent_ln
     cap_ln="$(grep -n 'id: start_ref' "$1" | head -1 | cut -d: -f1)"
@@ -1396,10 +1407,12 @@ DECOY
     [ -n "$cap_ln" ] && [ -n "$agent_ln" ] && [ "$cap_ln" -lt "$agent_ln" ] \
       && grep -qE 'git( --no-replace-objects)? rev-parse HEAD' "$1"
   }
+  local block
   for wf in .github/workflows/backlog-burn.yml .github/workflows/design-run.yml; do
     [ -f "$wf" ] || st_fail "drift: $wf is missing — the cleanup workflows moved"
-    sed -n "/Withdraw a dead run's SHIP-LOCK/,/^      - name:/p" "$wf" | sed '$d' \
-      | restore_in_block \
+    block="$(sed -n "/Withdraw a dead run's SHIP-LOCK/,/^      - name:/p" "$wf" | sed '$d')"
+    printf '%s\n' "$block" | restore_in_block \
+      || printf '%s\n' "$block" | settle_in_block \
       || st_fail "drift: $wf's lock-cleanup step does not restore scripts/routine-lock-cleanup.sh from \$START_SHA before running it (#670)"
     capture_precedes_agent "$wf" \
       || st_fail "drift: $wf does not capture the start commit (id: start_ref, git rev-parse HEAD) before its first agent step (#670)"
