@@ -483,6 +483,10 @@ surfaces studies awaiting a read live in
     author+suffix pattern); refuses (rather than answers `false`) on a
     typo'd reviewer or sha, and carries a `--selftest` with a negative
     control per row
+  - `design-run-deliver.sh` — pushes a design-run's `claude/issue-<N>-*` branch
+    and opens its draft PR after the agent step, and posts the success
+    comment only once the remote tip and a same-repo draft PR at that tip
+    are verified (issue #853)
   - `routine-lock-cleanup.sh` — withdraws a dead scheduled run's SHIP-LOCK (a
     run killed by its timeout cannot run the skill's own release step) and
     escalates to `needs-decision` after 3 run-deaths on one issue; invoked by

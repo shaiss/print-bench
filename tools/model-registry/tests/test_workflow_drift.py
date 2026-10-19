@@ -2950,7 +2950,17 @@ def _assert_ship_lock_gate_follows_disposition(
             "pushed nothing as healthy (#538)")
     # After stripping the legs the simulation fixes green, the surviving
     # clause is exactly the two disposition legs — nothing else sneaks in.
+    # design-run's run job also carries `steps.bundle.outputs.pending !=
+    # 'true'`: while a bundle is waiting on the deliver job the run job must
+    # not score the run dead. That leg is not a walk outcome and not a
+    # disposition, so it is removed before the exact-tail compare. A routine
+    # without the leg is unchanged.
     sim_cond = _strip_fixed_green_legs(cond)
+    sim_cond = re.sub(
+        r"\s*&&\s*steps\.bundle\.outputs\.pending\s*!=\s*'true'",
+        "",
+        sim_cond,
+    )
     assert sim_cond.strip() == _DISPOSITION_TAIL, (
         f"{where}: the '{step_name}' condition does not reduce to the "
         f"disposition tail ({_DISPOSITION_TAIL!r}) after stripping the "

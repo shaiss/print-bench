@@ -225,11 +225,12 @@ telemetry, rather than forcing green.
        all. (Path-traced `shots.conf` product shots need `bpy`/CI; don't
        hand-fake them.)
     2. **If a required preview can only come from CI `regen`, it needs a PAT.**
-       The scheduled `design-run.yml` runs the agent with the default
-       `github.token`, and a push/PR authored by `github.token` **does not
-       trigger `ci.yml`** (the same reason `regen` uses `REGEN_TOKEN` — see
-       CLAUDE.md), so `regen` won't fire on your draft PR. With a PAT wired as
-       `github_token`, CI regenerates and commits the shot as usual.
+       `design-run.yml` wires `secrets.GH_TOKEN` as the agent's `github_token`
+       and as the delivery step's push credential. A push or PR authored by
+       the default `github.token` **does not trigger `ci.yml`** (the same
+       reason `regen` uses `REGEN_TOKEN` — see CLAUDE.md), so `regen` would
+       not fire. With that PAT present, CI regenerates and commits the shot
+       as usual. The delivery step refuses to push when `GH_TOKEN` is empty.
     3. **No PAT and the gate still needs a CI-only shot?** Then `/preflight` is
        red and §8's hard stop applies: **do not open an image-less draft PR**
        that fails its own gate — stop, withdraw the claim (§0.6), and report the
@@ -259,22 +260,58 @@ Evidence means a re-derivation from the exported mesh (facet measurements,
 printcheck output, slice result), never the parameter you just typed — issue
 #37's lesson. Anything unmapped: revert it, or file it, before the PR exists.
 
-## 7. Ship
+## 7. Ship — leave a branch. A fresh runner delivers it.
 
-Draft PR, base = default branch, title stating what the design *is* (not
-"closes #96"). Body:
+Gate-green is not delivery. `design-run.yml`'s agent step exits 0 when you
+end the turn, and nothing you type in a comment creates a branch. The agent
+job does not push. Its next step writes a git bundle of the commits on
+`claude/issue-<N>-*`. A later job, on a fresh runner, checks out the commit
+the job started from, verifies that bundle, and only then runs
+`scripts/design-run-deliver.sh` from that checkout to push and open the
+draft PR. Nothing in the bundle is executed. The success comment is posted
+only after both of these are true:
 
-1. `Closes #<N>` on its own line.
-2. The frozen contract with every gate box passing, **linking the claim
-   comment** so a reader sees it predates the diff.
-3. The §6 brief-audit table — file → part, and *Must fit / hold* row → the
-   measured number off the export.
-4. The preview images (once CI has committed them), the `/preflight` verdict,
-   and anything deferred with its follow-up issue link.
+- `git ls-remote` returns the tip of your local `claude/issue-<N>-*` branch
+- an open **draft** pull request in this repository, whose `headRefOid` is that tip, has a body that closes `#<N>`
 
-Then `subscribe_pr_activity` and drive it to green per the PR-ownership rules —
-a PR you opened is yours until it merges or closes. The human's job from here is
-what #96 promised: react to the previews and merge.
+Until both hold, do not post a comment that says the gates are green, the
+run succeeded, or a pull request exists. A mid-run note, if you need one on
+the thread, starts with `🚢 design-run progress` and ends with this line,
+exactly: `Not delivered — no remote branch or draft PR has been verified.`
+
+Before you end the turn:
+
+1. Check out `claude/issue-<N>-<design>` (create it from the default branch
+   if you have not already). Any other name, including the default branch,
+   is not pushed.
+2. Commit the design. The delivery step commits dirty files under `designs/`
+   and first-party `lib/` that you left behind, and it does not commit
+   `scripts/`, `.github/`, `.claude/`, `tools/`, or the vendored trees. It
+   refuses the push entirely when any commit since the job's start SHA
+   touches `.github/`, `scripts/`, `.claude/`, or `tools/`. A non-draft PR
+   already open on the branch is also a hard stop (`auto-arm.yml` arms
+   auto-merge on non-draft `claude/*` PRs). A tree with no commit ahead of
+   the job's start SHA and no safe dirty files is not delivered.
+3. You may `git push` and `gh pr create --draft` yourself. The PR body still
+   has to carry, on its own, `Closes #<N>`, the frozen contract with the
+   claim comment linked, the §6 audit table with measured numbers, and the
+   `/preflight` verdict. If you do not open the PR, the delivery step opens
+   a draft whose body is `Closes #<N>` plus a pointer at the branch — a
+   thinner PR than you would have written, so prefer to open it yourself.
+4. Stop. Do not post the success comment. The delivery step posts
+   `🚢 design-run delivered — branch and draft PR verified` with the branch
+   tip and the PR URL, and only after the two checks above pass. A failed
+   push posts nothing that reads as success. A `🚢 DECLINED`,
+   `🚦 DECISION NEEDED`, or `🚢 DEFERRED` comment from this run is a hard
+   stop: the delivery step does not bundle that work, does not push it,
+   and does not post success.
+
+When you opened the draft PR yourself in step 3, call `subscribe_pr_activity`
+on that PR and drive it to green per the PR-ownership rules. A PR the deliver
+job opens does not exist yet when your turn ends, so the follow-up on that
+PR belongs to those same PR-ownership rules after delivery.
+
+The human's job from here is what #96 promised: react to the previews and merge.
 
 ## 8. Unattended mode (the scheduled workflow invoked this)
 
@@ -294,8 +331,10 @@ Same skill, three tightenings — nobody is there to catch a wrong guess:
   the brief; a `Style: new` brief whose lift never landed. Stop and comment —
   never push a design you'd have to apologise for.
 - **The issue thread is the only log.** Assume nobody reads the run output.
-  Claim, amendments, the telemetry trend at a stop, declines, and the final
-  verdict all land as comments, each readable cold.
+  Claim, amendments, the telemetry trend at a stop, and declines all land as
+  comments, each readable cold. The success comment is not one of these:
+  §7 reserves it for the delivery step, which posts it only after the remote
+  branch and the draft PR have both been verified.
 
 A stopped run costs nothing; a confidently wrong design PR costs a review and,
 worse, teaches the human to distrust the pipeline. When unsure, decline.
