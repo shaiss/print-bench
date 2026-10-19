@@ -2070,6 +2070,47 @@ p.write_bytes(data)
     exit 1
   }
 
+  # The other finish-false path: the branch name matches, but HEAD has no
+  # commit ahead of START_SHA. A planted file must still be removed.
+  local psrc2 pstart2 pout2
+  psrc2="${tmp}/psrc2"
+  pout2="${tmp}/planted-output-ahead"
+  mkdir -p "$psrc2"
+  git_cmd -C "$psrc2" init -b main >/dev/null
+  git_cmd -C "$psrc2" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  pstart2="$(git_cmd -C "$psrc2" rev-parse HEAD)"
+  git_cmd -C "$psrc2" checkout -b claude/issue-853-planted >/dev/null
+  printf 'planted\n' > "${tmp}/planted-ahead.bundle"
+  : > "$pout2"
+  set +e
+  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GITHUB_OUTPUT="$pout2" \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$psrc2" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$pstart2" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --write-bundle "${tmp}/planted-ahead.bundle" >/dev/null
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || { echo "selftest: planted bundle with nothing ahead exited ${rc}" >&2; exit 1; }
+  [ ! -e "${tmp}/planted-ahead.bundle" ] || {
+    echo "selftest: no-commits-ahead write_bundle left the planted bundle" >&2
+    exit 1
+  }
+  if [ -f "${tmp}/planted-ahead.bundle" ]; then
+    echo "pending=true" >> "$pout2"
+  else
+    echo "pending=false" >> "$pout2"
+  fi
+  grep -qx 'pending=false' "$pout2" || {
+    echo "selftest: no-commits-ahead planted bundle marked the run pending" >&2
+    exit 1
+  }
+  grep -qx 'delivered=false' "$pout2" || {
+    echo "selftest: no-commits-ahead planted bundle did not record delivered=false" >&2
+    exit 1
+  }
+
   # H1: the workflow restores the real script from START_SHA into a temp
   # dir outside the fixture repo and runs --write-bundle. The worktree
   # copy is poisoned. A missing DELIVER_WORKTREE and a worktree that is
@@ -2171,8 +2212,52 @@ p.write_bytes(data)
     echo "selftest: the deliver job does not run the checkout script" >&2
     exit 1
   }
-  grep -q 'timeout-minutes: 10' "$workflow" || {
+  local push_step deliver_job
+  push_step="$(awk '
+    /^      - name: Verify the bundle and push/ { printing = 1 }
+    printing && /^      - name:/ && !/^      - name: Verify the bundle and push/ { exit }
+    printing { print }
+  ' "$workflow")"
+  [ -n "$push_step" ] || { echo "selftest: could not extract the deliver push step" >&2; exit 1; }
+  printf '%s\n' "$push_step" | grep -q 'timeout-minutes: 10' || {
     echo "selftest: the deliver push step has no timeout under the job budget" >&2
+    exit 1
+  }
+  printf '%s\n' "$push_step" | grep -q 'GH_TOKEN: \${{ secrets.GH_TOKEN }}' || {
+    echo "selftest: the deliver push step does not hold the push PAT" >&2
+    exit 1
+  }
+  deliver_job="$(awk '
+    /^  deliver:/ { printing = 1 }
+    printing && /^  [A-Za-z]/ && !/^  deliver:/ { exit }
+    printing { print }
+  ' "$workflow")"
+  [ -n "$deliver_job" ] || { echo "selftest: could not extract the deliver job" >&2; exit 1; }
+  printf '%s\n' "$deliver_job" | awk '
+    /uses: actions\/checkout@v7/ { found = 1; n = 0 }
+    found { n++; if ($0 ~ /timeout-minutes: 2/) ok = 1 }
+    found && n > 4 { exit }
+    END { exit ok ? 0 : 1 }
+  ' || {
+    echo "selftest: the deliver checkout has no 2-minute timeout" >&2
+    exit 1
+  }
+  printf '%s\n' "$deliver_job" | awk '
+    /name: Download the design bundle/ { found = 1; n = 0 }
+    found { n++; if ($0 ~ /timeout-minutes: 2/) ok = 1 }
+    found && n > 4 { exit }
+    END { exit ok ? 0 : 1 }
+  ' || {
+    echo "selftest: the bundle download has no 2-minute timeout" >&2
+    exit 1
+  }
+  printf '%s\n' "$deliver_job" | awk '
+    /name: Release the SHIP-LOCK after delivery/ { found = 1; n = 0 }
+    found { n++; if ($0 ~ /timeout-minutes: 3/) ok = 1 }
+    found && n > 8 { exit }
+    END { exit ok ? 0 : 1 }
+  ' || {
+    echo "selftest: the deliver lock cleanup has no 3-minute timeout" >&2
     exit 1
   }
   printf '%s\n' "$deliver_run" | grep -q -- '--write-bundle' || {
@@ -2217,12 +2302,78 @@ p.write_bytes(data)
     echo "selftest: SKILL.md does not mention subscribe_pr_activity" >&2
     exit 1
   }
-  grep -q 'opened the draft PR yourself in step 3' "$skill" || {
-    echo "selftest: SKILL.md does not limit subscribe_pr_activity to a PR the agent opened" >&2
+  grep -q 'Do not call `subscribe_pr_activity`' "$skill" || {
+    echo "selftest: SKILL.md does not forbid subscribe_pr_activity" >&2
     exit 1
   }
   grep -q 'does not exist yet' "$skill" || {
     echo "selftest: SKILL.md does not say a deliver-job PR does not exist yet" >&2
+    exit 1
+  }
+  grep -q 'Do not `git push`' "$skill" || {
+    echo "selftest: SKILL.md still tells the agent it may push" >&2
+    exit 1
+  }
+  grep -q 'do not `gh pr create`' "$skill" || {
+    echo "selftest: SKILL.md does not forbid gh pr create" >&2
+    exit 1
+  }
+  if grep -q 'You may `git push`' "$skill"; then
+    echo "selftest: SKILL.md still authorizes git push" >&2
+    exit 1
+  fi
+  if grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$workflow"; then
+    echo "selftest: an agent step still receives the push PAT" >&2
+    exit 1
+  fi
+  agent_token_n="$(grep -c 'github_token: \${{ github.token }}' "$workflow" || true)"
+  [ "$agent_token_n" -eq 5 ] || {
+    echo "selftest: expected 5 agent github.token wires, found ${agent_token_n}" >&2
+    exit 1
+  }
+  pat_n="$(grep -c 'GH_TOKEN: \${{ secrets.GH_TOKEN }}' "$workflow" || true)"
+  [ "$pat_n" -eq 1 ] || {
+    echo "selftest: the push PAT must appear on exactly one step, found ${pat_n}" >&2
+    exit 1
+  }
+  settings="${repo_root}/.claude/design-run-settings.json"
+  for rule in 'Bash(git push:*)' 'Bash(git push*)' 'Bash(gh pr create:*)' 'Bash(gh pr create*)'; do
+    grep -qF "\"${rule}\"" "$settings" || {
+      echo "selftest: design-run settings missing deny ${rule}" >&2
+      exit 1
+    }
+  done
+  dontask_n="$(grep -c -- '--permission-mode dontAsk --settings .claude/design-run-settings.json' "$workflow" || true)"
+  [ "$dontask_n" -eq 5 ] || {
+    echo "selftest: expected 5 dontAsk deny-backstop steps, found ${dontask_n}" >&2
+    exit 1
+  }
+  if grep -q 'bypassPermissions' "$workflow" && grep -q 'claude_args:.*bypassPermissions' "$workflow"; then
+    echo "selftest: an agent step still uses bypassPermissions" >&2
+    exit 1
+  fi
+  printf '%s\n' "$deliver_run" | grep -q 'reap_agent_orphans' || {
+    echo "selftest: the bundle step does not reap detached agent processes" >&2
+    exit 1
+  }
+  printf '%s\n' "$deliver_run" | grep -q 'now" != "$captured"' || {
+    echo "selftest: the bundle step does not re-check the bundle after the reap" >&2
+    exit 1
+  }
+  grep -q 'Restore provider-triage from the pinned commit' "$workflow" || {
+    echo "selftest: provider-triage is not restored from START_SHA" >&2
+    exit 1
+  }
+  grep -q 'ls-tree -r -z "$START_SHA" -- .github/actions/provider-triage .github/models tools/model-registry' "$workflow" || {
+    echo "selftest: provider-triage restore does not list the pinned trees" >&2
+    exit 1
+  }
+  grep -q 'PYTHONSAFEPATH: "1"' "$workflow" || {
+    echo "selftest: provider-triage does not set PYTHONSAFEPATH" >&2
+    exit 1
+  }
+  grep -q 'steps.restore_triage.outcome == '"'"'success'"'"'' "$workflow" || {
+    echo "selftest: provider-triage does not wait for the pinned restore" >&2
     exit 1
   }
   if grep -q 'PR the delivery step verified' "$skill"; then
@@ -2277,6 +2428,7 @@ EOF
       cd "$dir"
       START_SHA="$(git_cmd rev-parse HEAD)"
       export START_SHA RUNNER_TEMP="$runner" H1_MARK="$mark"
+      export GITHUB_WORKSPACE="$dir"
       export GITHUB_REPOSITORY=acme/print-bench ISSUE=853 BASE_BRANCH=main
       export RUN_URL=https://example.test/run/1
       export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null

@@ -292,12 +292,13 @@ Before you end the turn:
    already open on the branch is also a hard stop (`auto-arm.yml` arms
    auto-merge on non-draft `claude/*` PRs). A tree with no commit ahead of
    the job's start SHA and no safe dirty files is not delivered.
-3. You may `git push` and `gh pr create --draft` yourself. The PR body still
-   has to carry, on its own, `Closes #<N>`, the frozen contract with the
-   claim comment linked, the §6 audit table with measured numbers, and the
-   `/preflight` verdict. If you do not open the PR, the delivery step opens
-   a draft whose body is `Closes #<N>` plus a pointer at the branch — a
-   thinner PR than you would have written, so prefer to open it yourself.
+3. Do not `git push` and do not `gh pr create`. This job's token cannot
+   push, those two commands are denied, and a pull request opened here
+   would not trigger CI. The delivery step pushes the branch and opens the
+   draft. Its body is `Closes #<N>` plus a pointer at the branch, so the
+   frozen contract, the claim-comment link, the §6 audit table with
+   measured numbers, and the `/preflight` verdict belong in the branch
+   (the design's NOTES) where a reviewer can read them.
 4. Stop. Do not post the success comment. The delivery step posts
    `🚢 design-run delivered — branch and draft PR verified` with the branch
    tip and the PR URL, and only after the two checks above pass. A failed
@@ -306,10 +307,8 @@ Before you end the turn:
    stop: the delivery step does not bundle that work, does not push it,
    and does not post success.
 
-When you opened the draft PR yourself in step 3, call `subscribe_pr_activity`
-on that PR and drive it to green per the PR-ownership rules. A PR the deliver
-job opens does not exist yet when your turn ends, so the follow-up on that
-PR belongs to those same PR-ownership rules after delivery.
+Do not call `subscribe_pr_activity`. You do not open the draft PR in step 3.
+The deliver job opens it, and that PR does not exist yet when your turn ends.
 
 The human's job from here is what #96 promised: react to the previews and merge.
 

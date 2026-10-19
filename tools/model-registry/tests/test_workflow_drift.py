@@ -743,8 +743,9 @@ class Routine(NamedTuple):
                 step sets none), the `--settings` deny backstop, the
                 `--mcp-config` server (None for a routine whose write is a
                 shell wrapper, or none) and the exact `--allowedTools` list
-                (None for the SHIP-LOCK routines, which run the whole skill
-                under bypassPermissions). The tail runs only on the
+                (None for backlog-burn, which runs the whole skill under
+                bypassPermissions; design-run is dontAsk with a narrow
+                push / pr-create deny, issue #859). The tail runs only on the
                 fall-through path where nobody is watching, so a tail step
                 that shed its backstop or widened its allow-list is exactly
                 the drift these fields pin — the same surface every
@@ -783,10 +784,14 @@ ROUTINES = {
         resolve_id="chain", prefix="run",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
         gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
-        # The SHIP-LOCK routines run the whole skill: no backstop, no
-        # allow-list, bypassPermissions on every link.
-        permission_mode="bypassPermissions", backstop=None, mcp_config=None,
-        allowed=None),
+        # #859: dontAsk so the deny file is honored (bypassPermissions
+        # ignores denies). The allow-list is the toolchain; the backstop
+        # only refuses git push and gh pr create. The push PAT is not on
+        # these steps.
+        permission_mode="dontAsk",
+        backstop=".claude/design-run-settings.json",
+        mcp_config=None,
+        allowed="Bash,Read,Write,Edit,Glob,Grep,Skill"),
     "backlog-burn": Routine(
         workflow="backlog-burn.yml", chain="backlog-burn",
         conf=".github/backlog-burn.conf", job="burn",
@@ -2958,6 +2963,15 @@ def _assert_ship_lock_gate_follows_disposition(
     sim_cond = _strip_fixed_green_legs(cond)
     sim_cond = re.sub(
         r"\s*&&\s*steps\.bundle\.outputs\.pending\s*!=\s*'true'",
+        "",
+        sim_cond,
+    )
+    # design-run restores provider-triage from START_SHA before the probe
+    # (#859). A failed restore must not run that step: the secrets would
+    # execute whatever the agent left behind. The leg is a prerequisite,
+    # not a disposition, so it is removed before the exact-tail compare.
+    sim_cond = re.sub(
+        r"\s*&&\s*steps\.restore_triage\.outcome\s*==\s*'success'",
         "",
         sim_cond,
     )
