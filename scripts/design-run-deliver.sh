@@ -14,12 +14,25 @@
 # writes a git bundle of START_SHA..HEAD. A later job, on a fresh runner,
 # checks out that same start commit, verifies the bundle, and only then
 # runs this file from that checkout (`--bundle`). Nothing in the bundle
-# is executed. Then:
+# is executed.
+#
+# A firing whose issue thread carries 🚢 DECLINED, 🚦 DECISION NEEDED, or
+# 🚢 DEFERRED — the same markers routine-lock-cleanup.sh's
+# decline_indicated / deferred_indicated score, including that script's
+# window and author gate — is not delivered. --write-bundle writes no
+# bundle (the run job's lock cleanup still runs) and --bundle does not
+# push. The check reads comments with GH_TOKEN and runs --stop-only on
+# the routine-lock-cleanup.sh blob at the start SHA, so a commit on the
+# design branch cannot replace the gate.
+#
+# Then:
 #   1. Only a branch named claude/issue-<N>-* is eligible. main is never
 #      pushed.
 #   2. Uncommitted files under designs/ and first-party lib/ are committed
-#      onto that branch. Vendored trees, scripts/, .github/, .claude/ and
-#      tools/ are not.
+#      onto that branch, and the commit lists only those paths. A file
+#      already staged outside that set (a vendored tree, a repo-root doc)
+#      stays in the index and out of the commit. Vendored trees, scripts/,
+#      .github/, .claude/ and tools/ are not committed.
 #   3. Any commit since the job's start SHA that touches .github/, scripts/,
 #      .claude/ or tools/ — including a path added and later deleted, or the
 #      pre-image of a rename — refuses the push.
@@ -261,7 +274,8 @@ EOF
 # A rename/copy record is `XY SP <new>\0<old>\0`; both sides are staged
 # when each is a safe path.
 commit_safe_dirty() {
-  local entry xy path old added=0 status_file
+  local entry xy path old added=0 status_file cached
+  local -a drop=()
   status_file="$(mktemp)"
   # -uall: an untracked directory is otherwise one line ("lib/"), and
   # `git add` of that line would stage the vendored subtree inside it.
@@ -298,6 +312,21 @@ commit_safe_dirty() {
   done < "$status_file"
   rm -f "$status_file"
   [ "$added" -eq 1 ] || return 0
+  # Unstage anything already in the index that is outside the safe set,
+  # then commit with no pathspec. `git commit -- <path>` is --only: it
+  # replays the worktree and drops a staged rename's deletion (the old
+  # name is not a path `git add` can name). A bare commit records that
+  # index rename, and the reset keeps a pre-staged vendored file or
+  # repo-root doc out of the commit.
+  while IFS= read -r -d '' cached || [ -n "${cached:-}" ]; do
+    [ -n "$cached" ] || continue
+    if ! safe_path "$cached"; then
+      drop+=("$cached")
+    fi
+  done < <(git_cmd diff --cached --name-only -z)
+  if [ "${#drop[@]}" -gt 0 ]; then
+    git_cmd reset -q -- "${drop[@]}"
+  fi
   git_cmd -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
       -c user.name="github-actions[bot]" \
       commit -m "Design for #${ISSUE}"
@@ -490,12 +519,14 @@ finish() {  # delivered summary
   exit 0
 }
 
-# Read `git bundle verify` output. One contained ref, one prerequisite.
+# Read `git bundle verify` output. One contained ref. START_SHA (BASE)
+# must be a prerequisite. Further prerequisites are accepted only when
+# each is an ancestor of BASE; an unrelated prerequisite is rejected.
 # `git bundle verify` (git 2.43) does not checksum the pack — a flipped
 # pack byte still prints "is okay" — so the caller also fetches, and a
 # corrupt pack dies there instead of being pushed.
-parse_bundle_verify() {  # $1 verify text. Sets BUNDLE_HEAD_SHA, BUNDLE_HEAD_REF, BUNDLE_PREREQ.
-  local line state sha ref
+parse_bundle_verify() {  # $1 verify text. Sets BUNDLE_HEAD_SHA, BUNDLE_HEAD_REF.
+  local line state sha ref prereq base_present
   local -a prereqs=() heads=()
   state=none
   while IFS= read -r line || [ -n "${line:-}" ]; do
@@ -519,7 +550,20 @@ parse_bundle_verify() {  # $1 verify text. Sets BUNDLE_HEAD_SHA, BUNDLE_HEAD_REF
       requires) prereqs+=("$sha") ;;
     esac
   done <<< "$1"
-  if [ "${#prereqs[@]}" -ne 1 ] || [ "${prereqs[0]}" != "$BASE" ]; then
+  base_present=0
+  for prereq in "${prereqs[@]}"; do
+    if [ "$prereq" = "$BASE" ]; then
+      base_present=1
+    fi
+    # Inclusive: BASE is an ancestor of itself. Any other prerequisite
+    # must be a real ancestor, present in this checkout (the deliver job
+    # fetches full history so the check can see it).
+    if ! git_cmd merge-base --is-ancestor "$prereq" "$BASE"; then
+      echo "design-run-deliver: prerequisite ${prereq} is not an ancestor of START_SHA" >&2
+      return 1
+    fi
+  done
+  if [ "$base_present" -ne 1 ]; then
     echo "design-run-deliver: ancestry does not start at START_SHA" >&2
     return 1
   fi
@@ -580,15 +624,79 @@ apply_bundle() {
   DELIVER_REF=refs/deliver/tip
 }
 
+# Returns 0 when this firing's stop markers say do not deliver, 1 when
+# they do not, 2 when the disposition could not be read. The markers are
+# routine-lock-cleanup.sh's decline_indicated and deferred_indicated,
+# executed from the blob at BASE (the pinned start SHA), not from the
+# worktree copy the agent can rewrite.
+delivery_stopped() {
+  local comments cleanup stopped
+  local -a window_args=()
+  if [ -z "${GH_TOKEN:-}" ]; then
+    echo "design-run-deliver: GH_TOKEN is required to read the run disposition" >&2
+    return 2
+  fi
+  if ! comments="$(gh api --paginate "/repos/${REPO}/issues/${ISSUE}/comments?per_page=100" \
+      --jq '.[] | {body: (.body // ""), created_at: .created_at, login: (.user.login // ""), type: (.user.type // "")}')"; then
+    echo "design-run-deliver: could not read issue comments to derive the run disposition" >&2
+    return 2
+  fi
+  if ! git_cmd cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+    echo "design-run-deliver: base ${BASE} is not a commit in this checkout" >&2
+    return 2
+  fi
+  cleanup="$(mktemp)"
+  if ! git_cmd show "${BASE}:scripts/routine-lock-cleanup.sh" > "$cleanup"; then
+    rm -f "$cleanup"
+    echo "design-run-deliver: could not read routine-lock-cleanup.sh from ${BASE}" >&2
+    return 2
+  fi
+  if [ -n "${JOB_WINDOW_START:-}" ]; then
+    window_args=(--run-started-at "$JOB_WINDOW_START")
+  fi
+  # A failing query is the || branch. Do not toggle set -e here: it is not
+  # function-local, and a later `return 1` ("not stopped") would then abort
+  # the caller.
+  if ! stopped="$(printf '%s\n' "$comments" | bash "$cleanup" --stop-only --repo "$REPO" --issue "$ISSUE" "${window_args[@]}")"; then
+    rm -f "$cleanup"
+    echo "design-run-deliver: disposition query failed" >&2
+    return 2
+  fi
+  rm -f "$cleanup"
+  case "$stopped" in
+    true) return 0 ;;
+    false) return 1 ;;
+  esac
+  echo "design-run-deliver: disposition query returned '${stopped:-empty}'" >&2
+  return 2
+}
+
+# Exit 0 with nothing delivered when this firing already stopped. A read
+# failure exits 1 so a design is not pushed on an unknown disposition.
+refuse_if_stopped() {
+  local rc
+  set +e
+  delivery_stopped
+  rc=$?
+  set -e
+  case "$rc" in
+    0) finish false "a DECLINED, DECISION NEEDED, or DEFERRED stop from this run — nothing pushed" ;;
+    1) return 0 ;;
+    *) exit 1 ;;
+  esac
+}
+
 # Commit safe dirty files and write START_SHA..HEAD. No token, no push.
 # Exit 0 with no file when there is nothing to deliver (the workflow then
-# records pending=false). A protected path exits 1 and writes no file.
+# records pending=false), including a declined / deferred stop. A protected
+# path exits 1 and writes no file.
 write_bundle() {
   local ahead
   BRANCH="$(git_cmd rev-parse --abbrev-ref HEAD)"
   if ! [[ "$BRANCH" =~ ^claude/issue-${ISSUE}- ]]; then
     finish false "HEAD is '${BRANCH}', not claude/issue-${ISSUE}-* — nothing pushed"
   fi
+  refuse_if_stopped
   commit_safe_dirty
   if ! git_cmd cat-file -e "${BASE}^{commit}" 2>/dev/null; then
     echo "design-run-deliver: base ${BASE} is not a commit in this checkout" >&2
@@ -633,6 +741,9 @@ run_live() {
   if [ -n "$WRITE_BUNDLE" ]; then
     write_bundle
   fi
+  # --write-bundle already returned through finish/exit. This is the
+  # deliver-job and direct-push gate: a stop writes no success and no push.
+  refuse_if_stopped
   if [ -n "$BUNDLE" ]; then
     if ! apply_bundle; then
       emit delivered false
@@ -697,8 +808,10 @@ selftest() {
   root="${tmp}/repo"
   bare="${tmp}/bare.git"
   mkdir -p "$root/designs/nuggs-ladder" "$root/designs/old" "$root/designs/new" "$root/scripts"
+  cp "$(dirname "$SELF")/routine-lock-cleanup.sh" "$root/scripts/routine-lock-cleanup.sh"
   git_cmd -C "$root" init -b main >/dev/null
-  git_cmd -C "$root" -c user.email=t@example.com -c user.name=t commit --allow-empty -m base >/dev/null
+  git_cmd -C "$root" add -- scripts/routine-lock-cleanup.sh
+  git_cmd -C "$root" -c user.email=t@example.com -c user.name=t commit -m base >/dev/null
   base="$(git_cmd -C "$root" rev-parse HEAD)"
   git_cmd -C "$root" checkout -b claude/issue-853-nuggs-ladder >/dev/null 2>&1
   printf 'x\n' > "$root/designs/nuggs-ladder/nuggs-ladder.scad"
@@ -712,6 +825,12 @@ selftest() {
   mkdir -p "$root/lib/Third"
   printf 'vendored\n' > "$root/lib/Third/secret.scad"
   printf 'libok\n' > "$root/lib/note.scad"
+  # Already staged, and outside the safe set: a bare `git commit` would
+  # record both under github-actions[bot]. The delivery commit must not.
+  printf 'staged-vendor\n' > "$root/lib/Third/staged.scad"
+  mkdir -p "$root/docs"
+  printf 'staged-doc\n' > "$root/docs/staged.md"
+  git_cmd -C "$root" add -- lib/Third/staged.scad docs/staged.md
   git_cmd -C "$root" init -b main --bare "$bare" >/dev/null
 
   # Fake gh: records invocations and serves the PR the create call wrote.
@@ -743,6 +862,14 @@ JSON
 fi
 if [ "\$1" = "api" ]; then
   # Comment GET (paginate) returns prior bodies; POST records the body.
+  # The disposition read asks for created_at and wants comment NDJSON.
+  # The success-comment count asks with a different --jq and wants 0 or 1.
+  if printf '%s\n' "\$*" | grep -q 'created_at'; then
+    if [ -f "${tmp}/comments.ndjson" ]; then
+      cat "${tmp}/comments.ndjson"
+    fi
+    exit 0
+  fi
   for arg in "\$@"; do
     case "\$arg" in
       --method) posting=1 ;;
@@ -874,6 +1001,14 @@ EOF
   }
   if tree_has 'lib/Third/secret.scad'; then
     echo "selftest: vendored lib subtree was pushed" >&2
+    exit 1
+  fi
+  if tree_has 'lib/Third/staged.scad'; then
+    echo "selftest: staged vendored file was committed and pushed" >&2
+    exit 1
+  fi
+  if tree_has 'docs/staged.md'; then
+    echo "selftest: staged repo-root doc was committed and pushed" >&2
     exit 1
   fi
   if tree_has 'designs/old/a.scad'; then
@@ -1199,9 +1334,11 @@ JSON
   bdel="${tmp}/bdel"
   bbare="${tmp}/bbare.git"
   bfile="${tmp}/design-run.bundle"
-  mkdir -p "$bsrc/designs/nuggs-ladder"
+  mkdir -p "$bsrc/designs/nuggs-ladder" "$bsrc/scripts"
+  cp "$(dirname "$SELF")/routine-lock-cleanup.sh" "$bsrc/scripts/routine-lock-cleanup.sh"
   git_cmd -C "$bsrc" init -b main >/dev/null
-  git_cmd -C "$bsrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  git_cmd -C "$bsrc" add -- scripts/routine-lock-cleanup.sh
+  git_cmd -C "$bsrc" -c user.email=t@example.com -c user.name=t commit -m start >/dev/null
   bstart="$(git_cmd -C "$bsrc" rev-parse HEAD)"
   git_cmd -C "$bsrc" checkout -b claude/issue-853-nuggs-ladder >/dev/null
   printf 'bundled\n' > "$bsrc/designs/nuggs-ladder/nuggs-ladder.scad"
@@ -1349,9 +1486,11 @@ p.write_bytes(data)
   local asrc adel aroot astart
   asrc="${tmp}/asrc"
   adel="${tmp}/adel"
-  mkdir -p "$asrc/designs/nuggs-ladder"
+  mkdir -p "$asrc/designs/nuggs-ladder" "$asrc/scripts"
+  cp "$(dirname "$SELF")/routine-lock-cleanup.sh" "$asrc/scripts/routine-lock-cleanup.sh"
   git_cmd -C "$asrc" init -b main >/dev/null
-  git_cmd -C "$asrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m root >/dev/null
+  git_cmd -C "$asrc" add -- scripts/routine-lock-cleanup.sh
+  git_cmd -C "$asrc" -c user.email=t@example.com -c user.name=t commit -m root >/dev/null
   aroot="$(git_cmd -C "$asrc" rev-parse HEAD)"
   git_cmd -C "$asrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
   astart="$(git_cmd -C "$asrc" rev-parse HEAD)"
@@ -1379,6 +1518,78 @@ p.write_bytes(data)
     printf '%s\n' "$stderr" >&2
     exit 1
   }
+
+  # START_SHA plus an ancestor prerequisite is a valid boundary. An extra
+  # prerequisite that is not an ancestor of START_SHA is rejected, and
+  # nothing is pushed. The ancestor object has to be in the deliver
+  # checkout (the workflow fetches the full history for this check).
+  insert_prereq() {  # $1 src bundle, $2 dst, $3 sha
+    python3 - "$1" "$2" "$3" <<'PY'
+import pathlib, sys
+src, dst, sha = sys.argv[1:]
+data = pathlib.Path(src).read_bytes()
+nl = data.find(b"\n\n")
+if nl < 0:
+    raise SystemExit("bundle header has no blank line")
+header, rest = data[:nl], data[nl:]
+pathlib.Path(dst).write_bytes(header + b"\n-" + sha.encode() + b" extra" + rest)
+PY
+  }
+  local mbare mdel msha usha
+  git_cmd -C "$asrc" bundle create "${tmp}/base-only.bundle" "^${astart}" refs/heads/claude/issue-853-nuggs-ladder
+  insert_prereq "${tmp}/base-only.bundle" "${tmp}/ancestor-ok.bundle" "$aroot"
+  mbare="${tmp}/mbare.git"
+  mdel="${tmp}/mdel"
+  git_cmd init -b main --bare "$mbare" >/dev/null
+  git_cmd clone -b main "${tmp}/astart.git" "$mdel" >/dev/null
+  bsha="$(sha256sum "${tmp}/ancestor-ok.bundle" | awk '{print $1}')"
+  rm -f "${tmp}/pr.json" "${tmp}/comment.body"
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_REPO="$mdel" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$mdel" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$astart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$mbare" \
+    --bundle "${tmp}/ancestor-ok.bundle" --bundle-sha256 "$bsha" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || {
+    echo "selftest: ancestor prerequisite bundle exited ${rc}" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  git_cmd --git-dir="$mbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder >/dev/null || {
+    echo "selftest: ancestor prerequisite bundle was not pushed" >&2
+    exit 1
+  }
+  git_cmd -C "$mdel" checkout -b side >/dev/null
+  git_cmd -C "$mdel" -c user.email=t@example.com -c user.name=t commit --allow-empty -m unrelated >/dev/null
+  usha="$(git_cmd -C "$mdel" rev-parse HEAD)"
+  git_cmd -C "$mdel" checkout main >/dev/null
+  insert_prereq "${tmp}/base-only.bundle" "${tmp}/unrelated.bundle" "$usha"
+  msha="$(sha256sum "${tmp}/unrelated.bundle" | awk '{print $1}')"
+  local ubare
+  ubare="${tmp}/ubare.git"
+  git_cmd init -b main --bare "$ubare" >/dev/null
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$mdel" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$astart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$ubare" \
+    --bundle "${tmp}/unrelated.bundle" --bundle-sha256 "$msha" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || { echo "selftest: unrelated prerequisite bundle exited ${rc}" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'is not an ancestor of START_SHA' || {
+    echo "selftest: unrelated prerequisite was accepted" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  if git_cmd --git-dir="$ubare" rev-parse refs/heads/claude/issue-853-nuggs-ladder >/dev/null 2>&1; then
+    echo "selftest: unrelated prerequisite bundle was pushed" >&2
+    exit 1
+  fi
 
   # A protected-path commit inside an otherwise well-formed bundle is
   # refused after the fetch and is not pushed. Built with git directly so
@@ -1517,6 +1728,37 @@ p.write_bytes(data)
   }
   printf '%s\n' "$deliver_run" | grep -q -- '--write-bundle' || {
     echo "selftest: the bundle step does not pass --write-bundle" >&2
+    exit 1
+  }
+  # The bundle step may read issue comments with the job token. The PAT
+  # that can push stays on the deliver step; this run block must not see it.
+  if printf '%s\n' "$deliver_run" | grep -q 'secrets.GH_TOKEN'; then
+    echo "selftest: the bundle step run block mentions secrets.GH_TOKEN" >&2
+    exit 1
+  fi
+  awk '
+    /^      - name: Bundle the design commits/ { in_step = 1 }
+    in_step && /^      - name: Upload the design bundle/ { exit }
+    in_step { print }
+  ' "$workflow" | grep -q 'GH_TOKEN: ${{ github.token }}' || {
+    echo "selftest: the bundle step does not read comments with github.token" >&2
+    exit 1
+  }
+  awk '
+    /^      - name: Bundle the design commits/ { in_step = 1 }
+    in_step && /^      - name: Upload the design bundle/ { exit }
+    in_step { print }
+  ' "$workflow" | grep -q 'JOB_WINDOW_START: ${{ steps.job_window.outputs.start }}' || {
+    echo "selftest: the bundle step does not pin the job window from the step output" >&2
+    exit 1
+  }
+  awk '
+    /^  deliver:/ { in_d = 1 }
+    in_d && /^  [a-zA-Z0-9_-]+:/ && !/^  deliver:/ { in_d = 0 }
+    in_d && /fetch-depth: 0/ { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$workflow" || {
+    echo "selftest: the deliver checkout does not fetch full history" >&2
     exit 1
   }
   if printf '%s\n' "$deliver_run" | grep -q 'GH_TOKEN'; then
@@ -1811,6 +2053,115 @@ EOF
     echo "selftest: dest-symlink restore did not write the real script" >&2
     exit 1
   }
+
+  # A declined / decision-needed / deferred stop must not write a bundle
+  # and must not push one that already exists. An outsider's copy of the
+  # marker is not this firing's stop (the lock-cleanup author gate).
+  stop_case() {  # $1 name, $2 comment NDJSON, $3 refuse|deliver
+    local name="$1" comments="$2" kind="$3"
+    local sdir sbare sdel sfile sstart rc stderr
+    sdir="${tmp}/stop-${name}"
+    sbare="${tmp}/stop-${name}.git"
+    sdel="${tmp}/stop-${name}-del"
+    sfile="${tmp}/stop-${name}.bundle"
+    rm -rf "$sdir" "$sbare" "$sdel" "$sfile"
+    mkdir -p "$sdir/designs/nuggs-ladder" "$sdir/scripts"
+    cp "$(dirname "$SELF")/routine-lock-cleanup.sh" "$sdir/scripts/routine-lock-cleanup.sh"
+    git_cmd -C "$sdir" init -b main >/dev/null
+    git_cmd -C "$sdir" add -- scripts/routine-lock-cleanup.sh
+    git_cmd -C "$sdir" -c user.email=t@example.com -c user.name=t commit -m start >/dev/null
+    sstart="$(git_cmd -C "$sdir" rev-parse HEAD)"
+    git_cmd -C "$sdir" checkout -b claude/issue-853-nuggs-ladder >/dev/null
+    printf 'wip\n' > "$sdir/designs/nuggs-ladder/nuggs-ladder.scad"
+    git_cmd -C "$sdir" add -- designs/nuggs-ladder/nuggs-ladder.scad
+    git_cmd -C "$sdir" -c user.email=t@example.com -c user.name=t commit -m wip >/dev/null
+    printf '%s\n' "$comments" > "${tmp}/comments.ndjson"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      JOB_WINDOW_START=2026-10-19T00:00:00Z \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$sdir" \
+      "$SELF" --repo acme/print-bench --issue 853 --base "$sstart" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --write-bundle "$sfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    if [ "$kind" = "refuse" ]; then
+      [ "$rc" -eq 0 ] || { echo "selftest: ${name} write-bundle exited ${rc}" >&2; printf '%s\n' "$stderr" >&2; exit 1; }
+      [ ! -e "$sfile" ] || { echo "selftest: ${name} wrote a bundle" >&2; exit 1; }
+      printf '%s\n' "$stderr" | grep -q 'stop from this run — nothing pushed' || {
+        echo "selftest: ${name} did not report the stop" >&2
+        printf '%s\n' "$stderr" >&2
+        exit 1
+      }
+      # A bundle built before the stop comment is visible must still not
+      # be pushed once the comment is on the thread.
+      rm -f "${tmp}/comments.ndjson" "$sfile"
+      env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+        JOB_WINDOW_START=2026-10-19T00:00:00Z \
+        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        DELIVER_WORKTREE="$sdir" \
+        "$SELF" --repo acme/print-bench --issue 853 --base "$sstart" \
+        --base-branch main --run-url https://example.test/run/1 \
+        --write-bundle "$sfile" >/dev/null
+      [ -f "$sfile" ] || { echo "selftest: ${name} could not build the control bundle" >&2; exit 1; }
+      printf '%s\n' "$comments" > "${tmp}/comments.ndjson"
+      git_cmd init -b main --bare "$sbare" >/dev/null
+      git_cmd -C "$sdir" push "$sbare" "${sstart}:refs/heads/main" >/dev/null
+      git_cmd clone -b main "$sbare" "$sdel" >/dev/null
+      bsha="$(sha256sum "$sfile" | awk '{print $1}')"
+      rm -f "${tmp}/pr.json" "${tmp}/comment.body"
+      set +e
+      stderr="$(env GH_BIN="${tmp}/bin/gh" GH_REPO="$sdel" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \
+        JOB_WINDOW_START=2026-10-19T00:00:00Z \
+        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        DELIVER_WORKTREE="$sdel" \
+        "$SELF" --repo acme/print-bench --issue 853 --base "$sstart" \
+        --base-branch main --run-url https://example.test/run/1 --push-url "$sbare" \
+        --bundle "$sfile" --bundle-sha256 "$bsha" 2>&1 >/dev/null)"
+      rc=$?
+      set -e
+      [ "$rc" -eq 0 ] || { echo "selftest: ${name} deliver exited ${rc}" >&2; printf '%s\n' "$stderr" >&2; exit 1; }
+      if git_cmd --git-dir="$sbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder >/dev/null 2>&1; then
+        echo "selftest: ${name} pushed a branch" >&2
+        exit 1
+      fi
+      if [ -f "${tmp}/comment.body" ] && grep -q 'design-run delivered' "${tmp}/comment.body"; then
+        echo "selftest: ${name} posted a delivery comment" >&2
+        exit 1
+      fi
+      if [ -f "${tmp}/pr.json" ]; then
+        echo "selftest: ${name} opened a pull request" >&2
+        exit 1
+      fi
+    else
+      [ "$rc" -eq 0 ] && [ -f "$sfile" ] || {
+        echo "selftest: outsider stop blocked the bundle (exit ${rc})" >&2
+        printf '%s\n' "$stderr" >&2
+        exit 1
+      }
+    fi
+    rm -f "${tmp}/comments.ndjson"
+  }
+  stop_case declined "$(cat <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-10-19T00:30:00Z", "login": "acme", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision\n\nstop", "created_at": "2026-10-19T01:00:00Z", "login": "acme", "type": "User"}
+EOF
+)" refuse
+  stop_case decision "$(cat <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-10-19T00:30:00Z", "login": "acme", "type": "User"}
+{"body": "🚦 DECISION NEEDED — `bay-width`\n\nparked", "created_at": "2026-10-19T01:00:00Z", "login": "acme", "type": "User"}
+EOF
+)" refuse
+  stop_case deferred "$(cat <<'EOF'
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\nwaiting", "created_at": "2026-10-19T01:00:00Z", "login": "acme", "type": "User"}
+EOF
+)" refuse
+  stop_case outsider "$(cat <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-10-19T00:30:00Z", "login": "acme", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision\n\nspoof", "created_at": "2026-10-19T01:00:00Z", "login": "attacker", "type": "User"}
+EOF
+)" deliver
 
   echo "design-run-deliver selftest: ok"
 }

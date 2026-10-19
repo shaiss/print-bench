@@ -77,15 +77,15 @@ on:
         type: boolean
         default: false
 
-# GITHUB_TOKEN does not push. The run job posts the SHIP-LOCK (issues) and
-# uploads the bundle artifact (actions). The deliver job opens the draft PR
-# (pull-requests) and pushes with the GH_TOKEN PAT, not with this token, so
-# contents stays read. The jobs are off unless DESIGN_RUN_ENABLED is set AND
-# the committed config says enabled, and the writing steps are skipped
-# entirely without a provider secret, so these grants sit idle until the
-# routine is deliberately switched on.
+# GITHUB_TOKEN does not push. The run job posts the SHIP-LOCK (issues).
+# Artifact upload and download authenticate with ACTIONS_RUNTIME_TOKEN, so
+# this workflow does not grant the GITHUB_TOKEN `actions` scope. The deliver
+# job opens the draft PR (pull-requests) and pushes with the GH_TOKEN PAT,
+# not with this token, so contents stays read. The jobs are off unless
+# DESIGN_RUN_ENABLED is set AND the committed config says enabled, and the
+# writing steps are skipped entirely without a provider secret, so these
+# grants sit idle until the routine is deliberately switched on.
 permissions:
-  actions: write
   contents: read
   issues: write
   pull-requests: write
@@ -524,6 +524,12 @@ jobs:
           ISSUE: ${{ steps.select.outputs.issue }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DELIVER_SHA256: ${{ steps.start_ref.outputs.deliver_sha256 }}
+          # Disposition read only. github.token can list issue comments.
+          # The push PAT (secrets.GH_TOKEN) stays on the deliver job. The
+          # window is the step output, which an agent rewrite of GITHUB_ENV
+          # cannot move.
+          JOB_WINDOW_START: ${{ steps.job_window.outputs.start }}
+          GH_TOKEN: ${{ github.token }}
           # The restored script lives in RUNNER_TEMP. It must operate on the
           # checkout, never on dirname($0)/.. (that is the runner work dir).
           DELIVER_WORKTREE: ${{ github.workspace }}
@@ -651,6 +657,8 @@ jobs:
         # Skipped while a bundle is pending: the deliver job pushes, then
         # runs lock cleanup. Withdrawing here would drop the claim before
         # that push and the red gate would fail a run that is still in flight.
+        # A DECLINED, DECISION NEEDED, or DEFERRED stop writes no bundle, so
+        # pending stays false and this cleanup still runs for that stop.
         if: >-
           always()
           && steps.policy.outputs.enabled == 'true'
@@ -940,6 +948,10 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.run.outputs.start_sha }}
+          # Ancestor prerequisites of the bundle are commits behind
+          # START_SHA. The default fetch-depth of 1 would hide them, and
+          # the deliver script would reject a legitimate extra prerequisite.
+          fetch-depth: 0
 
       - name: Download the design bundle
         uses: actions/download-artifact@v7
@@ -961,6 +973,7 @@ jobs:
           ISSUE: ${{ needs.run.outputs.issue }}
           START_SHA: ${{ needs.run.outputs.start_sha }}
           DELIVER_SHA256: ${{ needs.run.outputs.deliver_sha256 }}
+          JOB_WINDOW_START: ${{ needs.run.outputs.job_window_start }}
           BUNDLE_SHA256: ${{ needs.run.outputs.bundle_sha256 }}
           DELIVER_WORKTREE: ${{ github.workspace }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

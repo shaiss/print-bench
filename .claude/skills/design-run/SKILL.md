@@ -265,11 +265,14 @@ printcheck output, slice result), never the parameter you just typed — issue
 Gate-green is not delivery. `design-run.yml`'s agent step exits 0 when you
 end the turn, and nothing you type in a comment creates a branch. The agent
 job does not push. Its next step writes a git bundle of the commits on
-`claude/issue-<N>-*`. A later job, on a fresh runner, checks out the commit
-the job started from, verifies that bundle, and only then runs
-`scripts/design-run-deliver.sh` from that checkout to push and open the
-draft PR. Nothing in the bundle is executed. The success comment is posted
-only after both of these are true:
+`claude/issue-<N>-*` unless this firing already posted a `🚢 DECLINED`,
+`🚦 DECISION NEEDED`, or `🚢 DEFERRED` stop (the same markers lock cleanup
+reads). A stop writes no bundle, and lock cleanup in that job still runs.
+A later job, on a fresh runner, checks out the commit the job started from,
+verifies that bundle, and only then runs `scripts/design-run-deliver.sh`
+from that checkout to push and open the draft PR. That job also refuses the
+push when the stop is on the thread. Nothing in the bundle is executed. The
+success comment is posted only after both of these are true:
 
 - `git ls-remote` returns the tip of your local `claude/issue-<N>-*` branch
 - an open **draft** pull request in this repository, whose `headRefOid` is that tip, has a body that closes `#<N>`
@@ -285,13 +288,15 @@ Before you end the turn:
    if you have not already). Any other name, including the default branch,
    is not pushed.
 2. Commit the design. The delivery step commits dirty files under `designs/`
-   and first-party `lib/` that you left behind, and it does not commit
-   `scripts/`, `.github/`, `.claude/`, `tools/`, or the vendored trees. It
-   refuses the push entirely when any commit since the job's start SHA
-   touches `.github/`, `scripts/`, `.claude/`, or `tools/`. A non-draft PR
-   already open on the branch is also a hard stop (`auto-arm.yml` arms
-   auto-merge on non-draft `claude/*` PRs). A tree with no commit ahead of
-   the job's start SHA and no safe dirty files is not delivered.
+   and first-party `lib/` that you left behind, and that commit lists only
+   those paths. It does not commit `scripts/`, `.github/`, `.claude/`,
+   `tools/`, the vendored trees, or a file you had already staged outside
+   that set. It refuses the push entirely when any commit since the job's
+   start SHA touches `.github/`, `scripts/`, `.claude/`, or `tools/`. A
+   non-draft PR already open on the branch is also a hard stop
+   (`auto-arm.yml` arms auto-merge on non-draft `claude/*` PRs). A tree
+   with no commit ahead of the job's start SHA and no safe dirty files is
+   not delivered.
 3. You may `git push` and `gh pr create --draft` yourself. The PR body still
    has to carry, on its own, `Closes #<N>`, the frozen contract with the
    claim comment linked, the §6 audit table with measured numbers, and the
@@ -303,9 +308,11 @@ Before you end the turn:
    tip and the PR URL, and only after the two checks above pass. A failed
    push posts nothing that reads as success.
 
-Then `subscribe_pr_activity` on the PR the delivery step verified, and drive
-it to green per the PR-ownership rules. The human's job from here is what
-#96 promised: react to the previews and merge.
+When you opened the draft PR yourself in step 3, call `subscribe_pr_activity`
+on that PR and drive it to green per the PR-ownership rules. A PR the deliver
+job opens does not exist yet when your turn ends, so the follow-up on that
+PR belongs to those same PR-ownership rules after delivery. The human's job
+from here is what #96 promised: react to the previews and merge.
 
 ## 8. Unattended mode (the scheduled workflow invoked this)
 

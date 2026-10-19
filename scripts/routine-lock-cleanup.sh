@@ -64,7 +64,15 @@
 #       --run-url <url> --routine <design-run|backlog-burn> \
 #       [--run-started-at <YYYY-MM-DDTHH:MM:SSZ>] \
 #       [--escalate-after <n>]                                # default 3
+#   scripts/routine-lock-cleanup.sh --stop-only --repo <owner/name> --issue <N> \
+#       [--run-started-at <YYYY-MM-DDTHH:MM:SSZ>]
 #   scripts/routine-lock-cleanup.sh --selftest
+#
+# --stop-only reads comment NDJSON on stdin (the same {body, created_at,
+# login, type} records the live fetch builds) and prints true when
+# decline_indicated or deferred_indicated scores this firing's stop. It
+# does not read branches, withdraw a lock, or post. design-run-deliver.sh
+# uses it so a declined run is not pushed.
 #
 # Live mode needs GH_TOKEN (gh api auth) — checked after the not-run no-op,
 # so a run with no ship link at all concludes without it. Appends
@@ -106,6 +114,8 @@ usage: scripts/routine-lock-cleanup.sh --repo <owner/name> --issue <N>
            --run-url <url> --routine <design-run|backlog-burn>
            [--run-started-at <YYYY-MM-DDTHH:MM:SSZ>]
            [--escalate-after <n>]
+       scripts/routine-lock-cleanup.sh --stop-only --repo <owner/name> --issue <N>
+           [--run-started-at <YYYY-MM-DDTHH:MM:SSZ>]
        scripts/routine-lock-cleanup.sh --selftest
 EOF
   exit 2
@@ -369,6 +379,26 @@ conclude() {  # delivered declined withdrawn escalated summary — the one exit 
   emit escalated "$4"
   note "routine-lock-cleanup (${ROUTINE}, #${ISSUE}): $5"
   exit 0
+}
+
+# stdin: the same comment NDJSON decline_indicated reads. Prints true when
+# this firing's 🚢 DECLINED, 🚦 DECISION NEEDED, or 🚢 DEFERRED stop is the
+# disposition, and false otherwise. No network and no withdrawal — the
+# branch/PR corroboration in run_live is deliberately not consulted, because
+# that read is what treated a hard-stop's unpushed WIP as a delivery once
+# the deliver job had pushed it.
+stop_query() {
+  local comments
+  comments="$(cat)"
+  if [ "$(printf '%s\n' "$comments" | decline_indicated "$RUN_STARTED_AT")" = "true" ]; then
+    printf '%s\n' true
+    return 0
+  fi
+  if [ "$(printf '%s\n' "$comments" | deferred_indicated "$RUN_STARTED_AT")" = "true" ]; then
+    printf '%s\n' true
+    return 0
+  fi
+  printf '%s\n' false
 }
 
 # ---- live flow ------------------------------------------------------------
@@ -1519,6 +1549,31 @@ fi
 REPO='' ISSUE='' OUTCOME='' RUN_URL='' ROUTINE='' RUN_STARTED_AT='' ESCALATE_AFTER=3
 
 need_val() { [ "$#" -ge 2 ] || usage "$1 requires a value"; }
+
+# design-run-deliver.sh's pre-push check. Same markers, same window, same
+# author gate as the live disposition; comments arrive on stdin so this
+# process does not fetch or post.
+if [ "${1:-}" = "--stop-only" ]; then
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)           need_val "$@"; REPO="$2"; shift 2 ;;
+      --issue)          need_val "$@"; ISSUE="$2"; shift 2 ;;
+      --run-started-at) need_val "$@"; RUN_STARTED_AT="$2"; shift 2 ;;
+      *) usage "unknown argument: $1" ;;
+    esac
+  done
+  [ -n "$REPO" ] && [ -n "$ISSUE" ] || usage "--stop-only needs --repo and --issue"
+  case "$ISSUE" in ''|*[!0-9]*) usage "--issue must be an integer, got '$ISSUE'" ;; esac
+  if [ -n "$RUN_STARTED_AT" ]; then
+    case "$RUN_STARTED_AT" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+      *) usage "--run-started-at must be UTC ISO-8601 (YYYY-MM-DDTHH:MM:SSZ), got '$RUN_STARTED_AT'" ;;
+    esac
+  fi
+  stop_query
+  exit 0
+fi
 
 while [ $# -gt 0 ]; do
   case "$1" in
