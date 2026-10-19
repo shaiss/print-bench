@@ -169,9 +169,9 @@ jobs:
       # Anthropic credential here is CLAUDE_KEY (see the auth note above).
       HAS_ANTHROPIC_KEY: ${{ secrets.CLAUDE_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
-      # The github_token PAT is effectively required here (without it the draft
-      # PR won't trigger CI and readme-gate has no preview) — surfaced so a step
-      # can warn before the agentic run when it is missing.
+      # The push PAT is not given to the agent (#859). Deliver is the only
+      # job that can open a draft PR that triggers CI. Surfaced here so a
+      # missing PAT is visible before a long agent run that cannot be delivered.
       HAS_GH_TOKEN: ${{ secrets.GH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
@@ -340,22 +340,17 @@ jobs:
       # matching run step here (and its slot in the resolve step's --layout)
       # — the drift guard fails either half shipped alone.
       #
-      # All five steps share the pin, the write permissions, the `github_token`
-      # that authenticates the action's own git push / PR creation, and the
-      # same /design-run prompt. The `github_token` is wired to the GH_TOKEN
-      # secret (a PAT) ON PURPOSE — and it matters MORE here than for the
-      # backlog burn: a PR opened with the default GITHUB_TOKEN does not itself
-      # trigger CI (the reason regen uses REGEN_TOKEN), so `regen` would not
-      # fire and the design's previews wouldn't be generated — and a design
-      # page WITHOUT its previews fails readme-gate.sh. With the PAT the draft
-      # PR triggers CI and the product shots regenerate. So for this pipeline a
-      # PAT as `github_token` is effectively required, to reach a mergeable
-      # state unattended: readme-gate needs a preview, and a path-traced
-      # product shot only comes from CI regen. Without a PAT, /design-run first
-      # generates what it can locally (cameras.conf previews via `render.sh
-      # --previews`); if the gate still needs a CI-only shot it stops and
-      # reports rather than opening an image-less PR that fails its own gate
-      # (see its §5 regen handoff).
+      # All five steps share the pin, the workflow's github.token, and the
+      # same /design-run prompt. That token is the job token: contents read,
+      # issues write, pull-requests write. It cannot push. A PR opened with
+      # it does not trigger CI (the reason regen uses REGEN_TOKEN), so these
+      # steps must not open the PR either. The deliver job holds the
+      # GH_TOKEN PAT, pushes, and opens the draft, which is what makes
+      # `regen` fire. .claude/design-run-settings.json denies `git push` and
+      # `gh pr create`. The steps use dontAsk because a bypassPermissions
+      # step ignores its own denies. The allow-list stays the whole
+      # toolchain (Bash plus the file tools the skill edits with); the deny
+      # file only carves out those two commands.
       #
       # The pin is the immutable commit behind the v1 tag; a moved tag must not
       # silently change what runs with write perms + a secret. Re-pin
@@ -390,8 +385,8 @@ jobs:
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link1_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link1_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       # The GLM tail (#327): links 2 and 3 of the registry's `design-run`
@@ -414,8 +409,8 @@ jobs:
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link2_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link2_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       - name: Run via Z.AI (GLM, chain link 3)
@@ -436,8 +431,8 @@ jobs:
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link3_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link3_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       # The cross-provider tail (issue #544): links 4 and 5 of the registry's
@@ -471,8 +466,8 @@ jobs:
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link4_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link4_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       - name: Run via Anthropic (Claude, chain link 5)
@@ -494,8 +489,8 @@ jobs:
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link5_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link5_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       # The agent step exits 0 when the model ends its turn, even if it
@@ -564,6 +559,53 @@ jobs:
         run: |
           set -euo pipefail
           unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
+          # A detached child of the agent is reparented to init. Kill those
+          # process groups before the bundle is judged, and again after
+          # write_bundle returns, so a survivor cannot create the bundle
+          # file once this step has decided it is absent. The runner's own
+          # processes are not init's children and are excluded by comm.
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              [ "$pid" = "$$" ] && continue
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              [ "$ppid" = "1" ] || continue
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              case "$comm" in
+                Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) continue ;;
+              esac
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              case "$cwd" in
+                "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) victims+=("$pid"); continue ;;
+              esac
+              case "$cmd" in
+                *design-run.bundle*) victims+=("$pid") ;;
+              esac
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
             exit 1
@@ -618,13 +660,31 @@ jobs:
             echo "::error::restored design-run-deliver.sh sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
+          reap_agent_orphans
           "$restore_tmp" --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
             --base "$START_SHA" --base-branch "$BASE_BRANCH" --run-url "$RUN_URL" \
             --write-bundle "${RUNNER_TEMP}/design-run.bundle"
+          bundle_path="${RUNNER_TEMP}/design-run.bundle"
+          if [ -f "$bundle_path" ]; then
+            captured="$(sha256sum "$bundle_path" | awk '{print $1}')"
+          else
+            captured=""
+          fi
+          # write_bundle has returned. Anything still alive was not that
+          # script. Reap, then accept the file only when its digest is the
+          # one captured before the reap.
+          reap_agent_orphans
+          if [ -n "$captured" ] && [ -f "$bundle_path" ]; then
+            now="$(sha256sum "$bundle_path" | awk '{print $1}')"
+          else
+            now=""
+          fi
+          if [ -z "$captured" ] || [ "$now" != "$captured" ]; then
+            rm -f "$bundle_path"
+          fi
           if [ -n "${GITHUB_OUTPUT:-}" ]; then
-            if [ -f "${RUNNER_TEMP}/design-run.bundle" ]; then
-              sum="$(sha256sum "${RUNNER_TEMP}/design-run.bundle" | awk '{print $1}')"
-              echo "sha256=${sum}" >> "$GITHUB_OUTPUT"
+            if [ -n "$captured" ] && [ "$now" = "$captured" ] && [ -f "$bundle_path" ]; then
+              echo "sha256=${now}" >> "$GITHUB_OUTPUT"
               echo "pending=true" >> "$GITHUB_OUTPUT"
             else
               echo "sha256=" >> "$GITHUB_OUTPUT"
@@ -869,6 +929,166 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # provider-triage runs with ZAI_KEY, CLAUDE_KEY and github.token, and
+      # its python is the worktree copy. The agent can rewrite that action
+      # and tools/model-registry (and .github/models, which chooses the
+      # probe URL the keys are sent to) before this step. Restore those
+      # paths from START_SHA — blob by blob, no smudge filter — after the
+      # agent's detached processes are dead. Same if: as the triage step:
+      # a delivered run never reaches the secrets.
+      - name: Restore provider-triage from the pinned commit
+        id: restore_triage
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.lock_cleanup.outputs.delivered != 'true'
+          && steps.lock_cleanup.outputs.declined != 'true'
+          && steps.bundle.outputs.pending != 'true'
+        env:
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          PYTHONPATH: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+          PATH: /usr/bin:/bin
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              [ "$pid" = "$$" ] && continue
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              [ "$ppid" = "1" ] || continue
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              case "$comm" in
+                Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) continue ;;
+              esac
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              case "$cwd" in
+                "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) victims+=("$pid"); continue ;;
+              esac
+              case "$cmd" in
+                *design-run.bundle*|*model_registry*) victims+=("$pid") ;;
+              esac
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — provider-triage was not restored" >&2
+            exit 1
+          fi
+          reap_agent_orphans
+          git_dir="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore provider-triage: git object alternates are present" >&2
+            exit 1
+          fi
+          for p in .github .github/actions .github/actions/provider-triage .github/models tools tools/model-registry; do
+            if [ -L "$p" ]; then
+              echo "::error::refusing to restore provider-triage: ${p} is a symlink" >&2
+              exit 1
+            fi
+          done
+          rm -rf .github/actions/provider-triage .github/models tools/model-registry
+          mkdir -p .github/actions .github tools
+          installed=0
+          while IFS= read -r -d '' line; do
+            mode="${line%% *}"
+            rest="${line#* }"
+            type="${rest%% *}"
+            rest="${rest#* }"
+            sha="${rest%%$'\t'*}"
+            path="${rest#*$'\t'}"
+            case "$mode" in
+              100644|100755) ;;
+              *)
+                echo "::error::refusing pinned path ${path} (mode ${mode})" >&2
+                exit 1
+                ;;
+            esac
+            if [ "$type" != "blob" ]; then
+              echo "::error::pinned path ${path} is not a blob" >&2
+              exit 1
+            fi
+            case "$path" in
+              .github/actions/provider-triage/*|.github/models/*|tools/model-registry/*) ;;
+              *)
+                echo "::error::pinned path ${path} is outside the triage closure" >&2
+                exit 1
+                ;;
+            esac
+            parent="$(dirname "$path")"
+            if [ -L "$parent" ]; then
+              echo "::error::refusing to restore through symlink ${parent}" >&2
+              exit 1
+            fi
+            mkdir -p "$parent"
+            if [ -L "$path" ]; then
+              rm -f "$path"
+            fi
+            blob_tmp="$(mktemp "${RUNNER_TEMP}/triage-blob.XXXXXX")"
+            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= cat-file blob "$sha" > "$blob_tmp"; then
+              rm -f "$blob_tmp"
+              echo "::error::could not read ${path} from ${START_SHA}" >&2
+              exit 1
+            fi
+            mv -f "$blob_tmp" "$path"
+            if [ "$mode" = "100755" ]; then
+              chmod +x "$path"
+            else
+              chmod 644 "$path"
+            fi
+            installed=$((installed + 1))
+          done < <(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= ls-tree -r -z "$START_SHA" -- .github/actions/provider-triage .github/models tools/model-registry)
+          if [ "$installed" -lt 1 ] || [ ! -f .github/actions/provider-triage/action.yml ]; then
+            echo "::error::provider-triage restore wrote nothing from ${START_SHA}" >&2
+            exit 1
+          fi
+          got="$(sha256sum .github/actions/provider-triage/action.yml | awk '{print $1}')"
+          want="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:.github/actions/provider-triage/action.yml" | sha256sum | awk '{print $1}')"
+          if [ "$got" != "$want" ]; then
+            echo "::error::restored provider-triage action.yml does not match ${START_SHA}" >&2
+            exit 1
+          fi
+
       # Before failing the run, recover WHY the chain exhausted — the agent steps
       # hide their provider error — and route it: out of credit / out of tokens /
       # bad key escalate to ONE deduped needs-decision issue (so a scheduled red
@@ -878,6 +1098,9 @@ jobs:
       # released the SHIP-LOCK. Same disposition condition as that gate. The
       # Anthropic key is the CLAUDE_KEY alias (as the run_anthropic_4/5 steps
       # wire); both keys go in so classify probes both halves of the chain.
+      # The step env wins over a GITHUB_ENV / GITHUB_PATH the agent appended:
+      # system python, no preload, and PYTHONSAFEPATH so a planted module in
+      # the workspace is not imported ahead of the restored tree.
       - name: Diagnose the exhausted chain (billing / tokens / technical)
         id: triage
         if: >-
@@ -889,7 +1112,18 @@ jobs:
           && steps.lock_cleanup.outputs.delivered != 'true'
           && steps.lock_cleanup.outputs.declined != 'true'
           && steps.bundle.outputs.pending != 'true'
+          && steps.restore_triage.outcome == 'success'
         uses: ./.github/actions/provider-triage
+        env:
+          PYTHONSAFEPATH: "1"
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          PATH: /usr/bin:/bin
         with:
           chain: design-run
           zai-key: ${{ secrets.ZAI_KEY }}
@@ -944,6 +1178,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        timeout-minutes: 2
         with:
           persist-credentials: false
           # Full history. START_SHA must be a bundle prerequisite, and every
@@ -953,6 +1188,7 @@ jobs:
           ref: ${{ needs.run.outputs.start_sha }}
 
       - name: Download the design bundle
+        timeout-minutes: 2
         uses: actions/download-artifact@v7
         with:
           name: design-run-bundle
@@ -1042,6 +1278,10 @@ jobs:
 
       - name: Release the SHIP-LOCK after delivery
         id: lock_cleanup
+        # Short on purpose. The push step above is capped at 10 minutes and
+        # this job at 15, so a hung cleanup must not consume the rest of the
+        # job after that push has already timed out.
+        timeout-minutes: 3
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
