@@ -671,40 +671,14 @@ refuse_if_hard_stop() {
   fi
 }
 
-# $1 commit. True when it is reachable from HEAD or from a branch,
-# remote-tracking branch, or tag already in this checkout. refs/deliver
-# is not a source: this script creates it. A dangling object is not history.
-prereq_in_history() {
-  local sha="$1" ref rest refs
-  git_cmd cat-file -e "${sha}^{commit}" 2>/dev/null || return 1
-  if git_cmd merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
-    return 0
-  fi
-  refs="$(mktemp)"
-  git_cmd for-each-ref --format='%(objectname) %(refname)' refs/heads refs/remotes refs/tags > "$refs"
-  while read -r ref rest; do
-    [ -n "${ref:-}" ] || continue
-    case "${rest:-}" in
-      refs/deliver|refs/deliver/*) continue ;;
-    esac
-    if git_cmd merge-base --is-ancestor "$sha" "$ref" 2>/dev/null; then
-      rm -f "$refs"
-      return 0
-    fi
-  done < "$refs"
-  rm -f "$refs"
-  return 1
-}
-
-# Read `git bundle verify` output. One contained ref. Every prerequisite
-# must already be in this checkout's history (a merge of newer main adds
-# that commit next to START_SHA; a commit from outside this repo does
-# not). START_SHA itself is checked after the fetch: it must be an
-# ancestor of the tip. `git bundle verify` (git 2.43) does not checksum
-# the pack — a flipped pack byte still prints "is okay" — so the caller
-# also fetches with transfer.fsckObjects, and a corrupt pack dies there.
+# Read `git bundle verify` output. One contained ref. START_SHA (BASE)
+# must be a prerequisite. Further prerequisites are accepted only when
+# each is an ancestor of BASE; an unrelated prerequisite is rejected.
+# `git bundle verify` (git 2.43) does not checksum the pack — a flipped
+# pack byte still prints "is okay" — so the caller also fetches with
+# transfer.fsckObjects, and a corrupt pack dies there.
 parse_bundle_verify() {  # $1 verify text. Sets BUNDLE_HEAD_SHA, BUNDLE_HEAD_REF.
-  local line state sha ref
+  local line state sha ref prereq base_present
   local -a prereqs=() heads=()
   state=none
   while IFS= read -r line || [ -n "${line:-}" ]; do
@@ -728,17 +702,23 @@ parse_bundle_verify() {  # $1 verify text. Sets BUNDLE_HEAD_SHA, BUNDLE_HEAD_REF
       requires) prereqs+=("$sha") ;;
     esac
   done <<< "$1"
-  if [ "${#prereqs[@]}" -lt 1 ]; then
-    echo "design-run-deliver: ancestry does not start at START_SHA" >&2
-    return 1
-  fi
-  local prereq
+  base_present=0
   for prereq in "${prereqs[@]}"; do
-    if ! prereq_in_history "$prereq"; then
-      echo "design-run-deliver: prerequisite ${prereq} is not in this repository's history" >&2
+    if [ "$prereq" = "$BASE" ]; then
+      base_present=1
+    fi
+    # Inclusive: BASE is an ancestor of itself. Any other prerequisite
+    # must be a real ancestor, present in this checkout (the deliver job
+    # fetches full history so the check can see it).
+    if ! git_cmd merge-base --is-ancestor "$prereq" "$BASE"; then
+      echo "design-run-deliver: prerequisite ${prereq} is not an ancestor of START_SHA" >&2
       return 1
     fi
   done
+  if [ "$base_present" -ne 1 ]; then
+    echo "design-run-deliver: ancestry does not start at START_SHA" >&2
+    return 1
+  fi
   if [ "${#heads[@]}" -ne 1 ]; then
     echo "design-run-deliver: bundle does not contain exactly one branch ref" >&2
     return 1
@@ -1648,121 +1628,89 @@ p.write_bytes(data)
     exit 1
   }
 
-  # Accept: a merge of newer main. The bundle requires START_SHA and the
-  # main tip. Both are reachable in the deliver checkout (main is ahead of
-  # the detached START_SHA). The merged commit is a design file, so the
-  # forbidden-path walk, which still covers every commit since START_SHA,
-  # allows the push.
-  local msrc mdel mstart mmain mtip mbare msha
-  msrc="${tmp}/msrc"
-  mdel="${tmp}/mdel"
+  # START_SHA plus an ancestor prerequisite is a valid boundary. An extra
+  # prerequisite that is not an ancestor of START_SHA is rejected, and
+  # nothing is pushed. The ancestor object has to be in the deliver
+  # checkout (the workflow fetches the full history for this check).
+  # git bundle create collapses ^ancestor ^BASE to one boundary, so the
+  # extra prerequisite line is written into the header.
+  insert_prereq() {  # $1 src bundle, $2 dst, $3 sha
+    python3 - "$1" "$2" "$3" <<'PY'
+import pathlib, sys
+src, dst, sha = sys.argv[1:]
+data = pathlib.Path(src).read_bytes()
+nl = data.find(b"\n\n")
+if nl < 0:
+    raise SystemExit("bundle header has no blank line")
+header, rest = data[:nl], data[nl:]
+pathlib.Path(dst).write_bytes(header + b"\n-" + sha.encode() + b" extra" + rest)
+PY
+  }
+  local mbare mdel msha usha
+  git_cmd -C "$asrc" checkout main >/dev/null
+  git_cmd -C "$asrc" checkout -B claude/issue-853-nuggs-ladder >/dev/null
+  mkdir -p "$asrc/designs/nuggs-ladder"
+  printf 'own\n' > "$asrc/designs/nuggs-ladder/own.scad"
+  git_cmd -C "$asrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/own.scad
+  git_cmd -C "$asrc" -c user.email=t@example.com -c user.name=t commit -m own >/dev/null
+  git_cmd -C "$asrc" bundle create "${tmp}/base-only.bundle" "^${astart}" refs/heads/claude/issue-853-nuggs-ladder
+  insert_prereq "${tmp}/base-only.bundle" "${tmp}/ancestor-ok.bundle" "$aroot"
   mbare="${tmp}/mbare.git"
-  mkdir -p "$msrc/designs/nuggs-ladder"
-  git_cmd -C "$msrc" init -b main >/dev/null
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
-  mstart="$(git_cmd -C "$msrc" rev-parse HEAD)"
-  git_cmd -C "$msrc" checkout -b claude/issue-853-nuggs-ladder >/dev/null
-  git_cmd -C "$msrc" checkout main >/dev/null
-  printf 'from-main\n' > "$msrc/designs/nuggs-ladder/from-main.scad"
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/from-main.scad
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit -m 'newer main' >/dev/null
-  mmain="$(git_cmd -C "$msrc" rev-parse HEAD)"
-  git_cmd -C "$msrc" checkout claude/issue-853-nuggs-ladder >/dev/null
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t merge --no-ff -m merge "$mmain" >/dev/null
-  printf 'own\n' > "$msrc/designs/nuggs-ladder/own.scad"
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/own.scad
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit -m own >/dev/null
-  mtip="$(git_cmd -C "$msrc" rev-parse HEAD)"
-  git_cmd -C "$msrc" bundle create "${tmp}/merged.bundle" "^${mstart}" "^${mmain}" refs/heads/claude/issue-853-nuggs-ladder
-  git_cmd init -b main --bare "${tmp}/mhist.git" >/dev/null
-  git_cmd -C "$msrc" push "${tmp}/mhist.git" "${mmain}:refs/heads/main" >/dev/null
-  git_cmd clone -b main "${tmp}/mhist.git" "$mdel" >/dev/null
-  git_cmd -C "$mdel" checkout --detach "$mstart" >/dev/null
+  mdel="${tmp}/mdel"
   git_cmd init -b main --bare "$mbare" >/dev/null
-  msha="$(sha256sum "${tmp}/merged.bundle" | awk '{print $1}')"
+  git_cmd clone -b main "${tmp}/astart.git" "$mdel" >/dev/null
+  bsha="$(sha256sum "${tmp}/ancestor-ok.bundle" | awk '{print $1}')"
   rm -f "${tmp}/pr.json" "${tmp}/comment.body" "${tmp}/comments.json"
   set +e
-  env GH_BIN="${tmp}/bin/gh" GH_REPO="$mdel" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_REPO="$mdel" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$mdel" \
-    "$SELF" --repo acme/print-bench --issue 853 --base "$mstart" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$astart" \
     --base-branch main --run-url https://example.test/run/1 --push-url "$mbare" \
-    --bundle "${tmp}/merged.bundle" --bundle-sha256 "$msha" >/dev/null
+    --bundle "${tmp}/ancestor-ok.bundle" --bundle-sha256 "$bsha" 2>&1 >/dev/null)"
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] || { echo "selftest: merged-main bundle exited ${rc}" >&2; exit 1; }
-  [ "$(git_cmd --git-dir="$mbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)" = "$mtip" ] || {
-    echo "selftest: merged-main bundle was not pushed" >&2
-    exit 1
-  }
-  git_cmd --git-dir="$mbare" grep -q from-main refs/heads/claude/issue-853-nuggs-ladder -- designs/nuggs-ladder/from-main.scad
-  [ "$(git_cmd -C "$mdel" rev-parse HEAD)" = "$mstart" ] || {
-    echo "selftest: merged-main bundle checked the bundle out over START_SHA" >&2
-    exit 1
-  }
-
-  # Reject: the same bundle, but the newer-main commit is only a dangling
-  # object in the deliver repo. Reachable history does not contain it.
-  local mdel2
-  mdel2="${tmp}/mdel2"
-  git_cmd clone -b main "${tmp}/mhist.git" "$mdel2" >/dev/null
-  git_cmd -C "$mdel2" checkout --detach "$mstart" >/dev/null
-  git_cmd -C "$mdel2" branch -D main >/dev/null
-  git_cmd -C "$mdel2" remote remove origin
-  set +e
-  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
-    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-    DELIVER_WORKTREE="$mdel2" \
-    "$SELF" --repo acme/print-bench --issue 853 --base "$mstart" \
-    --base-branch main --run-url https://example.test/run/1 --push-url "$mbare" \
-    --bundle "${tmp}/merged.bundle" --bundle-sha256 "$msha" 2>&1 >/dev/null)"
-  rc=$?
-  set -e
-  [ "$rc" -eq 1 ] || { echo "selftest: dangling-prerequisite bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'not in this repository'"'"'s history' || {
-    echo "selftest: dangling prerequisite was accepted" >&2
+  [ "$rc" -eq 0 ] || {
+    echo "selftest: ancestor prerequisite bundle exited ${rc}" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
   }
-  [ "$(git_cmd --git-dir="$mbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)" = "$mtip" ] || {
-    echo "selftest: dangling prerequisite was pushed" >&2
+  git_cmd --git-dir="$mbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder >/dev/null || {
+    echo "selftest: ancestor prerequisite bundle was not pushed" >&2
     exit 1
   }
-
-  # Reject: newer main is in history, and it touches scripts/. The
-  # forbidden-path walk covers that commit, so the merge is not pushed.
-  git_cmd -C "$msrc" checkout main >/dev/null
-  mkdir -p "$msrc/scripts"
-  printf 'script\n' > "$msrc/scripts/from-main.sh"
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t add -- scripts/from-main.sh
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit -m 'main scripts' >/dev/null
-  mmain="$(git_cmd -C "$msrc" rev-parse HEAD)"
-  git_cmd -C "$msrc" checkout claude/issue-853-nuggs-ladder >/dev/null
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t merge --no-ff -m 'merge scripts' "$mmain" >/dev/null
-  git_cmd -C "$msrc" bundle create "${tmp}/merged-scripts.bundle" "^${mstart}" "^${mmain}" refs/heads/claude/issue-853-nuggs-ladder
-  git_cmd -C "$msrc" push "${tmp}/mhist.git" "${mmain}:refs/heads/main" >/dev/null
-  git_cmd -C "$mdel" fetch "${tmp}/mhist.git" "+refs/heads/main:refs/heads/main" >/dev/null
-  msha="$(sha256sum "${tmp}/merged-scripts.bundle" | awk '{print $1}')"
-  mtip="$(git_cmd --git-dir="$mbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)"
+  [ "$(git_cmd -C "$mdel" rev-parse HEAD)" = "$astart" ] || {
+    echo "selftest: ancestor prerequisite bundle checked the bundle out over START_SHA" >&2
+    exit 1
+  }
+  git_cmd -C "$mdel" checkout -b side >/dev/null
+  git_cmd -C "$mdel" -c user.email=t@example.com -c user.name=t commit --allow-empty -m unrelated >/dev/null
+  usha="$(git_cmd -C "$mdel" rev-parse HEAD)"
+  git_cmd -C "$mdel" checkout main >/dev/null
+  insert_prereq "${tmp}/base-only.bundle" "${tmp}/unrelated.bundle" "$usha"
+  msha="$(sha256sum "${tmp}/unrelated.bundle" | awk '{print $1}')"
+  local ubare
+  ubare="${tmp}/ubare.git"
+  git_cmd init -b main --bare "$ubare" >/dev/null
   set +e
   stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$mdel" \
-    "$SELF" --repo acme/print-bench --issue 853 --base "$mstart" \
-    --base-branch main --run-url https://example.test/run/1 --push-url "$mbare" \
-    --bundle "${tmp}/merged-scripts.bundle" --bundle-sha256 "$msha" 2>&1 >/dev/null)"
+    "$SELF" --repo acme/print-bench --issue 853 --base "$astart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$ubare" \
+    --bundle "${tmp}/unrelated.bundle" --bundle-sha256 "$msha" 2>&1 >/dev/null)"
   rc=$?
   set -e
-  [ "$rc" -eq 1 ] || { echo "selftest: merged scripts bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/from-main.sh' || {
-    echo "selftest: merged scripts path was not refused" >&2
+  [ "$rc" -eq 1 ] || { echo "selftest: unrelated prerequisite bundle exited ${rc}" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'is not an ancestor of START_SHA' || {
+    echo "selftest: unrelated prerequisite was accepted" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
   }
-  [ "$(git_cmd --git-dir="$mbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)" = "$mtip" ] || {
-    echo "selftest: merged scripts bundle was pushed" >&2
+  if git_cmd --git-dir="$ubare" rev-parse refs/heads/claude/issue-853-nuggs-ladder >/dev/null 2>&1; then
+    echo "selftest: unrelated prerequisite bundle was pushed" >&2
     exit 1
-  }
+  fi
 
   # A protected-path commit inside an otherwise well-formed bundle is
   # refused after the fetch and is not pushed. Built with git directly so
@@ -2083,8 +2031,21 @@ p.write_bytes(data)
     echo "selftest: workflow permissions still grant actions" >&2
     exit 1
   fi
-  if grep -q 'subscribe_pr_activity' "${repo_root}/.claude/skills/design-run/SKILL.md"; then
-    echo "selftest: SKILL.md still tells the agent to subscribe_pr_activity" >&2
+  skill="${repo_root}/.claude/skills/design-run/SKILL.md"
+  grep -q 'subscribe_pr_activity' "$skill" || {
+    echo "selftest: SKILL.md does not mention subscribe_pr_activity" >&2
+    exit 1
+  }
+  grep -q 'opened the draft PR yourself in step 3' "$skill" || {
+    echo "selftest: SKILL.md does not limit subscribe_pr_activity to a PR the agent opened" >&2
+    exit 1
+  }
+  grep -q 'does not exist yet' "$skill" || {
+    echo "selftest: SKILL.md does not say a deliver-job PR does not exist yet" >&2
+    exit 1
+  }
+  if grep -q 'PR the delivery step verified' "$skill"; then
+    echo "selftest: SKILL.md still subscribes to a PR the deliver job has not opened" >&2
     exit 1
   fi
   printf '%s\n' "$deliver_run" | grep -q 'GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY' || {
