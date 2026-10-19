@@ -359,7 +359,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
           GROWTHQ_DEDUP_CONTEXT: ${{ github.workspace }}/.reeve-growth-context/dedup.json
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -428,7 +428,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
           GROWTHQ_DEDUP_CONTEXT: ${{ github.workspace }}/.reeve-growth-context/dedup.json
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -479,7 +479,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GROWTHQ_CAP_STATE: ${{ runner.temp }}/growthq-posts
           GROWTHQ_DEDUP_CONTEXT: ${{ github.workspace }}/.reeve-growth-context/dedup.json
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
