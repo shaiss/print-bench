@@ -2066,6 +2066,14 @@ p.write_bytes(data)
     echo "selftest: deliver job does not assert START_SHA == github.sha" >&2
     exit 1
   }
+  grep -q 'merge-base --is-ancestor "$GITHUB_SHA" "$START_SHA"' "$workflow" || {
+    echo "selftest: deliver job does not allow a newer default-branch pin" >&2
+    exit 1
+  }
+  grep -q 'merge-base --is-ancestor "$START_SHA" "origin/${BASE_BRANCH}"' "$workflow" || {
+    echo "selftest: deliver job does not require START_SHA on the default branch" >&2
+    exit 1
+  }
   if awk '
     /^permissions:/ { p = 1; next }
     p && /^[^ ]/ { exit }

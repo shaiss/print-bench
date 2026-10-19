@@ -1011,11 +1011,20 @@ jobs:
             echo "::error::deliver inputs are empty" >&2
             exit 1
           fi
-          # The pin is the workflow commit. A rewritten job output that
-          # named some other SHA must not be what this job checks out.
+          # The run job checks out the default branch by name and pins that
+          # tip. A push to the default branch while this workflow is queued
+          # makes that tip a descendant of github.sha; equality is the common
+          # case. A rewritten output that names an older script, or a commit
+          # that is not on the default branch, is refused.
           if [ "$START_SHA" != "$GITHUB_SHA" ]; then
-            echo "::error::START_SHA does not match the workflow commit" >&2
-            exit 1
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$GITHUB_SHA" "$START_SHA"; then
+              echo "::error::START_SHA is not the workflow commit or a descendant of it" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$START_SHA" "origin/${BASE_BRANCH}"; then
+              echo "::error::START_SHA is not on ${BASE_BRANCH}" >&2
+              exit 1
+            fi
           fi
           got="$(sha256sum "$script" | awk '{print $1}')"
           if [ "$got" != "$DELIVER_SHA256" ]; then
