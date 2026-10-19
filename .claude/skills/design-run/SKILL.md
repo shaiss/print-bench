@@ -224,13 +224,14 @@ telemetry, rather than forcing green.
        commit those. Most designs can satisfy the gate this way with no CI at
        all. (Path-traced `shots.conf` product shots need `bpy`/CI; don't
        hand-fake them.)
-    2. **If a required preview can only come from CI `regen`, it needs a PAT.**
-       `design-run.yml` wires `secrets.GH_TOKEN` as the agent's `github_token`
-       and as the delivery step's push credential. A push or PR authored by
-       the default `github.token` **does not trigger `ci.yml`** (the same
-       reason `regen` uses `REGEN_TOKEN` — see CLAUDE.md), so `regen` would
-       not fire. With that PAT present, CI regenerates and commits the shot
-       as usual. The delivery step refuses to push when `GH_TOKEN` is empty.
+    2. **If a required preview can only come from CI `regen`, delivery needs the push PAT.**
+       The agent steps hold `github.token` only. A separate delivery workflow,
+       which runs no agent code, pushes with the repo secret `GH_TOKEN` and
+       opens the draft. A push or PR authored by the default `github.token`
+       **does not trigger `ci.yml`** (the same reason `regen` uses
+       `REGEN_TOKEN` — see CLAUDE.md), so `regen` would not fire. With that
+       PAT present, CI regenerates and commits the shot as usual. The
+       delivery step refuses to push when `GH_TOKEN` is empty.
     3. **No PAT and the gate still needs a CI-only shot?** Then `/preflight` is
        red and §8's hard stop applies: **do not open an image-less draft PR**
        that fails its own gate — stop, withdraw the claim (§0.6), and report the
@@ -308,7 +309,7 @@ Before you end the turn:
    and does not post success.
 
 Do not call `subscribe_pr_activity`. You do not open the draft PR in step 3.
-The deliver job opens it, and that PR does not exist yet when your turn ends.
+The delivery workflow opens it, and that PR does not exist yet when your turn ends.
 
 The human's job from here is what #96 promised: react to the previews and merge.
 

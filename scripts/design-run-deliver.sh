@@ -2115,7 +2115,7 @@ p.write_bytes(data)
   # dir outside the fixture repo and runs --write-bundle. The worktree
   # copy is poisoned. A missing DELIVER_WORKTREE and a worktree that is
   # not the git toplevel (a planted parent .git) both fail closed.
-  local workflow deliver_run
+  local workflow deliver_run deliver_workflow push_step deliver_job
   workflow="${repo_root}/.github/workflows/design-run.yml"
   deliver_run="$(awk '
     /^      - name: Bundle the design commits/ { in_step = 1 }
@@ -2204,20 +2204,38 @@ p.write_bytes(data)
     echo "selftest: the bundle artifact has no short retention" >&2
     exit 1
   }
-  grep -q 'actions/download-artifact@v7' "$workflow" || {
-    echo "selftest: the deliver job does not download the bundle" >&2
+  grep -q 'name: design-run-meta' "$workflow" || {
+    echo "selftest: the run job does not upload delivery metadata" >&2
     exit 1
   }
-  grep -q '\$GITHUB_WORKSPACE/scripts/design-run-deliver.sh' "$workflow" || {
-    echo "selftest: the deliver job does not run the checkout script" >&2
+  deliver_workflow="${repo_root}/.github/workflows/design-run-deliver.yml"
+  [ -f "$deliver_workflow" ] || { echo "selftest: design-run-deliver.yml is missing" >&2; exit 1; }
+  grep -q 'workflow_run:' "$deliver_workflow" || {
+    echo "selftest: delivery is not a workflow_run workflow" >&2
     exit 1
   }
+  grep -q 'workflows: \["Design run (scheduled idea→PR pipeline)"\]' "$deliver_workflow" || {
+    echo "selftest: delivery workflow_run does not name the design-run workflow" >&2
+    exit 1
+  }
+  grep -q 'actions/download-artifact@v7' "$deliver_workflow" || {
+    echo "selftest: the deliver workflow does not download the bundle" >&2
+    exit 1
+  }
+  grep -q '\$GITHUB_WORKSPACE/scripts/design-run-deliver.sh' "$deliver_workflow" || {
+    echo "selftest: the deliver workflow does not run the checkout script" >&2
+    exit 1
+  }
+  if grep -q 'anthropics/claude-code-action' "$deliver_workflow"; then
+    echo "selftest: the deliver workflow runs agent code" >&2
+    exit 1
+  fi
   local push_step deliver_job
   push_step="$(awk '
     /^      - name: Verify the bundle and push/ { printing = 1 }
     printing && /^      - name:/ && !/^      - name: Verify the bundle and push/ { exit }
     printing { print }
-  ' "$workflow")"
+  ' "$deliver_workflow")"
   [ -n "$push_step" ] || { echo "selftest: could not extract the deliver push step" >&2; exit 1; }
   printf '%s\n' "$push_step" | grep -q 'timeout-minutes: 10' || {
     echo "selftest: the deliver push step has no timeout under the job budget" >&2
@@ -2231,12 +2249,12 @@ p.write_bytes(data)
     /^  deliver:/ { printing = 1 }
     printing && /^  [A-Za-z]/ && !/^  deliver:/ { exit }
     printing { print }
-  ' "$workflow")"
+  ' "$deliver_workflow")"
   [ -n "$deliver_job" ] || { echo "selftest: could not extract the deliver job" >&2; exit 1; }
   printf '%s\n' "$deliver_job" | awk '
     /uses: actions\/checkout@v7/ { found = 1; n = 0 }
     found { n++; if ($0 ~ /timeout-minutes: 2/) ok = 1 }
-    found && n > 4 { exit }
+    found && n > 6 { exit }
     END { exit ok ? 0 : 1 }
   ' || {
     echo "selftest: the deliver checkout has no 2-minute timeout" >&2
@@ -2245,7 +2263,7 @@ p.write_bytes(data)
   printf '%s\n' "$deliver_job" | awk '
     /name: Download the design bundle/ { found = 1; n = 0 }
     found { n++; if ($0 ~ /timeout-minutes: 2/) ok = 1 }
-    found && n > 4 { exit }
+    found && n > 6 { exit }
     END { exit ok ? 0 : 1 }
   ' || {
     echo "selftest: the bundle download has no 2-minute timeout" >&2
@@ -2272,20 +2290,40 @@ p.write_bytes(data)
     echo "selftest: bundle fetch does not set transfer.fsckObjects" >&2
     exit 1
   }
-  grep -q 'fetch-depth: 0' "$workflow" || {
+  grep -q 'fetch-depth: 0' "$deliver_workflow" || {
     echo "selftest: deliver checkout is not a full history" >&2
     exit 1
   }
+  grep -q 'fetch-depth: 0' "$workflow" || {
+    echo "selftest: triage checkout is not a full history" >&2
+    exit 1
+  }
   grep -q 'START_SHA" != "$GITHUB_SHA"' "$workflow" || {
-    echo "selftest: deliver job does not assert START_SHA == github.sha" >&2
+    echo "selftest: triage job does not assert START_SHA against github.sha" >&2
     exit 1
   }
   grep -q 'merge-base --is-ancestor "$GITHUB_SHA" "$START_SHA"' "$workflow" || {
+    echo "selftest: triage job does not allow a newer default-branch pin" >&2
+    exit 1
+  }
+  grep -q 'START_SHA" != "$WORKFLOW_HEAD_SHA"' "$deliver_workflow" || {
+    echo "selftest: deliver job does not assert START_SHA against the triggering head" >&2
+    exit 1
+  }
+  grep -q 'merge-base --is-ancestor "$WORKFLOW_HEAD_SHA" "$START_SHA"' "$deliver_workflow" || {
     echo "selftest: deliver job does not allow a newer default-branch pin" >&2
     exit 1
   }
-  grep -q 'merge-base --is-ancestor "$START_SHA" "origin/${BASE_BRANCH}"' "$workflow" || {
+  if grep -q 'merge-base --is-ancestor "$GITHUB_SHA" "$START_SHA"' "$deliver_workflow"; then
+    echo "selftest: deliver job compares START_SHA to workflow_run GITHUB_SHA" >&2
+    exit 1
+  fi
+  grep -q 'merge-base --is-ancestor "$START_SHA" "origin/${BASE_BRANCH}"' "$deliver_workflow" || {
     echo "selftest: deliver job does not require START_SHA on the default branch" >&2
+    exit 1
+  }
+  grep -q 'head_branch == github.event.repository.default_branch' "$deliver_workflow" || {
+    echo "selftest: deliver job does not require the triggering head branch" >&2
     exit 1
   }
   if awk '
@@ -2297,6 +2335,19 @@ p.write_bytes(data)
     echo "selftest: workflow permissions still grant actions" >&2
     exit 1
   fi
+  if awk '
+    /^permissions:/ { p = 1; next }
+    p && /^[^ ]/ { exit }
+    p && /^  actions: write/ { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$deliver_workflow"; then
+    echo "selftest: deliver workflow grants actions: write" >&2
+    exit 1
+  fi
+  grep -q '^  actions: read$' "$deliver_workflow" || {
+    echo "selftest: deliver workflow does not grant actions: read" >&2
+    exit 1
+  }
   skill="${repo_root}/.claude/skills/design-run/SKILL.md"
   grep -q 'subscribe_pr_activity' "$skill" || {
     echo "selftest: SKILL.md does not mention subscribe_pr_activity" >&2
@@ -2322,7 +2373,11 @@ p.write_bytes(data)
     echo "selftest: SKILL.md still authorizes git push" >&2
     exit 1
   fi
-  if grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$workflow"; then
+  if grep -q 'secrets.GH_TOKEN' "$workflow" || grep -q 'HAS_GH_TOKEN' "$workflow"; then
+    echo "selftest: the run workflow still references the push PAT" >&2
+    exit 1
+  fi
+  if grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$workflow" || grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$deliver_workflow"; then
     echo "selftest: an agent step still receives the push PAT" >&2
     exit 1
   fi
@@ -2331,18 +2386,64 @@ p.write_bytes(data)
     echo "selftest: expected 5 agent github.token wires, found ${agent_token_n}" >&2
     exit 1
   }
-  pat_n="$(grep -c 'GH_TOKEN: \${{ secrets.GH_TOKEN }}' "$workflow" || true)"
+  pat_n="$(grep -c 'GH_TOKEN: \${{ secrets.GH_TOKEN }}' "$deliver_workflow" || true)"
   [ "$pat_n" -eq 1 ] || {
-    echo "selftest: the push PAT must appear on exactly one step, found ${pat_n}" >&2
+    echo "selftest: the push PAT must appear on exactly one deliver step, found ${pat_n}" >&2
     exit 1
   }
+  scrub_n="$(grep -c 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"' "$workflow" || true)"
+  [ "$scrub_n" -eq 5 ] || {
+    echo "selftest: expected 5 subprocess env scrubs, found ${scrub_n}" >&2
+    exit 1
+  }
+  sudo_line="$(grep -n 'name: Disable sudo before the agent' "$workflow" | head -1 | cut -d: -f1)"
+  agent_line="$(grep -n 'name: Run via Z.AI (GLM, chain link 1)' "$workflow" | head -1 | cut -d: -f1)"
+  [ -n "$sudo_line" ] && [ -n "$agent_line" ] && [ "$sudo_line" -lt "$agent_line" ] || {
+    echo "selftest: sudo is not disabled before the agent steps" >&2
+    exit 1
+  }
+  grep -q 'sudo -n true' "$workflow" || {
+    echo "selftest: the sudo disable step does not prove sudo is gone" >&2
+    exit 1
+  }
+  run_perms="$(awk '/^  run:/{p=1} p && /^  [A-Za-z]/ && !/^  run:/{exit} p' "$workflow")"
+  # A pipe into grep -q dies with SIGPIPE under pipefail: the match is near
+  # the top of the job and grep exits before printf finishes writing.
+  case "$run_perms" in
+    *"pull-requests: read"*) ;;
+    *) echo "selftest: the run job does not set pull-requests: read" >&2; exit 1 ;;
+  esac
+  case "$run_perms" in
+    *"pull-requests: write"*)
+      echo "selftest: the run job still grants pull-requests: write" >&2
+      exit 1 ;;
+  esac
   settings="${repo_root}/.claude/design-run-settings.json"
-  for rule in 'Bash(git push:*)' 'Bash(git push*)' 'Bash(gh pr create:*)' 'Bash(gh pr create*)'; do
+  for rule in 'Bash(git push:*)' 'Bash(git push*)' 'Bash(gh pr create:*)' 'Bash(gh pr create*)' \
+    'Bash(gh issue edit*design-brief*)' 'Bash(gh issue edit*autonomy-ok*)' \
+    'Bash(gh api*design-brief*)' 'Bash(gh api*autonomy-ok*)' \
+    'Bash(curl*design-brief*)' 'Bash(curl*autonomy-ok*)'; do
     grep -qF "\"${rule}\"" "$settings" || {
       echo "selftest: design-run settings missing deny ${rule}" >&2
       exit 1
     }
   done
+  grep -q 'name: Strip bot-added opt-in labels' "$workflow" || {
+    echo "selftest: bot-added opt-in labels are not stripped" >&2
+    exit 1
+  }
+  grep -q 'github-actions\[bot\]' "$workflow" || {
+    echo "selftest: the label strip does not key on the bot actor" >&2
+    exit 1
+  }
+  grep -q 'needs-decision is never removed' "$workflow" || {
+    echo "selftest: the label strip does not leave needs-decision alone" >&2
+    exit 1
+  }
+  grep -q 'name: Drop agent PATH and env plants' "$workflow" || {
+    echo "selftest: agent GITHUB_PATH and GITHUB_ENV plants are not dropped" >&2
+    exit 1
+  }
   dontask_n="$(grep -c -- '--permission-mode dontAsk --settings .claude/design-run-settings.json' "$workflow" || true)"
   [ "$dontask_n" -eq 5 ] || {
     echo "selftest: expected 5 dontAsk deny-backstop steps, found ${dontask_n}" >&2
@@ -2360,20 +2461,80 @@ p.write_bytes(data)
     echo "selftest: the bundle step does not re-check the bundle after the reap" >&2
     exit 1
   }
-  grep -q 'Restore provider-triage from the pinned commit' "$workflow" || {
-    echo "selftest: provider-triage is not restored from START_SHA" >&2
+  printf '%s\n' "$deliver_run" | grep -q 'reap_should_kill' || {
+    echo "selftest: the bundle step does not classify orphans" >&2
     exit 1
   }
-  grep -q 'ls-tree -r -z "$START_SHA" -- .github/actions/provider-triage .github/models tools/model-registry' "$workflow" || {
-    echo "selftest: provider-triage restore does not list the pinned trees" >&2
+  printf '%s\n' "$deliver_run" | grep -q 'run-\*\.scope' || {
+    echo "selftest: the bundle reaper does not catch systemd-run scopes" >&2
+    exit 1
+  }
+  reap_n="$(grep -c 'reap_should_kill()' "$workflow" || true)"
+  [ "$reap_n" -eq 2 ] || {
+    echo "selftest: expected the reaper predicate in the bundle and strip steps, found ${reap_n}" >&2
+    exit 1
+  }
+  reap_a="$(awk '
+    /reap_should_kill\(\) \{/ { c++; if (c==1) p=1 }
+    p { print }
+    p && /^          \}$/ { exit }
+  ' "$workflow")"
+  reap_b="$(awk '
+    /reap_should_kill\(\) \{/ { c++; if (c==2) p=1 }
+    p { print }
+    p && /^          \}$/ { exit }
+  ' "$workflow")"
+  [ "$reap_a" = "$reap_b" ] || {
+    echo "selftest: the two reap_should_kill copies differ" >&2
+    exit 1
+  }
+  (
+    eval "$reap_a"
+    export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
+    expect_kill() {
+      if ! reap_should_kill "$@"; then
+        echo "selftest: reap_should_kill kept a process it must kill: $*" >&2
+        exit 1
+      fi
+    }
+    expect_keep() {
+      if reap_should_kill "$@"; then
+        echo "selftest: reap_should_kill killed a process it must keep: $*" >&2
+        exit 1
+      fi
+    }
+    expect_kill 50 1 sleep /work/x sleep 9 "" 99 1
+    expect_keep 50 1 Runner.Worker /work/x runner 9 "" 99 1
+    expect_kill 70 400 bash /work/x bash 70 "" 99 1
+    expect_keep 99 400 bash /work/x bash 99 "" 99 1
+    expect_kill 80 200 sleep /work/x sleep 10 "0::/system.slice/run-u123.scope" 99 1
+    expect_keep 2 0 systemd /work/x systemd 2 "0::/system.slice/run-u123.scope" 99 1
+    expect_keep 80 200 sleep /home/elsewhere sleep 10 "" 99 1
+    expect_kill 55 1 sleep / "design-run.bundle" 3 "" 99 1
+    expect_keep 1 1 bash /work/x bash 1 "" 99 1
+  )
+  grep -q '  triage:' "$workflow" || {
+    echo "selftest: provider-triage is not a separate job" >&2
+    exit 1
+  }
+  if grep -q 'Restore provider-triage from the pinned commit' "$workflow"; then
+    echo "selftest: provider-triage is still restored inside the agent job" >&2
+    exit 1
+  fi
+  grep -q 'ref: \${{ needs.run.outputs.start_sha }}' "$workflow" || {
+    echo "selftest: the triage job does not check out START_SHA" >&2
     exit 1
   }
   grep -q 'PYTHONSAFEPATH: "1"' "$workflow" || {
     echo "selftest: provider-triage does not set PYTHONSAFEPATH" >&2
     exit 1
   }
-  grep -q 'steps.restore_triage.outcome == '"'"'success'"'"'' "$workflow" || {
-    echo "selftest: provider-triage does not wait for the pinned restore" >&2
+  grep -q 'steps.verify_triage.outcome == '"'"'success'"'"'' "$workflow" || {
+    echo "selftest: provider-triage does not wait for the fresh checkout" >&2
+    exit 1
+  }
+  grep -q '/usr/bin/python3 -m model_registry classify' "${repo_root}/.github/actions/provider-triage/action.yml" || {
+    echo "selftest: provider-triage does not pin /usr/bin/python3" >&2
     exit 1
   }
   if grep -q 'PR the delivery step verified' "$skill"; then

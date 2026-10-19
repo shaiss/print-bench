@@ -1,0 +1,281 @@
+name: Design run delivery
+
+# workflow_run runs THIS file from the default branch, with secrets, after
+# "Design run (scheduled idea→PR pipeline)" completes. It is the only
+# workflow that references secrets.GH_TOKEN. Nothing here is agent code:
+# the run job's metadata artifact was written from step outputs, the bundle
+# is verified by scripts/design-run-deliver.sh from the pinned commit, and
+# the script is not the agent's worktree copy.
+#
+# Until this file is on the default branch the event has no workflow to
+# start. A pull_request or a non-default head branch does not deliver.
+
+on:
+  workflow_run:
+    workflows: ["Design run (scheduled idea→PR pipeline)"]
+    types: [completed]
+
+# GITHUB_TOKEN comments and reads artifacts. It does not push. The push
+# and the draft PR use the GH_TOKEN PAT on the push step only. actions:
+# read is what download-artifact needs to fetch the triggering run's
+# artifacts. actions: write is not granted.
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: design-run-deliver
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    name: Verify the bundle and open the draft PR
+    if: >-
+      github.event.workflow_run.event != 'pull_request'
+      && github.event.workflow_run.head_branch == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      actions: read
+    steps:
+      - name: Download the delivery metadata
+        id: meta
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/download-artifact@v7
+        with:
+          name: design-run-meta
+          path: ${{ runner.temp }}/design-run-meta
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+        env:
+          NODE_OPTIONS: ""
+
+      - name: Nothing to deliver
+        if: steps.meta.outcome != 'success'
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: echo "no design-run-meta artifact from run ${RUN_ID}; nothing to deliver"
+
+      - name: Read the delivery metadata
+        id: parsed
+        if: steps.meta.outcome == 'success'
+        env:
+          PATH: /usr/bin:/bin
+        run: |
+          set -euo pipefail
+          meta="${RUNNER_TEMP}/design-run-meta/meta.json"
+          if [ -L "$meta" ] || [ ! -f "$meta" ]; then
+            echo "::error::delivery metadata is not a regular file" >&2
+            exit 1
+          fi
+          jq -e '
+            (.issue | test("^[0-9]+$"))
+            and (.start_sha | test("^[0-9a-f]{40}$"))
+            and (.deliver_sha256 | test("^[0-9a-f]{64}$"))
+            and (.bundle_sha256 | test("^[0-9a-f]{64}$"))
+            and (.job_window_start | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+            and (.walk_outcome == "success" or .walk_outcome == "failure" or .walk_outcome == "not-run")
+          ' "$meta" >/dev/null
+          {
+            echo "issue=$(jq -r .issue "$meta")"
+            echo "start_sha=$(jq -r .start_sha "$meta")"
+            echo "deliver_sha256=$(jq -r .deliver_sha256 "$meta")"
+            echo "bundle_sha256=$(jq -r .bundle_sha256 "$meta")"
+            echo "job_window_start=$(jq -r .job_window_start "$meta")"
+            echo "walk_outcome=$(jq -r .walk_outcome "$meta")"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        if: steps.meta.outcome == 'success'
+        timeout-minutes: 2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ steps.parsed.outputs.start_sha }}
+
+      - name: Download the design bundle
+        if: steps.meta.outcome == 'success'
+        timeout-minutes: 2
+        uses: actions/download-artifact@v7
+        with:
+          name: design-run-bundle
+          path: ${{ runner.temp }}/design-run-bundle
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+        env:
+          NODE_OPTIONS: ""
+
+      # No agent code. The script is the fresh checkout of START_SHA, hashed
+      # against the pre-agent pin. The bundle is data: it is verified and
+      # fetched into a local ref, and nothing in it is executed. The PAT is
+      # on this step only.
+      - name: Verify the bundle and push
+        id: deliver
+        if: steps.meta.outcome == 'success'
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          COMMENT_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.parsed.outputs.issue }}
+          START_SHA: ${{ steps.parsed.outputs.start_sha }}
+          DELIVER_SHA256: ${{ steps.parsed.outputs.deliver_sha256 }}
+          BUNDLE_SHA256: ${{ steps.parsed.outputs.bundle_sha256 }}
+          DELIVER_WORKTREE: ${{ github.workspace }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          JOB_WINDOW_START: ${{ steps.parsed.outputs.job_window_start }}
+          ISSUE_READ_TOKEN: ${{ github.token }}
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_BIN: /usr/bin/git
+          GH_BIN: /usr/bin/gh
+          JQ_BIN: /usr/bin/jq
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          PYTHONPATH: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+          PATH: /usr/bin:/bin
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
+          script="$GITHUB_WORKSPACE/scripts/design-run-deliver.sh"
+          if [ -L "$script" ] || [ ! -f "$script" ]; then
+            echo "::error::delivery script is not a regular file in the START_SHA checkout" >&2
+            exit 1
+          fi
+          if [ -z "${DELIVER_SHA256:-}" ] || [ -z "${BUNDLE_SHA256:-}" ] || [ -z "${START_SHA:-}" ] || [ -z "${WORKFLOW_HEAD_SHA:-}" ]; then
+            echo "::error::deliver inputs are empty" >&2
+            exit 1
+          fi
+          if [ "$HEAD_BRANCH" != "$BASE_BRANCH" ]; then
+            echo "::error::refusing to deliver a run whose head branch is not ${BASE_BRANCH}" >&2
+            exit 1
+          fi
+          case "$START_SHA" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::START_SHA is not a commit id" >&2; exit 1 ;;
+          esac
+          case "$WORKFLOW_HEAD_SHA" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::WORKFLOW_HEAD_SHA is not a commit id" >&2; exit 1 ;;
+          esac
+          head_now="$(/usr/bin/git --no-replace-objects rev-parse HEAD)"
+          if [ "$head_now" != "$START_SHA" ]; then
+            echo "::error::checkout HEAD is not START_SHA" >&2
+            exit 1
+          fi
+          # START_SHA is the run job's default-branch checkout. The
+          # triggering workflow's commit is WORKFLOW_HEAD_SHA (not this
+          # workflow_run's GITHUB_SHA, which can be a later main tip).
+          # Equality is the common case. A pin that is not that commit or
+          # a descendant of it, or that is not on the default branch, is
+          # refused.
+          if [ "$START_SHA" != "$WORKFLOW_HEAD_SHA" ]; then
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$WORKFLOW_HEAD_SHA" "$START_SHA"; then
+              echo "::error::START_SHA is not the triggering workflow commit or a descendant of it" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$START_SHA" "origin/${BASE_BRANCH}"; then
+              echo "::error::START_SHA is not on ${BASE_BRANCH}" >&2
+              exit 1
+            fi
+          fi
+          got="$(sha256sum "$script" | awk '{print $1}')"
+          if [ "$got" != "$DELIVER_SHA256" ]; then
+            echo "::error::checkout design-run-deliver.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          "$GITHUB_WORKSPACE/scripts/design-run-deliver.sh" \
+            --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+            --base "$START_SHA" --base-branch "$BASE_BRANCH" --run-url "$RUN_URL" \
+            --bundle "${RUNNER_TEMP}/design-run-bundle/design-run.bundle" \
+            --bundle-sha256 "$BUNDLE_SHA256"
+
+      - name: Release the SHIP-LOCK after delivery
+        id: lock_cleanup
+        if: always() && steps.meta.outcome == 'success'
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.parsed.outputs.issue }}
+          WALK_OUTCOME: ${{ steps.parsed.outputs.walk_outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+          START_SHA: ${{ steps.parsed.outputs.start_sha }}
+          JOB_WINDOW_START: ${{ steps.parsed.outputs.job_window_start }}
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          PYTHONPATH: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          PATH: /usr/bin:/bin
+        run: |
+          set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND || true
+          if [ -z "${JOB_WINDOW_START:-}" ]; then
+            echo "::error::JOB_WINDOW_START is empty — the job-window output did not arrive"
+            exit 1
+          fi
+          if [ -L scripts ]; then
+            echo "::error::refusing to restore lock-cleanup: scripts/ is a symlink" >&2
+            exit 1
+          fi
+          if [ -L scripts/routine-lock-cleanup.sh ]; then
+            rm -f scripts/routine-lock-cleanup.sh
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh; then
+            restore_tmp="$(mktemp)"
+            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$restore_tmp"; then
+              rm -f "$restore_tmp"
+              exit 1
+            fi
+            if [ -L scripts/routine-lock-cleanup.sh ]; then
+              rm -f scripts/routine-lock-cleanup.sh
+            fi
+            mv -f "$restore_tmp" scripts/routine-lock-cleanup.sh
+          fi
+          if [ -L scripts/routine-lock-cleanup.sh ] || [ ! -f scripts/routine-lock-cleanup.sh ]; then
+            echo "::error::lock-cleanup restore did not leave a regular file" >&2
+            exit 1
+          fi
+          chmod +x scripts/routine-lock-cleanup.sh
+          ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+            --agent-outcome "$WALK_OUTCOME" --run-url "$RUN_URL" --routine design-run \
+            --run-started-at "$JOB_WINDOW_START"
+
+      - name: Fail a delivery that neither pushed nor declined
+        if: >-
+          always()
+          && steps.meta.outcome == 'success'
+          && steps.lock_cleanup.outputs.delivered != 'true'
+          && steps.lock_cleanup.outputs.declined != 'true'
+        env:
+          ISSUE: ${{ steps.parsed.outputs.issue }}
+        run: |
+          echo "::error::the design-run delivery for #${ISSUE} neither delivered nor declined"
+          exit 1
