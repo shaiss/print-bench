@@ -477,9 +477,16 @@ jobs:
       # claude/issue-<N>-* — including design files it left uncommitted —
       # is pushed here, a draft PR is opened if the agent did not open one,
       # and the success comment is posted only after ls-remote matches the
-      # local tip and an open PR from that branch closes the issue. A failed
-      # push posts no success comment. Lock cleanup runs next and treats a
-      # verified branch as delivered.
+      # local tip and a same-repo draft PR at that tip closes the issue. A
+      # failed push posts no success comment. Lock cleanup runs next and
+      # treats a verified branch as delivered.
+      #
+      # The script is NOT the worktree copy. bypassPermissions lets the agent
+      # rewrite scripts/design-run-deliver.sh (or replace it with a symlink)
+      # before this step. Same rule as the #670 lock-cleanup restore: read
+      # the blob from the commit pinned before the agent ran, refuse a
+      # symlink, and execute a regular file. The copy lives in $RUNNER_TEMP
+      # so a worktree symlink cannot redirect the write.
       - name: Deliver the branch and draft PR
         id: deliver
         if: >-
@@ -499,7 +506,43 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          ./scripts/design-run-deliver.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          if [ -L scripts ] || [ -L scripts/design-run-deliver.sh ]; then
+            echo "::error::refusing to restore design-run-deliver: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/design-run-deliver-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore design-run-deliver through a symlink" >&2
+            exit 1
+          fi
+          if ! git -c core.hooksPath=/dev/null show "$START_SHA:scripts/design-run-deliver.sh" > "$blob_tmp"; then
+            rm -f "$blob_tmp"
+            echo "::error::could not restore design-run-deliver.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::design-run-deliver restore did not leave a regular file" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/design-run-deliver.sh"
+          if [ -L "$restore_tmp" ]; then
+            rm -f "$restore_tmp"
+          fi
+          mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::design-run-deliver restore did not leave a regular file" >&2
+            exit 1
+          fi
+          chmod +x "$restore_tmp"
+          "$restore_tmp" --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
             --base "$START_SHA" --base-branch "$BASE_BRANCH" --run-url "$RUN_URL"
 
       - name: Withdraw a dead run's SHIP-LOCK

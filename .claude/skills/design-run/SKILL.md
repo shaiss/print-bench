@@ -268,7 +268,7 @@ next step, `scripts/design-run-deliver.sh`, is what pushes and opens the
 draft PR. It posts the success comment only after both of these are true:
 
 - `git ls-remote` returns the tip of your local `claude/issue-<N>-*` branch
-- an open PR from that branch has a body that closes `#<N>`
+- an open **draft** pull request in this repository, whose `headRefOid` is that tip, has a body that closes `#<N>`
 
 Until both hold, do not post a comment that says the gates are green, the
 run succeeded, or a pull request exists. A mid-run note, if you need one on
@@ -282,8 +282,12 @@ Before you end the turn:
    is not pushed.
 2. Commit the design. The delivery step commits dirty files under `designs/`
    and first-party `lib/` that you left behind, and it does not commit
-   `scripts/`, `.github/`, or the vendored trees. A tree with no commit
-   ahead of the job's start SHA and no such files is not delivered.
+   `scripts/`, `.github/`, `.claude/`, `tools/`, or the vendored trees. It
+   refuses the push entirely when any commit since the job's start SHA
+   touches `.github/`, `scripts/`, `.claude/`, or `tools/`. A non-draft PR
+   already open on the branch is also a hard stop (`auto-arm.yml` arms
+   auto-merge on non-draft `claude/*` PRs). A tree with no commit ahead of
+   the job's start SHA and no safe dirty files is not delivered.
 3. You may `git push` and `gh pr create --draft` yourself. The PR body still
    has to carry, on its own, `Closes #<N>`, the frozen contract with the
    claim comment linked, the §6 audit table with measured numbers, and the
