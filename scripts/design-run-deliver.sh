@@ -24,8 +24,11 @@
 #      commit is refused. `git commit` records the whole index.
 #   3. Any commit since the job's start SHA that touches .github/, scripts/,
 #      .claude/ or tools/ — including a path added and later deleted, the
-#      pre-image of a rename, or a commit brought in by merging main —
-#      refuses the push.
+#      pre-image of a rename, a commit brought in by merging main, or a
+#      change made inside a merge commit and removed by a later merge —
+#      refuses the push. The bundle must list START_SHA as a prerequisite.
+#      Every other prerequisite must pass
+#      `git merge-base --is-ancestor <p> START_SHA` in this script.
 #   4. An open non-draft PR on the branch refuses the push. auto-arm.yml
 #      arms auto-merge on non-draft claude/* PRs.
 #   5. The branch is pushed and `git ls-remote` must return the local tip.
@@ -397,15 +400,17 @@ commit_safe_dirty() {
 
 # `git diff BASE...HEAD` is the merge-base diff (what the branch changed
 # since it left START_SHA). It hides a path that was added and then deleted,
-# and a rename's old name. `git log -z --name-status` catches both, and the
-# NUL records keep a newline inside a path from splitting the record.
+# and a rename's old name. `git log -z -m --name-status` catches both. -m
+# diffs a merge against each parent, so a protected path introduced inside
+# a merge and removed by a later merge is still listed. The NUL records
+# keep a newline inside a path from splitting the record.
 refuse_forbidden_range() {  # $1 tip ref, default HEAD
   local tip="${1:-HEAD}"
   local path status old new diff_file log_file
   diff_file="$(mktemp)"
   log_file="$(mktemp)"
   git_cmd diff --name-only -z "${BASE}...${tip}" > "$diff_file"
-  git_cmd log -z --name-status --find-renames --pretty=format: "${BASE}..${tip}" > "$log_file"
+  git_cmd log -z -m --name-status --find-renames --pretty=format: "${BASE}..${tip}" > "$log_file"
   while IFS= read -r -d '' path || [ -n "${path:-}" ]; do
     [ -n "$path" ] || continue
     if forbidden_path "$path"; then
@@ -671,40 +676,15 @@ refuse_if_hard_stop() {
   fi
 }
 
-# $1 commit. True when it is reachable from HEAD or from a branch,
-# remote-tracking branch, or tag already in this checkout. refs/deliver
-# is not a source: this script creates it. A dangling object is not history.
-prereq_in_history() {
-  local sha="$1" ref rest refs
-  git_cmd cat-file -e "${sha}^{commit}" 2>/dev/null || return 1
-  if git_cmd merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
-    return 0
-  fi
-  refs="$(mktemp)"
-  git_cmd for-each-ref --format='%(objectname) %(refname)' refs/heads refs/remotes refs/tags > "$refs"
-  while read -r ref rest; do
-    [ -n "${ref:-}" ] || continue
-    case "${rest:-}" in
-      refs/deliver|refs/deliver/*) continue ;;
-    esac
-    if git_cmd merge-base --is-ancestor "$sha" "$ref" 2>/dev/null; then
-      rm -f "$refs"
-      return 0
-    fi
-  done < "$refs"
-  rm -f "$refs"
-  return 1
-}
-
-# Read `git bundle verify` output. One contained ref. Every prerequisite
-# must already be in this checkout's history (a merge of newer main adds
-# that commit next to START_SHA; a commit from outside this repo does
-# not). START_SHA itself is checked after the fetch: it must be an
-# ancestor of the tip. `git bundle verify` (git 2.43) does not checksum
-# the pack — a flipped pack byte still prints "is okay" — so the caller
-# also fetches with transfer.fsckObjects, and a corrupt pack dies there.
+# Read `git bundle verify` output. One contained ref. START_SHA (BASE)
+# must be a prerequisite. Every other prerequisite must pass
+# `git merge-base --is-ancestor <p> START_SHA` in this script. A commit
+# that is merely reachable from a branch, remote, or tag is not enough.
+# `git bundle verify` (git 2.43) does not checksum the pack — a flipped
+# pack byte still prints "is okay" — so the caller also fetches with
+# transfer.fsckObjects, and a corrupt pack dies there.
 parse_bundle_verify() {  # $1 verify text. Sets BUNDLE_HEAD_SHA, BUNDLE_HEAD_REF.
-  local line state sha ref
+  local line state sha ref prereq base_present
   local -a prereqs=() heads=()
   state=none
   while IFS= read -r line || [ -n "${line:-}" ]; do
@@ -728,19 +708,24 @@ parse_bundle_verify() {  # $1 verify text. Sets BUNDLE_HEAD_SHA, BUNDLE_HEAD_REF
       requires) prereqs+=("$sha") ;;
     esac
   done <<< "$1"
-  if [ "${#prereqs[@]}" -lt 1 ]; then
-    echo "design-run-deliver: ancestry does not start at START_SHA" >&2
+  if [ "${#heads[@]}" -ne 1 ]; then
+    echo "design-run-deliver: bundle does not contain exactly one branch ref" >&2
     return 1
   fi
-  local prereq
+  base_present=0
   for prereq in "${prereqs[@]}"; do
-    if ! prereq_in_history "$prereq"; then
-      echo "design-run-deliver: prerequisite ${prereq} is not in this repository's history" >&2
+    if [ "$prereq" = "$BASE" ]; then
+      base_present=1
+    fi
+    # Inclusive: START_SHA is an ancestor of itself. The object has to be
+    # in this checkout; a missing object fails the ancestor check.
+    if ! git_cmd merge-base --is-ancestor "$prereq" "$BASE"; then
+      echo "design-run-deliver: prerequisite ${prereq} is not an ancestor of START_SHA" >&2
       return 1
     fi
   done
-  if [ "${#heads[@]}" -ne 1 ]; then
-    echo "design-run-deliver: bundle does not contain exactly one branch ref" >&2
+  if [ "$base_present" -ne 1 ]; then
+    echo "design-run-deliver: ancestry does not start at START_SHA" >&2
     return 1
   fi
   BUNDLE_HEAD_SHA="${heads[0]%% *}"
@@ -1057,8 +1042,16 @@ EOF
   grep -q 'commit|push|merge|rebase|am' "$SELF"
   grep -q 'GH_CONFIG_DIR' "$SELF"
   grep -q 'DELIVER_WORKTREE is required' "$SELF"
-  grep -q 'git_cmd log -z --name-status' "$SELF"
+  grep -q 'git_cmd log -z -m --name-status' "$SELF"
   grep -q 'diff --name-only -z "${BASE}...${tip}"' "$SELF"
+  grep -q 'merge-base --is-ancestor "$prereq" "$BASE"' "$SELF" || {
+    echo "selftest: prerequisites are not checked with merge-base --is-ancestor" >&2
+    exit 1
+  }
+  if grep -q '^prereq_in_history()' "$SELF"; then
+    echo "selftest: history-reachable prerequisite helper is still defined" >&2
+    exit 1
+  fi
   grep -q 'refusing to run with hostile local git config' "$SELF"
   # git_cmd is the only function that execs git. A second `git ` in command
   # position (the line starts with optional whitespace, then git) must pin
@@ -1648,35 +1641,52 @@ p.write_bytes(data)
     exit 1
   }
 
-  # Accept: a merge of newer main. The bundle requires START_SHA and the
-  # main tip. Both are reachable in the deliver checkout (main is ahead of
-  # the detached START_SHA). The merged commit is a design file, so the
-  # forbidden-path walk, which still covers every commit since START_SHA,
-  # allows the push.
-  local msrc mdel mstart mmain mtip mbare msha
+  # Accept: a depth-1 clone merges newer main. Newer main itself merges a
+  # side branch forked before START_SHA. The bundle is what --write-bundle
+  # writes (`^START_SHA refs/heads/<branch>`), not a hand-built `^mmain`
+  # boundary. START_SHA is the prerequisite. Strict accepts it. The deliver
+  # checkout is the full history, detached at START_SHA.
+  local msrc mdel mshallow mstart mmain mtip mbare msha mhare
   msrc="${tmp}/msrc"
   mdel="${tmp}/mdel"
+  mshallow="${tmp}/mshallow"
   mbare="${tmp}/mbare.git"
+  mhare="${tmp}/mhare.git"
   mkdir -p "$msrc/designs/nuggs-ladder"
   git_cmd -C "$msrc" init -b main >/dev/null
+  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m root >/dev/null
+  git_cmd -C "$msrc" checkout -b side >/dev/null
+  mkdir -p "$msrc/designs/nuggs-ladder"
+  printf 'side\n' > "$msrc/designs/nuggs-ladder/side.scad"
+  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/side.scad
+  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit -m side >/dev/null
+  git_cmd -C "$msrc" checkout main >/dev/null
   git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
   mstart="$(git_cmd -C "$msrc" rev-parse HEAD)"
-  git_cmd -C "$msrc" checkout -b claude/issue-853-nuggs-ladder >/dev/null
-  git_cmd -C "$msrc" checkout main >/dev/null
+  mkdir -p "$msrc/designs/nuggs-ladder"
   printf 'from-main\n' > "$msrc/designs/nuggs-ladder/from-main.scad"
   git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/from-main.scad
   git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit -m 'newer main' >/dev/null
+  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t merge --no-ff -m 'merge side into main' side >/dev/null
   mmain="$(git_cmd -C "$msrc" rev-parse HEAD)"
-  git_cmd -C "$msrc" checkout claude/issue-853-nuggs-ladder >/dev/null
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t merge --no-ff -m merge "$mmain" >/dev/null
-  printf 'own\n' > "$msrc/designs/nuggs-ladder/own.scad"
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/own.scad
-  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit -m own >/dev/null
-  mtip="$(git_cmd -C "$msrc" rev-parse HEAD)"
-  git_cmd -C "$msrc" bundle create "${tmp}/merged.bundle" "^${mstart}" "^${mmain}" refs/heads/claude/issue-853-nuggs-ladder
-  git_cmd init -b main --bare "${tmp}/mhist.git" >/dev/null
-  git_cmd -C "$msrc" push "${tmp}/mhist.git" "${mmain}:refs/heads/main" >/dev/null
-  git_cmd clone -b main "${tmp}/mhist.git" "$mdel" >/dev/null
+  git_cmd init -b main --bare "$mhare" >/dev/null
+  git_cmd -C "$msrc" push "$mhare" "${mstart}:refs/heads/start" "${mmain}:refs/heads/main" >/dev/null
+  # Local clones ignore --depth. file:// is what makes the clone shallow.
+  git_cmd clone --depth 1 -b start "file://${mhare}" "$mshallow" >/dev/null
+  grep -qx "$mstart" "$mshallow/.git/shallow" || {
+    echo "selftest: merged-main clone was not depth-1 at START_SHA" >&2
+    exit 1
+  }
+  git_cmd -C "$mshallow" checkout -b claude/issue-853-nuggs-ladder >/dev/null
+  mkdir -p "$mshallow/designs/nuggs-ladder"
+  printf 'own\n' > "$mshallow/designs/nuggs-ladder/own.scad"
+  git_cmd -C "$mshallow" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/own.scad
+  git_cmd -C "$mshallow" -c user.email=t@example.com -c user.name=t commit -m own >/dev/null
+  git_cmd -C "$mshallow" fetch origin "+refs/heads/main:refs/remotes/origin/main" >/dev/null
+  git_cmd -C "$mshallow" -c user.email=t@example.com -c user.name=t merge --no-ff -m 'merge newer' origin/main >/dev/null
+  mtip="$(git_cmd -C "$mshallow" rev-parse HEAD)"
+  git_cmd -C "$mshallow" bundle create "${tmp}/merged.bundle" "^${mstart}" "refs/heads/claude/issue-853-nuggs-ladder"
+  git_cmd clone -b start "$mhare" "$mdel" >/dev/null
   git_cmd -C "$mdel" checkout --detach "$mstart" >/dev/null
   git_cmd init -b main --bare "$mbare" >/dev/null
   msha="$(sha256sum "${tmp}/merged.bundle" | awk '{print $1}')"
@@ -1696,30 +1706,43 @@ p.write_bytes(data)
     exit 1
   }
   git_cmd --git-dir="$mbare" grep -q from-main refs/heads/claude/issue-853-nuggs-ladder -- designs/nuggs-ladder/from-main.scad
+  git_cmd --git-dir="$mbare" grep -q side refs/heads/claude/issue-853-nuggs-ladder -- designs/nuggs-ladder/side.scad
   [ "$(git_cmd -C "$mdel" rev-parse HEAD)" = "$mstart" ] || {
     echo "selftest: merged-main bundle checked the bundle out over START_SHA" >&2
     exit 1
   }
 
-  # Reject: the same bundle, but the newer-main commit is only a dangling
-  # object in the deliver repo. Reachable history does not contain it.
+  # Reject: a prerequisite that is not an ancestor of START_SHA. The bundle
+  # lists START_SHA and the newer-main tip. The deliver checkout still has
+  # the newer-main object, but only as a dangling object: its branch and
+  # remote are gone. merge-base --is-ancestor fails. Nothing is pushed.
   local mdel2
   mdel2="${tmp}/mdel2"
+  git_cmd -C "$msrc" checkout -B claude/issue-853-nuggs-ladder "$mstart" >/dev/null
+  mkdir -p "$msrc/designs/nuggs-ladder"
+  printf 'dang\n' > "$msrc/designs/nuggs-ladder/dang.scad"
+  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/dang.scad
+  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t commit -m dang >/dev/null
+  git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t merge --no-ff -m 'merge for dangling prereq' "$mmain" >/dev/null
+  git_cmd -C "$msrc" bundle create "${tmp}/dangling.bundle" "^${mstart}" "^${mmain}" refs/heads/claude/issue-853-nuggs-ladder
+  git_cmd init -b main --bare "${tmp}/mhist.git" >/dev/null
+  git_cmd -C "$msrc" push "${tmp}/mhist.git" "${mmain}:refs/heads/main" >/dev/null
   git_cmd clone -b main "${tmp}/mhist.git" "$mdel2" >/dev/null
   git_cmd -C "$mdel2" checkout --detach "$mstart" >/dev/null
   git_cmd -C "$mdel2" branch -D main >/dev/null
   git_cmd -C "$mdel2" remote remove origin
+  msha="$(sha256sum "${tmp}/dangling.bundle" | awk '{print $1}')"
   set +e
   stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$mdel2" \
     "$SELF" --repo acme/print-bench --issue 853 --base "$mstart" \
     --base-branch main --run-url https://example.test/run/1 --push-url "$mbare" \
-    --bundle "${tmp}/merged.bundle" --bundle-sha256 "$msha" 2>&1 >/dev/null)"
+    --bundle "${tmp}/dangling.bundle" --bundle-sha256 "$msha" 2>&1 >/dev/null)"
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: dangling-prerequisite bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'not in this repository'"'"'s history' || {
+  printf '%s\n' "$stderr" | grep -q 'is not an ancestor of START_SHA' || {
     echo "selftest: dangling prerequisite was accepted" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -1729,8 +1752,9 @@ p.write_bytes(data)
     exit 1
   }
 
-  # Reject: newer main is in history, and it touches scripts/. The
-  # forbidden-path walk covers that commit, so the merge is not pushed.
+  # Reject: newer main touches scripts/. The bundle is again
+  # `^START_SHA refs/heads/<branch>`, so the scripts commit is inside the
+  # pack and the prerequisite check passes. The forbidden-path walk refuses.
   git_cmd -C "$msrc" checkout main >/dev/null
   mkdir -p "$msrc/scripts"
   printf 'script\n' > "$msrc/scripts/from-main.sh"
@@ -1739,11 +1763,8 @@ p.write_bytes(data)
   mmain="$(git_cmd -C "$msrc" rev-parse HEAD)"
   git_cmd -C "$msrc" checkout claude/issue-853-nuggs-ladder >/dev/null
   git_cmd -C "$msrc" -c user.email=t@example.com -c user.name=t merge --no-ff -m 'merge scripts' "$mmain" >/dev/null
-  git_cmd -C "$msrc" bundle create "${tmp}/merged-scripts.bundle" "^${mstart}" "^${mmain}" refs/heads/claude/issue-853-nuggs-ladder
-  git_cmd -C "$msrc" push "${tmp}/mhist.git" "${mmain}:refs/heads/main" >/dev/null
-  git_cmd -C "$mdel" fetch "${tmp}/mhist.git" "+refs/heads/main:refs/heads/main" >/dev/null
+  git_cmd -C "$msrc" bundle create "${tmp}/merged-scripts.bundle" "^${mstart}" refs/heads/claude/issue-853-nuggs-ladder
   msha="$(sha256sum "${tmp}/merged-scripts.bundle" | awk '{print $1}')"
-  mtip="$(git_cmd --git-dir="$mbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)"
   set +e
   stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
@@ -1761,6 +1782,66 @@ p.write_bytes(data)
   }
   [ "$(git_cmd --git-dir="$mbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)" = "$mtip" ] || {
     echo "selftest: merged scripts bundle was pushed" >&2
+    exit 1
+  }
+
+  # Reject: a protected path is added inside a merge commit and removed by
+  # a later merge. `git log` without -m does not show either merge's path,
+  # and the three-dot diff does not either, because the tip no longer has
+  # the file. -m on the range log lists it.
+  local esrc edel estart
+  esrc="${tmp}/esrc"
+  edel="${tmp}/edel"
+  mkdir -p "$esrc/designs/nuggs-ladder"
+  git_cmd -C "$esrc" init -b main >/dev/null
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  estart="$(git_cmd -C "$esrc" rev-parse HEAD)"
+  git_cmd -C "$esrc" checkout -b claude/issue-853-nuggs-ladder >/dev/null
+  printf 'own\n' > "$esrc/designs/nuggs-ladder/own.scad"
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/own.scad
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t commit -m own >/dev/null
+  git_cmd -C "$esrc" checkout main >/dev/null
+  mkdir -p "$esrc/designs/nuggs-ladder"
+  printf 'b\n' > "$esrc/designs/nuggs-ladder/b.scad"
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/b.scad
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t commit -m mainfile >/dev/null
+  git_cmd -C "$esrc" checkout claude/issue-853-nuggs-ladder >/dev/null
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t merge --no-ff --no-commit main >/dev/null
+  mkdir -p "$esrc/scripts"
+  printf 'evil\n' > "$esrc/scripts/evil.sh"
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t add -- scripts/evil.sh
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t commit -m 'evil merge' >/dev/null
+  git_cmd -C "$esrc" checkout -b cleaner "$estart" >/dev/null
+  mkdir -p "$esrc/designs/nuggs-ladder"
+  printf 'c\n' > "$esrc/designs/nuggs-ladder/c.scad"
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/c.scad
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t commit -m cleaner >/dev/null
+  git_cmd -C "$esrc" checkout claude/issue-853-nuggs-ladder >/dev/null
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t merge --no-ff --no-commit cleaner >/dev/null
+  git_cmd -C "$esrc" rm -q -- scripts/evil.sh >/dev/null
+  git_cmd -C "$esrc" -c user.email=t@example.com -c user.name=t commit -m 'merge delete' >/dev/null
+  git_cmd -C "$esrc" bundle create "${tmp}/evil-merge.bundle" "^${estart}" refs/heads/claude/issue-853-nuggs-ladder
+  git_cmd init -b main --bare "${tmp}/ehist.git" >/dev/null
+  git_cmd -C "$esrc" push "${tmp}/ehist.git" "${estart}:refs/heads/main" >/dev/null
+  git_cmd clone -b main "${tmp}/ehist.git" "$edel" >/dev/null
+  msha="$(sha256sum "${tmp}/evil-merge.bundle" | awk '{print $1}')"
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$edel" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$estart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$mbare" \
+    --bundle "${tmp}/evil-merge.bundle" --bundle-sha256 "$msha" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || { echo "selftest: evil-merge bundle exited ${rc}" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'touches scripts/evil.sh' || {
+    echo "selftest: merge-only protected path was not refused" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  [ "$(git_cmd --git-dir="$mbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)" = "$mtip" ] || {
+    echo "selftest: evil-merge bundle was pushed" >&2
     exit 1
   }
 
