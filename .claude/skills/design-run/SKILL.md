@@ -260,12 +260,16 @@ Evidence means a re-derivation from the exported mesh (facet measurements,
 printcheck output, slice result), never the parameter you just typed — issue
 #37's lesson. Anything unmapped: revert it, or file it, before the PR exists.
 
-## 7. Ship — leave a branch. The workflow delivers it.
+## 7. Ship — leave a branch. A fresh runner delivers it.
 
 Gate-green is not delivery. `design-run.yml`'s agent step exits 0 when you
-end the turn, and nothing you type in a comment creates a branch. The job's
-next step, `scripts/design-run-deliver.sh`, is what pushes and opens the
-draft PR. It posts the success comment only after both of these are true:
+end the turn, and nothing you type in a comment creates a branch. The agent
+job does not push. Its next step writes a git bundle of the commits on
+`claude/issue-<N>-*`. A later job, on a fresh runner, checks out the commit
+the job started from, verifies that bundle, and only then runs
+`scripts/design-run-deliver.sh` from that checkout to push and open the
+draft PR. Nothing in the bundle is executed. The success comment is posted
+only after both of these are true:
 
 - `git ls-remote` returns the tip of your local `claude/issue-<N>-*` branch
 - an open **draft** pull request in this repository, whose `headRefOid` is that tip, has a body that closes `#<N>`

@@ -9,10 +9,12 @@
 # tree, so lock cleanup correctly scored the run dead and withdrew the
 # SHIP-LOCK. Gate success is not delivery.
 #
-# This step runs in the same job, after the agent and before lock cleanup.
-# The workflow restores THIS file from the pinned start commit into
-# $RUNNER_TEMP and executes that copy — the worktree copy is untrusted
-# after bypassPermissions. Then:
+# The agent job does not push. It restores this file from the pinned start
+# commit and runs `--write-bundle`, which commits safe dirty files and
+# writes a git bundle of START_SHA..HEAD. A later job, on a fresh runner,
+# checks out that same start commit, verifies the bundle, and only then
+# runs this file from that checkout (`--bundle`). Nothing in the bundle
+# is executed. Then:
 #   1. Only a branch named claude/issue-<N>-* is eligible. main is never
 #      pushed.
 #   2. Uncommitted files under designs/ and first-party lib/ are committed
@@ -43,10 +45,21 @@
 # verification failed; exit 2 on usage.
 set -euo pipefail
 
-# Absolute path of this file. Live runs are a copy in $RUNNER_TEMP, so this
-# path is NOT the checkout and dirname/.. is NOT the repo. The checkout is
-# only DELIVER_WORKTREE, checked against `git rev-parse --show-toplevel`.
+# Absolute path of this file. The agent-side copy lives in $RUNNER_TEMP, so
+# this path is NOT the checkout and dirname/.. is NOT the repo. The checkout
+# is only DELIVER_WORKTREE, checked against `git rev-parse --show-toplevel`.
 SELF="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)/$(basename "$0")"
+
+# ubuntu-latest ships these under /usr/bin. A GITHUB_PATH shim lands in
+# /usr/local/bin, which the default PATH searches first, so the defaults
+# are absolute. The step env sets the same paths; a test may point GH_BIN
+# at a fake.
+GIT_BIN="${GIT_BIN:-/usr/bin/git}"
+GH_BIN="${GH_BIN:-/usr/bin/gh}"
+JQ_BIN="${JQ_BIN:-/usr/bin/jq}"
+
+gh() { "$GH_BIN" "$@"; }
+jq() { "$JQ_BIN" "$@"; }
 
 DELIVERED_LINE='🚢 design-run delivered — branch and draft PR verified'
 PR_FIELDS='number,url,body,isDraft,headRefOid,isCrossRepository,headRepositoryOwner,headRepository'
@@ -57,13 +70,14 @@ usage() {
 usage: scripts/design-run-deliver.sh --repo <owner/name> --issue <N>
            --base <sha> --base-branch <name> --run-url <url>
            [--push-url <url>]
+           [--write-bundle <path> | --bundle <path> --bundle-sha256 <hex>]
        scripts/design-run-deliver.sh --selftest
 EOF
   exit 2
 }
 
-command -v jq >/dev/null 2>&1 || {
-  echo "design-run-deliver: jq is required" >&2
+[ -x "$GIT_BIN" ] && [ -x "$GH_BIN" ] && [ -x "$JQ_BIN" ] || {
+  echo "design-run-deliver: git, gh and jq are required (${GIT_BIN}, ${GH_BIN}, ${JQ_BIN})" >&2
   exit 1
 }
 
@@ -78,14 +92,16 @@ note() {
 
 # Every git invocation in this file goes through git_cmd.
 #
-# -c core.hooksPath=/dev/null, core.fsmonitor=false and commit.gpgSign=false
-# are placed AFTER any caller -c, so a caller cannot turn them back on.
-# --no-replace-objects is a global option (not overridable by -c).
-# --no-verify is passed only to the subcommands that accept it (commit,
-# push, merge, rebase, am). status, diff, config, log, ls-remote, add,
-# rev-list, cat-file and show exit 129 or 128 when given --no-verify, so
-# those get the hardening -c flags alone. rev-parse treats --no-verify as
-# the negation of --verify, which is a different flag.
+# -c core.hooksPath=/dev/null, core.fsmonitor=false, commit.gpgSign=false
+# and an empty core.sshCommand are placed AFTER any caller -c, so a caller
+# cannot turn them back on. --no-replace-objects is a global option (not
+# overridable by -c). GIT_CONFIG_GLOBAL=/dev/null and GIT_CONFIG_NOSYSTEM=1
+# are set on the git process itself, so a caller export cannot point git
+# at a global config. --no-verify is passed only to the subcommands that
+# accept it (commit, push, merge, rebase, am). status, diff, config, log,
+# ls-remote, add, rev-list, cat-file, show, bundle and fetch exit 129 or
+# 128 when given --no-verify, so those get the hardening -c flags alone.
+# rev-parse treats --no-verify as the negation of --verify.
 git_cmd() {
   local -a pre=()
   while [ $# -gt 0 ]; do
@@ -101,16 +117,20 @@ git_cmd() {
   shift
   case "$sub" in
     commit|push|merge|rebase|am)
-      git --no-replace-objects "${pre[@]}" \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+        "$GIT_BIN" --no-replace-objects "${pre[@]}" \
         -c core.hooksPath=/dev/null \
         -c core.fsmonitor=false \
         -c commit.gpgSign=false \
+        -c core.sshCommand= \
         "$sub" --no-verify "$@" ;;
     *)
-      git --no-replace-objects "${pre[@]}" \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+        "$GIT_BIN" --no-replace-objects "${pre[@]}" \
         -c core.hooksPath=/dev/null \
         -c core.fsmonitor=false \
         -c commit.gpgSign=false \
+        -c core.sshCommand= \
         "$sub" "$@" ;;
   esac
 }
@@ -178,6 +198,20 @@ refuse_url_rewrites() {
   raw="$(git_cmd config --get-regexp '^url\.' || true)"
   if [ -n "$raw" ]; then
     echo "design-run-deliver: refusing to run with git url.* rewrite configured" >&2
+    return 1
+  fi
+}
+
+# A caller-supplied global or system gitconfig is refused before any git
+# command. git_cmd forces /dev/null itself; this catches the invocation
+# environment, and the message does not print the path or the file.
+refuse_incoming_global_gitconfig() {
+  if [ -n "${GIT_CONFIG_GLOBAL:-}" ] && [ "$GIT_CONFIG_GLOBAL" != "/dev/null" ]; then
+    echo "design-run-deliver: refusing to run with GIT_CONFIG_GLOBAL set" >&2
+    return 1
+  fi
+  if [ -n "${GIT_CONFIG_SYSTEM:-}" ] && [ "$GIT_CONFIG_SYSTEM" != "/dev/null" ]; then
+    echo "design-run-deliver: refusing to run with GIT_CONFIG_SYSTEM set" >&2
     return 1
   fi
 }
@@ -274,12 +308,13 @@ commit_safe_dirty() {
 # since it left START_SHA). It hides a path that was added and then deleted,
 # and a rename's old name. `git log -z --name-status` catches both, and the
 # NUL records keep a newline inside a path from splitting the record.
-refuse_forbidden_range() {
+refuse_forbidden_range() {  # $1 tip ref, default HEAD
+  local tip="${1:-HEAD}"
   local path status old new diff_file log_file
   diff_file="$(mktemp)"
   log_file="$(mktemp)"
-  git_cmd diff --name-only -z "${BASE}...HEAD" > "$diff_file"
-  git_cmd log -z --name-status --find-renames --pretty=format: "${BASE}..HEAD" > "$log_file"
+  git_cmd diff --name-only -z "${BASE}...${tip}" > "$diff_file"
+  git_cmd log -z --name-status --find-renames --pretty=format: "${BASE}..${tip}" > "$log_file"
   while IFS= read -r -d '' path || [ -n "${path:-}" ]; do
     [ -n "$path" ] || continue
     if forbidden_path "$path"; then
@@ -324,13 +359,13 @@ refuse_forbidden_range() {
 # Remote tip must be this checkout's HEAD. Push when it is not.
 verify_remote_tip() {
   local head remote
-  head="$(git_cmd rev-parse HEAD)"
+  head="$(git_cmd rev-parse "$DELIVER_REF")"
   remote="$(git_authed ls-remote "$PUSH_URL" "refs/heads/${BRANCH}" | awk 'NR==1{print $1}')"
   if [ "$remote" = "$head" ]; then
     note "remote ${BRANCH} already at ${head}"
     return 0
   fi
-  if ! git_authed push "$PUSH_URL" "HEAD:refs/heads/${BRANCH}"; then
+  if ! git_authed push "$PUSH_URL" "${DELIVER_REF}:refs/heads/${BRANCH}"; then
     note "push of ${BRANCH} failed — not opening a PR and not posting success"
     return 1
   fi
@@ -384,7 +419,7 @@ refuse_open_nondraft() {
 # A non-empty list that does not qualify fails closed — no second PR.
 ensure_pr() {
   local json url count tip bodyfile title body
-  tip="$(git_cmd rev-parse HEAD)"
+  tip="$(git_cmd rev-parse "$DELIVER_REF")"
   if ! json="$(pr_list_json)"; then
     note "gh pr list failed for ${BRANCH} — not posting success"
     return 1
@@ -405,7 +440,7 @@ Closes #${ISSUE}
 
 Draft opened by the design-run delivery step after it verified \`${BRANCH}\` on the remote. The agent run ended without opening a PR; the gate evidence is the commits on this branch.
 EOF
-  title="$(git_cmd log -1 --format=%s)"
+  title="$(git_cmd log -1 --format=%s "$DELIVER_REF")"
   title="${title:-Design for #${ISSUE}}"
   if ! gh pr create --repo "$REPO" --base "$BASE_BRANCH" --head "$BRANCH" \
       --draft --title "$title" --body-file "$bodyfile" >/dev/null; then
@@ -455,18 +490,101 @@ finish() {  # delivered summary
   exit 0
 }
 
-run_live() {
-  local ahead head_sha pr_url
-  if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
-    echo "design-run-deliver: issue must be numeric, got '${ISSUE}'" >&2
-    exit 2
+# Read `git bundle verify` output. One contained ref, one prerequisite.
+# `git bundle verify` (git 2.43) does not checksum the pack — a flipped
+# pack byte still prints "is okay" — so the caller also fetches, and a
+# corrupt pack dies there instead of being pushed.
+parse_bundle_verify() {  # $1 verify text. Sets BUNDLE_HEAD_SHA, BUNDLE_HEAD_REF, BUNDLE_PREREQ.
+  local line state sha ref
+  local -a prereqs=() heads=()
+  state=none
+  while IFS= read -r line || [ -n "${line:-}" ]; do
+    case "$line" in
+      *" is okay") state=none; continue ;;
+      "The bundle contains this ref:"|"The bundle contains these "*refs:) state=contains; continue ;;
+      "The bundle requires this ref:"|"The bundle requires these "*refs:) state=requires; continue ;;
+      "The bundle records a complete history."|"The bundle records a complete history") state=none; continue ;;
+      "The bundle uses this hash algorithm:"*) state=none; continue ;;
+      "") continue ;;
+    esac
+    sha="${line%% *}"
+    ref="${line#"${sha}"}"
+    ref="${ref#" "}"
+    if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+      state=none
+      continue
+    fi
+    case "$state" in
+      contains) heads+=("${sha} ${ref}") ;;
+      requires) prereqs+=("$sha") ;;
+    esac
+  done <<< "$1"
+  if [ "${#prereqs[@]}" -ne 1 ] || [ "${prereqs[0]}" != "$BASE" ]; then
+    echo "design-run-deliver: ancestry does not start at START_SHA" >&2
+    return 1
   fi
-  enter_worktree
-  use_fresh_gh_config
-  if ! refuse_hostile_local_config || ! refuse_url_rewrites; then
-    emit delivered false
-    exit 1
+  if [ "${#heads[@]}" -ne 1 ]; then
+    echo "design-run-deliver: bundle does not contain exactly one branch ref" >&2
+    return 1
   fi
+  BUNDLE_HEAD_SHA="${heads[0]%% *}"
+  BUNDLE_HEAD_REF="${heads[0]#* }"
+}
+
+# Fetch the verified bundle into refs/deliver/tip. Does not check the
+# worktree out: the checkout must stay the start commit so this script
+# is never replaced by a commit inside the bundle.
+apply_bundle() {
+  local got verify_out
+  if [ -z "$BUNDLE" ] || [ ! -f "$BUNDLE" ] || [ -L "$BUNDLE" ]; then
+    echo "design-run-deliver: bundle file is missing" >&2
+    return 1
+  fi
+  if ! printf '%s' "$BUNDLE_SHA256" | grep -Eq '^[0-9a-f]{64}$'; then
+    echo "design-run-deliver: bundle sha256 does not match" >&2
+    return 1
+  fi
+  got="$(sha256sum "$BUNDLE" | awk '{print $1}')"
+  if [ "$got" != "$BUNDLE_SHA256" ]; then
+    echo "design-run-deliver: bundle sha256 does not match" >&2
+    return 1
+  fi
+  if ! verify_out="$(git_cmd bundle verify "$BUNDLE" 2>&1)"; then
+    echo "design-run-deliver: git bundle verify failed" >&2
+    return 1
+  fi
+  if ! parse_bundle_verify "$verify_out"; then
+    return 1
+  fi
+  case "$BUNDLE_HEAD_REF" in
+    refs/heads/claude/issue-${ISSUE}-*) ;;
+    *)
+      echo "design-run-deliver: bundle ref '${BUNDLE_HEAD_REF}' is not claude/issue-${ISSUE}-* — nothing pushed" >&2
+      return 1
+      ;;
+  esac
+  BRANCH="${BUNDLE_HEAD_REF#refs/heads/}"
+  git_cmd update-ref -d refs/deliver/tip >/dev/null 2>&1 || true
+  if ! git_cmd fetch --no-tags "$BUNDLE" "${BUNDLE_HEAD_REF}:refs/deliver/tip" >/dev/null; then
+    echo "design-run-deliver: could not fetch the bundle" >&2
+    return 1
+  fi
+  if [ "$(git_cmd rev-parse refs/deliver/tip)" != "$BUNDLE_HEAD_SHA" ]; then
+    echo "design-run-deliver: fetched tip does not match the bundle ref" >&2
+    return 1
+  fi
+  if ! git_cmd merge-base --is-ancestor "$BASE" refs/deliver/tip; then
+    echo "design-run-deliver: ancestry does not start at START_SHA" >&2
+    return 1
+  fi
+  DELIVER_REF=refs/deliver/tip
+}
+
+# Commit safe dirty files and write START_SHA..HEAD. No token, no push.
+# Exit 0 with no file when there is nothing to deliver (the workflow then
+# records pending=false). A protected path exits 1 and writes no file.
+write_bundle() {
+  local ahead
   BRANCH="$(git_cmd rev-parse --abbrev-ref HEAD)"
   if ! [[ "$BRANCH" =~ ^claude/issue-${ISSUE}- ]]; then
     finish false "HEAD is '${BRANCH}', not claude/issue-${ISSUE}-* — nothing pushed"
@@ -480,7 +598,63 @@ run_live() {
   if [ "$ahead" -eq 0 ]; then
     finish false "HEAD has no commits ahead of ${BASE} — nothing pushed"
   fi
-  if ! refuse_forbidden_range; then
+  if ! refuse_forbidden_range HEAD; then
+    exit 1
+  fi
+  if [ -L "$WRITE_BUNDLE" ]; then
+    echo "design-run-deliver: refusing to write the bundle through a symlink" >&2
+    exit 1
+  fi
+  rm -f "$WRITE_BUNDLE"
+  git_cmd bundle create "$WRITE_BUNDLE" "^${BASE}" "refs/heads/${BRANCH}"
+  exit 0
+}
+
+run_live() {
+  local ahead head_sha pr_url
+  if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
+    echo "design-run-deliver: issue must be numeric, got '${ISSUE}'" >&2
+    exit 2
+  fi
+  # A step env blanks these so a GITHUB_ENV poison cannot redirect git.
+  # An empty value is still set, and an empty GIT_DIR breaks every command,
+  # so drop them before the first git.
+  unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND || true
+  if ! refuse_incoming_global_gitconfig; then
+    emit delivered false
+    exit 1
+  fi
+  enter_worktree
+  use_fresh_gh_config
+  if ! refuse_hostile_local_config || ! refuse_url_rewrites; then
+    emit delivered false
+    exit 1
+  fi
+  if [ -n "$WRITE_BUNDLE" ]; then
+    write_bundle
+  fi
+  if [ -n "$BUNDLE" ]; then
+    if ! apply_bundle; then
+      emit delivered false
+      exit 1
+    fi
+  else
+    DELIVER_REF=HEAD
+    BRANCH="$(git_cmd rev-parse --abbrev-ref HEAD)"
+    if ! [[ "$BRANCH" =~ ^claude/issue-${ISSUE}- ]]; then
+      finish false "HEAD is '${BRANCH}', not claude/issue-${ISSUE}-* — nothing pushed"
+    fi
+    commit_safe_dirty
+  fi
+  if ! git_cmd cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+    echo "design-run-deliver: base ${BASE} is not a commit in this checkout" >&2
+    exit 1
+  fi
+  ahead="$(git_cmd rev-list --count "${BASE}..${DELIVER_REF}")"
+  if [ "$ahead" -eq 0 ]; then
+    finish false "HEAD has no commits ahead of ${BASE} — nothing pushed"
+  fi
+  if ! refuse_forbidden_range "$DELIVER_REF"; then
     emit delivered false
     exit 1
   fi
@@ -504,7 +678,7 @@ run_live() {
     emit delivered false
     exit 1
   fi
-  head_sha="$(git_cmd rev-parse HEAD)"
+  head_sha="$(git_cmd rev-parse "$DELIVER_REF")"
   if already_delivered_comment; then
     finish true "delivery already recorded for ${BRANCH} (${pr_url})"
   fi
@@ -555,7 +729,12 @@ if [ "\$1" = "pr" ] && [ "\$2" = "create" ]; then
     echo "pr create refused" >&2
     exit 1
   fi
-  oid=\$(git -C "${root}" -c core.hooksPath=/dev/null rev-parse HEAD)
+  repo="\${GH_REPO:-${root}}"
+  if git -C "\$repo" rev-parse --verify -q refs/deliver/tip >/dev/null 2>&1; then
+    oid=\$(git -C "\$repo" -c core.hooksPath=/dev/null rev-parse refs/deliver/tip)
+  else
+    oid=\$(git -C "\$repo" -c core.hooksPath=/dev/null rev-parse HEAD)
+  fi
   cat > "${tmp}/pr.json" <<JSON
 [{"number":99,"url":"https://github.com/acme/print-bench/pull/99","body":"Closes #853\\n\\nDraft opened by the design-run delivery step.\\n","isDraft":true,"headRefOid":"\${oid}","isCrossRepository":false,"headRepositoryOwner":{"login":"acme"},"headRepository":{"name":"print-bench"}}]
 JSON
@@ -608,7 +787,7 @@ EOF
     # rewrites. The check under test is unscoped on purpose; the fixture
     # hides that ambient config so a local url.* key is the only one visible.
     set +e
-    env PATH="${tmp}/bin:${PATH}" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \
+    env PATH="${tmp}/bin:${PATH}" GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \
       GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
       DELIVER_WORKTREE="$root" \
       "$@" "$SELF" --repo acme/print-bench --issue 853 --base "$base" \
@@ -625,14 +804,18 @@ EOF
   # commit/push/merge/rebase/am cannot take --no-verify (they exit 129).
   grep -q 'core.hooksPath=/dev/null' "$SELF"
   grep -q 'core.fsmonitor=false' "$SELF"
+  grep -q 'core.sshCommand=' "$SELF"
   grep -q 'commit.gpgSign=false' "$SELF"
+  grep -q 'GIT_CONFIG_GLOBAL=/dev/null' "$SELF"
+  grep -q 'GIT_CONFIG_NOSYSTEM=1' "$SELF"
+  grep -q 'refusing to run with GIT_CONFIG_GLOBAL set' "$SELF"
   grep -q -- '--no-replace-objects' "$SELF"
   grep -q -- '--no-verify' "$SELF"
   grep -q 'commit|push|merge|rebase|am' "$SELF"
   grep -q 'GH_CONFIG_DIR' "$SELF"
   grep -q 'DELIVER_WORKTREE is required' "$SELF"
   grep -q 'git_cmd log -z --name-status' "$SELF"
-  grep -q 'diff --name-only -z "${BASE}...HEAD"' "$SELF"
+  grep -q 'diff --name-only -z "${BASE}...${tip}"' "$SELF"
   grep -q 'refusing to run with hostile local git config' "$SELF"
   # git_cmd is the only function that execs git. A second `git ` in command
   # position (the line starts with optional whitespace, then git) must pin
@@ -737,6 +920,60 @@ EOF
     echo "selftest: planted GH_CONFIG_DIR was used (${recorded_gh})" >&2
     exit 1
   }
+
+  # A caller-supplied global gitconfig is refused before any git command.
+  # The file holds a stand-in token; the refusal must not print it, and
+  # nothing is committed or pushed.
+  local evil_git bare_now head_now
+  evil_git="${tmp}/evil.gitconfig"
+  printf '[url "https://evil.example/"]\n\tinsteadOf = https://user:SECRETTOKEN@github.com/\n' > "$evil_git"
+  bare_now="$(bare_sha)"
+  head_now="$(git_cmd -C "$root" rev-parse HEAD)"
+  set +e
+  stderr="$(env PATH="${tmp}/bin:${PATH}" GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \
+    GIT_CONFIG_GLOBAL="$evil_git" GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$root" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$base" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$bare" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "selftest: GIT_CONFIG_GLOBAL exited ${rc}, expected 1" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  fi
+  if printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN'; then
+    echo "selftest: GIT_CONFIG_GLOBAL refusal printed the file" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$stderr" | grep -q 'refusing to run with GIT_CONFIG_GLOBAL set'; then
+    echo "selftest: GIT_CONFIG_GLOBAL did not report the refusal" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  fi
+  [ "$(git_cmd -C "$root" rev-parse HEAD)" = "$head_now" ] || {
+    echo "selftest: GIT_CONFIG_GLOBAL committed anyway" >&2
+    exit 1
+  }
+  [ "$(bare_sha)" = "$bare_now" ] || {
+    echo "selftest: GIT_CONFIG_GLOBAL pushed anyway" >&2
+    exit 1
+  }
+  printf '[http]\n\tproxy = SECRETTOKEN\n' > "$evil_git"
+  set +e
+  stderr="$(env PATH="${tmp}/bin:${PATH}" GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM="$evil_git" \
+    DELIVER_WORKTREE="$root" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$base" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$bare" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ] || printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN' \
+      || ! printf '%s\n' "$stderr" | grep -q 'refusing to run with GIT_CONFIG_SYSTEM set'; then
+    echo "selftest: GIT_CONFIG_SYSTEM was not refused" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  fi
 
   # Push failure: no PR create, no success comment, non-zero exit.
   rm -rf "$bare"
@@ -951,21 +1188,247 @@ JSON
     git_cmd -C "$root" config --local --unset-all "$hostile_key"
   done
 
+  # Bundle path. The agent-side --write-bundle commits safe dirty files
+  # and writes START..HEAD. The deliver-side --bundle runs against a
+  # checkout that has only the start commit: it checks the sha256, runs
+  # git bundle verify, fetches into refs/deliver/tip, and refuses unless
+  # that ref's ancestry starts at the start commit. It does not check the
+  # bundle out, and it does not execute anything from the bundle.
+  local bsrc bdel bbare bstart btip bsha bfile bhead
+  bsrc="${tmp}/bsrc"
+  bdel="${tmp}/bdel"
+  bbare="${tmp}/bbare.git"
+  bfile="${tmp}/design-run.bundle"
+  mkdir -p "$bsrc/designs/nuggs-ladder"
+  git_cmd -C "$bsrc" init -b main >/dev/null
+  git_cmd -C "$bsrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  bstart="$(git_cmd -C "$bsrc" rev-parse HEAD)"
+  git_cmd -C "$bsrc" checkout -b claude/issue-853-nuggs-ladder >/dev/null
+  printf 'bundled\n' > "$bsrc/designs/nuggs-ladder/nuggs-ladder.scad"
+  git_cmd -C "$bsrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/nuggs-ladder.scad
+  git_cmd -C "$bsrc" -c user.email=t@example.com -c user.name=t commit -m 'design' >/dev/null
+  printf 'dirty\n' > "$bsrc/designs/nuggs-ladder/extra.scad"
+  git_cmd init -b main --bare "$bbare" >/dev/null
+  set +e
+  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$bsrc" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$bstart" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --write-bundle "$bfile" >/dev/null
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] && [ -f "$bfile" ] || {
+    echo "selftest: --write-bundle did not write a bundle (exit ${rc})" >&2
+    exit 1
+  }
+  btip="$(git_cmd -C "$bsrc" rev-parse HEAD)"
+  git_cmd -C "$bsrc" grep -q dirty "$btip" -- designs/nuggs-ladder/extra.scad || {
+    echo "selftest: --write-bundle did not commit the dirty design file" >&2
+    exit 1
+  }
+  git_cmd init -b main --bare "${tmp}/bstart.git" >/dev/null
+  git_cmd -C "$bsrc" push "${tmp}/bstart.git" "$bstart:refs/heads/main" >/dev/null
+  git_cmd clone -b main "${tmp}/bstart.git" "$bdel" >/dev/null
+  bsha="$(sha256sum "$bfile" | awk '{print $1}')"
+  rm -f "${tmp}/pr.json" "${tmp}/comment.body" "${tmp}/gh.log"
+  set +e
+  env GH_BIN="${tmp}/bin/gh" GH_REPO="$bdel" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$bdel" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$bstart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$bbare" \
+    --bundle "$bfile" --bundle-sha256 "$bsha" >/dev/null
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || { echo "selftest: bundle delivery exited ${rc}" >&2; exit 1; }
+  [ "$(git_cmd -C "$bdel" rev-parse HEAD)" = "$bstart" ] || {
+    echo "selftest: bundle delivery checked the bundle out over START_SHA" >&2
+    exit 1
+  }
+  [ "$(git_cmd -C "$bdel" rev-parse refs/deliver/tip)" = "$btip" ] || {
+    echo "selftest: refs/deliver/tip is not the bundled tip" >&2
+    exit 1
+  }
+  [ "$(git_cmd --git-dir="$bbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)" = "$btip" ] || {
+    echo "selftest: bundle was not pushed" >&2
+    exit 1
+  }
+  git_cmd --git-dir="$bbare" grep -q dirty refs/heads/claude/issue-853-nuggs-ladder -- designs/nuggs-ladder/extra.scad
+  grep -q 'design-run delivered' "${tmp}/comment.body" || {
+    echo "selftest: bundle delivery did not post success" >&2
+    exit 1
+  }
+
+  # Wrong sha256: the bundle is valid, the digest is not. Nothing is pushed.
+  bhead="$(git_cmd --git-dir="$bbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)"
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_REPO="$bdel" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$bdel" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$bstart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$bbare" \
+    --bundle "$bfile" --bundle-sha256 0000000000000000000000000000000000000000000000000000000000000000 \
+    2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || { echo "selftest: wrong bundle sha exited ${rc}" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'bundle sha256 does not match' || {
+    echo "selftest: wrong bundle sha did not report the refusal" >&2
+    exit 1
+  }
+  [ "$(git_cmd --git-dir="$bbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)" = "$bhead" ] || {
+    echo "selftest: wrong bundle sha pushed" >&2
+    exit 1
+  }
+
+  # Tampered pack. git bundle verify still says the bundle is okay (it does
+  # not checksum the pack); the fetch must refuse it. The sha256 is of the
+  # tampered bytes, so this is not the digest check. A fresh checkout that
+  # has only START_SHA, so the objects are not already present and a
+  # short-circuited fetch cannot look like success.
+  local bdel2 bbare2
+  bdel2="${tmp}/bdel2"
+  bbare2="${tmp}/bbare2.git"
+  git_cmd clone -b main "${tmp}/bstart.git" "$bdel2" >/dev/null
+  git_cmd init -b main --bare "$bbare2" >/dev/null
+  cp "$bfile" "${tmp}/tampered.bundle"
+  python3 -c '
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+data = bytearray(p.read_bytes())
+# The pack trailer is the checksum. Flipping it is what makes fetch
+# report "pack is corrupted"; a byte just after the PACK header is not.
+data[-10] ^= 0xFF
+p.write_bytes(data)
+' "${tmp}/tampered.bundle"
+  bsha="$(sha256sum "${tmp}/tampered.bundle" | awk '{print $1}')"
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_REPO="$bdel2" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$bdel2" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$bstart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$bbare2" \
+    --bundle "${tmp}/tampered.bundle" --bundle-sha256 "$bsha" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || { echo "selftest: tampered bundle exited ${rc}" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -Eq 'git bundle verify failed|could not fetch the bundle' || {
+    echo "selftest: tampered bundle was not refused" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  if git_cmd --git-dir="$bbare2" rev-parse refs/heads/claude/issue-853-nuggs-ladder >/dev/null 2>&1; then
+    echo "selftest: tampered bundle was pushed" >&2
+    exit 1
+  fi
+
+  # Ancestry that does not start at START_SHA: a complete-history bundle
+  # has no prerequisite, and a bundle whose prerequisite is the parent of
+  # START_SHA is not START_SHA either.
+  git_cmd -C "$bsrc" bundle create "${tmp}/orphan.bundle" refs/heads/claude/issue-853-nuggs-ladder
+  bsha="$(sha256sum "${tmp}/orphan.bundle" | awk '{print $1}')"
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$bdel" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$bstart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$bbare" \
+    --bundle "${tmp}/orphan.bundle" --bundle-sha256 "$bsha" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || { echo "selftest: orphan bundle exited ${rc}" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'ancestry does not start at START_SHA' || {
+    echo "selftest: orphan bundle did not refuse the ancestry" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  # A prerequisite that is a real ancestor, but not START_SHA. The
+  # deliver checkout contains that ancestor (it is START_SHA's parent), so
+  # `git bundle verify` succeeds and the refusal is the ancestry check.
+  local asrc adel aroot astart
+  asrc="${tmp}/asrc"
+  adel="${tmp}/adel"
+  mkdir -p "$asrc/designs/nuggs-ladder"
+  git_cmd -C "$asrc" init -b main >/dev/null
+  git_cmd -C "$asrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m root >/dev/null
+  aroot="$(git_cmd -C "$asrc" rev-parse HEAD)"
+  git_cmd -C "$asrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  astart="$(git_cmd -C "$asrc" rev-parse HEAD)"
+  git_cmd -C "$asrc" checkout -b claude/issue-853-nuggs-ladder >/dev/null
+  printf 'later\n' > "$asrc/designs/nuggs-ladder/later.scad"
+  git_cmd -C "$asrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/later.scad
+  git_cmd -C "$asrc" -c user.email=t@example.com -c user.name=t commit -m later >/dev/null
+  git_cmd -C "$asrc" bundle create "${tmp}/older.bundle" "^${aroot}" refs/heads/claude/issue-853-nuggs-ladder
+  git_cmd init -b main --bare "${tmp}/astart.git" >/dev/null
+  git_cmd -C "$asrc" push "${tmp}/astart.git" "${astart}:refs/heads/main" >/dev/null
+  git_cmd clone -b main "${tmp}/astart.git" "$adel" >/dev/null
+  bsha="$(sha256sum "${tmp}/older.bundle" | awk '{print $1}')"
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$adel" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$astart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$bbare" \
+    --bundle "${tmp}/older.bundle" --bundle-sha256 "$bsha" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || { echo "selftest: older-prerequisite bundle exited ${rc}" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'ancestry does not start at START_SHA' || {
+    echo "selftest: older prerequisite was accepted" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+
+  # A protected-path commit inside an otherwise well-formed bundle is
+  # refused after the fetch and is not pushed. Built with git directly so
+  # --write-bundle's own refusal is not what we are measuring.
+  git_cmd -C "$bsrc" checkout claude/issue-853-nuggs-ladder >/dev/null
+  mkdir -p "$bsrc/scripts"
+  printf 'nope\n' > "$bsrc/scripts/evil.sh"
+  git_cmd -C "$bsrc" -c user.email=t@example.com -c user.name=t add -- scripts/evil.sh
+  git_cmd -C "$bsrc" -c user.email=t@example.com -c user.name=t commit -m 'scripts touch' >/dev/null
+  git_cmd -C "$bsrc" bundle create "${tmp}/protected.bundle" "^${bstart}" refs/heads/claude/issue-853-nuggs-ladder
+  bsha="$(sha256sum "${tmp}/protected.bundle" | awk '{print $1}')"
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$bdel" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$bstart" \
+    --base-branch main --run-url https://example.test/run/1 --push-url "$bbare" \
+    --bundle "${tmp}/protected.bundle" --bundle-sha256 "$bsha" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || { echo "selftest: protected-path bundle exited ${rc}" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'touches scripts/evil.sh' || {
+    echo "selftest: protected-path bundle was not refused" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  [ "$(git_cmd --git-dir="$bbare" rev-parse refs/heads/claude/issue-853-nuggs-ladder)" = "$bhead" ] || {
+    echo "selftest: protected-path bundle was pushed" >&2
+    exit 1
+  }
+  [ "$(git_cmd -C "$bdel" rev-parse HEAD)" = "$bstart" ] || {
+    echo "selftest: protected-path bundle moved the deliver checkout" >&2
+    exit 1
+  }
+
   # H1: the workflow restores the real script from START_SHA into a temp
-  # dir outside the fixture repo. The worktree copy is poisoned. A missing
-  # DELIVER_WORKTREE and a worktree that is not the git toplevel (a planted
-  # parent .git) both fail closed.
+  # dir outside the fixture repo and runs --write-bundle. The worktree
+  # copy is poisoned. A missing DELIVER_WORKTREE and a worktree that is
+  # not the git toplevel (a planted parent .git) both fail closed.
   local workflow deliver_run
   workflow="${repo_root}/.github/workflows/design-run.yml"
   deliver_run="$(awk '
-    /^      - name: Deliver the branch and draft PR/ { in_step = 1 }
+    /^      - name: Bundle the design commits/ { in_step = 1 }
     in_step && /^        run: \|/ { printing = 1; next }
     in_step && printing && /^      - name:/ { exit }
     printing { print }
   ' "$workflow")"
-  [ -n "$deliver_run" ] || { echo "selftest: could not extract the deliver run block" >&2; exit 1; }
-  printf '%s\n' "$deliver_run" | grep -q 'git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/design-run-deliver.sh"' || {
-    echo "selftest: deliver step does not git-show the pinned script" >&2
+  [ -n "$deliver_run" ] || { echo "selftest: could not extract the bundle run block" >&2; exit 1; }
+  printf '%s\n' "$deliver_run" | grep -q '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' || {
+    echo "selftest: bundle step does not git-show the pinned script" >&2
     exit 1
   }
   printf '%s\n' "$deliver_run" | grep -q 'DELIVER_SHA256' || {
@@ -976,7 +1439,7 @@ JSON
     echo "selftest: deliver step does not refuse object alternates" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'unset GIT_ALTERNATE_OBJECT_DIRECTORIES' || {
+  printf '%s\n' "$deliver_run" | grep -q 'GIT_ALTERNATE_OBJECT_DIRECTORIES' || {
     echo "selftest: deliver step does not drop GIT_ALTERNATE_OBJECT_DIRECTORIES" >&2
     exit 1
   }
@@ -1000,11 +1463,67 @@ JSON
     echo "selftest: deliver step does not pin an empty BASH_ENV" >&2
     exit 1
   }
-  grep -q 'PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' "$workflow" || {
-    echo "selftest: deliver step does not pin PATH" >&2
+  grep -q 'PATH: /usr/bin:/bin' "$workflow" || {
+    echo "selftest: deliver step does not pin PATH to /usr/bin:/bin" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY' || {
+  grep -q 'GIT_CONFIG_GLOBAL: /dev/null' "$workflow" || {
+    echo "selftest: deliver step does not pin GIT_CONFIG_GLOBAL=/dev/null" >&2
+    exit 1
+  }
+  grep -q 'GIT_CONFIG_NOSYSTEM: "1"' "$workflow" || {
+    echo "selftest: deliver step does not pin GIT_CONFIG_NOSYSTEM" >&2
+    exit 1
+  }
+  grep -q 'NODE_OPTIONS: ""' "$workflow" || {
+    echo "selftest: deliver step does not blank NODE_OPTIONS" >&2
+    exit 1
+  }
+  grep -q 'PYTHONPATH: ""' "$workflow" || {
+    echo "selftest: deliver step does not blank PYTHONPATH" >&2
+    exit 1
+  }
+  grep -q 'GIT_SSH_COMMAND: ""' "$workflow" || {
+    echo "selftest: deliver step does not blank GIT_SSH_COMMAND" >&2
+    exit 1
+  }
+  grep -q 'GIT_DIR: ""' "$workflow" || {
+    echo "selftest: deliver step does not blank GIT_DIR" >&2
+    exit 1
+  }
+  grep -q 'GIT_WORK_TREE: ""' "$workflow" || {
+    echo "selftest: deliver step does not blank GIT_WORK_TREE" >&2
+    exit 1
+  }
+  grep -q 'GIT_BIN: /usr/bin/git' "$workflow" || {
+    echo "selftest: deliver step does not pin GIT_BIN" >&2
+    exit 1
+  }
+  grep -q 'actions/upload-artifact@v7' "$workflow" || {
+    echo "selftest: the bundle is not uploaded" >&2
+    exit 1
+  }
+  grep -q 'retention-days: 1' "$workflow" || {
+    echo "selftest: the bundle artifact has no short retention" >&2
+    exit 1
+  }
+  grep -q 'actions/download-artifact@v7' "$workflow" || {
+    echo "selftest: the deliver job does not download the bundle" >&2
+    exit 1
+  }
+  grep -q '\$GITHUB_WORKSPACE/scripts/design-run-deliver.sh' "$workflow" || {
+    echo "selftest: the deliver job does not run the checkout script" >&2
+    exit 1
+  }
+  printf '%s\n' "$deliver_run" | grep -q -- '--write-bundle' || {
+    echo "selftest: the bundle step does not pass --write-bundle" >&2
+    exit 1
+  }
+  if printf '%s\n' "$deliver_run" | grep -q 'GH_TOKEN'; then
+    echo "selftest: the bundle step run block mentions GH_TOKEN" >&2
+    exit 1
+  fi
+  printf '%s\n' "$deliver_run" | grep -q 'GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY' || {
     echo "selftest: deliver step does not drop alternate object dirs" >&2
     exit 1
   }
@@ -1297,6 +1816,7 @@ EOF
 }
 
 REPO="" ISSUE="" BASE="" BASE_BRANCH="" RUN_URL="" PUSH_URL="" BRANCH="" ASKPASS=""
+BUNDLE="" BUNDLE_SHA256="" WRITE_BUNDLE="" DELIVER_REF="HEAD"
 
 if [ "${1:-}" = "--selftest" ]; then
   # Only the in-repo file may run the suite. A restored copy lives outside
@@ -1319,6 +1839,9 @@ while [ $# -gt 0 ]; do
     --base-branch) BASE_BRANCH="${2:-}"; shift 2 ;;
     --run-url) RUN_URL="${2:-}"; shift 2 ;;
     --push-url) PUSH_URL="${2:-}"; shift 2 ;;
+    --bundle) BUNDLE="${2:-}"; shift 2 ;;
+    --bundle-sha256) BUNDLE_SHA256="${2:-}"; shift 2 ;;
+    --write-bundle) WRITE_BUNDLE="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) usage "unknown argument: $1" ;;
   esac
@@ -1326,6 +1849,12 @@ done
 
 [ -n "$REPO" ] && [ -n "$ISSUE" ] && [ -n "$BASE" ] && [ -n "$BASE_BRANCH" ] && [ -n "$RUN_URL" ] \
   || usage "missing required argument"
+if [ -n "$WRITE_BUNDLE" ] && [ -n "$BUNDLE" ]; then
+  usage "pass only one of --bundle and --write-bundle"
+fi
+if [ -n "$BUNDLE" ] && [ -z "$BUNDLE_SHA256" ]; then
+  usage "--bundle requires --bundle-sha256"
+fi
 [ -z "$PUSH_URL" ] && PUSH_URL="https://github.com/${REPO}.git"
 
 run_live
