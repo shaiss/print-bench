@@ -2326,6 +2326,114 @@ p.write_bytes(data)
     echo "selftest: deliver job does not require the triggering head branch" >&2
     exit 1
   }
+  pin_line="$(grep -n 'name: Verify the delivery pin' "$deliver_workflow" | head -1 | cut -d: -f1)"
+  checkout_line="$(grep -n 'name: Checkout the default branch' "$deliver_workflow" | head -1 | cut -d: -f1)"
+  [ -n "$pin_line" ] && [ -n "$checkout_line" ] && [ "$pin_line" -lt "$checkout_line" ] || {
+    echo "selftest: the delivery pin is not verified before checkout" >&2
+    exit 1
+  }
+  if grep -q 'ref: ${{ steps.parsed.outputs.start_sha }}' "$deliver_workflow"; then
+    echo "selftest: checkout still uses the artifact start_sha" >&2
+    exit 1
+  fi
+  if grep -q 'git fetch' "$deliver_workflow"; then
+    echo "selftest: delivery fetches a commit by id" >&2
+    exit 1
+  fi
+  pin_gates="$(grep -c "steps.pin.outcome == 'success'" "$deliver_workflow" || true)"
+  [ "$pin_gates" -ge 5 ] || {
+    echo "selftest: checkout, download, deliver, lock cleanup, and the red step are not all gated on the pin (found ${pin_gates})" >&2
+    exit 1
+  }
+  grep -q 'show "$WORKFLOW_HEAD_SHA:scripts/routine-lock-cleanup.sh"' "$deliver_workflow" || {
+    echo "selftest: lock cleanup does not read the script from the triggering head" >&2
+    exit 1
+  }
+  if grep -q 'START_SHA:scripts/routine-lock-cleanup.sh' "$deliver_workflow" \
+    || grep -q 'checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh' "$deliver_workflow"; then
+    echo "selftest: lock cleanup still takes its script from START_SHA" >&2
+    exit 1
+  fi
+  pin_run="$(awk '
+    /^      - name: Verify the delivery pin/ { in_step = 1 }
+    in_step && /^        run: \|/ { printing = 1; next }
+    in_step && printing && /^      - name:/ { exit }
+    printing { print }
+  ' "$deliver_workflow")"
+  [ -n "$pin_run" ] || { echo "selftest: could not extract the pin step" >&2; exit 1; }
+  pin_stub="${tmp}/pin-bin"
+  pin_log="${tmp}/pin.log"
+  pin_map="${tmp}/pin.map"
+  pin_out="${tmp}/pin.out"
+  pin_err="${tmp}/pin.err"
+  mkdir -p "$pin_stub"
+  cat > "$pin_stub/gh" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$*" >> "${GH_LOG:?}"
+url=""
+for a in "$@"; do
+  case "$a" in
+    repos/*/compare/*) url="$a" ;;
+  esac
+done
+spec="${url##*compare/}"
+[ -n "$spec" ] || { echo "gh: no compare url" >&2; exit 2; }
+[ -f "${GH_MAP:?}" ] || { echo "gh: no map" >&2; exit 2; }
+status="$(awk -v s="$spec" '$1 == s { print $2; found = 1 } END { exit found ? 0 : 1 }' "$GH_MAP")" || {
+  echo "gh: unmapped ${spec}" >&2
+  exit 2
+}
+printf '%s\n' "$status"
+EOF
+  chmod +x "$pin_stub/gh"
+  run_pin() {
+    local start="$1" head="$2" branch="$3" map="$4" rc
+    : > "$pin_log"
+    printf '%s\n' "$map" > "$pin_map"
+    : > "$pin_out"
+    set +e
+    START_SHA="$start" WORKFLOW_HEAD_SHA="$head" BASE_BRANCH="$branch" \
+      GITHUB_REPOSITORY=acme/print-bench GITHUB_OUTPUT="$pin_out" \
+      GH_LOG="$pin_log" GH_MAP="$pin_map" \
+      PATH="$pin_stub:/usr/bin:/bin" \
+      bash -eo pipefail -c "$pin_run" >"$pin_err" 2>&1
+    rc=$?
+    set -e
+    printf '%s\n' "$rc"
+  }
+  pin_a="1111111111111111111111111111111111111111"
+  pin_b="2222222222222222222222222222222222222222"
+  pin_c="3333333333333333333333333333333333333333"
+  [ "$(run_pin "$pin_a" "$pin_a" main "")" -eq 0 ] || {
+    echo "selftest: a pin equal to the triggering head was refused" >&2
+    cat "$pin_err" >&2
+    exit 1
+  }
+  [ ! -s "$pin_log" ] || {
+    echo "selftest: an equal pin called the compare API" >&2
+    exit 1
+  }
+  grep -qx 'verified=head' "$pin_out" || {
+    echo "selftest: an equal pin did not record verified=head" >&2
+    exit 1
+  }
+  [ "$(run_pin "$pin_c" "$pin_a" main "${pin_a}...${pin_c} diverged")" -ne 0 ] || {
+    echo "selftest: a mismatched start_sha was accepted" >&2
+    exit 1
+  }
+  [ "$(run_pin "$pin_b" "$pin_a" main "$(printf '%s\n' "${pin_a}...${pin_b} ahead" "${pin_b}...main ahead")")" -eq 0 ] || {
+    echo "selftest: a start_sha on the default branch ahead of the triggering head was refused" >&2
+    cat "$pin_err" >&2
+    exit 1
+  }
+  grep -qx 'verified=ancestor' "$pin_out" || {
+    echo "selftest: an ancestor pin did not record verified=ancestor" >&2
+    exit 1
+  }
+  [ "$(run_pin "$pin_c" "$pin_a" main "$(printf '%s\n' "${pin_a}...${pin_c} ahead" "${pin_c}...main diverged")")" -ne 0 ] || {
+    echo "selftest: a start_sha that is not an ancestor of the default branch was accepted" >&2
+    exit 1
+  }
   if awk '
     /^permissions:/ { p = 1; next }
     p && /^[^ ]/ { exit }

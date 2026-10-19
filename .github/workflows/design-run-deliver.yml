@@ -3,9 +3,10 @@ name: Design run delivery
 # workflow_run runs THIS file from the default branch, with secrets, after
 # "Design run (scheduled idea→PR pipeline)" completes. It is the only
 # workflow that references secrets.GH_TOKEN. Nothing here is agent code:
-# the run job's metadata artifact was written from step outputs, the bundle
-# is verified by scripts/design-run-deliver.sh from the pinned commit, and
-# the script is not the agent's worktree copy.
+# the run job's metadata artifact was written from step outputs. The pin is
+# checked against the triggering commit, or through the compare API, before
+# anything is checked out from it. The bundle is data. The delivery script
+# is the default-branch history at that pin, not the agent's worktree copy.
 #
 # Until this file is on the default branch the event has no workflow to
 # start. A pull_request or a non-default head branch does not deliver.
@@ -91,16 +92,83 @@ jobs:
             echo "walk_outcome=$(jq -r .walk_outcome "$meta")"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v7
+      # No checkout yet. The artifact SHA is untrusted until this step
+      # accepts it: equal to the triggering run's head (a default-branch
+      # commit, per the job if), or a descendant of that head that the
+      # compare API says is still an ancestor of the default branch. A
+      # fork SHA in the repo network fails the compare and is never
+      # checked out. This step does not fetch.
+      - name: Verify the delivery pin
+        id: pin
         if: steps.meta.outcome == 'success'
+        timeout-minutes: 2
+        env:
+          START_SHA: ${{ steps.parsed.outputs.start_sha }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          sha_ok() {
+            [[ "$1" =~ ^[0-9a-f]{40}$ ]]
+          }
+          if ! sha_ok "$START_SHA" || ! sha_ok "$WORKFLOW_HEAD_SHA" || [ -z "${BASE_BRANCH:-}" ]; then
+            echo "::error::delivery pin is not a commit id" >&2
+            exit 1
+          fi
+          # compare base...head is "ahead" or "identical" when base is an
+          # ancestor of head. "diverged" and "behind" are not.
+          api_ancestor() {
+            local status rc
+            set +e
+            status="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${1}...${2}" --jq .status)"
+            rc=$?
+            set -e
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::compare API failed for ${1}...${2}" >&2
+              return 1
+            fi
+            status="${status//[[:space:]]/}"
+            case "$status" in
+              ahead|identical) return 0 ;;
+              *)
+                echo "::error::compare ${1}...${2} is ${status:-empty}, not an ancestor" >&2
+                return 1
+                ;;
+            esac
+          }
+          if [ "$START_SHA" = "$WORKFLOW_HEAD_SHA" ]; then
+            echo "verified=head" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! api_ancestor "$WORKFLOW_HEAD_SHA" "$START_SHA"; then
+            echo "::error::START_SHA is not the triggering workflow commit or a descendant of it" >&2
+            exit 1
+          fi
+          if ! api_ancestor "$START_SHA" "$BASE_BRANCH"; then
+            echo "::error::START_SHA is not an ancestor of ${BASE_BRANCH}" >&2
+            exit 1
+          fi
+          echo "verified=ancestor" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the default branch
+        if: steps.pin.outcome == 'success'
+        uses: actions/checkout@v7
         timeout-minutes: 2
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: ${{ steps.parsed.outputs.start_sha }}
 
       - name: Download the design bundle
-        if: steps.meta.outcome == 'success'
+        if: steps.pin.outcome == 'success'
         timeout-minutes: 2
         uses: actions/download-artifact@v7
         with:
@@ -111,13 +179,15 @@ jobs:
         env:
           NODE_OPTIONS: ""
 
-      # No agent code. The script is the fresh checkout of START_SHA, hashed
-      # against the pre-agent pin. The bundle is data: it is verified and
-      # fetched into a local ref, and nothing in it is executed. The PAT is
-      # on this step only.
+      # No agent code. The clone is the default branch. START_SHA is
+      # detached only after the pin step, and only if that commit is
+      # already in this history — a fork SHA is not fetched. The script
+      # is hashed against the pre-agent pin. The bundle is data: it is
+      # verified and fetched into a local ref, and nothing in it is
+      # executed. The PAT is on this step only.
       - name: Verify the bundle and push
         id: deliver
-        if: steps.meta.outcome == 'success'
+        if: steps.pin.outcome == 'success'
         timeout-minutes: 10
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -157,10 +227,6 @@ jobs:
           set -euo pipefail
           unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
           script="$GITHUB_WORKSPACE/scripts/design-run-deliver.sh"
-          if [ -L "$script" ] || [ ! -f "$script" ]; then
-            echo "::error::delivery script is not a regular file in the START_SHA checkout" >&2
-            exit 1
-          fi
           if [ -z "${DELIVER_SHA256:-}" ] || [ -z "${BUNDLE_SHA256:-}" ] || [ -z "${START_SHA:-}" ] || [ -z "${WORKFLOW_HEAD_SHA:-}" ]; then
             echo "::error::deliver inputs are empty" >&2
             exit 1
@@ -177,17 +243,13 @@ jobs:
             [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
             *) echo "::error::WORKFLOW_HEAD_SHA is not a commit id" >&2; exit 1 ;;
           esac
-          head_now="$(/usr/bin/git --no-replace-objects rev-parse HEAD)"
-          if [ "$head_now" != "$START_SHA" ]; then
-            echo "::error::checkout HEAD is not START_SHA" >&2
+          # Local confirmation of the pin step. The object has to already
+          # be in the default-branch clone. Do not fetch: a fork SHA in
+          # the repo network can be fetched by id.
+          if ! /usr/bin/git --no-replace-objects cat-file -e "${START_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::START_SHA is not in the default-branch history — refusing to fetch it" >&2
             exit 1
           fi
-          # START_SHA is the run job's default-branch checkout. The
-          # triggering workflow's commit is WORKFLOW_HEAD_SHA (not this
-          # workflow_run's GITHUB_SHA, which can be a later main tip).
-          # Equality is the common case. A pin that is not that commit or
-          # a descendant of it, or that is not on the default branch, is
-          # refused.
           if [ "$START_SHA" != "$WORKFLOW_HEAD_SHA" ]; then
             if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$WORKFLOW_HEAD_SHA" "$START_SHA"; then
               echo "::error::START_SHA is not the triggering workflow commit or a descendant of it" >&2
@@ -197,6 +259,16 @@ jobs:
               echo "::error::START_SHA is not on ${BASE_BRANCH}" >&2
               exit 1
             fi
+          fi
+          /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null checkout --detach "$START_SHA"
+          head_now="$(/usr/bin/git --no-replace-objects rev-parse HEAD)"
+          if [ "$head_now" != "$START_SHA" ]; then
+            echo "::error::checkout HEAD is not START_SHA" >&2
+            exit 1
+          fi
+          if [ -L "$script" ] || [ ! -f "$script" ]; then
+            echo "::error::delivery script is not a regular file in the START_SHA checkout" >&2
+            exit 1
           fi
           got="$(sha256sum "$script" | awk '{print $1}')"
           if [ "$got" != "$DELIVER_SHA256" ]; then
@@ -211,14 +283,17 @@ jobs:
 
       - name: Release the SHIP-LOCK after delivery
         id: lock_cleanup
-        if: always() && steps.meta.outcome == 'success'
+        # Only after the pin step. A failed pin must not run a script from
+        # the artifact SHA. always() still releases the lock when delivery
+        # itself failed after a verified pin.
+        if: always() && steps.pin.outcome == 'success'
         timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ steps.parsed.outputs.issue }}
           WALK_OUTCOME: ${{ steps.parsed.outputs.walk_outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
-          START_SHA: ${{ steps.parsed.outputs.start_sha }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           JOB_WINDOW_START: ${{ steps.parsed.outputs.job_window_start }}
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
@@ -237,41 +312,45 @@ jobs:
         run: |
           set -euo pipefail
           unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND || true
-          if [ -z "${JOB_WINDOW_START:-}" ]; then
-            echo "::error::JOB_WINDOW_START is empty — the job-window output did not arrive"
+          if [ -z "${JOB_WINDOW_START:-}" ] || [ -z "${WORKFLOW_HEAD_SHA:-}" ]; then
+            echo "::error::JOB_WINDOW_START or the triggering head is empty"
             exit 1
           fi
-          if [ -L scripts ]; then
-            echo "::error::refusing to restore lock-cleanup: scripts/ is a symlink" >&2
+          if ! [[ "$WORKFLOW_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::triggering head is not a commit id" >&2
             exit 1
           fi
-          if [ -L scripts/routine-lock-cleanup.sh ]; then
-            rm -f scripts/routine-lock-cleanup.sh
+          # The script is the triggering run's commit, which the job if
+          # already requires to be the default branch. Never the artifact
+          # START_SHA. The blob is written outside the worktree and executed
+          # from there. Do not fetch.
+          if ! /usr/bin/git --no-replace-objects cat-file -e "${WORKFLOW_HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::triggering head is not in the default-branch history — refusing to fetch it" >&2
+            exit 1
           fi
-          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh; then
-            restore_tmp="$(mktemp)"
-            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$restore_tmp"; then
-              rm -f "$restore_tmp"
-              exit 1
-            fi
-            if [ -L scripts/routine-lock-cleanup.sh ]; then
-              rm -f scripts/routine-lock-cleanup.sh
-            fi
-            mv -f "$restore_tmp" scripts/routine-lock-cleanup.sh
+          script="${RUNNER_TEMP}/routine-lock-cleanup.sh"
+          if [ -L "$script" ] || [ -d "$script" ]; then
+            echo "::error::refusing to write lock-cleanup through a symlink" >&2
+            exit 1
           fi
-          if [ -L scripts/routine-lock-cleanup.sh ] || [ ! -f scripts/routine-lock-cleanup.sh ]; then
+          rm -f "$script"
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$WORKFLOW_HEAD_SHA:scripts/routine-lock-cleanup.sh" > "$script"; then
+            rm -f "$script"
+            exit 1
+          fi
+          if [ -L "$script" ] || [ ! -f "$script" ]; then
             echo "::error::lock-cleanup restore did not leave a regular file" >&2
             exit 1
           fi
-          chmod +x scripts/routine-lock-cleanup.sh
-          ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+          chmod +x "$script"
+          "$script" --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
             --agent-outcome "$WALK_OUTCOME" --run-url "$RUN_URL" --routine design-run \
             --run-started-at "$JOB_WINDOW_START"
 
       - name: Fail a delivery that neither pushed nor declined
         if: >-
           always()
-          && steps.meta.outcome == 'success'
+          && steps.pin.outcome == 'success'
           && steps.lock_cleanup.outputs.delivered != 'true'
           && steps.lock_cleanup.outputs.declined != 'true'
         env:
