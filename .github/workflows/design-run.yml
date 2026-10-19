@@ -77,15 +77,16 @@ on:
         type: boolean
         default: false
 
-# GITHUB_TOKEN does not push. The run job posts the SHIP-LOCK (issues) and
-# uploads the bundle artifact (actions). The deliver job opens the draft PR
-# (pull-requests) and pushes with the GH_TOKEN PAT, not with this token, so
-# contents stays read. The jobs are off unless DESIGN_RUN_ENABLED is set AND
+# GITHUB_TOKEN does not push. The run job posts the SHIP-LOCK (issues). The
+# deliver job opens the draft PR (pull-requests) and pushes with the GH_TOKEN
+# PAT, not with this token, so contents stays read. Artifact upload and
+# download use the runner's ACTIONS_RUNTIME_TOKEN; they do not need
+# actions: write, and that grant would reach the bypassPermissions agent.
+# The jobs are off unless DESIGN_RUN_ENABLED is set AND
 # the committed config says enabled, and the writing steps are skipped
 # entirely without a provider secret, so these grants sit idle until the
 # routine is deliberately switched on.
 permissions:
-  actions: write
   contents: read
   issues: write
   pull-requests: write
@@ -529,6 +530,10 @@ jobs:
           DELIVER_WORKTREE: ${{ github.workspace }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          # Step output, not GITHUB_ENV: the agent can append to GITHUB_ENV.
+          # The hard-stop read uses this window and github.token, not the push PAT.
+          JOB_WINDOW_START: ${{ steps.job_window.outputs.start }}
+          ISSUE_READ_TOKEN: ${{ github.token }}
           # bypassPermissions can append to GITHUB_ENV and GITHUB_PATH. Step
           # env wins over those files, and an absolute shell is looked up
           # before PATH. Empty LD_PRELOAD / BASH_ENV are ignored at process
@@ -939,6 +944,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # Full history. A run that merged newer main puts that commit in
+          # the bundle's prerequisites; a depth-1 checkout does not have it,
+          # so the ancestry check would reject a legitimate bundle.
+          fetch-depth: 0
           ref: ${{ needs.run.outputs.start_sha }}
 
       - name: Download the design bundle
@@ -965,6 +974,8 @@ jobs:
           DELIVER_WORKTREE: ${{ github.workspace }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          JOB_WINDOW_START: ${{ needs.run.outputs.job_window_start }}
+          ISSUE_READ_TOKEN: ${{ github.token }}
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
           GIT_BIN: /usr/bin/git
@@ -995,6 +1006,12 @@ jobs:
           fi
           if [ -z "${DELIVER_SHA256:-}" ] || [ -z "${BUNDLE_SHA256:-}" ] || [ -z "${START_SHA:-}" ]; then
             echo "::error::deliver inputs are empty" >&2
+            exit 1
+          fi
+          # The pin is the workflow commit. A rewritten job output that
+          # named some other SHA must not be what this job checks out.
+          if [ "$START_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::START_SHA does not match the workflow commit" >&2
             exit 1
           fi
           got="$(sha256sum "$script" | awk '{print $1}')"

@@ -301,11 +301,12 @@ Before you end the turn:
 4. Stop. Do not post the success comment. The delivery step posts
    `🚢 design-run delivered — branch and draft PR verified` with the branch
    tip and the PR URL, and only after the two checks above pass. A failed
-   push posts nothing that reads as success.
+   push posts nothing that reads as success. A `🚢 DECLINED`,
+   `🚦 DECISION NEEDED`, or `🚢 DEFERRED` comment from this run is a hard
+   stop: the delivery step does not bundle that work, does not push it,
+   and does not post success.
 
-Then `subscribe_pr_activity` on the PR the delivery step verified, and drive
-it to green per the PR-ownership rules. The human's job from here is what
-#96 promised: react to the previews and merge.
+The human's job from here is what #96 promised: react to the previews and merge.
 
 ## 8. Unattended mode (the scheduled workflow invoked this)
 
