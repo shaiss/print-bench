@@ -946,8 +946,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          # Full history. Extra bundle prerequisites must be ancestors of
-          # START_SHA; a depth-1 checkout cannot see those ancestors.
+          # Full history. Extra bundle prerequisites must already be
+          # reachable from this checkout (HEAD, a branch, a remote-tracking
+          # branch, or a tag). A depth-1 checkout cannot see a merge of
+          # newer main, and START_SHA must still be an ancestor of the tip.
           fetch-depth: 0
           ref: ${{ needs.run.outputs.start_sha }}
 
