@@ -306,11 +306,6 @@ Before you end the turn:
    stop: the delivery step does not bundle that work, does not push it,
    and does not post success.
 
-When you opened the draft PR yourself in step 3, call `subscribe_pr_activity`
-on that PR and drive it to green per the PR-ownership rules. A PR the deliver
-job opens does not exist yet when your turn ends, so the follow-up on that
-PR belongs to those same PR-ownership rules after delivery.
-
 The human's job from here is what #96 promised: react to the previews and merge.
 
 ## 8. Unattended mode (the scheduled workflow invoked this)
