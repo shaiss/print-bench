@@ -114,12 +114,13 @@ closes_issue() {
   printf '%s\n' "$1" | grep -qiP "\\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\\s+#${2}\\b"
 }
 
-# Paths the delivery commit may include. Vendored trees and anything
-# outside the design stay on the runner.
+# Paths the delivery commit may include. A first-party module is a single
+# file under lib/. A lib subdirectory is a vendored third-party tree and
+# stays on the runner, as does anything outside the design.
 safe_path() {
   case "$1" in
     designs/*) return 0 ;;
-    lib/BOSL2/*|lib/NopSCADlib/*) return 1 ;;
+    lib|lib/|lib/*/*) return 1 ;;
     lib/*) return 0 ;;
     *) return 1 ;;
   esac
@@ -173,7 +174,9 @@ EOF
 commit_safe_dirty() {
   local entry xy path old added=0 status_file
   status_file="$(mktemp)"
-  git_cmd status --porcelain -z > "$status_file"
+  # -uall: an untracked directory is otherwise one line ("lib/"), and
+  # `git add` of that line would stage the vendored subtree inside it.
+  git_cmd status --porcelain -z -uall > "$status_file"
   while IFS= read -r -d '' entry || [ -n "${entry:-}" ]; do
     [ -n "$entry" ] || continue
     xy="${entry:0:2}"
@@ -465,6 +468,9 @@ selftest() {
   git_cmd -C "$root" -c user.email=t@example.com -c user.name=t commit -m 'add a' >/dev/null
   git_cmd -C "$root" mv -- "designs/old/a.scad" "designs/new/a.scad"
   printf 'nope\n' > "$root/scripts/evil.sh"
+  mkdir -p "$root/lib/Third"
+  printf 'vendored\n' > "$root/lib/Third/secret.scad"
+  printf 'libok\n' > "$root/lib/note.scad"
   git_cmd -C "$root" init -b main --bare "$bare" >/dev/null
 
   # Fake gh: records invocations and serves the PR the create call wrote.
@@ -598,6 +604,14 @@ EOF
     echo "selftest: rename destination was not pushed" >&2
     exit 1
   }
+  tree_has 'lib/note.scad' || {
+    echo "selftest: first-party lib file was not pushed" >&2
+    exit 1
+  }
+  if tree_has 'lib/Third/secret.scad'; then
+    echo "selftest: vendored lib subtree was pushed" >&2
+    exit 1
+  fi
   if tree_has 'designs/old/a.scad'; then
     echo "selftest: rename source was still in the tree" >&2
     exit 1
@@ -831,9 +845,9 @@ EOF
   }
 
   run_h1() {  # $1 dir, $2 runner temp, $3 mark file. Echoes the script's exit.
-    local dir="$1" runner="$2" mark="$3" rc
+    local dir="$1" runner="$2" mark="$3" rc out
     set +e
-    (
+    out="$(
       cd "$dir"
       START_SHA="$(git_cmd rev-parse HEAD)" \
         RUNNER_TEMP="$runner" \
@@ -842,10 +856,14 @@ EOF
         ISSUE=853 \
         BASE_BRANCH=main \
         RUN_URL=https://example.test/run/1 \
-        bash -eo pipefail -c "$deliver_run"
-    )
+        bash -eo pipefail -c "$deliver_run" 2>&1
+    )"
     rc=$?
     set -e
+    # The workflow's ::error:: markers are real on a runner. Printed raw
+    # inside check.sh they become job annotations, so the selftest rewrites
+    # them after it has captured the exit code.
+    printf '%s\n' "$out" | sed 's/::error::/error: /' >&2
     printf '%s\n' "$rc"
   }
 
