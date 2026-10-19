@@ -2164,8 +2164,21 @@ p.write_bytes(data)
     echo "selftest: workflow permissions still grant actions" >&2
     exit 1
   fi
-  if grep -q 'subscribe_pr_activity' "${repo_root}/.claude/skills/design-run/SKILL.md"; then
-    echo "selftest: SKILL.md still tells the agent to subscribe_pr_activity" >&2
+  skill="${repo_root}/.claude/skills/design-run/SKILL.md"
+  grep -q 'subscribe_pr_activity' "$skill" || {
+    echo "selftest: SKILL.md does not mention subscribe_pr_activity" >&2
+    exit 1
+  }
+  grep -q 'opened the draft PR yourself in step 3' "$skill" || {
+    echo "selftest: SKILL.md does not limit subscribe_pr_activity to a PR the agent opened" >&2
+    exit 1
+  }
+  grep -q 'does not exist yet' "$skill" || {
+    echo "selftest: SKILL.md does not say a deliver-job PR does not exist yet" >&2
+    exit 1
+  }
+  if grep -q 'PR the delivery step verified' "$skill"; then
+    echo "selftest: SKILL.md still subscribes to a PR the deliver job has not opened" >&2
     exit 1
   fi
   printf '%s\n' "$deliver_run" | grep -q 'GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY' || {
