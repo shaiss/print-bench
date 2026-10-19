@@ -1365,8 +1365,10 @@ DECOY
   restore_in_block() {  # step-block text on stdin → 0 when the restore pins the script
     local block restore_ln invoke_ln unlink_ln
     block="$(cat)"
+    # design-run.yml pins --no-replace-objects and hooksPath on this checkout.
+    # backlog-burn.yml still has the plain form. Either line is a restore.
     restore_ln="$(printf '%s\n' "$block" \
-      | grep -n 'git checkout "\$START_SHA" -- scripts/routine-lock-cleanup.sh' \
+      | grep -nE 'git( --no-replace-objects -c core\.hooksPath=/dev/null)? checkout "\$START_SHA" -- scripts/routine-lock-cleanup\.sh' \
       | head -1 | cut -d: -f1)"
     invoke_ln="$(printf '%s\n' "$block" \
       | grep -n '\./scripts/routine-lock-cleanup.sh --repo' \
@@ -1389,8 +1391,10 @@ DECOY
     local cap_ln agent_ln
     cap_ln="$(grep -n 'id: start_ref' "$1" | head -1 | cut -d: -f1)"
     agent_ln="$(grep -n 'uses: anthropics/claude-code-action' "$1" | head -1 | cut -d: -f1)"
+    # design-run.yml pins --no-replace-objects on this rev-parse so a replace
+    # ref cannot move the captured SHA. backlog-burn.yml keeps the plain form.
     [ -n "$cap_ln" ] && [ -n "$agent_ln" ] && [ "$cap_ln" -lt "$agent_ln" ] \
-      && grep -q 'git rev-parse HEAD' "$1"
+      && grep -qE 'git( --no-replace-objects)? rev-parse HEAD' "$1"
   }
   for wf in .github/workflows/backlog-burn.yml .github/workflows/design-run.yml; do
     [ -f "$wf" ] || st_fail "drift: $wf is missing — the cleanup workflows moved"

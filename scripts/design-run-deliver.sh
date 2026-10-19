@@ -43,13 +43,10 @@
 # verification failed; exit 2 on usage.
 set -euo pipefail
 
+# Absolute path of this file. Live runs are a copy in $RUNNER_TEMP, so this
+# path is NOT the checkout and dirname/.. is NOT the repo. The checkout is
+# only DELIVER_WORKTREE, checked against `git rev-parse --show-toplevel`.
 SELF="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)/$(basename "$0")"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
-# Selftest points this at a throwaway worktree. Live runs stay in the repo.
-if [ -n "${DELIVER_WORKTREE:-}" ]; then
-  cd "$DELIVER_WORKTREE"
-fi
 
 DELIVERED_LINE='🚢 design-run delivered — branch and draft PR verified'
 PR_FIELDS='number,url,body,isDraft,headRefOid,isCrossRepository,headRepositoryOwner,headRepository'
@@ -81,12 +78,14 @@ note() {
 
 # Every git invocation in this file goes through git_cmd.
 #
-# -c core.hooksPath=/dev/null is placed AFTER any caller -c, so a caller
-# cannot turn hooks back on. --no-verify is passed only to the subcommands
-# that accept it (commit, push, merge, rebase, am). status, diff, config,
-# log, ls-remote, add, rev-list, cat-file and show exit 129 or 128 when
-# given --no-verify, so those get hooksPath alone. rev-parse treats
-# --no-verify as the negation of --verify, which is a different flag.
+# -c core.hooksPath=/dev/null, core.fsmonitor=false and commit.gpgSign=false
+# are placed AFTER any caller -c, so a caller cannot turn them back on.
+# --no-replace-objects is a global option (not overridable by -c).
+# --no-verify is passed only to the subcommands that accept it (commit,
+# push, merge, rebase, am). status, diff, config, log, ls-remote, add,
+# rev-list, cat-file and show exit 129 or 128 when given --no-verify, so
+# those get the hardening -c flags alone. rev-parse treats --no-verify as
+# the negation of --verify, which is a different flag.
 git_cmd() {
   local -a pre=()
   while [ $# -gt 0 ]; do
@@ -102,10 +101,48 @@ git_cmd() {
   shift
   case "$sub" in
     commit|push|merge|rebase|am)
-      git "${pre[@]}" -c core.hooksPath=/dev/null "$sub" --no-verify "$@" ;;
+      git --no-replace-objects "${pre[@]}" \
+        -c core.hooksPath=/dev/null \
+        -c core.fsmonitor=false \
+        -c commit.gpgSign=false \
+        "$sub" --no-verify "$@" ;;
     *)
-      git "${pre[@]}" -c core.hooksPath=/dev/null "$sub" "$@" ;;
+      git --no-replace-objects "${pre[@]}" \
+        -c core.hooksPath=/dev/null \
+        -c core.fsmonitor=false \
+        -c commit.gpgSign=false \
+        "$sub" "$@" ;;
   esac
+}
+
+# The checkout is whatever the workflow named. A copy of this script in
+# $RUNNER_TEMP must not discover a repo by walking up from its own path.
+enter_worktree() {
+  local top
+  if [ -z "${DELIVER_WORKTREE:-}" ]; then
+    echo "design-run-deliver: DELIVER_WORKTREE is required" >&2
+    exit 1
+  fi
+  case "$DELIVER_WORKTREE" in
+    /*) ;;
+    *)
+      echo "design-run-deliver: DELIVER_WORKTREE must be an absolute path" >&2
+      exit 1
+      ;;
+  esac
+  if [ ! -d "$DELIVER_WORKTREE" ]; then
+    echo "design-run-deliver: DELIVER_WORKTREE is not a directory" >&2
+    exit 1
+  fi
+  cd "$DELIVER_WORKTREE"
+  if ! top="$(git_cmd rev-parse --show-toplevel 2>/dev/null)"; then
+    echo "design-run-deliver: DELIVER_WORKTREE is not a git checkout" >&2
+    exit 1
+  fi
+  if [ "$top" != "$DELIVER_WORKTREE" ]; then
+    echo "design-run-deliver: refusing DELIVER_WORKTREE ${DELIVER_WORKTREE}; git toplevel is ${top}" >&2
+    exit 1
+  fi
 }
 
 # $1 body, $2 issue number. GitHub's nine closing keywords, the same
@@ -143,6 +180,24 @@ refuse_url_rewrites() {
     echo "design-run-deliver: refusing to run with git url.* rewrite configured" >&2
     return 1
   fi
+}
+
+# Local keys that smudge blobs, redirect git, or sign commits. Values can
+# carry a token or a command, so the refusal prints neither key nor value.
+refuse_hostile_local_config() {
+  local keys
+  keys="$(git_cmd config --local --name-only --get-regexp '^(filter\.|include|gpg\.|http\.|credential\.|core\.fsmonitor$|core\.sshcommand$)' || true)"
+  if [ -n "$keys" ]; then
+    echo "design-run-deliver: refusing to run with hostile local git config" >&2
+    return 1
+  fi
+}
+
+# gh reads hosts.yml and config.yml from this directory. A fresh one means
+# a poisoned ~/.config/gh cannot redirect the PR call.
+use_fresh_gh_config() {
+  GH_CONFIG_DIR="$(mktemp -d)"
+  export GH_CONFIG_DIR
 }
 
 git_authed() {
@@ -215,30 +270,39 @@ commit_safe_dirty() {
   note "committed uncommitted design files onto ${BRANCH} before push"
 }
 
-# Net `git diff --name-only BASE..HEAD` hides a path that was added and
-# then deleted, and a rename's old name. The log walk catches both.
+# `git diff BASE...HEAD` is the merge-base diff (what the branch changed
+# since it left START_SHA). It hides a path that was added and then deleted,
+# and a rename's old name. `git log -z --name-status` catches both, and the
+# NUL records keep a newline inside a path from splitting the record.
 refuse_forbidden_range() {
-  local path line status rest old new diff_file log_file
+  local path status old new diff_file log_file
   diff_file="$(mktemp)"
   log_file="$(mktemp)"
-  git_cmd diff --name-only -z "${BASE}..HEAD" > "$diff_file"
-  git_cmd log --name-status --find-renames --pretty=format: "${BASE}..HEAD" > "$log_file"
+  git_cmd diff --name-only -z "${BASE}...HEAD" > "$diff_file"
+  git_cmd log -z --name-status --find-renames --pretty=format: "${BASE}..HEAD" > "$log_file"
   while IFS= read -r -d '' path || [ -n "${path:-}" ]; do
     [ -n "$path" ] || continue
     if forbidden_path "$path"; then
       rm -f "$diff_file" "$log_file"
-      echo "design-run-deliver: ${BASE}..HEAD touches ${path} — refusing to push" >&2
+      echo "design-run-deliver: ${BASE}...HEAD touches ${path} — refusing to push" >&2
       return 1
     fi
   done < "$diff_file"
-  while IFS= read -r line || [ -n "${line:-}" ]; do
-    [ -n "$line" ] || continue
-    status="${line%%$'\t'*}"
-    rest="${line#*$'\t'}"
+  while IFS= read -r -d '' status || [ -n "${status:-}" ]; do
+    [ -n "$status" ] || continue
+    IFS= read -r -d '' path || {
+      rm -f "$diff_file" "$log_file"
+      echo "design-run-deliver: truncated name-status record (${status})" >&2
+      return 1
+    }
     case "$status" in
       R*|C*)
-        old="${rest%%$'\t'*}"
-        new="${rest#*$'\t'}"
+        IFS= read -r -d '' new || {
+          rm -f "$diff_file" "$log_file"
+          echo "design-run-deliver: truncated rename record for ${path}" >&2
+          return 1
+        }
+        old="$path"
         if forbidden_path "$old" || forbidden_path "$new"; then
           rm -f "$diff_file" "$log_file"
           echo "design-run-deliver: ${BASE}..HEAD touches ${old} -> ${new} — refusing to push" >&2
@@ -246,9 +310,9 @@ refuse_forbidden_range() {
         fi
         ;;
       *)
-        if forbidden_path "$rest"; then
+        if forbidden_path "$path"; then
           rm -f "$diff_file" "$log_file"
-          echo "design-run-deliver: ${BASE}..HEAD touches ${rest} — refusing to push" >&2
+          echo "design-run-deliver: ${BASE}..HEAD touches ${path} — refusing to push" >&2
           return 1
         fi
         ;;
@@ -397,7 +461,9 @@ run_live() {
     echo "design-run-deliver: issue must be numeric, got '${ISSUE}'" >&2
     exit 2
   fi
-  if ! refuse_url_rewrites; then
+  enter_worktree
+  use_fresh_gh_config
+  if ! refuse_hostile_local_config || ! refuse_url_rewrites; then
     emit delivered false
     exit 1
   fi
@@ -451,6 +517,7 @@ run_live() {
 }
 
 selftest() {
+  local repo_root="$1"
   local tmp root bare base
   tmp="$(mktemp -d)"
   root="${tmp}/repo"
@@ -478,6 +545,7 @@ selftest() {
   cat > "${tmp}/bin/gh" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >> "${tmp}/gh.log"
+printf '%s\n' "\${GH_CONFIG_DIR:-unset}" >> "${tmp}/gh-config-dirs"
 if [ "\$1" = "pr" ] && [ "\$2" = "list" ]; then
   if [ -f "${tmp}/pr.json" ]; then cat "${tmp}/pr.json"; else printf '%s\n' '[]'; fi
   exit 0
@@ -556,17 +624,30 @@ EOF
   # git_cmd is the only git binary entry. Subcommands other than
   # commit/push/merge/rebase/am cannot take --no-verify (they exit 129).
   grep -q 'core.hooksPath=/dev/null' "$SELF"
+  grep -q 'core.fsmonitor=false' "$SELF"
+  grep -q 'commit.gpgSign=false' "$SELF"
+  grep -q -- '--no-replace-objects' "$SELF"
   grep -q -- '--no-verify' "$SELF"
   grep -q 'commit|push|merge|rebase|am' "$SELF"
+  grep -q 'GH_CONFIG_DIR' "$SELF"
+  grep -q 'DELIVER_WORKTREE is required' "$SELF"
+  grep -q 'git_cmd log -z --name-status' "$SELF"
+  grep -q 'diff --name-only -z "${BASE}...HEAD"' "$SELF"
+  grep -q 'refusing to run with hostile local git config' "$SELF"
   # git_cmd is the only function that execs git. A second `git ` in command
   # position (the line starts with optional whitespace, then git) must pin
   # hooksPath. Mentions inside quotes are not invocations.
   if awk '
     /^[[:space:]]*#/ { next }
-    /^[[:space:]]*git[[:space:]]/ {
-      if ($0 ~ /core\.hooksPath=\/dev\/null/) next
-      print
-      bad = 1
+    /\\$/ { buf = buf $0 " "; next }
+    {
+      line = buf $0
+      buf = ""
+      if (line ~ /^[[:space:]]*git[[:space:]]/) {
+        if (line ~ /core\.hooksPath=\/dev\/null/ && line ~ /--no-replace-objects/ && line ~ /core\.fsmonitor=false/ && line ~ /commit\.gpgSign=false/) next
+        print
+        bad = 1
+      }
     }
     END { exit bad ? 1 : 0 }
   ' "$SELF"; then
@@ -618,6 +699,15 @@ EOF
   fi
   grep -q 'design-run delivered' "${tmp}/comment.body"
   grep -q 'https://github.com/acme/print-bench/pull/99' "${tmp}/comment.body"
+  gh_cfg="$(tail -n 1 "${tmp}/gh-config-dirs")"
+  [ -n "$gh_cfg" ] && [ "$gh_cfg" != "unset" ] && [ -d "$gh_cfg" ] || {
+    echo "selftest: gh did not receive a fresh GH_CONFIG_DIR" >&2
+    exit 1
+  }
+  [ ! -e "${gh_cfg}/PLANTED" ] || {
+    echo "selftest: gh used a planted GH_CONFIG_DIR" >&2
+    exit 1
+  }
   create_line="$(grep -n 'pr create' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
   comment_line="$(grep -n 'api --method POST' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
   [ -n "$create_line" ] && [ -n "$comment_line" ] && [ "$comment_line" -gt "$create_line" ] || {
@@ -633,6 +723,20 @@ EOF
     echo "selftest: idempotent rerun posted a second success comment" >&2
     exit 1
   fi
+
+  # A planted GH_CONFIG_DIR is replaced before gh runs. This has to be a
+  # successful gh-calling run, before any scripts/ commit makes the range
+  # refuse and skip gh.
+  local planted_gh recorded_gh
+  planted_gh="${tmp}/planted-gh"
+  mkdir -p "$planted_gh"
+  printf 'planted\n' > "${planted_gh}/PLANTED"
+  run_case 'fresh gh config' 0 keep env GH_CONFIG_DIR="$planted_gh"
+  recorded_gh="$(tail -n 1 "${tmp}/gh-config-dirs")"
+  [ "$recorded_gh" != "$planted_gh" ] && [ -d "$recorded_gh" ] && [ ! -e "${recorded_gh}/PLANTED" ] || {
+    echo "selftest: planted GH_CONFIG_DIR was used (${recorded_gh})" >&2
+    exit 1
+  }
 
   # Push failure: no PR create, no success comment, non-zero exit.
   rm -rf "$bare"
@@ -796,12 +900,63 @@ JSON
     exit 1
   fi
 
-  # H1: the workflow restores the script from START_SHA into RUNNER_TEMP.
-  # A poisoned worktree copy, a symlinked scripts/, and a symlinked script
-  # must not run. A symlink already at the restore path is unlinked, not
-  # followed.
+  # A newline inside a scripts/ path must still refuse. Line-oriented
+  # name-status would split the record; the -z walk keeps it one path.
+  nl_path=$'scripts/has\nnewline.sh'
+  printf 'nl\n' > "$root/$nl_path"
+  git_cmd -C "$root" -c user.email=t@example.com -c user.name=t add -- "$nl_path"
+  git_cmd -C "$root" -c user.email=t@example.com -c user.name=t commit -m 'newline path' >/dev/null
+  bare_before="$(bare_sha)"
+  run_case 'newline in scripts path' 1 fresh
+  [ "$(bare_sha)" = "$bare_before" ] || {
+    echo "selftest: newline scripts path was pushed" >&2
+    exit 1
+  }
+
+  # Hostile local git config (smudge filters, includes, signing, http,
+  # credentials, fsmonitor, sshCommand) refuses before any push. The value
+  # is a stand-in token and must not be echoed.
+  local hostile_key
+  for hostile_key in \
+    filter.lfs.clean \
+    include.path \
+    gpg.format \
+    http.extraheader \
+    credential.helper \
+    core.fsmonitor \
+    core.sshCommand
+  do
+    git_cmd -C "$root" config --local "$hostile_key" "SECRETTOKEN-${hostile_key}"
+    set +e
+    stderr="$(env PATH="${tmp}/bin:${PATH}" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$root" \
+      "$SELF" --repo acme/print-bench --issue 853 --base "$base" \
+      --base-branch main --run-url https://example.test/run/1 --push-url "$bare" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    if [ "$rc" -ne 1 ]; then
+      echo "selftest: ${hostile_key} exited ${rc}, expected 1" >&2
+      exit 1
+    fi
+    if printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN'; then
+      echo "selftest: ${hostile_key} printed the config value" >&2
+      exit 1
+    fi
+    if ! printf '%s\n' "$stderr" | grep -q 'hostile local git config'; then
+      echo "selftest: ${hostile_key} did not report the refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    fi
+    git_cmd -C "$root" config --local --unset-all "$hostile_key"
+  done
+
+  # H1: the workflow restores the real script from START_SHA into a temp
+  # dir outside the fixture repo. The worktree copy is poisoned. A missing
+  # DELIVER_WORKTREE and a worktree that is not the git toplevel (a planted
+  # parent .git) both fail closed.
   local workflow deliver_run
-  workflow="${ROOT}/.github/workflows/design-run.yml"
+  workflow="${repo_root}/.github/workflows/design-run.yml"
   deliver_run="$(awk '
     /^      - name: Deliver the branch and draft PR/ { in_step = 1 }
     in_step && /^        run: \|/ { printing = 1; next }
@@ -809,8 +964,56 @@ JSON
     printing { print }
   ' "$workflow")"
   [ -n "$deliver_run" ] || { echo "selftest: could not extract the deliver run block" >&2; exit 1; }
-  printf '%s\n' "$deliver_run" | grep -q 'git -c core.hooksPath=/dev/null show "$START_SHA:scripts/design-run-deliver.sh"' || {
+  printf '%s\n' "$deliver_run" | grep -q 'git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/design-run-deliver.sh"' || {
     echo "selftest: deliver step does not git-show the pinned script" >&2
+    exit 1
+  }
+  printf '%s\n' "$deliver_run" | grep -q 'DELIVER_SHA256' || {
+    echo "selftest: deliver step does not check the pre-agent sha256" >&2
+    exit 1
+  }
+  printf '%s\n' "$deliver_run" | grep -q 'objects/info/alternates' || {
+    echo "selftest: deliver step does not refuse object alternates" >&2
+    exit 1
+  }
+  printf '%s\n' "$deliver_run" | grep -q 'unset GIT_ALTERNATE_OBJECT_DIRECTORIES' || {
+    echo "selftest: deliver step does not drop GIT_ALTERNATE_OBJECT_DIRECTORIES" >&2
+    exit 1
+  }
+  grep -q 'deliver_sha256=' "$workflow" || {
+    echo "selftest: the pre-agent pin does not record deliver_sha256" >&2
+    exit 1
+  }
+  grep -q 'DELIVER_WORKTREE: \${{ github.workspace }}' "$workflow" || {
+    echo "selftest: deliver step does not pin DELIVER_WORKTREE to the checkout" >&2
+    exit 1
+  }
+  grep -q 'shell: /usr/bin/bash --noprofile --norc' "$workflow" || {
+    echo "selftest: deliver step does not pin an absolute shell" >&2
+    exit 1
+  }
+  grep -q 'LD_PRELOAD: ""' "$workflow" || {
+    echo "selftest: deliver step does not pin an empty LD_PRELOAD" >&2
+    exit 1
+  }
+  grep -q 'BASH_ENV: ""' "$workflow" || {
+    echo "selftest: deliver step does not pin an empty BASH_ENV" >&2
+    exit 1
+  }
+  grep -q 'PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' "$workflow" || {
+    echo "selftest: deliver step does not pin PATH" >&2
+    exit 1
+  }
+  printf '%s\n' "$deliver_run" | grep -q 'unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY' || {
+    echo "selftest: deliver step does not drop alternate object dirs" >&2
+    exit 1
+  }
+  printf '%s\n' "$deliver_run" | grep -q 'GIT_CONFIG_PARAMETERS' || {
+    echo "selftest: deliver step does not drop GIT_CONFIG_PARAMETERS" >&2
+    exit 1
+  }
+  grep -q 'git --no-replace-objects -c core.hooksPath=/dev/null checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh' "$workflow" || {
+    echo "selftest: lock-cleanup restore is missing --no-replace-objects and hooksPath" >&2
     exit 1
   }
   printf '%s\n' "$deliver_run" | grep -q 'RUNNER_TEMP' || {
@@ -826,14 +1029,11 @@ JSON
     exit 1
   fi
 
-  h1_repo() {  # $1 dir. Commits a trusted script, then poisons the worktree.
+  h1_repo() {  # $1 dir. Commits THIS script, then poisons the worktree copy.
     local dir="$1"
     mkdir -p "$dir/scripts"
-    cat > "$dir/scripts/design-run-deliver.sh" <<'EOF'
-#!/bin/sh
-printf '%s\n' TRUSTED > "$H1_MARK"
-exit 0
-EOF
+    cp "$SELF" "$dir/scripts/design-run-deliver.sh"
+    chmod +x "$dir/scripts/design-run-deliver.sh"
     git_cmd -C "$dir" init -b main >/dev/null
     git_cmd -C "$dir" -c user.email=t@example.com -c user.name=t add -- scripts/design-run-deliver.sh
     git_cmd -C "$dir" -c user.email=t@example.com -c user.name=t commit -m trusted >/dev/null
@@ -844,41 +1044,204 @@ exit 0
 EOF
   }
 
-  run_h1() {  # $1 dir, $2 runner temp, $3 mark file. Echoes the script's exit.
-    local dir="$1" runner="$2" mark="$3" rc out
+  run_h1() {  # $1 dir, $2 runner temp, $3 mark, $4 sha256 mode (match|wrong|omit), $5 worktree (path|omit). Echoes the script's exit.
+    local dir="$1" runner="$2" mark="$3" sha_mode="$4" wt_mode="$5" rc out want
+    want="$(git_cmd -C "$dir" show "HEAD:scripts/design-run-deliver.sh" | sha256sum | awk '{print $1}')"
     set +e
     out="$(
       cd "$dir"
-      START_SHA="$(git_cmd rev-parse HEAD)" \
-        RUNNER_TEMP="$runner" \
-        H1_MARK="$mark" \
-        GITHUB_REPOSITORY=acme/print-bench \
-        ISSUE=853 \
-        BASE_BRANCH=main \
-        RUN_URL=https://example.test/run/1 \
-        bash -eo pipefail -c "$deliver_run" 2>&1
+      START_SHA="$(git_cmd rev-parse HEAD)"
+      export START_SHA RUNNER_TEMP="$runner" H1_MARK="$mark"
+      export GITHUB_REPOSITORY=acme/print-bench ISSUE=853 BASE_BRANCH=main
+      export RUN_URL=https://example.test/run/1
+      export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+      case "$sha_mode" in
+        match) export DELIVER_SHA256="$want" ;;
+        wrong) export DELIVER_SHA256="0000000000000000000000000000000000000000000000000000000000000000" ;;
+        omit) unset DELIVER_SHA256 || true ;;
+      esac
+      case "$wt_mode" in
+        set) export DELIVER_WORKTREE="$dir" ;;
+        omit) unset DELIVER_WORKTREE || true ;;
+      esac
+      bash -eo pipefail -c "$deliver_run" 2>&1
     )"
     rc=$?
     set -e
     # The workflow's ::error:: markers are real on a runner. Printed raw
     # inside check.sh they become job annotations, so the selftest rewrites
     # them after it has captured the exit code.
-    printf '%s\n' "$out" | sed 's/::error::/error: /' >&2
+    printf '%s\n' "$out" | sed 's/::error::/error: /' > "${mark}.out"
+    cat "${mark}.out" >&2
     printf '%s\n' "$rc"
   }
 
-  local h1 mark runner poisoned rc canary
+  # $1 script, $2 "-" to unset DELIVER_WORKTREE or an absolute path. Echoes rc.
+  invoke_outside() {
+    local script="$1" wt="$2" rc
+    set +e
+    if [ "$wt" = "-" ]; then
+      env -u DELIVER_WORKTREE \
+        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        GH_TOKEN=test-token \
+        "$script" --repo acme/print-bench --issue 853 --base "$base" \
+        --base-branch main --run-url https://example.test/run/1 --push-url "$bare" \
+        >/dev/null 2>"${tmp}/outside.err"
+    else
+      env DELIVER_WORKTREE="$wt" \
+        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        GH_TOKEN=test-token \
+        "$script" --repo acme/print-bench --issue 853 --base "$base" \
+        --base-branch main --run-url https://example.test/run/1 --push-url "$bare" \
+        >/dev/null 2>"${tmp}/outside.err"
+    fi
+    rc=$?
+    set -e
+    printf '%s\n' "$rc"
+  }
+
+  local h1 mark runner poisoned rc canary outside plant plant_head git_dir
+  local real_blob poison_blob plain_sha hard_sha
   h1="${tmp}/h1"
   mark="${tmp}/h1-mark"
   runner="${tmp}/h1-runner"
   mkdir -p "$runner"
   h1_repo "$h1"
-  rc="$(run_h1 "$h1" "$runner" "$mark")"
+  rc="$(run_h1 "$h1" "$runner" "$mark" match set)"
   [ "$rc" -eq 0 ] || { echo "selftest: H1 restore exited ${rc}" >&2; exit 1; }
-  [ "$(cat "$mark")" = "TRUSTED" ] || {
-    echo "selftest: H1 ran the worktree script ($(cat "$mark"))" >&2
+  [ ! -e "$mark" ] || { echo "selftest: H1 ran the worktree script ($(cat "$mark"))" >&2; exit 1; }
+  grep -q "not claude/issue-853-" "${mark}.out" || {
+    echo "selftest: H1 did not execute the restored script" >&2
     exit 1
   }
+  case "$runner" in
+    "$h1"|"$h1"/*)
+      echo "selftest: restored script is inside the fixture repo" >&2
+      exit 1
+      ;;
+  esac
+  if git_cmd -C "$runner" rev-parse --show-toplevel >/dev/null 2>&1; then
+    echo "selftest: restored script dir is inside a git repo" >&2
+    exit 1
+  fi
+  grep -q 'DELIVER_WORKTREE is required' "$runner/design-run-deliver.sh" || {
+    echo "selftest: restored file is not the real script" >&2
+    exit 1
+  }
+  [ "$(sha256sum "$runner/design-run-deliver.sh" | awk '{print $1}')" = \
+    "$(git_cmd -C "$h1" show "HEAD:scripts/design-run-deliver.sh" | sha256sum | awk '{print $1}')" ] || {
+    echo "selftest: restored file does not match the pinned blob" >&2
+    exit 1
+  }
+
+  # The restored copy, run from outside any repo, with no DELIVER_WORKTREE.
+  outside="${tmp}/outside"
+  mkdir -p "$outside"
+  cp "$runner/design-run-deliver.sh" "$outside/design-run-deliver.sh"
+  chmod +x "$outside/design-run-deliver.sh"
+  rc="$(invoke_outside "$outside/design-run-deliver.sh" -)"
+  [ "$rc" -eq 1 ] || { echo "selftest: missing DELIVER_WORKTREE exited ${rc}, expected 1" >&2; exit 1; }
+  grep -q 'DELIVER_WORKTREE is required' "${tmp}/outside.err" || {
+    echo "selftest: missing DELIVER_WORKTREE did not fail closed" >&2
+    cat "${tmp}/outside.err" >&2
+    exit 1
+  }
+
+  # A planted parent .git. dirname($0)/.. is that repo; the script must not
+  # walk up into it, and must not treat a nested directory as the checkout.
+  plant="${tmp}/plant"
+  mkdir -p "$plant/decoy"
+  git_cmd -C "$plant" init -b main >/dev/null
+  git_cmd -C "$plant" -c user.email=t@example.com -c user.name=t commit --allow-empty -m plant >/dev/null
+  cp "$runner/design-run-deliver.sh" "$plant/decoy/design-run-deliver.sh"
+  chmod +x "$plant/decoy/design-run-deliver.sh"
+  plant_head="$(git_cmd -C "$plant" rev-parse HEAD)"
+  rc="$(invoke_outside "$plant/decoy/design-run-deliver.sh" -)"
+  [ "$rc" -eq 1 ] || { echo "selftest: planted parent without DELIVER_WORKTREE exited ${rc}" >&2; exit 1; }
+  [ "$(git_cmd -C "$plant" rev-parse HEAD)" = "$plant_head" ] || {
+    echo "selftest: planted parent moved HEAD" >&2
+    exit 1
+  }
+  rc="$(invoke_outside "$plant/decoy/design-run-deliver.sh" "$plant/decoy")"
+  [ "$rc" -eq 1 ] || { echo "selftest: nested DELIVER_WORKTREE exited ${rc}, expected 1" >&2; exit 1; }
+  grep -q 'git toplevel is' "${tmp}/outside.err" || {
+    echo "selftest: nested worktree was not refused" >&2
+    cat "${tmp}/outside.err" >&2
+    exit 1
+  }
+  [ "$(git_cmd -C "$plant" rev-parse HEAD)" = "$plant_head" ] || {
+    echo "selftest: nested worktree moved the planted HEAD" >&2
+    exit 1
+  }
+  set +e
+  env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    "$plant/decoy/design-run-deliver.sh" --selftest >/dev/null 2>"${tmp}/outside.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || { echo "selftest: --selftest ran from a copy inside a planted repo" >&2; exit 1; }
+  grep -q 'refuses to run a copy outside the checkout' "${tmp}/outside.err" || {
+    echo "selftest: outside-checkout --selftest did not refuse" >&2
+    cat "${tmp}/outside.err" >&2
+    exit 1
+  }
+
+  # Wrong or missing pre-agent sha256, and a missing DELIVER_WORKTREE in the
+  # workflow step, all fail before the restored file is executed.
+  rm -f "$mark"
+  rc="$(run_h1 "$h1" "$runner" "$mark" wrong set)"
+  [ "$rc" -ne 0 ] || { echo "selftest: wrong deliver sha256 was accepted" >&2; exit 1; }
+  [ ! -e "$mark" ] || { echo "selftest: wrong sha256 executed the worktree script" >&2; exit 1; }
+  rm -f "$mark"
+  rc="$(run_h1 "$h1" "$runner" "$mark" omit set)"
+  [ "$rc" -ne 0 ] || { echo "selftest: missing DELIVER_SHA256 was accepted" >&2; exit 1; }
+  [ ! -e "$mark" ] || { echo "selftest: missing sha256 executed a script" >&2; exit 1; }
+  rm -f "$mark"
+  rc="$(run_h1 "$h1" "$runner" "$mark" match omit)"
+  [ "$rc" -ne 0 ] || { echo "selftest: workflow accepted a missing DELIVER_WORKTREE" >&2; exit 1; }
+  [ ! -e "$mark" ] || { echo "selftest: missing worktree executed a script" >&2; exit 1; }
+  grep -q 'DELIVER_WORKTREE is empty' "${mark}.out" || {
+    echo "selftest: workflow did not fail closed on an empty DELIVER_WORKTREE" >&2
+    exit 1
+  }
+
+  # Object alternates are refused before git show.
+  git_dir="$(git_cmd -C "$h1" rev-parse --git-dir)"
+  case "$git_dir" in
+    /*) ;;
+    *) git_dir="$h1/$git_dir" ;;
+  esac
+  mkdir -p "${git_dir}/objects/info"
+  printf '%s\n' "${tmp}/fake-alternates" > "${git_dir}/objects/info/alternates"
+  rm -f "$mark"
+  rc="$(run_h1 "$h1" "$runner" "$mark" match set)"
+  [ "$rc" -ne 0 ] || { echo "selftest: object alternates were accepted" >&2; exit 1; }
+  [ ! -e "$mark" ] || { echo "selftest: alternates executed a script" >&2; exit 1; }
+  grep -q 'object alternates are present' "${mark}.out" || {
+    echo "selftest: alternates refusal was not reported" >&2
+    exit 1
+  }
+  rm -f "${git_dir}/objects/info/alternates"
+
+  # A replace ref swaps the blob for a plain git show. --no-replace-objects
+  # keeps the pinned bytes, so the restored file is still the real script.
+  real_blob="$(git_cmd -C "$h1" rev-parse "HEAD:scripts/design-run-deliver.sh")"
+  poison_blob="$(git_cmd -C "$h1" hash-object -w -- "$h1/scripts/design-run-deliver.sh")"
+  git_cmd -C "$h1" replace "$real_blob" "$poison_blob"
+  plain_sha="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -C "$h1" show "HEAD:scripts/design-run-deliver.sh" | sha256sum | awk '{print $1}')"
+  hard_sha="$(git_cmd -C "$h1" show "HEAD:scripts/design-run-deliver.sh" | sha256sum | awk '{print $1}')"
+  [ "$plain_sha" != "$hard_sha" ] || {
+    echo "selftest: replace ref did not change an unhardened git show" >&2
+    exit 1
+  }
+  rm -f "$mark"
+  rc="$(run_h1 "$h1" "$runner" "$mark" match set)"
+  [ "$rc" -eq 0 ] || { echo "selftest: replace ref broke the hardened restore (${rc})" >&2; exit 1; }
+  [ ! -e "$mark" ] || { echo "selftest: replace ref executed the poison script" >&2; exit 1; }
+  grep -q 'DELIVER_WORKTREE is required' "$runner/design-run-deliver.sh" || {
+    echo "selftest: replace ref restored the poison blob" >&2
+    exit 1
+  }
+  git_cmd -C "$h1" replace -d "$real_blob"
 
   # scripts/ as a symlink.
   poisoned="${tmp}/poison-dir"
@@ -892,7 +1255,7 @@ EOF
   rm -rf "$h1/scripts"
   ln -s "$poisoned" "$h1/scripts"
   rm -f "$mark"
-  rc="$(run_h1 "$h1" "$runner" "$mark")"
+  rc="$(run_h1 "$h1" "$runner" "$mark" match set)"
   [ "$rc" -ne 0 ] || { echo "selftest: symlinked scripts/ was accepted" >&2; exit 1; }
   [ ! -e "$mark" ] || { echo "selftest: symlinked scripts/ executed a script" >&2; exit 1; }
 
@@ -902,7 +1265,7 @@ EOF
   rm -f "$h1/scripts/design-run-deliver.sh"
   ln -s "$poisoned/design-run-deliver.sh" "$h1/scripts/design-run-deliver.sh"
   rm -f "$mark"
-  rc="$(run_h1 "$h1" "$runner" "$mark")"
+  rc="$(run_h1 "$h1" "$runner" "$mark" match set)"
   [ "$rc" -ne 0 ] || { echo "selftest: symlinked script was accepted" >&2; exit 1; }
   [ ! -e "$mark" ] || { echo "selftest: symlinked script executed" >&2; exit 1; }
 
@@ -914,7 +1277,7 @@ EOF
   printf '%s\n' CANARY > "$canary"
   ln -sfn "$canary" "$runner/design-run-deliver.sh"
   rm -f "$mark"
-  rc="$(run_h1 "$h1" "$runner" "$mark")"
+  rc="$(run_h1 "$h1" "$runner" "$mark" match set)"
   [ "$rc" -eq 0 ] || { echo "selftest: restore over a dest symlink exited ${rc}" >&2; exit 1; }
   [ "$(cat "$canary")" = "CANARY" ] || {
     echo "selftest: dest symlink was followed ($(cat "$canary"))" >&2
@@ -924,8 +1287,9 @@ EOF
     echo "selftest: restored script is not a regular file" >&2
     exit 1
   }
-  [ "$(cat "$mark")" = "TRUSTED" ] || {
-    echo "selftest: dest-symlink restore ran untrusted code" >&2
+  [ ! -e "$mark" ] || { echo "selftest: dest-symlink restore ran untrusted code" >&2; exit 1; }
+  grep -q 'DELIVER_WORKTREE is required' "$runner/design-run-deliver.sh" || {
+    echo "selftest: dest-symlink restore did not write the real script" >&2
     exit 1
   }
 
@@ -935,7 +1299,15 @@ EOF
 REPO="" ISSUE="" BASE="" BASE_BRANCH="" RUN_URL="" PUSH_URL="" BRANCH="" ASKPASS=""
 
 if [ "${1:-}" = "--selftest" ]; then
-  selftest
+  # Only the in-repo file may run the suite. A restored copy lives outside
+  # the checkout; walking up from its path would land in a parent git dir.
+  script_dir="$(cd "$(dirname "$SELF")" >/dev/null 2>&1 && pwd)"
+  repo_root="$(git_cmd -C "$script_dir" rev-parse --show-toplevel)"
+  if [ "$SELF" != "${repo_root}/scripts/design-run-deliver.sh" ]; then
+    echo "design-run-deliver: --selftest refuses to run a copy outside the checkout" >&2
+    exit 1
+  fi
+  selftest "$repo_root"
   exit 0
 fi
 

@@ -180,7 +180,15 @@ jobs:
         # (#627). Captured here, before any agent step can move HEAD or the
         # remote-tracking refs.
         id: start_ref
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          sha="$(git --no-replace-objects rev-parse HEAD)"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          # Digest of the delivery-script blob before any agent step. The
+          # deliver step compares the restored file to this, so a replace
+          # ref or an alternate object store cannot swap the bytes.
+          deliver_sha256="$(git --no-replace-objects show "HEAD:scripts/design-run-deliver.sh" | sha256sum | awk '{print $1}')"
+          echo "deliver_sha256=${deliver_sha256}" >> "$GITHUB_OUTPUT"
 
       - name: Note the job window start
         # Stamped before any agent step and passed to routine-lock-cleanup as
@@ -503,15 +511,48 @@ jobs:
           COMMENT_TOKEN: ${{ github.token }}
           ISSUE: ${{ steps.select.outputs.issue }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
+          DELIVER_SHA256: ${{ steps.start_ref.outputs.deliver_sha256 }}
+          # The restored script lives in RUNNER_TEMP. It must operate on the
+          # checkout, never on dirname($0)/.. (that is the runner work dir).
+          DELIVER_WORKTREE: ${{ github.workspace }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          # bypassPermissions can append to GITHUB_ENV and GITHUB_PATH. Step
+          # env wins over those files, and an absolute shell is looked up
+          # before PATH. Empty LD_PRELOAD / BASH_ENV are ignored at process
+          # start; unsetting them inside the script is too late.
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+          PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
+          set -euo pipefail
+          unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
+                GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE || true
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
             exit 1
           fi
+          if [ -z "${DELIVER_SHA256:-}" ]; then
+            echo "::error::DELIVER_SHA256 is empty — the pin step did not hash the script" >&2
+            exit 1
+          fi
+          if [ -z "${DELIVER_WORKTREE:-}" ]; then
+            echo "::error::DELIVER_WORKTREE is empty" >&2
+            exit 1
+          fi
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          git_dir="$(git --no-replace-objects rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore design-run-deliver: git object alternates are present" >&2
             exit 1
           fi
           if [ -L scripts ] || [ -L scripts/design-run-deliver.sh ]; then
@@ -523,7 +564,7 @@ jobs:
             echo "::error::refusing to restore design-run-deliver through a symlink" >&2
             exit 1
           fi
-          if ! git -c core.hooksPath=/dev/null show "$START_SHA:scripts/design-run-deliver.sh" > "$blob_tmp"; then
+          if ! git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/design-run-deliver.sh" > "$blob_tmp"; then
             rm -f "$blob_tmp"
             echo "::error::could not restore design-run-deliver.sh from ${START_SHA}" >&2
             exit 1
@@ -542,6 +583,11 @@ jobs:
             exit 1
           fi
           chmod +x "$restore_tmp"
+          got="$(sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$DELIVER_SHA256" ]; then
+            echo "::error::restored design-run-deliver.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
           "$restore_tmp" --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
             --base "$START_SHA" --base-branch "$BASE_BRANCH" --run-url "$RUN_URL"
 
@@ -621,9 +667,9 @@ jobs:
           if [ -L scripts/routine-lock-cleanup.sh ]; then
             rm -f scripts/routine-lock-cleanup.sh
           fi
-          if ! git checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh; then
+          if ! git --no-replace-objects -c core.hooksPath=/dev/null checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh; then
             restore_tmp="$(mktemp)"
-            if ! git show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$restore_tmp"; then
+            if ! git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$restore_tmp"; then
               rm -f "$restore_tmp"
               exit 1
             fi
