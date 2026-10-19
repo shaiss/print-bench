@@ -784,8 +784,12 @@ apply_bundle() {
 # Commit safe dirty files and write START_SHA..HEAD. No token, no push.
 # Exit 0 with no file when there is nothing to deliver (the workflow then
 # records pending=false). A protected path exits 1 and writes no file.
+# A leftover or planted file at the bundle path is removed first: the
+# finish-false paths return before the later rm, and the workflow marks
+# the run pending whenever that path is still a regular file.
 write_bundle() {
   local ahead
+  rm -f "$WRITE_BUNDLE"
   BRANCH="$(git_cmd rev-parse --abbrev-ref HEAD)"
   if ! [[ "$BRANCH" =~ ^claude/issue-${ISSUE}- ]]; then
     finish false "HEAD is '${BRANCH}', not claude/issue-${ISSUE}-* — nothing pushed"
@@ -2026,6 +2030,46 @@ p.write_bytes(data)
   }
   rm -f "${tmp}/comments.json"
 
+  # A file planted at the bundle path must not survive a finish-false
+  # write_bundle. The workflow marks the run pending when that file exists.
+  local psrc pstart pout
+  psrc="${tmp}/psrc"
+  pout="${tmp}/planted-output"
+  mkdir -p "$psrc"
+  git_cmd -C "$psrc" init -b main >/dev/null
+  git_cmd -C "$psrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  pstart="$(git_cmd -C "$psrc" rev-parse HEAD)"
+  printf 'planted\n' > "${tmp}/planted.bundle"
+  : > "$pout"
+  set +e
+  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GITHUB_OUTPUT="$pout" \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$psrc" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$pstart" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --write-bundle "${tmp}/planted.bundle" >/dev/null
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || { echo "selftest: planted bundle on main exited ${rc}" >&2; exit 1; }
+  [ ! -e "${tmp}/planted.bundle" ] || {
+    echo "selftest: failing write_bundle left the planted bundle" >&2
+    exit 1
+  }
+  if [ -f "${tmp}/planted.bundle" ]; then
+    echo "pending=true" >> "$pout"
+  else
+    echo "pending=false" >> "$pout"
+  fi
+  grep -qx 'pending=false' "$pout" || {
+    echo "selftest: planted bundle marked the run pending" >&2
+    exit 1
+  }
+  grep -qx 'delivered=false' "$pout" || {
+    echo "selftest: planted bundle did not record delivered=false" >&2
+    exit 1
+  }
+
   # H1: the workflow restores the real script from START_SHA into a temp
   # dir outside the fixture repo and runs --write-bundle. The worktree
   # copy is poisoned. A missing DELIVER_WORKTREE and a worktree that is
@@ -2125,6 +2169,10 @@ p.write_bytes(data)
   }
   grep -q '\$GITHUB_WORKSPACE/scripts/design-run-deliver.sh' "$workflow" || {
     echo "selftest: the deliver job does not run the checkout script" >&2
+    exit 1
+  }
+  grep -q 'timeout-minutes: 10' "$workflow" || {
+    echo "selftest: the deliver push step has no timeout under the job budget" >&2
     exit 1
   }
   printf '%s\n' "$deliver_run" | grep -q -- '--write-bundle' || {

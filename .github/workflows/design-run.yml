@@ -966,6 +966,10 @@ jobs:
       # on this step only.
       - name: Verify the bundle and push
         id: deliver
+        # Below the job's 15 minutes. A job timeout cancels later steps,
+        # including the always() SHIP-LOCK cleanup. A step timeout fails
+        # this step and still leaves that cleanup time to run.
+        timeout-minutes: 10
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           COMMENT_TOKEN: ${{ github.token }}
