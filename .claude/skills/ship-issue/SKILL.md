@@ -267,9 +267,11 @@ Before you end the turn:
    if you have not already). Any other name, including the default branch,
    is not pushed.
 2. Commit the work. The delivery step commits the dirty files you left
-   behind too — the burn ships arbitrary single-PR work, so `scripts/`,
-   `.github/`, `docs/` and `lib/` are all deliverable here, unlike
-   design-run's designs-only policy. A non-draft PR already open on the
+   behind too — but only outside the protected prefixes. Both backlog-burn
+   and design-run refuse `.github/**`, `.claude/**`, `scripts/**` and
+   `tools/**` (issue #869); backlog-burn may still deliver `docs/`,
+   `designs/`, `lib/`, `people/` and other non-protected paths, while
+   design-run stays designs-only. A non-draft PR already open on the
    branch is a hard stop (`auto-arm.yml` arms auto-merge on non-draft
    `claude/*` PRs). A tree with no commit ahead of the job's start SHA and
    no dirty files is not delivered.

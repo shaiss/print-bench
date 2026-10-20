@@ -3998,3 +3998,112 @@ def test_reeve_reporter_keyless_guard_fires_on_a_secret_reference():
         "the tamper landed outside the report job — the fixture is stale")
     with pytest.raises(AssertionError):
         _assert_reeve_report_job_is_keyless(tampered)
+
+# ── ci.yml autonomy-head secret gate (issue #869) ────────────────────────────
+# Branch CI on claude/* heads runs branch-controlled scripts/. Those jobs
+# must not receive REGEN_TOKEN or the LLM provider keys. Every spend of the
+# set below in ci.yml must either be a presence probe (`!= ''`) or sit
+# behind `startsWith(github.head_ref, 'claude/')` (same line, or the
+# enclosing step's `if:`). The marker comment `claude-head-secret-gate`
+# pins the intent so a silent reversion is reviewable.
+
+CI_YML = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+CLAUDE_HEAD_GUARD = "startsWith(github.head_ref, 'claude/')"
+CI_AUTONOMY_SECRETS = (
+    "REGEN_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ZAI_KEY",
+    "ZAI_API_KEY",
+    "OPENROUTER_API_KEY",
+)
+_CI_PRESENCE_PROBE = re.compile(
+    r"secrets\.(" + "|".join(CI_AUTONOMY_SECRETS) + r")\s*!=\s*''"
+)
+_CI_SECRET_SPEND = re.compile(
+    r"secrets\.(" + "|".join(CI_AUTONOMY_SECRETS) + r")\b"
+)
+
+
+def _ci_step_if_containing(lines: list[str], idx: int) -> str:
+    """Walk back from lines[idx] to the enclosing `- name:`/`- uses:` and
+    return any `if:` value found between that header and idx."""
+    header = idx
+    while header >= 0:
+        stripped = lines[header].lstrip()
+        if stripped.startswith("- name:") or stripped.startswith("- uses:"):
+            break
+        header -= 1
+    if header < 0:
+        return ""
+    chunk = "\n".join(lines[header:idx + 1])
+    m = re.search(r"^[ \t]*if:\s*(.+?)(?=\n[ \t]*(?:name:|uses:|id:|env:|run:|with:)|$)",
+                  chunk, re.MULTILINE | re.DOTALL)
+    if not m:
+        # Folded if: >- form spanning lines
+        m = re.search(r"^[ \t]*if:\s*>-?\s*\n((?:[ \t]+.+\n)*)", chunk, re.MULTILINE)
+        if m:
+            return m.group(1)
+        return ""
+    return m.group(1)
+
+
+def _assert_ci_yml_autonomy_secrets_are_claude_gated(text: str) -> None:
+    """Fail if any #869 secret spend in ci.yml is reachable on a claude/* head."""
+    assert "claude-head-secret-gate" in text, (
+        "ci.yml is missing the claude-head-secret-gate marker — the #869 "
+        "autonomy-head secret gate was removed or renamed")
+    assert CLAUDE_HEAD_GUARD in text, (
+        "ci.yml has no startsWith(github.head_ref, 'claude/') guard")
+    lines = text.splitlines()
+    offenders: list[str] = []
+    for i, line in enumerate(lines):
+        for m in _CI_SECRET_SPEND.finditer(line):
+            name = m.group(1)
+            # Presence probes are boolean checks, not spends.
+            if _CI_PRESENCE_PROBE.search(line):
+                # A probe that ALSO gates on claude/* (HAVE_PAT) is fine;
+                # a bare probe is fine too — it only exposes a boolean.
+                continue
+            if CLAUDE_HEAD_GUARD in line:
+                continue
+            step_if = _ci_step_if_containing(lines, i)
+            if CLAUDE_HEAD_GUARD in step_if:
+                continue
+            offenders.append(f"line {i + 1}: secrets.{name}: {line.strip()}")
+    assert not offenders, (
+        "ci.yml exposes autonomy secrets to claude/* heads without the "
+        f"#869 gate ({CLAUDE_HEAD_GUARD}):\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_ci_yml_autonomy_head_secret_gate():
+    _assert_ci_yml_autonomy_secrets_are_claude_gated(
+        CI_YML.read_text(encoding="utf-8"))
+
+
+def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_regen_token():
+    # NEGATIVE CONTROL: drop the claude/* ternary from the checkout token
+    # and require the canary to FAIL.
+    text = CI_YML.read_text(encoding="utf-8")
+    needle = (
+        "(github.event_name == 'pull_request' && "
+        "startsWith(github.head_ref, 'claude/')) && github.token || "
+        "secrets.REGEN_TOKEN || github.token"
+    )
+    assert needle in text, "tamper target not found — the checkout token gate moved"
+    tampered = text.replace(needle, "secrets.REGEN_TOKEN || github.token", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match="REGEN_TOKEN"):
+        _assert_ci_yml_autonomy_secrets_are_claude_gated(tampered)
+
+
+def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_anthropic_step():
+    # NEGATIVE CONTROL: strip the claude/* conjunct from the product-page
+    # step's if: so ANTHROPIC_API_KEY would materialize on autonomy heads.
+    text = CI_YML.read_text(encoding="utf-8")
+    needle = "&& !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'claude/'))"
+    assert needle in text, "tamper target not found — the product-page claude gate moved"
+    tampered = text.replace(needle, "", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match="ANTHROPIC_API_KEY"):
+        _assert_ci_yml_autonomy_secrets_are_claude_gated(tampered)
