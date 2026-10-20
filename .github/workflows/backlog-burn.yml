@@ -486,8 +486,13 @@ jobs:
             exit 1
           }
           python3 -m pip install --require-hashes --no-deps -r "$req"
-          python3 -m pip install --no-deps -e "${GITHUB_WORKSPACE}/tools/printcheck"
-          python3 -m pip install --no-deps -e "${GITHUB_WORKSPACE}/tools/stylelift"
+          # --no-build-isolation: use the hashed setuptools/wheel already
+          # installed above. Default PEP 517 isolation would fetch
+          # setuptools>=64 from PyPI without hashes (Bugbot on #878).
+          python3 -m pip install --no-deps --no-build-isolation \
+            -e "${GITHUB_WORKSPACE}/tools/printcheck"
+          python3 -m pip install --no-deps --no-build-isolation \
+            -e "${GITHUB_WORKSPACE}/tools/stylelift"
           for bin in printcheck stylelift pytest; do
             command -v "$bin" >/dev/null || {
               echo "::error::preflight Python tool missing ${bin} after install" >&2
