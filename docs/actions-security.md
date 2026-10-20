@@ -99,17 +99,18 @@ curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.301
 
 CI: `.github/workflows/reviewer-deny-canary.yml` — `workflow_dispatch`, and on PRs that touch the backstops, the auto-review pin, the canary, or this CR-A record. Modeled on `model-smoke.yml`: **not** a required check, **not** in `ci-ok`, no provider key (it never starts a model session). If a future pin installs a moving version instead of a hardcoded one, write that down here: the SHA would no longer pin the matcher and this canary would be the only enforcement.
 
-### Claude Code CLI pin + bubblewrap for SCRUB=1 (issue #875)
+### Claude Code CLI pin + bubblewrap for SCRUB=1 (issue #875 / Cipher on #876)
 
-`backlog-burn.yml` and `design-run.yml` set `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` on every agent step. Claude Code **2.1.301** refuses to start under that flag unless `bubblewrap` is installed and actually works. Do **not** set `SCRUB=0` to paper over a missing `bwrap` — that weakens subprocess isolation.
+`backlog-burn.yml` and `design-run.yml` set `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` on every agent step. Claude Code **2.1.301** refuses to start under that flag unless `bubblewrap` is installed and actually works. Do **not** set `SCRUB=0` to paper over a missing `bwrap` — that weakens subprocess isolation. Do **not** clear `kernel.apparmor_restrict_unprivileged_userns` globally.
 
 | Piece | Where | Notes |
 |---|---|---|
-| CLI version pin | `.github/claude-code-version` | Exact `X.Y.Z` only (currently `2.1.301`). Both ship workflows read this file in trusted preflight, install that CLI, and pass `path_to_claude_code_executable` so the action does not float. |
-| bubblewrap + AppArmor | Trusted preflight, **before** disable-sudo | `apt-get install -y bubblewrap`, then `kernel.apparmor_restrict_unprivileged_userns=0` (ubuntu-24.04 runners otherwise block unprivileged user namespaces). |
-| bwrap smoke | **After** disable-sudo, as the agent user | `bwrap --ro-bind / / --dev /dev --proc /proc true` — agent steps require `steps.bwrap_smoke.outcome == 'success'`. |
+| CLI version + GPG pin | `.github/claude-code-version` | Exact `X.Y.Z`, committed `linux-x64-sha256`, and Anthropic GPG fingerprint. Trusted preflight GPG-verifies the release manifest, downloads the binary directly (no `install.sh` / `curl\|bash`), checks sha256 against both the signed manifest and the pin, then `install -o root -g root -m 0755` to `/opt/claude-code/<ver>/claude`. Pass that absolute path as `path_to_claude_code_executable`. |
+| bubblewrap + AppArmor | Trusted preflight, **before** disable-sudo | `apt-get install -y bubblewrap apparmor-profiles`, copy `/usr/share/apparmor/extra-profiles/bwrap-userns-restrict` to `/etc/apparmor.d/`, `apparmor_parser -r` it, assert `bwrap` and `unpriv_bwrap` are `(enforce)` and the userns sysctl still reads `1`. |
+| SCRUB sandbox smoke | **After** disable-sudo, as the agent uid (`runner`) | Real SCRUB=1 Claude sandbox Bash path (`scripts/smoke-claude-scrub-sandbox.sh`) — not bare `bwrap true`. On failure, stop and report; never fall back to clearing the sysctl. |
+| Per-link re-verify | Before every keyed agent link | `scripts/verify-claude-code-pin.sh`: sha256 matches the pin, owner `0:0`, mode `755`, parents not writable by the runner user, not a symlink. Each agent step's `if:` requires `preflight`, `disable_sudo`, `scrub_smoke`, and that link's verify success. |
 
-**How to bump the CLI pin:** edit the version line in `.github/claude-code-version` (see the file header). Keep `SCRUB=1`. If `anthropics/claude-code-action`'s hardcoded install diverges from the new pin, either re-pin the action SHA (table above) or leave `path_to_claude_code_executable` wired so this file remains authoritative. Re-run the deny canary when matcher syntax may have moved.
+**How to bump the CLI pin:** edit `version:` and `linux-x64-sha256:` in `.github/claude-code-version` after GPG-verifying the new manifest (see the file header). Keep `SCRUB=1`. If `anthropics/claude-code-action`'s hardcoded install diverges from the new pin, either re-pin the action SHA (table above) or leave `path_to_claude_code_executable` wired so this file remains authoritative. Re-run the deny canary when matcher syntax may have moved. Out of scope (tracked separately): the action directory, bun, and `~/.claude` remain runner-writable.
 
 ## The decision
 

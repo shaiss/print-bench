@@ -406,9 +406,9 @@ jobs:
       # would pull in. Disable-sudo runs next and strips setuid from sudo, so
       # the SessionStart hook must not need apt after this step — it already
       # exits when openscad/xvfb/…/printcheck/stylelift are on PATH.
-      # Also installs bubblewrap + the pinned Claude Code CLI (issue #875)
-      # before sudo is stripped: SCRUB=1 on the agent steps requires bwrap,
-      # and ubuntu-24.04 AppArmor must allow unprivileged user namespaces.
+      # Also: bubblewrap + AppArmor bwrap-userns-restrict + GPG-pinned Claude
+      # Code CLI under /opt (issue #875 / Cipher on #876). SCRUB=1 stays on.
+      # Do NOT clear kernel.apparmor_restrict_unprivileged_userns.
       # Pip stays here for now (#870 moves it after disable-sudo separately).
       - name: Install preflight toolchain before disabling sudo
         id: preflight
@@ -417,35 +417,38 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
+        # Cipher: install must not see provider/PAT secrets.
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
         run: |
           set -euo pipefail
+          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_KEY ZAI_KEY \
+            OPENROUTER_API_KEY GH_TOKEN REGEN_TOKEN || true
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update -qq 2>/dev/null || true
-          sudo apt-get install -y -qq openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq bubblewrap
-          # ubuntu-24.04 restricts unprivileged user namespaces via AppArmor;
-          # without this, installed bwrap still fails under SCRUB=1.
-          if [ -w /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
-            echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns >/dev/null
-          else
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
+          sudo apt-get install -y -qq openscad xvfb imagemagick prusa-slicer \
+            ffmpeg gifsicle jq bubblewrap apparmor-profiles socat gnupg
           python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/printcheck[test]"
           python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/stylelift[test]"
-          for bin in openscad xvfb-run montage ffmpeg gifsicle prusa-slicer jq printcheck stylelift pytest bwrap; do
+          # Claude's sandbox-runtime (srt) — the Bash wrap SCRUB=1 uses.
+          # Pinned; installed before disable-sudo so smoke needs no root/npm.
+          sudo npm install -g --silent "@anthropic-ai/sandbox-runtime@0.0.80"
+          for bin in openscad xvfb-run montage ffmpeg gifsicle prusa-slicer jq \
+            printcheck stylelift pytest bwrap srt; do
             command -v "$bin" >/dev/null || {
               echo "::error::preflight toolchain missing ${bin} after install" >&2
               exit 1
             }
           done
-          # Pin Claude Code CLI from .github/claude-code-version (never latest).
-          claude_ver="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' "${GITHUB_WORKSPACE}/.github/claude-code-version")"
-          [ -n "$claude_ver" ]
-          curl -fsSL https://claude.ai/install.sh | bash -s -- "$claude_ver"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          claude_bin="$HOME/.local/bin/claude"
-          test -x "$claude_bin"
-          "$claude_bin" --version | grep -F "$claude_ver"
-          echo "claude_bin=${claude_bin}" >> "$GITHUB_OUTPUT"
+          "${GITHUB_WORKSPACE}/scripts/setup-bwrap-apparmor.sh"
+          "${GITHUB_WORKSPACE}/scripts/install-claude-code-pin.sh" \
+            "${GITHUB_WORKSPACE}/.github/claude-code-version"
 
       - name: Disable sudo before the agent
         id: disable_sudo
@@ -454,6 +457,7 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
         run: |
           set -euo pipefail
           # Docker group membership gives the runner root without sudo.
@@ -487,20 +491,55 @@ jobs:
             exit 1
           fi
 
-      # Prove bwrap works as the agent user after sudo is gone (issue #875).
-      # Fails the job before any secret-bearing agent step if AppArmor or the
-      # package install left SCRUB=1 unable to isolate subprocesses.
-      - name: Smoke-test bubblewrap as the agent user
-        id: bwrap_smoke
+      # Real SCRUB=1 Claude sandbox Bash smoke as the agent uid (Cipher on #876).
+      # Plain `bwrap true` is not enough. Never clear the userns sysctl.
+      - name: Smoke-test Claude SCRUB=1 sandbox as the agent user
+        id: scrub_smoke
         if: >-
           steps.policy.outputs.enabled == 'true'
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
           && steps.disable_sudo.outcome == 'success'
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
         run: |
           set -euo pipefail
-          bwrap --ro-bind / / --dev /dev --proc /proc true
+          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_KEY ZAI_KEY \
+            OPENROUTER_API_KEY GH_TOKEN REGEN_TOKEN || true
+          "${GITHUB_WORKSPACE}/scripts/smoke-claude-scrub-sandbox.sh" \
+            "${{ steps.preflight.outputs.claude_bin }}"
+
+      - name: Verify Claude Code pin (before link 1)
+        id: verify_claude_1
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.zai_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+            "${{ steps.preflight.outputs.claude_bin }}" \
+            "${{ steps.preflight.outputs.claude_sha256 }}"
 
       - name: Ship via Z.AI (GLM, chain link 1)
         id: ship_zai_1
@@ -509,8 +548,10 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
           && steps.disable_sudo.outcome == 'success'
-          && steps.bwrap_smoke.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+          && steps.verify_claude_1.outcome == 'success'
         # The step must die inside a live job (step timeout < job timeout) so
         # the settle job's cleanup runs as a normal step, not in a cancellation
         # grace window; continue-on-error keeps the job alive for it (the
@@ -542,6 +583,31 @@ jobs:
       # The GLM tail (#327): links 2 and 3 of the registry's `backlog-burn`
       # chain, reached only when every earlier link did not succeed — the
       # same env/secret/pin/prompt as link 1, only the model differs.
+      - name: Verify Claude Code pin (before link 2)
+        id: verify_claude_2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.zai_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+          && steps.ship_zai_1.outcome != 'success'
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+            "${{ steps.preflight.outputs.claude_bin }}" \
+            "${{ steps.preflight.outputs.claude_sha256 }}"
+
       - name: Ship via Z.AI (GLM, chain link 2)
         id: ship_zai_2
         if: >-
@@ -549,8 +615,10 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
           && steps.disable_sudo.outcome == 'success'
-          && steps.bwrap_smoke.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+          && steps.verify_claude_2.outcome == 'success'
           && steps.ship_zai_1.outcome != 'success'
         timeout-minutes: 105
         continue-on-error: true
@@ -567,6 +635,32 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link2_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
+      - name: Verify Claude Code pin (before link 3)
+        id: verify_claude_3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.zai_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+            "${{ steps.preflight.outputs.claude_bin }}" \
+            "${{ steps.preflight.outputs.claude_sha256 }}"
+
       - name: Ship via Z.AI (GLM, chain link 3)
         id: ship_zai_3
         if: >-
@@ -574,8 +668,10 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
           && steps.disable_sudo.outcome == 'success'
-          && steps.bwrap_smoke.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+          && steps.verify_claude_3.outcome == 'success'
           && steps.ship_zai_1.outcome != 'success'
           && steps.ship_zai_2.outcome != 'success'
         timeout-minutes: 105
@@ -603,6 +699,33 @@ jobs:
       # only the model, secret and endpoint differ. Which model runs is the
       # registry's call (the cheap Anthropic tier, since a GLM outage shifts
       # this hourly routine's whole spend here).
+      - name: Verify Claude Code pin (before link 4)
+        id: verify_claude_4
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+          && steps.ship_zai_3.outcome != 'success'
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+            "${{ steps.preflight.outputs.claude_bin }}" \
+            "${{ steps.preflight.outputs.claude_sha256 }}"
+
       - name: Ship via Anthropic (Claude, chain link 4)
         id: ship_anthropic_4
         if: >-
@@ -610,8 +733,10 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
           && steps.disable_sudo.outcome == 'success'
-          && steps.bwrap_smoke.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+          && steps.verify_claude_4.outcome == 'success'
           && steps.ship_zai_1.outcome != 'success'
           && steps.ship_zai_2.outcome != 'success'
           && steps.ship_zai_3.outcome != 'success'
@@ -627,6 +752,34 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link4_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
 
+      - name: Verify Claude Code pin (before link 5)
+        id: verify_claude_5
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+          && steps.ship_zai_3.outcome != 'success'
+          && steps.ship_anthropic_4.outcome != 'success'
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+            "${{ steps.preflight.outputs.claude_bin }}" \
+            "${{ steps.preflight.outputs.claude_sha256 }}"
+
       - name: Ship via Anthropic (Claude, chain link 5)
         id: ship_anthropic_5
         if: >-
@@ -634,8 +787,10 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.preflight.outcome == 'success'
           && steps.disable_sudo.outcome == 'success'
-          && steps.bwrap_smoke.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+          && steps.verify_claude_5.outcome == 'success'
           && steps.ship_zai_1.outcome != 'success'
           && steps.ship_zai_2.outcome != 'success'
           && steps.ship_zai_3.outcome != 'success'
