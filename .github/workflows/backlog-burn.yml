@@ -1093,8 +1093,15 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          if [ -z "${JOB_WINDOW_START:-}" ] || [ -z "${AGENT_WINDOW_END:-}" ] || [ -z "${ISSUE:-}" ]; then
-            echo "::error::label strip is missing the issue or the agent window" >&2
+          # The burn job can die on its timeout before "Note the agent window
+          # end" stamps AGENT_WINDOW_END. The agent cannot act after that job
+          # ended, so this settle job's start is a safe upper bound.
+          if [ -z "${AGENT_WINDOW_END:-}" ]; then
+            AGENT_WINDOW_END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "::warning::agent window end missing — using settle start ${AGENT_WINDOW_END}"
+          fi
+          if [ -z "${JOB_WINDOW_START:-}" ] || [ -z "${ISSUE:-}" ]; then
+            echo "::error::label strip is missing the issue or the agent window start" >&2
             exit 1
           fi
           case "$ISSUE" in

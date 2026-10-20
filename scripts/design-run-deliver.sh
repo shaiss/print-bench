@@ -2998,6 +2998,10 @@ EOF
     echo "selftest: the burn label strip does not bound the agent window" >&2
     exit 1
   }
+  grep -q 'agent window end missing — using settle start' "$burn" || {
+    echo "selftest: the burn label strip does not fall back when agent_window_end is empty" >&2
+    exit 1
+  }
   burn_perms="$(awk '/^  burn:/{p=1} p && /^  [A-Za-z]/ && !/^  burn:/{exit} p' "$burn")"
   case "$burn_perms" in
     *"pull-requests: read"*) ;;
