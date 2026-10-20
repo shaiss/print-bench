@@ -417,6 +417,42 @@ jobs:
           && steps.select.outputs.issue != ''
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
+      # bubblewrap + pinned Claude Code CLI before sudo is stripped (issue
+      # #875). SCRUB=1 on the agent steps requires bwrap; ubuntu-24.04
+      # AppArmor must allow unprivileged user namespaces. Do not set SCRUB=0.
+      - name: Install bubblewrap and pinned Claude Code before disabling sudo
+        id: preflight
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -qq 2>/dev/null || true
+          sudo apt-get install -y -qq bubblewrap
+          # ubuntu-24.04 restricts unprivileged user namespaces via AppArmor;
+          # without this, installed bwrap still fails under SCRUB=1.
+          if [ -w /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns >/dev/null
+          else
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          command -v bwrap >/dev/null || {
+            echo "::error::preflight missing bwrap after install" >&2
+            exit 1
+          }
+          # Pin Claude Code CLI from .github/claude-code-version (never latest).
+          claude_ver="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' "${GITHUB_WORKSPACE}/.github/claude-code-version")"
+          [ -n "$claude_ver" ]
+          curl -fsSL https://claude.ai/install.sh | bash -s -- "$claude_ver"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          claude_bin="$HOME/.local/bin/claude"
+          test -x "$claude_bin"
+          "$claude_bin" --version | grep -F "$claude_ver"
+          echo "claude_bin=${claude_bin}" >> "$GITHUB_OUTPUT"
+
       - name: Disable sudo before the agent
         id: disable_sudo
         if: >-
@@ -457,6 +493,19 @@ jobs:
             exit 1
           fi
 
+      # Prove bwrap works as the agent user after sudo is gone (issue #875).
+      - name: Smoke-test bubblewrap as the agent user
+        id: bwrap_smoke
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
+        run: |
+          set -euo pipefail
+          bwrap --ro-bind / / --dev /dev --proc /proc true
+
       - name: Run via Z.AI (GLM, chain link 1)
         id: run_zai_1
         if: >-
@@ -465,6 +514,7 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.disable_sudo.outcome == 'success'
+          && steps.bwrap_smoke.outcome == 'success'
         # The step must die inside a live job (step timeout < job timeout) so
         # the lock cleanup below runs as a normal step, not in a cancellation
         # grace window; continue-on-error keeps the job alive for it (the
@@ -489,6 +539,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          path_to_claude_code_executable: ${{ steps.preflight.outputs.claude_bin }}
           claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link1_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
@@ -503,6 +554,7 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.disable_sudo.outcome == 'success'
+          && steps.bwrap_smoke.outcome == 'success'
           && steps.run_zai_1.outcome != 'success'
         timeout-minutes: 220
         continue-on-error: true
@@ -515,6 +567,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          path_to_claude_code_executable: ${{ steps.preflight.outputs.claude_bin }}
           claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link2_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
@@ -526,6 +579,7 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.disable_sudo.outcome == 'success'
+          && steps.bwrap_smoke.outcome == 'success'
           && steps.run_zai_1.outcome != 'success'
           && steps.run_zai_2.outcome != 'success'
         timeout-minutes: 220
@@ -539,6 +593,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
+          path_to_claude_code_executable: ${{ steps.preflight.outputs.claude_bin }}
           claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link3_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
@@ -560,6 +615,7 @@ jobs:
           && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.disable_sudo.outcome == 'success'
+          && steps.bwrap_smoke.outcome == 'success'
           && steps.run_zai_1.outcome != 'success'
           && steps.run_zai_2.outcome != 'success'
           && steps.run_zai_3.outcome != 'success'
@@ -577,6 +633,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
           github_token: ${{ github.token }}
+          path_to_claude_code_executable: ${{ steps.preflight.outputs.claude_bin }}
           claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link4_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
@@ -591,6 +648,7 @@ jobs:
           && steps.run_zai_2.outcome != 'success'
           && steps.run_zai_3.outcome != 'success'
           && steps.disable_sudo.outcome == 'success'
+          && steps.bwrap_smoke.outcome == 'success'
           && steps.run_anthropic_4.outcome != 'success'
         timeout-minutes: 120
         continue-on-error: true
@@ -603,6 +661,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
           github_token: ${{ github.token }}
+          path_to_claude_code_executable: ${{ steps.preflight.outputs.claude_bin }}
           claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link5_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 

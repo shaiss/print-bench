@@ -1,0 +1,13 @@
+# Exact Claude Code CLI version for backlog-burn.yml and design-run.yml
+# (issue #875). One source of truth — both workflows install from this file
+# and pass path_to_claude_code_executable so the action does not float.
+#
+# How to bump:
+#   1. Change the version line below to the new exact X.Y.Z (never "latest").
+#   2. Confirm anthropics/claude-code-action's hardcoded install still matches
+#      (docs/actions-security.md records the SHA ↔ CLI pairing). If the action
+#      SHA installs a different CLI, either re-pin the action or keep using
+#      path_to_claude_code_executable (already wired) so this file wins.
+#   3. Re-run reviewer-deny-canary.yml if matcher syntax may have moved.
+#   4. Keep CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1; do not disable scrubbing.
+2.1.301

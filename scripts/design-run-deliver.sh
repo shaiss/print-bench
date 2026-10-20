@@ -2667,10 +2667,44 @@ EOF
     echo "selftest: expected 5 subprocess env scrubs, found ${scrub_n}" >&2
     exit 1
   }
+  if grep -q 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"' "$workflow"; then
+    echo "selftest: design-run must not set SCRUB=0 (issue #875)" >&2
+    exit 1
+  fi
+  preflight_line="$(grep -n 'name: Install bubblewrap and pinned Claude Code before disabling sudo' "$workflow" | head -1 | cut -d: -f1)"
   sudo_line="$(grep -n 'name: Disable sudo before the agent' "$workflow" | head -1 | cut -d: -f1)"
+  smoke_line="$(grep -n 'name: Smoke-test bubblewrap as the agent user' "$workflow" | head -1 | cut -d: -f1)"
   agent_line="$(grep -n 'name: Run via Z.AI (GLM, chain link 1)' "$workflow" | head -1 | cut -d: -f1)"
-  [ -n "$sudo_line" ] && [ -n "$agent_line" ] && [ "$sudo_line" -lt "$agent_line" ] || {
-    echo "selftest: sudo is not disabled before the agent steps" >&2
+  [ -n "$preflight_line" ] && [ -n "$sudo_line" ] && [ -n "$smoke_line" ] && [ -n "$agent_line" ] \
+    && [ "$preflight_line" -lt "$sudo_line" ] && [ "$sudo_line" -lt "$smoke_line" ] \
+    && [ "$smoke_line" -lt "$agent_line" ] || {
+    echo "selftest: design-run preflight → disable-sudo → bwrap smoke must precede the agent (issue #875)" >&2
+    exit 1
+  }
+  grep -q 'apt-get install -y -qq bubblewrap' "$workflow" || {
+    echo "selftest: design-run preflight does not apt-get bubblewrap" >&2
+    exit 1
+  }
+  grep -q 'apparmor_restrict_unprivileged_userns' "$workflow" || {
+    echo "selftest: design-run preflight does not relax AppArmor userns for bwrap" >&2
+    exit 1
+  }
+  grep -q 'bwrap --ro-bind / / --dev /dev --proc /proc true' "$workflow" || {
+    echo "selftest: design-run missing bwrap smoke command" >&2
+    exit 1
+  }
+  grep -q '\.github/claude-code-version' "$workflow" || {
+    echo "selftest: design-run does not pin Claude Code from .github/claude-code-version" >&2
+    exit 1
+  }
+  path_pin_n="$(grep -c 'path_to_claude_code_executable: \${{ steps.preflight.outputs.claude_bin }}' "$workflow" || true)"
+  [ "$path_pin_n" -eq 5 ] || {
+    echo "selftest: expected 5 design-run path_to_claude_code_executable pins, found ${path_pin_n}" >&2
+    exit 1
+  }
+  bwrap_gate_n="$(grep -c "steps.bwrap_smoke.outcome == 'success'" "$workflow" || true)"
+  [ "$bwrap_gate_n" -eq 5 ] || {
+    echo "selftest: expected 5 design-run agent steps gated on bwrap_smoke, found ${bwrap_gate_n}" >&2
     exit 1
   }
   grep -q 'sudo -n true' "$workflow" || {
@@ -2974,16 +3008,56 @@ EOF
     echo "selftest: expected 5 burn subprocess env scrubs, found ${burn_scrub_n}" >&2
     exit 1
   }
+  if grep -q 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"' "$burn"; then
+    echo "selftest: backlog-burn must not set SCRUB=0 (issue #875)" >&2
+    exit 1
+  fi
   burn_install_line="$(grep -n 'name: Install preflight toolchain before disabling sudo' "$burn" | head -1 | cut -d: -f1)"
   burn_sudo_line="$(grep -n 'name: Disable sudo before the agent' "$burn" | head -1 | cut -d: -f1)"
+  burn_smoke_line="$(grep -n 'name: Smoke-test bubblewrap as the agent user' "$burn" | head -1 | cut -d: -f1)"
   burn_agent_line="$(grep -n 'name: Ship via Z.AI (GLM, chain link 1)' "$burn" | head -1 | cut -d: -f1)"
-  [ -n "$burn_install_line" ] && [ -n "$burn_sudo_line" ] && [ -n "$burn_agent_line" ] \
-    && [ "$burn_install_line" -lt "$burn_sudo_line" ] && [ "$burn_sudo_line" -lt "$burn_agent_line" ] || {
-    echo "selftest: preflight install must precede disable-sudo, which must precede the burn agent" >&2
+  [ -n "$burn_install_line" ] && [ -n "$burn_sudo_line" ] && [ -n "$burn_smoke_line" ] \
+    && [ -n "$burn_agent_line" ] \
+    && [ "$burn_install_line" -lt "$burn_sudo_line" ] \
+    && [ "$burn_sudo_line" -lt "$burn_smoke_line" ] \
+    && [ "$burn_smoke_line" -lt "$burn_agent_line" ] || {
+    echo "selftest: burn preflight → disable-sudo → bwrap smoke must precede the agent (issue #875)" >&2
     exit 1
   }
-  grep -q 'openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq' "$burn" || {
-    echo "selftest: the burn preflight install does not apt-get the session-start toolchain" >&2
+  grep -q 'openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq bubblewrap' "$burn" || {
+    echo "selftest: the burn preflight install does not apt-get the session-start toolchain + bubblewrap" >&2
+    exit 1
+  }
+  grep -q 'apparmor_restrict_unprivileged_userns' "$burn" || {
+    echo "selftest: burn preflight does not relax AppArmor userns for bwrap" >&2
+    exit 1
+  }
+  grep -q 'bwrap --ro-bind / / --dev /dev --proc /proc true' "$burn" || {
+    echo "selftest: burn missing bwrap smoke command" >&2
+    exit 1
+  }
+  grep -q '\.github/claude-code-version' "$burn" || {
+    echo "selftest: burn does not pin Claude Code from .github/claude-code-version" >&2
+    exit 1
+  }
+  burn_path_pin_n="$(grep -c 'path_to_claude_code_executable: \${{ steps.preflight.outputs.claude_bin }}' "$burn" || true)"
+  [ "$burn_path_pin_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn path_to_claude_code_executable pins, found ${burn_path_pin_n}" >&2
+    exit 1
+  }
+  burn_bwrap_gate_n="$(grep -c "steps.bwrap_smoke.outcome == 'success'" "$burn" || true)"
+  [ "$burn_bwrap_gate_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn agent steps gated on bwrap_smoke, found ${burn_bwrap_gate_n}" >&2
+    exit 1
+  }
+  claude_ver_file="${repo_root}/.github/claude-code-version"
+  [ -f "$claude_ver_file" ] || {
+    echo "selftest: .github/claude-code-version is missing" >&2
+    exit 1
+  }
+  claude_ver="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' "$claude_ver_file" || true)"
+  [ -n "$claude_ver" ] || {
+    echo "selftest: .github/claude-code-version has no exact X.Y.Z pin (never latest)" >&2
     exit 1
   }
   grep -q 'sudo -n true' "$burn" || {

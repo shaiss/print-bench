@@ -99,6 +99,18 @@ curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.301
 
 CI: `.github/workflows/reviewer-deny-canary.yml` — `workflow_dispatch`, and on PRs that touch the backstops, the auto-review pin, the canary, or this CR-A record. Modeled on `model-smoke.yml`: **not** a required check, **not** in `ci-ok`, no provider key (it never starts a model session). If a future pin installs a moving version instead of a hardcoded one, write that down here: the SHA would no longer pin the matcher and this canary would be the only enforcement.
 
+### Claude Code CLI pin + bubblewrap for SCRUB=1 (issue #875)
+
+`backlog-burn.yml` and `design-run.yml` set `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` on every agent step. Claude Code **2.1.301** refuses to start under that flag unless `bubblewrap` is installed and actually works. Do **not** set `SCRUB=0` to paper over a missing `bwrap` — that weakens subprocess isolation.
+
+| Piece | Where | Notes |
+|---|---|---|
+| CLI version pin | `.github/claude-code-version` | Exact `X.Y.Z` only (currently `2.1.301`). Both ship workflows read this file in trusted preflight, install that CLI, and pass `path_to_claude_code_executable` so the action does not float. |
+| bubblewrap + AppArmor | Trusted preflight, **before** disable-sudo | `apt-get install -y bubblewrap`, then `kernel.apparmor_restrict_unprivileged_userns=0` (ubuntu-24.04 runners otherwise block unprivileged user namespaces). |
+| bwrap smoke | **After** disable-sudo, as the agent user | `bwrap --ro-bind / / --dev /dev --proc /proc true` — agent steps require `steps.bwrap_smoke.outcome == 'success'`. |
+
+**How to bump the CLI pin:** edit the version line in `.github/claude-code-version` (see the file header). Keep `SCRUB=1`. If `anthropics/claude-code-action`'s hardcoded install diverges from the new pin, either re-pin the action SHA (table above) or leave `path_to_claude_code_executable` wired so this file remains authoritative. Re-run the deny canary when matcher syntax may have moved.
+
 ## The decision
 
 **Accept and document the current posture** (Option 2 of the two #113 listed). Rationale: write-access ⇒ already-trusted actor; not reachable from a fork; the two heaviest routines are off by default; and the property is intrinsic to `workflow_dispatch` — no file in the repo can neutralize it.
