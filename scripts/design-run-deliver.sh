@@ -3982,22 +3982,12 @@ EOF
   }
   # Local tools must be --no-deps --no-build-isolation so they cannot resolve
   # unpinned PyPI deps (including build backends via PEP 517 isolation).
-  grep -q -- '--no-build-isolation' "$burn" || {
-    echo "selftest: burn preflight_pip must use --no-build-isolation for editable installs" >&2
+  grep -q 'pip install --no-deps --no-build-isolation -e .*tools/printcheck' "$burn" || {
+    echo "selftest: burn must pip install --no-deps --no-build-isolation -e tools/printcheck" >&2
     exit 1
   }
-  # Folded YAML may put -e on the next line; require both flags near each tool.
-  burn_pip_block="$(awk '/id: preflight_pip/{p=1} p && /^      - name:/{if(seen++){exit}} p' "$burn")"
-  echo "$burn_pip_block" | grep -q -- '--no-deps' || {
-    echo "selftest: burn preflight_pip must use --no-deps" >&2
-    exit 1
-  }
-  echo "$burn_pip_block" | grep -q 'tools/printcheck' || {
-    echo "selftest: burn preflight_pip must install tools/printcheck" >&2
-    exit 1
-  }
-  echo "$burn_pip_block" | grep -q 'tools/stylelift' || {
-    echo "selftest: burn preflight_pip must install tools/stylelift" >&2
+  grep -q 'pip install --no-deps --no-build-isolation -e .*tools/stylelift' "$burn" || {
+    echo "selftest: burn must pip install --no-deps --no-build-isolation -e tools/stylelift" >&2
     exit 1
   }
   if grep -qE 'pip install .*printcheck\[test\]|pip install .*stylelift\[test\]' "$burn"; then
