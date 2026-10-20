@@ -41,6 +41,27 @@
 #      test as routine-lock-cleanup.sh — writes no bundle, pushes nothing,
 #      and posts no success comment. Lock cleanup then scores the run
 #      declined. The stop is read before the commit and again before the push.
+#      The agent job carries no issues: write (issue #862), so the stop also
+#      arrives as an intents file: a stop-marker first line on a comment
+#      intent targeting the selected issue suppresses the bundle the same way.
+#   9. Issue intents. Unattended, the agent cannot write the issue thread at
+#      all — its token is issues: read — so the /design-run protocol has it
+#      declare its owed comments and labels in an untracked worktree file,
+#      .design-run-intents.json ({"version":1,"intents":[{issue,action,body}
+#      for comments and {issue,action,label} for labels]}). This file never
+#      rides the git bundle: a declined run writes no bundle to ride, and a
+#      committed copy would reach main through the delivered PR and poison
+#      later runs with a stale stop. Instead the trusted bundle step copies
+#      it (--write-intents), the workflow uploads it as the
+#      design-run-intents artifact under the same reap-and-digest discipline
+#      as the bundle, and settle applies it (--apply-intents). The applier is
+#      the only issue-writing surface in the pipeline after #862: an intent
+#      is posted only when it targets the SELECTED issue, only with a label
+#      from the allowlist (needs-decision — never design-brief or
+#      autonomy-ok), and only within per-run caps (8 KiB/comment body,
+#      64 KiB payload). Bare ASCII SHIP-LOCK first lines and HTML comment
+#      markers are rejected. Off-issue and non-allowlisted intents are
+#      dropped with a ::warning::, never posted.
 #
 # Usage:
 #   scripts/design-run-deliver.sh --repo <owner/name> --issue <N> \
@@ -48,16 +69,21 @@
 #       [--push-url <url>] [--routine <design-run|backlog-burn>]
 #   scripts/design-run-deliver.sh --selftest
 #
-# The routine parameter adapts the per-routine wording and path policy only
-# (issue #863): design-run (the default, and the behavior before the flag
-# existed) delivers a design — only designs/ and single-file lib/ modules
-# may ship, and .github/.claude/scripts/tools never may — while backlog-burn
-# runs /ship-issue on arbitrary single-PR work (scripts/, tools/, …) so its
-# path policy is wider, BUT never `.github/**`: a delivered workflow under
-# `.github/workflows/` would run with repo secrets on the next push (the
-# residual HIGH on #863). Symlinks, case folding and `../` tricks that land
-# under `.github/` are refused the same way. An unknown routine is a usage
-# error.
+# The routine parameter adapts the per-routine wording and the *safe*
+# commit surface only (issues #863 / #869): design-run (the default, and
+# the behavior before the flag existed) delivers a design — only designs/
+# and single-file lib/ modules may be committed — while backlog-burn runs
+# /ship-issue and may commit any non-protected path (docs/, designs/,
+# people/, …). Both routines refuse the same protected prefixes —
+# `.github/**`, `.claude/**`, `scripts/**`, `tools/**` — and agent-
+# instruction paths at ANY depth after case-folding normalization:
+# `**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`, `**/.mcp.json`,
+# `**/.cursor/**`, `**/.cursorrules` — because a delivered workflow, hook,
+# CI script or agent instruction file would run with repo secrets on the
+# next push or agent session (Cipher on #869). Symlinks (including
+# absolute targets), case folding, `../`, backslashes and gitlinks that
+# land under a protected path are refused the same way. An unknown
+# routine is a usage error.
 #
 # Live mode needs GH_TOKEN to push and to open the PR (the design-run PAT,
 # so the draft triggers CI). COMMENT_TOKEN, when set, is the token for the
@@ -93,7 +119,9 @@ usage() {
 usage: scripts/design-run-deliver.sh --repo <owner/name> --issue <N>
            --base <sha> --base-branch <name> --run-url <url>
            [--push-url <url>] [--routine <design-run|backlog-burn>]
-           [--write-bundle <path> | --bundle <path> --bundle-sha256 <hex>]
+           [--write-bundle <path> [--write-intents <path>]
+            | --bundle <path> --bundle-sha256 <hex>]
+           [--apply-intents <path>]
        scripts/design-run-deliver.sh --selftest
 EOF
   exit 2
@@ -194,11 +222,11 @@ closes_issue() {
   printf '%s\n' "$1" | grep -qiP "\\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\\s+#${2}\\b"
 }
 
-# Normalize a repo-relative path for .github matching: lowercase, strip
-# empty/`.` segments, resolve `..`. Prints the normalized path. Returns 1
-# (and prints nothing) when the path is not a safe repo-relative name —
-# absolute, backslash, NUL/newline, or a `..` that escapes the root.
-# Callers fail closed: a failed normalize is treated as under `.github/`.
+# Normalize a repo-relative path for protected-prefix matching: lowercase,
+# strip empty/`.` segments, resolve `..`. Prints the normalized path.
+# Returns 1 (and prints nothing) when the path is not a safe repo-relative
+# name — absolute, backslash, NUL/newline, or a `..` that escapes the root.
+# Callers fail closed: a failed normalize is treated as protected.
 normalize_repo_path() {
   local raw="$1" part
   local -a parts out
@@ -224,20 +252,35 @@ normalize_repo_path() {
   printf '%s\n' "${out[*]}"
 }
 
-# Return 0 when $1 is `.github` or under it after normalization (case,
-# `./`, `../`). Fail closed: an unnormalizable path counts as under.
-is_under_dot_github() {
+# Return 0 when $1 is a protected delivery path after normalization
+# (case, `./`, `../`). Protected:
+#   prefixes: `.github`, `.claude`, `scripts`, `tools`
+#   agent-instruction files at ANY depth (bash `case` `*` matches `/`):
+#     `**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`, `**/.mcp.json`,
+#     `**/.cursorrules`, and `**/.cursor/**`
+# Filenames/dirs are matched lowercased because normalize_repo_path folds
+# case. Fail closed: an unnormalizable path counts as protected (issue #869).
+is_protected_path() {
   local norm
   norm="$(normalize_repo_path "$1")" || return 0
   case "$norm" in
-    .github|.github/*) return 0 ;;
+    .github|.github/*|.claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
+    # agent-instruction-path-drift (issue #869): any-depth, case-folded.
+    # Keep these patterns in sync with the drift guard in
+    # tools/model-registry/tests/test_workflow_drift.py.
+    claude.md|*/claude.md) return 0 ;;
+    claude.local.md|*/claude.local.md) return 0 ;;
+    agents.md|*/agents.md) return 0 ;;
+    .mcp.json|*/.mcp.json) return 0 ;;
+    .cursorrules|*/.cursorrules) return 0 ;;
+    .cursor|.cursor/*|*/.cursor|*/.cursor/*) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-# Return 0 when symlink at repo path $1 with target $2 resolves under
-# `.github/`. Absolute targets fail closed.
-symlink_points_under_dot_github() {
+# Return 0 when symlink at repo path $1 with target $2 resolves under a
+# protected prefix. Absolute targets and unnormalizable joins fail closed.
+symlink_points_under_protected() {
   local path="$1" target="$2" base joined
   [ -n "$target" ] || return 1
   case "$target" in
@@ -249,25 +292,30 @@ symlink_points_under_dot_github() {
   else
     joined="${base}/${target}"
   fi
-  is_under_dot_github "$joined"
+  is_protected_path "$joined"
 }
 
 # Paths the delivery commit may include. A first-party module is a single
 # file under lib/. A lib subdirectory is a vendored third-party tree and
-# stays on the runner, as does anything outside the design. backlog-burn
-# ships /ship-issue work of any shape outside `.github/**` (scripts/,
-# tools/, …); `.github/**` is never deliverable for either routine — a
-# workflow pushed with the PAT runs with repo secrets on the next check.
+# stays on the runner. Both routines refuse the protected prefixes
+# (`.github/**`, `.claude/**`, `scripts/**`, `tools/**`) and agent-
+# instruction paths at any depth (`**/CLAUDE.md`, `**/CLAUDE.local.md`,
+# `**/AGENTS.md`, `**/.mcp.json`, `**/.cursor/**`, `**/.cursorrules`) —
+# a workflow, hook, CI script or instruction file pushed with the PAT
+# runs with repo secrets on the next check or agent session (issues
+# #863 / #869). backlog-burn may still commit any other non-protected
+# path (docs/, designs/, people/, …); design-run stays designs/ +
+# single-file lib/ only.
 safe_path() {
   local target
-  if is_under_dot_github "$1"; then
+  if is_protected_path "$1"; then
     return 1
   fi
-  # A worktree symlink whose target resolves under .github/ (e.g.
-  # tools/hook -> ../.github/workflows/evil.yml) must not be staged.
+  # A worktree symlink whose target resolves under a protected prefix
+  # (e.g. docs/hook -> ../.claude/hooks/evil.sh) must not be staged.
   if [ -L "$1" ]; then
     target="$(readlink -- "$1" 2>/dev/null || true)"
-    if symlink_points_under_dot_github "$1" "$target"; then
+    if symlink_points_under_protected "$1" "$target"; then
       return 1
     fi
   fi
@@ -284,20 +332,20 @@ safe_path() {
 }
 
 # Paths a commit since the start SHA must not touch. Both routines refuse
-# `.github/**` (normalized — case / `../` / symlink target). design-run
-# additionally refuses .claude/, scripts/, tools/. backlog-burn may touch
-# those; refuse_open_nondraft, the delivery pin and CI still apply.
+# the same protected prefixes after normalization (case / `../` / symlink
+# target / gitlink path). refuse_open_nondraft, the delivery pin and CI
+# still apply on top. The intents file (.design-run-intents.json) is also
+# forbidden on every routine (case-folded like the other protected names):
+# it is a run-scoped handoff to settle, never repo state — a committed
+# copy would ride the delivered PR onto main and poison every later run
+# on that branch with a stale stop intent (#862).
 forbidden_path() {
-  if is_under_dot_github "$1"; then
-    return 0
-  fi
-  case "$ROUTINE" in
-    backlog-burn) return 1 ;;
+  local norm
+  norm="$(normalize_repo_path "$1")" || return 0
+  case "$norm" in
+    .design-run-intents.json) return 0 ;;
   esac
-  case "$1" in
-    .claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
-    *) return 1 ;;
-  esac
+  is_protected_path "$1"
 }
 
 # insteadOf rewrites the push URL. A value (or a key) can carry a token,
@@ -502,21 +550,33 @@ commit_safe_dirty() {
 # diffs a merge against each parent, so a protected path introduced inside
 # a merge and removed by a later merge is still listed. The NUL records
 # keep a newline inside a path from splitting the record.
-# If $2 exists at $1 as a symlink whose target resolves under .github/,
-# print a refusal and return 1. Missing / non-symlink paths are fine.
-refuse_symlink_into_dot_github() {
+# If $2 exists at $1 as a symlink whose target resolves under a protected
+# prefix, or as a gitlink (mode 160000) whose path is protected, print a
+# refusal and return 1. Missing / ordinary-blob paths are fine.
+refuse_symlink_or_gitlink_into_protected() {
   local tip="$1" path="$2" meta mode target
   meta="$(git_cmd ls-tree -z "$tip" -- "$path" 2>/dev/null | tr '\0' '\n' | head -n 1)"
   [ -n "$meta" ] || return 0
   mode="${meta%% *}"
-  [ "$mode" = "120000" ] || return 0
-  target="$(git_cmd cat-file -p "${tip}:${path}" 2>/dev/null || true)"
-  [ -n "$target" ] || return 0
-  if symlink_points_under_dot_github "$path" "$target"; then
-    echo "design-run-deliver: ${BASE}..HEAD symlink ${path} -> ${target} points under .github/ — refusing to push" >&2
-    return 1
-  fi
-  return 0
+  case "$mode" in
+    160000)
+      if is_protected_path "$path"; then
+        echo "design-run-deliver: ${BASE}..HEAD gitlink ${path} is under a protected prefix — refusing to push" >&2
+        return 1
+      fi
+      return 0
+      ;;
+    120000)
+      target="$(git_cmd cat-file -p "${tip}:${path}" 2>/dev/null || true)"
+      [ -n "$target" ] || return 0
+      if symlink_points_under_protected "$path" "$target"; then
+        echo "design-run-deliver: ${BASE}..HEAD symlink ${path} -> ${target} points under a protected prefix — refusing to push" >&2
+        return 1
+      fi
+      return 0
+      ;;
+    *) return 0 ;;
+  esac
 }
 
 refuse_forbidden_range() {  # $1 tip ref, default HEAD
@@ -533,7 +593,7 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
       echo "design-run-deliver: ${BASE}...HEAD touches ${path} — refusing to push" >&2
       return 1
     fi
-    if ! refuse_symlink_into_dot_github "$tip" "$path"; then
+    if ! refuse_symlink_or_gitlink_into_protected "$tip" "$path"; then
       rm -f "$diff_file" "$log_file"
       return 1
     fi
@@ -558,8 +618,8 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
           echo "design-run-deliver: ${BASE}..HEAD touches ${old} -> ${new} — refusing to push" >&2
           return 1
         fi
-        if ! refuse_symlink_into_dot_github "$tip" "$old" \
-            || ! refuse_symlink_into_dot_github "$tip" "$new"; then
+        if ! refuse_symlink_or_gitlink_into_protected "$tip" "$old" \
+            || ! refuse_symlink_or_gitlink_into_protected "$tip" "$new"; then
           rm -f "$diff_file" "$log_file"
           return 1
         fi
@@ -570,7 +630,7 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
           echo "design-run-deliver: ${BASE}..HEAD touches ${path} — refusing to push" >&2
           return 1
         fi
-        if ! refuse_symlink_into_dot_github "$tip" "$path"; then
+        if ! refuse_symlink_or_gitlink_into_protected "$tip" "$path"; then
           rm -f "$diff_file" "$log_file"
           return 1
         fi
@@ -720,28 +780,107 @@ finish() {  # delivered summary
 STOP_MARKER_DECLINED='🚢 DECLINED'
 STOP_MARKER_DECISION='🚦 DECISION NEEDED'
 STOP_MARKER_DEFERRED='🚢 DEFERRED'
+# Visible first line for humans. A comment is a lock ONLY when it also
+# carries SHIP_LOCK_HTML_MARKER and is authored by SHIP_LOCK_AUTHOR_LOGIN —
+# never because it merely starts with this string (Cipher, #864).
 STOP_LOCK_MARKER='🚢 SHIP-LOCK'
+# Hidden authenticity marker. Settle's lock writer emits it; intents reject
+# `<!--` so an applied intent can never forge a lock.
+SHIP_LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
+# Exact GitHub logins that may author a lock (space-separated; no generic
+# "[bot]" match). Cipher, #864:
+#   github-actions[bot] — settle apply-intents (GH_TOKEN=${{ github.token }})
+#   shaiss              — attended hand-run / PAT (repo owner)
+# cursor[bot] is NOT listed (shared Cursor App login — Bugbot, Security/
+# Approval Agents, every Cursor cloud agent). Attended runs post as shaiss
+# or not at all. backlog-burn can also post as shaiss (#872).
+SHIP_LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss'
+# Constant settle-claim body — built here, never from intent text.
+SHIP_LOCK_SETTLE_BODY="${STOP_LOCK_MARKER} — settle claim
+
+${SHIP_LOCK_HTML_MARKER}
+"
+
+# The agent's issue intents (item 9 above). The file name is the contract
+# with .claude/skills/design-run/SKILL.md and .gitignore; it is also in the
+# forbidden_path set so a committed copy refuses delivery.
+INTENTS_FILENAME='.design-run-intents.json'
+# Labels an intent may set, ever. design-brief and autonomy-ok are the
+# opt-in labels this pipeline exists to keep out of the agent's hands.
+INTENTS_ALLOWLIST='needs-decision'
+INTENTS_MAX_COMMENTS=8
+INTENTS_MAX_LABELS=2
+INTENTS_MAX_ENTRIES=32
+# Worktree / apply payload ceiling (64 KiB). write_intents drops an
+# oversize copy; apply_intents fails closed (Cipher LOW, #864).
+INTENTS_MAX_BYTES=65536
+# Per-comment body cap on apply (8 KiB). Fail closed per intent.
+INTENTS_BODY_MAX=8192
+
+# Normalize an intent comment body (stdin → stdout): Unicode NFKC, strip
+# every Cf (format) character including zero-width joiners/BOM, then
+# collapse whitespace per line. Exit 1 on any failure (fail closed).
+normalize_intent_body() {
+  python3 -c '
+import re, sys, unicodedata
+try:
+    text = unicodedata.normalize("NFKC", sys.stdin.read())
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    out = []
+    for line in text.splitlines():
+        out.append(re.sub(r"\s+", " ", line.strip()))
+    sys.stdout.write("\n".join(out))
+except Exception as exc:
+    print("normalize_intent_body: %s" % (exc,), file=sys.stderr)
+    sys.exit(1)
+'
+}
+
+# Return 0 when the normalized body (stdin) has any line matching
+# /ship[\s_-]*lock/i — the lock-spoof forms intents must never post.
+normalized_body_has_ship_lock() {
+  python3 -c '
+import re, sys
+pat = re.compile(r"ship[\s_-]*lock", re.I)
+text = sys.stdin.read()
+sys.exit(0 if any(pat.search(line) for line in text.splitlines()) else 1)
+'
+}
+
+# Post the settle SHIP-LOCK claim. Body is the SHIP_LOCK_SETTLE_BODY
+# constant — never intent text. Intents cannot forge the HTML marker.
+post_settle_ship_lock() {
+  local token="${COMMENT_TOKEN:-${GH_TOKEN:-}}"
+  if [ -z "$token" ]; then
+    echo "design-run-deliver: no token to post the settle SHIP-LOCK" >&2
+    exit 1
+  fi
+  if ! GH_TOKEN="$token" gh api --method POST "repos/${REPO}/issues/${ISSUE}/comments" \
+    -f body="$SHIP_LOCK_SETTLE_BODY" >/dev/null; then
+    echo "design-run-deliver: failed to post the settle SHIP-LOCK on #${ISSUE}" >&2
+    exit 1
+  fi
+  note "posted settle SHIP-LOCK on #${ISSUE}"
+}
 
 # stdin: one JSON array of {body, created_at, login, type} per line (one
 # gh --paginate page each). $1: this run's start (UTC ISO-8601), or empty.
 # Prints true when a this-run decline, decision-needed, or defer is on
 # the thread. The predicate is the lock-cleanup pair
-# (decline_indicated + deferred_indicated): after the latest SHIP-LOCK
-# when one exists, otherwise the latest comment, inside the job window,
-# from a Bot or the repo owner.
+# (decline_indicated + deferred_indicated): after the latest authentic
+# SHIP-LOCK (HTML marker + trusted author) when one exists, otherwise the
+# latest comment, inside the job window, from a Bot or the repo owner.
 hard_stop_from_comments() {  # [run-started-at]
-  jq -s --arg marker "$STOP_LOCK_MARKER" \
+  jq -s --arg html_marker "$SHIP_LOCK_HTML_MARKER" \
+    --arg settle_logins "$SHIP_LOCK_AUTHOR_LOGINS" \
     --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
     --arg d3 "$STOP_MARKER_DEFERRED" \
     --arg since "${1:-}" --arg owner "${REPO%%/*}" '
       def fl($b): ($b // "") | split("\n")
         | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
         | map(select(length > 0)) | (.[0] // "");
-      def latest_lock:
-        [ .[] | select(fl(.body) | startswith($marker)) ]
-        | if length == 0 then null
-          else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
-          end;
+      # Stops may come from github-actions[bot] (settle intents) or the
+      # repo owner (attended PAT). Locks use the named allowlist — see is_lock.
       def stop_trusted:
         ((.login // "") | length) > 0 and ((.type // "") | length) > 0
         and (
@@ -749,10 +888,28 @@ hard_stop_from_comments() {  # [run-started-at]
           or (($owner | length) > 0
               and ((.login | ascii_downcase) == ($owner | ascii_downcase)))
         );
+      def lock_logins:
+        ($settle_logins / " ") | map(select(length > 0) | ascii_downcase);
+      # A lock is the HTML marker PLUS an allowlisted login — never a bare
+      # SHIP-LOCK first line, never an unlisted Bot (Cipher, #864).
+      def is_lock:
+        ((.body // "") | contains($html_marker))
+        and (((.login // "") | ascii_downcase) as $l
+             | (lock_logins | index($l)) != null);
+      def latest_lock:
+        [ .[] | select(is_lock) ]
+        | if length == 0 then null
+          else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
+          end;
       def in_window: ($since | length) == 0 or .created_at > $since;
+      # Same-second ties (GitHub created_at is second-precision) break by
+      # higher comment id — settle skip-lock can post contract then DECLINED
+      # in one second (Bugbot MED, #864); keep in sync with
+      # routine-lock-cleanup.sh JQ_THIS_RUN. sort_by keeps the last of equal
+      # keys, so higher id wins (missing id sorts as 0).
       def claimless_stop(is_stop):
         if ($since | length) == 0 or length == 0 then false
-        else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
+        else (sort_by(.created_at, ((.id // 0) | tonumber)) | last)
              | (fl(.body) | is_stop) and (.created_at > $since) and stop_trusted
         end;
       def indicated(pred):
@@ -783,7 +940,7 @@ fetch_issue_comments() {
     return 1
   fi
   GH_TOKEN="$token" gh api --paginate "repos/${REPO}/issues/${ISSUE}/comments?per_page=100" \
-    --jq '[.[] | {body: (.body // ""), created_at: .created_at, login: (.user.login // ""), type: (.user.type // "")}]'
+    --jq '[.[] | {body: (.body // ""), created_at: .created_at, login: (.user.login // ""), type: (.user.type // ""), id: (.id // 0)}]'
 }
 
 # A this-run hard stop is not a delivery. Exit 0 with delivered=false and
@@ -802,6 +959,240 @@ refuse_if_hard_stop() {
   if [ "$verdict" = "true" ]; then
     finish false "a DECLINED, DECISION NEEDED, or DEFERRED comment from this run is on #${ISSUE} — nothing pushed"
   fi
+}
+
+# A stop can no longer arrive as a comment from the agent (issues: read),
+# so the bundle step also reads the agent's intents file: a comment intent
+# on the selected issue whose first non-empty body line leads with a stop
+# marker is the same hard stop refuse_if_hard_stop reads on the thread.
+# A malformed or missing file indicates nothing (the applier warns on it
+# separately); this predicate never fails the run.
+# $1 optional path (default INTENTS_FILENAME). True when a selected-issue
+# comment intent leads with a stop marker.
+intents_stop_indicated() {
+  local f="${1:-${INTENTS_FILENAME}}"
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  jq -e --arg issue "$ISSUE" \
+    --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
+    --arg d3 "$STOP_MARKER_DEFERRED" '
+    def fl($b): ($b // "") | split("\n")
+      | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+      | map(select(length > 0)) | (.[0] // "");
+    [ (.intents // [])[]
+      | select(((.issue // 0) | tostring) == $issue)
+      | select((.action // "") == "comment")
+      | fl(.body)
+      | select(startswith($d1) or startswith($d2) or startswith($d3)) ]
+    | length > 0
+  ' "$f" >/dev/null 2>&1
+}
+
+# Copy the agent's worktree intents file to $WRITE_INTENTS for the trusted
+# upload. Content is NOT judged here — settle's applier does that — so a
+# malformed file still travels (its ::warning:: is the visible trace that an
+# intent was lost). Only the file being unreadable, huge, or a symlink is an
+# error. Returns (does not exit) so --write-bundle still follows.
+write_intents() {
+  rm -f "$WRITE_INTENTS"
+  local src="${INTENTS_FILENAME}" size
+  if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+    return 0
+  fi
+  if [ -L "$src" ] || [ ! -f "$src" ]; then
+    echo "design-run-deliver: ${src} is not a regular file — refusing to copy intents" >&2
+    exit 1
+  fi
+  size="$(wc -c < "$src" | tr -d '[:space:]')"
+  case "$size" in
+    ''|*[!0-9]*)
+      echo "design-run-deliver: could not size ${src}" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$size" -gt "$INTENTS_MAX_BYTES" ]; then
+    echo "design-run-deliver: ${src} is ${size} bytes (over ${INTENTS_MAX_BYTES}) — intents dropped" >&2
+    return 0
+  fi
+  if [ -L "$WRITE_INTENTS" ]; then
+    echo "design-run-deliver: refusing to write intents through a symlink" >&2
+    exit 1
+  fi
+  cat -- "$src" > "$WRITE_INTENTS" || {
+    echo "design-run-deliver: could not copy ${src}" >&2
+    exit 1
+  }
+}
+
+# Apply the agent's issue intents (settle job, trusted artifact download).
+# Posts the settle SHIP-LOCK claim (constant body with HTML marker)
+# first, then applies intents. One intent posts only when: it targets THIS
+# issue, its action is comment or label, its label is in INTENTS_ALLOWLIST,
+# and the per-run caps hold. Comment bodies are NFKC-normalized (Cf stripped,
+# whitespace collapsed) before the ship-lock regex; HTML comment markers and
+# oversize bodies are rejected (Cipher, #864). Everything else is dropped
+# with a ::warning:: naming why. Exit 0 for agent-side problems (the run's
+# disposition comes from the thread, not from here); exit 1 only for an
+# unreadable/oversized file, a normalizer failure, or broken arguments —
+# an applier that cannot read its input must not look like "no intents".
+apply_intents() {
+  local path="$1" n i applied=0 rejected=0 comments=0 labels=0
+  local intent_issue action body label size normalized
+  if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
+    echo "design-run-deliver: issue must be numeric, got '${ISSUE}'" >&2
+    exit 2
+  fi
+  if [ -L "$path" ]; then
+    echo "design-run-deliver: refusing to apply intents through a symlink" >&2
+    exit 1
+  fi
+  if [ ! -f "$path" ]; then
+    echo "design-run-deliver: intents file '${path}' is missing or not a regular file" >&2
+    exit 1
+  fi
+  size="$(wc -c < "$path" | tr -d '[:space:]')"
+  case "$size" in
+    ''|*[!0-9]*)
+      echo "design-run-deliver: could not size intents file '${path}'" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$size" -gt "$INTENTS_MAX_BYTES" ]; then
+    echo "design-run-deliver: intents file '${path}' is ${size} bytes (over ${INTENTS_MAX_BYTES}) — refusing to apply" >&2
+    exit 1
+  fi
+  if ! jq -e --argjson max "$INTENTS_MAX_ENTRIES" '
+    (type == "object") and (.version == 1) and (.intents | type == "array")
+    and ((.intents | length) <= $max)
+  ' "$path" >/dev/null 2>&1; then
+    echo "::warning::intents file is malformed (want {version:1,intents:[...]} of at most '${INTENTS_MAX_ENTRIES}' entries) — no intents applied" >&2
+    exit 0
+  fi
+  # Settle claim: constant body, never intent text. Skip when intents
+  # already carry a stop (DECLINED / DECISION NEEDED / DEFERRED) — posting
+  # a lock then would leave an active claim that cleanup treats as
+  # declined-after-claim and does not withdraw (Bugbot MED, #864).
+  if intents_stop_indicated "$path"; then
+    note "skipping settle SHIP-LOCK — intents carry a stop marker on #${ISSUE}"
+  else
+    post_settle_ship_lock
+  fi
+  n="$(jq '.intents | length' "$path")"
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    if ! intent_issue="$(jq -r --argjson i "$i" '.intents[$i].issue // "" | if type == "number" then tostring else . end' "$path")" \
+      || ! action="$(jq -r --argjson i "$i" '.intents[$i].action // ""' "$path")"; then
+      echo "::warning::intents entry ${i} is unreadable — skipped" >&2
+      rejected=$((rejected + 1))
+      i=$((i + 1))
+      continue
+    fi
+    if ! [[ "$intent_issue" =~ ^[0-9]+$ ]] || [ "$intent_issue" != "$ISSUE" ]; then
+      echo "::warning::intent ${i} targets issue '${intent_issue}', not the selected #${ISSUE} — rejected (off-issue writes are the attack #862 closes)" >&2
+      rejected=$((rejected + 1))
+      i=$((i + 1))
+      continue
+    fi
+    case "$action" in
+      comment)
+        if ! body="$(jq -r --argjson i "$i" '.intents[$i].body // ""' "$path")"; then
+          echo "::warning::comment intent ${i} is unreadable — skipped" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
+        local blen
+        blen="$(printf '%s' "$body" | wc -c | tr -d '[:space:]')"
+        if [ -z "$body" ] || [ "${blen:-0}" -gt "$INTENTS_BODY_MAX" ]; then
+          echo "::warning::comment intent ${i} has an empty or over-length body (cap ${INTENTS_BODY_MAX} bytes) — rejected" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
+        case "$body" in
+          *'<!--'*|*'-->'*)
+            echo "::warning::comment intent ${i} contains an HTML comment marker — rejected" >&2
+            rejected=$((rejected + 1))
+            i=$((i + 1))
+            continue
+            ;;
+        esac
+        if ! normalized="$(printf '%s' "$body" | normalize_intent_body)"; then
+          echo "design-run-deliver: comment intent ${i}: body normalizer failed — refusing to apply" >&2
+          exit 1
+        fi
+        if printf '%s' "$normalized" | normalized_body_has_ship_lock; then
+          echo "::warning::comment intent ${i} matches ship-lock after normalization — rejected (intents cannot author a lock; see #872 for burn residual)" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
+        if [ "$comments" -ge "$INTENTS_MAX_COMMENTS" ]; then
+          echo "::warning::comment intent ${i} exceeds the ${INTENTS_MAX_COMMENTS}-comment cap — rejected" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
+        if ! gh api --method POST "repos/${REPO}/issues/${ISSUE}/comments" \
+          -f body="$body" >/dev/null; then
+          echo "::warning::comment intent ${i} failed to post on #${ISSUE}" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
+        comments=$((comments + 1))
+        applied=$((applied + 1))
+        ;;
+      label)
+        if ! label="$(jq -r --argjson i "$i" '.intents[$i].label // ""' "$path")"; then
+          echo "::warning::label intent ${i} is unreadable — skipped" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
+        local allowed=0 wl
+        for wl in $INTENTS_ALLOWLIST; do
+          [ "$label" = "$wl" ] && allowed=1
+        done
+        if [ "$allowed" -ne 1 ]; then
+          echo "::warning::label intent ${i} names '${label}', which is not in the allowlist (${INTENTS_ALLOWLIST}) — rejected" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
+        if [ "$labels" -ge "$INTENTS_MAX_LABELS" ]; then
+          echo "::warning::label intent ${i} exceeds the ${INTENTS_MAX_LABELS}-label cap — rejected" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
+        # Ensure-then-add (the §9 idiom): create the label if this repo has
+        # none yet, then attach it to the selected issue.
+        if ! gh api "repos/${REPO}/labels/${label}" >/dev/null 2>&1; then
+          if ! gh api --method POST "repos/${REPO}/labels" -f name="$label" -f color=d876e3 >/dev/null; then
+            echo "::warning::label intent ${i}: '${label}' is absent and could not be created — skipped" >&2
+            rejected=$((rejected + 1))
+            i=$((i + 1))
+            continue
+          fi
+        fi
+        if ! gh api --method POST "repos/${REPO}/issues/${ISSUE}/labels" -f "labels[]=${label}" >/dev/null; then
+          echo "::warning::label intent ${i} failed to add '${label}' on #${ISSUE}" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
+        labels=$((labels + 1))
+        applied=$((applied + 1))
+        ;;
+      *)
+        echo "::warning::intent ${i} has action '${action}' (want comment or label) — rejected" >&2
+        rejected=$((rejected + 1))
+        ;;
+    esac
+    i=$((i + 1))
+  done
+  note "applied ${applied} issue intent(s) on #${ISSUE} (${comments} comment(s), ${labels} label(s)); ${rejected} rejected"
+  exit 0
 }
 
 # Read `git bundle verify` output. One contained ref. START_SHA (BASE)
@@ -925,6 +1316,11 @@ write_bundle() {
   if ! refuse_if_hard_stop; then
     exit 1
   fi
+  # The agent could not post its stop as a comment (issues: read), so the
+  # same markers are read from its intents file before anything is bundled.
+  if intents_stop_indicated; then
+    finish false "a DECLINED, DECISION NEEDED, or DEFERRED intent is in ${INTENTS_FILENAME} — nothing pushed"
+  fi
   commit_safe_dirty
   if ! git_cmd cat-file -e "${BASE}^{commit}" 2>/dev/null; then
     echo "design-run-deliver: base ${BASE} is not a commit in this checkout" >&2
@@ -965,6 +1361,16 @@ run_live() {
   if ! refuse_hostile_local_config || ! refuse_url_rewrites; then
     emit delivered false
     exit 1
+  fi
+  if [ -n "$APPLY_INTENTS" ]; then
+    apply_intents "$APPLY_INTENTS"
+  fi
+  # The intents copy happens before write_bundle on purpose: write_bundle
+  # exits on its no-delivery paths (including an intents stop), and the
+  # intents still owe settle their comments — a decline travels even when
+  # (especially when) no bundle is written.
+  if [ -n "$WRITE_INTENTS" ]; then
+    write_intents
   fi
   if [ -n "$WRITE_BUNDLE" ]; then
     write_bundle
@@ -1773,6 +2179,358 @@ p.write_bytes(data)
     exit 1
   }
 
+  # Issue intents (item 9). The settle job's --apply-intents is the only
+  # issue-writing surface left in the pipeline: an intent posts only when
+  # it targets the SELECTED issue and its label is allowlisted. Every case
+  # below drives the real entrypoint against the recording fake gh.
+  local isrc ibase ifile stderr rc
+  isrc="${tmp}/isrc"
+  mkdir -p "$isrc"
+  git_cmd -C "$isrc" init -b main >/dev/null
+  git_cmd -C "$isrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m base >/dev/null
+  ibase="$(git_cmd -C "$isrc" rev-parse HEAD)"
+  run_intents() {  # $1 intents file, $2 expected exit. Captures stderr+rc.
+    : > "${tmp}/gh.log"
+    set +e
+    stderr="$(env PATH="${tmp}/bin:${PATH}" GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$isrc" \
+      "$SELF" --repo acme/print-bench --issue 853 --base "$ibase" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --apply-intents "$1" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    if [ "$rc" -ne "$2" ]; then
+      echo "selftest: apply-intents $1 exited ${rc}, expected ${2}" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    fi
+  }
+  comment_posts() {
+    grep -c -- 'api --method POST repos/acme/print-bench/issues/853/comments' "${tmp}/gh.log" || true
+  }
+  label_posts() {
+    grep -c -- 'api --method POST repos/acme/print-bench/issues/853/labels' "${tmp}/gh.log" || true
+  }
+
+  # Happy path: settle posts its constant SHIP-LOCK first, then the
+  # agent's non-lock comments and a needs-decision label, in file order.
+  # SHIP-LOCK must never appear in intent text (rejected below).
+  ifile="${tmp}/intents-happy.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"Acceptance contract body"},
+ {"issue":853,"action":"comment","body":"Amendment body"},
+ {"issue":853,"action":"label","label":"needs-decision"}
+]}
+EOF
+  run_intents "$ifile" 0
+  # settle lock + 2 intent comments
+  [ "$(comment_posts)" -eq 3 ] || { echo "selftest: happy intents did not post settle lock + both comments (posted $(comment_posts))" >&2; exit 1; }
+  [ "$(label_posts)" -eq 1 ] || { echo "selftest: happy intents did not post the label" >&2; exit 1; }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" || {
+    echo "selftest: settle SHIP-LOCK did not carry the HTML authenticity marker" >&2
+    exit 1
+  }
+  grep -qF -- "$STOP_LOCK_MARKER — settle claim" "${tmp}/gh.log" || {
+    echo "selftest: settle SHIP-LOCK did not use the constant visible line" >&2
+    exit 1
+  }
+  settle_line="$(grep -nF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  contract_line="$(grep -n -- 'Acceptance contract body' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  amend_line="$(grep -n -- 'Amendment body' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  [ -n "$settle_line" ] && [ -n "$contract_line" ] && [ -n "$amend_line" ] \
+    && [ "$settle_line" -lt "$contract_line" ] && [ "$contract_line" -lt "$amend_line" ] || {
+    echo "selftest: settle lock / comments were not posted in order" >&2
+    exit 1
+  }
+  grep -q -- 'labels\[\]=needs-decision' "${tmp}/gh.log" || {
+    echo "selftest: the label intent did not add needs-decision" >&2
+    exit 1
+  }
+
+  # THE #862 case: an off-issue label intent must be rejected — never
+  # posted, no matter what it names.
+  ifile="${tmp}/intents-offissue-label.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":999,"action":"label","label":"needs-decision"},
+ {"issue":853,"action":"comment","body":"on-issue comment survives"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(label_posts)" -eq 0 ] || { echo "selftest: an off-issue label intent was posted" >&2; exit 1; }
+  # settle lock + the surviving on-issue comment
+  [ "$(comment_posts)" -eq 2 ] || { echo "selftest: the on-issue comment was dropped with the off-issue label (posted $(comment_posts))" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q "targets issue '999', not the selected #853" || {
+    echo "selftest: the off-issue rejection did not name the reason" >&2
+    exit 1
+  }
+
+  # Off-issue comment intents are rejected the same way.
+  ifile="${tmp}/intents-offissue-comment.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":999,"action":"comment","body":"off-issue spoof body"}
+]}
+EOF
+  run_intents "$ifile" 0
+  # settle lock only — the off-issue comment never posts
+  [ "$(comment_posts)" -eq 1 ] || { echo "selftest: an off-issue comment intent was posted (posted $(comment_posts))" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q "targets issue '999'" || {
+    echo "selftest: the off-issue comment rejection did not name the reason" >&2
+    exit 1
+  }
+
+  # An allowlist rejection: autonomy-ok on the SELECTED issue — the exact
+  # injection the finding describes — still never posts.
+  ifile="${tmp}/intents-badlabel.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"label","label":"autonomy-ok"},
+ {"issue":853,"action":"label","label":"design-brief"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(label_posts)" -eq 0 ] || { echo "selftest: a non-allowlisted label intent was posted" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q "not in the allowlist" || {
+    echo "selftest: the allowlist rejection did not name the reason" >&2
+    exit 1
+  }
+
+  # Caps: nine comment intents post eight.
+  ifile="${tmp}/intents-cap.json"
+  {
+    printf '%s\n' '{"version":1,"intents":['
+    for ci in 1 2 3 4 5 6 7 8 9; do
+      printf ' {"issue":853,"action":"comment","body":"c%d"}%s\n' "$ci" "$([ "$ci" -lt 9 ] && echo , || echo '')"
+    done
+    printf '%s\n' ']}'
+  } > "$ifile"
+  run_intents "$ifile" 0
+  # settle lock + 8 capped comments
+  [ "$(comment_posts)" -eq 9 ] || { echo "selftest: the comment cap did not hold (posted $(comment_posts))" >&2; exit 1; }
+
+  # Cipher (#864): every ship-lock shape is rejected after NFKC / Cf-strip /
+  # whitespace collapse — including emoji, case, separators, zero-width,
+  # fullwidth, and non-first-line forms. Settle still posts its own lock.
+  reject_shiplock_case() {  # $1 name, $2 body
+    ifile="${tmp}/intents-sl-$1.json"
+    jq -n --arg b "$2" \
+      '{"version":1,"intents":[{"issue":853,"action":"comment","body":$b},{"issue":853,"action":"comment","body":"safe sibling survives"}]}' \
+      > "$ifile"
+    run_intents "$ifile" 0
+    # settle lock + safe sibling only
+    [ "$(comment_posts)" -eq 2 ] || {
+      echo "selftest: ship-lock case '$1' was not rejected (posted $(comment_posts))" >&2
+      exit 1
+    }
+    grep -q -- 'safe sibling survives' "${tmp}/gh.log" || {
+      echo "selftest: ship-lock case '$1' dropped its safe sibling" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q 'matches ship-lock after normalization' || {
+      echo "selftest: ship-lock case '$1' did not name the reason" >&2
+      exit 1
+    }
+  }
+  reject_shiplock_case emoji $'🚢 SHIP-LOCK — claim via intent'
+  reject_shiplock_case lower 'ship-lock spoof'
+  reject_shiplock_case spaced 'ship lock spoof'
+  reject_shiplock_case underscored 'ship_lock spoof'
+  # U+200B zero-width space inside SHIP-LOCK
+  reject_shiplock_case zwsp "$(python3 -c 'print("SHIP\u200b-LOCK spoof")')"
+  # Fullwidth ＳＨＩＰ－ＬＯＣＫ (NFKC → SHIP-LOCK)
+  reject_shiplock_case fullwidth "$(python3 -c 'print("\uff33\uff28\uff29\uff30\uff0d\uff2c\uff2f\uff23\uff2b spoof")')"
+  reject_shiplock_case line2 $'preamble\nSHIP-LOCK on line two'
+
+  # Cipher / Bugbot MED (#864): a DECLINED-only intents payload must NOT
+  # post a settle lock (cleanup would leave it active as declined-after-claim).
+  ifile="${tmp}/intents-declined-only.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\n\nparked"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(comment_posts)" -eq 1 ] || {
+    echo "selftest: DECLINED-only intents posted settle lock (posted $(comment_posts))" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+    echo "selftest: DECLINED-only intents still posted the settle SHIP-LOCK marker" >&2
+    exit 1
+  }
+  grep -q -- 'DECLINED — needs a decision' "${tmp}/gh.log" || {
+    echo "selftest: DECLINED-only intents did not post the stop comment" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK' || {
+    echo "selftest: DECLINED-only path did not note skipping the settle lock" >&2
+    exit 1
+  }
+
+  # Cipher (#864): HTML comment markers anywhere in the body → reject.
+  ifile="${tmp}/intents-html-comment.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"visible <!-- hidden --> text"},
+ {"issue":853,"action":"comment","body":"trailing -->"},
+ {"issue":853,"action":"comment","body":"no markers here"}
+]}
+EOF
+  run_intents "$ifile" 0
+  # settle lock + no-markers sibling
+  [ "$(comment_posts)" -eq 2 ] || { echo "selftest: HTML-marker bodies were not rejected (posted $(comment_posts))" >&2; exit 1; }
+  grep -q -- 'no markers here' "${tmp}/gh.log" || {
+    echo "selftest: the sibling of an HTML-marker body was dropped" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'HTML comment marker' || {
+    echo "selftest: HTML-marker rejection did not name the reason" >&2
+    exit 1
+  }
+
+  # Cipher (#864): per-comment 8 KiB body cap, and a 64 KiB apply-side
+  # payload ceiling that fails closed (exit 1) before any intent posts.
+  ifile="${tmp}/intents-body-cap.json"
+  big="$(printf 'x%.0s' {1..8193})"
+  jq -n --arg b "$big" \
+    '{"version":1,"intents":[{"issue":853,"action":"comment","body":$b},{"issue":853,"action":"comment","body":"tiny"}]}' \
+    > "$ifile"
+  run_intents "$ifile" 0
+  # settle lock + tiny
+  [ "$(comment_posts)" -eq 2 ] || { echo "selftest: over-length comment body was posted (posted $(comment_posts))" >&2; exit 1; }
+  grep -q -- 'tiny' "${tmp}/gh.log" || {
+    echo "selftest: the sibling of an over-length body was dropped" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'over-length body' || {
+    echo "selftest: over-length body rejection did not name the reason" >&2
+    exit 1
+  }
+
+  ifile="${tmp}/intents-file-huge.json"
+  # A valid envelope padded past INTENTS_MAX_BYTES — apply must refuse
+  # before posting, even though the JSON itself would otherwise parse.
+  printf '%s' '{"version":1,"intents":[{"issue":853,"action":"comment","body":"pad"}]}' > "$ifile"
+  # shellcheck disable=SC2188
+  dd if=/dev/zero bs=1 count=70000 >> "$ifile" 2>/dev/null
+  run_intents "$ifile" 1
+  [ "$(comment_posts)" -eq 0 ] || {
+    echo "selftest: an oversized intents file still posted" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'refusing to apply' || {
+    echo "selftest: an oversized intents file did not fail closed" >&2
+    exit 1
+  }
+
+  # A malformed file applies nothing and does not fail the settle job.
+  printf '%s\n' '{not json' > "${tmp}/intents-malformed.json"
+  run_intents "${tmp}/intents-malformed.json" 0
+  [ "$(comment_posts)" -eq 0 ] && [ "$(label_posts)" -eq 0 ] || {
+    echo "selftest: a malformed intents file still posted" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'intents file is malformed' || {
+    echo "selftest: a malformed intents file did not warn" >&2
+    exit 1
+  }
+
+  # A missing file is an infra failure (exit 1), never a silent no-op.
+  run_intents "${tmp}/intents-absent.json" 1
+  printf '%s\n' "$stderr" | grep -q 'missing or not a regular file' || {
+    echo "selftest: a missing intents file did not fail loudly" >&2
+    exit 1
+  }
+
+  # The write side. --write-bundle refuses to bundle when the agent's
+  # intents carry a stop marker for the selected issue, and --write-intents
+  # still copies the file so settle can post the decline.
+  local ssrc sbase sfile sint
+  ssrc="${tmp}/ssrc"
+  sfile="${tmp}/stop.bundle"
+  sint="${tmp}/stop-intents.json"
+  mkdir -p "$ssrc/designs/nuggs-ladder"
+  git_cmd -C "$ssrc" init -b main >/dev/null
+  git_cmd -C "$ssrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  sbase="$(git_cmd -C "$ssrc" rev-parse HEAD)"
+  git_cmd -C "$ssrc" checkout -b claude/issue-853-nuggs-ladder >/dev/null
+  printf 'work\n' > "$ssrc/designs/nuggs-ladder/work.scad"
+  git_cmd -C "$ssrc" -c user.email=t@example.com -c user.name=t add -- designs/nuggs-ladder/work.scad
+  git_cmd -C "$ssrc" -c user.email=t@example.com -c user.name=t commit -m work >/dev/null
+  cat > "$sint" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\n\nThe brief asks for two deliverables."},
+ {"issue":999,"action":"comment","body":"🚢 DECLINED — off-issue stop must not count"}
+]}
+EOF
+  cp "$sint" "$ssrc/.design-run-intents.json"
+  # The thread fixture would refuse via refuse_if_hard_stop for its own
+  # reason; these cases test the intents channel alone.
+  rm -f "${tmp}/comments.json"
+  set +e
+  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$ssrc" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$sbase" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --write-intents "${tmp}/stop-intents-copy.json" \
+    --write-bundle "$sfile" >/dev/null
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || { echo "selftest: intents stop exited ${rc}, expected 0" >&2; exit 1; }
+  [ ! -f "$sfile" ] || { echo "selftest: a stop intent still wrote a bundle" >&2; exit 1; }
+  [ -f "${tmp}/stop-intents-copy.json" ] || { echo "selftest: the stop run did not copy its intents" >&2; exit 1; }
+
+  # A stop aimed at a DIFFERENT issue does not stop the bundle (the
+  # off-issue half of the same rule), and a healthy intents file does not
+  # stop it either.
+  rm -f "$sfile" "${tmp}/stop-intents-copy.json" "$ssrc/.design-run-intents.json" "${tmp}/comments.json"
+  cat > "$ssrc/.design-run-intents.json" <<'EOF'
+{"version":1,"intents":[
+ {"issue":999,"action":"comment","body":"🚢 DECLINED — other issue"},
+ {"issue":853,"action":"comment","body":"Progress note, not a stop"}
+]}
+EOF
+  set +e
+  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$ssrc" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$sbase" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --write-intents "${tmp}/stop-intents-copy.json" \
+    --write-bundle "$sfile" >/dev/null
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] && [ -f "$sfile" ] || { echo "selftest: an off-issue stop suppressed the bundle (exit ${rc})" >&2; exit 1; }
+
+  # A COMMITTED intents file refuses the delivery outright: it must never
+  # ride the PR onto main.
+  rm -f "$sfile" "$ssrc/.design-run-intents.json" "${tmp}/comments.json"
+  cat > "$ssrc/.design-run-intents.json" <<'EOF'
+{"version":1,"intents":[{"issue":853,"action":"comment","body":"stale"}]}
+EOF
+  git_cmd -C "$ssrc" -c user.email=t@example.com -c user.name=t add -- .design-run-intents.json
+  git_cmd -C "$ssrc" -c user.email=t@example.com -c user.name=t commit -m 'stale intents' >/dev/null
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$ssrc" \
+    "$SELF" --repo acme/print-bench --issue 853 --base "$sbase" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --write-bundle "$sfile" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || { echo "selftest: a committed intents file exited ${rc}, expected 1" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'design-run-intents.json' || {
+    echo "selftest: a committed intents file did not name the refusal" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  [ ! -f "$sfile" ] || { echo "selftest: a committed intents file still bundled" >&2; exit 1; }
+
   # Accept: a depth-1 clone merges newer main. Newer main itself merges a
   # side branch forked before START_SHA. The bundle is what --write-bundle
   # writes (`^START_SHA refs/heads/<branch>`), not a hand-built `^mmain`
@@ -2032,8 +2790,10 @@ p.write_bytes(data)
   git_cmd clone -b main "${tmp}/hhist.git" "$hdel" >/dev/null
   git_cmd init -b main --bare "$hbare" >/dev/null
   plant_stop() {  # body, login, type, created_at
+    # Authentic settle lock: visible line + HTML marker + settle login.
     jq -n --arg body "$1" --arg login "$2" --arg type "$3" --arg at "$4" \
-      '[{body:"🚢 SHIP-LOCK\n\nclaimed",created_at:"2026-10-19T00:00:00Z",login:"acme",type:"User"},
+      --arg lock "$SHIP_LOCK_SETTLE_BODY" \
+      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"github-actions[bot]",type:"Bot"},
         {body:$body,created_at:$at,login:$login,type:$type}]' > "${tmp}/comments.json"
   }
   for marker in '🚢 DECLINED — needs a decision' '🚦 DECISION NEEDED — bay-width' '🚢 DEFERRED — dependencies'; do
@@ -2058,6 +2818,66 @@ p.write_bytes(data)
       exit 1
     }
   done
+  # Cipher (#864): a comment that merely starts with SHIP-LOCK / 🚢 SHIP-LOCK
+  # but lacks the HTML authenticity marker is NOT a lock — hard-stop stays
+  # claimless (the later stop still fires as claimless). REPO must be set so
+  # author_trusted can match the owner login.
+  REPO=acme/print-bench
+  jq -n --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+    '[{body:"🚢 SHIP-LOCK\n\nspoofed without marker",created_at:"2026-10-19T00:00:00Z",login:"acme",type:"User"},
+      {body:$body,created_at:"2026-10-19T01:00:00Z",login:"acme",type:"User"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+    echo "selftest: claimless stop after a marker-less SHIP-LOCK did not fire" >&2
+    exit 1
+  }
+  # Settle-written claim (marker + trusted author) IS a lock: a stop after
+  # it is indicated; the same stop before the window is not.
+  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+    '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"github-actions[bot]",type:"Bot"},
+      {body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+    echo "selftest: settle-written SHIP-LOCK was not treated as a lock" >&2
+    exit 1
+  }
+  # Marker present but untrusted author → not a lock.
+  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" \
+    '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"attacker",type:"User"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+    echo "selftest: marker+untrusted-author was treated as a lock" >&2
+    exit 1
+  }
+  # Allowlisted logins (settle + attended shaiss) count.
+  for ok_login in 'github-actions[bot]' 'shaiss'; do
+    jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg login "$ok_login" \
+      --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:$login,type:(if $login=="shaiss" then "User" else "Bot" end)},
+        {body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
+      > "${tmp}/comments.json"
+    [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+      echo "selftest: marker+${ok_login} was not treated as a lock" >&2
+      exit 1
+    }
+  done
+  # cursor[bot] must NOT count — shared Cursor App (Bugbot / agents).
+  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" \
+    '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"cursor[bot]",type:"Bot"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+    echo "selftest: marker+cursor[bot] was treated as a lock" >&2
+    exit 1
+  }
+  # Unlisted Bot (claude[bot]) must NOT count — no generic [bot] match.
+  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" \
+    '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"claude[bot]",type:"Bot"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+    echo "selftest: marker+claude[bot] was treated as a lock" >&2
+    exit 1
+  }
+
   # Bot author, claimless (no lock): still this run's stop.
   jq -n --arg body $'🚦 DECISION NEEDED — bay-width\n\nstop' \
     '[{body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
@@ -2075,6 +2895,28 @@ p.write_bytes(data)
   set -e
   [ "$rc" -eq 0 ] && [ ! -e "${tmp}/stop.bundle" ] || {
     echo "selftest: claimless bot decision was delivered (exit ${rc})" >&2
+    exit 1
+  }
+  # Same-second contract + DECLINED (skip-lock settle): higher id wins so
+  # the stop still fires as claimless (Bugbot MED, #864).
+  jq -n \
+    '[{body:"**Design name:** widget\n\n**Gate contract**\n- [ ] G1",
+       created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:100},
+      {body:"🚢 DECLINED — needs a decision\n\nstop",
+       created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:101}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+    echo "selftest: same-second claimless contract+DECLINED (stop higher id) did not fire" >&2
+    exit 1
+  }
+  jq -n \
+    '[{body:"🚢 DECLINED — needs a decision\n\nstop",
+       created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:100},
+      {body:"**Design name:** widget\n\n**Gate contract**\n- [ ] G1",
+       created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:101}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+    echo "selftest: same-second DECLINED followed by higher-id contract still fired as stop" >&2
     exit 1
   }
   # Outsider marker does not stop the run. The bundle is written.
@@ -2422,6 +3264,129 @@ p.write_bytes(data)
     echo "selftest: the bundle step run block mentions GH_TOKEN" >&2
     exit 1
   fi
+
+  # #862: the agent job must not carry issues: write — the whole fix. The
+  # run job may READ the thread (the selector snapshot and the hard-stop
+  # read), but a comment or label POST has to 403. The pins read the
+  # permissions STANZA, not the job's prose — a comment saying "no
+  # issues: write" must be able to exist without failing (or satisfying)
+  # the check.
+  local run_job run_perms
+  run_job="$(awk '
+    /^  run:/ { printing = 1 }
+    printing && /^  [A-Za-z]/ && !/^  run:/ { exit }
+    printing { print }
+  ' "$workflow")"
+  [ -n "$run_job" ] || { echo "selftest: could not extract the run job" >&2; exit 1; }
+  run_perms="$(awk '/^    permissions:/ { p = 1; next } p && /^      [-a-z]+:/ { print; next } p && /^      #/ { next } p { exit }' <<<"$run_job")"
+  grep -q 'issues: read' <<<"$run_perms" || {
+    echo "selftest: the run job cannot read issues (the selector snapshot needs it)" >&2
+    exit 1
+  }
+  if grep -q 'issues: write' <<<"$run_perms"; then
+    echo "selftest: the agent job still carries issues: write — the #862 injection is open" >&2
+    exit 1
+  fi
+  # The intents file is captured and re-digested around the post-bundle
+  # reap, exactly like the bundle: an orphan rewriting it between the two
+  # reads must invalidate the upload.
+  grep -q -- '--write-intents' <<<"$deliver_run" || {
+    echo "selftest: the bundle step does not carry the intents file" >&2
+    exit 1
+  }
+  grep -q 'intents_now' <<<"$deliver_run" && grep -q 'intents_captured' <<<"$deliver_run" || {
+    echo "selftest: the bundle step does not digest the intents file around the reap" >&2
+    exit 1
+  }
+  grep -q 'rm -f "\$intents_path"' <<<"$deliver_run" || {
+    echo "selftest: a changed intents digest does not drop the file" >&2
+    exit 1
+  }
+  # The trusted upload: pinned action, short retention, hard-fail when the
+  # trusted copy is missing, and a note step settle can key on.
+  local intents_upload_step
+  intents_upload_step="$(awk '
+    /^      - name: Upload the design intents/ { printing = 1 }
+    printing && /^      - name:/ && !/^      - name: Upload the design intents/ { exit }
+    printing { print }
+  ' "$workflow")"
+  [ -n "$intents_upload_step" ] || { echo "selftest: could not extract the intents upload step" >&2; exit 1; }
+  grep -q 'name: design-run-intents' <<<"$intents_upload_step" || {
+    echo "selftest: the intents artifact is not named design-run-intents" >&2
+    exit 1
+  }
+  grep -q 'if-no-files-found: error' <<<"$intents_upload_step" || {
+    echo "selftest: the intents upload does not fail on a missing file" >&2
+    exit 1
+  }
+  grep -q 'retention-days: 1' <<<"$intents_upload_step" || {
+    echo "selftest: the intents artifact has no short retention" >&2
+    exit 1
+  }
+  grep -q 'intents_uploaded: \${{ steps.intents_upload.outputs.ready }}' "$workflow" || {
+    echo "selftest: the run job does not surface intents_uploaded" >&2
+    exit 1
+  }
+  # The applier: settle downloads the same-run artifact with the pinned
+  # action, restores this script from the pre-agent pin, and applies only
+  # when the trusted upload happened.
+  local settle_job apply_step
+  settle_job="$(awk '
+    /^  settle:/ { printing = 1 }
+    printing && /^  [A-Za-z]/ && !/^  settle:/ { exit }
+    printing { print }
+  ' "$workflow")"
+  [ -n "$settle_job" ] || { echo "selftest: could not extract the settle job" >&2; exit 1; }
+  apply_step="$(printf '%s\n' "$settle_job" | awk '
+    /^      - name: Apply the agent.s issue intents/ { printing = 1 }
+    printing && /^      - name:/ && !/^      - name: Apply the agent.s issue intents/ { exit }
+    printing { print }
+  ')"
+  [ -n "$apply_step" ] || { echo "selftest: settle has no Apply the agent's issue intents step" >&2; exit 1; }
+  grep -q -- '--apply-intents' <<<"$apply_step" || {
+    echo "selftest: the settle applier does not pass --apply-intents" >&2
+    exit 1
+  }
+  grep -q 'intents_uploaded' <<<"$apply_step" || {
+    echo "selftest: the settle applier does not gate on the trusted upload" >&2
+    exit 1
+  }
+  grep -q 'DELIVER_SHA256' <<<"$apply_step" || {
+    echo "selftest: the settle applier does not verify the pinned script hash" >&2
+    exit 1
+  }
+  grep -q 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' <<<"$settle_job" || {
+    echo "selftest: settle does not download the intents with the pinned action" >&2
+    exit 1
+  }
+  # The settle job is the one issue-writing job left in this workflow —
+  # checked against its permissions stanza, not its prose (the run-job
+  # rule above).
+  local settle_perms
+  settle_perms="$(awk '/^    permissions:/ { p = 1; next } p && /^      [-a-z]+:/ { print; next } p && /^      #/ { next } p { exit }' <<<"$settle_job")"
+  grep -q 'issues: write' <<<"$settle_perms" || {
+    echo "selftest: settle cannot write issues (the applier lives there)" >&2
+    exit 1
+  }
+  # The skill the agent runs must teach the intents protocol, or an
+  # unattended run posts nothing at all.
+  local skill_doc
+  skill_doc="${repo_root}/.claude/skills/design-run/SKILL.md"
+  [ -f "$skill_doc" ] || { echo "selftest: design-run SKILL.md is missing" >&2; exit 1; }
+  grep -q '\.design-run-intents\.json' "$skill_doc" || {
+    echo "selftest: the design-run skill does not document the intents file" >&2
+    exit 1
+  }
+  # The worktree file must be ignored (never committed) and forbidden by
+  # the bundle's path check.
+  grep -q '^\.design-run-intents\.json$' "${repo_root}/.gitignore" || {
+    echo "selftest: .gitignore does not list the intents file" >&2
+    exit 1
+  }
+  grep -q '\.design-run-intents\.json' "$SELF" || {
+    echo "selftest: forbidden_path does not refuse the intents file" >&2
+    exit 1
+  }
   grep -q 'transfer.fsckObjects=true' "$SELF" || {
     echo "selftest: bundle fetch does not set transfer.fsckObjects" >&2
     exit 1
@@ -2910,10 +3875,11 @@ EOF
     exit 1
   fi
 
-  # backlog-burn wiring (issue #863, the #859/#861 pattern). The burn's
-  # agent steps must never see the PAT, the PAT lives only in the deliver
-  # workflow's push step, and the bundle handoff carries --routine
-  # backlog-burn so the burn path policy (no .github/**) is explicit.
+  # backlog-burn wiring (issue #863, the #859/#861 pattern; path policy
+  # tightened in #869). The burn's agent steps must never see the PAT,
+  # the PAT lives only in the deliver workflow's push step, and the
+  # bundle handoff carries --routine backlog-burn so the shared
+  # protected-prefix policy (.github/.claude/scripts/tools) is explicit.
   burn="${repo_root}/.github/workflows/backlog-burn.yml"
   [ -f "$burn" ] || { echo "selftest: backlog-burn.yml is missing" >&2; exit 1; }
   burn_run="$(awk '
@@ -3489,26 +4455,28 @@ EOF
     exit 1
   }
 
-  # --routine behavior. A scripts/ change is forbidden for design-run and
-  # deliverable for backlog-burn (issue #863 ships scripts/ itself); an
-  # unknown routine is a usage error, never a silent default.
+  # --routine behavior. A scripts/ change is forbidden for BOTH routines
+  # (issue #869 — backlog-burn shares design-run's protected prefixes); an
+  # unknown routine is a usage error, never a silent default. A benign
+  # docs/ change still delivers under backlog-burn.
   local rsrc rfile rstart
   rsrc="${tmp}/rsrc"
   rfile="${tmp}/backlog-burn.bundle"
-  mkdir -p "$rsrc/scripts"
+  mkdir -p "$rsrc/scripts" "$rsrc/docs"
   git_cmd -C "$rsrc" init -b main >/dev/null
-  git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  printf 'seed\n' > "$rsrc/docs/seed.md"
+  git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t add -- docs/seed.md
+  git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t commit -m start >/dev/null
   rstart="$(git_cmd -C "$rsrc" rev-parse HEAD)"
-  git_cmd -C "$rsrc" checkout -b claude/issue-863-burn-pat >/dev/null 2>&1
+  git_cmd -C "$rsrc" checkout -b claude/issue-869-burn-paths >/dev/null 2>&1
   printf 'fix\n' > "$rsrc/scripts/fix.sh"
   git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t add -- scripts/fix.sh
   git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t commit -m fix >/dev/null
-  printf 'dirty\n' > "$rsrc/scripts/dirty.sh"
   set +e
   stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$rsrc" \
-    "$SELF" --repo acme/print-bench --issue 863 --base "$rstart" \
+    "$SELF" --repo acme/print-bench --issue 869 --base "$rstart" \
     --base-branch main --run-url https://example.test/run/1 \
     --write-bundle "$rfile" 2>&1 >/dev/null)"
   rc=$?
@@ -3521,27 +4489,30 @@ EOF
   }
   [ ! -e "$rfile" ] || { echo "selftest: design-run wrote a bundle for a forbidden range" >&2; exit 1; }
   set +e
-  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$rsrc" \
-    "$SELF" --repo acme/print-bench --issue 863 --base "$rstart" \
+    "$SELF" --repo acme/print-bench --issue 869 --base "$rstart" \
     --base-branch main --run-url https://example.test/run/1 \
-    --routine backlog-burn --write-bundle "$rfile" >/dev/null
+    --routine backlog-burn --write-bundle "$rfile" 2>&1 >/dev/null)"
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] && [ -f "$rfile" ] || {
-    echo "selftest: backlog-burn --write-bundle refused a scripts/ commit (exit ${rc})" >&2
+  [ "$rc" -eq 1 ] || {
+    echo "selftest: backlog-burn accepted a scripts/ commit (exit ${rc})" >&2
+    printf '%s\n' "$stderr" >&2
     exit 1
   }
-  git_cmd -C "$rsrc" grep -q dirty HEAD -- scripts/dirty.sh || {
-    echo "selftest: backlog-burn --write-bundle did not commit the dirty scripts file" >&2
+  printf '%s\n' "$stderr" | grep -q 'touches scripts/fix.sh' || {
+    echo "selftest: backlog-burn did not report the scripts/ refusal" >&2
+    printf '%s\n' "$stderr" >&2
     exit 1
   }
+  [ ! -e "$rfile" ] || { echo "selftest: backlog-burn wrote a bundle for a forbidden scripts/ range" >&2; exit 1; }
   set +e
   stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$rsrc" \
-    "$SELF" --repo acme/print-bench --issue 863 --base "$rstart" \
+    "$SELF" --repo acme/print-bench --issue 869 --base "$rstart" \
     --base-branch main --run-url https://example.test/run/1 \
     --routine bogus --write-bundle "$rfile" 2>&1 >/dev/null)"
   rc=$?
@@ -3552,12 +4523,14 @@ EOF
     exit 1
   }
 
-  # backlog-burn refuses .github/** (closes #863 residual HIGH): add,
-  # modify, rename into .github, symlink pointing into .github — while a
-  # benign tools/ change still delivers.
-  local gsrc gfile gstart
+  # backlog-burn refuses .github/**, .claude/**, scripts/** and tools/**
+  # together (closes #869): for each prefix, add / modify / delete /
+  # rename into / rename out of / symlink into — while a benign docs/
+  # change still delivers. The normalizer (case / ../ / backslash /
+  # absolute symlink target / gitlink) is shared with design-run.
+  local gsrc gfile gstart prefix
   gsrc="${tmp}/gsrc"
-  gfile="${tmp}/github-forbid.bundle"
+  gfile="${tmp}/protected-forbid.bundle"
   greject() {  # $1 label, $2 expected stderr needle
     local label="$1" needle="$2"
     rm -f "$gfile"
@@ -3565,98 +4538,492 @@ EOF
     stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
       GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
       DELIVER_WORKTREE="$gsrc" \
-      "$SELF" --repo acme/print-bench --issue 863 --base "$gstart" \
+      "$SELF" --repo acme/print-bench --issue 869 --base "$gstart" \
       --base-branch main --run-url https://example.test/run/1 \
       --routine backlog-burn --write-bundle "$gfile" 2>&1 >/dev/null)"
     rc=$?
     set -e
     [ "$rc" -eq 1 ] || {
-      echo "selftest: backlog-burn accepted a .github ${label} (exit ${rc})" >&2
+      echo "selftest: backlog-burn accepted protected ${label} (exit ${rc})" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
     }
     printf '%s\n' "$stderr" | grep -q "$needle" || {
-      echo "selftest: backlog-burn .github ${label} did not report the refusal" >&2
+      echo "selftest: backlog-burn protected ${label} did not report the refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
     }
     [ ! -e "$gfile" ] || {
-      echo "selftest: backlog-burn wrote a bundle for a .github ${label}" >&2
+      echo "selftest: backlog-burn wrote a bundle for protected ${label}" >&2
       exit 1
     }
   }
 
   rm -rf "$gsrc"
-  mkdir -p "$gsrc/.github/workflows" "$gsrc/tools"
+  mkdir -p "$gsrc/.github/workflows" "$gsrc/.claude/hooks" \
+    "$gsrc/scripts" "$gsrc/tools" "$gsrc/docs" "$gsrc/safe"
   git_cmd -C "$gsrc" init -b main >/dev/null
   printf 'name: keep\non: push\njobs: {}\n' > "$gsrc/.github/workflows/keep.yml"
-  printf 'seed\n' > "$gsrc/tools/seed.py"
+  printf 'keep\n' > "$gsrc/.claude/hooks/keep.sh"
+  printf 'keep\n' > "$gsrc/scripts/keep.sh"
+  printf 'keep\n' > "$gsrc/tools/keep.py"
+  printf 'seed\n' > "$gsrc/docs/seed.md"
+  printf 'park\n' > "$gsrc/safe/parked.txt"
+  # Seed root agent-instruction files at gstart so symlink-into cases only
+  # change docs/hook (otherwise the range also touches CLAUDE.md itself).
+  printf 'seed\n' > "$gsrc/CLAUDE.md"
+  printf 'seed\n' > "$gsrc/AGENTS.md"
+  printf '{}\n' > "$gsrc/.mcp.json"
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
-    .github/workflows/keep.yml tools/seed.py
+    .github/workflows/keep.yml .claude/hooks/keep.sh scripts/keep.sh \
+    tools/keep.py docs/seed.md safe/parked.txt \
+    CLAUDE.md AGENTS.md .mcp.json
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m start >/dev/null
   gstart="$(git_cmd -C "$gsrc" rev-parse HEAD)"
-  git_cmd -C "$gsrc" checkout -b claude/issue-863-github-forbid >/dev/null 2>&1
+  git_cmd -C "$gsrc" checkout -b claude/issue-869-protected-forbid >/dev/null 2>&1
 
-  # Add: new workflow file.
-  printf 'name: evil\non: push\njobs: {}\n' > "$gsrc/.github/workflows/evil.yml"
+  for prefix in .github .claude scripts tools; do
+    case "$prefix" in
+      .github) mkdir -p "$gsrc/.github/workflows" ;;
+      .claude) mkdir -p "$gsrc/.claude/hooks" ;;
+      scripts|tools) mkdir -p "$gsrc/$prefix" ;;
+    esac
+
+    # Add
+    case "$prefix" in
+      .github)
+        printf 'name: evil\non: push\njobs: {}\n' > "$gsrc/.github/workflows/evil.yml"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+          .github/workflows/evil.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "add ${prefix}" >/dev/null
+        greject "${prefix}/add" 'touches .github/workflows/evil.yml'
+        ;;
+      .claude)
+        printf 'evil\n' > "$gsrc/.claude/hooks/evil.sh"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+          .claude/hooks/evil.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "add ${prefix}" >/dev/null
+        greject "${prefix}/add" 'touches .claude/hooks/evil.sh'
+        ;;
+      scripts)
+        printf 'evil\n' > "$gsrc/scripts/evil.sh"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- scripts/evil.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "add ${prefix}" >/dev/null
+        greject "${prefix}/add" 'touches scripts/evil.sh'
+        ;;
+      tools)
+        printf 'evil\n' > "$gsrc/tools/evil.py"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/evil.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "add ${prefix}" >/dev/null
+        greject "${prefix}/add" 'touches tools/evil.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Modify
+    case "$prefix" in
+      .github)
+        printf 'name: keep\non: push\njobs: {x: {runs-on: ubuntu-latest, steps: []}}\n' \
+          > "$gsrc/.github/workflows/keep.yml"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+          .github/workflows/keep.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "mod ${prefix}" >/dev/null
+        greject "${prefix}/modify" 'touches .github/workflows/keep.yml'
+        ;;
+      .claude)
+        printf 'changed\n' > "$gsrc/.claude/hooks/keep.sh"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+          .claude/hooks/keep.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "mod ${prefix}" >/dev/null
+        greject "${prefix}/modify" 'touches .claude/hooks/keep.sh'
+        ;;
+      scripts)
+        printf 'changed\n' > "$gsrc/scripts/keep.sh"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- scripts/keep.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "mod ${prefix}" >/dev/null
+        greject "${prefix}/modify" 'touches scripts/keep.sh'
+        ;;
+      tools)
+        printf 'changed\n' > "$gsrc/tools/keep.py"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/keep.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "mod ${prefix}" >/dev/null
+        greject "${prefix}/modify" 'touches tools/keep.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Delete
+    case "$prefix" in
+      .github)
+        git_cmd -C "$gsrc" rm -q -- .github/workflows/keep.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "del ${prefix}" >/dev/null
+        greject "${prefix}/delete" 'touches .github/workflows/keep.yml'
+        ;;
+      .claude)
+        git_cmd -C "$gsrc" rm -q -- .claude/hooks/keep.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "del ${prefix}" >/dev/null
+        greject "${prefix}/delete" 'touches .claude/hooks/keep.sh'
+        ;;
+      scripts)
+        git_cmd -C "$gsrc" rm -q -- scripts/keep.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "del ${prefix}" >/dev/null
+        greject "${prefix}/delete" 'touches scripts/keep.sh'
+        ;;
+      tools)
+        git_cmd -C "$gsrc" rm -q -- tools/keep.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "del ${prefix}" >/dev/null
+        greject "${prefix}/delete" 'touches tools/keep.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Rename into protected prefix (from safe/)
+    case "$prefix" in
+      .github)
+        git_cmd -C "$gsrc" mv -- safe/parked.txt .github/workflows/moved.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-in ${prefix}" >/dev/null
+        greject "${prefix}/rename-into" '\.github/workflows/moved\.yml'
+        ;;
+      .claude)
+        git_cmd -C "$gsrc" mv -- safe/parked.txt .claude/hooks/moved.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-in ${prefix}" >/dev/null
+        greject "${prefix}/rename-into" '\.claude/hooks/moved\.sh'
+        ;;
+      scripts)
+        git_cmd -C "$gsrc" mv -- safe/parked.txt scripts/moved.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-in ${prefix}" >/dev/null
+        greject "${prefix}/rename-into" 'scripts/moved\.sh'
+        ;;
+      tools)
+        git_cmd -C "$gsrc" mv -- safe/parked.txt tools/moved.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-in ${prefix}" >/dev/null
+        greject "${prefix}/rename-into" 'tools/moved\.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Rename out of protected prefix (into docs/)
+    case "$prefix" in
+      .github)
+        git_cmd -C "$gsrc" mv -- .github/workflows/keep.yml docs/exfiltrated.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-out ${prefix}" >/dev/null
+        greject "${prefix}/rename-out" '\.github/workflows/keep\.yml'
+        ;;
+      .claude)
+        git_cmd -C "$gsrc" mv -- .claude/hooks/keep.sh docs/exfiltrated.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-out ${prefix}" >/dev/null
+        greject "${prefix}/rename-out" '\.claude/hooks/keep\.sh'
+        ;;
+      scripts)
+        git_cmd -C "$gsrc" mv -- scripts/keep.sh docs/exfiltrated.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-out ${prefix}" >/dev/null
+        greject "${prefix}/rename-out" 'scripts/keep\.sh'
+        ;;
+      tools)
+        git_cmd -C "$gsrc" mv -- tools/keep.py docs/exfiltrated.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-out ${prefix}" >/dev/null
+        greject "${prefix}/rename-out" 'tools/keep\.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Symlink into protected prefix (path itself under docs/)
+    case "$prefix" in
+      .github)
+        ln -s '../.github/workflows/keep.yml' "$gsrc/docs/hook"
+        ;;
+      .claude)
+        ln -s '../.claude/hooks/keep.sh' "$gsrc/docs/hook"
+        ;;
+      scripts)
+        ln -s '../scripts/keep.sh' "$gsrc/docs/hook"
+        ;;
+      tools)
+        ln -s '../tools/keep.py' "$gsrc/docs/hook"
+        ;;
+    esac
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/hook
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "symlink ${prefix}" >/dev/null
+    greject "${prefix}/symlink" 'points under a protected prefix'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+  done
+
+  # Case-folded .GitHub/ path — normalizer lowercases before the match.
+  mkdir -p "$gsrc/.GitHub/workflows"
+  printf 'name: case\non: push\njobs: {}\n' > "$gsrc/.GitHub/workflows/case.yml"
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
-    .github/workflows/evil.yml
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'add workflow' >/dev/null
-  greject add 'touches .github/workflows/evil.yml'
+    .GitHub/workflows/case.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'case fold' >/dev/null
+  greject 'case-fold' 'touches'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
-  # Modify: edit a workflow that already exists at START_SHA.
-  printf 'name: keep\non: push\njobs: {x: {runs-on: ubuntu-latest, steps: []}}\n' \
-    > "$gsrc/.github/workflows/keep.yml"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
-    .github/workflows/keep.yml
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'modify workflow' >/dev/null
-  greject modify 'touches .github/workflows/keep.yml'
+  # Absolute symlink target fails closed.
+  ln -s '/etc/passwd' "$gsrc/docs/abs"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/abs
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'abs symlink' >/dev/null
+  greject 'abs-symlink' 'points under a protected prefix'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
-  # Rename into .github/.
-  printf 'moved\n' > "$gsrc/tools/moved.yml"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/moved.yml
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'stage move' >/dev/null
-  mkdir -p "$gsrc/.github/workflows"
-  git_cmd -C "$gsrc" mv -- tools/moved.yml .github/workflows/moved.yml
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'rename into .github' >/dev/null
-  greject rename '\.github/workflows/moved\.yml'
-  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
-
-  # Symlink pointing into .github/ (path itself is under tools/).
-  mkdir -p "$gsrc/tools"
-  ln -s '../.github/workflows/evil.yml' "$gsrc/tools/hook"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/hook
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'symlink into .github' >/dev/null
-  greject symlink 'points under .github/'
+  # Gitlink (mode 160000) under a protected prefix — refused by path and
+  # by the explicit gitlink check.
+  blob_sha="$(git_cmd -C "$gsrc" rev-parse "HEAD:docs/seed.md")"
+  git_cmd -C "$gsrc" update-index --add --cacheinfo "160000,${blob_sha},scripts/submod"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'gitlink' >/dev/null
+  greject gitlink 'touches scripts/submod'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
   # Backslash in a path — normalize fails closed (single `\`, not `\\`).
-  mkdir -p "$gsrc/tools"
-  printf 'x\n' > "${gsrc}/tools/foo\\bar"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "tools/foo\\bar"
+  mkdir -p "$gsrc/docs"
+  printf 'x\n' > "${gsrc}/docs/foo\\bar"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "docs/foo\\bar"
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'backslash path' >/dev/null
   # Needle is a BRE: `\\` matches one literal backslash (`\b` would be a word boundary).
-  greject backslash 'touches tools/foo\\bar'
+  greject backslash 'touches docs/foo\\bar'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
-  # Benign tools/ change still passes for backlog-burn.
-  printf 'ok\n' > "$gsrc/tools/ok.py"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/ok.py
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'tools ok' >/dev/null
+  # Root agent-instruction files (CLAUDE.md, AGENTS.md, .mcp.json) —
+  # add / modify / rename into / symlink into — refused for both routines
+  # (issue #869). Names are case-folded by the normalizer.
+  local rootfile routine
+  reject_rootfile() {  # $1 routine, $2 label, $3 needle
+    local routine="$1" label="$2" needle="$3"
+    rm -f "$gfile"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$gsrc" \
+      "$SELF" --repo acme/print-bench --issue 869 --base "$gstart" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --routine "$routine" --write-bundle "$gfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    [ "$rc" -eq 1 ] || {
+      echo "selftest: ${routine} accepted protected ${label} (exit ${rc})" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q "$needle" || {
+      echo "selftest: ${routine} protected ${label} did not report the refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    [ ! -e "$gfile" ] || {
+      echo "selftest: ${routine} wrote a bundle for protected ${label}" >&2
+      exit 1
+    }
+  }
+  for routine in backlog-burn design-run; do
+    for rootfile in CLAUDE.md AGENTS.md .mcp.json; do
+      # Add — delete the seeded file then recreate so the tip introduces
+      # the path as an addition relative to a parent that lacked it; the
+      # range still refuses on the protected path either way.
+      git_cmd -C "$gsrc" rm -q -- "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "drop ${rootfile}" >/dev/null
+      printf 'evil\n' > "$gsrc/$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "add ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/add" "touches ${rootfile}"
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+      # Modify (files already seeded at gstart)
+      printf 'changed\n' > "$gsrc/$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "mod ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/modify" "touches ${rootfile}"
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+      # Rename into (replace the seeded file from safe/)
+      git_cmd -C "$gsrc" rm -q -- "$rootfile"
+      git_cmd -C "$gsrc" mv -- safe/parked.txt "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "ren-in ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/rename-into" "touches ${rootfile}"
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+      # Symlink into (path under docs/ pointing at the seeded root file)
+      ln -s "../${rootfile}" "$gsrc/docs/hook"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/hook
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "symlink ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/symlink" 'points under a protected prefix'
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+    done
+  done
+
+  # Nested agent-instruction paths at ANY depth (issue #869 Cipher MEDIUM):
+  # docs/CLAUDE.md, designs/<name>/{CLAUDE,AGENTS}.md, lib/.mcp.json,
+  # nested .cursor/rules/, nested .cursorrules, case variant, plus
+  # rename-into and symlink-into (path matches or target is protected).
+  reject_nested() {  # $1 routine, $2 label, $3 needle
+    reject_rootfile "$1" "$2" "$3"
+  }
+  for routine in backlog-burn design-run; do
+    # docs/CLAUDE.md — add
+    mkdir -p "$gsrc/docs"
+    printf 'evil\n' > "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/add' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # designs/<name>/CLAUDE.md — add (alone; multi-path commits report one)
+    mkdir -p "$gsrc/designs/gadget"
+    printf 'evil\n' > "$gsrc/designs/gadget/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      designs/gadget/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add designs/gadget/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'designs/gadget/CLAUDE.md/add' 'touches designs/gadget/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # designs/<name>/AGENTS.md — add
+    mkdir -p "$gsrc/designs/gadget"
+    printf 'evil\n' > "$gsrc/designs/gadget/AGENTS.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      designs/gadget/AGENTS.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add designs/gadget/AGENTS.md' >/dev/null
+    reject_nested "$routine" 'designs/gadget/AGENTS.md/add' 'touches designs/gadget/AGENTS.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # lib/.mcp.json — add (design-run otherwise allows single-file lib/)
+    mkdir -p "$gsrc/lib"
+    printf '{}\n' > "$gsrc/lib/.mcp.json"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- lib/.mcp.json
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add lib/.mcp.json' >/dev/null
+    reject_nested "$routine" 'lib/.mcp.json/add' 'touches lib/\.mcp\.json'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Nested .cursor/rules/x.mdc — add
+    mkdir -p "$gsrc/a/b/.cursor/rules"
+    printf 'rule\n' > "$gsrc/a/b/.cursor/rules/x.mdc"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      a/b/.cursor/rules/x.mdc
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add nested .cursor rules' >/dev/null
+    reject_nested "$routine" 'nested-.cursor/add' 'touches a/b/\.cursor/rules/x\.mdc'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Nested .cursorrules — add
+    mkdir -p "$gsrc/docs/deep"
+    printf 'rules\n' > "$gsrc/docs/deep/.cursorrules"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      docs/deep/.cursorrules
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add nested .cursorrules' >/dev/null
+    reject_nested "$routine" 'nested-.cursorrules/add' 'touches docs/deep/\.cursorrules'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Case variant docs/claude.MD — normalizer folds case
+    mkdir -p "$gsrc/docs"
+    printf 'evil\n' > "$gsrc/docs/claude.MD"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/claude.MD
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add docs/claude.MD' >/dev/null
+    reject_nested "$routine" 'docs/claude.MD/case' 'touches'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # CLAUDE.local.md nested — add
+    mkdir -p "$gsrc/docs"
+    printf 'evil\n' > "$gsrc/docs/CLAUDE.local.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      docs/CLAUDE.local.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add docs/CLAUDE.local.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.local.md/add' 'touches docs/CLAUDE\.local\.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Rename into nested protected path
+    mkdir -p "$gsrc/docs"
+    git_cmd -C "$gsrc" mv -- safe/parked.txt docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'rename into docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/rename-into' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Symlink whose path matches a protected name (docs/CLAUDE.md -> seed.md)
+    mkdir -p "$gsrc/docs"
+    ln -s 'seed.md' "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'symlink path docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/symlink-path' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Symlink whose target is a nested protected path (seed target at tip
+    # first, then reset base past the seed so the range only adds the link).
+    mkdir -p "$gsrc/docs"
+    printf 'seed\n' > "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'seed docs/CLAUDE.md for symlink target' >/dev/null
+    local nested_base
+    nested_base="$(git_cmd -C "$gsrc" rev-parse HEAD)"
+    ln -s 'CLAUDE.md' "$gsrc/docs/hook"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/hook
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'symlink target docs/CLAUDE.md' >/dev/null
+    # Temporarily point reject at nested_base..HEAD (only the symlink).
+    rm -f "$gfile"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$gsrc" \
+      "$SELF" --repo acme/print-bench --issue 869 --base "$nested_base" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --routine "$routine" --write-bundle "$gfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    [ "$rc" -eq 1 ] || {
+      echo "selftest: ${routine} accepted docs/hook->CLAUDE.md (exit ${rc})" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q 'points under a protected prefix' || {
+      echo "selftest: ${routine} docs/hook->CLAUDE.md did not report symlink refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    [ ! -e "$gfile" ] || {
+      echo "selftest: ${routine} wrote a bundle for docs/hook->CLAUDE.md" >&2
+      exit 1
+    }
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Delete nested protected path
+    mkdir -p "$gsrc/docs"
+    printf 'seed\n' > "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'seed docs/CLAUDE.md for delete' >/dev/null
+    git_cmd -C "$gsrc" rm -q -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'delete docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/delete' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+  done
+
+  # Benign docs/ change still passes for backlog-burn.
+  printf 'ok\n' > "$gsrc/docs/ok.md"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/ok.md
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'docs ok' >/dev/null
   rm -f "$gfile"
   set +e
   env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$gsrc" \
-    "$SELF" --repo acme/print-bench --issue 863 --base "$gstart" \
+    "$SELF" --repo acme/print-bench --issue 869 --base "$gstart" \
     --base-branch main --run-url https://example.test/run/1 \
     --routine backlog-burn --write-bundle "$gfile" >/dev/null
   rc=$?
   set -e
   [ "$rc" -eq 0 ] && [ -f "$gfile" ] || {
-    echo "selftest: backlog-burn refused a benign tools/ commit (exit ${rc})" >&2
+    echo "selftest: backlog-burn refused a benign docs/ commit (exit ${rc})" >&2
     exit 1
   }
 
@@ -3929,7 +5296,7 @@ EOF
 }
 
 REPO="" ISSUE="" BASE="" BASE_BRANCH="" RUN_URL="" PUSH_URL="" BRANCH="" ASKPASS=""
-BUNDLE="" BUNDLE_SHA256="" WRITE_BUNDLE="" DELIVER_REF="HEAD"
+BUNDLE="" BUNDLE_SHA256="" WRITE_BUNDLE="" WRITE_INTENTS="" APPLY_INTENTS="" DELIVER_REF="HEAD"
 
 if [ "${1:-}" = "--selftest" ]; then
   # Only the in-repo file may run the suite. A restored copy lives outside
@@ -3956,6 +5323,8 @@ while [ $# -gt 0 ]; do
     --bundle-sha256) BUNDLE_SHA256="${2:-}"; shift 2 ;;
     --write-bundle) WRITE_BUNDLE="${2:-}"; shift 2 ;;
     --routine) ROUTINE="${2:-}"; shift 2 ;;
+    --write-intents) WRITE_INTENTS="${2:-}"; shift 2 ;;
+    --apply-intents) APPLY_INTENTS="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) usage "unknown argument: $1" ;;
   esac
@@ -3965,6 +5334,12 @@ done
   || usage "missing required argument"
 if [ -n "$WRITE_BUNDLE" ] && [ -n "$BUNDLE" ]; then
   usage "pass only one of --bundle and --write-bundle"
+fi
+if [ -n "$WRITE_INTENTS" ] && [ -z "$WRITE_BUNDLE" ]; then
+  usage "--write-intents rides the bundle step (pass --write-bundle too)"
+fi
+if [ -n "$APPLY_INTENTS" ] && { [ -n "$WRITE_BUNDLE" ] || [ -n "$WRITE_INTENTS" ] || [ -n "$BUNDLE" ]; }; then
+  usage "pass only one of --apply-intents and the write/bundle modes"
 fi
 if [ -n "$BUNDLE" ] && [ -z "$BUNDLE_SHA256" ]; then
   usage "--bundle requires --bundle-sha256"

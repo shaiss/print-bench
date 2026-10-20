@@ -77,21 +77,26 @@ on:
         type: boolean
         default: false
 
-# GITHUB_TOKEN does not push. The run job posts the SHIP-LOCK (issues: write
-# is the narrowest issues scope that can comment; GitHub has no comment-only
-# scope). pull-requests is read, so this token cannot open a PR. The push PAT
-# is not referenced in this file at all — design-run-deliver.yml, a
-# workflow_run workflow with no agent code, is the only job that decrypts it.
-# Artifact upload uses the runner's ACTIONS_RUNTIME_TOKEN; it does not need
-# actions: write, and that grant would reach the agent.
+# GITHUB_TOKEN does not push. The AGENT job cannot write issues at all
+# (issue #862): its token is contents read, issues read, pull-requests read,
+# so a prompt-injected /design-run cannot label or comment ANY issue — the
+# off-issue `autonomy-ok` / `design-brief` injection the finding names. The
+# comments and labels the protocol owes the thread travel as an intents
+# file (.design-run-intents.json) that the trusted post-agent steps carry
+# and the settle job applies — only to the selected issue, only with an
+# allowlisted label (needs-decision). settle and triage, which run no agent
+# code, keep issues: write. The push PAT is not referenced in this file at
+# all — design-run-deliver.yml, a workflow_run workflow with no agent code,
+# is the only job that decrypts it. Artifact upload uses the runner's
+# ACTIONS_RUNTIME_TOKEN; it does not need actions: write, and that grant
+# would reach the agent.
 # The jobs are off unless DESIGN_RUN_ENABLED is set AND
 # the committed config says enabled, and the writing steps are skipped
 # entirely without a provider secret, so these grants sit idle until the
-# routine is deliberately switched on.
+# routine is deliberately switched on. Every job declares its own
+# permissions block, so this default is the least-privilege floor.
 permissions:
   contents: read
-  issues: write
-  pull-requests: read
 
 # Never run two design runs at once — this group serializes THIS workflow with
 # itself. It deliberately does NOT serialize against the backlog burn: GitHub
@@ -123,6 +128,11 @@ jobs:
       bundle_pending: ${{ steps.meta_upload.outputs.ready == 'true' && 'true' || 'false' }}
       meta_uploaded: ${{ steps.meta_upload.outputs.ready }}
       lock_uploaded: ${{ steps.lock_uploaded.outputs.ready }}
+      # True only after the TRUSTED intents upload step. settle's applier
+      # keys on this; the agent has no actions: write, so it cannot plant
+      # the artifact, and an earlier same-name upload would break the
+      # trusted upload instead.
+      intents_uploaded: ${{ steps.intents_upload.outputs.ready }}
       agent_window_end: ${{ steps.agent_window.outputs.end }}
       issue: ${{ steps.select.outputs.issue }}
       job_window_start: ${{ steps.job_window.outputs.start }}
@@ -170,8 +180,12 @@ jobs:
     # default while the cleanup stays reachable inside a live job.
     timeout-minutes: 360
     permissions:
+      # #862: no issues: write on the agent job. The token still reads the
+      # thread (the selector's snapshot and the bundle step's hard-stop
+      # read), but a comment or label POST 403s — the intents file is the
+      # agent's only voice on the thread, and settle applies it.
       contents: read
-      issues: write
+      issues: read
       pull-requests: read
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
@@ -352,8 +366,12 @@ jobs:
       #
       # All five steps share the pin, the workflow's github.token, and the
       # same /design-run prompt. That token is the job token: contents read,
-      # issues write, pull-requests read. It cannot push and it cannot open
-      # a PR. The push PAT is not decrypted in this workflow.
+      # issues read, pull-requests read. It cannot push, it cannot open a
+      # PR, and since #862 it cannot write an issue either — the skill's
+      # owed comments and labels go into the worktree intents file
+      # (.design-run-intents.json), which the trusted bundle step copies
+      # and settle applies under a selected-issue + label-allowlist rule.
+      # The push PAT is not decrypted in this workflow.
       # design-run-deliver.yml holds it, pushes, and opens the draft, which
       # is what makes `regen` fire. .claude/design-run-settings.json denies
       # `git push`, `gh pr create`, and commands that add `design-brief` or
@@ -1032,26 +1050,46 @@ jobs:
             exit 1
           fi
           reap_agent_orphans
+          # --write-intents rides the same pinned script BEFORE the bundle
+          # logic: a declined run writes no bundle to ride, so the intents
+          # copy must complete first (the script copies the worktree's
+          # .design-run-intents.json whatever the bundle decision turns
+          # out to be).
           "$restore_tmp" --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
             --base "$START_SHA" --base-branch "$BASE_BRANCH" --run-url "$RUN_URL" \
+            --write-intents "${RUNNER_TEMP}/design-run-intents.json" \
             --write-bundle "${RUNNER_TEMP}/design-run.bundle"
           bundle_path="${RUNNER_TEMP}/design-run.bundle"
+          intents_path="${RUNNER_TEMP}/design-run-intents.json"
           if [ -f "$bundle_path" ]; then
             captured="$(sha256sum "$bundle_path" | awk '{print $1}')"
           else
             captured=""
           fi
+          if [ -f "$intents_path" ]; then
+            intents_captured="$(sha256sum "$intents_path" | awk '{print $1}')"
+          else
+            intents_captured=""
+          fi
           # write_bundle has returned. Anything still alive was not that
-          # script. Reap, then accept the file only when its digest is the
-          # one captured before the reap.
+          # script. Reap, then accept each file only when its digest is
+          # the one captured before the reap.
           reap_agent_orphans
           if [ -n "$captured" ] && [ -f "$bundle_path" ]; then
             now="$(sha256sum "$bundle_path" | awk '{print $1}')"
           else
             now=""
           fi
+          if [ -n "$intents_captured" ] && [ -f "$intents_path" ]; then
+            intents_now="$(sha256sum "$intents_path" | awk '{print $1}')"
+          else
+            intents_now=""
+          fi
           if [ -z "$captured" ] || [ "$now" != "$captured" ]; then
             rm -f "$bundle_path"
+          fi
+          if [ -z "$intents_captured" ] || [ "$intents_now" != "$intents_captured" ]; then
+            rm -f "$intents_path"
           fi
           if [ -n "${GITHUB_OUTPUT:-}" ]; then
             if [ -n "$captured" ] && [ "$now" = "$captured" ] && [ -f "$bundle_path" ]; then
@@ -1060,6 +1098,13 @@ jobs:
             else
               echo "sha256=" >> "$GITHUB_OUTPUT"
               echo "pending=false" >> "$GITHUB_OUTPUT"
+            fi
+            if [ -n "$intents_captured" ] && [ "$intents_now" = "$intents_captured" ] && [ -f "$intents_path" ]; then
+              echo "intents_sha256=${intents_now}" >> "$GITHUB_OUTPUT"
+              echo "intents_pending=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "intents_sha256=" >> "$GITHUB_OUTPUT"
+              echo "intents_pending=false" >> "$GITHUB_OUTPUT"
             fi
           fi
 
@@ -1073,6 +1118,28 @@ jobs:
           if-no-files-found: error
         env:
           NODE_OPTIONS: ""
+
+      - name: Upload the design intents
+        # NOT gated on the bundle: a declined run writes no bundle but its
+        # stop intent still owes the thread its comment. Gated only on the
+        # trusted copy having survived the reap-and-digest check above.
+        if: steps.bundle.outputs.intents_pending == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: design-run-intents
+          path: ${{ runner.temp }}/design-run-intents.json
+          retention-days: 1
+          if-no-files-found: error
+        env:
+          NODE_OPTIONS: ""
+
+      - name: Note the design intents upload
+        id: intents_upload
+        # Runs only when the upload step succeeded. settle's applier keys
+        # on this output as the artifact's provenance, exactly as delivery
+        # keys on the metadata upload note.
+        if: steps.bundle.outputs.intents_pending == 'true'
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Record delivery metadata
         if: steps.bundle.outputs.pending == 'true'
@@ -1251,12 +1318,17 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   settle:
-    name: Release the SHIP-LOCK on a fresh runner
+    name: Apply intents and release the SHIP-LOCK on a fresh runner
     needs: run
     # Fresh runner. Nothing the agent wrote is on this machine, and this
     # job does not execute a worktree path. The script blob is read from
     # the run's start commit after that commit is shown to be in the
     # default-branch history.
+    #
+    # This job holds issues: write — #862 keeps it away from the agent —
+    # and spends it in trusted steps only: applying the agent's intents
+    # (selected issue + label allowlist, never off-issue), stripping
+    # bot-added opt-in labels, and the lock cleanup.
     if: always() && needs.run.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1276,6 +1348,137 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ github.event.repository.default_branch }}
+
+      - name: Download the design intents
+        # Same-run artifact: no run-id needed, and the agent's token could
+        # not have uploaded it (no actions: write). The upload is trusted
+        # only because the run job's note step set intents_uploaded after
+        # the pinned upload action succeeded.
+        if: >-
+          always()
+          && needs.run.outputs.enabled == 'true'
+          && needs.run.outputs.issue != ''
+          && needs.run.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && needs.run.outputs.intents_uploaded == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        timeout-minutes: 2
+        with:
+          name: design-run-intents
+          path: ${{ runner.temp }}/design-run-intents
+        env:
+          NODE_OPTIONS: ""
+
+      - name: Apply the agent's issue intents
+        # #862: the agent job has no issues: write, so this trusted step is
+        # the ONLY surface that posts the run's issue comments and labels.
+        # The applier (scripts/design-run-deliver.sh --apply-intents,
+        # restored from the same pre-agent pin the bundle step used and
+        # hashed against it) posts an intent only when it targets the
+        # SELECTED issue and its label is allowlisted (needs-decision);
+        # off-issue and non-allowlisted intents are dropped with a
+        # ::warning:: and never posted. It runs BEFORE the lock cleanup so
+        # the claim (and any stop) is on the thread lock cleanup reads.
+        if: >-
+          always()
+          && needs.run.outputs.enabled == 'true'
+          && needs.run.outputs.issue != ''
+          && needs.run.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && needs.run.outputs.intents_uploaded == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.run.outputs.issue }}
+          START_SHA: ${{ needs.run.outputs.start_sha }}
+          DELIVER_SHA256: ${{ needs.run.outputs.deliver_sha256 }}
+          INTENTS_PATH: ${{ runner.temp }}/design-run-intents/design-run-intents.json
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          # The applier operates on the default-branch checkout, never on
+          # dirname($0)/.. (the runner work dir) — the bundle step's rule.
+          DELIVER_WORKTREE: ${{ github.workspace }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          PYTHONPATH: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_BIN: /usr/bin/git
+          GH_BIN: /usr/bin/gh
+          JQ_BIN: /usr/bin/jq
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
+          if [ -z "${START_SHA:-}" ] || [ -z "${DELIVER_SHA256:-}" ]; then
+            echo "::error::START_SHA or DELIVER_SHA256 is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          case "$START_SHA" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::START_SHA is not a commit id" >&2; exit 1 ;;
+          esac
+          if ! /usr/bin/git --no-replace-objects cat-file -e "${START_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::START_SHA is not in the default-branch history — refusing to fetch it" >&2
+            exit 1
+          fi
+          if [ "$START_SHA" != "$GITHUB_SHA" ]; then
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$GITHUB_SHA" "$START_SHA"; then
+              echo "::error::START_SHA is not the workflow commit or a descendant of it" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$START_SHA" "origin/${BASE_BRANCH}"; then
+              echo "::error::START_SHA is not on ${BASE_BRANCH}" >&2
+              exit 1
+            fi
+          fi
+          if [ -L scripts ] || [ -L scripts/design-run-deliver.sh ]; then
+            echo "::error::refusing to restore design-run-deliver: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/design-run-deliver-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore design-run-deliver through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh" > "$blob_tmp"; then
+            rm -f "$blob_tmp"
+            echo "::error::could not restore design-run-deliver.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::design-run-deliver restore did not leave a regular file" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/design-run-deliver-apply.sh"
+          if [ -L "$restore_tmp" ]; then
+            rm -f "$restore_tmp"
+          fi
+          mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::design-run-deliver restore did not leave a regular file" >&2
+            exit 1
+          fi
+          chmod +x "$restore_tmp"
+          got="$(sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$DELIVER_SHA256" ]; then
+            echo "::error::restored design-run-deliver.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          "$restore_tmp" --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+            --base "$START_SHA" --base-branch "$BASE_BRANCH" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --apply-intents "$INTENTS_PATH"
 
       - name: Strip bot-added opt-in labels
         # issues: write cannot be split into "comment" vs "labels". Deny

@@ -26,8 +26,13 @@ workflow did). Section 7 says what changes when nobody is watching.
    when you posted it.
 3. **Lock check** — an issue is taken if any of these hold:
    - **an active claim marker.** The marker is a state, not a flag: read the
-     *latest* `🚢 SHIP-LOCK` comment and act on that one.
-     `🚢 SHIP-LOCK` is active, and the issue is taken.
+     *latest authentic* `🚢 SHIP-LOCK` comment and act on that one.
+     Authentic means the body carries `<!-- design-run-ship-lock:v1 -->`
+     and the author login is `github-actions[bot]` (settle) or `shaiss`
+     (attended/PAT) — attended runs post as `shaiss` or not at all; never
+     `cursor[bot]` (shared Cursor App). A bare `🚢 SHIP-LOCK` first line
+     is never enough, nor is marker + `cursor[bot]` / `claude[bot]`. An
+     authentic `🚢 SHIP-LOCK` is active, and the issue is taken.
      `🚢 SHIP-LOCK WITHDRAWN` is released, and blocks nothing.
      An active claim more than a few hours old with **no**
      `claude/issue-<N>-*` branch carrying unmerged work and **no** open PR
@@ -49,10 +54,12 @@ workflow did). Section 7 says what changes when nobody is watching.
      cannot tell (the count fails), treat the branch as a claim. The burn's
      selector (`tools/backlog-burn`) and its lock cleanup
      (`scripts/routine-lock-cleanup.sh`) read the same rule.
-4. Claim it by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`.
-   One per issue, ever. The comment's timestamp is the proof the contract
-   predates the diff — that is the whole anti-retrofit mechanism, so post it
-   **before** you read a line of implementation code.
+4. Claim it by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`,
+   including the authenticity marker `<!-- design-run-ship-lock:v1 -->` in
+   the body (readers require marker + trusted author — a bare first line is
+   never enough). One per issue, ever. The comment's timestamp is the proof
+   the contract predates the diff — that is the whole anti-retrofit
+   mechanism, so post it **before** you read a line of implementation code.
 5. **Re-read after claiming.** Check-then-post is not atomic: two runs can
    both pass step 3 and both post. So re-read the comments afterwards, and if
    another *active* claim predates yours, withdraw and stop — last writer
@@ -113,6 +120,8 @@ asked for.
 
 ```markdown
 🚢 SHIP-LOCK — shipping this as one PR.
+
+<!-- design-run-ship-lock:v1 -->
 
 **Chosen approach:** <the option the issue picked, or the only one on offer>
 
@@ -267,9 +276,11 @@ Before you end the turn:
    if you have not already). Any other name, including the default branch,
    is not pushed.
 2. Commit the work. The delivery step commits the dirty files you left
-   behind too — the burn ships arbitrary single-PR work, so `scripts/`,
-   `.github/`, `docs/` and `lib/` are all deliverable here, unlike
-   design-run's designs-only policy. A non-draft PR already open on the
+   behind too — but only outside the protected prefixes. Both backlog-burn
+   and design-run refuse `.github/**`, `.claude/**`, `scripts/**` and
+   `tools/**` (issue #869); backlog-burn may still deliver `docs/`,
+   `designs/`, `lib/`, `people/` and other non-protected paths, while
+   design-run stays designs-only. A non-draft PR already open on the
    branch is a hard stop (`auto-arm.yml` arms auto-merge on non-draft
    `claude/*` PRs). A tree with no commit ahead of the job's start SHA and
    no dirty files is not delivered.
