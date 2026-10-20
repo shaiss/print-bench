@@ -402,10 +402,11 @@ jobs:
           && steps.select.outputs.issue != ''
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
-      # Trusted install of the same toolchain .claude/hooks/session-start.sh
-      # would pull in. Disable-sudo runs next and strips setuid from sudo, so
-      # the SessionStart hook must not need apt after this step — it already
-      # exits when openscad/xvfb/…/printcheck/stylelift are on PATH.
+      # Trusted apt install of the same system toolchain
+      # .claude/hooks/session-start.sh would pull in. Disable-sudo runs next
+      # and strips setuid from sudo, so the SessionStart hook must not need
+      # apt after this step. Pip installs (printcheck/stylelift) do not need
+      # root and run in a later step after sudo is disabled (#870).
       - name: Install preflight toolchain before disabling sudo
         if: >-
           steps.policy.outputs.enabled == 'true'
@@ -417,9 +418,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update -qq 2>/dev/null || true
           sudo apt-get install -y -qq openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq
-          python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/printcheck[test]"
-          python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/stylelift[test]"
-          for bin in openscad xvfb-run montage ffmpeg gifsicle prusa-slicer jq printcheck stylelift pytest; do
+          for bin in openscad xvfb-run montage ffmpeg gifsicle prusa-slicer jq; do
             command -v "$bin" >/dev/null || {
               echo "::error::preflight toolchain missing ${bin} after install" >&2
               exit 1
@@ -466,6 +465,36 @@ jobs:
             exit 1
           fi
 
+      # User-level pip after sudo is gone (Cipher #868 LOW / issue #870).
+      # PyPI deps come only from the committed hashed lockfile — exact
+      # versions + sha256, fail-closed via --require-hashes --no-deps. Local
+      # printcheck/stylelift are then installed --no-deps so they cannot pull
+      # unpinned transitive deps (-e rejects --require-hashes).
+      - name: Install preflight Python tools after disabling sudo
+        id: preflight_pip
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
+        run: |
+          set -euo pipefail
+          req="${GITHUB_WORKSPACE}/.github/backlog-burn-preflight-requirements.txt"
+          [ -f "$req" ] || {
+            echo "::error::missing hashed preflight requirements: ${req}" >&2
+            exit 1
+          }
+          python3 -m pip install --require-hashes --no-deps -r "$req"
+          python3 -m pip install --no-deps -e "${GITHUB_WORKSPACE}/tools/printcheck"
+          python3 -m pip install --no-deps -e "${GITHUB_WORKSPACE}/tools/stylelift"
+          for bin in printcheck stylelift pytest; do
+            command -v "$bin" >/dev/null || {
+              echo "::error::preflight Python tool missing ${bin} after install" >&2
+              exit 1
+            }
+          done
+
       - name: Ship via Z.AI (GLM, chain link 1)
         id: ship_zai_1
         if: >-
@@ -474,6 +503,7 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
         # The step must die inside a live job (step timeout < job timeout) so
         # the settle job's cleanup runs as a normal step, not in a cancellation
         # grace window; continue-on-error keeps the job alive for it (the
@@ -512,6 +542,7 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
           && steps.ship_zai_1.outcome != 'success'
         timeout-minutes: 105
         continue-on-error: true
@@ -535,6 +566,7 @@ jobs:
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
           && steps.ship_zai_1.outcome != 'success'
           && steps.ship_zai_2.outcome != 'success'
         timeout-minutes: 105
@@ -569,6 +601,7 @@ jobs:
           && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
           && steps.ship_zai_1.outcome != 'success'
           && steps.ship_zai_2.outcome != 'success'
           && steps.ship_zai_3.outcome != 'success'
@@ -591,6 +624,7 @@ jobs:
           && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
           && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
           && steps.ship_zai_1.outcome != 'success'
           && steps.ship_zai_2.outcome != 'success'
           && steps.ship_zai_3.outcome != 'success'
