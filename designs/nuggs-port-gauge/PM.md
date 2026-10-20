@@ -50,6 +50,7 @@ ladder-2. Lifestyle / AI tiers: none — a calibration tool.
 1. Field-test the ladder on a real printer and log the winner.
 2. Optional physical 0.10 negative-control step if users ask.
 3. Seed a `printer.conf` recipe from a decisive field result.
+4. Fuller quarter-section cutaway shot (J7 + Drik r2): the committed cutaway reads as one shell rather than a mated pair; preview legibility only.
 
 ## Open decisions
 
