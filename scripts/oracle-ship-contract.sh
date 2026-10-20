@@ -42,7 +42,7 @@ select_contract() {  # file or -
 }
 
 selftest() {
-  local tmp rc
+  local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
