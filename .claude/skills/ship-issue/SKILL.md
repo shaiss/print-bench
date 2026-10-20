@@ -245,6 +245,53 @@ Same skill, three tightenings — nobody is there to catch a wrong guess:
   Claim, amendments, declines, and the final verdict all land as comments,
   each one readable cold.
 
+### Shipping in the scheduled burn — leave a branch, a fresh runner delivers it
+
+When the invoker is `backlog-burn.yml`, §6's "Draft PR … then
+`subscribe_pr_activity`" is not yours to do. The agent job runs with
+`github.token` and cannot push; a PAT could have steered more than the
+issue it was handed, so it holds none (issue #863, the #859/#861
+pattern). The agent job's next step writes a git bundle of the commits on
+`claude/issue-<N>-*`; a separate deliver workflow, running no agent code,
+checks out the commit the job started from, verifies that bundle, and only
+then pushes the branch and opens the draft PR. Nothing in the bundle is
+executed. The success comment is posted only after both of these are true:
+
+- `git ls-remote` returns the tip of your local `claude/issue-<N>-*` branch
+- an open **draft** pull request in this repository, whose `headRefOid` is
+  that tip, has a body that closes `#<N>`
+
+Before you end the turn:
+
+1. Check out `claude/issue-<N>-<slug>` (create it from the default branch
+   if you have not already). Any other name, including the default branch,
+   is not pushed.
+2. Commit the work. The delivery step commits the dirty files you left
+   behind too — the burn ships arbitrary single-PR work, so `scripts/`,
+   `.github/`, `docs/` and `lib/` are all deliverable here, unlike
+   design-run's designs-only policy. A non-draft PR already open on the
+   branch is a hard stop (`auto-arm.yml` arms auto-merge on non-draft
+   `claude/*` PRs). A tree with no commit ahead of the job's start SHA and
+   no dirty files is not delivered.
+3. Do not `git push` and do not `gh pr create`. This job's token cannot
+   push, those two commands are denied, and a pull request opened here
+   would not trigger CI. The delivery step pushes the branch and opens the
+   draft. Its body is `Closes #<N>` plus a pointer at the branch, so the
+   frozen contract, the claim-comment link, the §5 audit table with
+   measured numbers, and the `/preflight` verdict belong on the issue
+   thread, where a reviewer can read them.
+4. Stop. Do not post the success comment. The delivery step posts
+   `🚢 backlog-burn delivered — branch and draft PR verified` with the
+   branch tip and the PR URL, and only after the two checks above pass. A
+   failed push posts nothing that reads as success. A `🚢 DECLINED`,
+   `🚦 DECISION NEEDED`, or `🚢 DEFERRED` comment from this run is a hard
+   stop: the delivery step does not bundle that work, does not push it,
+   and does not post success.
+
+Do not call `subscribe_pr_activity`. You do not open the draft PR in step 3.
+The delivery workflow opens it, and that PR does not exist yet when your
+turn ends.
+
 ## 8. Decisions that need a human (the HITL decision gate)
 
 Some forks are not yours to take: a taste call, a requirement the issue states
