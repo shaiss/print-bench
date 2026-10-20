@@ -274,7 +274,9 @@ jobs:
               # "🚢 SHIP-LOCK — settle claim" + HTML marker; the real contract
               # is a later comment (or an attended claim that embeds Gate
               # contract / Acceptance criteria). scripts/oracle-ship-contract.sh
-              # picks it; --selftest covers stub vs real (Cipher, #864).
+              # picks it from an allowlisted author only (same logins as the
+              # SHIP-LOCK readers); --selftest covers stub vs real and an
+              # outsider heading-shaped spoof (Cipher, #864).
               comments_json="$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}/comments" \
                 --paginate --slurp 2>/dev/null || true)"
               contract=""

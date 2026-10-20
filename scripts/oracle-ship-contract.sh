@@ -7,8 +7,17 @@
 #   - an attended claim that embeds Gate contract / Acceptance criteria in
 #     the same SHIP-LOCK body, or
 #   - a later intent comment carrying those section headings (unattended).
-# This script selects the latest comment whose body looks like a contract
-# and is not the settle stub alone.
+# This script selects the latest TRUSTED comment whose body looks like a
+# contract and is not the settle stub alone.
+#
+# Trust rule (same exact allowlist as the SHIP-LOCK readers — Cipher
+# 0dde3ce0 / #864): author login must be one of github-actions[bot],
+# shaiss, cursor[bot]. Heading shape alone is not enough — on a public
+# issue any user can paste "**Gate contract**" and must not replace the
+# frozen §2 text in Oracle context. Contract intent comments cannot carry
+# the lock HTML marker (intents reject `<!--`), so authorship is the gate;
+# an attended claim that embeds the contract still wins via the allowlist
+# (and typically carries the marker too).
 #
 # Usage:
 #   scripts/oracle-ship-contract.sh <comments.json>
@@ -19,12 +28,20 @@ set -euo pipefail
 
 SETTLE_STUB='🚢 SHIP-LOCK — settle claim'
 LOCK_HTML='<!-- design-run-ship-lock:v1 -->'
+# Exact logins — keep in sync with SHIP_LOCK_AUTHOR_LOGINS /
+# LOCK_AUTHOR_LOGINS in design-run-deliver.sh and routine-lock-cleanup.sh.
+CONTRACT_AUTHOR_LOGINS='github-actions[bot] shaiss cursor[bot]'
 
 select_contract() {  # file or -
-  jq -r --arg stub "$SETTLE_STUB" '
+  jq -r --arg stub "$SETTLE_STUB" --arg allow "$CONTRACT_AUTHOR_LOGINS" '
     def fl($b): ($b // "") | split("\n")
       | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
       | map(select(length > 0)) | (.[0] // "");
+    def allow_logins:
+      ($allow / " ") | map(select(length > 0) | ascii_downcase);
+    def trusted_author:
+      (((.user.login // .login // "") | ascii_downcase) as $l
+       | ($l | length) > 0 and ((allow_logins | index($l)) != null));
     def looks_like_contract:
       (.body // "")
       | test("\\*\\*Gate contract\\*\\*|\\*\\*Acceptance criteria\\*\\*|\\*\\*Design name:\\*\\*|\\*\\*Chosen approach:\\*\\*");
@@ -34,7 +51,8 @@ select_contract() {  # file or -
     [ .[]
       | select(is_settle_stub | not)
       | select(fl(.body) | test("^🚢 SHIP-LOCK WITHDRAWN") | not)
-      | select(looks_like_contract) ]
+      | select(looks_like_contract)
+      | select(trusted_author) ]
     | sort_by(.created_at // "")
     | last
     | if . == null then "" else (.body // "") end
@@ -42,7 +60,7 @@ select_contract() {  # file or -
 }
 
 selftest() {
-  local tmp
+  local tmp out
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
@@ -98,6 +116,66 @@ selftest() {
   out="$(select_contract "$tmp/wd.json")"
   printf '%s' "$out" | grep -q 'Acceptance criteria' || {
     echo "selftest: Acceptance criteria comment was not selected after WITHDRAWN" >&2
+    return 1
+  }
+
+  # Outsider / late heading-shaped comment must NOT replace a trusted contract
+  # (Bugbot + Security Agent MED on #864).
+  jq -n \
+    '[{body:"**Design name:** real\n\n**Gate contract**\n- [ ] G1 authentic\n",
+       created_at:"2026-10-20T00:01:00Z",
+       user:{login:"github-actions[bot]",type:"Bot"}},
+      {body:"**Gate contract**\n- [ ] attacker criteria\n",
+       created_at:"2026-10-20T00:02:00Z",
+       user:{login:"outsider",type:"User"}}]' > "$tmp/outsider.json"
+  out="$(select_contract "$tmp/outsider.json")"
+  printf '%s' "$out" | grep -qF 'G1 authentic' || {
+    echo "selftest: trusted contract was not kept when an outsider posted a later heading" >&2
+    printf 'got: %s\n' "$out" >&2
+    return 1
+  }
+  printf '%s' "$out" | grep -qF 'attacker criteria' && {
+    echo "selftest: outsider heading-shaped comment replaced the trusted contract" >&2
+    return 1
+  }
+
+  # Outsider-only heading thread → empty (no trusted contract to fall back on)
+  jq -n \
+    '[{body:"**Acceptance criteria**\n- [ ] forged\n",
+       created_at:"2026-10-20T00:01:00Z",
+       user:{login:"random-user",type:"User"}}]' > "$tmp/outsider-only.json"
+  [ -z "$(select_contract "$tmp/outsider-only.json")" ] || {
+    echo "selftest: outsider-only heading was accepted as a contract" >&2
+    return 1
+  }
+
+  # claude[bot] is NOT on the allowlist (same rule as lock readers)
+  jq -n \
+    '[{body:"**Design name:** real\n\n**Gate contract**\n- [ ] G1\n",
+       created_at:"2026-10-20T00:01:00Z",
+       user:{login:"github-actions[bot]",type:"Bot"}},
+      {body:"**Gate contract**\n- [ ] claude rewrite\n",
+       created_at:"2026-10-20T00:02:00Z",
+       user:{login:"claude[bot]",type:"Bot"}}]' > "$tmp/claude.json"
+  out="$(select_contract "$tmp/claude.json")"
+  printf '%s' "$out" | grep -qF 'claude rewrite' && {
+    echo "selftest: claude[bot] heading replaced the trusted contract" >&2
+    return 1
+  }
+  printf '%s' "$out" | grep -qF 'G1' || {
+    echo "selftest: trusted contract lost when claude[bot] posted later" >&2
+    return 1
+  }
+
+  # cursor[bot] on the allowlist still wins (attended cloud-agent claim)
+  jq -n --arg html "$LOCK_HTML" \
+    '[{body:("🚢 SHIP-LOCK — running.\n\n" + $html
+             + "\n\n**Design name:** from-cursor\n\n**Gate contract**\n- [ ] C1\n"),
+       created_at:"2026-10-20T00:00:00Z",
+       user:{login:"cursor[bot]",type:"Bot"}}]' > "$tmp/cursor.json"
+  out="$(select_contract "$tmp/cursor.json")"
+  printf '%s' "$out" | grep -qF 'from-cursor' || {
+    echo "selftest: cursor[bot] attended contract was not selected" >&2
     return 1
   }
 

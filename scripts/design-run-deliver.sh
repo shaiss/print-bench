@@ -902,9 +902,14 @@ hard_stop_from_comments() {  # [run-started-at]
           else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
           end;
       def in_window: ($since | length) == 0 or .created_at > $since;
+      # Same-second ties (GitHub created_at is second-precision) break by
+      # higher comment id — settle skip-lock can post contract then DECLINED
+      # in one second (Bugbot MED, #864); keep in sync with
+      # routine-lock-cleanup.sh JQ_THIS_RUN. sort_by keeps the last of equal
+      # keys, so higher id wins (missing id sorts as 0).
       def claimless_stop(is_stop):
         if ($since | length) == 0 or length == 0 then false
-        else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
+        else (sort_by(.created_at, ((.id // 0) | tonumber)) | last)
              | (fl(.body) | is_stop) and (.created_at > $since) and stop_trusted
         end;
       def indicated(pred):
@@ -935,7 +940,7 @@ fetch_issue_comments() {
     return 1
   fi
   GH_TOKEN="$token" gh api --paginate "repos/${REPO}/issues/${ISSUE}/comments?per_page=100" \
-    --jq '[.[] | {body: (.body // ""), created_at: .created_at, login: (.user.login // ""), type: (.user.type // "")}]'
+    --jq '[.[] | {body: (.body // ""), created_at: .created_at, login: (.user.login // ""), type: (.user.type // ""), id: (.id // 0)}]'
 }
 
 # A this-run hard stop is not a delivery. Exit 0 with delivered=false and
@@ -2882,6 +2887,28 @@ EOF
   set -e
   [ "$rc" -eq 0 ] && [ ! -e "${tmp}/stop.bundle" ] || {
     echo "selftest: claimless bot decision was delivered (exit ${rc})" >&2
+    exit 1
+  }
+  # Same-second contract + DECLINED (skip-lock settle): higher id wins so
+  # the stop still fires as claimless (Bugbot MED, #864).
+  jq -n \
+    '[{body:"**Design name:** widget\n\n**Gate contract**\n- [ ] G1",
+       created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:100},
+      {body:"🚢 DECLINED — needs a decision\n\nstop",
+       created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:101}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+    echo "selftest: same-second claimless contract+DECLINED (stop higher id) did not fire" >&2
+    exit 1
+  }
+  jq -n \
+    '[{body:"🚢 DECLINED — needs a decision\n\nstop",
+       created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:100},
+      {body:"**Design name:** widget\n\n**Gate contract**\n- [ ] G1",
+       created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:101}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+    echo "selftest: same-second DECLINED followed by higher-id contract still fired as stop" >&2
     exit 1
   }
   # Outsider marker does not stop the run. The bundle is written.

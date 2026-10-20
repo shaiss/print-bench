@@ -199,11 +199,17 @@ lock_state() {
 #     passed no --run-started-at still works there).
 #   claimless_stop(is_stop) — for a thread with NO SHIP-LOCK at all, where
 #     there is no claim timestamp to anchor on: the thread's LATEST comment
-#     (first-of-ties, as latest_lock) must be a stop (is_stop, applied to
-#     its first line), strictly after $since, by a trusted author. Anything
-#     newer means the stop is history; no window, or a stop that predates
-#     the window, is not this firing — a later success that posts nothing
-#     must not reuse it, set declined, and skip red-on-death.
+#     must be a stop (is_stop, applied to its first line), strictly after
+#     $since, by a trusted author. Anything newer means the stop is history;
+#     no window, or a stop that predates the window, is not this firing — a
+#     later success that posts nothing must not reuse it, set declined, and
+#     skip red-on-death.
+#     "Latest" ties on created_at (GitHub second precision) break by higher
+#     numeric comment id — settle's apply loop can post a contract intent
+#     then a DECLINED in the same second when it skips the lock (Bugbot MED
+#     on #864); first-of-ties would keep the contract and score a death.
+#     sort_by keeps the last of equal keys, so higher id wins a same-second
+#     tie (missing id sorts as 0 — same as the pre-id fixtures).
 JQ_THIS_RUN='def stop_trusted:
     ((.login // "") | length) > 0 and ((.type // "") | length) > 0
     and (
@@ -214,7 +220,7 @@ JQ_THIS_RUN='def stop_trusted:
   def in_window: ($since | length) == 0 or .created_at > $since;
   def claimless_stop(is_stop):
     if ($since | length) == 0 or length == 0 then false
-    else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
+    else (sort_by(.created_at, ((.id // 0) | tonumber)) | last)
          | (fl(.body) | is_stop) and (.created_at > $since) and stop_trusted
     end;'
 
@@ -455,7 +461,7 @@ run_live() {
   # edited to SHIP-LOCK WITHDRAWN in the agent's wording — never this
   # script's DEATH_PREFIX, which marks a death, not a decline).
   comments="$(gh_api --paginate "/repos/$REPO/issues/$ISSUE/comments?per_page=100" \
-    --jq '.[] | {body: (.body // ""), created_at: .created_at, login: (.user.login // ""), type: (.user.type // "")}')"
+    --jq '.[] | {body: (.body // ""), created_at: .created_at, login: (.user.login // ""), type: (.user.type // ""), id: (.id // 0)}')"
   if [ "$(decline_indicated "$RUN_STARTED_AT" <<<"$comments")" = "true" ]; then
     echo "::notice::a DECLINED/DECISION NEEDED comment from this run is the stop on #$ISSUE — a deliberate stop, not a death"
     conclude false true false false "declined (a stop comment from this run)"
@@ -719,7 +725,32 @@ EOF
 EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-followed.ndjson")" = "false" ] \
     || st_fail "a claimless DECLINED that a newer comment followed was still read as this run's stop"
-  echo "ok    selftest: decline detection (after-claim owner/Bot / claimed outsider / claimed anon / before-claim / mid-line / no-claim / claimless #675 in-window / prior-window / no-window / at-start / Bot / outsider / anon / followed)"
+  # Same-second contract + stop (skip-lock settle apply): higher comment id
+  # wins the "latest" tie so the DECLINED still scores as a decline, not a
+  # death (Bugbot MED on #864). Contract first in array (lower id) mimics
+  # apply_intents order when intents carry a stop and settle skips the lock.
+  cat > "$tmp/decline-claimless-tie.ndjson" <<'EOF'
+{"body": "**Design name:** widget\n\n**Gate contract**\n- [ ] G1", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 100}
+{"body": "🚢 DECLINED — needs a decision\n\nparked", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 101}
+EOF
+  [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-tie.ndjson")" = "true" ] \
+    || st_fail "a same-second claimless contract+DECLINED tie (stop has higher id) was not read as a decline"
+  # Inverse order in the array must not matter — id, not array position.
+  cat > "$tmp/decline-claimless-tie-rev.ndjson" <<'EOF'
+{"body": "🚢 DECLINED — needs a decision\n\nparked", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 101}
+{"body": "**Design name:** widget\n\n**Gate contract**\n- [ ] G1", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 100}
+EOF
+  [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-tie-rev.ndjson")" = "true" ] \
+    || st_fail "a same-second claimless tie with stop listed first still needs higher id to win"
+  # If the non-stop has the higher id (posted after the stop in the same
+  # second), the stop is no longer latest — not this firing's decline.
+  cat > "$tmp/decline-claimless-tie-followed.ndjson" <<'EOF'
+{"body": "🚢 DECLINED — needs a decision\n\nparked", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 100}
+{"body": "**Design name:** widget\n\n**Gate contract**\n- [ ] G1", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 101}
+EOF
+  [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-tie-followed.ndjson")" = "false" ] \
+    || st_fail "a same-second claimless DECLINED followed by a higher-id non-stop was still read as a decline"
+  echo "ok    selftest: decline detection (after-claim owner/Bot / claimed outsider / claimed anon / before-claim / mid-line / no-claim / claimless #675 in-window / prior-window / no-window / at-start / Bot / outsider / anon / followed / same-second id-tie)"
 
   # -- death-marking: our own withdrawal notice is a death, not a decline ---
   cat > "$tmp/our-death.ndjson" <<'EOF'

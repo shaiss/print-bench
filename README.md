@@ -489,7 +489,10 @@ surfaces studies awaiting a read live in
     are verified (issue #853)
   - `oracle-ship-contract.sh` — picks the frozen §2 ship contract for Oracle
     context (Gate contract / Acceptance criteria / Design name / Chosen
-    approach), never the settle SHIP-LOCK stub alone (issue #864)
+    approach) from an allowlisted author only (github-actions[bot], shaiss,
+    cursor[bot] — same trust rule as the SHIP-LOCK readers), never the settle
+    SHIP-LOCK stub alone and never an outsider heading-shaped comment
+    (issue #864)
   - `routine-lock-cleanup.sh` — withdraws a dead scheduled run's SHIP-LOCK (a
     run killed by its timeout cannot run the skill's own release step) and
     escalates to `needs-decision` after 3 run-deaths on one issue; invoked by
