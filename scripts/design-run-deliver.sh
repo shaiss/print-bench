@@ -61,7 +61,10 @@
 #      autonomy-ok), and only within per-run caps (8 KiB/comment body,
 #      64 KiB payload). Bare ASCII SHIP-LOCK first lines and HTML comment
 #      markers are rejected. Off-issue and non-allowlisted intents are
-#      dropped with a ::warning::, never posted.
+#      dropped with a ::warning::, never posted. A stop-marker intent
+#      defers the settle SHIP-LOCK and skips it only after a validated
+#      stop comment actually posts; a rejected or failed stop falls back
+#      to posting the lock (Cipher L2, #884).
 #
 # Usage:
 #   scripts/design-run-deliver.sh --repo <owner/name> --issue <N> \
@@ -1038,20 +1041,38 @@ write_intents() {
   }
 }
 
+# True when $1's first non-empty line leads with a hard-stop marker
+# (DECLINED / DECISION NEEDED / DEFERRED). Same first-line rule as
+# intents_stop_indicated / hard_stop_from_comments.
+body_is_stop_comment() {
+  local first
+  first="$(printf '%s' "${1:-}" | awk '
+    { line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line);
+      if (length(line) > 0) { print line; exit } }')"
+  case "$first" in
+    "${STOP_MARKER_DECLINED}"*|"${STOP_MARKER_DECISION}"*|"${STOP_MARKER_DEFERRED}"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Apply the agent's issue intents (settle job, trusted artifact download).
 # Posts the settle SHIP-LOCK claim (constant body with HTML marker)
-# first, then applies intents. One intent posts only when: it targets THIS
-# issue, its action is comment or label, its label is in INTENTS_ALLOWLIST,
-# and the per-run caps hold. Comment bodies are NFKC-normalized (Cf stripped,
-# whitespace collapsed) before the ship-lock regex; HTML comment markers and
-# oversize bodies are rejected (Cipher, #864). Everything else is dropped
-# with a ::warning:: naming why. Exit 0 for agent-side problems (the run's
-# disposition comes from the thread, not from here); exit 1 only for an
-# unreadable/oversized file, a normalizer failure, or broken arguments —
-# an applier that cannot read its input must not look like "no intents".
+# first, then applies intents — except when intents indicate a hard stop,
+# in which case the lock is deferred and skipped only after a validated
+# stop comment actually posts (Cipher L2, #884). One intent posts only when:
+# it targets THIS issue, its action is comment or label, its label is in
+# INTENTS_ALLOWLIST, and the per-run caps hold. Comment bodies are
+# NFKC-normalized (Cf stripped, whitespace collapsed) before the ship-lock
+# regex; HTML comment markers and oversize bodies are rejected (Cipher, #864).
+# Everything else is dropped with a ::warning:: naming why. Exit 0 for
+# agent-side problems (the run's disposition comes from the thread, not
+# from here); exit 1 only for an unreadable/oversized file, a normalizer
+# failure, or broken arguments — an applier that cannot read its input
+# must not look like "no intents".
 apply_intents() {
   local path="$1" n i applied=0 rejected=0 comments=0 labels=0
   local intent_issue action body label size normalized
+  local defer_settle_lock=0 stop_posted=0
   if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
     echo "design-run-deliver: issue must be numeric, got '${ISSUE}'" >&2
     exit 2
@@ -1082,12 +1103,16 @@ apply_intents() {
     echo "::warning::intents file is malformed (want {version:1,intents:[...]} of at most '${INTENTS_MAX_ENTRIES}' entries) — no intents applied" >&2
     exit 0
   fi
-  # Settle claim: constant body, never intent text. Skip when intents
-  # already carry a stop (DECLINED / DECISION NEEDED / DEFERRED) — posting
-  # a lock then would leave an active claim that cleanup treats as
-  # declined-after-claim and does not withdraw (Bugbot MED, #864).
+  # Settle claim: constant body, never intent text. When intents carry a
+  # stop (DECLINED / DECISION NEEDED / DEFERRED), defer the lock until
+  # after intents apply — skip only once a validated stop actually posts
+  # (Cipher L2, #884). A rejected or failed stop falls back to the normal
+  # lock so settle never posts nothing. Posting lock-then-stop would leave
+  # an active claim cleanup treats as declined-after-claim and does not
+  # withdraw (Bugbot MED, #864); deferring avoids that without the silent
+  # skip-on-indication hole.
   if intents_stop_indicated "$path"; then
-    note "skipping settle SHIP-LOCK — intents carry a stop marker on #${ISSUE}"
+    defer_settle_lock=1
   else
     post_settle_ship_lock
   fi
@@ -1154,6 +1179,9 @@ apply_intents() {
           i=$((i + 1))
           continue
         fi
+        if body_is_stop_comment "$body"; then
+          stop_posted=1
+        fi
         comments=$((comments + 1))
         applied=$((applied + 1))
         ;;
@@ -1206,6 +1234,16 @@ apply_intents() {
     esac
     i=$((i + 1))
   done
+  # Cipher L2 (#884): lock skip is earned by a posted stop, not by
+  # indication alone. Rejected / failed stops fall back to the lock.
+  if [ "$defer_settle_lock" -eq 1 ]; then
+    if [ "$stop_posted" -eq 1 ]; then
+      note "skipping settle SHIP-LOCK — validated stop posted on #${ISSUE}"
+    else
+      note "stop indicated but none posted — posting settle SHIP-LOCK on #${ISSUE}"
+      post_settle_ship_lock
+    fi
+  fi
   note "applied ${applied} issue intent(s) on #${ISSUE} (${comments} comment(s), ${labels} label(s)); ${rejected} rejected"
   exit 0
 }
@@ -1521,6 +1559,15 @@ if [ "\$1" = "api" ]; then
     esac
   done
   if [ -n "\${posting:-}" ]; then
+    # Optional: fail a comment POST whose argv matches FAIL_COMMENT_POST_MATCH
+    # (used by the #884 stop-post-failure selftest). Settle lock posts omit
+    # the match string so the fallback lock still succeeds.
+    if [ -n "\${FAIL_COMMENT_POST_MATCH:-}" ] \
+      && printf '%s\n' "\$*" | grep -q -- '--method POST' \
+      && printf '%s\n' "\$*" | grep -qF -- "\${FAIL_COMMENT_POST_MATCH}"; then
+      echo "comment post refused" >&2
+      exit 1
+    fi
     printf '%s\n' '{"id":1}'
     exit 0
   fi
@@ -2213,11 +2260,14 @@ p.write_bytes(data)
   git_cmd -C "$isrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m base >/dev/null
   ibase="$(git_cmd -C "$isrc" rev-parse HEAD)"
   run_intents() {  # $1 intents file, $2 expected exit. Captures stderr+rc.
+    # Optional FAIL_COMMENT_POST_MATCH is forwarded so the fake gh can
+    # refuse a matching comment POST (Cipher L2, #884 case c).
     : > "${tmp}/gh.log"
     set +e
     stderr="$(env PATH="${tmp}/bin:${PATH}" GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
       GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
       DELIVER_WORKTREE="$isrc" \
+      FAIL_COMMENT_POST_MATCH="${FAIL_COMMENT_POST_MATCH:-}" \
       "$SELF" --repo acme/print-bench --issue 853 --base "$ibase" \
       --base-branch main --run-url https://example.test/run/1 \
       --apply-intents "$1" 2>&1 >/dev/null)"
@@ -2367,8 +2417,10 @@ EOF
   reject_shiplock_case fullwidth "$(python3 -c 'print("\uff33\uff28\uff29\uff30\uff0d\uff2c\uff2f\uff23\uff2b spoof")')"
   reject_shiplock_case line2 $'preamble\nSHIP-LOCK on line two'
 
-  # Cipher / Bugbot MED (#864): a DECLINED-only intents payload must NOT
-  # post a settle lock (cleanup would leave it active as declined-after-claim).
+  # Cipher / Bugbot MED (#864) + Cipher L2 (#884 case a): a valid
+  # DECLINED-only intents payload posts the stop and skips the settle
+  # lock (cleanup would leave lock-then-stop active as declined-after-claim).
+  # Skip is earned only after the stop posts — see cases b/c below.
   ifile="${tmp}/intents-declined-only.json"
   cat > "$ifile" <<'EOF'
 {"version":1,"intents":[
@@ -2388,8 +2440,71 @@ EOF
     echo "selftest: DECLINED-only intents did not post the stop comment" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK' || {
-    echo "selftest: DECLINED-only path did not note skipping the settle lock" >&2
+  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+    echo "selftest: DECLINED-only path did not note skipping the settle lock after a posted stop" >&2
+    exit 1
+  }
+
+  # Cipher L2 (#884 case b): a stop intent that fails validation (HTML
+  # comment marker) must NOT silently skip the lock — fall back to posting it.
+  ifile="${tmp}/intents-stop-rejected.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — parked <!-- spoof -->"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(comment_posts)" -eq 1 ] || {
+    echo "selftest: rejected-stop intents did not fall back to the settle lock (posted $(comment_posts))" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" || {
+    echo "selftest: rejected-stop intents silently skipped the settle SHIP-LOCK" >&2
+    exit 1
+  }
+  grep -q -- 'DECLINED — parked' "${tmp}/gh.log" && {
+    echo "selftest: rejected-stop intents still posted the invalid stop body" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'HTML comment marker' || {
+    echo "selftest: rejected-stop path did not name the HTML rejection" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'stop indicated but none posted — posting settle SHIP-LOCK' || {
+    echo "selftest: rejected-stop path did not note the lock fallback" >&2
+    exit 1
+  }
+
+  # Cipher L2 (#884 case c): a validated stop whose POST fails must NOT
+  # skip the lock — fall back to posting it.
+  ifile="${tmp}/intents-stop-post-fail.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\n\nparked"}
+]}
+EOF
+  FAIL_COMMENT_POST_MATCH='DECLINED — needs a decision' run_intents "$ifile" 0
+  # Fake gh logs the refused stop POST before exiting 1, then the lock POST
+  # succeeds — two comment API calls, one of which carries the authenticity
+  # marker. Indication alone must not have skipped the lock.
+  [ "$(comment_posts)" -eq 2 ] || {
+    echo "selftest: failed-stop-post expected stop-attempt + settle lock (posted $(comment_posts))" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" || {
+    echo "selftest: failed-stop-post silently skipped the settle SHIP-LOCK" >&2
+    exit 1
+  }
+  grep -q -- 'DECLINED — needs a decision' "${tmp}/gh.log" || {
+    echo "selftest: failed-stop-post never attempted the stop comment" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'failed to post' || {
+    echo "selftest: failed-stop-post path did not warn about the post failure" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'stop indicated but none posted — posting settle SHIP-LOCK' || {
+    echo "selftest: failed-stop-post path did not note the lock fallback" >&2
     exit 1
   }
 
