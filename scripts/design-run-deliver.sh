@@ -3024,6 +3024,8 @@ EOF
   burn_settings="${repo_root}/.claude/backlog-burn-settings.json"
   [ -f "$burn_settings" ] || { echo "selftest: backlog-burn settings are missing" >&2; exit 1; }
   for rule in 'Bash(git push:*)' 'Bash(git push*)' 'Bash(gh pr create:*)' 'Bash(gh pr create*)' \
+    'Bash(gh issue create*autonomy-ok*)' 'Bash(gh issue create*design-brief*)' \
+    'Bash(gh pr create*autonomy-ok*)' 'Bash(gh pr create*design-brief*)' \
     'Bash(gh issue edit*autonomy-ok*)' 'Bash(gh issue edit*design-brief*)' \
     'Bash(gh api*autonomy-ok*)' 'Bash(gh api*design-brief*)' \
     'Bash(curl*autonomy-ok*)' 'Bash(curl*design-brief*)'; do
