@@ -781,12 +781,18 @@ STOP_MARKER_DECLINED='🚢 DECLINED'
 STOP_MARKER_DECISION='🚦 DECISION NEEDED'
 STOP_MARKER_DEFERRED='🚢 DEFERRED'
 # Visible first line for humans. A comment is a lock ONLY when it also
-# carries SHIP_LOCK_HTML_MARKER and a trusted author (Bot or repo owner) —
+# carries SHIP_LOCK_HTML_MARKER and is authored by SHIP_LOCK_AUTHOR_LOGIN —
 # never because it merely starts with this string (Cipher, #864).
 STOP_LOCK_MARKER='🚢 SHIP-LOCK'
 # Hidden authenticity marker. Settle's lock writer emits it; intents reject
 # `<!--` so an applied intent can never forge a lock.
 SHIP_LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
+# Exact GitHub login settle posts as. design-run.yml's settle
+# "Apply the agent's issue intents" step sets GH_TOKEN=${{ github.token }},
+# which is always github-actions[bot] — never a PAT, never another app Bot
+# (claude[bot] / cursor[bot] can comment with the marker and must not
+# count). Do not widen this to "any Bot" or the repo owner.
+SHIP_LOCK_AUTHOR_LOGIN='github-actions[bot]'
 # Constant settle-claim body — built here, never from intent text.
 SHIP_LOCK_SETTLE_BODY="${STOP_LOCK_MARKER} — settle claim
 
@@ -864,29 +870,33 @@ post_settle_ship_lock() {
 # latest comment, inside the job window, from a Bot or the repo owner.
 hard_stop_from_comments() {  # [run-started-at]
   jq -s --arg html_marker "$SHIP_LOCK_HTML_MARKER" \
+    --arg settle_login "$SHIP_LOCK_AUTHOR_LOGIN" \
     --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
     --arg d3 "$STOP_MARKER_DEFERRED" \
     --arg since "${1:-}" --arg owner "${REPO%%/*}" '
       def fl($b): ($b // "") | split("\n")
         | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
         | map(select(length > 0)) | (.[0] // "");
-      def author_trusted:
+      # Stops may come from github-actions[bot] (settle intents) or the
+      # repo owner (attended PAT). Locks may NOT — see is_lock.
+      def stop_trusted:
         ((.login // "") | length) > 0 and ((.type // "") | length) > 0
         and (
           .type == "Bot"
           or (($owner | length) > 0
               and ((.login | ascii_downcase) == ($owner | ascii_downcase)))
         );
-      # A lock is the HTML marker PLUS a trusted author — never a bare
-      # SHIP-LOCK / 🚢 SHIP-LOCK first line (Cipher, #864).
+      # A lock is the HTML marker PLUS the settle login exactly — never a
+      # bare SHIP-LOCK first line, never another Bot (Cipher, #864).
       def is_lock:
-        ((.body // "") | contains($html_marker)) and author_trusted;
+        ((.body // "") | contains($html_marker))
+        and (((.login // "") | ascii_downcase)
+             == ($settle_login | ascii_downcase));
       def latest_lock:
         [ .[] | select(is_lock) ]
         | if length == 0 then null
           else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
           end;
-      def stop_trusted: author_trusted;
       def in_window: ($since | length) == 0 or .created_at > $since;
       def claimless_stop(is_stop):
         if ($since | length) == 0 or length == 0 then false
@@ -2737,10 +2747,10 @@ EOF
   git_cmd clone -b main "${tmp}/hhist.git" "$hdel" >/dev/null
   git_cmd init -b main --bare "$hbare" >/dev/null
   plant_stop() {  # body, login, type, created_at
-    # Authentic settle lock: visible line + HTML marker + trusted author.
+    # Authentic settle lock: visible line + HTML marker + settle login.
     jq -n --arg body "$1" --arg login "$2" --arg type "$3" --arg at "$4" \
-      --arg lock "$SHIP_LOCK_SETTLE_BODY" \
-      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"acme",type:"User"},
+      --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg settle "$SHIP_LOCK_AUTHOR_LOGIN" \
+      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:$settle,type:"Bot"},
         {body:$body,created_at:$at,login:$login,type:$type}]' > "${tmp}/comments.json"
   }
   for marker in '🚢 DECLINED — needs a decision' '🚦 DECISION NEEDED — bay-width' '🚢 DEFERRED — dependencies'; do
@@ -2796,6 +2806,17 @@ EOF
     echo "selftest: marker+untrusted-author was treated as a lock" >&2
     exit 1
   }
+  # Marker + another app Bot (not settle's github-actions[bot]) → not a lock.
+  # claude[bot]/cursor[bot] can comment directly with the marker.
+  for other_bot in 'claude[bot]' 'cursor[bot]'; do
+    jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg login "$other_bot" \
+      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:$login,type:"Bot"}]' \
+      > "${tmp}/comments.json"
+    [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+      echo "selftest: marker+${other_bot} was treated as a lock" >&2
+      exit 1
+    }
+  done
 
   # Bot author, claimless (no lock): still this run's stop.
   jq -n --arg body $'🚦 DECISION NEEDED — bay-width\n\nstop' \

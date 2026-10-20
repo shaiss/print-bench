@@ -270,19 +270,16 @@ jobs:
                 --jq '"**" + .title + "**\n\n" + (.body // "(no body)")' \
                 || echo "(issue #${n} could not be read)"
               echo
-              # Authentic lock = HTML marker + trusted author (Bot or repo
-              # owner). A bare 🚢 SHIP-LOCK first line is never enough (Cipher, #864).
-              # Owner is inlined (gh api --jq has no --arg); GITHUB_REPOSITORY
-              # is workflow-trusted.
-              _owner="${GITHUB_REPOSITORY%%/*}"
+              # Authentic lock = HTML marker + settle login github-actions[bot]
+              # (GH_TOKEN=${{ github.token }}). Not any Bot, not the owner
+              # (Cipher, #864). A bare 🚢 SHIP-LOCK first line is never enough.
               lock="$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}/comments" \
                 --paginate \
                 --jq "[.[]
                     | select(.body | contains(\"<!-- design-run-ship-lock:v1 -->\"))
                     | select(
-                        (.user.type == \"Bot\")
-                        or (((.user.login // \"\") | ascii_downcase)
-                            == (\"${_owner}\" | ascii_downcase))
+                        ((.user.login // \"\") | ascii_downcase)
+                        == \"github-actions[bot]\"
                       )
                     | select(.body | test(\"^\\\\s*🚢 SHIP-LOCK WITHDRAWN\") | not)]
                    | last

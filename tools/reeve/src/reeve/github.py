@@ -61,6 +61,10 @@ _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 # the two tools must stay independently installable (the groomer's precedent).
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
+# Settle posts via GH_TOKEN=${{ github.token }} → this exact login. Not
+# "any Bot" (claude[bot]/cursor[bot] can forge the marker) and not the
+# repo owner (settle does not use a PAT). Cipher, #864.
+SHIP_LOCK_AUTHOR_LOGIN = "github-actions[bot]"
 
 # The label an adoption-study submission carries. Collected from the same
 # open-issues listing the lock scan reads (no extra request), so Reeve can
@@ -253,11 +257,8 @@ def gather_run_health(
             c for c in comments
             if SHIP_LOCK_HTML_MARKER in (c.get("body") or "")
             and (
-                ((c.get("user") or {}).get("type") == "Bot")
-                or (
-                    ((c.get("user") or {}).get("login") or "").lower()
-                    == repo.split("/", 1)[0].lower()
-                )
+                ((c.get("user") or {}).get("login") or "").lower()
+                == SHIP_LOCK_AUTHOR_LOGIN.lower()
             )
         ]
         if not lock_comments:

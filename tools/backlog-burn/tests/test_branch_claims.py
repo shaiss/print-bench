@@ -65,7 +65,7 @@ def lock(hours_ago):
     return {
         "body": "🚢 SHIP-LOCK — shipping this as one PR.\n\n<!-- design-run-ship-lock:v1 -->",
         "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
-        "authorType": "Bot",
+        "authorLogin": "github-actions[bot]", "authorType": "Bot",
     }
 
 

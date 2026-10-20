@@ -77,10 +77,14 @@ DEFAULT_REQUIRED_LABEL = "autonomy-ok"
 
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 # Hidden authenticity marker settle (and trusted claim writers) emit.
-# A comment is a lock only when it carries this marker AND a trusted
-# author — never because it merely starts with SHIP_LOCK_MARKER
-# (Cipher, #864). Mirrored in scripts/design-run-deliver.sh.
+# A comment is a lock only when it carries this marker AND is authored
+# by SHIP_LOCK_AUTHOR_LOGIN — never because it merely starts with
+# SHIP_LOCK_MARKER, and never because authorType is Bot (Cipher, #864).
+# Mirrored in scripts/design-run-deliver.sh.
 SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
+# Settle posts via GH_TOKEN=${{ github.token }} → this exact login. Not a
+# PAT, not claude[bot]/cursor[bot]/any other app Bot.
+SHIP_LOCK_AUTHOR_LOGIN = "github-actions[bot]"
 
 # An issue an agentic run parked for a human yes/no (the HITL decision gate,
 # issue #161) carries this label until the decision is recorded and it is
@@ -181,23 +185,19 @@ def _parse_iso(ts: str) -> Optional[datetime]:
 
 
 def _is_authentic_ship_lock(comment: dict[str, Any]) -> bool:
-    """True when ``comment`` is a settle/trusted SHIP-LOCK (Cipher, #864).
+    """True when ``comment`` is a settle-written SHIP-LOCK (Cipher, #864).
 
-    Requires BOTH the HTML authenticity marker and a trusted author
-    (GitHub ``Bot``, or a ``User`` whose login matches ``ownerLogin``).
-    A bare ``🚢 SHIP-LOCK`` / ``SHIP-LOCK`` first line is never enough —
-    author alone cannot tell a settle claim from an applied intent when
-    both post as the same PAT, so the marker is the forge-proof half.
+    Requires BOTH the HTML authenticity marker and author login equal to
+    ``SHIP_LOCK_AUTHOR_LOGIN`` (``github-actions[bot]`` — settle's
+    ``GH_TOKEN=${{ github.token }}``). A bare ``🚢 SHIP-LOCK`` first line
+    is never enough; nor is marker + some other Bot (``claude[bot]``,
+    ``cursor[bot]``) — those apps can comment directly with the marker.
     """
     body = comment.get("body") or ""
     if SHIP_LOCK_HTML_MARKER not in body:
         return False
-    author_type = comment.get("authorType") or ""
-    if author_type == "Bot":
-        return True
-    owner = (comment.get("ownerLogin") or "").lower()
     login = (comment.get("authorLogin") or "").lower()
-    return bool(owner and login and login == owner)
+    return login == SHIP_LOCK_AUTHOR_LOGIN.lower()
 
 
 def _ship_lock_state(

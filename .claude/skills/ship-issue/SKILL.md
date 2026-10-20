@@ -28,10 +28,11 @@ workflow did). Section 7 says what changes when nobody is watching.
    - **an active claim marker.** The marker is a state, not a flag: read the
      *latest authentic* `🚢 SHIP-LOCK` comment and act on that one.
      Authentic means the body carries `<!-- design-run-ship-lock:v1 -->`
-     and a trusted author (Bot or repo owner) — a bare `🚢 SHIP-LOCK`
-     first line is never enough. An authentic `🚢 SHIP-LOCK` is active,
-     and the issue is taken. `🚢 SHIP-LOCK WITHDRAWN` is released, and
-     blocks nothing.
+     and the author login is exactly `github-actions[bot]` (settle /
+     Actions `GITHUB_TOKEN`) — a bare `🚢 SHIP-LOCK` first line is never
+     enough, nor is marker + another Bot. An authentic `🚢 SHIP-LOCK` is
+     active, and the issue is taken. `🚢 SHIP-LOCK WITHDRAWN` is released,
+     and blocks nothing.
      An active claim more than a few hours old with **no**
      `claude/issue-<N>-*` branch carrying unmerged work and **no** open PR
      closing the issue is *stale* — a run that died between posting its lock

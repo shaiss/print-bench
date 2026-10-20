@@ -43,10 +43,12 @@ so the two never collide on the same issue.
    both claim it:
    - **an active claim marker** — read the *latest authentic* `🚢 SHIP-LOCK`
      comment (it must carry the settle HTML marker
-     `<!-- design-run-ship-lock:v1 -->` and a trusted author — Bot or the
-     repo owner; a bare `🚢 SHIP-LOCK` / `SHIP-LOCK` first line is never a
-     lock) and act on that one. An authentic `🚢 SHIP-LOCK` is active and the
-     issue is taken; `🚢 SHIP-LOCK WITHDRAWN` is released and blocks nothing.
+     `<!-- design-run-ship-lock:v1 -->` **and** be authored by
+     `github-actions[bot]` — settle's `GH_TOKEN=${{ github.token }}`; a bare
+     `🚢 SHIP-LOCK` first line is never a lock, nor is marker +
+     `claude[bot]` / `cursor[bot]` / the repo owner) and act on that one.
+     An authentic `🚢 SHIP-LOCK` is active and the issue is taken;
+     `🚢 SHIP-LOCK WITHDRAWN` is released and blocks nothing.
      An active claim more than a few hours old with **no**
      `claude/issue-<N>-*` branch carrying unmerged work and **no** open PR
      closing the issue is *stale* — take it over, naming the one you
