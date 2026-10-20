@@ -525,7 +525,8 @@ jobs:
           steps.plan.outputs.designs != ''
           && github.event_name == 'pull_request'
           && env.TRUSTED_FOR_SECRETS != 'true'
-        run: echo '::notice::untrusted agent head - product-page drafting and REGEN_TOKEN commit-back were skipped so branch-controlled scripts/ never share a job with REGEN_TOKEN / ANTHROPIC_API_KEY / ZAI_KEY / OPENROUTER_API_KEY (issue #869). Commit regenerated artifacts on the branch if needed.'
+        run: |
+          echo "::notice::untrusted agent head - product-page drafting and REGEN_TOKEN commit-back were skipped so branch-controlled scripts/ never share a job with REGEN_TOKEN / ANTHROPIC_API_KEY / ZAI_KEY / OPENROUTER_API_KEY (issue #869). Commit regenerated artifacts on the branch if needed."
 
       - name: Measure regenerated previews against the committed bytes (advisory)
         # The faithfulness half of #69 (issue #470): preview-diff classes each
