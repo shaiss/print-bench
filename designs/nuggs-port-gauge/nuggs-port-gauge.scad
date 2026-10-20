@@ -71,6 +71,11 @@ grip_len = 28.0;
 grip_w = 22.0;
 // Grip-tab thickness (mm) — also the flat bed pad under the laid-down neck
 grip_t = 4.0;
+// 45° bed-edge chamfer on sector-tip OD (mm). Absorbs first-layer squish on
+// the datum head/coupon; applied as a difference on the assembled part —
+// never inside port_stub (N3). Plates bury tips in the backplate, so they
+// do not take this cut.
+tip_chamfer = 0.4;
 
 /* [Print settings] */
 // Nozzle diameter (mm) — feeds the wall and web guards in the lib
@@ -100,7 +105,10 @@ z_tip   = nuggs_z_tip(cfg_ref);
 neck_len = z_top + shell_extra;
 
 // Plate assignments (HITL yes): 3-step + 2-step, all five values kept.
-tols_3 = [ladder_tols[0], ladder_tols[1], ladder_tols[2]]; // 0.20 0.25 0.30
+// On the 2+1 triangle, put 0.30 (decision-rule anchor) on a bottom centre
+// with a free front label; apex gets 0.20 with its label aimed +y (outer
+// edge) so nothing sits in the interior pocket (Drik r2).
+tols_3 = [0.30, 0.25, 0.20];
 tols_2 = [ladder_tols[3], ladder_tols[4]];                 // 0.35 0.40
 
 // 2+1 triangle centres for the 3-step plate (equilateral side = step_pitch).
@@ -143,6 +151,21 @@ module port_stub(tol) {
     nuggs_neck(cfg_at(tol), neck_len);
 }
 
+// Bed-frame cutter: 45° chamfer on the outer tip OD at z = 0. A full
+// rotate_extrude only removes material where tips exist. N3: edge treatment
+// on the part, not a coupling-profile change.
+module tip_od_chamfer_cut(tol, ch = tip_chamfer) {
+    r = nuggs_r_out(cfg_at(tol));
+    ov = 0.05;
+    rotate_extrude($fn = 96)
+        polygon([
+            [r - ch, -ov],
+            [r + 1,  -ov],
+            [r + 1,   ch],
+            [r,       ch]
+        ]);
+}
+
 // Value label embossed on the XY plane at z, centred. Uses text() — the
 // ladder values need a decimal point, which stencil-glyphs does not carry.
 // Format as two decimals so 0.20 does not render as "0.2".
@@ -157,6 +180,10 @@ module tol_label(tol) {
              valign = "center", font = "Liberation Sans:style=Bold");
 }
 
+// Radial offset from a station centre to its label centreline (mm). Inner
+// glyph edge lands at ≈ r_out − 1 — the label-clearance wall (see NOTES).
+function label_r() = r_out + plate_margin / 2 + 1;
+
 // ---------------------------------------------------------------------------
 // Reference head — one nominal neck + grip tab.
 //
@@ -167,24 +194,30 @@ module tol_label(tol) {
 // ---------------------------------------------------------------------------
 
 module reference_head() {
-    // Neck standing on its sector tips at z = 0
-    translate([0, 0, -z_tip])
-        port_stub(ref_port_tol);
+    difference() {
+        union() {
+            // Neck standing on its sector tips at z = 0
+            translate([0, 0, -z_tip])
+                port_stub(ref_port_tol);
 
-    // Grip tab on the bed, fused into the sector-tip footprint via a web
-    // that reaches inside r_out so the union is one body.
-    translate([r_out - 8, -grip_w / 2, 0])
-        cube([grip_len + 8, grip_w, grip_t]);
+            // Grip tab on the bed, fused into the sector-tip footprint via a
+            // web that reaches inside r_out so the union is one body.
+            translate([r_out - 8, -grip_w / 2, 0])
+                cube([grip_len + 8, grip_w, grip_t]);
 
-    translate([r_out - 8 + (grip_len + 8) / 2, 0, grip_t - 0.05])
-        tol_label(ref_port_tol);
+            translate([r_out - 8 + (grip_len + 8) / 2, 0, grip_t - 0.05])
+                tol_label(ref_port_tol);
+        }
+        tip_od_chamfer_cut(ref_port_tol);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Ladder plates — ports stand on their sector tips (family coupon pose) on
 // a stiff backplate so the mating face is approachable from above. Centres
 // are ≥ step_pitch apart (HITL: Ø96.8 envelope). Labels emboss beside each
-// ring on the backplate.
+// ring on the backplate — per-station direction so the apex (0.30) on the
+// 2+1 triangle sits on the free outer edge, not in the interior pocket.
 //
 // Print orientation note: the brief's "port axis horizontal" is the *use*
 // pose (mate the reference head by hand). The plates print with port axes
@@ -193,40 +226,56 @@ module reference_head() {
 // ≤200×135 footprint while keeping centres ≥ 96.8. See NOTES.md.
 // ---------------------------------------------------------------------------
 
-module ladder_station(tol, cxy) {
+// label_dir is a unit XY vector from the station centre toward the label.
+module ladder_station(tol, cxy, label_dir = [0, -1]) {
     // Bury sector tips 0.8 mm into the backplate so the union cannot
     // kiss on a coplanar tip/plate pair (CGAL zero-volume facets).
     translate([cxy[0], cxy[1], plate_t - z_tip - 0.8])
         port_stub(tol);
     // Label just outside the ring — bury into the backplate so the emboss
     // unions instead of kissing as a second body.
-    translate([cxy[0], cxy[1] - r_out - plate_margin / 2 - 1, plate_t - 0.05])
+    lr = label_r();
+    translate([cxy[0] + label_dir[0] * lr,
+               cxy[1] + label_dir[1] * lr,
+               plate_t - 0.05])
         tol_label(tol);
 }
 
-module ladder_backplate(centres) {
-    // Axis-aligned bounds of every ring plus margin
+module ladder_backplate(centres, label_dirs) {
+    // Axis-aligned bounds of every ring plus margin, grown for each label
     xs = [for (c = centres) c[0]];
     ys = [for (c = centres) c[1]];
-    x0 = min(xs) - r_out - plate_margin;
-    x1 = max(xs) + r_out + plate_margin;
-    y0 = min(ys) - r_out - plate_margin - (label_h + 4);
-    y1 = max(ys) + r_out + plate_margin;
+    lr = label_r();
+    pad = label_h / 2 + 2;
+    lx = [for (i = [0 : len(centres) - 1])
+            centres[i][0] + label_dirs[i][0] * lr];
+    ly = [for (i = [0 : len(centres) - 1])
+            centres[i][1] + label_dirs[i][1] * lr];
+    x0 = min(min(xs) - r_out - plate_margin, min(lx) - pad);
+    x1 = max(max(xs) + r_out + plate_margin, max(lx) + pad);
+    y0 = min(min(ys) - r_out - plate_margin, min(ly) - pad);
+    y1 = max(max(ys) + r_out + plate_margin, max(ly) + pad);
     translate([x0, y0, 0])
         cube([x1 - x0, y1 - y0, plate_t]);
 }
 
-module ladder_plate(tols, centres) {
+module ladder_plate(tols, centres, label_dirs) {
     assert(len(tols) == len(centres), "ladder_plate: tols/centres length mismatch");
+    assert(len(label_dirs) == len(centres),
+           "ladder_plate: label_dirs/centres length mismatch");
     union() {
-        ladder_backplate(centres);
+        ladder_backplate(centres, label_dirs);
         for (i = [0 : len(tols) - 1])
-            ladder_station(tols[i], centres[i]);
+            ladder_station(tols[i], centres[i], label_dirs[i]);
     }
 }
 
-module ladder_3() ladder_plate(tols_3, centres_3);
-module ladder_2() ladder_plate(tols_2, centres_2);
+// Bottom stations label −y (open front); apex labels +y (free outer edge).
+dirs_3 = [[0, -1], [0, -1], [0, 1]];
+dirs_2 = [[0, -1], [0, -1]];
+
+module ladder_3() ladder_plate(tols_3, centres_3, dirs_3);
+module ladder_2() ladder_plate(tols_2, centres_2, dirs_2);
 
 // ---------------------------------------------------------------------------
 // Coupon — one reference stub beside one mid-ladder step (0.30), both in
@@ -236,10 +285,16 @@ module ladder_2() ladder_plate(tols_2, centres_2);
 
 module coupon() {
     pitch = 2 * r_out + 12;
-    translate([-pitch / 2, 0, -z_tip])
-        nuggs_neck(cfg_ref, neck_len);
-    translate([ pitch / 2, 0, -z_tip])
-        nuggs_neck(cfg_at(0.30), neck_len);
+    difference() {
+        union() {
+            translate([-pitch / 2, 0, -z_tip])
+                port_stub(ref_port_tol);
+            translate([ pitch / 2, 0, -z_tip])
+                port_stub(0.30);
+        }
+        translate([-pitch / 2, 0, 0]) tip_od_chamfer_cut(ref_port_tol);
+        translate([ pitch / 2, 0, 0]) tip_od_chamfer_cut(0.30);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +339,10 @@ module assembled() {
 }
 
 module cutaway() {
-    // Section through one ladder step + the reference head mated at 0.30
+    // Section through one ladder step + the reference head mated at 0.30.
+    // Cut plane at y = −6 (not through the axis) so the cylinder OD is not
+    // tangent to the cut — a through-axis half left a paper sliver at ±x
+    // (the right crop edge). Fuller quarter-section is backlog, not now.
     difference() {
         union() {
             translate([0, 0, -z_tip])
@@ -295,7 +353,7 @@ module cutaway() {
                         translate([0, 0, -z_tip])
                             nuggs_neck(cfg_ref, neck_len);
         }
-        translate([-200, 0, -200])
+        translate([-200, -6, -200])
             cube([400, 400, 400]);
     }
 }

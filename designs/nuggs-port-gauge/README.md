@@ -7,6 +7,10 @@ to each step — which won't seat or won't turn, which seats and clicks home,
 which seats but wobbles — and pick your printer's `port_tol` with the rule
 below.
 
+If you will only ever build **one** NUGGS module, that module's own coupon is
+the cheaper instrument. This gauge earns its keep from module two onward —
+one calibration replaces N single-value coupon reprints.
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ![Reference head, flat on the bed](previews/reference-head.png)
@@ -45,13 +49,18 @@ slicer.
 ## Print settings
 
 - **Material:** PLA is fine for a gauge; PETG if it lives in a toolbox. Print
-  the coupon in the **same filament** as the plates.
+  all four pieces — head, coupon, and both plates — in the **same filament**.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Infill:** 15–20 % gyroid.
 - **Supports:** none.
+- **Seam:** Back (or scarf) — the gauge reads finer than a stock seam ridge.
 - **Orientation:** as modeled — standing on sector tips (plates on the
   backplate; reference head on tips + grip tab).
-- **Brim:** none needed; sector tips are the family's standard bed contact.
+- **Brim:** optional 5 mm; check the plate doesn't rock on a flat table
+  before gauging.
+- **First use:** debur the head's port face (blade or fingernail) before the
+  first session — tip chamfer absorbs most first-layer flare, but a quick
+  wipe still helps.
 
 ## Parameters
 
@@ -71,19 +80,28 @@ command line with `-D 'ref_port_tol=0.30'`.
 1. Print the coupon first; mate and twist. **Binds** (won't seat or won't
    turn): fix first-layer squish / elephant foot before printing the plates.
    **Flops** (seats but wobbles): the printer probably wants a tighter
-   `port_tol` — print `ladder-3` first; `ladder-2` may be skippable.
+   `port_tol` — print `ladder-3` first; `ladder-2` may be skippable. The
+   coupon is the catastrophe check; the tightest rung the head actually
+   seats on the ladder is the number.
 2. Print the three plate objects (3MF or separate STLs).
-3. Flip the reference head port-face down onto a ring, line the lugs up with
-   the gaps, quarter-turn to seat, and hold the plate flat with the other
-   hand so the plate does not spin with you. Unseat and repeat through
-   0.40. Run the round twice (0.40 down to 0.20, then back) — or have
-   someone else call rungs out of order — so the known 0.30 default does
-   not bias the call.
+3. Start at **0.40** (widest seats easiest first). Flip the reference head
+   port-face down onto a ring, line the lugs up with the gaps, quarter-turn
+   to seat, and hold the plate flat with the other hand so the plate does
+   not spin with you. Unseat and step down through 0.20. Run the round
+   twice (0.40 down to 0.20, then back) — or have someone else call rungs
+   out of order — so the known 0.30 default does not bias the call.
 4. Score each rung in plain words: won't seat or won't turn / seats and
    clicks home / seats but wobbles. **Decision rule:** choose the tightest
    rung that seats and clicks home without binding; if that rung is within
    one step of 0.30, keep 0.30. Use that value on the next NUGGS coupon, and
    log a FIELD-TEST entry in that design's NOTES.md.
+5. **Session-level outs:** if all five rungs bind, fix the first layer
+   before blaming `port_tol`. If even 0.40 wobbles, the printer needs
+   attention before the port does — this gauge cannot help upstream
+   dimensional accuracy.
+6. **Wear:** rings are PLA mating surfaces; heavy use drifts readings
+   looser. Re-run the ladder against a fresh coupon if the gauge is a year
+   old or heavily used.
 
 ## Licensing
 
