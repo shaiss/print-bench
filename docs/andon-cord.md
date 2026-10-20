@@ -61,7 +61,7 @@ emits the one notice.
 
 | Workflow | Bypassed | Who says so |
 |---|---|---|
-| `backlog-burn.yml` | the `burn` job (the burn did not run) | `disarmed-notice` — cord message first, then the disarmed/off-branch messages only when the cord is released |
+| `backlog-burn.yml` | the `burn` and `triage` jobs | `disarmed-notice` — cord message first, then the disarmed/off-branch messages only when the cord is released |
 | `design-run.yml` | the `run` and `triage` jobs | `disarmed-notice` |
 | `chunker.yml` | the `chunk` job | `disarmed-notice` |
 | `labeler.yml` | the `label` job — untriaged issues wait; the loop's front door pauses | `disarmed-notice` |

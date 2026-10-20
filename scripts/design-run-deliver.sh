@@ -45,8 +45,19 @@
 # Usage:
 #   scripts/design-run-deliver.sh --repo <owner/name> --issue <N> \
 #       --base <sha> --base-branch <name> --run-url <url> \
-#       [--push-url <url>]
+#       [--push-url <url>] [--routine <design-run|backlog-burn>]
 #   scripts/design-run-deliver.sh --selftest
+#
+# The routine parameter adapts the per-routine wording and path policy only
+# (issue #863): design-run (the default, and the behavior before the flag
+# existed) delivers a design — only designs/ and single-file lib/ modules
+# may ship, and .github/.claude/scripts/tools never may — while backlog-burn
+# runs /ship-issue on arbitrary single-PR work (scripts/, tools/, …) so its
+# path policy is wider, BUT never `.github/**`: a delivered workflow under
+# `.github/workflows/` would run with repo secrets on the next push (the
+# residual HIGH on #863). Symlinks, case folding and `../` tricks that land
+# under `.github/` are refused the same way. An unknown routine is a usage
+# error.
 #
 # Live mode needs GH_TOKEN to push and to open the PR (the design-run PAT,
 # so the draft triggers CI). COMMENT_TOKEN, when set, is the token for the
@@ -74,13 +85,14 @@ jq() { "$JQ_BIN" "$@"; }
 
 DELIVERED_LINE='🚢 design-run delivered — branch and draft PR verified'
 PR_FIELDS='number,url,body,isDraft,headRefOid,isCrossRepository,headRepositoryOwner,headRepository'
+ROUTINE='design-run'
 
 usage() {
   [ $# -eq 0 ] || echo "design-run-deliver: $*" >&2
   cat >&2 <<'EOF'
 usage: scripts/design-run-deliver.sh --repo <owner/name> --issue <N>
            --base <sha> --base-branch <name> --run-url <url>
-           [--push-url <url>]
+           [--push-url <url>] [--routine <design-run|backlog-burn>]
            [--write-bundle <path> | --bundle <path> --bundle-sha256 <hex>]
        scripts/design-run-deliver.sh --selftest
 EOF
@@ -182,10 +194,87 @@ closes_issue() {
   printf '%s\n' "$1" | grep -qiP "\\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\\s+#${2}\\b"
 }
 
+# Normalize a repo-relative path for .github matching: lowercase, strip
+# empty/`.` segments, resolve `..`. Prints the normalized path. Returns 1
+# (and prints nothing) when the path is not a safe repo-relative name —
+# absolute, backslash, NUL/newline, or a `..` that escapes the root.
+# Callers fail closed: a failed normalize is treated as under `.github/`.
+normalize_repo_path() {
+  local raw="$1" part
+  local -a parts out
+  case "$raw" in
+    ''|*$'\n'*|*$'\r'*|/*|[A-Za-z]:*|*$'\\'*) return 1 ;;
+  esac
+  raw="$(printf '%s' "$raw" | tr 'A-Z' 'a-z')"
+  IFS=/ read -r -a parts <<< "$raw" || true
+  out=()
+  for part in "${parts[@]}"; do
+    case "$part" in
+      ''|'.') continue ;;
+      '..')
+        if [ "${#out[@]}" -eq 0 ]; then
+          return 1
+        fi
+        out=("${out[@]:0:${#out[@]}-1}")
+        ;;
+      *) out+=("$part") ;;
+    esac
+  done
+  local IFS=/
+  printf '%s\n' "${out[*]}"
+}
+
+# Return 0 when $1 is `.github` or under it after normalization (case,
+# `./`, `../`). Fail closed: an unnormalizable path counts as under.
+is_under_dot_github() {
+  local norm
+  norm="$(normalize_repo_path "$1")" || return 0
+  case "$norm" in
+    .github|.github/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Return 0 when symlink at repo path $1 with target $2 resolves under
+# `.github/`. Absolute targets fail closed.
+symlink_points_under_dot_github() {
+  local path="$1" target="$2" base joined
+  [ -n "$target" ] || return 1
+  case "$target" in
+    /*|[A-Za-z]:*|*$'\\'*) return 0 ;;
+  esac
+  base="$(dirname -- "$path")"
+  if [ "$base" = "." ]; then
+    joined="$target"
+  else
+    joined="${base}/${target}"
+  fi
+  is_under_dot_github "$joined"
+}
+
 # Paths the delivery commit may include. A first-party module is a single
 # file under lib/. A lib subdirectory is a vendored third-party tree and
-# stays on the runner, as does anything outside the design.
+# stays on the runner, as does anything outside the design. backlog-burn
+# ships /ship-issue work of any shape outside `.github/**` (scripts/,
+# tools/, …); `.github/**` is never deliverable for either routine — a
+# workflow pushed with the PAT runs with repo secrets on the next check.
 safe_path() {
+  local target
+  if is_under_dot_github "$1"; then
+    return 1
+  fi
+  # A worktree symlink whose target resolves under .github/ (e.g.
+  # tools/hook -> ../.github/workflows/evil.yml) must not be staged.
+  if [ -L "$1" ]; then
+    target="$(readlink -- "$1" 2>/dev/null || true)"
+    if symlink_points_under_dot_github "$1" "$target"; then
+      return 1
+    fi
+  fi
+  case "$ROUTINE" in
+    design-run) ;;
+    backlog-burn) return 0 ;;
+  esac
   case "$1" in
     designs/*) return 0 ;;
     lib|lib/|lib/*/*) return 1 ;;
@@ -194,10 +283,19 @@ safe_path() {
   esac
 }
 
-# Paths a commit since the start SHA must not touch.
+# Paths a commit since the start SHA must not touch. Both routines refuse
+# `.github/**` (normalized — case / `../` / symlink target). design-run
+# additionally refuses .claude/, scripts/, tools/. backlog-burn may touch
+# those; refuse_open_nondraft, the delivery pin and CI still apply.
 forbidden_path() {
+  if is_under_dot_github "$1"; then
+    return 0
+  fi
+  case "$ROUTINE" in
+    backlog-burn) return 1 ;;
+  esac
   case "$1" in
-    .github|.github/*|.claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
+    .claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -394,8 +492,8 @@ commit_safe_dirty() {
   fi
   git_cmd -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
       -c user.name="github-actions[bot]" \
-      commit -m "Design for #${ISSUE}"
-  note "committed uncommitted design files onto ${BRANCH} before push"
+      commit -m "$COMMIT_SUBJECT"
+  note "committed uncommitted files onto ${BRANCH} before push"
 }
 
 # `git diff BASE...HEAD` is the merge-base diff (what the branch changed
@@ -404,6 +502,23 @@ commit_safe_dirty() {
 # diffs a merge against each parent, so a protected path introduced inside
 # a merge and removed by a later merge is still listed. The NUL records
 # keep a newline inside a path from splitting the record.
+# If $2 exists at $1 as a symlink whose target resolves under .github/,
+# print a refusal and return 1. Missing / non-symlink paths are fine.
+refuse_symlink_into_dot_github() {
+  local tip="$1" path="$2" meta mode target
+  meta="$(git_cmd ls-tree -z "$tip" -- "$path" 2>/dev/null | tr '\0' '\n' | head -n 1)"
+  [ -n "$meta" ] || return 0
+  mode="${meta%% *}"
+  [ "$mode" = "120000" ] || return 0
+  target="$(git_cmd cat-file -p "${tip}:${path}" 2>/dev/null || true)"
+  [ -n "$target" ] || return 0
+  if symlink_points_under_dot_github "$path" "$target"; then
+    echo "design-run-deliver: ${BASE}..HEAD symlink ${path} -> ${target} points under .github/ — refusing to push" >&2
+    return 1
+  fi
+  return 0
+}
+
 refuse_forbidden_range() {  # $1 tip ref, default HEAD
   local tip="${1:-HEAD}"
   local path status old new diff_file log_file
@@ -416,6 +531,10 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
     if forbidden_path "$path"; then
       rm -f "$diff_file" "$log_file"
       echo "design-run-deliver: ${BASE}...HEAD touches ${path} — refusing to push" >&2
+      return 1
+    fi
+    if ! refuse_symlink_into_dot_github "$tip" "$path"; then
+      rm -f "$diff_file" "$log_file"
       return 1
     fi
   done < "$diff_file"
@@ -439,11 +558,20 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
           echo "design-run-deliver: ${BASE}..HEAD touches ${old} -> ${new} — refusing to push" >&2
           return 1
         fi
+        if ! refuse_symlink_into_dot_github "$tip" "$old" \
+            || ! refuse_symlink_into_dot_github "$tip" "$new"; then
+          rm -f "$diff_file" "$log_file"
+          return 1
+        fi
         ;;
       *)
         if forbidden_path "$path"; then
           rm -f "$diff_file" "$log_file"
           echo "design-run-deliver: ${BASE}..HEAD touches ${path} — refusing to push" >&2
+          return 1
+        fi
+        if ! refuse_symlink_into_dot_github "$tip" "$path"; then
+          rm -f "$diff_file" "$log_file"
           return 1
         fi
         ;;
@@ -534,10 +662,10 @@ ensure_pr() {
   cat > "$bodyfile" <<EOF
 Closes #${ISSUE}
 
-Draft opened by the design-run delivery step after it verified \`${BRANCH}\` on the remote. The agent run ended without opening a PR; the gate evidence is the commits on this branch.
+Draft opened by the ${ROUTINE} delivery step after it verified \`${BRANCH}\` on the remote. The agent run ended without opening a PR; the gate evidence is the commits on this branch.
 EOF
   title="$(git_cmd log -1 --format=%s "$DELIVER_REF")"
-  title="${title:-Design for #${ISSUE}}"
+  title="${title:-$PR_TITLE_FALLBACK}"
   if ! gh pr create --repo "$REPO" --base "$BASE_BRANCH" --head "$BRANCH" \
       --draft --title "$title" --body-file "$bodyfile" >/dev/null; then
     note "gh pr create failed for ${BRANCH} — not posting success"
@@ -2720,6 +2848,598 @@ EOF
     exit 1
   fi
 
+  # backlog-burn wiring (issue #863, the #859/#861 pattern). The burn's
+  # agent steps must never see the PAT, the PAT lives only in the deliver
+  # workflow's push step, and the bundle handoff carries --routine
+  # backlog-burn so the burn path policy (no .github/**) is explicit.
+  burn="${repo_root}/.github/workflows/backlog-burn.yml"
+  [ -f "$burn" ] || { echo "selftest: backlog-burn.yml is missing" >&2; exit 1; }
+  burn_run="$(awk '
+    /^      - name: Bundle the ship commits/ { in_step = 1 }
+    in_step && /^        run: \|/ { printing = 1; next }
+    in_step && printing && /^      - name:/ { exit }
+    printing { print }
+  ' "$burn")"
+  [ -n "$burn_run" ] || { echo "selftest: could not extract the burn bundle run block" >&2; exit 1; }
+  printf '%s\n' "$burn_run" | grep -q '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' || {
+    echo "selftest: burn bundle step does not git-show the pinned script" >&2
+    exit 1
+  }
+  printf '%s\n' "$burn_run" | grep -q 'DELIVER_SHA256' || {
+    echo "selftest: burn bundle step does not check the pre-agent sha256" >&2
+    exit 1
+  }
+  printf '%s\n' "$burn_run" | grep -q 'objects/info/alternates' || {
+    echo "selftest: burn bundle step does not refuse object alternates" >&2
+    exit 1
+  }
+  printf '%s\n' "$burn_run" | grep -q -- '--routine backlog-burn --write-bundle "${RUNNER_TEMP}/backlog-burn.bundle"' || {
+    echo "selftest: burn bundle step does not write the backlog-burn bundle" >&2
+    exit 1
+  }
+  printf '%s\n' "$burn_run" | grep -q 'refusing to restore design-run-deliver' || {
+    echo "selftest: burn bundle step does not refuse a symlink restore" >&2
+    exit 1
+  }
+  printf '%s\n' "$burn_run" | grep -q './scripts/design-run-deliver.sh' && {
+    echo "selftest: burn bundle step still executes the worktree script" >&2
+    exit 1
+  }
+  printf '%s\n' "$burn_run" | grep -q 'reap_agent_orphans' || {
+    echo "selftest: burn bundle step does not reap detached agent processes" >&2
+    exit 1
+  }
+  printf '%s\n' "$burn_run" | grep -q 'now" != "$captured"' || {
+    echo "selftest: burn bundle step does not re-check the bundle after the reap" >&2
+    exit 1
+  }
+  grep -q 'deliver_sha256=' "$burn" || {
+    echo "selftest: the burn pre-agent pin does not record deliver_sha256" >&2
+    exit 1
+  }
+  grep -q 'DELIVER_WORKTREE: \${{ github.workspace }}' "$burn" || {
+    echo "selftest: burn bundle step does not pin DELIVER_WORKTREE to the checkout" >&2
+    exit 1
+  }
+  grep -q 'shell: /usr/bin/bash --noprofile --norc' "$burn" || {
+    echo "selftest: burn trusted steps do not pin an absolute shell" >&2
+    exit 1
+  }
+  grep -q 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' "$burn" || {
+    echo "selftest: the burn artifacts are not uploaded from the pinned v7 action" >&2
+    exit 1
+  }
+  if grep -q 'actions/upload-artifact@v7' "$burn" || grep -q 'actions/checkout@v7' "$burn" || grep -q 'actions/setup-python@v7' "$burn"; then
+    echo "selftest: backlog-burn.yml still uses a floating v7 action tag" >&2
+    exit 1
+  fi
+  grep -q 'retention-days: 1' "$burn" || {
+    echo "selftest: the burn artifacts have no short retention" >&2
+    exit 1
+  }
+  grep -q 'name: backlog-burn-lock' "$burn" || {
+    echo "selftest: the burn job does not publish the SHIP-LOCK context" >&2
+    exit 1
+  }
+  grep -q 'name: backlog-burn-bundle' "$burn" || {
+    echo "selftest: the burn job does not upload the ship bundle" >&2
+    exit 1
+  }
+  grep -q 'name: backlog-burn-meta' "$burn" || {
+    echo "selftest: the burn job does not upload delivery metadata" >&2
+    exit 1
+  }
+  # AC4: the arming variable, the cadence and the workflow name (the
+  # deliver workflow_run trigger keys on it) are untouched.
+  grep -q "^name: Backlog burn (scheduled /ship-issue)$" "$burn" || {
+    echo "selftest: the burn workflow name changed" >&2
+    exit 1
+  }
+  grep -q -e "- cron: '17 \* \* \* \*'" "$burn" || {
+    echo "selftest: the burn cadence changed" >&2
+    exit 1
+  }
+  grep -q "vars.BACKLOG_BURN_ENABLED == 'true'" "$burn" || {
+    echo "selftest: the burn arming gate changed" >&2
+    exit 1
+  }
+  if grep -q 'secrets.GH_TOKEN' "$burn" || grep -q 'HAS_GH_TOKEN' "$burn"; then
+    echo "selftest: the burn workflow still references the push PAT" >&2
+    exit 1
+  fi
+  if grep -q 'github_token: \${{ secrets.GH_TOKEN' "$burn"; then
+    echo "selftest: a burn agent step still receives the push PAT" >&2
+    exit 1
+  fi
+  if grep -q 'name: Note a checkless draft PR' "$burn"; then
+    echo "selftest: the checkless-PR notice step is still present" >&2
+    exit 1
+  fi
+  burn_token_n="$(grep -c 'github_token: \${{ github.token }}' "$burn" || true)"
+  [ "$burn_token_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn agent github.token wires, found ${burn_token_n}" >&2
+    exit 1
+  }
+  burn_dontask_n="$(grep -c -- '--permission-mode dontAsk --settings .claude/backlog-burn-settings.json' "$burn" || true)"
+  [ "$burn_dontask_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn dontAsk deny-backstop steps, found ${burn_dontask_n}" >&2
+    exit 1
+  }
+  if grep -q 'claude_args:.*bypassPermissions' "$burn"; then
+    echo "selftest: a burn agent step still uses bypassPermissions" >&2
+    exit 1
+  fi
+  burn_scrub_n="$(grep -c 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"' "$burn" || true)"
+  [ "$burn_scrub_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn subprocess env scrubs, found ${burn_scrub_n}" >&2
+    exit 1
+  }
+  burn_install_line="$(grep -n 'name: Install preflight toolchain before disabling sudo' "$burn" | head -1 | cut -d: -f1)"
+  burn_sudo_line="$(grep -n 'name: Disable sudo before the agent' "$burn" | head -1 | cut -d: -f1)"
+  burn_agent_line="$(grep -n 'name: Ship via Z.AI (GLM, chain link 1)' "$burn" | head -1 | cut -d: -f1)"
+  [ -n "$burn_install_line" ] && [ -n "$burn_sudo_line" ] && [ -n "$burn_agent_line" ] \
+    && [ "$burn_install_line" -lt "$burn_sudo_line" ] && [ "$burn_sudo_line" -lt "$burn_agent_line" ] || {
+    echo "selftest: preflight install must precede disable-sudo, which must precede the burn agent" >&2
+    exit 1
+  }
+  grep -q 'openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq' "$burn" || {
+    echo "selftest: the burn preflight install does not apt-get the session-start toolchain" >&2
+    exit 1
+  }
+  grep -q 'sudo -n true' "$burn" || {
+    echo "selftest: the burn sudo disable step does not prove sudo is gone" >&2
+    exit 1
+  }
+  grep -q -- '--slurp' "$burn" || {
+    echo "selftest: the burn label strip does not merge paginated event pages" >&2
+    exit 1
+  }
+  grep -q 'AGENT_WINDOW_END' "$burn" || {
+    echo "selftest: the burn label strip does not bound the agent window" >&2
+    exit 1
+  }
+  grep -q 'agent window end missing — using settle start' "$burn" || {
+    echo "selftest: the burn label strip does not fall back when agent_window_end is empty" >&2
+    exit 1
+  }
+  burn_perms="$(awk '/^  burn:/{p=1} p && /^  [A-Za-z]/ && !/^  burn:/{exit} p' "$burn")"
+  case "$burn_perms" in
+    *"pull-requests: read"*) ;;
+    *) echo "selftest: the burn job does not set pull-requests: read" >&2; exit 1 ;;
+  esac
+  case "$burn_perms" in
+    *"pull-requests: write"*)
+      echo "selftest: the burn job still grants pull-requests: write" >&2
+      exit 1 ;;
+  esac
+  if awk '
+    /^permissions:/ { p = 1; next }
+    p && /^[^ ]/ { exit }
+    p && /^  actions:/ { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$burn"; then
+    echo "selftest: burn workflow permissions still grant actions" >&2
+    exit 1
+  fi
+  burn_settings="${repo_root}/.claude/backlog-burn-settings.json"
+  [ -f "$burn_settings" ] || { echo "selftest: backlog-burn settings are missing" >&2; exit 1; }
+  for rule in 'Bash(git push:*)' 'Bash(git push*)' 'Bash(gh pr create:*)' 'Bash(gh pr create*)' \
+    'Bash(gh issue create*autonomy-ok*)' 'Bash(gh issue create*design-brief*)' \
+    'Bash(gh pr create*autonomy-ok*)' 'Bash(gh pr create*design-brief*)' \
+    'Bash(gh issue edit*autonomy-ok*)' 'Bash(gh issue edit*design-brief*)' \
+    'Bash(gh api*autonomy-ok*)' 'Bash(gh api*design-brief*)' \
+    'Bash(curl*autonomy-ok*)' 'Bash(curl*design-brief*)'; do
+    grep -qF "\"${rule}\"" "$burn_settings" || {
+      echo "selftest: backlog-burn settings missing deny ${rule}" >&2
+      exit 1
+    }
+  done
+  grep -q 'name: Strip bot-added opt-in labels' "$burn" || {
+    echo "selftest: burn bot-added opt-in labels are not stripped" >&2
+    exit 1
+  }
+  grep -q 'github-actions\[bot\]' "$burn" || {
+    echo "selftest: the burn label strip does not key on the bot actor" >&2
+    exit 1
+  }
+  grep -q 'needs-decision is never removed' "$burn" || {
+    echo "selftest: the burn label strip does not leave needs-decision alone" >&2
+    exit 1
+  }
+  grep -q '  settle:' "$burn" || {
+    echo "selftest: burn label strip and lock cleanup are not in a fresh settle job" >&2
+    exit 1
+  }
+  # Settle START_SHA case must accept a real 40-char commit (Bugbot on #863:
+  # 41 hex classes rejected every SHA and lock cleanup never ran).
+  settle_job="$(awk '/^  settle:/{p=1;print;next} p && /^  [A-Za-z]/{exit} p' "$burn")"
+  settle_sha_arm="$(printf '%s\n' "$settle_job" | grep -E '\[0-9a-f\]\[0-9a-f\]' | head -1)"
+  [ -n "$settle_sha_arm" ] || {
+    echo "selftest: settle job has no START_SHA hex case arm" >&2
+    exit 1
+  }
+  settle_sha_n="$(printf '%s' "$settle_sha_arm" | grep -oE '\[0-9a-f\]' | wc -l | tr -d ' ')"
+  [ "$settle_sha_n" = "40" ] || {
+    echo "selftest: settle START_SHA case has ${settle_sha_n} hex classes, want 40" >&2
+    exit 1
+  }
+  burn_outcome_n="$(grep -c 'AGENT_OUTCOME: ${{ needs.burn.outputs.walk_outcome }}' "$burn" || true)"
+  [ "$burn_outcome_n" -eq 2 ] || {
+    echo "selftest: expected 2 identical burn AGENT_OUTCOME reads, found ${burn_outcome_n}" >&2
+    exit 1
+  }
+  burn_pending_n="$(grep -c "needs.burn.outputs.bundle_pending != 'true'" "$burn" || true)"
+  [ "$burn_pending_n" -eq 3 ] || {
+    echo "selftest: expected the settle lock cleanup, red gate, and triage gated on bundle_pending, found ${burn_pending_n}" >&2
+    exit 1
+  }
+  grep -q 'git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/routine-lock-cleanup.sh"' "$burn" || {
+    echo "selftest: burn lock-cleanup restore is missing --no-replace-objects and hooksPath" >&2
+    exit 1
+  }
+  burn_routine_n="$(grep -v '^[[:space:]]*#' "$burn" | grep -c -- '--routine backlog-burn' || true)"
+  [ "$burn_routine_n" -eq 2 ] || {
+    echo "selftest: expected the burn bundle step and settle lock cleanup on --routine backlog-burn, found ${burn_routine_n}" >&2
+    exit 1
+  }
+  burn_reap_n="$(grep -c 'reap_should_kill()' "$burn" || true)"
+  [ "$burn_reap_n" -eq 1 ] || {
+    echo "selftest: expected the reaper predicate in the burn bundle step, found ${burn_reap_n}" >&2
+    exit 1
+  }
+  burn_reap_a="$(awk '
+    /reap_should_kill\(\) \{/ { c++; if (c==1) p=1 }
+    p { print }
+    p && /^          \}$/ { exit }
+  ' "$burn")"
+  (
+    eval "$burn_reap_a"
+    export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
+    if reap_should_kill 55 1 sleep / "backlog-burn.bundle" 3 "" 99 1; then :; else
+      echo "selftest: burn reap_should_kill kept a process mentioning the burn bundle" >&2
+      exit 1
+    fi
+    if reap_should_kill 55 1 sleep / "design-run.bundle" 3 "" 99 1; then
+      echo "selftest: burn reap_should_kill killed a process outside the burn" >&2
+      exit 1
+    fi
+  )
+  grep -q '  triage:' "$burn" || {
+    echo "selftest: burn provider-triage is not a separate job" >&2
+    exit 1
+  }
+  grep -q 'ref: \${{ needs.burn.outputs.start_sha }}' "$burn" || {
+    echo "selftest: the burn triage job does not check out START_SHA" >&2
+    exit 1
+  }
+  grep -q 'steps.verify_triage.outcome == '"'"'success'"'"'' "$burn" || {
+    echo "selftest: burn provider-triage does not wait for the fresh checkout" >&2
+    exit 1
+  }
+  burn_triage_job="$(awk '
+    /^  triage:/ { printing = 1 }
+    printing && /^  [A-Za-z]/ && !/^  triage:/ { exit }
+    printing { print }
+  ' "$burn")"
+  printf '%s\n' "$burn_triage_job" | grep -q 'uses: \./\.github/actions/provider-triage' || {
+    echo "selftest: the burn triage job does not run provider-triage" >&2
+    exit 1
+  }
+  if printf '%s\n' "$burn_perms" | grep -q 'provider-triage'; then
+    echo "selftest: provider-triage still runs inside the burn agent job" >&2
+    exit 1
+  fi
+  grep -q 'PYTHONSAFEPATH: "1"' "$burn" || {
+    echo "selftest: burn provider-triage does not set PYTHONSAFEPATH" >&2
+    exit 1
+  }
+  grep -q 'vars.AI_ANDON_CORD' "$burn" || {
+    echo "selftest: the burn jobs lost the andon cord leg" >&2
+    exit 1
+  }
+
+  burn_deliver="${repo_root}/.github/workflows/backlog-burn-deliver.yml"
+  [ -f "$burn_deliver" ] || { echo "selftest: backlog-burn-deliver.yml is missing" >&2; exit 1; }
+  grep -q 'workflow_run:' "$burn_deliver" || {
+    echo "selftest: burn delivery is not a workflow_run workflow" >&2
+    exit 1
+  }
+  grep -q 'workflows: \["Backlog burn (scheduled /ship-issue)"\]' "$burn_deliver" || {
+    echo "selftest: burn delivery workflow_run does not name the burn workflow" >&2
+    exit 1
+  }
+  grep -q 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' "$burn_deliver" || {
+    echo "selftest: the burn deliver workflow does not download the bundle from the pinned v7 action" >&2
+    exit 1
+  }
+  if grep -q 'actions/download-artifact@v7' "$burn_deliver" || grep -q 'actions/checkout@v7' "$burn_deliver"; then
+    echo "selftest: backlog-burn-deliver.yml still uses a floating v7 action tag" >&2
+    exit 1
+  fi
+  grep -q '\$GITHUB_WORKSPACE/scripts/design-run-deliver.sh' "$burn_deliver" || {
+    echo "selftest: the burn deliver workflow does not run the checkout script" >&2
+    exit 1
+  }
+  if grep -q 'anthropics/claude-code-action' "$burn_deliver"; then
+    echo "selftest: the burn deliver workflow runs agent code" >&2
+    exit 1
+  fi
+  grep -q '"Pick one issue and run /ship-issue"' "$burn_deliver" || {
+    echo "selftest: burn delivery does not filter the triggering run's job" >&2
+    exit 1
+  }
+  grep -q 'name: backlog-burn-lock' "$burn_deliver" || {
+    echo "selftest: burn delivery does not download the SHIP-LOCK context" >&2
+    exit 1
+  }
+  grep -q 'name: backlog-burn-meta' "$burn_deliver" || {
+    echo "selftest: burn delivery does not download the metadata" >&2
+    exit 1
+  }
+  grep -q 'name: backlog-burn-bundle' "$burn_deliver" || {
+    echo "selftest: burn delivery does not download the bundle" >&2
+    exit 1
+  }
+  grep -q -- '--bundle "${RUNNER_TEMP}/backlog-burn-bundle/backlog-burn.bundle"' "$burn_deliver" || {
+    echo "selftest: burn delivery does not verify the burn bundle path" >&2
+    exit 1
+  }
+  burn_pat_n="$(grep -c 'GH_TOKEN: \${{ secrets.GH_TOKEN }}' "$burn_deliver" || true)"
+  [ "$burn_pat_n" -eq 1 ] || {
+    echo "selftest: the burn push PAT must appear on exactly one deliver step, found ${burn_pat_n}" >&2
+    exit 1
+  }
+  if grep -q 'github_token: \${{ secrets.GH_TOKEN' "$burn_deliver"; then
+    echo "selftest: a burn deliver step wires the PAT as an agent token" >&2
+    exit 1
+  fi
+  burn_deliver_routine_n="$(grep -v '^[[:space:]]*#' "$burn_deliver" | grep -c -- '--routine backlog-burn' || true)"
+  [ "$burn_deliver_routine_n" -eq 2 ] || {
+    echo "selftest: expected the burn deliver push and lock cleanup on --routine backlog-burn, found ${burn_deliver_routine_n}" >&2
+    exit 1
+  }
+  grep -q 'head_branch == github.event.repository.default_branch' "$burn_deliver" || {
+    echo "selftest: burn deliver job does not require the triggering head branch" >&2
+    exit 1
+  }
+  grep -q 'metadata issue' "$burn_deliver" || {
+    echo "selftest: burn deliver does not require the metadata issue to match the pre-agent lock" >&2
+    exit 1
+  }
+  grep -q 'Upload the delivery metadata' "$burn_deliver" || {
+    echo "selftest: burn deliver does not require the trusted metadata upload step" >&2
+    exit 1
+  }
+  burn_pin_gates="$(grep -c "steps.pin.outcome == 'success'" "$burn_deliver" || true)"
+  [ "$burn_pin_gates" -eq 3 ] || {
+    echo "selftest: burn download, deliver, and the red step must be gated on the pin, and lock cleanup must not be (found ${burn_pin_gates})" >&2
+    exit 1
+  }
+  if awk '
+    /name: Release the SHIP-LOCK after delivery/ { found = 1; n = 0 }
+    found { n++; if ($0 ~ /steps.pin.outcome/) bad = 1 }
+    found && n > 12 { exit }
+    END { exit bad ? 1 : 0 }
+  ' "$burn_deliver"; then
+    :
+  else
+    echo "selftest: burn lock cleanup is still gated on the delivery pin" >&2
+    exit 1
+  fi
+  if grep -q 'git fetch' "$burn_deliver"; then
+    echo "selftest: burn delivery fetches a commit by id" >&2
+    exit 1
+  fi
+  if grep -q 'ref: ${{ steps.parsed.outputs.start_sha }}' "$burn_deliver"; then
+    echo "selftest: burn checkout still uses the artifact start_sha" >&2
+    exit 1
+  fi
+  grep -q 'show "$WORKFLOW_HEAD_SHA:scripts/routine-lock-cleanup.sh"' "$burn_deliver" || {
+    echo "selftest: burn lock cleanup does not read the script from the triggering head" >&2
+    exit 1
+  }
+  grep -q '^  actions: read$' "$burn_deliver" || {
+    echo "selftest: burn deliver workflow does not grant actions: read" >&2
+    exit 1
+  }
+  if awk '
+    /^permissions:/ { p = 1; next }
+    p && /^[^ ]/ { exit }
+    p && /^  actions: write/ { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$burn_deliver"; then
+    echo "selftest: burn deliver workflow grants actions: write" >&2
+    exit 1
+  fi
+  grep -q "always() && (steps.lock_parsed.outcome == 'success' || steps.parsed.outcome == 'success')" "$burn_deliver" || {
+    echo "selftest: burn deliver checkout is skipped when an earlier step failed" >&2
+    exit 1
+  }
+  ship_skill="${repo_root}/.claude/skills/ship-issue/SKILL.md"
+  grep -q 'Do not `git push`' "$ship_skill" || {
+    echo "selftest: ship-issue SKILL.md does not forbid git push in unattended mode" >&2
+    exit 1
+  }
+  grep -q 'do not `gh pr create`' "$ship_skill" || {
+    echo "selftest: ship-issue SKILL.md does not forbid gh pr create in unattended mode" >&2
+    exit 1
+  }
+  grep -q 'does not exist yet' "$ship_skill" || {
+    echo "selftest: ship-issue SKILL.md does not say the deliver-job PR does not exist yet" >&2
+    exit 1
+  }
+
+  # --routine behavior. A scripts/ change is forbidden for design-run and
+  # deliverable for backlog-burn (issue #863 ships scripts/ itself); an
+  # unknown routine is a usage error, never a silent default.
+  local rsrc rfile rstart
+  rsrc="${tmp}/rsrc"
+  rfile="${tmp}/backlog-burn.bundle"
+  mkdir -p "$rsrc/scripts"
+  git_cmd -C "$rsrc" init -b main >/dev/null
+  git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  rstart="$(git_cmd -C "$rsrc" rev-parse HEAD)"
+  git_cmd -C "$rsrc" checkout -b claude/issue-863-burn-pat >/dev/null 2>&1
+  printf 'fix\n' > "$rsrc/scripts/fix.sh"
+  git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t add -- scripts/fix.sh
+  git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t commit -m fix >/dev/null
+  printf 'dirty\n' > "$rsrc/scripts/dirty.sh"
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$rsrc" \
+    "$SELF" --repo acme/print-bench --issue 863 --base "$rstart" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --write-bundle "$rfile" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || { echo "selftest: design-run accepted a scripts/ commit (exit ${rc})" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'touches scripts/fix.sh' || {
+    echo "selftest: design-run did not report the scripts/ refusal" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  [ ! -e "$rfile" ] || { echo "selftest: design-run wrote a bundle for a forbidden range" >&2; exit 1; }
+  set +e
+  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$rsrc" \
+    "$SELF" --repo acme/print-bench --issue 863 --base "$rstart" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --routine backlog-burn --write-bundle "$rfile" >/dev/null
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] && [ -f "$rfile" ] || {
+    echo "selftest: backlog-burn --write-bundle refused a scripts/ commit (exit ${rc})" >&2
+    exit 1
+  }
+  git_cmd -C "$rsrc" grep -q dirty HEAD -- scripts/dirty.sh || {
+    echo "selftest: backlog-burn --write-bundle did not commit the dirty scripts file" >&2
+    exit 1
+  }
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$rsrc" \
+    "$SELF" --repo acme/print-bench --issue 863 --base "$rstart" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --routine bogus --write-bundle "$rfile" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 2 ] || { echo "selftest: an unknown routine exited ${rc}, expected 2" >&2; exit 1; }
+  printf '%s\n' "$stderr" | grep -q 'unknown routine: bogus' || {
+    echo "selftest: an unknown routine did not report the refusal" >&2
+    exit 1
+  }
+
+  # backlog-burn refuses .github/** (closes #863 residual HIGH): add,
+  # modify, rename into .github, symlink pointing into .github — while a
+  # benign tools/ change still delivers.
+  local gsrc gfile gstart
+  gsrc="${tmp}/gsrc"
+  gfile="${tmp}/github-forbid.bundle"
+  greject() {  # $1 label, $2 expected stderr needle
+    local label="$1" needle="$2"
+    rm -f "$gfile"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$gsrc" \
+      "$SELF" --repo acme/print-bench --issue 863 --base "$gstart" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --routine backlog-burn --write-bundle "$gfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    [ "$rc" -eq 1 ] || {
+      echo "selftest: backlog-burn accepted a .github ${label} (exit ${rc})" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q "$needle" || {
+      echo "selftest: backlog-burn .github ${label} did not report the refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    [ ! -e "$gfile" ] || {
+      echo "selftest: backlog-burn wrote a bundle for a .github ${label}" >&2
+      exit 1
+    }
+  }
+
+  rm -rf "$gsrc"
+  mkdir -p "$gsrc/.github/workflows" "$gsrc/tools"
+  git_cmd -C "$gsrc" init -b main >/dev/null
+  printf 'name: keep\non: push\njobs: {}\n' > "$gsrc/.github/workflows/keep.yml"
+  printf 'seed\n' > "$gsrc/tools/seed.py"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+    .github/workflows/keep.yml tools/seed.py
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m start >/dev/null
+  gstart="$(git_cmd -C "$gsrc" rev-parse HEAD)"
+  git_cmd -C "$gsrc" checkout -b claude/issue-863-github-forbid >/dev/null 2>&1
+
+  # Add: new workflow file.
+  printf 'name: evil\non: push\njobs: {}\n' > "$gsrc/.github/workflows/evil.yml"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+    .github/workflows/evil.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'add workflow' >/dev/null
+  greject add 'touches .github/workflows/evil.yml'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Modify: edit a workflow that already exists at START_SHA.
+  printf 'name: keep\non: push\njobs: {x: {runs-on: ubuntu-latest, steps: []}}\n' \
+    > "$gsrc/.github/workflows/keep.yml"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+    .github/workflows/keep.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'modify workflow' >/dev/null
+  greject modify 'touches .github/workflows/keep.yml'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Rename into .github/.
+  printf 'moved\n' > "$gsrc/tools/moved.yml"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/moved.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'stage move' >/dev/null
+  mkdir -p "$gsrc/.github/workflows"
+  git_cmd -C "$gsrc" mv -- tools/moved.yml .github/workflows/moved.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'rename into .github' >/dev/null
+  greject rename '\.github/workflows/moved\.yml'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Symlink pointing into .github/ (path itself is under tools/).
+  mkdir -p "$gsrc/tools"
+  ln -s '../.github/workflows/evil.yml' "$gsrc/tools/hook"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/hook
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'symlink into .github' >/dev/null
+  greject symlink 'points under .github/'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Backslash in a path — normalize fails closed (single `\`, not `\\`).
+  mkdir -p "$gsrc/tools"
+  printf 'x\n' > "${gsrc}/tools/foo\\bar"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "tools/foo\\bar"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'backslash path' >/dev/null
+  # Needle is a BRE: `\\` matches one literal backslash (`\b` would be a word boundary).
+  greject backslash 'touches tools/foo\\bar'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Benign tools/ change still passes for backlog-burn.
+  printf 'ok\n' > "$gsrc/tools/ok.py"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/ok.py
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'tools ok' >/dev/null
+  rm -f "$gfile"
+  set +e
+  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$gsrc" \
+    "$SELF" --repo acme/print-bench --issue 863 --base "$gstart" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --routine backlog-burn --write-bundle "$gfile" >/dev/null
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] && [ -f "$gfile" ] || {
+    echo "selftest: backlog-burn refused a benign tools/ commit (exit ${rc})" >&2
+    exit 1
+  }
+
   h1_repo() {  # $1 dir. Commits THIS script, then poisons the worktree copy.
     local dir="$1"
     mkdir -p "$dir/scripts"
@@ -3015,6 +3735,7 @@ while [ $# -gt 0 ]; do
     --bundle) BUNDLE="${2:-}"; shift 2 ;;
     --bundle-sha256) BUNDLE_SHA256="${2:-}"; shift 2 ;;
     --write-bundle) WRITE_BUNDLE="${2:-}"; shift 2 ;;
+    --routine) ROUTINE="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) usage "unknown argument: $1" ;;
   esac
@@ -3029,5 +3750,24 @@ if [ -n "$BUNDLE" ] && [ -z "$BUNDLE_SHA256" ]; then
   usage "--bundle requires --bundle-sha256"
 fi
 [ -z "$PUSH_URL" ] && PUSH_URL="https://github.com/${REPO}.git"
+
+# Per-routine wording, applied after parsing so every reader below resolves
+# it at call time (issue #863). design-run keeps the pre-flag literals
+# byte-for-byte; an unknown routine is a usage error, never a silent
+# fallback — a typo'd routine must not ship design-run's narrow path policy
+# under backlog-burn's name or vice versa.
+case "$ROUTINE" in
+  design-run)
+    DELIVERED_LINE='🚢 design-run delivered — branch and draft PR verified'
+    COMMIT_SUBJECT="Design for #${ISSUE}"
+    PR_TITLE_FALLBACK="Design for #${ISSUE}"
+    ;;
+  backlog-burn)
+    DELIVERED_LINE='🚢 backlog-burn delivered — branch and draft PR verified'
+    COMMIT_SUBJECT="Ship #${ISSUE}"
+    PR_TITLE_FALLBACK="Ship #${ISSUE}"
+    ;;
+  *) usage "unknown routine: ${ROUTINE}" ;;
+esac
 
 run_live
