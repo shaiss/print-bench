@@ -52,10 +52,12 @@
 # (issue #863): design-run (the default, and the behavior before the flag
 # existed) delivers a design — only designs/ and single-file lib/ modules
 # may ship, and .github/.claude/scripts/tools never may — while backlog-burn
-# runs /ship-issue on arbitrary single-PR work (issue #863 itself touches
-# scripts/ and .github/), so for backlog-burn every path is deliverable and
-# the protected-path refusal is the human merge review instead. An unknown
-# routine is a usage error.
+# runs /ship-issue on arbitrary single-PR work (scripts/, tools/, …) so its
+# path policy is wider, BUT never `.github/**`: a delivered workflow under
+# `.github/workflows/` would run with repo secrets on the next push (the
+# residual HIGH on #863). Symlinks, case folding and `../` tricks that land
+# under `.github/` are refused the same way. An unknown routine is a usage
+# error.
 #
 # Live mode needs GH_TOKEN to push and to open the PR (the design-run PAT,
 # so the draft triggers CI). COMMENT_TOKEN, when set, is the token for the
@@ -192,13 +194,83 @@ closes_issue() {
   printf '%s\n' "$1" | grep -qiP "\\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\\s+#${2}\\b"
 }
 
+# Normalize a repo-relative path for .github matching: lowercase, strip
+# empty/`.` segments, resolve `..`. Prints the normalized path. Returns 1
+# (and prints nothing) when the path is not a safe repo-relative name —
+# absolute, backslash, NUL/newline, or a `..` that escapes the root.
+# Callers fail closed: a failed normalize is treated as under `.github/`.
+normalize_repo_path() {
+  local raw="$1" part
+  local -a parts out
+  case "$raw" in
+    ''|*$'\n'*|*$'\r'*|/*|[A-Za-z]:*|*'\\'*) return 1 ;;
+  esac
+  raw="$(printf '%s' "$raw" | tr 'A-Z' 'a-z')"
+  IFS=/ read -r -a parts <<< "$raw" || true
+  out=()
+  for part in "${parts[@]}"; do
+    case "$part" in
+      ''|'.') continue ;;
+      '..')
+        if [ "${#out[@]}" -eq 0 ]; then
+          return 1
+        fi
+        out=("${out[@]:0:${#out[@]}-1}")
+        ;;
+      *) out+=("$part") ;;
+    esac
+  done
+  local IFS=/
+  printf '%s\n' "${out[*]}"
+}
+
+# Return 0 when $1 is `.github` or under it after normalization (case,
+# `./`, `../`). Fail closed: an unnormalizable path counts as under.
+is_under_dot_github() {
+  local norm
+  norm="$(normalize_repo_path "$1")" || return 0
+  case "$norm" in
+    .github|.github/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Return 0 when symlink at repo path $1 with target $2 resolves under
+# `.github/`. Absolute targets fail closed.
+symlink_points_under_dot_github() {
+  local path="$1" target="$2" base joined
+  [ -n "$target" ] || return 1
+  case "$target" in
+    /*|[A-Za-z]:*|*'\\'*) return 0 ;;
+  esac
+  base="$(dirname -- "$path")"
+  if [ "$base" = "." ]; then
+    joined="$target"
+  else
+    joined="${base}/${target}"
+  fi
+  is_under_dot_github "$joined"
+}
+
 # Paths the delivery commit may include. A first-party module is a single
 # file under lib/. A lib subdirectory is a vendored third-party tree and
 # stays on the runner, as does anything outside the design. backlog-burn
-# ships /ship-issue work of any shape (issue #863 touches scripts/ and
-# .github/ itself), so for that routine everything is deliverable — the
-# path gate on those PRs is the human merge review, not this list.
+# ships /ship-issue work of any shape outside `.github/**` (scripts/,
+# tools/, …); `.github/**` is never deliverable for either routine — a
+# workflow pushed with the PAT runs with repo secrets on the next check.
 safe_path() {
+  local target
+  if is_under_dot_github "$1"; then
+    return 1
+  fi
+  # A worktree symlink whose target resolves under .github/ (e.g.
+  # tools/hook -> ../.github/workflows/evil.yml) must not be staged.
+  if [ -L "$1" ]; then
+    target="$(readlink -- "$1" 2>/dev/null || true)"
+    if symlink_points_under_dot_github "$1" "$target"; then
+      return 1
+    fi
+  fi
   case "$ROUTINE" in
     design-run) ;;
     backlog-burn) return 0 ;;
@@ -211,16 +283,19 @@ safe_path() {
   esac
 }
 
-# Paths a commit since the start SHA must not touch. backlog-burn commits
-# may touch them (see safe_path); everything else that gates those PRs —
-# refuse_open_nondraft, the delivery pin, CI — still applies.
+# Paths a commit since the start SHA must not touch. Both routines refuse
+# `.github/**` (normalized — case / `../` / symlink target). design-run
+# additionally refuses .claude/, scripts/, tools/. backlog-burn may touch
+# those; refuse_open_nondraft, the delivery pin and CI still apply.
 forbidden_path() {
+  if is_under_dot_github "$1"; then
+    return 0
+  fi
   case "$ROUTINE" in
-    design-run) ;;
     backlog-burn) return 1 ;;
   esac
   case "$1" in
-    .github|.github/*|.claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
+    .claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -427,6 +502,23 @@ commit_safe_dirty() {
 # diffs a merge against each parent, so a protected path introduced inside
 # a merge and removed by a later merge is still listed. The NUL records
 # keep a newline inside a path from splitting the record.
+# If $2 exists at $1 as a symlink whose target resolves under .github/,
+# print a refusal and return 1. Missing / non-symlink paths are fine.
+refuse_symlink_into_dot_github() {
+  local tip="$1" path="$2" meta mode target
+  meta="$(git_cmd ls-tree -z "$tip" -- "$path" 2>/dev/null | tr '\0' '\n' | head -n 1)"
+  [ -n "$meta" ] || return 0
+  mode="${meta%% *}"
+  [ "$mode" = "120000" ] || return 0
+  target="$(git_cmd cat-file -p "${tip}:${path}" 2>/dev/null || true)"
+  [ -n "$target" ] || return 0
+  if symlink_points_under_dot_github "$path" "$target"; then
+    echo "design-run-deliver: ${BASE}..HEAD symlink ${path} -> ${target} points under .github/ — refusing to push" >&2
+    return 1
+  fi
+  return 0
+}
+
 refuse_forbidden_range() {  # $1 tip ref, default HEAD
   local tip="${1:-HEAD}"
   local path status old new diff_file log_file
@@ -439,6 +531,10 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
     if forbidden_path "$path"; then
       rm -f "$diff_file" "$log_file"
       echo "design-run-deliver: ${BASE}...HEAD touches ${path} — refusing to push" >&2
+      return 1
+    fi
+    if ! refuse_symlink_into_dot_github "$tip" "$path"; then
+      rm -f "$diff_file" "$log_file"
       return 1
     fi
   done < "$diff_file"
@@ -462,11 +558,20 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
           echo "design-run-deliver: ${BASE}..HEAD touches ${old} -> ${new} — refusing to push" >&2
           return 1
         fi
+        if ! refuse_symlink_into_dot_github "$tip" "$old" \
+            || ! refuse_symlink_into_dot_github "$tip" "$new"; then
+          rm -f "$diff_file" "$log_file"
+          return 1
+        fi
         ;;
       *)
         if forbidden_path "$path"; then
           rm -f "$diff_file" "$log_file"
           echo "design-run-deliver: ${BASE}..HEAD touches ${path} — refusing to push" >&2
+          return 1
+        fi
+        if ! refuse_symlink_into_dot_github "$tip" "$path"; then
+          rm -f "$diff_file" "$log_file"
           return 1
         fi
         ;;
@@ -2746,7 +2851,7 @@ EOF
   # backlog-burn wiring (issue #863, the #859/#861 pattern). The burn's
   # agent steps must never see the PAT, the PAT lives only in the deliver
   # workflow's push step, and the bundle handoff carries --routine
-  # backlog-burn so the widened path policy is explicit, never a default.
+  # backlog-burn so the burn path policy (no .github/**) is explicit.
   burn="${repo_root}/.github/workflows/backlog-burn.yml"
   [ -f "$burn" ] || { echo "selftest: backlog-burn.yml is missing" >&2; exit 1; }
   burn_run="$(awk '
@@ -3199,6 +3304,105 @@ EOF
   [ "$rc" -eq 2 ] || { echo "selftest: an unknown routine exited ${rc}, expected 2" >&2; exit 1; }
   printf '%s\n' "$stderr" | grep -q 'unknown routine: bogus' || {
     echo "selftest: an unknown routine did not report the refusal" >&2
+    exit 1
+  }
+
+  # backlog-burn refuses .github/** (closes #863 residual HIGH): add,
+  # modify, rename into .github, symlink pointing into .github — while a
+  # benign tools/ change still delivers.
+  local gsrc gfile gstart greject
+  gsrc="${tmp}/gsrc"
+  gfile="${tmp}/github-forbid.bundle"
+  greject() {  # $1 label, $2 expected stderr needle
+    local label="$1" needle="$2"
+    rm -f "$gfile"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$gsrc" \
+      "$SELF" --repo acme/print-bench --issue 863 --base "$gstart" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --routine backlog-burn --write-bundle "$gfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    [ "$rc" -eq 1 ] || {
+      echo "selftest: backlog-burn accepted a .github ${label} (exit ${rc})" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q "$needle" || {
+      echo "selftest: backlog-burn .github ${label} did not report the refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    [ ! -e "$gfile" ] || {
+      echo "selftest: backlog-burn wrote a bundle for a .github ${label}" >&2
+      exit 1
+    }
+  }
+
+  rm -rf "$gsrc"
+  mkdir -p "$gsrc/.github/workflows" "$gsrc/tools"
+  git_cmd -C "$gsrc" init -b main >/dev/null
+  printf 'name: keep\non: push\njobs: {}\n' > "$gsrc/.github/workflows/keep.yml"
+  printf 'seed\n' > "$gsrc/tools/seed.py"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+    .github/workflows/keep.yml tools/seed.py
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m start >/dev/null
+  gstart="$(git_cmd -C "$gsrc" rev-parse HEAD)"
+  git_cmd -C "$gsrc" checkout -b claude/issue-863-github-forbid >/dev/null 2>&1
+
+  # Add: new workflow file.
+  printf 'name: evil\non: push\njobs: {}\n' > "$gsrc/.github/workflows/evil.yml"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+    .github/workflows/evil.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'add workflow' >/dev/null
+  greject add 'touches .github/workflows/evil.yml'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Modify: edit a workflow that already exists at START_SHA.
+  printf 'name: keep\non: push\njobs: {x: {runs-on: ubuntu-latest, steps: []}}\n' \
+    > "$gsrc/.github/workflows/keep.yml"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+    .github/workflows/keep.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'modify workflow' >/dev/null
+  greject modify 'touches .github/workflows/keep.yml'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Rename into .github/.
+  printf 'moved\n' > "$gsrc/tools/moved.yml"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/moved.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'stage move' >/dev/null
+  mkdir -p "$gsrc/.github/workflows"
+  git_cmd -C "$gsrc" mv -- tools/moved.yml .github/workflows/moved.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'rename into .github' >/dev/null
+  greject rename '\.github/workflows/moved\.yml'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Symlink pointing into .github/ (path itself is under tools/).
+  mkdir -p "$gsrc/tools"
+  ln -s '../.github/workflows/evil.yml' "$gsrc/tools/hook"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/hook
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'symlink into .github' >/dev/null
+  greject symlink 'points under .github/'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Benign tools/ change still passes for backlog-burn.
+  printf 'ok\n' > "$gsrc/tools/ok.py"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/ok.py
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'tools ok' >/dev/null
+  rm -f "$gfile"
+  set +e
+  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$gsrc" \
+    "$SELF" --repo acme/print-bench --issue 863 --base "$gstart" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --routine backlog-burn --write-bundle "$gfile" >/dev/null
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] && [ -f "$gfile" ] || {
+    echo "selftest: backlog-burn refused a benign tools/ commit (exit ${rc})" >&2
     exit 1
   }
 
