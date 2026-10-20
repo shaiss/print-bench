@@ -80,23 +80,37 @@ set -euo pipefail
 SELF="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 
-# The literal strings the selector classifies on (select.py: the first
-# non-blank line must start with SHIP_LOCK_MARKER, and "WITHDRAWN" anywhere
-# in that line releases the claim). The withdrawal line must start with the
-# marker AND carry WITHDRAWN or the selector keeps reading the claim as
-# active — asserted by --selftest against these literals.
+# Visible first line for humans. A comment is a lock ONLY when it also
+# carries LOCK_HTML_MARKER and a trusted author (Bot or repo owner) —
+# never because it merely starts with LOCK_MARKER (Cipher, #864). Mirrored
+# in scripts/design-run-deliver.sh and tools/backlog-burn select.py.
 LOCK_MARKER='🚢 SHIP-LOCK'
-WITHDRAW_LINE='🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering'
+LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
+# Withdrawal carries the same HTML marker so readers still classify it as
+# a (withdrawn) lock comment. WITHDRAWN on the first line releases it.
+WITHDRAW_LINE="🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering
+
+${LOCK_HTML_MARKER}"
 # Stable prefix the escalation counter keys on; the tail of WITHDRAW_LINE may
 # be reworded, this prefix may not (old comments would stop counting).
 DEATH_PREFIX='🚢 SHIP-LOCK WITHDRAWN — scheduled run died'
 DECISION_LABEL='needs-decision'
 
 # jq prelude: first non-blank line of a body, stripped — the line
-# backlog_burn.select._first_line classifies on.
+# backlog_burn.select._first_line classifies on. is_lock requires the HTML
+# authenticity marker plus a trusted author (Bot or repo owner).
 JQ_FL='def fl($b): ($b // "") | split("\n")
   | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
-  | map(select(length > 0)) | (.[0] // "");'
+  | map(select(length > 0)) | (.[0] // "");
+def author_trusted:
+  ((.login // "") | length) > 0 and ((.type // "") | length) > 0
+  and (
+    .type == "Bot"
+    or (($owner | length) > 0
+        and ((.login | ascii_downcase) == ($owner | ascii_downcase)))
+  );
+def is_lock:
+  ((.body // "") | contains($html_marker)) and author_trusted;'
 
 usage() {  # [message]
   [ $# -eq 0 ] || echo "routine-lock-cleanup: $*" >&2
@@ -140,22 +154,24 @@ DECLINE_MARKER_2='🚦 DECISION NEEDED'
 # is not this firing.
 DEFER_MARKER='🚢 DEFERRED'
 
-# The latest SHIP-LOCK comment (claim or withdrawal form alike), or null.
-# First-of-ties on equal created_at, matching Python max() in the selector
-# exactly (jq max_by would keep the last of ties).
+# The latest authentic SHIP-LOCK comment (claim or withdrawal form alike),
+# or null. First-of-ties on equal created_at, matching Python max() in the
+# selector exactly (jq max_by would keep the last of ties).
 JQ_LATEST_LOCK='def latest_lock:
-  [ .[] | select(fl(.body) | startswith($marker)) ]
+  [ .[] | select(is_lock) ]
   | if length == 0 then null
     else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
     end;'
 
-# stdin: NDJSON comments {body, created_at}. Prints the latest SHIP-LOCK's
-# state, "active", "withdrawn" or "none" — the selector's _ship_lock_state
-# split by cause: "withdrawn" distinguishes a claim somebody released from
-# "none" (no lock comment at all), because only the former is evidence of a
-# deliberate terminal stop by the run that claimed.
+# stdin: NDJSON comments {body, created_at, login, type}. Prints the latest
+# authentic SHIP-LOCK's state, "active", "withdrawn" or "none" — the
+# selector's _ship_lock_state split by cause: "withdrawn" distinguishes a
+# claim somebody released from "none" (no lock comment at all), because only
+# the former is evidence of a deliberate terminal stop by the run that claimed.
+# Authenticity = HTML marker + trusted author (Cipher, #864).
 lock_state() {
-  jq -rs --arg marker "$LOCK_MARKER" "$JQ_FL $JQ_LATEST_LOCK"'
+  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg owner "${REPO%%/*}" \
+    "$JQ_FL $JQ_LATEST_LOCK"'
     latest_lock as $l
     | if $l == null then "none"
       elif ($l | fl(.body) | ascii_upcase | contains("WITHDRAWN")) then "withdrawn"
@@ -216,7 +232,7 @@ JQ_THIS_RUN='def stop_trusted:
 # Neither branch counts the marker mid-line: the skill leads its stop
 # comments with the marker.
 decline_indicated() {  # [run-started-at]
-  jq -rs --arg marker "$LOCK_MARKER" --arg d1 "$DECLINE_MARKER_1" --arg d2 "$DECLINE_MARKER_2" \
+  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg d1 "$DECLINE_MARKER_1" --arg d2 "$DECLINE_MARKER_2" \
     --arg since "${1:-}" --arg owner "${REPO%%/*}" \
     "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
     latest_lock as $l
@@ -248,7 +264,7 @@ decline_indicated() {  # [run-started-at]
 #     claim timestamp to anchor on: JQ_THIS_RUN's claimless_stop, the same
 #     test decline_indicated's claimless branch runs.
 deferred_indicated() {  # [run-started-at]
-  jq -rs --arg marker "$LOCK_MARKER" --arg d "$DEFER_MARKER" --arg since "${1:-}" \
+  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg d "$DEFER_MARKER" --arg since "${1:-}" \
     --arg owner "${REPO%%/*}" \
     "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
     latest_lock as $l
@@ -269,7 +285,8 @@ deferred_indicated() {  # [run-started-at]
 # skill's §0.6 edit) carries its own wording, never this prefix — and must
 # not be read as a deliberate stop by the current run.
 death_marked() {
-  jq -rs --arg marker "$LOCK_MARKER" --arg prefix "$DEATH_PREFIX" \
+  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg owner "${REPO%%/*}" \
+    --arg prefix "$DEATH_PREFIX" \
     "$JQ_FL $JQ_LATEST_LOCK"'
     latest_lock as $l
     | if $l == null then false
@@ -510,7 +527,7 @@ selftest() {
 
   # -- lock classification, each case with its negative control ------------
   cat > "$tmp/active.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed by run 1", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed by run 1", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 {"body": "just a comment", "created_at": "2026-08-02T00:00:00Z"}
 EOF
   [ "$(lock_state < "$tmp/active.ndjson")" = "active" ] \
@@ -524,34 +541,40 @@ EOF
   # WITHDRAWN latest releases, case-insensitively; the same pair with the
   # timestamps swapped (withdrawal older than the claim) must stay active.
   cat > "$tmp/withdrawn.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚢 SHIP-LOCK withdrawn — taking it back", "created_at": "2026-08-03T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK withdrawn — taking it back\n\n<!-- design-run-ship-lock:v1 -->", "created_at": "2026-08-03T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(lock_state < "$tmp/withdrawn.ndjson")" = "withdrawn" ] \
     || st_fail "a lowercase-withdrawn latest lock was not classified withdrawn"
   cat > "$tmp/reclaimed.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK withdrawn — taking it back", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-03T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK withdrawn — taking it back\n\n<!-- design-run-ship-lock:v1 -->", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-03T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(lock_state < "$tmp/reclaimed.ndjson")" = "active" ] \
     || st_fail "a re-claim after a withdrawal was not classified active"
 
-  # The marker mid-line is body text, not a claim; at line start it is one.
+  # Mid-line SHIP-LOCK text is never a claim. A first-line SHIP-LOCK without
+  # the HTML authenticity marker is also NOT a lock (Cipher, #864).
   cat > "$tmp/midline.ndjson" <<'EOF'
-{"body": "beware the 🚢 SHIP-LOCK marker mid-line", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "beware the 🚢 SHIP-LOCK marker mid-line", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(lock_state < "$tmp/midline.ndjson")" = "none" ] \
     || st_fail "a mid-line marker was counted as a lock"
-  cat > "$tmp/linestart.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK marker at line start", "created_at": "2026-08-01T00:00:00Z"}
+  cat > "$tmp/linestart-nomarker.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK marker at line start", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 EOF
-  [ "$(lock_state < "$tmp/linestart.ndjson")" = "active" ] \
-    || st_fail "a line-start marker was not counted as a lock"
+  [ "$(lock_state < "$tmp/linestart-nomarker.ndjson")" = "none" ] \
+    || st_fail "a line-start SHIP-LOCK without the HTML marker was counted as a lock"
+  cat > "$tmp/linestart-marked.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nsettle claim", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+EOF
+  [ "$(lock_state < "$tmp/linestart-marked.ndjson")" = "active" ] \
+    || st_fail "a settle-written SHIP-LOCK (marker + trusted author) was not counted as a lock"
 
   # First-NON-blank-line rule: leading blank lines and indentation are
   # stripped before classifying; a marker on a later line does not count.
   cat > "$tmp/blankfirst.ndjson" <<'EOF'
-{"body": "\n   🚢 SHIP-LOCK\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "\n   🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(lock_state < "$tmp/blankfirst.ndjson")" = "active" ] \
     || st_fail "a body starting with a blank line was not classified by its first non-blank line"
@@ -568,13 +591,13 @@ EOF
   # BEFORE the claim (a previous run's decline never vouches for this one),
   # the marker mid-line, and a thread with no claim at all.
   cat > "$tmp/declined-after.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 {"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(decline_indicated < "$tmp/declined-after.ndjson")" = "true" ] \
     || st_fail "a DECLINED comment after the claim by the owner was not read as a decline"
   cat > "$tmp/decision-after.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
 {"body": "🚦 DECISION NEEDED — `tol-default-loosen`\n\nparked per the gate", "created_at": "2026-08-02T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
 EOF
   [ "$(decline_indicated < "$tmp/decision-after.ndjson")" = "true" ] \
@@ -586,13 +609,13 @@ EOF
   # Both DECLINED and DECISION NEEDED, each the positive fixture above with
   # only the stop author changed to an outsider.
   cat > "$tmp/declined-after-attacker.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 {"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z", "login": "attacker", "type": "User"}
 EOF
   [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/declined-after-attacker.ndjson")" = "false" ] \
     || st_fail "an outsider's DECLINED under a live SHIP-LOCK minted a decline (ghost-lock spoof)"
   cat > "$tmp/decision-after-attacker.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 {"body": "🚦 DECISION NEEDED — `tol-default-loosen`\n\nparked per the gate", "created_at": "2026-08-02T00:00:00Z", "login": "attacker", "type": "User"}
 EOF
   [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/decision-after-attacker.ndjson")" = "false" ] \
@@ -600,19 +623,19 @@ EOF
   # …and the claimed branch also fails closed when the stop carries no author
   # data the fetch could attribute.
   cat > "$tmp/declined-after-anon.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 {"body": "🚢 DECLINED — needs a decision", "created_at": "2026-08-02T00:00:00Z"}
 EOF
   [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/declined-after-anon.ndjson")" = "false" ] \
     || st_fail "a claimed DECLINED with no login or type was read as a decline"
   cat > "$tmp/declined-before.ndjson" <<'EOF'
 {"body": "🚢 DECLINED — earlier run gave up here", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚢 SHIP-LOCK\n\nclaimed afresh", "created_at": "2026-08-02T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed afresh", "created_at": "2026-08-02T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(decline_indicated < "$tmp/declined-before.ndjson")" = "false" ] \
     || st_fail "a decline posted BEFORE the claim wrongly vouched for this run"
   cat > "$tmp/declined-midline.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 {"body": "beware the 🚢 DECLINED marker mid-line", "created_at": "2026-08-02T00:00:00Z"}
 EOF
   [ "$(decline_indicated < "$tmp/declined-midline.ndjson")" = "false" ] \
@@ -669,8 +692,8 @@ EOF
 
   # -- death-marking: our own withdrawal notice is a death, not a decline ---
   cat > "$tmp/our-death.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\n- routine: backlog-burn", "created_at": "2026-08-02T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\n<!-- design-run-ship-lock:v1 -->\n\n- routine: backlog-burn", "created_at": "2026-08-02T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(death_marked < "$tmp/our-death.ndjson")" = "true" ] \
     || st_fail "our own death-withdrawal notice was not death-marked"
@@ -691,7 +714,7 @@ EOF
   # the window, a defer a newer comment followed, and a non-defer latest
   # comment.
   cat > "$tmp/defer-after.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
 {"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T15:00:00Z < "$tmp/defer-after.ndjson")" = "true" ] \
@@ -702,12 +725,12 @@ EOF
     || st_fail "a DEFERRED comment after the claim was not read as a defer"
   cat > "$tmp/defer-before.ndjson" <<'EOF'
 {"body": "🚢 DEFERRED — dependency not landed yet.", "created_at": "2026-09-01T15:00:00Z", "login": "o", "type": "User"}
-{"body": "🚢 SHIP-LOCK\n\nclaimed afresh", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed afresh", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T14:00:00Z < "$tmp/defer-before.ndjson")" = "false" ] \
     || st_fail "a defer posted BEFORE the claim wrongly vouched for this run"
   cat > "$tmp/defer-midline.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
 {"body": "beware the 🚢 DEFERRED marker mid-line", "created_at": "2026-09-01T15:02:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T15:00:00Z < "$tmp/defer-midline.ndjson")" = "false" ] \
@@ -771,7 +794,7 @@ EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-attacker.ndjson")" = "false" ] \
     || st_fail "an outsider User (attacker) claimless DEFERRED inside the window was read as a defer"
   cat > "$tmp/defer-attacker-claimed.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "o", "type": "User"}
 {"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "login": "attacker", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T15:00:00Z < "$tmp/defer-attacker-claimed.ndjson")" = "false" ] \
@@ -911,7 +934,7 @@ STUB
   }
 
   # Row 1 (#538's exact shape): exit 0, an active claim, nothing else → dead.
-  e2e_fix dead comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix dead comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix dead branches '[]'
   e2e_fix dead pulls '[]'
   e2e dead success
@@ -925,7 +948,7 @@ STUB
   # The branch carries unmerged work: its compare against the default branch
   # (read from the repo, "trunk" here, never assumed to be main — the
   # fixture's file name pins the base) reports commits ahead.
-  e2e_fix branch comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix branch comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix branch branches '[{"name": "claude/issue-1-the-fix"}]'
   e2e_fix branch pulls '[]'
   e2e_fix branch repo '{"default_branch": "trunk"}'
@@ -938,7 +961,7 @@ STUB
   # nothing ahead of the default branch — and the run claimed, then died.
   # Not delivered: dead, the claim is withdrawn. Before the unmerged-work
   # rule this read "delivered" and the dead run's lock stood, green.
-  e2e_fix orphan comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix orphan comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix orphan branches '[{"name": "claude/issue-1-scout-cap-state"}]'
   e2e_fix orphan pulls '[]'
   e2e_fix orphan repo '{"default_branch": "main"}'
@@ -951,7 +974,7 @@ STUB
 
   # Row 2c: an orphan beside a branch with real work → delivered (any one
   # branch carrying work corroborates), nothing posted.
-  e2e_fix mixed comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix mixed comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix mixed branches '[{"name": "claude/issue-1-old"},{"name": "claude/issue-1-new"}]'
   e2e_fix mixed pulls '[]'
   e2e_fix mixed repo '{"default_branch": "main"}'
@@ -963,7 +986,7 @@ STUB
 
   # Row 2d: a compare whose payload has no ahead_by → unknown, which is
   # work (fail-conservative, the selector's rule): delivered, nothing posted.
-  e2e_fix unknown comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix unknown comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix unknown branches '[{"name": "claude/issue-1-the-fix"}]'
   e2e_fix unknown pulls '[]'
   e2e_fix unknown repo '{"default_branch": "main"}'
@@ -975,7 +998,7 @@ STUB
   # Row 2e: the compare request itself fails (no fixture → the stub exits
   # 1) → the script's fail-loud exit 1, with no output and nothing posted:
   # an unreadable branch never reads as empty, so no claim is withdrawn.
-  e2e_fix cmpfail comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix cmpfail comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix cmpfail branches '[{"name": "claude/issue-1-the-fix"}]'
   e2e_fix cmpfail pulls '[]'
   e2e_fix cmpfail repo '{"default_branch": "main"}'
@@ -993,7 +1016,7 @@ STUB
   # Row 3: exit 0 with a DECLINED comment after the claim → declined, nothing
   # posted (the lock is left to age out through the selector's staleness, per
   # the fix's design).
-  e2e_fix declined comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z", "user": {"login": "o", "type": "User"}}]'
+  e2e_fix declined comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix declined branches '[]'
   e2e_fix declined pulls '[]'
   e2e declined success
@@ -1006,7 +1029,7 @@ STUB
   # comment posted). Mirrors the deferatklock control for the decline path:
   # a public-issue spoof can no longer suppress the death-withdrawal and
   # strand a ghost lock.
-  e2e_fix declatklock comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z", "user": {"login": "attacker", "type": "User"}}]'
+  e2e_fix declatklock comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — the issue needs a decision\n\nparked", "created_at": "2026-09-01T16:00:00Z", "user": {"login": "attacker", "type": "User"}}]'
   e2e_fix declatklock branches '[]'
   e2e_fix declatklock pulls '[]'
   e2e declatklock success 2026-09-01T15:00:00Z
@@ -1017,7 +1040,7 @@ STUB
 
   # Row 3b: exit 0 with the claim self-withdrawn in the agent's own wording →
   # declined (its §0.6 release), nothing posted.
-  e2e_fix selfwd comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z"},{"body": "🚢 SHIP-LOCK WITHDRAWN — this run is stopping without shipping", "created_at": "2026-09-01T15:02:00Z"}]'
+  e2e_fix selfwd comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 SHIP-LOCK WITHDRAWN — this run is stopping without shipping\n\n<!-- design-run-ship-lock:v1 -->", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix selfwd branches '[]'
   e2e_fix selfwd pulls '[]'
   e2e selfwd success
@@ -1103,7 +1126,7 @@ STUB
 
   # Same control on the claimed branch: an outsider's DEFERRED after the
   # lock is not a stop, so the active lock is a death and gets withdrawn.
-  e2e_fix deferatklock comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "attacker", "type": "User"}}]'
+  e2e_fix deferatklock comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "attacker", "type": "User"}}]'
   e2e_fix deferatklock branches '[]'
   e2e_fix deferatklock pulls '[]'
   e2e deferatklock success 2026-09-01T15:00:00Z
@@ -1142,7 +1165,7 @@ STUB
   # Row 4b: the claimed shape — the walk claimed, deferred inside the
   # window, and left the lock standing → declined, nothing posted (the lock
   # ages out through the selector's staleness, the DECLINED row's design).
-  e2e_fix deferlock comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}}]'
+  e2e_fix deferlock comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}}]'
   e2e_fix deferlock branches '[]'
   e2e_fix deferlock pulls '[]'
   e2e deferlock success 2026-09-01T15:00:00Z
@@ -1153,7 +1176,7 @@ STUB
   # window opens after both. The defer is not this run's, the lock is still
   # active and nothing was delivered, so the run is dead and the claim is
   # withdrawn — not quietly declined.
-  e2e_fix deferold comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "o", "type": "User"}}]'
+  e2e_fix deferold comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix deferold branches '[]'
   e2e_fix deferold pulls '[]'
   e2e deferold success 2026-09-01T16:00:00Z
@@ -1165,7 +1188,7 @@ STUB
   # Row 4c: corroboration outranks the defer — a branch exists even though
   # the thread's latest stop is a DEFERRED → delivered, nothing posted (a
   # walk that deferred and then landed anyway is a delivery, not a defer).
-  e2e_fix deferbranch comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "o", "type": "User"}}]'
+  e2e_fix deferbranch comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix deferbranch branches '[{"name": "claude/issue-1-the-fix"}]'
   e2e_fix deferbranch pulls '[]'
   e2e_fix deferbranch repo '{"default_branch": "main"}'
@@ -1178,7 +1201,7 @@ STUB
   # Escalation still fires at the threshold under the new disposition: two
   # prior death-withdrawals + this death → withdrawal, label add, decision
   # comment, escalated=true.
-  e2e_fix esc comments '[{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\ndetails", "created_at": "2026-09-01T00:00:00Z"},{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\ndetails", "created_at": "2026-09-02T00:00:00Z"},{"body": "🚢 SHIP-LOCK\n\nclaimed again", "created_at": "2026-09-03T00:00:00Z"}]'
+  e2e_fix esc comments '[{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\n<!-- design-run-ship-lock:v1 -->\n\ndetails", "created_at": "2026-09-01T00:00:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\n<!-- design-run-ship-lock:v1 -->\n\ndetails", "created_at": "2026-09-02T00:00:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed again", "created_at": "2026-09-03T00:00:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix esc branches '[]'
   e2e_fix esc pulls '[]'
   e2e_fix esc labels '[{"name": "needs-decision"}]'
@@ -1266,7 +1289,7 @@ DECOY
     || st_fail "the decoy (pre-#538) copy did not print its no-op notice — the fixture is wrong"
 
   # Dead-success fixtures: an active claim, nothing corroborating or stopping.
-  e2e_fix stacked comments '[{"body": "🚢 SHIP-LOCK\n\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z"}]'
+  e2e_fix stacked comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed by the run", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix stacked branches '[]'
   e2e_fix stacked pulls '[]'
 
@@ -1461,17 +1484,17 @@ UNSAFE
 
   # -- escalation fires at the threshold, not below it ---------------------
   cat > "$tmp/two-deaths.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\ndetails", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\ndetails", "created_at": "2026-08-02T00:00:00Z"}
-{"body": "🚢 SHIP-LOCK\n\nclaimed again", "created_at": "2026-08-03T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\n<!-- design-run-ship-lock:v1 -->\n\ndetails", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\n<!-- design-run-ship-lock:v1 -->\n\ndetails", "created_at": "2026-08-02T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed again", "created_at": "2026-08-03T00:00:00Z", "login": "o", "type": "User"}
 EOF
   deaths="$(count_dead_withdrawals < "$tmp/two-deaths.ndjson")"
   [ "$deaths" = 2 ] || st_fail "expected 2 prior dead-run withdrawals, got $deaths"
   should_escalate "$deaths" 3 \
     || st_fail "the 3rd death (2 prior + this run) did not escalate at threshold 3"
   cat > "$tmp/one-death.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\ndetails", "created_at": "2026-08-01T00:00:00Z"}
-{"body": "🚢 SHIP-LOCK\n\nclaimed again", "created_at": "2026-08-02T00:00:00Z"}
+{"body": "🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering\n\n<!-- design-run-ship-lock:v1 -->\n\ndetails", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed again", "created_at": "2026-08-02T00:00:00Z", "login": "o", "type": "User"}
 EOF
   deaths="$(count_dead_withdrawals < "$tmp/one-death.ndjson")"
   [ "$deaths" = 1 ] || st_fail "expected 1 prior dead-run withdrawal, got $deaths"
@@ -1499,9 +1522,9 @@ EOF
   esac
   # And the behavioral proof: a comment built from our own withdrawal line
   # must release a prior claim in the classifier itself.
-  jq -cn --arg lock "$LOCK_MARKER" --arg wd "$WITHDRAW_LINE" '
-    {body: ($lock + "\n\nclaimed"), created_at: "2026-08-01T00:00:00Z"},
-    {body: ($wd + "\n\n- routine: design-run"), created_at: "2026-08-02T00:00:00Z"}' \
+  jq -cn --arg lock "$LOCK_MARKER" --arg html "$LOCK_HTML_MARKER" --arg wd "$WITHDRAW_LINE" '
+    {body: ($lock + "\n\n" + $html + "\n\nclaimed"), created_at: "2026-08-01T00:00:00Z", login: "o", type: "User"},
+    {body: ($wd + "\n\n- routine: design-run"), created_at: "2026-08-02T00:00:00Z", login: "o", type: "User"}' \
     > "$tmp/ours.ndjson"
   [ "$(lock_state < "$tmp/ours.ndjson")" = "withdrawn" ] \
     || st_fail "our own withdrawal line does not release the lock for the selector"

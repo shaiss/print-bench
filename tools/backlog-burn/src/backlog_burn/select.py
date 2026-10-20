@@ -76,6 +76,11 @@ from typing import Any, Optional
 DEFAULT_REQUIRED_LABEL = "autonomy-ok"
 
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
+# Hidden authenticity marker settle (and trusted claim writers) emit.
+# A comment is a lock only when it carries this marker AND a trusted
+# author — never because it merely starts with SHIP_LOCK_MARKER
+# (Cipher, #864). Mirrored in scripts/design-run-deliver.sh.
+SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
 
 # An issue an agentic run parked for a human yes/no (the HITL decision gate,
 # issue #161) carries this label until the decision is recorded and it is
@@ -175,17 +180,38 @@ def _parse_iso(ts: str) -> Optional[datetime]:
         return None
 
 
+def _is_authentic_ship_lock(comment: dict[str, Any]) -> bool:
+    """True when ``comment`` is a settle/trusted SHIP-LOCK (Cipher, #864).
+
+    Requires BOTH the HTML authenticity marker and a trusted author
+    (GitHub ``Bot``, or a ``User`` whose login matches ``ownerLogin``).
+    A bare ``🚢 SHIP-LOCK`` / ``SHIP-LOCK`` first line is never enough —
+    author alone cannot tell a settle claim from an applied intent when
+    both post as the same PAT, so the marker is the forge-proof half.
+    """
+    body = comment.get("body") or ""
+    if SHIP_LOCK_HTML_MARKER not in body:
+        return False
+    author_type = comment.get("authorType") or ""
+    if author_type == "Bot":
+        return True
+    owner = (comment.get("ownerLogin") or "").lower()
+    login = (comment.get("authorLogin") or "").lower()
+    return bool(owner and login and login == owner)
+
+
 def _ship_lock_state(
     comments: list[dict[str, Any]],
     now: Optional[datetime],
     stale_after_hours: float,
 ) -> str:
-    """Classify the *latest* SHIP-LOCK comment: ``none`` / ``active`` / ``stale``.
+    """Classify the *latest* authentic SHIP-LOCK: ``none`` / ``active`` / ``stale``.
 
     A claim is a state, not a flag (the skill's §0.3 rule): read the newest
-    ``🚢 SHIP-LOCK`` comment and act on that one. ``🚢 SHIP-LOCK WITHDRAWN``
-    releases the claim (``none``), which is why a withdrawal has to be able to
-    *un*-exclude an issue here, not merely be ignored.
+    authentic lock (HTML marker + trusted author) and act on that one.
+    ``🚢 SHIP-LOCK WITHDRAWN`` releases the claim (``none``), which is why a
+    withdrawal has to be able to *un*-exclude an issue here, not merely be
+    ignored. A comment that merely starts with ``🚢 SHIP-LOCK`` is ignored.
 
     An un-withdrawn claim older than ``stale_after_hours`` is ``stale`` — the
     caller only asks about the lock once it has already ruled out a
@@ -196,7 +222,7 @@ def _ship_lock_state(
     """
     lock_comments = [
         c for c in (comments or [])
-        if _first_line(c.get("body", "")).startswith(SHIP_LOCK_MARKER)
+        if _is_authentic_ship_lock(c)
     ]
     if not lock_comments:
         return "none"

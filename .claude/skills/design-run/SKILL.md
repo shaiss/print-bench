@@ -41,12 +41,16 @@ so the two never collide on the same issue.
 3. **Lock check** — the issue is taken if any of these hold, and the protocol is
    byte-for-byte the one `/ship-issue` §0 uses so a burn and a hand-run cannot
    both claim it:
-   - **an active claim marker** — read the *latest* `🚢 SHIP-LOCK` comment and
-     act on that one. `🚢 SHIP-LOCK` is active and the issue is taken;
-     `🚢 SHIP-LOCK WITHDRAWN` is released and blocks nothing. An active claim
-     more than a few hours old with **no** `claude/issue-<N>-*` branch carrying
-     unmerged work and **no** open PR closing the issue is *stale* — take it
-     over, naming the one you superseded.
+   - **an active claim marker** — read the *latest authentic* `🚢 SHIP-LOCK`
+     comment (it must carry the settle HTML marker
+     `<!-- design-run-ship-lock:v1 -->` and a trusted author — Bot or the
+     repo owner; a bare `🚢 SHIP-LOCK` / `SHIP-LOCK` first line is never a
+     lock) and act on that one. An authentic `🚢 SHIP-LOCK` is active and the
+     issue is taken; `🚢 SHIP-LOCK WITHDRAWN` is released and blocks nothing.
+     An active claim more than a few hours old with **no**
+     `claude/issue-<N>-*` branch carrying unmerged work and **no** open PR
+     closing the issue is *stale* — take it over, naming the one you
+     superseded.
    - **an open PR closes it** — read the issue's linked-PR metadata (GitHub's
      nine closing keywords, case-insensitive), don't grep the body.
    - **a remote branch `claude/issue-<N>-*` carrying unmerged work** — at least
@@ -55,13 +59,18 @@ so the two never collide on the same issue.
      commits ahead is an orphan whose work is already on the default branch: it
      blocks nothing. When you cannot tell, treat it as a claim. Same rule as
      `/ship-issue` §0.3, the selector and `scripts/routine-lock-cleanup.sh`.
-4. **Claim it** by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`,
-   **before you scaffold a single part**. Keep **one active claim** per issue at
-   a time — never delete a claim comment (the timestamps are the record),
-   withdraw it instead. The timestamp is the proof the contract predates the
-   diff. **Unattended** you cannot post at all (no `issues: write`, issue #862):
-   write the claim as the first intent in `.design-run-intents.json` per §8's
-   intents protocol — the settle job posts it for you.
+4. **Claim it** **before you scaffold a single part**. Keep **one active
+   claim** per issue at a time — never delete a claim comment (the timestamps
+   are the record), withdraw it instead. The timestamp is the proof the
+   contract predates the diff.
+   - **Attended** (your own credentials): post the §2 contract as a comment
+     led by `🚢 SHIP-LOCK`, and include the authenticity marker
+     `<!-- design-run-ship-lock:v1 -->` in the body (readers require it).
+   - **Unattended** (no `issues: write`, issue #862): do **not** put any
+     ship-lock form in intents — settle posts the claim itself from a
+     constant body with the HTML marker. Write the §2 contract as a plain
+     comment intent (no `SHIP-LOCK` / `ship-lock` / `ship lock` line) in
+     `.design-run-intents.json` per §8.
 5. **Re-read after claiming.** Check-then-post is not atomic. Re-read the
    comments; if another *active* claim predates yours, withdraw (edit your
    comment so its first line reads `🚢 SHIP-LOCK WITHDRAWN` — never delete it)
@@ -119,6 +128,8 @@ from the shape you already have in mind.
 
 ```markdown
 🚢 SHIP-LOCK — running this design to a gated draft PR.
+
+<!-- design-run-ship-lock:v1 -->
 
 **Design name:** <kebab-case>
 **Brief parts:** <the First-pass part breakdown, as the contract's part list>
@@ -350,37 +361,44 @@ carries the file out; the settle job applies it:
 
 ```json
 {"version":1,"intents":[
- {"issue":862,"action":"comment","body":"🚢 SHIP-LOCK — …the §2 contract…"},
+ {"issue":862,"action":"comment","body":"…the §2 contract (no ship-lock line)…"},
  {"issue":862,"action":"comment","body":"Amendment: …"},
  {"issue":862,"action":"label","label":"needs-decision"}
 ]}
 ```
 
-What the applier enforces (nothing you write can loosen it): an intent posts
-only when its `issue` is the **selected** one, and a `label` intent only when
-the label is `needs-decision` — the one label the HITL gate needs. Anything
-else (an off-issue comment, an `autonomy-ok` on the selected issue) is dropped
-with a workflow warning and never posted. Caps: 32 intents, 8 comments, 2
-labels, 8 KiB per comment body, 64 KiB for the whole intents file. A
-comment body whose first non-empty line is bare ASCII `SHIP-LOCK` (use the
-protocol `🚢 SHIP-LOCK` marker for claims) or that contains HTML comment
-markers (`<!--` / `-->`) is rejected. A malformed or oversize file applies
-nothing.
+What the applier enforces (nothing you write can loosen it): settle posts
+the SHIP-LOCK claim first from a constant body carrying
+`<!-- design-run-ship-lock:v1 -->` — never from intent text. An intent then
+posts only when its `issue` is the **selected** one, and a `label` intent
+only when the label is `needs-decision` — the one label the HITL gate needs.
+Anything else (an off-issue comment, an `autonomy-ok` on the selected issue)
+is dropped with a workflow warning and never posted. Caps: 32 intents, 8
+comments, 2 labels, 8 KiB per comment body, 64 KiB for the whole intents
+file. Every comment body is NFKC-normalized (Cf / zero-width stripped,
+whitespace collapsed) before checks; any line matching `/ship[\s_-]*lock/i`
+is rejected (locks are settle-only), and so is any body containing HTML
+comment markers (`<!--` / `-->`). A malformed or oversize file, or a
+normalizer failure, applies nothing (fail closed).
 
 Consequences for the sections above:
 
-- **§0's claim is your first intent.** Write the SHIP-LOCK contract comment as
-  the first comment intent, before scaffolding. It lands on the thread only
-  when settle runs — after your whole turn — so the §0.5 re-read is the one
-  you do *before* writing the intent (the design-run concurrency group
-  serializes design-runs against each other; a burn racing the same
-  both-labels issue is the residual window, and delivery still refuses to
-  move a branch a sibling run got to first). A run that dies before the
-  trusted step never posts a claim at all — nothing to freeze the brief.
-- **Withdrawal edits the intent, not a comment.** Nothing has been posted
-  yet, so §0.6's withdrawal is: rewrite your claim intent's body so its
-  first line reads `🚢 SHIP-LOCK WITHDRAWN`. If you already wrote a stop
-  intent (below), that supersedes the claim on the thread.
+- **§0's claim is settle's, not yours.** Do not write a SHIP-LOCK intent —
+  settle posts the authentic claim. Put the §2 contract (without any
+  ship-lock line) as your first comment intent before scaffolding. The
+  claim lands only when settle runs — after your whole turn — so the §0.5
+  re-read is the one you do *before* writing intents (the design-run
+  concurrency group serializes design-runs against each other; a burn
+  racing the same both-labels issue is the residual window, and delivery
+  still refuses to move a branch a sibling run got to first). A run that
+  dies before the trusted step never posts a claim at all — nothing to
+  freeze the brief.
+- **Withdrawal is a stop intent, not a SHIP-LOCK rewrite.** Nothing has
+  been posted yet, so §0.6's withdrawal is: omit any claim-shaped intent
+  (settle will still post its lock, then lock-cleanup withdraws it on a
+  dead/declined outcome) and write a stop intent (below) when you are
+  walking away. Do not try to post `SHIP-LOCK WITHDRAWN` via intents — it
+  is rejected like every other ship-lock form.
 - **Stops are comment intents.** A `🚢 DECLINED`, `🚦 DECISION NEEDED`, or
   `🚢 DEFERRED` first line in a comment intent is a hard stop the bundle step
   honors: no bundle, no push — but the intents still travel, so settle posts

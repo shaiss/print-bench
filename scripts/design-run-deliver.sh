@@ -780,7 +780,18 @@ finish() {  # delivered summary
 STOP_MARKER_DECLINED='🚢 DECLINED'
 STOP_MARKER_DECISION='🚦 DECISION NEEDED'
 STOP_MARKER_DEFERRED='🚢 DEFERRED'
+# Visible first line for humans. A comment is a lock ONLY when it also
+# carries SHIP_LOCK_HTML_MARKER and a trusted author (Bot or repo owner) —
+# never because it merely starts with this string (Cipher, #864).
 STOP_LOCK_MARKER='🚢 SHIP-LOCK'
+# Hidden authenticity marker. Settle's lock writer emits it; intents reject
+# `<!--` so an applied intent can never forge a lock.
+SHIP_LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
+# Constant settle-claim body — built here, never from intent text.
+SHIP_LOCK_SETTLE_BODY="${STOP_LOCK_MARKER} — settle claim
+
+${SHIP_LOCK_HTML_MARKER}
+"
 
 # The agent's issue intents (item 9 above). The file name is the contract
 # with .claude/skills/design-run/SKILL.md and .gitignore; it is also in the
@@ -798,33 +809,84 @@ INTENTS_MAX_BYTES=65536
 # Per-comment body cap on apply (8 KiB). Fail closed per intent.
 INTENTS_BODY_MAX=8192
 
+# Normalize an intent comment body (stdin → stdout): Unicode NFKC, strip
+# every Cf (format) character including zero-width joiners/BOM, then
+# collapse whitespace per line. Exit 1 on any failure (fail closed).
+normalize_intent_body() {
+  python3 -c '
+import re, sys, unicodedata
+try:
+    text = unicodedata.normalize("NFKC", sys.stdin.read())
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    out = []
+    for line in text.splitlines():
+        out.append(re.sub(r"\s+", " ", line.strip()))
+    sys.stdout.write("\n".join(out))
+except Exception as exc:
+    print("normalize_intent_body: %s" % (exc,), file=sys.stderr)
+    sys.exit(1)
+'
+}
+
+# Return 0 when the normalized body (stdin) has any line matching
+# /ship[\s_-]*lock/i — the lock-spoof forms intents must never post.
+normalized_body_has_ship_lock() {
+  python3 -c '
+import re, sys
+pat = re.compile(r"ship[\s_-]*lock", re.I)
+text = sys.stdin.read()
+sys.exit(0 if any(pat.search(line) for line in text.splitlines()) else 1)
+'
+}
+
+# Post the settle-only SHIP-LOCK claim. Body is the SHIP_LOCK_SETTLE_BODY
+# constant — never intent text. Intents cannot forge the HTML marker.
+post_settle_ship_lock() {
+  local token="${COMMENT_TOKEN:-${GH_TOKEN:-}}"
+  if [ -z "$token" ]; then
+    echo "design-run-deliver: no token to post the settle SHIP-LOCK" >&2
+    exit 1
+  fi
+  if ! GH_TOKEN="$token" gh api --method POST "repos/${REPO}/issues/${ISSUE}/comments" \
+    -f body="$SHIP_LOCK_SETTLE_BODY" >/dev/null; then
+    echo "design-run-deliver: failed to post the settle SHIP-LOCK on #${ISSUE}" >&2
+    exit 1
+  fi
+  note "posted settle SHIP-LOCK on #${ISSUE}"
+}
+
 # stdin: one JSON array of {body, created_at, login, type} per line (one
 # gh --paginate page each). $1: this run's start (UTC ISO-8601), or empty.
 # Prints true when a this-run decline, decision-needed, or defer is on
 # the thread. The predicate is the lock-cleanup pair
-# (decline_indicated + deferred_indicated): after the latest SHIP-LOCK
-# when one exists, otherwise the latest comment, inside the job window,
-# from a Bot or the repo owner.
+# (decline_indicated + deferred_indicated): after the latest authentic
+# SHIP-LOCK (HTML marker + trusted author) when one exists, otherwise the
+# latest comment, inside the job window, from a Bot or the repo owner.
 hard_stop_from_comments() {  # [run-started-at]
-  jq -s --arg marker "$STOP_LOCK_MARKER" \
+  jq -s --arg html_marker "$SHIP_LOCK_HTML_MARKER" \
     --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
     --arg d3 "$STOP_MARKER_DEFERRED" \
     --arg since "${1:-}" --arg owner "${REPO%%/*}" '
       def fl($b): ($b // "") | split("\n")
         | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
         | map(select(length > 0)) | (.[0] // "");
-      def latest_lock:
-        [ .[] | select(fl(.body) | startswith($marker)) ]
-        | if length == 0 then null
-          else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
-          end;
-      def stop_trusted:
+      def author_trusted:
         ((.login // "") | length) > 0 and ((.type // "") | length) > 0
         and (
           .type == "Bot"
           or (($owner | length) > 0
               and ((.login | ascii_downcase) == ($owner | ascii_downcase)))
         );
+      # A lock is the HTML marker PLUS a trusted author — never a bare
+      # SHIP-LOCK / 🚢 SHIP-LOCK first line (Cipher, #864).
+      def is_lock:
+        ((.body // "") | contains($html_marker)) and author_trusted;
+      def latest_lock:
+        [ .[] | select(is_lock) ]
+        | if length == 0 then null
+          else (reduce .[] as $c (.[0]; if $c.created_at > .created_at then $c else . end))
+          end;
+      def stop_trusted: author_trusted;
       def in_window: ($since | length) == 0 or .created_at > $since;
       def claimless_stop(is_stop):
         if ($since | length) == 0 or length == 0 then false
@@ -941,19 +1003,19 @@ write_intents() {
 }
 
 # Apply the agent's issue intents (settle job, trusted artifact download).
-# One intent posts only when: it targets THIS issue, its action is comment
-# or label, its label is in INTENTS_ALLOWLIST, and the per-run caps hold.
-# Comment bodies whose first non-empty line is the bare ASCII `SHIP-LOCK`
-# (a spoof of the lock marker without the 🚢 prefix the protocol uses),
-# or that contain HTML comment markers, are rejected (Cipher LOW, #864).
-# Everything else is dropped with a ::warning:: naming why. Exit 0 for
-# agent-side problems (the run's disposition comes from the thread, not
-# from here); exit 1 only for an unreadable/oversized file or broken
-# arguments — an applier that cannot read its input must not look like
-# "no intents".
+# Posts the settle-only SHIP-LOCK claim (constant body with HTML marker)
+# first, then applies intents. One intent posts only when: it targets THIS
+# issue, its action is comment or label, its label is in INTENTS_ALLOWLIST,
+# and the per-run caps hold. Comment bodies are NFKC-normalized (Cf stripped,
+# whitespace collapsed) before the ship-lock regex; HTML comment markers and
+# oversize bodies are rejected (Cipher, #864). Everything else is dropped
+# with a ::warning:: naming why. Exit 0 for agent-side problems (the run's
+# disposition comes from the thread, not from here); exit 1 only for an
+# unreadable/oversized file, a normalizer failure, or broken arguments —
+# an applier that cannot read its input must not look like "no intents".
 apply_intents() {
   local path="$1" n i applied=0 rejected=0 comments=0 labels=0
-  local intent_issue action body label size
+  local intent_issue action body label size normalized
   if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
     echo "design-run-deliver: issue must be numeric, got '${ISSUE}'" >&2
     exit 2
@@ -984,6 +1046,9 @@ apply_intents() {
     echo "::warning::intents file is malformed (want {version:1,intents:[...]} of at most '${INTENTS_MAX_ENTRIES}' entries) — no intents applied" >&2
     exit 0
   fi
+  # Settle-only claim: constant body, never intent text. Posted before
+  # intents so lock cleanup / hard-stop readers see an authentic lock.
+  post_settle_ship_lock
   n="$(jq '.intents | length' "$path")"
   i=0
   while [ "$i" -lt "$n" ]; do
@@ -1008,7 +1073,7 @@ apply_intents() {
           i=$((i + 1))
           continue
         fi
-        local blen first_line
+        local blen
         blen="$(printf '%s' "$body" | wc -c | tr -d '[:space:]')"
         if [ -z "$body" ] || [ "${blen:-0}" -gt "$INTENTS_BODY_MAX" ]; then
           echo "::warning::comment intent ${i} has an empty or over-length body (cap ${INTENTS_BODY_MAX} bytes) — rejected" >&2
@@ -1016,16 +1081,6 @@ apply_intents() {
           i=$((i + 1))
           continue
         fi
-        # First non-empty line, trimmed — same shape as hard_stop_from_comments.
-        first_line="$(printf '%s\n' "$body" | sed -n '/[^[:space:]]/{s/^[[:space:]]*//;s/[[:space:]]*$//;p;q}')"
-        case "$first_line" in
-          SHIP-LOCK|SHIP-LOCK*)
-            echo "::warning::comment intent ${i} leads with bare SHIP-LOCK (want the 🚢-prefixed protocol marker, or a non-lock body) — rejected" >&2
-            rejected=$((rejected + 1))
-            i=$((i + 1))
-            continue
-            ;;
-        esac
         case "$body" in
           *'<!--'*|*'-->'*)
             echo "::warning::comment intent ${i} contains an HTML comment marker — rejected" >&2
@@ -1034,6 +1089,16 @@ apply_intents() {
             continue
             ;;
         esac
+        if ! normalized="$(printf '%s' "$body" | normalize_intent_body)"; then
+          echo "design-run-deliver: comment intent ${i}: body normalizer failed — refusing to apply" >&2
+          exit 1
+        fi
+        if printf '%s' "$normalized" | normalized_body_has_ship_lock; then
+          echo "::warning::comment intent ${i} matches ship-lock after normalization — rejected (locks are settle-only)" >&2
+          rejected=$((rejected + 1))
+          i=$((i + 1))
+          continue
+        fi
         if [ "$comments" -ge "$INTENTS_MAX_COMMENTS" ]; then
           echo "::warning::comment intent ${i} exceeds the ${INTENTS_MAX_COMMENTS}-comment cap — rejected" >&2
           rejected=$((rejected + 1))
@@ -2121,24 +2186,35 @@ p.write_bytes(data)
     grep -c -- 'api --method POST repos/acme/print-bench/issues/853/labels' "${tmp}/gh.log" || true
   }
 
-  # Happy path: claim + amendment comments and a needs-decision label on
-  # the selected issue, posted in file order. The claim uses the protocol
-  # 🚢-prefixed marker; a bare ASCII SHIP-LOCK first line is rejected below.
+  # Happy path: settle posts its constant SHIP-LOCK first, then the
+  # agent's non-lock comments and a needs-decision label, in file order.
+  # SHIP-LOCK must never appear in intent text (rejected below).
   ifile="${tmp}/intents-happy.json"
   cat > "$ifile" <<'EOF'
 {"version":1,"intents":[
- {"issue":853,"action":"comment","body":"🚢 SHIP-LOCK — claim body"},
+ {"issue":853,"action":"comment","body":"Acceptance contract body"},
  {"issue":853,"action":"comment","body":"Amendment body"},
  {"issue":853,"action":"label","label":"needs-decision"}
 ]}
 EOF
   run_intents "$ifile" 0
-  [ "$(comment_posts)" -eq 2 ] || { echo "selftest: happy intents did not post both comments" >&2; exit 1; }
+  # settle lock + 2 intent comments
+  [ "$(comment_posts)" -eq 3 ] || { echo "selftest: happy intents did not post settle lock + both comments (posted $(comment_posts))" >&2; exit 1; }
   [ "$(label_posts)" -eq 1 ] || { echo "selftest: happy intents did not post the label" >&2; exit 1; }
-  claim_line="$(grep -n -- 'SHIP-LOCK — claim body' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" || {
+    echo "selftest: settle SHIP-LOCK did not carry the HTML authenticity marker" >&2
+    exit 1
+  }
+  grep -qF -- "$STOP_LOCK_MARKER — settle claim" "${tmp}/gh.log" || {
+    echo "selftest: settle SHIP-LOCK did not use the constant visible line" >&2
+    exit 1
+  }
+  settle_line="$(grep -nF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  contract_line="$(grep -n -- 'Acceptance contract body' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
   amend_line="$(grep -n -- 'Amendment body' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
-  [ -n "$claim_line" ] && [ -n "$amend_line" ] && [ "$claim_line" -lt "$amend_line" ] || {
-    echo "selftest: comments were not posted in intents order" >&2
+  [ -n "$settle_line" ] && [ -n "$contract_line" ] && [ -n "$amend_line" ] \
+    && [ "$settle_line" -lt "$contract_line" ] && [ "$contract_line" -lt "$amend_line" ] || {
+    echo "selftest: settle lock / comments were not posted in order" >&2
     exit 1
   }
   grep -q -- 'labels\[\]=needs-decision' "${tmp}/gh.log" || {
@@ -2157,7 +2233,8 @@ EOF
 EOF
   run_intents "$ifile" 0
   [ "$(label_posts)" -eq 0 ] || { echo "selftest: an off-issue label intent was posted" >&2; exit 1; }
-  [ "$(comment_posts)" -eq 1 ] || { echo "selftest: the on-issue comment was dropped with the off-issue label" >&2; exit 1; }
+  # settle lock + the surviving on-issue comment
+  [ "$(comment_posts)" -eq 2 ] || { echo "selftest: the on-issue comment was dropped with the off-issue label (posted $(comment_posts))" >&2; exit 1; }
   printf '%s\n' "$stderr" | grep -q "targets issue '999', not the selected #853" || {
     echo "selftest: the off-issue rejection did not name the reason" >&2
     exit 1
@@ -2167,11 +2244,12 @@ EOF
   ifile="${tmp}/intents-offissue-comment.json"
   cat > "$ifile" <<'EOF'
 {"version":1,"intents":[
- {"issue":999,"action":"comment","body":"🚢 SHIP-LOCK — taking #999 instead"}
+ {"issue":999,"action":"comment","body":"off-issue spoof body"}
 ]}
 EOF
   run_intents "$ifile" 0
-  [ "$(comment_posts)" -eq 0 ] || { echo "selftest: an off-issue comment intent was posted" >&2; exit 1; }
+  # settle lock only — the off-issue comment never posts
+  [ "$(comment_posts)" -eq 1 ] || { echo "selftest: an off-issue comment intent was posted (posted $(comment_posts))" >&2; exit 1; }
   printf '%s\n' "$stderr" | grep -q "targets issue '999'" || {
     echo "selftest: the off-issue comment rejection did not name the reason" >&2
     exit 1
@@ -2203,30 +2281,43 @@ EOF
     printf '%s\n' ']}'
   } > "$ifile"
   run_intents "$ifile" 0
-  [ "$(comment_posts)" -eq 8 ] || { echo "selftest: the comment cap did not hold (posted $(comment_posts))" >&2; exit 1; }
+  # settle lock + 8 capped comments
+  [ "$(comment_posts)" -eq 9 ] || { echo "selftest: the comment cap did not hold (posted $(comment_posts))" >&2; exit 1; }
 
-  # Cipher LOW (#864): bare ASCII SHIP-LOCK first line is rejected; the
-  # protocol 🚢-prefixed claim still posts (happy path above).
-  ifile="${tmp}/intents-bare-shiplock.json"
-  cat > "$ifile" <<'EOF'
-{"version":1,"intents":[
- {"issue":853,"action":"comment","body":"SHIP-LOCK\n\nspoofed claim"},
- {"issue":853,"action":"comment","body":"SHIP-LOCK claim body"},
- {"issue":853,"action":"comment","body":"safe sibling survives"}
-]}
-EOF
-  run_intents "$ifile" 0
-  [ "$(comment_posts)" -eq 1 ] || { echo "selftest: bare SHIP-LOCK bodies were not rejected (posted $(comment_posts))" >&2; exit 1; }
-  grep -q -- 'safe sibling survives' "${tmp}/gh.log" || {
-    echo "selftest: the sibling of a bare SHIP-LOCK body was dropped" >&2
-    exit 1
+  # Cipher (#864): every ship-lock shape is rejected after NFKC / Cf-strip /
+  # whitespace collapse — including emoji, case, separators, zero-width,
+  # fullwidth, and non-first-line forms. Settle still posts its own lock.
+  reject_shiplock_case() {  # $1 name, $2 body
+    ifile="${tmp}/intents-sl-$1.json"
+    jq -n --arg b "$2" \
+      '{"version":1,"intents":[{"issue":853,"action":"comment","body":$b},{"issue":853,"action":"comment","body":"safe sibling survives"}]}' \
+      > "$ifile"
+    run_intents "$ifile" 0
+    # settle lock + safe sibling only
+    [ "$(comment_posts)" -eq 2 ] || {
+      echo "selftest: ship-lock case '$1' was not rejected (posted $(comment_posts))" >&2
+      exit 1
+    }
+    grep -q -- 'safe sibling survives' "${tmp}/gh.log" || {
+      echo "selftest: ship-lock case '$1' dropped its safe sibling" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q 'matches ship-lock after normalization' || {
+      echo "selftest: ship-lock case '$1' did not name the reason" >&2
+      exit 1
+    }
   }
-  printf '%s\n' "$stderr" | grep -q 'leads with bare SHIP-LOCK' || {
-    echo "selftest: bare SHIP-LOCK rejection did not name the reason" >&2
-    exit 1
-  }
+  reject_shiplock_case emoji $'🚢 SHIP-LOCK — claim via intent'
+  reject_shiplock_case lower 'ship-lock spoof'
+  reject_shiplock_case spaced 'ship lock spoof'
+  reject_shiplock_case underscored 'ship_lock spoof'
+  # U+200B zero-width space inside SHIP-LOCK
+  reject_shiplock_case zwsp "$(python3 -c 'print("SHIP\u200b-LOCK spoof")')"
+  # Fullwidth ＳＨＩＰ－ＬＯＣＫ (NFKC → SHIP-LOCK)
+  reject_shiplock_case fullwidth "$(python3 -c 'print("\uff33\uff28\uff29\uff30\uff0d\uff2c\uff2f\uff23\uff2b spoof")')"
+  reject_shiplock_case line2 $'preamble\nSHIP-LOCK on line two'
 
-  # Cipher LOW (#864): HTML comment markers anywhere in the body → reject.
+  # Cipher (#864): HTML comment markers anywhere in the body → reject.
   ifile="${tmp}/intents-html-comment.json"
   cat > "$ifile" <<'EOF'
 {"version":1,"intents":[
@@ -2236,7 +2327,8 @@ EOF
 ]}
 EOF
   run_intents "$ifile" 0
-  [ "$(comment_posts)" -eq 1 ] || { echo "selftest: HTML-marker bodies were not rejected (posted $(comment_posts))" >&2; exit 1; }
+  # settle lock + no-markers sibling
+  [ "$(comment_posts)" -eq 2 ] || { echo "selftest: HTML-marker bodies were not rejected (posted $(comment_posts))" >&2; exit 1; }
   grep -q -- 'no markers here' "${tmp}/gh.log" || {
     echo "selftest: the sibling of an HTML-marker body was dropped" >&2
     exit 1
@@ -2246,7 +2338,7 @@ EOF
     exit 1
   }
 
-  # Cipher LOW (#864): per-comment 8 KiB body cap, and a 64 KiB apply-side
+  # Cipher (#864): per-comment 8 KiB body cap, and a 64 KiB apply-side
   # payload ceiling that fails closed (exit 1) before any intent posts.
   ifile="${tmp}/intents-body-cap.json"
   big="$(printf 'x%.0s' {1..8193})"
@@ -2254,7 +2346,8 @@ EOF
     '{"version":1,"intents":[{"issue":853,"action":"comment","body":$b},{"issue":853,"action":"comment","body":"tiny"}]}' \
     > "$ifile"
   run_intents "$ifile" 0
-  [ "$(comment_posts)" -eq 1 ] || { echo "selftest: over-length comment body was posted" >&2; exit 1; }
+  # settle lock + tiny
+  [ "$(comment_posts)" -eq 2 ] || { echo "selftest: over-length comment body was posted (posted $(comment_posts))" >&2; exit 1; }
   grep -q -- 'tiny' "${tmp}/gh.log" || {
     echo "selftest: the sibling of an over-length body was dropped" >&2
     exit 1
@@ -2644,8 +2737,10 @@ EOF
   git_cmd clone -b main "${tmp}/hhist.git" "$hdel" >/dev/null
   git_cmd init -b main --bare "$hbare" >/dev/null
   plant_stop() {  # body, login, type, created_at
+    # Authentic settle lock: visible line + HTML marker + trusted author.
     jq -n --arg body "$1" --arg login "$2" --arg type "$3" --arg at "$4" \
-      '[{body:"🚢 SHIP-LOCK\n\nclaimed",created_at:"2026-10-19T00:00:00Z",login:"acme",type:"User"},
+      --arg lock "$SHIP_LOCK_SETTLE_BODY" \
+      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"acme",type:"User"},
         {body:$body,created_at:$at,login:$login,type:$type}]' > "${tmp}/comments.json"
   }
   for marker in '🚢 DECLINED — needs a decision' '🚦 DECISION NEEDED — bay-width' '🚢 DEFERRED — dependencies'; do
@@ -2670,6 +2765,38 @@ EOF
       exit 1
     }
   done
+  # Cipher (#864): a comment that merely starts with SHIP-LOCK / 🚢 SHIP-LOCK
+  # but lacks the HTML authenticity marker is NOT a lock — hard-stop stays
+  # claimless (the later stop still fires as claimless). REPO must be set so
+  # author_trusted can match the owner login.
+  REPO=acme/print-bench
+  jq -n --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+    '[{body:"🚢 SHIP-LOCK\n\nspoofed without marker",created_at:"2026-10-19T00:00:00Z",login:"acme",type:"User"},
+      {body:$body,created_at:"2026-10-19T01:00:00Z",login:"acme",type:"User"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+    echo "selftest: claimless stop after a marker-less SHIP-LOCK did not fire" >&2
+    exit 1
+  }
+  # Settle-written claim (marker + trusted author) IS a lock: a stop after
+  # it is indicated; the same stop before the window is not.
+  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+    '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"github-actions[bot]",type:"Bot"},
+      {body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+    echo "selftest: settle-written SHIP-LOCK was not treated as a lock" >&2
+    exit 1
+  }
+  # Marker present but untrusted author → not a lock.
+  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" \
+    '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"attacker",type:"User"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+    echo "selftest: marker+untrusted-author was treated as a lock" >&2
+    exit 1
+  }
+
   # Bot author, claimless (no lock): still this run's stop.
   jq -n --arg body $'🚦 DECISION NEEDED — bay-width\n\nstop' \
     '[{body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \

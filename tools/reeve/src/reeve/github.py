@@ -60,6 +60,7 @@ _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 # Mirrored from tools/backlog-burn/src/backlog_burn/select.py, not imported —
 # the two tools must stay independently installable (the groomer's precedent).
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
+SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
 
 # The label an adoption-study submission carries. Collected from the same
 # open-issues listing the lock scan reads (no extra request), so Reeve can
@@ -250,7 +251,14 @@ def gather_run_health(
         )
         lock_comments = [
             c for c in comments
-            if _first_line(c.get("body", "")).startswith(SHIP_LOCK_MARKER)
+            if SHIP_LOCK_HTML_MARKER in (c.get("body") or "")
+            and (
+                ((c.get("user") or {}).get("type") == "Bot")
+                or (
+                    ((c.get("user") or {}).get("login") or "").lower()
+                    == repo.split("/", 1)[0].lower()
+                )
+            )
         ]
         if not lock_comments:
             continue

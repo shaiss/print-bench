@@ -270,14 +270,25 @@ jobs:
                 --jq '"**" + .title + "**\n\n" + (.body // "(no body)")' \
                 || echo "(issue #${n} could not be read)"
               echo
+              # Authentic lock = HTML marker + trusted author (Bot or repo
+              # owner). A bare 🚢 SHIP-LOCK first line is never enough (Cipher, #864).
+              # Owner is inlined (gh api --jq has no --arg); GITHUB_REPOSITORY
+              # is workflow-trusted.
+              _owner="${GITHUB_REPOSITORY%%/*}"
               lock="$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}/comments" \
                 --paginate \
-                --jq '[.[] | select(.body | startswith("🚢 SHIP-LOCK"))
-                           | select(.body | startswith("🚢 SHIP-LOCK WITHDRAWN") | not)]
-                      | last
-                      | if . == null then ""
-                        else "### SHIP-LOCK contract (by " + .user.login
-                             + " at " + .created_at + ")\n\n" + .body end' || true)"
+                --jq "[.[]
+                    | select(.body | contains(\"<!-- design-run-ship-lock:v1 -->\"))
+                    | select(
+                        (.user.type == \"Bot\")
+                        or (((.user.login // \"\") | ascii_downcase)
+                            == (\"${_owner}\" | ascii_downcase))
+                      )
+                    | select(.body | test(\"^\\\\s*🚢 SHIP-LOCK WITHDRAWN\") | not)]
+                   | last
+                   | if . == null then \"\"
+                     else \"### SHIP-LOCK contract (by \" + .user.login
+                          + \" at \" + .created_at + \")\\n\\n\" + .body end" || true)"
               if [ -n "$lock" ]; then
                 printf '%s\n\n' "$lock"
               else

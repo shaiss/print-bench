@@ -38,7 +38,11 @@ def _runs_body(wf, conclusions):
 
 
 def _lock(body, created_at):
-    return {"body": body, "created_at": created_at}
+    return {
+        "body": body,
+        "created_at": created_at,
+        "user": {"login": "github-actions[bot]", "type": "Bot"},
+    }
 
 
 def _responses():
@@ -97,14 +101,14 @@ def _responses():
     responses["https://next.example/issues2"] = (issues_page2, "")
 
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
-        _lock("🚢 SHIP-LOCK claimed by run 1", "2026-08-10T05:23:00Z"),
+        _lock("🚢 SHIP-LOCK claimed by run 1\n\n<!-- design-run-ship-lock:v1 -->", "2026-08-10T05:23:00Z"),
         # The newest lock's first NON-BLANK line is the marker line — leading
         # blank lines must not hide it.
-        _lock("\n\n  🚢 SHIP-LOCK claimed by run 2\n\ndetails", "2026-08-14T05:23:00Z"),
+        _lock("\n\n  🚢 SHIP-LOCK claimed by run 2\n\n<!-- design-run-ship-lock:v1 -->\n\ndetails", "2026-08-14T05:23:00Z"),
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/283/comments?per_page=100"] = ([
-        _lock("🚢 SHIP-LOCK claimed by run 3", "2026-08-10T05:23:00Z"),
-        _lock("🚢 SHIP-LOCK WITHDRAWN — stale claim", "2026-08-11T05:23:00Z"),
+        _lock("🚢 SHIP-LOCK claimed by run 3\n\n<!-- design-run-ship-lock:v1 -->", "2026-08-10T05:23:00Z"),
+        _lock("🚢 SHIP-LOCK WITHDRAWN — stale claim\n\n<!-- design-run-ship-lock:v1 -->", "2026-08-11T05:23:00Z"),
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/290/comments?per_page=100"] = ([
         {"body": "just a comment", "created_at": "2026-08-10T05:23:00Z"},

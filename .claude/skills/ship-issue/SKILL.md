@@ -26,9 +26,12 @@ workflow did). Section 7 says what changes when nobody is watching.
    when you posted it.
 3. **Lock check** — an issue is taken if any of these hold:
    - **an active claim marker.** The marker is a state, not a flag: read the
-     *latest* `🚢 SHIP-LOCK` comment and act on that one.
-     `🚢 SHIP-LOCK` is active, and the issue is taken.
-     `🚢 SHIP-LOCK WITHDRAWN` is released, and blocks nothing.
+     *latest authentic* `🚢 SHIP-LOCK` comment and act on that one.
+     Authentic means the body carries `<!-- design-run-ship-lock:v1 -->`
+     and a trusted author (Bot or repo owner) — a bare `🚢 SHIP-LOCK`
+     first line is never enough. An authentic `🚢 SHIP-LOCK` is active,
+     and the issue is taken. `🚢 SHIP-LOCK WITHDRAWN` is released, and
+     blocks nothing.
      An active claim more than a few hours old with **no**
      `claude/issue-<N>-*` branch carrying unmerged work and **no** open PR
      closing the issue is *stale* — a run that died between posting its lock
@@ -49,10 +52,12 @@ workflow did). Section 7 says what changes when nobody is watching.
      cannot tell (the count fails), treat the branch as a claim. The burn's
      selector (`tools/backlog-burn`) and its lock cleanup
      (`scripts/routine-lock-cleanup.sh`) read the same rule.
-4. Claim it by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`.
-   One per issue, ever. The comment's timestamp is the proof the contract
-   predates the diff — that is the whole anti-retrofit mechanism, so post it
-   **before** you read a line of implementation code.
+4. Claim it by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`,
+   including the authenticity marker `<!-- design-run-ship-lock:v1 -->` in
+   the body (readers require marker + trusted author — a bare first line is
+   never enough). One per issue, ever. The comment's timestamp is the proof
+   the contract predates the diff — that is the whole anti-retrofit
+   mechanism, so post it **before** you read a line of implementation code.
 5. **Re-read after claiming.** Check-then-post is not atomic: two runs can
    both pass step 3 and both post. So re-read the comments afterwards, and if
    another *active* claim predates yours, withdraw and stop — last writer
@@ -113,6 +118,8 @@ asked for.
 
 ```markdown
 🚢 SHIP-LOCK — shipping this as one PR.
+
+<!-- design-run-ship-lock:v1 -->
 
 **Chosen approach:** <the option the issue picked, or the only one on offer>
 
