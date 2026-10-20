@@ -2691,8 +2691,8 @@ EOF
     echo "selftest: design-run preflight → disable-sudo → scrub smoke → verify → agent (Cipher #876)" >&2
     exit 1
   }
-  grep -q 'bubblewrap apparmor-profiles' "$workflow" || {
-    echo "selftest: design-run preflight does not apt-get bubblewrap+apparmor-profiles" >&2
+  grep -q 'bubblewrap apparmor-profiles' "$workflow" && grep -q 'ripgrep' "$workflow" || {
+    echo "selftest: design-run preflight does not apt-get bubblewrap+apparmor-profiles+ripgrep" >&2
     exit 1
   }
   grep -q 'setup-bwrap-apparmor.sh' "$workflow" || {
@@ -3064,8 +3064,9 @@ EOF
   }
   # apt line may wrap after prusa-slicer; require both halves.
   grep -q 'openscad xvfb imagemagick prusa-slicer' "$burn" \
-    && grep -q 'ffmpeg gifsicle jq bubblewrap apparmor-profiles' "$burn" || {
-    echo "selftest: the burn preflight install does not apt-get toolchain + bubblewrap + apparmor-profiles" >&2
+    &&   grep -q 'ffmpeg gifsicle jq bubblewrap apparmor-profiles' "$burn" \
+    && grep -q 'ripgrep' "$burn" || {
+    echo "selftest: the burn preflight install does not apt-get toolchain + bubblewrap + apparmor-profiles + ripgrep" >&2
     exit 1
   }
   grep -q 'setup-bwrap-apparmor.sh' "$burn" || {
@@ -3187,6 +3188,10 @@ EOF
   }
   grep -q 'setup-bwrap-apparmor.sh' "$canary" || {
     echo "selftest: canary missing setup-bwrap-apparmor.sh" >&2
+    exit 1
+  }
+  grep -q 'ripgrep' "$canary" || {
+    echo "selftest: canary preflight does not apt-get ripgrep (srt dependency)" >&2
     exit 1
   }
   if grep -Eiq 'sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0|echo 0 \| sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns' "$canary"; then

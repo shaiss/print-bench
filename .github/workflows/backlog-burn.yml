@@ -433,14 +433,15 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update -qq 2>/dev/null || true
           sudo apt-get install -y -qq openscad xvfb imagemagick prusa-slicer \
-            ffmpeg gifsicle jq bubblewrap apparmor-profiles socat gnupg
+            ffmpeg gifsicle jq bubblewrap apparmor-profiles socat gnupg ripgrep
           python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/printcheck[test]"
           python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/stylelift[test]"
           # Claude's sandbox-runtime (srt) — the Bash wrap SCRUB=1 uses.
           # Integrity-pinned tarball install (Cipher follow-up on #876); no
           # bare `npm install -g @anthropic-ai/sandbox-runtime@…`.
+          # ripgrep: srt refuses to start without `rg` on PATH.
           for bin in openscad xvfb-run montage ffmpeg gifsicle prusa-slicer jq \
-            printcheck stylelift pytest bwrap; do
+            printcheck stylelift pytest bwrap rg; do
             command -v "$bin" >/dev/null || {
               echo "::error::preflight toolchain missing ${bin} after install" >&2
               exit 1

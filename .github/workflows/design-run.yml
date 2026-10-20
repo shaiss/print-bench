@@ -442,8 +442,9 @@ jobs:
             OPENROUTER_API_KEY GH_TOKEN REGEN_TOKEN || true
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update -qq 2>/dev/null || true
-          sudo apt-get install -y -qq bubblewrap apparmor-profiles socat gnupg
-          for bin in bwrap; do
+          # ripgrep: sandbox-runtime refuses to start without `rg` on PATH.
+          sudo apt-get install -y -qq bubblewrap apparmor-profiles socat gnupg ripgrep
+          for bin in bwrap rg; do
             command -v "$bin" >/dev/null || {
               echo "::error::preflight missing ${bin} after install" >&2
               exit 1

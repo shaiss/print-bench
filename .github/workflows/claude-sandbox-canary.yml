@@ -65,8 +65,9 @@ jobs:
           # needrestart after apt can hang the job on php-fpm; keep installs quiet.
           export NEEDRESTART_MODE=a
           sudo apt-get update -qq 2>/dev/null || true
-          sudo apt-get install -y -qq bubblewrap apparmor-profiles socat gnupg
-          for bin in bwrap; do
+          # ripgrep: sandbox-runtime refuses to start without `rg` on PATH.
+          sudo apt-get install -y -qq bubblewrap apparmor-profiles socat gnupg ripgrep
+          for bin in bwrap rg; do
             command -v "$bin" >/dev/null || {
               echo "::error::preflight missing ${bin} after apt" >&2
               exit 1
