@@ -27,20 +27,24 @@ command -v apparmor_parser >/dev/null || {
 sudo install -o root -g root -m 0644 "$src" "$dst"
 sudo apparmor_parser -r "$dst"
 
+# securityfs profiles is root-readable on GHA runners — use sudo.
 profiles_file="/sys/kernel/security/apparmor/profiles"
-[ -r "$profiles_file" ] || {
-  echo "error: cannot read ${profiles_file}" >&2
-  exit 1
-}
-# Both profile names must appear in enforce mode.
-if ! grep -E '^bwrap \(enforce\)$' "$profiles_file" >/dev/null; then
-  echo "error: AppArmor profile 'bwrap' not in (enforce):" >&2
-  grep -E 'bwrap' "$profiles_file" >&2 || true
+profiles_dump="$(mktemp)"
+cleanup_profiles() { rm -f "$profiles_dump"; }
+trap cleanup_profiles EXIT
+if ! sudo cat "$profiles_file" >"$profiles_dump" 2>/dev/null; then
+  echo "error: cannot read ${profiles_file} (even with sudo)" >&2
   exit 1
 fi
-if ! grep -E '^unpriv_bwrap \(enforce\)$' "$profiles_file" >/dev/null; then
+# Both profile names must appear in enforce mode.
+if ! grep -E '^bwrap \(enforce\)$' "$profiles_dump" >/dev/null; then
+  echo "error: AppArmor profile 'bwrap' not in (enforce):" >&2
+  grep -E 'bwrap' "$profiles_dump" >&2 || true
+  exit 1
+fi
+if ! grep -E '^unpriv_bwrap \(enforce\)$' "$profiles_dump" >/dev/null; then
   echo "error: AppArmor profile 'unpriv_bwrap' not in (enforce):" >&2
-  grep -E 'bwrap' "$profiles_file" >&2 || true
+  grep -E 'bwrap' "$profiles_dump" >&2 || true
   exit 1
 fi
 
