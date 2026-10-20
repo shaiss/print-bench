@@ -4292,3 +4292,82 @@ def test_model_smoke_secret_gate_rejects_ungated_keys():
     assert tampered != text
     with pytest.raises(AssertionError, match="ZAI_KEY|ANTHROPIC|OPENROUTER"):
         _assert_secrets_behind_trust(tampered, "model-smoke.yml")
+
+
+# ── design-run-deliver agent-instruction path drift guard (issue #869) ───────
+# is_protected_path must refuse agent-instruction files at ANY depth after
+# case-folding normalization — not only at the repo root. The marker
+# `agent-instruction-path-drift` pins the intent; each required case pattern
+# must appear inside the function body.
+
+DELIVER_SH = REPO_ROOT / "scripts" / "design-run-deliver.sh"
+AGENT_INSTRUCTION_PATH_MARKER = "agent-instruction-path-drift"
+# Patterns that must appear in is_protected_path (after normalize lowercases).
+# Root + nested (`*/…`) forms; `.cursor` at any depth.
+AGENT_INSTRUCTION_CASE_PATTERNS = (
+    "claude.md|*/claude.md",
+    "claude.local.md|*/claude.local.md",
+    "agents.md|*/agents.md",
+    ".mcp.json|*/.mcp.json",
+    ".cursorrules|*/.cursorrules",
+    ".cursor|.cursor/*|*/.cursor|*/.cursor/*",
+)
+
+
+def _is_protected_path_body(text: str) -> str:
+    """Return the body of is_protected_path() from design-run-deliver.sh."""
+    m = re.search(
+        r"^is_protected_path\(\)\s*\{\n(.*?)^\}\n",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert m, (
+        "scripts/design-run-deliver.sh has no is_protected_path() — the #869 "
+        "delivery path policy was removed")
+    return m.group(1)
+
+
+def _assert_agent_instruction_paths_are_any_depth(text: str) -> None:
+    """Fail if is_protected_path regresses to root-only agent-instruction matches."""
+    assert AGENT_INSTRUCTION_PATH_MARKER in text, (
+        "design-run-deliver.sh is missing the agent-instruction-path-drift "
+        "marker — the #869 any-depth instruction-file gate was removed")
+    body = _is_protected_path_body(text)
+    missing = [p for p in AGENT_INSTRUCTION_CASE_PATTERNS if p not in body]
+    assert not missing, (
+        "is_protected_path is missing any-depth agent-instruction pattern(s) "
+        f"{missing} — nested CLAUDE.md / AGENTS.md / .mcp.json / .cursor / "
+        ".cursorrules must be refused after normalization (issue #869)")
+    # Root-only `claude.md|agents.md|.mcp.json` (the pre-MEDIUM shape) must
+    # not be the sole match — require the nested `*/` forms explicitly.
+    assert "*/claude.md" in body, (
+        "is_protected_path does not match nested **/CLAUDE.md")
+    assert "*/.cursor" in body or "*/.cursor/*" in body, (
+        "is_protected_path does not match nested **/.cursor/**")
+
+
+def test_deliver_agent_instruction_paths_any_depth():
+    _assert_agent_instruction_paths_are_any_depth(
+        DELIVER_SH.read_text(encoding="utf-8"))
+
+
+def test_deliver_agent_instruction_paths_rejects_root_only_claude():
+    # NEGATIVE CONTROL: drop the nested */claude.md arm so only root
+    # claude.md would match — drift guard must FAIL.
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    needle = "claude.md|*/claude.md"
+    assert needle in text, "tamper target not found — is_protected_path moved"
+    tampered = text.replace(needle, "claude.md", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match=r"\*/claude\.md|nested"):
+        _assert_agent_instruction_paths_are_any_depth(tampered)
+
+
+def test_deliver_agent_instruction_paths_rejects_dropped_cursor():
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    needle = ".cursor|.cursor/*|*/.cursor|*/.cursor/*"
+    assert needle in text, "tamper target not found — .cursor pattern moved"
+    tampered = text.replace(needle, ".cursor|.cursor/*", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match=r"\.cursor|missing"):
+        _assert_agent_instruction_paths_are_any_depth(tampered)

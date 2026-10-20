@@ -54,13 +54,15 @@
 # and single-file lib/ modules may be committed — while backlog-burn runs
 # /ship-issue and may commit any non-protected path (docs/, designs/,
 # people/, …). Both routines refuse the same protected prefixes —
-# `.github/**`, `.claude/**`, `scripts/**`, `tools/**` — and the root
-# agent-instruction files `CLAUDE.md`, `AGENTS.md`, `.mcp.json` — because
-# a delivered workflow, hook, CI script or agent instruction file would
-# run with repo secrets on the next push or agent session (Cipher on
-# #869). Symlinks (including absolute targets), case folding, `../`,
-# backslashes and gitlinks that land under a protected prefix are refused
-# the same way. An unknown routine is a usage error.
+# `.github/**`, `.claude/**`, `scripts/**`, `tools/**` — and agent-
+# instruction paths at ANY depth after case-folding normalization:
+# `**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`, `**/.mcp.json`,
+# `**/.cursor/**`, `**/.cursorrules` — because a delivered workflow, hook,
+# CI script or agent instruction file would run with repo secrets on the
+# next push or agent session (Cipher on #869). Symlinks (including
+# absolute targets), case folding, `../`, backslashes and gitlinks that
+# land under a protected path are refused the same way. An unknown
+# routine is a usage error.
 #
 # Live mode needs GH_TOKEN to push and to open the PR (the design-run PAT,
 # so the draft triggers CI). COMMENT_TOKEN, when set, is the token for the
@@ -227,18 +229,28 @@ normalize_repo_path() {
   printf '%s\n' "${out[*]}"
 }
 
-# Return 0 when $1 is a protected delivery path — prefixes `.github`,
-# `.claude`, `scripts`, `tools`, or the root agent-instruction files
-# `CLAUDE.md`, `AGENTS.md`, `.mcp.json` — after normalization (case, `./`,
-# `../`). Filenames are matched lowercased because normalize_repo_path
-# folds case. Fail closed: an unnormalizable path counts as protected
-# (issue #869).
+# Return 0 when $1 is a protected delivery path after normalization
+# (case, `./`, `../`). Protected:
+#   prefixes: `.github`, `.claude`, `scripts`, `tools`
+#   agent-instruction files at ANY depth (bash `case` `*` matches `/`):
+#     `**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`, `**/.mcp.json`,
+#     `**/.cursorrules`, and `**/.cursor/**`
+# Filenames/dirs are matched lowercased because normalize_repo_path folds
+# case. Fail closed: an unnormalizable path counts as protected (issue #869).
 is_protected_path() {
   local norm
   norm="$(normalize_repo_path "$1")" || return 0
   case "$norm" in
     .github|.github/*|.claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
-    claude.md|agents.md|.mcp.json) return 0 ;;
+    # agent-instruction-path-drift (issue #869): any-depth, case-folded.
+    # Keep these patterns in sync with the drift guard in
+    # tools/model-registry/tests/test_workflow_drift.py.
+    claude.md|*/claude.md) return 0 ;;
+    claude.local.md|*/claude.local.md) return 0 ;;
+    agents.md|*/agents.md) return 0 ;;
+    .mcp.json|*/.mcp.json) return 0 ;;
+    .cursorrules|*/.cursorrules) return 0 ;;
+    .cursor|.cursor/*|*/.cursor|*/.cursor/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -263,13 +275,14 @@ symlink_points_under_protected() {
 # Paths the delivery commit may include. A first-party module is a single
 # file under lib/. A lib subdirectory is a vendored third-party tree and
 # stays on the runner. Both routines refuse the protected prefixes
-# (`.github/**`, `.claude/**`, `scripts/**`, `tools/**`) and the root
-# agent-instruction files (`CLAUDE.md`, `AGENTS.md`, `.mcp.json`) — a
-# workflow, hook, CI script or instruction file pushed with the PAT runs
-# with repo secrets on the next check or agent session (issues #863 /
-# #869). backlog-burn may still commit any other non-protected path
-# (docs/, designs/, people/, …); design-run stays designs/ + single-file
-# lib/ only.
+# (`.github/**`, `.claude/**`, `scripts/**`, `tools/**`) and agent-
+# instruction paths at any depth (`**/CLAUDE.md`, `**/CLAUDE.local.md`,
+# `**/AGENTS.md`, `**/.mcp.json`, `**/.cursor/**`, `**/.cursorrules`) —
+# a workflow, hook, CI script or instruction file pushed with the PAT
+# runs with repo secrets on the next check or agent session (issues
+# #863 / #869). backlog-burn may still commit any other non-protected
+# path (docs/, designs/, people/, …); design-run stays designs/ +
+# single-file lib/ only.
 safe_path() {
   local target
   if is_protected_path "$1"; then
@@ -3681,6 +3694,161 @@ EOF
       reject_rootfile "$routine" "${rootfile}/symlink" 'points under a protected prefix'
       git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
     done
+  done
+
+  # Nested agent-instruction paths at ANY depth (issue #869 Cipher MEDIUM):
+  # docs/CLAUDE.md, designs/<name>/{CLAUDE,AGENTS}.md, lib/.mcp.json,
+  # nested .cursor/rules/, nested .cursorrules, case variant, plus
+  # rename-into and symlink-into (path matches or target is protected).
+  reject_nested() {  # $1 routine, $2 label, $3 needle
+    reject_rootfile "$1" "$2" "$3"
+  }
+  for routine in backlog-burn design-run; do
+    # docs/CLAUDE.md — add
+    mkdir -p "$gsrc/docs"
+    printf 'evil\n' > "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/add' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # designs/<name>/CLAUDE.md — add (alone; multi-path commits report one)
+    mkdir -p "$gsrc/designs/gadget"
+    printf 'evil\n' > "$gsrc/designs/gadget/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      designs/gadget/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add designs/gadget/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'designs/gadget/CLAUDE.md/add' 'touches designs/gadget/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # designs/<name>/AGENTS.md — add
+    mkdir -p "$gsrc/designs/gadget"
+    printf 'evil\n' > "$gsrc/designs/gadget/AGENTS.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      designs/gadget/AGENTS.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add designs/gadget/AGENTS.md' >/dev/null
+    reject_nested "$routine" 'designs/gadget/AGENTS.md/add' 'touches designs/gadget/AGENTS.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # lib/.mcp.json — add (design-run otherwise allows single-file lib/)
+    mkdir -p "$gsrc/lib"
+    printf '{}\n' > "$gsrc/lib/.mcp.json"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- lib/.mcp.json
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add lib/.mcp.json' >/dev/null
+    reject_nested "$routine" 'lib/.mcp.json/add' 'touches lib/\.mcp\.json'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Nested .cursor/rules/x.mdc — add
+    mkdir -p "$gsrc/a/b/.cursor/rules"
+    printf 'rule\n' > "$gsrc/a/b/.cursor/rules/x.mdc"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      a/b/.cursor/rules/x.mdc
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add nested .cursor rules' >/dev/null
+    reject_nested "$routine" 'nested-.cursor/add' 'touches a/b/\.cursor/rules/x\.mdc'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Nested .cursorrules — add
+    mkdir -p "$gsrc/docs/deep"
+    printf 'rules\n' > "$gsrc/docs/deep/.cursorrules"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      docs/deep/.cursorrules
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add nested .cursorrules' >/dev/null
+    reject_nested "$routine" 'nested-.cursorrules/add' 'touches docs/deep/\.cursorrules'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Case variant docs/claude.MD — normalizer folds case
+    mkdir -p "$gsrc/docs"
+    printf 'evil\n' > "$gsrc/docs/claude.MD"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/claude.MD
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add docs/claude.MD' >/dev/null
+    reject_nested "$routine" 'docs/claude.MD/case' 'touches'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # CLAUDE.local.md nested — add
+    mkdir -p "$gsrc/docs"
+    printf 'evil\n' > "$gsrc/docs/CLAUDE.local.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      docs/CLAUDE.local.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add docs/CLAUDE.local.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.local.md/add' 'touches docs/CLAUDE\.local\.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Rename into nested protected path
+    mkdir -p "$gsrc/docs"
+    git_cmd -C "$gsrc" mv -- safe/parked.txt docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'rename into docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/rename-into' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Symlink whose path matches a protected name (docs/CLAUDE.md -> seed.md)
+    mkdir -p "$gsrc/docs"
+    ln -s 'seed.md' "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'symlink path docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/symlink-path' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Symlink whose target is a nested protected path (seed target at tip
+    # first, then reset base past the seed so the range only adds the link).
+    mkdir -p "$gsrc/docs"
+    printf 'seed\n' > "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'seed docs/CLAUDE.md for symlink target' >/dev/null
+    local nested_base
+    nested_base="$(git_cmd -C "$gsrc" rev-parse HEAD)"
+    ln -s 'CLAUDE.md' "$gsrc/docs/hook"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/hook
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'symlink target docs/CLAUDE.md' >/dev/null
+    # Temporarily point reject at nested_base..HEAD (only the symlink).
+    rm -f "$gfile"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$gsrc" \
+      "$SELF" --repo acme/print-bench --issue 869 --base "$nested_base" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --routine "$routine" --write-bundle "$gfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    [ "$rc" -eq 1 ] || {
+      echo "selftest: ${routine} accepted docs/hook->CLAUDE.md (exit ${rc})" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q 'points under a protected prefix' || {
+      echo "selftest: ${routine} docs/hook->CLAUDE.md did not report symlink refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    [ ! -e "$gfile" ] || {
+      echo "selftest: ${routine} wrote a bundle for docs/hook->CLAUDE.md" >&2
+      exit 1
+    }
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Delete nested protected path
+    mkdir -p "$gsrc/docs"
+    printf 'seed\n' > "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'seed docs/CLAUDE.md for delete' >/dev/null
+    git_cmd -C "$gsrc" rm -q -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'delete docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/delete' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
   done
 
   # Benign docs/ change still passes for backlog-burn.
