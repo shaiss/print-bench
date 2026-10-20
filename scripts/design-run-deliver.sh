@@ -203,7 +203,7 @@ normalize_repo_path() {
   local raw="$1" part
   local -a parts out
   case "$raw" in
-    ''|*$'\n'*|*$'\r'*|/*|[A-Za-z]:*|*'\\'*) return 1 ;;
+    ''|*$'\n'*|*$'\r'*|/*|[A-Za-z]:*|*$'\\'*) return 1 ;;
   esac
   raw="$(printf '%s' "$raw" | tr 'A-Z' 'a-z')"
   IFS=/ read -r -a parts <<< "$raw" || true
@@ -241,7 +241,7 @@ symlink_points_under_dot_github() {
   local path="$1" target="$2" base joined
   [ -n "$target" ] || return 1
   case "$target" in
-    /*|[A-Za-z]:*|*'\\'*) return 0 ;;
+    /*|[A-Za-z]:*|*$'\\'*) return 0 ;;
   esac
   base="$(dirname -- "$path")"
   if [ "$base" = "." ]; then
@@ -3310,7 +3310,7 @@ EOF
   # backlog-burn refuses .github/** (closes #863 residual HIGH): add,
   # modify, rename into .github, symlink pointing into .github — while a
   # benign tools/ change still delivers.
-  local gsrc gfile gstart greject
+  local gsrc gfile gstart
   gsrc="${tmp}/gsrc"
   gfile="${tmp}/github-forbid.bundle"
   greject() {  # $1 label, $2 expected stderr needle
@@ -3385,6 +3385,15 @@ EOF
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/hook
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'symlink into .github' >/dev/null
   greject symlink 'points under .github/'
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Backslash in a path — normalize fails closed (single `\`, not `\\`).
+  mkdir -p "$gsrc/tools"
+  printf 'x\n' > "${gsrc}/tools/foo\\bar"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "tools/foo\\bar"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'backslash path' >/dev/null
+  # Needle is a BRE: `\\` matches one literal backslash (`\b` would be a word boundary).
+  greject backslash 'touches tools/foo\\bar'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
   # Benign tools/ change still passes for backlog-burn.
