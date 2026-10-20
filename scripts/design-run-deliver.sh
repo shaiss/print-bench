@@ -2974,10 +2974,16 @@ EOF
     echo "selftest: expected 5 burn subprocess env scrubs, found ${burn_scrub_n}" >&2
     exit 1
   }
+  burn_install_line="$(grep -n 'name: Install preflight toolchain before disabling sudo' "$burn" | head -1 | cut -d: -f1)"
   burn_sudo_line="$(grep -n 'name: Disable sudo before the agent' "$burn" | head -1 | cut -d: -f1)"
   burn_agent_line="$(grep -n 'name: Ship via Z.AI (GLM, chain link 1)' "$burn" | head -1 | cut -d: -f1)"
-  [ -n "$burn_sudo_line" ] && [ -n "$burn_agent_line" ] && [ "$burn_sudo_line" -lt "$burn_agent_line" ] || {
-    echo "selftest: sudo is not disabled before the burn agent steps" >&2
+  [ -n "$burn_install_line" ] && [ -n "$burn_sudo_line" ] && [ -n "$burn_agent_line" ] \
+    && [ "$burn_install_line" -lt "$burn_sudo_line" ] && [ "$burn_sudo_line" -lt "$burn_agent_line" ] || {
+    echo "selftest: preflight install must precede disable-sudo, which must precede the burn agent" >&2
+    exit 1
+  }
+  grep -q 'openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq' "$burn" || {
+    echo "selftest: the burn preflight install does not apt-get the session-start toolchain" >&2
     exit 1
   }
   grep -q 'sudo -n true' "$burn" || {

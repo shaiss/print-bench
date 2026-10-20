@@ -402,6 +402,30 @@ jobs:
           && steps.select.outputs.issue != ''
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
+      # Trusted install of the same toolchain .claude/hooks/session-start.sh
+      # would pull in. Disable-sudo runs next and strips setuid from sudo, so
+      # the SessionStart hook must not need apt after this step — it already
+      # exits when openscad/xvfb/…/printcheck/stylelift are on PATH.
+      - name: Install preflight toolchain before disabling sudo
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -qq 2>/dev/null || true
+          sudo apt-get install -y -qq openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq
+          python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/printcheck[test]"
+          python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/stylelift[test]"
+          for bin in openscad xvfb-run montage ffmpeg gifsicle prusa-slicer jq printcheck stylelift pytest; do
+            command -v "$bin" >/dev/null || {
+              echo "::error::preflight toolchain missing ${bin} after install" >&2
+              exit 1
+            }
+          done
+
       - name: Disable sudo before the agent
         id: disable_sudo
         if: >-
