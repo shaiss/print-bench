@@ -3999,16 +3999,21 @@ def test_reeve_reporter_keyless_guard_fires_on_a_secret_reference():
     with pytest.raises(AssertionError):
         _assert_reeve_report_job_is_keyless(tampered)
 
-# ── ci.yml autonomy-head secret gate (issue #869) ────────────────────────────
-# Branch CI on claude/* heads runs branch-controlled scripts/. Those jobs
-# must not receive REGEN_TOKEN or the LLM provider keys. Every spend of the
-# set below in ci.yml must either be a presence probe (`!= ''`) or sit
-# behind `startsWith(github.head_ref, 'claude/')` (same line, or the
-# enclosing step's `if:`). The marker comment `claude-head-secret-gate`
-# pins the intent so a silent reversion is reviewable.
+# ── ci.yml agent-head secret gate (issue #869) ───────────────────────────────
+# Branch CI on agent heads (claude/*, cursor/*, …) runs branch-controlled
+# scripts/. Those jobs must not receive REGEN_TOKEN or the LLM provider
+# keys. Trust is fail-closed via ONE job env, TRUSTED_FOR_SECRETS, whose
+# expression is the only place agent prefixes are listed. Every spend of
+# the set below must either be a presence probe (`!= ''`) or sit behind
+# `env.TRUSTED_FOR_SECRETS` (same line, or the enclosing step's `if:`).
+# The marker comment `agent-head-secret-gate` pins the intent.
 
 CI_YML = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-CLAUDE_HEAD_GUARD = "startsWith(github.head_ref, 'claude/')"
+TRUSTED_FOR_SECRETS_GUARD = "env.TRUSTED_FOR_SECRETS"
+# Agent branch prefixes that must appear in the ONE TRUSTED_FOR_SECRETS
+# expression. Adding a new agent prefix means editing that expression and
+# this frozenset together — the canary fails if either side drifts.
+CI_AGENT_HEAD_PREFIXES = frozenset({"claude/", "cursor/"})
 CI_AUTONOMY_SECRETS = (
     "REGEN_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -4021,6 +4026,10 @@ _CI_PRESENCE_PROBE = re.compile(
 )
 _CI_SECRET_SPEND = re.compile(
     r"secrets\.(" + "|".join(CI_AUTONOMY_SECRETS) + r")\b"
+)
+_TRUSTED_FOR_SECRETS_DEF = re.compile(
+    r"^[ \t]*TRUSTED_FOR_SECRETS:\s*\$\{\{\s*(.+?)\s*\}\}\s*$",
+    re.MULTILINE,
 )
 
 
@@ -4049,70 +4058,116 @@ def _ci_step_if_containing(lines: list[str], idx: int) -> str:
     return ""
 
 
-def _assert_ci_yml_autonomy_secrets_are_claude_gated(text: str) -> None:
-    """Fail if any #869 secret spend in ci.yml is reachable on a claude/* head."""
-    assert "claude-head-secret-gate" in text, (
-        "ci.yml is missing the claude-head-secret-gate marker — the #869 "
-        "autonomy-head secret gate was removed or renamed")
-    assert CLAUDE_HEAD_GUARD in text, (
-        "ci.yml has no startsWith(github.head_ref, 'claude/') guard")
+def _ci_trusted_for_secrets_expression(text: str) -> str:
+    """Return the ONE TRUSTED_FOR_SECRETS expression body from ci.yml."""
+    matches = list(_TRUSTED_FOR_SECRETS_DEF.finditer(text))
+    assert matches, (
+        "ci.yml has no TRUSTED_FOR_SECRETS: ${{ … }} definition — the #869 "
+        "fail-closed secret gate was removed")
+    # Job-level env is the source of truth; step env may re-export it as
+    # `${{ env.TRUSTED_FOR_SECRETS }}`. Keep only definitions that list
+    # prefixes (contain startsWith), and require exactly one.
+    defs = [m for m in matches if "startsWith" in m.group(1)]
+    assert len(defs) == 1, (
+        f"ci.yml must define agent prefixes in exactly ONE TRUSTED_FOR_SECRETS "
+        f"expression (found {len(defs)} with startsWith) — add a prefix in "
+        f"that one place only")
+    return defs[0].group(1)
+
+
+def _assert_ci_yml_agent_head_secrets_are_gated(text: str) -> None:
+    """Fail if any #869 secret spend in ci.yml is reachable on an agent head."""
+    assert "agent-head-secret-gate" in text, (
+        "ci.yml is missing the agent-head-secret-gate marker — the #869 "
+        "agent-head secret gate was removed or renamed")
+    expr = _ci_trusted_for_secrets_expression(text)
+    # Fail closed: main pushes and non-agent pull_request heads only.
+    assert "github.event_name == 'push'" in expr, (
+        "TRUSTED_FOR_SECRETS is not fail-closed on push (main) — "
+        f"expression: {expr}")
+    assert "pull_request" in expr, (
+        "TRUSTED_FOR_SECRETS does not mention pull_request — "
+        f"expression: {expr}")
+    missing = [p for p in sorted(CI_AGENT_HEAD_PREFIXES)
+               if f"startsWith(github.head_ref, '{p}')" not in expr]
+    assert not missing, (
+        "TRUSTED_FOR_SECRETS is missing required agent prefix(es) "
+        f"{missing} — add them in that ONE expression only; "
+        f"expression: {expr}")
+    # A bare claude/-only gate (the pre-review shape) must not pass once
+    # cursor/ is required.
+    assert "cursor/" in expr, (
+        "TRUSTED_FOR_SECRETS does not exclude cursor/* agent heads")
+
     lines = text.splitlines()
     offenders: list[str] = []
     for i, line in enumerate(lines):
         for m in _CI_SECRET_SPEND.finditer(line):
             name = m.group(1)
-            # Presence probes are boolean checks, not spends.
+            # Presence probes (`!= ''`) are boolean checks, not spends.
             if _CI_PRESENCE_PROBE.search(line):
-                # A probe that ALSO gates on claude/* (HAVE_PAT) is fine;
-                # a bare probe is fine too — it only exposes a boolean.
                 continue
-            if CLAUDE_HEAD_GUARD in line:
+            if TRUSTED_FOR_SECRETS_GUARD in line:
                 continue
             step_if = _ci_step_if_containing(lines, i)
-            if CLAUDE_HEAD_GUARD in step_if:
+            if TRUSTED_FOR_SECRETS_GUARD in step_if:
                 continue
             offenders.append(f"line {i + 1}: secrets.{name}: {line.strip()}")
     assert not offenders, (
-        "ci.yml exposes autonomy secrets to claude/* heads without the "
-        f"#869 gate ({CLAUDE_HEAD_GUARD}):\n  " + "\n  ".join(offenders)
+        "ci.yml exposes autonomy secrets to agent heads (claude/*, cursor/*, …) "
+        f"without the #869 TRUSTED_FOR_SECRETS gate:\n  "
+        + "\n  ".join(offenders)
     )
 
 
 def test_ci_yml_autonomy_head_secret_gate():
-    _assert_ci_yml_autonomy_secrets_are_claude_gated(
+    _assert_ci_yml_agent_head_secrets_are_gated(
         CI_YML.read_text(encoding="utf-8"))
 
 
 def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_regen_token():
-    # NEGATIVE CONTROL: drop the claude/* ternary from the checkout token
-    # and require the canary to FAIL.
+    # NEGATIVE CONTROL: drop the TRUSTED_FOR_SECRETS ternary from the
+    # checkout token and require the canary to FAIL.
     text = CI_YML.read_text(encoding="utf-8")
     needle = (
-        "(github.event_name == 'pull_request' && "
-        "startsWith(github.head_ref, 'claude/')) && github.token || "
-        "secrets.REGEN_TOKEN || github.token"
+        "env.TRUSTED_FOR_SECRETS == 'true' && "
+        "(secrets.REGEN_TOKEN || github.token) || github.token"
     )
     assert needle in text, "tamper target not found — the checkout token gate moved"
     tampered = text.replace(needle, "secrets.REGEN_TOKEN || github.token", 1)
     assert tampered != text
     with pytest.raises(AssertionError, match="REGEN_TOKEN"):
-        _assert_ci_yml_autonomy_secrets_are_claude_gated(tampered)
+        _assert_ci_yml_agent_head_secrets_are_gated(tampered)
 
 
 def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_anthropic_step():
-    # NEGATIVE CONTROL: strip the claude/* conjunct from the product-page
-    # step's if: so ANTHROPIC_API_KEY would materialize on autonomy heads.
-    # Pin the surrounding andon conjunct so we do not hit HAVE_PAT's similar
-    # expression first.
+    # NEGATIVE CONTROL: strip the TRUSTED_FOR_SECRETS conjunct from the
+    # product-page step's if: so ANTHROPIC_API_KEY would materialize on
+    # agent heads.
     text = CI_YML.read_text(encoding="utf-8")
     needle = (
         "&& vars.AI_ANDON_CORD != 'pulled'\n"
-        "          && !(github.event_name == 'pull_request' && "
-        "startsWith(github.head_ref, 'claude/'))"
+        "          && env.TRUSTED_FOR_SECRETS == 'true'"
     )
-    assert needle in text, "tamper target not found — the product-page claude gate moved"
+    assert needle in text, "tamper target not found — the product-page trust gate moved"
     tampered = text.replace(
         needle, "&& vars.AI_ANDON_CORD != 'pulled'", 1)
     assert tampered != text
     with pytest.raises(AssertionError, match="ANTHROPIC_API_KEY"):
-        _assert_ci_yml_autonomy_secrets_are_claude_gated(tampered)
+        _assert_ci_yml_agent_head_secrets_are_gated(tampered)
+
+
+def test_ci_yml_autonomy_head_secret_gate_rejects_dropped_cursor_prefix():
+    # NEGATIVE CONTROL: drop cursor/ from the ONE TRUSTED_FOR_SECRETS
+    # expression so cursor/* heads would receive secrets — canary must FAIL.
+    text = CI_YML.read_text(encoding="utf-8")
+    needle = (
+        "!(startsWith(github.head_ref, 'claude/') || "
+        "startsWith(github.head_ref, 'cursor/'))"
+    )
+    assert needle in text, "tamper target not found — the agent prefix list moved"
+    tampered = text.replace(
+        needle, "!(startsWith(github.head_ref, 'claude/'))", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match="cursor/"):
+        _assert_ci_yml_agent_head_secrets_are_gated(tampered)

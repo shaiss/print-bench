@@ -116,12 +116,14 @@ jobs:
     # gallery, and — when a product page is missing or too thin to pass its
     # gate — an AI-drafted README.md.
     #
-    # Autonomy heads (claude/*): this job checks out and runs the PR's
-    # scripts/, so it must not receive REGEN_TOKEN, ANTHROPIC_API_KEY,
-    # ZAI_KEY/ZAI_API_KEY or OPENROUTER_API_KEY (issue #869). can_push is
-    # false for those heads — regenerate locally and commit, same as a
-    # fork. Human PRs and main keep the PAT + product-page key. The
-    # model-registry canary fails if a secret reappears ungated.
+    # Agent heads (claude/*, cursor/*, …): this job checks out and runs the
+    # PR's scripts/, so it must not receive REGEN_TOKEN, ANTHROPIC_API_KEY,
+    # ZAI_KEY/ZAI_API_KEY or OPENROUTER_API_KEY (issue #869). Trust is
+    # fail-closed via job env TRUSTED_FOR_SECRETS (agent prefixes listed in
+    # that one expression only). can_push is false for untrusted heads —
+    # regenerate locally and commit, same as a fork. Human PRs and main
+    # keep the PAT + product-page key. The model-registry canary fails if
+    # a secret reappears ungated or an agent prefix is dropped.
     #
     # These used to be run by hand and committed. Every gate on them is
     # presence-only *because* a human committed them, which is exactly the
@@ -161,6 +163,12 @@ jobs:
       # next run (see the loop guard in the commit step). Drift between the
       # two would silently disarm that guard.
       REGEN_SUBJECT: "CI: regenerate previews and product pages"
+      # agent-head-secret-gate (issue #869): fail-closed secret trust.
+      # Secrets only on main pushes (this workflow's push: [main]) and on
+      # pull_request heads that are NOT an agent prefix. Agent prefixes —
+      # the ONE list; add a prefix inside this expression only:
+      #   claude/ | cursor/
+      TRUSTED_FOR_SECRETS: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && !(startsWith(github.head_ref, 'claude/') || startsWith(github.head_ref, 'cursor/'))) }}
     outputs:
       # The commit this job pushed, or "" when it pushed nothing. Downstream
       # jobs pass it straight to actions/checkout's `ref`, where the empty
@@ -206,10 +214,9 @@ jobs:
           # a not-yet-configured repo still regenerates; the commit step says
           # loudly what that costs. (With persist-credentials off this only
           # authenticates the clone; the push re-supplies it explicitly.)
-          # Autonomy (claude/*) heads never receive REGEN_TOKEN — issue #869
-          # (claude-head-secret-gate): branch-controlled scripts/ must not
-          # share a job with the write PAT.
-          token: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'claude/')) && github.token || secrets.REGEN_TOKEN || github.token }}
+          # agent-head-secret-gate (issue #869): REGEN_TOKEN only when
+          # TRUSTED_FOR_SECRETS — never on claude/* or cursor/* heads.
+          token: ${{ env.TRUSTED_FOR_SECRETS == 'true' && (secrets.REGEN_TOKEN || github.token) || github.token }}
 
       - name: Fetch the preview-diff cross-check base
         # preview-diff (issue #470, the measure step below) cross-checks each
@@ -250,12 +257,11 @@ jobs:
           REGEN: ${{ needs.changes.outputs.regen }}
           REGEN_DESIGNS: ${{ needs.changes.outputs.regen_designs }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          # claude-head-secret-gate: autonomy heads never count as having the
-          # PAT, even when the secret exists — the checkout/push expressions
-          # above already omit it; this keeps the commit step's messaging
-          # honest and stops a GITHUB_TOKEN push from stranding the PR.
-          HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'claude/')) }}
-          CLAUDE_HEAD: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'claude/') }}
+          # agent-head-secret-gate: untrusted heads never count as having the
+          # PAT, even when the secret exists — checkout/push already omit it;
+          # this keeps the commit step's messaging honest.
+          HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' && env.TRUSTED_FOR_SECRETS == 'true' }}
+          TRUSTED_FOR_SECRETS: ${{ env.TRUSTED_FOR_SECRETS }}
         run: |
           set -euo pipefail
           designs=""
@@ -335,19 +341,20 @@ jobs:
             done
           fi
           # A fork PR's GITHUB_TOKEN is read-only, so there is nothing to push
-          # back to. Autonomy (claude/*) heads are treated the same for the
-          # PAT-backed commit-back (issue #869): branch-controlled scripts
-          # must not push with REGEN_TOKEN, and a GITHUB_TOKEN push would
-          # strand the PR without re-triggering checks. The commit step
-          # turns either case into a clear failure with the file list.
+          # back to. Untrusted agent heads (claude/*, cursor/*, …) are treated
+          # the same for the PAT-backed commit-back (issue #869): branch-
+          # controlled scripts must not push with REGEN_TOKEN, and a
+          # GITHUB_TOKEN push would strand the PR without re-triggering
+          # checks. The commit step turns either case into a clear failure
+          # with the file list. TRUSTED_FOR_SECRETS is the job-level gate.
           can_push=true
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ] \
              && [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
             can_push=false
           fi
-          if [ "${CLAUDE_HEAD:-}" = "true" ]; then
+          if [ "${TRUSTED_FOR_SECRETS:-}" != "true" ]; then
             can_push=false
-            echo "regen: claude/* head — commit-back disabled (no REGEN_TOKEN / LLM keys on this job; issue #869)"
+            echo "regen: untrusted head — commit-back disabled (no REGEN_TOKEN / LLM keys on this job; issue #869)"
           fi
           # LOOP GUARD. Pushing with a PAT re-triggers this workflow, so a
           # regeneration that is not byte-stable would push, re-trigger,
@@ -479,13 +486,13 @@ jobs:
         # `needs:` it, one required — see the job comment above), so the AI
         # andon cord (docs/andon-cord.md) skips only this one step, the only
         # place in ci.yml a provider key is materialized.
-        # claude-head-secret-gate (issue #869): autonomy heads skip this step
+        # agent-head-secret-gate (issue #869): untrusted heads skip this step
         # entirely so ANTHROPIC_API_KEY is never materialized next to
         # branch-controlled scripts/product-page.sh.
         if: >-
           steps.plan.outputs.designs != ''
           && vars.AI_ANDON_CORD != 'pulled'
-          && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'claude/'))
+          && env.TRUSTED_FOR_SECRETS == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DESIGNS: ${{ steps.plan.outputs.designs }}
@@ -511,14 +518,14 @@ jobs:
         if: steps.plan.outputs.designs != '' && vars.AI_ANDON_CORD == 'pulled'
         run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — product-page drafting (the one Claude API call in CI) was skipped; previews, animations, product shots and the gallery were regenerated deterministically as usual; no provider API call was made. Release the cord to resume — see docs/andon-cord.md."
 
-      - name: Autonomy head — product-page drafting and regen secrets bypassed
-        # claude-head-secret-gate (issue #869): say why the AI step and the
+      - name: Untrusted head — product-page drafting and regen secrets bypassed
+        # agent-head-secret-gate (issue #869): say why the AI step and the
         # PAT-backed commit-back did not run on this head.
         if: >-
           steps.plan.outputs.designs != ''
           && github.event_name == 'pull_request'
-          && startsWith(github.head_ref, 'claude/')
-        run: echo "::notice::claude/* head — product-page drafting and REGEN_TOKEN commit-back were skipped so branch-controlled scripts/ never share a job with REGEN_TOKEN / ANTHROPIC_API_KEY / ZAI_KEY / OPENROUTER_API_KEY (issue #869). Commit regenerated artifacts on the branch if needed."
+          && env.TRUSTED_FOR_SECRETS != 'true'
+        run: echo "::notice::untrusted agent head - product-page drafting and REGEN_TOKEN commit-back were skipped so branch-controlled scripts/ never share a job with REGEN_TOKEN / ANTHROPIC_API_KEY / ZAI_KEY / OPENROUTER_API_KEY (issue #869). Commit regenerated artifacts on the branch if needed."
 
       - name: Measure regenerated previews against the committed bytes (advisory)
         # The faithfulness half of #69 (issue #470): preview-diff classes each
@@ -589,9 +596,10 @@ jobs:
           HAVE_PAT: ${{ steps.plan.outputs.have_pat }}
           # Scoped to this step alone — see persist-credentials on the
           # checkout. Actions masks it in the log.
-          # claude-head-secret-gate (issue #869): autonomy heads never get
-          # REGEN_TOKEN here either (can_push is already false for them).
-          PUSH_TOKEN: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'claude/')) && github.token || secrets.REGEN_TOKEN || github.token }}
+          # agent-head-secret-gate (issue #869): REGEN_TOKEN only when
+          # TRUSTED_FOR_SECRETS (can_push is already false otherwise).
+          PUSH_TOKEN: ${{ env.TRUSTED_FOR_SECRETS == 'true' && (secrets.REGEN_TOKEN || github.token) || github.token }}
+          TRUSTED_FOR_SECRETS: ${{ env.TRUSTED_FOR_SECRETS }}
           # The measure step's verdict (data only — see that step).
           PREVIEW_VERDICT: ${{ steps.pdiff.outputs.verdict }}
           BRANCH: >-
@@ -639,8 +647,8 @@ jobs:
             exit 0
           fi
           if [ "$CAN_PUSH" != "true" ]; then
-            if [[ "${BRANCH}" == claude/* ]]; then
-              echo "::error::Committed artifacts are stale and CI will not push on a claude/* head (issue #869 — no REGEN_TOKEN / LLM keys while running branch-controlled scripts). Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh <name>, ./scripts/product-shot.sh <name>, ./scripts/assembly.sh <name>, ./scripts/gallery.sh) and commit them on this branch."
+            if [ "${TRUSTED_FOR_SECRETS:-}" != "true" ]; then
+              echo "::error::Committed artifacts are stale and CI will not push on an untrusted agent head (issue #869 — no REGEN_TOKEN / LLM keys while running branch-controlled scripts). Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh <name>, ./scripts/product-shot.sh <name>, ./scripts/assembly.sh <name>, ./scripts/gallery.sh) and commit them on this branch."
             else
               echo "::error::Committed artifacts are stale and CI cannot push to a fork. Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh <name>, ./scripts/product-shot.sh <name>, ./scripts/assembly.sh <name>, ./scripts/gallery.sh) and commit them, or re-open this PR from a branch in this repository."
             fi
