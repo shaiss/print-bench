@@ -743,14 +743,15 @@ class Routine(NamedTuple):
                 step sets none), the `--settings` deny backstop, the
                 `--mcp-config` server (None for a routine whose write is a
                 shell wrapper, or none) and the exact `--allowedTools` list
-                (None for backlog-burn, which runs the whole skill under
-                bypassPermissions; design-run is dontAsk with a narrow
-                push / pr-create deny, issue #859). The tail runs only on the
-                fall-through path where nobody is watching, so a tail step
-                that shed its backstop or widened its allow-list is exactly
-                the drift these fields pin — the same surface every
-                `scripts/*-perms-check.sh` holds over the FILES, none of
-                which reads a workflow.
+                (the two SHIP-LOCK routines are dontAsk over their own deny
+                backstops — design-run since #859, backlog-burn since #863,
+                whose backstop also denies the #862 label-steering verbs —
+                so neither agent job can push, open PRs, or hold the push
+                PAT). The tail runs only on the fall-through path where
+                nobody is watching, so a tail step that shed its backstop or
+                widened its allow-list is exactly the drift these fields pin
+                — the same surface every `scripts/*-perms-check.sh` holds
+                over the FILES, none of which reads a workflow.
     """
     workflow: str
     chain: str
@@ -803,8 +804,17 @@ ROUTINES = {
         resolve_id="chain", prefix="ship",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
         gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
-        permission_mode="bypassPermissions", backstop=None, mcp_config=None,
-        allowed=None),
+        # #863: the #859/#861 surface — dontAsk over a deny backstop (the
+        # backstop also refuses the #862 steering verbs: gh issue edit /
+        # gh api / curl naming autonomy-ok or design-brief), the
+        # toolchain allow-list, and no PAT anywhere in the workflow: the
+        # deliver workflow is the only PAT holder, and the burn job cannot
+        # push or open PRs.
+        permission_mode="dontAsk",
+        backstop=".claude/backlog-burn-settings.json",
+        mcp_config=None,
+        allowed="Bash,Read,Write,Edit,Glob,Grep,Skill",
+        triage_job="triage"),
     "chunker": Routine(
         workflow="chunker.yml", chain="chunker",
         conf=".github/chunker.conf", job="chunk",
@@ -1117,6 +1127,7 @@ ANDON_AI_JOBS = {
     ("auto-review.yml", "pm-triage"),
     ("auto-review.yml", "design-coach"),
     ("backlog-burn.yml", "burn"),
+    ("backlog-burn.yml", "triage"),
     ("backlog-groomer.yml", "groom"),
     ("chunker.yml", "chunk"),
     ("ci.yml", "regen"),
@@ -2998,21 +3009,28 @@ def _assert_ship_lock_gate_follows_disposition(
 
 
 def _normalize_cross_job_outputs(cond: str) -> str:
-    """Map a fresh job's `needs.run.outputs.*` back onto the walk job's steps.
+    """Map a fresh job's `needs.<job>.outputs.*` back onto the walk job's steps.
 
-    design-run's provider-triage step lives in its own job, so the
+    design-run's and backlog-burn's provider-triage steps live in their own
+    jobs (design-run names its walk job `run`, backlog-burn `burn`), so the
     disposition and arming legs are job outputs. The SHIP-LOCK pin still
     compares them to the walk job's step outputs.
     """
     repls = (
         ("needs.run.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
         ("needs.run.outputs.declined", "steps.lock_cleanup.outputs.declined"),
+        ("needs.burn.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
+        ("needs.burn.outputs.declined", "steps.lock_cleanup.outputs.declined"),
         ("needs.settle.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
         ("needs.settle.outputs.declined", "steps.lock_cleanup.outputs.declined"),
         ("needs.run.outputs.key_present", "steps.policy.outputs.key_present"),
         ("needs.run.outputs.enabled", "steps.policy.outputs.enabled"),
         ("needs.run.outputs.issue", "steps.select.outputs.issue"),
+        ("needs.burn.outputs.key_present", "steps.policy.outputs.key_present"),
+        ("needs.burn.outputs.enabled", "steps.policy.outputs.enabled"),
+        ("needs.burn.outputs.issue", "steps.select.outputs.issue"),
         ("needs.run.outputs.bundle_pending", "steps.bundle.outputs.pending"),
+        ("needs.burn.outputs.bundle_pending", "steps.bundle.outputs.pending"),
     )
     for src, dst in repls:
         cond = cond.replace(src, dst)
@@ -3101,63 +3119,58 @@ def test_gate_guard_rejects_a_red_step_without_its_arming_leg():
         _assert_gate_fires_on_whole_walk_failure(reg, row, tampered, EXHAUSTED_RED_STEP)
 
 
-def _assert_burn_checkless_notice_follows_delivery(
-        reg: Registry, row: Routine, text: str) -> None:
-    """The burn's checkless-PR notice must fire on the lock cleanup's
-    `delivered` output (#538) — the artifact-derived fact that a branch or
-    closing PR exists — never on the walk's success: an exit-0 ship link
-    that pushed nothing would otherwise produce a notice about a draft PR
-    that does not exist. Factored out for the negative control."""
-    workflow = row.workflow
-    where = f"{row.workflow} [{row.job}]"
-    job = _routine_job_text(text, row)
-    walk_ids = _routine_walk_ids(reg, row, job)
-    cond = _gate_condition(job, "Note a checkless draft PR (no CI-triggering PAT)", where)
-    assert re.search(
-        r"steps\.lock_cleanup\.outputs\.delivered\s*==\s*'true'", cond), (
-        f"{where}: the checkless-PR notice no longer fires on "
-        "steps.lock_cleanup.outputs.delivered == 'true' — it must key on the "
-        "artifact-derived disposition, not the walk")
-    assert re.search(r"steps\.policy\.outputs\.key_present\s*==\s*'1'", cond), (
-        f"{where}: the checkless-PR notice lost its key_present leg")
-    assert re.search(r"steps\.policy\.outputs\.enabled\s*==\s*'true'", cond), (
-        f"{where}: the checkless-PR notice lost its arming leg")
-    for sid in walk_ids:
-        assert f"steps.{sid}.outcome" not in cond, (
-            f"{where}: the checkless-PR notice reads steps.{sid}.outcome — "
-            "it must key on the delivered disposition, not the walk's "
-            "exit-code success (#538)")
+def _assert_ship_routine_holds_no_pat(text: str, workflow: str) -> None:
+    """#863 (the #859/#861 pattern): a workflow that runs a /ship-issue-style
+    agent must not reference the push PAT at all. Every agent wire runs on
+    the ephemeral `github.token` — an off-issue label (#862) could otherwise
+    steer which issue a PAT-holding agent works on, and a PR the agent
+    opened itself would carry no CI contexts. The PAT lives only in the
+    separate deliver workflow, which runs no agent code. Factored out for
+    the negative control."""
+    assert "secrets.GH_TOKEN" not in text, (
+        f"{workflow}: references secrets.GH_TOKEN — the push PAT belongs "
+        "only in the delivery workflow, never in the workflow that runs "
+        "the agent (issues #859/#863)")
+    assert "HAS_GH_TOKEN" not in text, (
+        f"{workflow}: gates a step on HAS_GH_TOKEN — a PAT-derived key "
+        "gate has no meaning once the workflow holds no PAT (issues "
+        "#859/#863)")
+    wires = re.findall(r"github_token:[ \t]*([^\n]+)", text)
+    assert wires, f"{workflow}: no claude-code-action step found"
+    for wire in wires:
+        assert wire.strip() == "${{ github.token }}", (
+            f"{workflow}: an agent step wires github_token: {wire.strip()!r} "
+            "— every agent step must run on the ephemeral github.token, "
+            "which cannot push or open PRs (issues #859/#863)")
 
 
-def test_burn_checkless_pr_notice_follows_the_delivered_disposition():
-    reg = Registry.load(str(REGISTRY))
+def test_ship_routine_workflows_hold_no_push_pat():
+    # Both SHIP-LOCK routines: the burn joins design-run on the isolated
+    # surface (#859 pinned design-run; #863 brings the burn, which runs
+    # hourly, to the same bar).
+    lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
+    assert len(lock_rows) == 2, (
+        "expected exactly the two SHIP-LOCK routines on the isolated "
+        "PAT-free surface — a third needs its deliver workflow first"
+    )
+    for row in lock_rows:
+        _assert_ship_routine_holds_no_pat(
+            _routine_text(row.workflow), row.workflow)
+
+
+def test_ship_routine_pat_guard_fires_on_a_pat_wire():
+    # NEGATIVE CONTROL: re-introduce the pre-#863 exposure — one agent step
+    # wired to the PAT — and require the guard to FAIL. A guard that cannot
+    # fail proves nothing.
     row = ROUTINES["backlog-burn"]
-    _assert_burn_checkless_notice_follows_delivery(
-        reg, row, _routine_text(row.workflow))
-
-
-def test_burn_checkless_notice_guard_rejects_a_walk_clause():
-    # NEGATIVE CONTROL: swap the notice's delivered leg back to the pre-#538
-    # `(walk) == 'success'` clause — an exit-0 run that delivered nothing
-    # would then trigger a notice about a draft PR that does not exist. The
-    # no-walk-read rule must reject it.
-    reg = Registry.load(str(REGISTRY))
-    row = ROUTINES["backlog-burn"]
-    workflow = row.workflow
-    text = _routine_text(workflow)
-    job = _routine_job_text(text, row)
-    chunk = _gate_chunk(job, "Note a checkless draft PR (no CI-triggering PAT)")
-    live = _live_walk_expression(job, workflow)
-    tampered_chunk = re.sub(
-        r"&& steps\.lock_cleanup\.outputs\.delivered == 'true'",
-        f"&& ({live}) == 'success'", chunk, count=1)
-    assert tampered_chunk != chunk, (
-        "tamper did not land — the notice's delivered leg moved shape")
-    tampered = text.replace(chunk, tampered_chunk, 1)
-    # The delivered-leg presence rule fires first (the swap removed the
-    # leg); both it and the no-walk-read rule name the same cause.
-    with pytest.raises(AssertionError, match="artifact-derived disposition"):
-        _assert_burn_checkless_notice_follows_delivery(reg, row, tampered)
+    text = _routine_text(row.workflow)
+    tampered = text.replace(
+        "github_token: ${{ github.token }}",
+        "github_token: ${{ secrets.GH_TOKEN }}", 1)
+    assert tampered != text, (
+        "tamper did not land — the burn's agent token wire moved shape")
+    with pytest.raises(AssertionError, match="secrets.GH_TOKEN"):
+        _assert_ship_routine_holds_no_pat(tampered, row.workflow)
 
 
 def test_ship_lock_gate_guard_rejects_a_dropped_disposition_leg():

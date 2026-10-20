@@ -1358,10 +1358,12 @@ DECOY
   # silently, so pin the mechanism: the lock-cleanup step must restore the
   # script from the job's start commit (START_SHA) BEFORE invoking it, the
   # start_ref capture must precede every agent step (else the walk moves
-  # HEAD first), and the restore must not follow a symlink. backlog-burn
-  # still unlinks a worktree symlink, checks the blob out, and installs the
-  # git-show fallback with mv. design-run's settle job never writes the
-  # worktree: it git-shows the blob into RUNNER_TEMP and executes that file.
+  # HEAD first), and the restore must not follow a symlink. Both ship
+  # workflows settle in a fresh job that never writes the worktree (#861
+  # for design-run, #863 for backlog-burn): it git-shows the blob into
+  # RUNNER_TEMP and executes that file. design-run's producer job is `run`,
+  # backlog-burn's is `burn`, so the START_SHA env accepts either output
+  # spelling while staying a needs.<job>.outputs pin.
   restore_in_block() {  # step-block text on stdin → 0 when the restore pins the script
     local block restore_ln invoke_ln unlink_ln
     block="$(cat)"
@@ -1394,7 +1396,8 @@ DECOY
       && printf '%s\n' "$block" | grep -q 'script="${RUNNER_TEMP}/routine-lock-cleanup.sh"' \
       && printf '%s\n' "$block" | grep -q '\[ -L "$script" \]' \
       && printf '%s\n' "$block" | grep -q '"$script" --repo' \
-      && printf '%s\n' "$block" | grep -q 'START_SHA: ${{ needs.run.outputs.start_sha }}' \
+      && printf '%s\n' "$block" \
+        | grep -qE 'START_SHA: \$\{\{ needs\.(run|burn)\.outputs\.start_sha \}\}' \
       && ! printf '%s\n' "$block" | grep -q '> scripts/routine-lock-cleanup.sh' \
       && ! printf '%s\n' "$block" | grep -q '\./scripts/routine-lock-cleanup.sh'
   }
