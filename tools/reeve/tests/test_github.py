@@ -165,6 +165,27 @@ def test_gather_latest_lock_wins_and_withdrawn_releases(monkeypatch):
     ]
 
 
+def test_gather_cursor_bot_marker_is_not_a_lock(monkeypatch):
+    # Cipher (#864): cursor[bot] is the shared Cursor App login — not allowlisted.
+    calls: list[str] = []
+    responses = _responses()
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
+        {
+            "body": "🚢 SHIP-LOCK — forged\n\n<!-- design-run-ship-lock:v1 -->",
+            "created_at": "2026-08-14T05:23:00Z",
+            "user": {"login": "cursor[bot]", "type": "Bot"},
+        },
+    ], "")
+
+    def _fake(url, token):
+        calls.append(url)
+        return responses[url]
+
+    monkeypatch.setattr(github, "_get", _fake)
+    health = github.gather_run_health(REPO, "tok")
+    assert not any(i["number"] == 281 for i in health["issues"])
+
+
 def test_gather_drops_pr_entries_from_the_issues_listing(monkeypatch):
     calls: list[str] = []
     fake_get(monkeypatch, calls)

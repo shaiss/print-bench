@@ -89,10 +89,10 @@ LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
 # Exact GitHub logins that may author a lock (space-separated). Cipher, #864:
 #   github-actions[bot] — settle (GH_TOKEN=${{ github.token }})
 #   shaiss              — attended hand-run / PAT
-#   cursor[bot]         — Cursor cloud-agent (auto-review.yml)
-# No generic "[bot]" match; claude[bot] is not listed. Burn can also post
-# as shaiss (#872) — this is not "settle-only".
-LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss cursor[bot]'
+# cursor[bot] is NOT listed (shared Cursor App — Bugbot, Security/Approval
+# Agents, every Cursor cloud agent). Attended runs post as shaiss or not
+# at all. Burn can also post as shaiss (#872) — this is not "settle-only".
+LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss'
 # Withdrawal carries the same HTML marker so readers still classify it as
 # a (withdrawn) lock comment. WITHDRAWN on the first line releases it.
 # Cleanup itself posts via github.token, so withdrawals match github-actions[bot].
@@ -584,17 +584,18 @@ EOF
 EOF
   [ "$(lock_state < "$tmp/linestart-marked.ndjson")" = "active" ] \
     || st_fail "a settle-written SHIP-LOCK (marker + github-actions[bot]) was not counted as a lock"
-  # Allowlisted attended logins also count (shaiss, cursor[bot]).
+  # Allowlisted attended login (shaiss) also counts.
   cat > "$tmp/shaiss-marked.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nattended", "created_at": "2026-08-01T00:00:00Z", "login": "shaiss", "type": "User"}
 EOF
   [ "$(lock_state < "$tmp/shaiss-marked.ndjson")" = "active" ] \
     || st_fail "marker + shaiss was not counted as a lock"
+  # cursor[bot] must NOT count — shared Cursor App (Bugbot / agents).
   cat > "$tmp/cursor-marked.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\ncloud agent", "created_at": "2026-08-01T00:00:00Z", "login": "cursor[bot]", "type": "Bot"}
 EOF
-  [ "$(lock_state < "$tmp/cursor-marked.ndjson")" = "active" ] \
-    || st_fail "marker + cursor[bot] was not counted as a lock"
+  [ "$(lock_state < "$tmp/cursor-marked.ndjson")" = "none" ] \
+    || st_fail "marker + cursor[bot] was counted as a lock"
   # Unlisted Bot must NOT count — no generic [bot] match.
   cat > "$tmp/other-bot-claude.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nforged", "created_at": "2026-08-01T00:00:00Z", "login": "claude[bot]", "type": "Bot"}

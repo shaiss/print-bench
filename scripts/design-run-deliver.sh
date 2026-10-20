@@ -790,11 +790,11 @@ SHIP_LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
 # Exact GitHub logins that may author a lock (space-separated; no generic
 # "[bot]" match). Cipher, #864:
 #   github-actions[bot] — settle apply-intents (GH_TOKEN=${{ github.token }})
-#   shaiss              — attended hand-run / PAT (repo owner; historical claims)
-#   cursor[bot]         — Cursor cloud-agent attended runs
-#                         (.github/workflows/auto-review.yml documents this actor)
-# claude[bot] is NOT listed. backlog-burn can also post as shaiss (#872).
-SHIP_LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss cursor[bot]'
+#   shaiss              — attended hand-run / PAT (repo owner)
+# cursor[bot] is NOT listed (shared Cursor App login — Bugbot, Security/
+# Approval Agents, every Cursor cloud agent). Attended runs post as shaiss
+# or not at all. backlog-burn can also post as shaiss (#872).
+SHIP_LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss'
 # Constant settle-claim body — built here, never from intent text.
 SHIP_LOCK_SETTLE_BODY="${STOP_LOCK_MARKER} — settle claim
 
@@ -2849,8 +2849,8 @@ EOF
     echo "selftest: marker+untrusted-author was treated as a lock" >&2
     exit 1
   }
-  # Allowlisted attended logins (shaiss, cursor[bot]) + settle login count.
-  for ok_login in 'github-actions[bot]' 'shaiss' 'cursor[bot]'; do
+  # Allowlisted logins (settle + attended shaiss) count.
+  for ok_login in 'github-actions[bot]' 'shaiss'; do
     jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg login "$ok_login" \
       --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
       '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:$login,type:(if $login=="shaiss" then "User" else "Bot" end)},
@@ -2861,6 +2861,14 @@ EOF
       exit 1
     }
   done
+  # cursor[bot] must NOT count — shared Cursor App (Bugbot / agents).
+  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" \
+    '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"cursor[bot]",type:"Bot"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+    echo "selftest: marker+cursor[bot] was treated as a lock" >&2
+    exit 1
+  }
   # Unlisted Bot (claude[bot]) must NOT count — no generic [bot] match.
   jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" \
     '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"claude[bot]",type:"Bot"}]' \

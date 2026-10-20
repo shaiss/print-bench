@@ -88,13 +88,14 @@ SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
 # Exact logins, listed by name (no generic "[bot]" match):
 #   github-actions[bot] — settle apply-intents (GH_TOKEN=${{ github.token }})
-#   shaiss              — attended hand-run / PAT identity (repo owner)
-#   cursor[bot]         — Cursor cloud-agent attended runs
-#                         (documented in .github/workflows/auto-review.yml)
+#   shaiss              — attended hand-run / PAT (repo owner)
+# cursor[bot] is NOT listed: it is the shared Cursor GitHub App login —
+# Bugbot, Security/Approval Agents, and every Cursor cloud agent post as
+# it, including arbitrary agent text (Cipher ruling on #864). Attended
+# runs post as shaiss or not at all.
 SHIP_LOCK_AUTHOR_LOGINS = frozenset({
     "github-actions[bot]",
     "shaiss",
-    "cursor[bot]",
 })
 
 # An issue an agentic run parked for a human yes/no (the HITL decision gate,
@@ -199,8 +200,8 @@ def _is_authentic_ship_lock(comment: dict[str, Any]) -> bool:
     """True when ``comment`` is an authentic SHIP-LOCK (Cipher, #864).
 
     Requires BOTH the HTML authenticity marker and author login in
-    ``SHIP_LOCK_AUTHOR_LOGINS`` (``github-actions[bot]``, ``shaiss``,
-    ``cursor[bot]``). A bare ``🚢 SHIP-LOCK`` first line is never enough;
+    ``SHIP_LOCK_AUTHOR_LOGINS`` (``github-actions[bot]``, ``shaiss``).
+    A bare ``🚢 SHIP-LOCK`` first line is never enough;
     nor is marker + some other Bot (e.g. ``claude[bot]``).
     """
     body = comment.get("body") or ""

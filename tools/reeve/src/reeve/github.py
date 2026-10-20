@@ -62,13 +62,13 @@ _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
 # Exact logins that may author a lock (Cipher, #864). Mirrored from
-# backlog_burn.select.SHIP_LOCK_AUTHOR_LOGINS — settle (GITHUB_TOKEN),
-# attended PAT (shaiss), Cursor cloud-agent (cursor[bot] per auto-review.yml).
-# No generic "[bot]" match; claude[bot] is not on the list.
+# backlog_burn.select.SHIP_LOCK_AUTHOR_LOGINS — settle (GITHUB_TOKEN) and
+# attended PAT (shaiss). cursor[bot] is excluded: shared Cursor App login
+# (Bugbot / Security / Approval / cloud agents). Attended runs post as
+# shaiss or not at all. No generic "[bot]" match.
 SHIP_LOCK_AUTHOR_LOGINS = frozenset({
     "github-actions[bot]",
     "shaiss",
-    "cursor[bot]",
 })
 
 # The label an adoption-study submission carries. Collected from the same

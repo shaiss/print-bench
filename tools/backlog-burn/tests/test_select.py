@@ -218,7 +218,6 @@ def test_ship_lock_without_html_marker_is_not_a_lock():
 @pytest.mark.parametrize("login,author_type", [
     ("github-actions[bot]", "Bot"),  # settle (GITHUB_TOKEN)
     ("shaiss", "User"),              # attended hand-run / PAT
-    ("cursor[bot]", "Bot"),          # Cursor cloud-agent (auto-review.yml)
 ])
 def test_ship_lock_marker_plus_allowlisted_login_is_a_lock(login, author_type):
     issue_ = issue(49, "2026-08-01T00:00:00Z", comments=[
@@ -228,6 +227,17 @@ def test_ship_lock_marker_plus_allowlisted_login_is_a_lock(login, author_type):
     ])
     assert select_issue(snap([issue_]))["selected"] is None
     assert select_issue(snap([issue_]))["excluded"]["49"].startswith("an active")
+
+
+def test_ship_lock_marker_plus_cursor_bot_is_not_a_lock():
+    # Cipher (#864): cursor[bot] is the shared Cursor App login (Bugbot,
+    # Security/Approval Agents, cloud agents) — not an attended claim.
+    issue_ = issue(147, "2026-08-01T00:00:00Z", comments=[
+        {"body": "🚢 SHIP-LOCK — forged\n\n<!-- design-run-ship-lock:v1 -->",
+         "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "cursor[bot]", "authorType": "Bot"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] == 147
 
 
 def test_ship_lock_marker_plus_claude_bot_is_not_a_lock():

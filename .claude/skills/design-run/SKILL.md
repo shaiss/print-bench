@@ -44,10 +44,11 @@ so the two never collide on the same issue.
    - **an active claim marker** — read the *latest authentic* `🚢 SHIP-LOCK`
      comment (it must carry the HTML marker
      `<!-- design-run-ship-lock:v1 -->` **and** be authored by one of
-     `github-actions[bot]` (settle), `shaiss` (attended/PAT), or
-     `cursor[bot]` (Cursor cloud-agent per auto-review.yml); a bare
-     `🚢 SHIP-LOCK` first line is never a lock, nor is marker +
-     `claude[bot]`) and act on that one. An authentic `🚢 SHIP-LOCK` is
+     `github-actions[bot]` (settle) or `shaiss` (attended/PAT); attended
+     runs post as `shaiss` or not at all — never `cursor[bot]`, the shared
+     Cursor App login; a bare `🚢 SHIP-LOCK` first line is never a lock,
+     nor is marker + `cursor[bot]` / `claude[bot]`) and act on that one.
+     An authentic `🚢 SHIP-LOCK` is
      active and the issue is taken; `🚢 SHIP-LOCK WITHDRAWN` is released
      and blocks nothing.
      An active claim more than a few hours old with **no**

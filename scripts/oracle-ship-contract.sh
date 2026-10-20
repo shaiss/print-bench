@@ -11,13 +11,15 @@
 # contract and is not the settle stub alone.
 #
 # Trust rule (same exact allowlist as the SHIP-LOCK readers — Cipher
-# 0dde3ce0 / #864): author login must be one of github-actions[bot],
-# shaiss, cursor[bot]. Heading shape alone is not enough — on a public
-# issue any user can paste "**Gate contract**" and must not replace the
-# frozen §2 text in Oracle context. Contract intent comments cannot carry
-# the lock HTML marker (intents reject `<!--`), so authorship is the gate;
-# an attended claim that embeds the contract still wins via the allowlist
-# (and typically carries the marker too).
+# #864): author login must be github-actions[bot] or shaiss. cursor[bot]
+# is excluded (shared Cursor App — Bugbot, Security/Approval Agents,
+# every Cursor cloud agent). Attended runs post as shaiss or not at all.
+# Heading shape alone is not enough — on a public issue any user can
+# paste "**Gate contract**" and must not replace the frozen §2 text.
+# Contract intent comments cannot carry the lock HTML marker (intents
+# reject `<!--`), so authorship is the gate; an attended claim that
+# embeds the contract still wins via shaiss (and typically carries the
+# marker too).
 #
 # Usage:
 #   scripts/oracle-ship-contract.sh <comments.json>
@@ -30,7 +32,7 @@ SETTLE_STUB='🚢 SHIP-LOCK — settle claim'
 LOCK_HTML='<!-- design-run-ship-lock:v1 -->'
 # Exact logins — keep in sync with SHIP_LOCK_AUTHOR_LOGINS /
 # LOCK_AUTHOR_LOGINS in design-run-deliver.sh and routine-lock-cleanup.sh.
-CONTRACT_AUTHOR_LOGINS='github-actions[bot] shaiss cursor[bot]'
+CONTRACT_AUTHOR_LOGINS='github-actions[bot] shaiss'
 
 select_contract() {  # file or -
   jq -r --arg stub "$SETTLE_STUB" --arg allow "$CONTRACT_AUTHOR_LOGINS" '
@@ -167,15 +169,15 @@ selftest() {
     return 1
   }
 
-  # cursor[bot] on the allowlist still wins (attended cloud-agent claim)
+  # cursor[bot] must NOT be accepted as a contract author (Cipher #864).
   jq -n --arg html "$LOCK_HTML" \
     '[{body:("🚢 SHIP-LOCK — running.\n\n" + $html
              + "\n\n**Design name:** from-cursor\n\n**Gate contract**\n- [ ] C1\n"),
        created_at:"2026-10-20T00:00:00Z",
        user:{login:"cursor[bot]",type:"Bot"}}]' > "$tmp/cursor.json"
   out="$(select_contract "$tmp/cursor.json")"
-  printf '%s' "$out" | grep -qF 'from-cursor' || {
-    echo "selftest: cursor[bot] attended contract was not selected" >&2
+  [ -z "$out" ] || {
+    echo "selftest: cursor[bot] contract was accepted" >&2
     return 1
   }
 
