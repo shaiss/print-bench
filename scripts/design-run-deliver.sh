@@ -4028,6 +4028,104 @@ EOF
     echo "selftest: burn preflight → disable-sudo → scrub smoke → verify → agent (Cipher #876)" >&2
     exit 1
   }
+  burn_pip_line="$(grep -n 'name: Install preflight Python tools after disabling sudo' "$burn" | head -1 | cut -d: -f1)"
+  # apt (needs root) before disable-sudo; pip (no root) after it; then the agent.
+  # A pip install that drifts back before disable-sudo reopens Cipher #868 LOW.
+  [ -n "$burn_install_line" ] && [ -n "$burn_sudo_line" ] && [ -n "$burn_pip_line" ] \
+    && [ -n "$burn_agent_line" ] \
+    && [ "$burn_install_line" -lt "$burn_sudo_line" ] \
+    && [ "$burn_sudo_line" -lt "$burn_pip_line" ] \
+    && [ "$burn_pip_line" -lt "$burn_agent_line" ] || {
+    echo "selftest: apt preflight must precede disable-sudo, which must precede pip, which must precede the burn agent" >&2
+    exit 1
+  }
+  burn_printcheck_pip_line="$(grep -n 'pip install .*tools/printcheck' "$burn" | head -1 | cut -d: -f1)"
+  burn_stylelift_pip_line="$(grep -n 'pip install .*tools/stylelift' "$burn" | head -1 | cut -d: -f1)"
+  [ -n "$burn_printcheck_pip_line" ] && [ -n "$burn_stylelift_pip_line" ] \
+    && [ "$burn_printcheck_pip_line" -gt "$burn_sudo_line" ] \
+    && [ "$burn_stylelift_pip_line" -gt "$burn_sudo_line" ] || {
+    echo "selftest: burn pip installs of printcheck/stylelift must run after disable-sudo" >&2
+    exit 1
+  }
+  # Hashed lockfile install (Cipher HOLD on #878): fail-closed PyPI pins.
+  grep -q -- '--require-hashes' "$burn" || {
+    echo "selftest: burn preflight_pip must pip install --require-hashes" >&2
+    exit 1
+  }
+  grep -q 'backlog-burn-preflight-requirements.txt' "$burn" || {
+    echo "selftest: burn preflight_pip must install from backlog-burn-preflight-requirements.txt" >&2
+    exit 1
+  }
+  [ -f "${repo_root}/.github/backlog-burn-preflight-requirements.txt" ] || {
+    echo "selftest: .github/backlog-burn-preflight-requirements.txt is missing" >&2
+    exit 1
+  }
+  grep -qE '^[^#].*--hash=sha256:' \
+    "${repo_root}/.github/backlog-burn-preflight-requirements.txt" || {
+    echo "selftest: backlog-burn-preflight-requirements.txt has no sha256 hashes" >&2
+    exit 1
+  }
+  # Local tools must be --no-deps --no-build-isolation so they cannot resolve
+  # unpinned PyPI deps (including build backends via PEP 517 isolation).
+  grep -q 'pip install --no-deps --no-build-isolation -e .*tools/printcheck' "$burn" || {
+    echo "selftest: burn must pip install --no-deps --no-build-isolation -e tools/printcheck" >&2
+    exit 1
+  }
+  grep -q 'pip install --no-deps --no-build-isolation -e .*tools/stylelift' "$burn" || {
+    echo "selftest: burn must pip install --no-deps --no-build-isolation -e tools/stylelift" >&2
+    exit 1
+  }
+  if grep -qE 'pip install .*printcheck\[test\]|pip install .*stylelift\[test\]' "$burn"; then
+    echo "selftest: burn must not pip install printcheck/stylelift[test] (unpinned extras)" >&2
+    exit 1
+  fi
+  grep -q -- '--only-binary :all:' "$burn" || {
+    echo "selftest: burn preflight_pip must pip install --only-binary :all:" >&2
+    exit 1
+  }
+  # tools/backlog-burn is stdlib-only: run via PYTHONPATH, never pip install
+  # before disable-sudo (Cipher HOLD on #878 — unhashed setuptools via -e).
+  # Skip full-line comments so a "# No pip install …" note is not a hit.
+  burn_bb_pip_line="$(
+    awk -v sudo="$burn_sudo_line" '
+      /^[[:space:]]*#/ { next }
+      /pip install .*tools\/backlog-burn/ && NR <= sudo { print NR; exit }
+    ' "$burn"
+  )"
+  if [ -n "$burn_bb_pip_line" ]; then
+    echo "selftest: burn must not pip install tools/backlog-burn before disable-sudo (line ${burn_bb_pip_line})" >&2
+    exit 1
+  fi
+  grep -q 'PYTHONPATH: tools/backlog-burn/src' "$burn" || {
+    echo "selftest: burn must set PYTHONPATH=tools/backlog-burn/src for the selector" >&2
+    exit 1
+  }
+  grep -q 'python3 -m backlog_burn.cli' "$burn" || {
+    echo "selftest: burn must invoke backlog_burn via python3 -m backlog_burn.cli" >&2
+    exit 1
+  }
+  if grep -vE '^[[:space:]]*#' "$burn" | grep -qE '(^|[[:space:]])backlog-burn (config|run|select|gather)'; then
+    echo "selftest: burn still calls the backlog-burn console script (needs install)" >&2
+    exit 1
+  fi
+  burn_pip_gate_n="$(grep -c 'steps.preflight_pip.outcome == '\''success'\''' "$burn" || true)"
+  burn_sudo_gate_n="$(grep -c 'steps.disable_sudo.outcome == '\''success'\''' "$burn" || true)"
+  # disable_sudo gates preflight_pip itself plus every later verify/keyed step.
+  # Those later steps must also require preflight_pip (pip_gates == sudo_gates - 1).
+  # Today that is the 5 keyed ship links; when #876 adds verify_* steps they
+  # must take the same preflight_pip conjunct or this equality fails.
+  [ "$burn_sudo_gate_n" -ge 6 ] || {
+    echo "selftest: expected at least 6 burn steps gated on disable_sudo (pip + ships), found ${burn_sudo_gate_n}" >&2
+    exit 1
+  }
+  [ "$burn_pip_gate_n" -eq $((burn_sudo_gate_n - 1)) ] || {
+    echo "selftest: every disable_sudo-gated step except preflight_pip must also gate on preflight_pip (pip=${burn_pip_gate_n} sudo=${burn_sudo_gate_n})" >&2
+    exit 1
+  }
+  [ "$burn_pip_gate_n" -ge 5 ] || {
+    echo "selftest: expected at least 5 burn steps gated on preflight_pip (keyed ships), found ${burn_pip_gate_n}" >&2
+    exit 1
+  }
   # apt line may wrap after prusa-slicer; require both halves.
   grep -q 'openscad xvfb imagemagick prusa-slicer' "$burn" \
     &&   grep -q 'ffmpeg gifsicle jq bubblewrap apparmor-profiles' "$burn" \
