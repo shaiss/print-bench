@@ -9,7 +9,17 @@
       "Bash(/usr/bin/git push*)",
       "Bash(gh pr create)",
       "Bash(gh pr create:*)",
-      "Bash(gh pr create*)"
+      "Bash(gh pr create*)",
+      "Bash(gh issue edit*design-brief*)",
+      "Bash(gh issue edit*autonomy-ok*)",
+      "Bash(gh pr edit*design-brief*)",
+      "Bash(gh pr edit*autonomy-ok*)",
+      "Bash(gh label create*design-brief*)",
+      "Bash(gh label create*autonomy-ok*)",
+      "Bash(gh api*design-brief*)",
+      "Bash(gh api*autonomy-ok*)",
+      "Bash(curl*design-brief*)",
+      "Bash(curl*autonomy-ok*)"
     ]
   }
 }

@@ -765,6 +765,10 @@ class Routine(NamedTuple):
     backstop: str | None
     mcp_config: str | None
     allowed: str | None
+    # Job that holds the provider-triage step when it is not `job`. The
+    # exhaustion pin reads that job's `if:` and normalizes
+    # `needs.<job>.outputs.*` back onto the walk job's step outputs.
+    triage_job: str | None = None
 
 
 # The provider-triage step every routine carries (#347): its `if:` is an
@@ -791,7 +795,8 @@ ROUTINES = {
         permission_mode="dontAsk",
         backstop=".claude/design-run-settings.json",
         mcp_config=None,
-        allowed="Bash,Read,Write,Edit,Glob,Grep,Skill"),
+        allowed="Bash,Read,Write,Edit,Glob,Grep,Skill",
+        triage_job="triage"),
     "backlog-burn": Routine(
         workflow="backlog-burn.yml", chain="backlog-burn",
         conf=".github/backlog-burn.conf", job="burn",
@@ -1116,6 +1121,7 @@ ANDON_AI_JOBS = {
     ("chunker.yml", "chunk"),
     ("ci.yml", "regen"),
     ("design-run.yml", "run"),
+    ("design-run.yml", "triage"),
     ("growth-twitter.yml", "drain"),
     ("labeler.yml", "label"),
     ("lifestyle-clip.yml", "generate"),
@@ -2489,7 +2495,7 @@ def _outcome_expressions(text: str) -> dict[str, list[str]]:
     # (the CodeQL ReDoS finding on the original pattern) — one `\n` per line,
     # matched explicitly, keeps each repetition deterministic.
     for m in re.finditer(
-            r"^([ \t]+)(AGENT_OUTCOME|RUN|SHIP):[ \t]*\$\{\{(.+?)\}\}[ \t]*$",
+            r"^([ \t]+)(AGENT_OUTCOME|RUN|SHIP|walk_outcome):[ \t]*\$\{\{(.+?)\}\}[ \t]*$",
             text, re.MULTILINE | re.DOTALL):
         exprs.setdefault(m.group(2), []).append(m.group(3))
     return exprs
@@ -2752,7 +2758,9 @@ def test_routine_agent_outcome_is_assigned_identically_everywhere():
     lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
     assert lock_rows, "no SHIP-LOCK routine in the ROUTINES table"
     for row in lock_rows:
-        exprs = _outcome_expressions(_routine_job_text(_routine_text(row.workflow), row))
+        # design-run's lock cleanup lives in the settle job, so the two
+        # AGENT_OUTCOME assignments are not in the walk job. Scan the file.
+        exprs = _outcome_expressions(_routine_text(row.workflow))
         found = [e.strip() for e in exprs.get("AGENT_OUTCOME", [])]
         assert len(found) == 2, (
             f"{row.workflow}: expected AGENT_OUTCOME assigned exactly twice (lock "
@@ -2920,8 +2928,9 @@ def _assert_ship_lock_gate_follows_disposition(
     workflow = row.workflow
     where = f"{row.workflow} [{row.job}]"
     job = _routine_job_text(text, row)
+    gate_job = _job_containing_step(text, step_name)
     walk_ids = _routine_walk_ids(reg, row, job)
-    cond = _gate_condition(job, step_name, where)
+    cond = _normalize_cross_job_outputs(_gate_condition(gate_job, step_name, where))
     # The legs the walk gates require for the same reasons: the keyless
     # degraded path (every link skipped, the pinned ::notice:: skip) must
     # not go red, and a paused-in-git routine must not fire its gates.
@@ -2966,12 +2975,19 @@ def _assert_ship_lock_gate_follows_disposition(
         "",
         sim_cond,
     )
-    # design-run restores provider-triage from START_SHA before the probe
-    # (#859). A failed restore must not run that step: the secrets would
-    # execute whatever the agent left behind. The leg is a prerequisite,
-    # not a disposition, so it is removed before the exact-tail compare.
+    # design-run restores nothing inside the agent job (#859 follow-up).
+    # The fresh triage job checks the START_SHA checkout out before the
+    # probe. A failed check must not run that step. The leg is a
+    # prerequisite, not a disposition, so it is removed before the
+    # exact-tail compare. The in-job restore leg is still stripped so a
+    # regression that puts it back does not hide inside the tail.
     sim_cond = re.sub(
         r"\s*&&\s*steps\.restore_triage\.outcome\s*==\s*'success'",
+        "",
+        sim_cond,
+    )
+    sim_cond = re.sub(
+        r"\s*&&\s*steps\.verify_triage\.outcome\s*==\s*'success'",
         "",
         sim_cond,
     )
@@ -2979,6 +2995,41 @@ def _assert_ship_lock_gate_follows_disposition(
         f"{where}: the '{step_name}' condition does not reduce to the "
         f"disposition tail ({_DISPOSITION_TAIL!r}) after stripping the "
         f"fixed-green legs: {sim_cond!r}")
+
+
+def _normalize_cross_job_outputs(cond: str) -> str:
+    """Map a fresh job's `needs.run.outputs.*` back onto the walk job's steps.
+
+    design-run's provider-triage step lives in its own job, so the
+    disposition and arming legs are job outputs. The SHIP-LOCK pin still
+    compares them to the walk job's step outputs.
+    """
+    repls = (
+        ("needs.run.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
+        ("needs.run.outputs.declined", "steps.lock_cleanup.outputs.declined"),
+        ("needs.settle.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
+        ("needs.settle.outputs.declined", "steps.lock_cleanup.outputs.declined"),
+        ("needs.run.outputs.key_present", "steps.policy.outputs.key_present"),
+        ("needs.run.outputs.enabled", "steps.policy.outputs.enabled"),
+        ("needs.run.outputs.issue", "steps.select.outputs.issue"),
+        ("needs.run.outputs.bundle_pending", "steps.bundle.outputs.pending"),
+    )
+    for src, dst in repls:
+        cond = cond.replace(src, dst)
+    return cond
+
+
+def _job_containing_step(text: str, step_name: str) -> str:
+    """The job block whose steps include `name: <step_name>`."""
+    found = []
+    for block in _job_blocks(text).values():
+        if re.search(
+                r"name:[ \t]*" + re.escape(step_name) + r"(?:[ \t]*#.*)?\n",
+                block):
+            found.append(block)
+    assert len(found) == 1, (
+        f"expected one job containing step {step_name!r}, found {len(found)}")
+    return found[0]
 
 
 def _gate_chunk(job_text: str, step_name: str) -> str:
@@ -2990,12 +3041,39 @@ def _gate_chunk(job_text: str, step_name: str) -> str:
 
 def _gate_without_leg(row: Routine, step_name: str, leg: str) -> str:
     """A copy of the workflow with one `&& <leg>` line removed from the named
-    gate's `if:` — the leg is read off the live gate, never hand-copied."""
+    gate's `if:` — the leg is read off the live gate, never hand-copied.
+
+    The gate may live in a sibling job (design-run's triage job). A
+    cross-job `needs.run.outputs` spelling of the same leg is the tamper
+    target when the walk-job spelling is not in that step.
+    """
     text = _routine_text(row.workflow)
-    chunk = _gate_chunk(_routine_job_text(text, row), step_name)
-    m = re.search(r"^[ \t]*&& " + leg + r"\n", chunk, re.MULTILINE)
-    assert m, f"tamper target not found — the gate's `{leg}` leg moved shape"
-    tampered = text.replace(chunk, chunk.replace(m.group(0), "", 1), 1)
+    chunk = None
+    for block in _job_blocks(text).values():
+        chunks = [c for c in re.split(r"\n      - ", block) if f"name: {step_name}" in c]
+        if len(chunks) == 1:
+            chunk = chunks[0]
+            break
+    assert chunk is not None, f"expected one '{step_name}' step, found none"
+    patterns = [leg]
+    aliased = (leg
+               .replace(r"steps\.lock_cleanup\.outputs\.", r"needs\.run\.outputs\.")
+               .replace(r"steps\.policy\.outputs\.", r"needs\.run\.outputs\.")
+               .replace(r"steps\.select\.outputs\.", r"needs\.run\.outputs\.")
+               .replace(r"steps\.bundle\.outputs\.", r"needs\.run\.outputs\."))
+    if aliased != leg:
+        patterns.append(aliased)
+    settled = leg.replace(
+        r"steps\.lock_cleanup\.outputs\.", r"needs\.settle\.outputs\.")
+    if settled != leg:
+        patterns.append(settled)
+    matched = None
+    for pat in patterns:
+        matched = re.search(r"^[ \t]*&& " + pat + r"\n", chunk, re.MULTILINE)
+        if matched:
+            break
+    assert matched, f"tamper target not found — the gate's `{leg}` leg moved shape"
+    tampered = text.replace(chunk, chunk.replace(matched.group(0), "", 1), 1)
     assert tampered != text, "tamper did not land — the fixture is stale"
     return tampered
 
@@ -3116,7 +3194,8 @@ def test_ship_lock_gate_guard_rejects_a_walk_clause():
         workflow = row.workflow
         text = _routine_text(workflow)
         job = _routine_job_text(text, row)
-        chunk = _gate_chunk(job, step_name)
+        gate_job = _job_containing_step(text, step_name)
+        chunk = _gate_chunk(gate_job, step_name)
         live = _live_walk_expression(job, workflow)
         leg = "&& steps.lock_cleanup.outputs.declined != 'true'\n"
         assert leg in chunk, (
@@ -3138,7 +3217,8 @@ def _live_walk_expression(job_text: str, workflow: str) -> str:
     hand-copied literal that silently stops matching (or keeps matching a
     dead substring) when the expression grows."""
     exprs = _outcome_expressions(job_text)
-    body = (exprs.get("AGENT_OUTCOME") or exprs.get("RUN") or exprs.get("SHIP"))
+    body = (exprs.get("AGENT_OUTCOME") or exprs.get("walk_outcome")
+            or exprs.get("RUN") or exprs.get("SHIP"))
     assert body, f"{workflow}: no walk-outcome expression to derive the mutation from"
     return body[0].strip()
 
@@ -3154,9 +3234,10 @@ def _stale_link1_copy(row: Routine) -> str:
     first = _walk_step_ids(_routine_ship_steps(job, row.resolve_id))[0]
     # EVERY occurrence must go stale together: mutating only one would leave
     # a healthy copy for the extractor/simulation and the control would pass
-    # vacuously. The expression appears at least twice in every routine (the
-    # record step's RUN/SHIP plus each exhaustion gate).
-    assert text.count(live) >= 2, (
+    # vacuously. design-run publishes the expression once, as the walk job's
+    # walk_outcome output; the settle job reads that output. Other routines
+    # still repeat it on the lock cleanup and the red step.
+    assert text.count(live) >= 1, (
         f"{workflow}: the live walk expression appears {text.count(live)} "
         "time(s) — the negative-control mutation would not represent the "
         "regression; update the derivation")
@@ -3523,13 +3604,19 @@ def test_every_consumer_wires_provider_triage_to_its_own_chain():
             f"{workflow} triages chain {chain!r} but does not resolve it — the "
             "walk and the diagnosis have drifted apart")
     for row in ROUTINES.values():
-        job = _routine_job_text(_routine_text(row.workflow), row)
-        chains = _triage_chains(job)
+        text = _routine_text(row.workflow)
+        walk_job = _routine_job_text(text, row)
+        triage_name = row.triage_job or row.job
+        blocks = _job_blocks(text)
+        assert triage_name in blocks, (
+            f"{row.workflow}: triage job {triage_name!r} is missing "
+            f"(jobs: {sorted(blocks)})")
+        chains = _triage_chains(blocks[triage_name])
         assert chains == [row.chain], (
-            f"{row.workflow}: the `{row.job}` job wires provider-triage to "
+            f"{row.workflow}: the `{triage_name}` job wires provider-triage to "
             f"chain(s) {chains}, but it walks the {row.chain!r} chain — exactly "
             "one triage step, on the chain the job walks")
-        assert f"model_registry resolve {row.chain}" in job, (
+        assert f"model_registry resolve {row.chain}" in walk_job, (
             f"{row.workflow}: the `{row.job}` job triages chain {row.chain!r} "
             "but does not resolve it — the walk and the diagnosis have drifted apart")
 
