@@ -63,10 +63,20 @@ cat > "${smoke_home}/.claude.json" <<EOF
 }
 EOF
 
-# srt settings: skip apply-seccomp nested userns (not covered by
-# bwrap-userns-restrict); keep the wrap on bwrap under unpriv_bwrap.
+# srt settings: required network+filesystem keys, plus allowAllUnixSockets
+# so the wrap uses bwrap (covered by bwrap-userns-restrict) instead of
+# apply-seccomp's nested userns (which fails setgroups under sysctl=1).
 cat > "${smoke_home}/.srt-settings.json" <<'EOF'
 {
+  "network": {
+    "allowedDomains": [],
+    "deniedDomains": []
+  },
+  "filesystem": {
+    "denyRead": [],
+    "allowWrite": ["/tmp"],
+    "denyWrite": []
+  },
   "allowAllUnixSockets": true
 }
 EOF
