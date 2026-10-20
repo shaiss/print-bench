@@ -443,8 +443,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update -qq 2>/dev/null || true
           sudo apt-get install -y -qq bubblewrap apparmor-profiles socat gnupg
-          sudo npm install -g --silent "@anthropic-ai/sandbox-runtime@0.0.80"
-          for bin in bwrap srt; do
+          for bin in bwrap; do
             command -v "$bin" >/dev/null || {
               echo "::error::preflight missing ${bin} after install" >&2
               exit 1
@@ -453,6 +452,14 @@ jobs:
           "${GITHUB_WORKSPACE}/scripts/setup-bwrap-apparmor.sh"
           "${GITHUB_WORKSPACE}/scripts/install-claude-code-pin.sh" \
             "${GITHUB_WORKSPACE}/.github/claude-code-version"
+          # Integrity-pinned tarball install (Cipher follow-up on #876); no
+          # bare `npm install -g @anthropic-ai/sandbox-runtime@…`.
+          "${GITHUB_WORKSPACE}/scripts/install-sandbox-runtime-pin.sh" \
+            "${GITHUB_WORKSPACE}/.github/sandbox-runtime-version"
+          command -v srt >/dev/null || {
+            echo "::error::preflight missing srt after verified install" >&2
+            exit 1
+          }
 
       - name: Disable sudo before the agent
         id: disable_sudo

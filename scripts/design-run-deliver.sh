@@ -3127,13 +3127,80 @@ EOF
     echo "selftest: committed gpg-fingerprint is not the Anthropic Claude Code signing key" >&2
     exit 1
   }
-  for script in install-claude-code-pin.sh verify-claude-code-pin.sh \
-    setup-bwrap-apparmor.sh smoke-claude-scrub-sandbox.sh; do
+  srt_pin="${repo_root}/.github/sandbox-runtime-version"
+  [ -f "$srt_pin" ] || {
+    echo "selftest: .github/sandbox-runtime-version is missing" >&2
+    exit 1
+  }
+  srt_ver="$(awk '/^version:/{print $2; exit}' "$srt_pin")"
+  srt_integrity="$(awk '/^dist-integrity:/{print $2; exit}' "$srt_pin")"
+  [ "$srt_ver" = "0.0.80" ] || {
+    echo "selftest: sandbox-runtime version pin is not 0.0.80 (got ${srt_ver:-empty})" >&2
+    exit 1
+  }
+  [ "$srt_integrity" = "sha512-WG4P8faU/JDH90I8NLUBPmg7e72zhanlW3AVCD0OF06JCtId9IDFewFgv4YRvHLcnn//h1r6a1AMosBsMLpxnA==" ] || {
+    echo "selftest: sandbox-runtime dist-integrity is not the committed 0.0.80 pin" >&2
+    exit 1
+  }
+  for script in install-claude-code-pin.sh install-sandbox-runtime-pin.sh \
+    verify-claude-code-pin.sh setup-bwrap-apparmor.sh smoke-claude-scrub-sandbox.sh; do
     [ -x "${repo_root}/scripts/${script}" ] || {
       echo "selftest: scripts/${script} missing or not executable" >&2
       exit 1
     }
   done
+  grep -q 'install-sandbox-runtime-pin.sh' "$burn" || {
+    echo "selftest: burn missing install-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'install-sandbox-runtime-pin.sh' "$workflow" || {
+    echo "selftest: design-run missing install-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  # Actual install lines only — comments may mention the forbidden form.
+  if grep -E '^[[:space:]]*(sudo[[:space:]]+)?npm install -g.*@anthropic-ai/sandbox-runtime' \
+       "$burn" "$workflow" >/dev/null; then
+    echo "selftest: ship workflows still bare-npm-install sandbox-runtime (Cipher #876)" >&2
+    exit 1
+  fi
+  canary="${repo_root}/.github/workflows/claude-sandbox-canary.yml"
+  [ -f "$canary" ] || {
+    echo "selftest: claude-sandbox-canary.yml is missing" >&2
+    exit 1
+  }
+  grep -q 'permissions:' "$canary" && grep -A2 '^permissions:' "$canary" | grep -q 'contents: read' || {
+    echo "selftest: canary must set permissions contents: read" >&2
+    exit 1
+  }
+  if grep -E '\$\{\{[[:space:]]*secrets\.|ANTHROPIC_API_KEY: \$\{|ZAI_KEY: \$\{|GH_TOKEN: \$\{|REGEN_TOKEN: \$\{' \
+       "$canary" >/dev/null; then
+    echo "selftest: canary must not reference provider/PAT secrets" >&2
+    exit 1
+  fi
+  grep -q 'install-sandbox-runtime-pin.sh' "$canary" || {
+    echo "selftest: canary missing install-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'smoke-claude-scrub-sandbox.sh' "$canary" || {
+    echo "selftest: canary missing smoke-claude-scrub-sandbox.sh" >&2
+    exit 1
+  }
+  grep -q 'setup-bwrap-apparmor.sh' "$canary" || {
+    echo "selftest: canary missing setup-bwrap-apparmor.sh" >&2
+    exit 1
+  }
+  if grep -Eiq 'sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0|echo 0 \| sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns' "$canary"; then
+    echo "selftest: canary must not clear apparmor_restrict_unprivileged_userns" >&2
+    exit 1
+  fi
+  grep -q 'dist-integrity' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not check dist-integrity" >&2
+    exit 1
+  }
+  grep -q -- '--ignore-scripts' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not use --ignore-scripts" >&2
+    exit 1
+  }
   grep -q 'sudo -n true' "$burn" || {
     echo "selftest: the burn sudo disable step does not prove sudo is gone" >&2
     exit 1

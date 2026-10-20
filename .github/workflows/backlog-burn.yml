@@ -437,10 +437,10 @@ jobs:
           python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/printcheck[test]"
           python3 -m pip install -q -e "${GITHUB_WORKSPACE}/tools/stylelift[test]"
           # Claude's sandbox-runtime (srt) — the Bash wrap SCRUB=1 uses.
-          # Pinned; installed before disable-sudo so smoke needs no root/npm.
-          sudo npm install -g --silent "@anthropic-ai/sandbox-runtime@0.0.80"
+          # Integrity-pinned tarball install (Cipher follow-up on #876); no
+          # bare `npm install -g @anthropic-ai/sandbox-runtime@…`.
           for bin in openscad xvfb-run montage ffmpeg gifsicle prusa-slicer jq \
-            printcheck stylelift pytest bwrap srt; do
+            printcheck stylelift pytest bwrap; do
             command -v "$bin" >/dev/null || {
               echo "::error::preflight toolchain missing ${bin} after install" >&2
               exit 1
@@ -449,6 +449,12 @@ jobs:
           "${GITHUB_WORKSPACE}/scripts/setup-bwrap-apparmor.sh"
           "${GITHUB_WORKSPACE}/scripts/install-claude-code-pin.sh" \
             "${GITHUB_WORKSPACE}/.github/claude-code-version"
+          "${GITHUB_WORKSPACE}/scripts/install-sandbox-runtime-pin.sh" \
+            "${GITHUB_WORKSPACE}/.github/sandbox-runtime-version"
+          command -v srt >/dev/null || {
+            echo "::error::preflight toolchain missing srt after verified install" >&2
+            exit 1
+          }
 
       - name: Disable sudo before the agent
         id: disable_sudo
