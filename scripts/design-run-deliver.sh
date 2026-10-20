@@ -18,16 +18,16 @@
 #   1. Only a branch named claude/issue-<N>-* is eligible. main is never
 #      pushed.
 #   2. Uncommitted files under designs/ and first-party lib/ are committed
-#      onto that branch. Vendored trees, scripts/, .github/, .claude/ and
-#      tools/ are not. A path already staged that is not one of those safe
-#      paths is unstaged before the commit; if it is still staged, the
+#      onto that branch. Vendored trees, scripts/, .github/, **/.claude/
+#      and tools/ are not. A path already staged that is not one of those
+#      safe paths is unstaged before the commit; if it is still staged, the
 #      commit is refused. `git commit` records the whole index.
 #   3. Any commit since the job's start SHA that touches .github/, scripts/,
-#      .claude/ or tools/ — including a path added and later deleted, the
-#      pre-image of a rename, a commit brought in by merging main, or a
-#      change made inside a merge commit and removed by a later merge —
-#      refuses the push. The bundle must list START_SHA as a prerequisite.
-#      Every other prerequisite must pass
+#      **/.claude/ (any depth) or tools/ — including a path added and later
+#      deleted, the pre-image of a rename, a commit brought in by merging
+#      main, or a change made inside a merge commit and removed by a later
+#      merge — refuses the push. The bundle must list START_SHA as a
+#      prerequisite. Every other prerequisite must pass
 #      `git merge-base --is-ancestor <p> START_SHA` in this script.
 #   4. An open non-draft PR on the branch refuses the push. auto-arm.yml
 #      arms auto-merge on non-draft claude/* PRs.
@@ -75,15 +75,15 @@
 # and single-file lib/ modules may be committed — while backlog-burn runs
 # /ship-issue and may commit any non-protected path (docs/, designs/,
 # people/, …). Both routines refuse the same protected prefixes —
-# `.github/**`, `.claude/**`, `scripts/**`, `tools/**` — and agent-
-# instruction paths at ANY depth after case-folding normalization:
-# `**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`, `**/.mcp.json`,
-# `**/.cursor/**`, `**/.cursorrules` — because a delivered workflow, hook,
-# CI script or agent instruction file would run with repo secrets on the
-# next push or agent session (Cipher on #869). Symlinks (including
-# absolute targets), case folding, `../`, backslashes and gitlinks that
-# land under a protected path are refused the same way. An unknown
-# routine is a usage error.
+# `.github/**`, `**/.claude/**` (any depth), `scripts/**`, `tools/**` —
+# and agent-instruction paths at ANY depth after case-folding
+# normalization: `**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`,
+# `**/.mcp.json`, `**/.cursor/**`, `**/.cursorrules` — because a delivered
+# workflow, hook, CI script or agent instruction file would run with repo
+# secrets on the next push or agent session (Cipher on #869 / #879).
+# Symlinks (including absolute targets), case folding, `../`, backslashes
+# and gitlinks that land under a protected path are refused the same way.
+# An unknown routine is a usage error.
 #
 # Live mode needs GH_TOKEN to push and to open the PR (the design-run PAT,
 # so the draft triggers CI). COMMENT_TOKEN, when set, is the token for the
@@ -148,11 +148,17 @@ note() {
 # cannot turn them back on. --no-replace-objects is a global option (not
 # overridable by -c). GIT_CONFIG_GLOBAL=/dev/null and GIT_CONFIG_NOSYSTEM=1
 # are set on the git process itself, so a caller export cannot point git
-# at a global config. --no-verify is passed only to the subcommands that
-# accept it (commit, push, merge, rebase, am). status, diff, config, log,
-# ls-remote, add, rev-list, cat-file, show, bundle and fetch exit 129 or
-# 128 when given --no-verify, so those get the hardening -c flags alone.
-# rev-parse treats --no-verify as the negation of --verify.
+# at a global config. GIT_LITERAL_PATHSPECS=1 makes every pathspec argument
+# literal (issue #879): without it, a root-level name like `:^y` is pathspec
+# magic for `ls-tree`/`add`/`reset`/`ls-files`/`diff`, so a symlink
+# `:^y -> .claude/x` skips the protected-target lookup. All path arguments
+# in this file are repo paths from status/diff, never intentional magic, so
+# literal mode is the safe default for add/reset/ls-files/diff/ls-tree alike.
+# --no-verify is passed only to the subcommands that accept it (commit, push,
+# merge, rebase, am). status, diff, config, log, ls-remote, add, rev-list,
+# cat-file, show, bundle and fetch exit 129 or 128 when given --no-verify,
+# so those get the hardening -c flags alone. rev-parse treats --no-verify as
+# the negation of --verify.
 git_cmd() {
   local -a pre=()
   while [ $# -gt 0 ]; do
@@ -168,7 +174,7 @@ git_cmd() {
   shift
   case "$sub" in
     commit|push|merge|rebase|am)
-      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_LITERAL_PATHSPECS=1 \
         "$GIT_BIN" --no-replace-objects "${pre[@]}" \
         -c core.hooksPath=/dev/null \
         -c core.fsmonitor=false \
@@ -176,7 +182,7 @@ git_cmd() {
         -c core.sshCommand= \
         "$sub" --no-verify "$@" ;;
     *)
-      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_LITERAL_PATHSPECS=1 \
         "$GIT_BIN" --no-replace-objects "${pre[@]}" \
         -c core.hooksPath=/dev/null \
         -c core.fsmonitor=false \
@@ -254,7 +260,9 @@ normalize_repo_path() {
 
 # Return 0 when $1 is a protected delivery path after normalization
 # (case, `./`, `../`). Protected:
-#   prefixes: `.github`, `.claude`, `scripts`, `tools`
+#   prefixes: `.github`, `scripts`, `tools` (repo-root)
+#   `**/.claude/**` at ANY depth (issue #879; a nested agent tree is as
+#     dangerous as the root one — e.g. `docs/.claude/skills/...`)
 #   agent-instruction files at ANY depth (bash `case` `*` matches `/`):
 #     `**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`, `**/.mcp.json`,
 #     `**/.cursorrules`, and `**/.cursor/**`
@@ -264,10 +272,11 @@ is_protected_path() {
   local norm
   norm="$(normalize_repo_path "$1")" || return 0
   case "$norm" in
-    .github|.github/*|.claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
-    # agent-instruction-path-drift (issue #869): any-depth, case-folded.
+    .github|.github/*|scripts|scripts/*|tools|tools/*) return 0 ;;
+    # agent-instruction-path-drift (issue #869 / #879): any-depth, case-folded.
     # Keep these patterns in sync with the drift guard in
     # tools/model-registry/tests/test_workflow_drift.py.
+    .claude|.claude/*|*/.claude|*/.claude/*) return 0 ;;
     claude.md|*/claude.md) return 0 ;;
     claude.local.md|*/claude.local.md) return 0 ;;
     agents.md|*/agents.md) return 0 ;;
@@ -298,12 +307,12 @@ symlink_points_under_protected() {
 # Paths the delivery commit may include. A first-party module is a single
 # file under lib/. A lib subdirectory is a vendored third-party tree and
 # stays on the runner. Both routines refuse the protected prefixes
-# (`.github/**`, `.claude/**`, `scripts/**`, `tools/**`) and agent-
+# (`.github/**`, `**/.claude/**`, `scripts/**`, `tools/**`) and agent-
 # instruction paths at any depth (`**/CLAUDE.md`, `**/CLAUDE.local.md`,
 # `**/AGENTS.md`, `**/.mcp.json`, `**/.cursor/**`, `**/.cursorrules`) —
 # a workflow, hook, CI script or instruction file pushed with the PAT
 # runs with repo secrets on the next check or agent session (issues
-# #863 / #869). backlog-burn may still commit any other non-protected
+# #863 / #869 / #879). backlog-burn may still commit any other non-protected
 # path (docs/, designs/, people/, …); design-run stays designs/ +
 # single-file lib/ only.
 safe_path() {
@@ -553,9 +562,15 @@ commit_safe_dirty() {
 # If $2 exists at $1 as a symlink whose target resolves under a protected
 # prefix, or as a gitlink (mode 160000) whose path is protected, print a
 # refusal and return 1. Missing / ordinary-blob paths are fine.
+# ls-tree pathspecs are literal via git_cmd's GIT_LITERAL_PATHSPECS=1
+# (issue #879). Fail closed on a non-zero ls-tree: an empty lookup used to
+# skip the check, which is how a pathspec-magic name bypassed it.
 refuse_symlink_or_gitlink_into_protected() {
   local tip="$1" path="$2" meta mode target
-  meta="$(git_cmd ls-tree -z "$tip" -- "$path" 2>/dev/null | tr '\0' '\n' | head -n 1)"
+  if ! meta="$(git_cmd ls-tree -z "$tip" -- "$path" 2>/dev/null | tr '\0' '\n' | head -n 1)"; then
+    echo "design-run-deliver: ${BASE}..HEAD ls-tree failed for ${path} — refusing to push" >&2
+    return 1
+  fi
   [ -n "$meta" ] || return 0
   mode="${meta%% *}"
   case "$mode" in
@@ -1574,6 +1589,14 @@ EOF
   grep -q 'commit.gpgSign=false' "$SELF"
   grep -q 'GIT_CONFIG_GLOBAL=/dev/null' "$SELF"
   grep -q 'GIT_CONFIG_NOSYSTEM=1' "$SELF"
+  grep -q 'GIT_LITERAL_PATHSPECS=1' "$SELF" || {
+    echo "selftest: git_cmd does not set GIT_LITERAL_PATHSPECS=1" >&2
+    exit 1
+  }
+  grep -q 'ls-tree failed for' "$SELF" || {
+    echo "selftest: refuse_symlink_or_gitlink_into_protected does not fail closed on ls-tree errors" >&2
+    exit 1
+  }
   grep -q 'refusing to run with GIT_CONFIG_GLOBAL set' "$SELF"
   grep -q -- '--no-replace-objects' "$SELF"
   grep -q -- '--no-verify' "$SELF"
@@ -4303,11 +4326,13 @@ EOF
     exit 1
   }
 
-  # backlog-burn refuses .github/**, .claude/**, scripts/** and tools/**
-  # together (closes #869): for each prefix, add / modify / delete /
-  # rename into / rename out of / symlink into — while a benign docs/
-  # change still delivers. The normalizer (case / ../ / backslash /
-  # absolute symlink target / gitlink) is shared with design-run.
+  # backlog-burn refuses .github/**, **/.claude/**, scripts/** and tools/**
+  # together (closes #869 / #879): for each root prefix, add / modify /
+  # delete / rename into / rename out of / symlink into — while a benign
+  # docs/ change still delivers. Nested **/.claude/** and pathspec-magic
+  # symlink names are covered below. The normalizer (case / ../ /
+  # backslash / absolute symlink target / gitlink) is shared with
+  # design-run.
   local gsrc gfile gstart prefix
   gsrc="${tmp}/gsrc"
   gfile="${tmp}/protected-forbid.bundle"
@@ -4786,7 +4811,124 @@ EOF
       commit -m 'delete docs/CLAUDE.md' >/dev/null
     reject_nested "$routine" 'docs/CLAUDE.md/delete' 'touches docs/CLAUDE.md'
     git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Nested **/.claude/** at any depth (issue #879) — add + case variant.
+    mkdir -p "$gsrc/docs/.claude/skills/x"
+    printf 'evil\n' > "$gsrc/docs/.claude/skills/x/SKILL.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      docs/.claude/skills/x/SKILL.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add nested .claude skill' >/dev/null
+    reject_nested "$routine" 'nested-.claude/add' \
+      'touches docs/\.claude/skills/x/SKILL\.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    mkdir -p "$gsrc/docs/.CLAUDE/skills/x"
+    printf 'evil\n' > "$gsrc/docs/.CLAUDE/skills/x/SKILL.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      docs/.CLAUDE/skills/x/SKILL.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add nested .CLAUDE case' >/dev/null
+    reject_nested "$routine" 'nested-.CLAUDE/case' 'touches'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Pathspec-magic symlink name (issue #879): without GIT_LITERAL_PATHSPECS
+    # ls-tree treats `:^y` as exclude magic, returns empty, and the check
+    # used to pass. Literal lookup must see the symlink and refuse the
+    # protected target.
+    mkdir -p "$gsrc/.claude"
+    printf 'seed\n' > "$gsrc/.claude/x"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- .claude/x
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'seed .claude/x for pathspec-magic symlink' >/dev/null
+    local magic_base
+    magic_base="$(git_cmd -C "$gsrc" rev-parse HEAD)"
+    ln -s '.claude/x' "$gsrc/:^y"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- ':^y'
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'pathspec-magic symlink' >/dev/null
+    rm -f "$gfile"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$gsrc" \
+      "$SELF" --repo acme/print-bench --issue 869 --base "$magic_base" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --routine "$routine" --write-bundle "$gfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    [ "$rc" -eq 1 ] || {
+      echo "selftest: ${routine} accepted pathspec-magic symlink :^y (exit ${rc})" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q 'points under a protected prefix' || {
+      echo "selftest: ${routine} pathspec-magic :^y did not report symlink refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    [ ! -e "$gfile" ] || {
+      echo "selftest: ${routine} wrote a bundle for pathspec-magic :^y" >&2
+      exit 1
+    }
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
   done
+
+  # ls-tree failure fails closed (issue #879): a wrapper GIT_BIN that
+  # exits 128 on ls-tree must refuse a otherwise-benign docs/ delivery.
+  cat > "${tmp}/bin/git-fail-lstree" <<'EOF'
+#!/bin/sh
+real=/usr/bin/git
+skip=
+for arg in "$@"; do
+  if [ -n "$skip" ]; then
+    skip=
+    continue
+  fi
+  case "$arg" in
+    -C|-c|--git-dir|--work-tree) skip=1; continue ;;
+    --no-replace-objects|-* ) continue ;;
+    ls-tree)
+      echo "planted ls-tree failure" >&2
+      exit 128
+      ;;
+    *) break ;;
+  esac
+done
+exec "$real" "$@"
+EOF
+  chmod +x "${tmp}/bin/git-fail-lstree"
+  printf 'ok\n' > "$gsrc/docs/lstree-fail.md"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+    docs/lstree-fail.md
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+    commit -m 'docs for ls-tree fail-closed' >/dev/null
+  rm -f "$gfile"
+  set +e
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+    GIT_BIN="${tmp}/bin/git-fail-lstree" \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    DELIVER_WORKTREE="$gsrc" \
+    "$SELF" --repo acme/print-bench --issue 869 --base "$gstart" \
+    --base-branch main --run-url https://example.test/run/1 \
+    --routine backlog-burn --write-bundle "$gfile" 2>&1 >/dev/null)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || {
+    echo "selftest: ls-tree failure did not fail closed (exit ${rc})" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'ls-tree failed for' || {
+    echo "selftest: ls-tree failure did not report the refusal" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  [ ! -e "$gfile" ] || {
+    echo "selftest: ls-tree failure wrote a bundle" >&2
+    exit 1
+  }
+  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
   # Benign docs/ change still passes for backlog-burn.
   printf 'ok\n' > "$gsrc/docs/ok.md"
