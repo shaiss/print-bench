@@ -28,14 +28,19 @@ sudo install -o root -g root -m 0644 "$src" "$dst"
 sudo apparmor_parser -r "$dst"
 
 # securityfs profiles is root-readable on GHA runners — use sudo.
+# Pipe through tee (user-owned dump); sudo only for the read.
 profiles_file="/sys/kernel/security/apparmor/profiles"
 profiles_dump="$(mktemp)"
 cleanup_profiles() { rm -f "$profiles_dump"; }
 trap cleanup_profiles EXIT
-if ! sudo cat "$profiles_file" >"$profiles_dump" 2>/dev/null; then
+if ! sudo cat "$profiles_file" 2>/dev/null | tee "$profiles_dump" >/dev/null; then
   echo "error: cannot read ${profiles_file} (even with sudo)" >&2
   exit 1
 fi
+[ -s "$profiles_dump" ] || {
+  echo "error: ${profiles_file} dump is empty" >&2
+  exit 1
+}
 # Both profile names must appear in enforce mode.
 if ! grep -E '^bwrap \(enforce\)$' "$profiles_dump" >/dev/null; then
   echo "error: AppArmor profile 'bwrap' not in (enforce):" >&2

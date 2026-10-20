@@ -92,7 +92,8 @@ sudo env "PATH=$(dirname "$npm_bin"):$(dirname "$node_bin"):/usr/local/bin:/usr/
   "$npm_bin" install -g --ignore-scripts --silent "$tgz"
 
 # Global bin dir may be /usr/local/bin (system node) or a prefix next to npm.
-export PATH="/usr/local/bin:$(dirname "$npm_bin"):${PATH}"
+PATH="/usr/local/bin:$(dirname "$npm_bin"):${PATH}"
+export PATH
 srt_bin="$(command -v srt || true)"
 [ -n "$srt_bin" ] || {
   echo "error: srt not on PATH after verified sandbox-runtime install" >&2
