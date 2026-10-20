@@ -3038,6 +3038,19 @@ EOF
     echo "selftest: burn label strip and lock cleanup are not in a fresh settle job" >&2
     exit 1
   }
+  # Settle START_SHA case must accept a real 40-char commit (Bugbot on #863:
+  # 41 hex classes rejected every SHA and lock cleanup never ran).
+  settle_job="$(awk '/^  settle:/{p=1;print;next} p && /^  [A-Za-z]/{exit} p' "$burn")"
+  settle_sha_arm="$(printf '%s\n' "$settle_job" | grep -E '\[0-9a-f\]\[0-9a-f\]' | head -1)"
+  [ -n "$settle_sha_arm" ] || {
+    echo "selftest: settle job has no START_SHA hex case arm" >&2
+    exit 1
+  }
+  settle_sha_n="$(printf '%s' "$settle_sha_arm" | grep -oE '\[0-9a-f\]' | wc -l | tr -d ' ')"
+  [ "$settle_sha_n" = "40" ] || {
+    echo "selftest: settle START_SHA case has ${settle_sha_n} hex classes, want 40" >&2
+    exit 1
+  }
   burn_outcome_n="$(grep -c 'AGENT_OUTCOME: ${{ needs.burn.outputs.walk_outcome }}' "$burn" || true)"
   [ "$burn_outcome_n" -eq 2 ] || {
     echo "selftest: expected 2 identical burn AGENT_OUTCOME reads, found ${burn_outcome_n}" >&2
