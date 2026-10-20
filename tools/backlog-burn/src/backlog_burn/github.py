@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import http.client
 import json
+import random
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,19 +33,60 @@ _API = "https://api.github.com"
 # propagates, so a programming error is never mistaken for "compare failed".
 _REQUEST_ERRORS = (OSError, ValueError, http.client.HTTPException)
 
+# Transient-failure retry for :func:`_get`: three attempts total, exponential
+# backoff with jitter between them. Client errors (4xx) are not retried — a
+# missing issue or a bad token will not clear on a second try. Tests patch
+# :func:`_sleep` so the suite never waits on the wall clock.
+_GET_ATTEMPTS = 3
+_GET_BACKOFF_BASE_S = 0.5
+
+
+def _sleep(seconds: float) -> None:
+    """Wall-clock sleep; the retry loop calls this so tests can patch it."""
+    time.sleep(seconds)
+
+
+def _retry_delay(attempt: int) -> float:
+    """Seconds to wait after a failed attempt (0-based) before the next try."""
+    return (_GET_BACKOFF_BASE_S * (2 ** attempt)) + random.uniform(
+        0.0, _GET_BACKOFF_BASE_S
+    )
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """True for HTTP 5xx and connection-level failures; never for 4xx."""
+    # ``HTTPError`` is a ``URLError`` subclass — classify it first so a 404
+    # cannot fall through as a connection retry.
+    if isinstance(exc, urllib.error.HTTPError):
+        return 500 <= exc.code < 600
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionResetError))
+
 
 def _get(url: str, token: str) -> tuple[Any, dict[str, str]]:
-    """GET ``url`` and return ``(parsed_json, lowercased_headers)``."""
+    """GET ``url`` and return ``(parsed_json, lowercased_headers)``.
+
+    Retries up to :data:`_GET_ATTEMPTS` times on HTTP 5xx and connection-level
+    errors (``URLError``, timeouts, connection reset), with exponential
+    backoff plus jitter. A 4xx response raises on the first attempt. After the
+    final attempt the last error is re-raised unchanged.
+    """
     req = urllib.request.Request(url)
     req.add_header("Accept", "application/vnd.github+json")
     req.add_header("X-GitHub-Api-Version", "2022-11-28")
     req.add_header("User-Agent", "print-bench-backlog-burn")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (fixed host)
-        body = json.loads(resp.read().decode("utf-8"))
-        headers = {k.lower(): v for k, v in resp.headers.items()}
-    return body, headers
+    for attempt in range(_GET_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (fixed host)
+                body = json.loads(resp.read().decode("utf-8"))
+                headers = {k.lower(): v for k, v in resp.headers.items()}
+            return body, headers
+        except Exception as exc:  # noqa: BLE001 — classified by _is_retryable
+            if not _is_retryable(exc) or attempt + 1 >= _GET_ATTEMPTS:
+                raise
+            _sleep(_retry_delay(attempt))
+    raise AssertionError("unreachable: the retry loop always returns or raises")
 
 
 # A page cap so a pathological Link loop cannot spin forever; 100 pages is
