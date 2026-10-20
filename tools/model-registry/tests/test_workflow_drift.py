@@ -4294,17 +4294,19 @@ def test_model_smoke_secret_gate_rejects_ungated_keys():
         _assert_secrets_behind_trust(tampered, "model-smoke.yml")
 
 
-# ── design-run-deliver agent-instruction path drift guard (issue #869) ───────
+# ── design-run-deliver agent-instruction path drift guard (issue #869/#879) ─
 # is_protected_path must refuse agent-instruction files at ANY depth after
-# case-folding normalization — not only at the repo root. The marker
+# case-folding normalization — not only at the repo root. Nested
+# `**/.claude/**` is the same class (issue #879). The marker
 # `agent-instruction-path-drift` pins the intent; each required case pattern
 # must appear inside the function body.
 
 DELIVER_SH = REPO_ROOT / "scripts" / "design-run-deliver.sh"
 AGENT_INSTRUCTION_PATH_MARKER = "agent-instruction-path-drift"
 # Patterns that must appear in is_protected_path (after normalize lowercases).
-# Root + nested (`*/…`) forms; `.cursor` at any depth.
+# Root + nested (`*/…`) forms; `.claude` / `.cursor` at any depth.
 AGENT_INSTRUCTION_CASE_PATTERNS = (
+    ".claude|.claude/*|*/.claude|*/.claude/*",
     "claude.md|*/claude.md",
     "claude.local.md|*/claude.local.md",
     "agents.md|*/agents.md",
@@ -4336,14 +4338,17 @@ def _assert_agent_instruction_paths_are_any_depth(text: str) -> None:
     missing = [p for p in AGENT_INSTRUCTION_CASE_PATTERNS if p not in body]
     assert not missing, (
         "is_protected_path is missing any-depth agent-instruction pattern(s) "
-        f"{missing} — nested CLAUDE.md / AGENTS.md / .mcp.json / .cursor / "
-        ".cursorrules must be refused after normalization (issue #869)")
+        f"{missing} — nested CLAUDE.md / AGENTS.md / .mcp.json / .claude / "
+        ".cursor / .cursorrules must be refused after normalization "
+        "(issues #869 / #879)")
     # Root-only `claude.md|agents.md|.mcp.json` (the pre-MEDIUM shape) must
     # not be the sole match — require the nested `*/` forms explicitly.
     assert "*/claude.md" in body, (
         "is_protected_path does not match nested **/CLAUDE.md")
     assert "*/.cursor" in body or "*/.cursor/*" in body, (
         "is_protected_path does not match nested **/.cursor/**")
+    assert "*/.claude" in body or "*/.claude/*" in body, (
+        "is_protected_path does not match nested **/.claude/**")
 
 
 def test_deliver_agent_instruction_paths_any_depth():
@@ -4370,4 +4375,15 @@ def test_deliver_agent_instruction_paths_rejects_dropped_cursor():
     tampered = text.replace(needle, ".cursor|.cursor/*", 1)
     assert tampered != text
     with pytest.raises(AssertionError, match=r"\.cursor|missing"):
+        _assert_agent_instruction_paths_are_any_depth(tampered)
+
+
+def test_deliver_agent_instruction_paths_rejects_root_only_dot_claude():
+    # NEGATIVE CONTROL (issue #879): root-only `.claude|.claude/*` must FAIL.
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    needle = ".claude|.claude/*|*/.claude|*/.claude/*"
+    assert needle in text, "tamper target not found — .claude pattern moved"
+    tampered = text.replace(needle, ".claude|.claude/*", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match=r"\.claude|missing"):
         _assert_agent_instruction_paths_are_any_depth(tampered)
