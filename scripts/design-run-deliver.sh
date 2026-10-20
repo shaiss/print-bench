@@ -3994,6 +3994,35 @@ EOF
     echo "selftest: burn must not pip install printcheck/stylelift[test] (unpinned extras)" >&2
     exit 1
   fi
+  grep -q -- '--only-binary :all:' "$burn" || {
+    echo "selftest: burn preflight_pip must pip install --only-binary :all:" >&2
+    exit 1
+  }
+  # tools/backlog-burn is stdlib-only: run via PYTHONPATH, never pip install
+  # before disable-sudo (Cipher HOLD on #878 — unhashed setuptools via -e).
+  # Skip full-line comments so a "# No pip install …" note is not a hit.
+  burn_bb_pip_line="$(
+    awk -v sudo="$burn_sudo_line" '
+      /^[[:space:]]*#/ { next }
+      /pip install .*tools\/backlog-burn/ && NR <= sudo { print NR; exit }
+    ' "$burn"
+  )"
+  if [ -n "$burn_bb_pip_line" ]; then
+    echo "selftest: burn must not pip install tools/backlog-burn before disable-sudo (line ${burn_bb_pip_line})" >&2
+    exit 1
+  fi
+  grep -q 'PYTHONPATH: tools/backlog-burn/src' "$burn" || {
+    echo "selftest: burn must set PYTHONPATH=tools/backlog-burn/src for the selector" >&2
+    exit 1
+  }
+  grep -q 'python3 -m backlog_burn.cli' "$burn" || {
+    echo "selftest: burn must invoke backlog_burn via python3 -m backlog_burn.cli" >&2
+    exit 1
+  }
+  if grep -vE '^[[:space:]]*#' "$burn" | grep -qE '(^|[[:space:]])backlog-burn (config|run|select|gather)'; then
+    echo "selftest: burn still calls the backlog-burn console script (needs install)" >&2
+    exit 1
+  fi
   burn_pip_gate_n="$(grep -c 'steps.preflight_pip.outcome == '\''success'\''' "$burn" || true)"
   burn_sudo_gate_n="$(grep -c 'steps.disable_sudo.outcome == '\''success'\''' "$burn" || true)"
   # disable_sudo gates preflight_pip itself plus every later verify/keyed step.
