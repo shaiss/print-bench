@@ -54,12 +54,13 @@
 # and single-file lib/ modules may be committed — while backlog-burn runs
 # /ship-issue and may commit any non-protected path (docs/, designs/,
 # people/, …). Both routines refuse the same protected prefixes —
-# `.github/**`, `.claude/**`, `scripts/**`, `tools/**` — because a delivered
-# workflow, hook, or CI script would run with repo secrets on the next
-# push or agent session (Cipher on #869). Symlinks (including absolute
-# targets), case folding, `../`, backslashes and gitlinks that land under
-# a protected prefix are refused the same way. An unknown routine is a
-# usage error.
+# `.github/**`, `.claude/**`, `scripts/**`, `tools/**` — and the root
+# agent-instruction files `CLAUDE.md`, `AGENTS.md`, `.mcp.json` — because
+# a delivered workflow, hook, CI script or agent instruction file would
+# run with repo secrets on the next push or agent session (Cipher on
+# #869). Symlinks (including absolute targets), case folding, `../`,
+# backslashes and gitlinks that land under a protected prefix are refused
+# the same way. An unknown routine is a usage error.
 #
 # Live mode needs GH_TOKEN to push and to open the PR (the design-run PAT,
 # so the draft triggers CI). COMMENT_TOKEN, when set, is the token for the
@@ -226,14 +227,18 @@ normalize_repo_path() {
   printf '%s\n' "${out[*]}"
 }
 
-# Return 0 when $1 is a protected delivery prefix — `.github`, `.claude`,
-# `scripts`, `tools` — or under one after normalization (case, `./`, `../`).
-# Fail closed: an unnormalizable path counts as protected (issue #869).
+# Return 0 when $1 is a protected delivery path — prefixes `.github`,
+# `.claude`, `scripts`, `tools`, or the root agent-instruction files
+# `CLAUDE.md`, `AGENTS.md`, `.mcp.json` — after normalization (case, `./`,
+# `../`). Filenames are matched lowercased because normalize_repo_path
+# folds case. Fail closed: an unnormalizable path counts as protected
+# (issue #869).
 is_protected_path() {
   local norm
   norm="$(normalize_repo_path "$1")" || return 0
   case "$norm" in
     .github|.github/*|.claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
+    claude.md|agents.md|.mcp.json) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -258,11 +263,13 @@ symlink_points_under_protected() {
 # Paths the delivery commit may include. A first-party module is a single
 # file under lib/. A lib subdirectory is a vendored third-party tree and
 # stays on the runner. Both routines refuse the protected prefixes
-# (`.github/**`, `.claude/**`, `scripts/**`, `tools/**`) — a workflow, hook
-# or CI script pushed with the PAT runs with repo secrets on the next
-# check or agent session (issues #863 / #869). backlog-burn may still
-# commit any other non-protected path (docs/, designs/, people/, …);
-# design-run stays designs/ + single-file lib/ only.
+# (`.github/**`, `.claude/**`, `scripts/**`, `tools/**`) and the root
+# agent-instruction files (`CLAUDE.md`, `AGENTS.md`, `.mcp.json`) — a
+# workflow, hook, CI script or instruction file pushed with the PAT runs
+# with repo secrets on the next check or agent session (issues #863 /
+# #869). backlog-burn may still commit any other non-protected path
+# (docs/, designs/, people/, …); design-run stays designs/ + single-file
+# lib/ only.
 safe_path() {
   local target
   if is_protected_path "$1"; then
@@ -3392,9 +3399,15 @@ EOF
   printf 'keep\n' > "$gsrc/tools/keep.py"
   printf 'seed\n' > "$gsrc/docs/seed.md"
   printf 'park\n' > "$gsrc/safe/parked.txt"
+  # Seed root agent-instruction files at gstart so symlink-into cases only
+  # change docs/hook (otherwise the range also touches CLAUDE.md itself).
+  printf 'seed\n' > "$gsrc/CLAUDE.md"
+  printf 'seed\n' > "$gsrc/AGENTS.md"
+  printf '{}\n' > "$gsrc/.mcp.json"
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
     .github/workflows/keep.yml .claude/hooks/keep.sh scripts/keep.sh \
-    tools/keep.py docs/seed.md safe/parked.txt
+    tools/keep.py docs/seed.md safe/parked.txt \
+    CLAUDE.md AGENTS.md .mcp.json
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m start >/dev/null
   gstart="$(git_cmd -C "$gsrc" rev-parse HEAD)"
   git_cmd -C "$gsrc" checkout -b claude/issue-869-protected-forbid >/dev/null 2>&1
@@ -3597,6 +3610,78 @@ EOF
   # Needle is a BRE: `\\` matches one literal backslash (`\b` would be a word boundary).
   greject backslash 'touches docs/foo\\bar'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+  # Root agent-instruction files (CLAUDE.md, AGENTS.md, .mcp.json) —
+  # add / modify / rename into / symlink into — refused for both routines
+  # (issue #869). Names are case-folded by the normalizer.
+  local rootfile routine
+  reject_rootfile() {  # $1 routine, $2 label, $3 needle
+    local routine="$1" label="$2" needle="$3"
+    rm -f "$gfile"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$gsrc" \
+      "$SELF" --repo acme/print-bench --issue 869 --base "$gstart" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --routine "$routine" --write-bundle "$gfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    [ "$rc" -eq 1 ] || {
+      echo "selftest: ${routine} accepted protected ${label} (exit ${rc})" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q "$needle" || {
+      echo "selftest: ${routine} protected ${label} did not report the refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    [ ! -e "$gfile" ] || {
+      echo "selftest: ${routine} wrote a bundle for protected ${label}" >&2
+      exit 1
+    }
+  }
+  for routine in backlog-burn design-run; do
+    for rootfile in CLAUDE.md AGENTS.md .mcp.json; do
+      # Add — delete the seeded file then recreate so the tip introduces
+      # the path as an addition relative to a parent that lacked it; the
+      # range still refuses on the protected path either way.
+      git_cmd -C "$gsrc" rm -q -- "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "drop ${rootfile}" >/dev/null
+      printf 'evil\n' > "$gsrc/$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "add ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/add" "touches ${rootfile}"
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+      # Modify (files already seeded at gstart)
+      printf 'changed\n' > "$gsrc/$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "mod ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/modify" "touches ${rootfile}"
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+      # Rename into (replace the seeded file from safe/)
+      git_cmd -C "$gsrc" rm -q -- "$rootfile"
+      git_cmd -C "$gsrc" mv -- safe/parked.txt "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "ren-in ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/rename-into" "touches ${rootfile}"
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+      # Symlink into (path under docs/ pointing at the seeded root file)
+      ln -s "../${rootfile}" "$gsrc/docs/hook"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/hook
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "symlink ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/symlink" 'points under a protected prefix'
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+    done
+  done
 
   # Benign docs/ change still passes for backlog-burn.
   printf 'ok\n' > "$gsrc/docs/ok.md"

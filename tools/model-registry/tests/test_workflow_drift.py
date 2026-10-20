@@ -1474,22 +1474,22 @@ def test_cord_conjunct_helper_rejects_a_non_governing_leg(cond):
 
 
 def test_andon_guard_rejects_a_leg_that_is_not_a_top_level_conjunct():
-    # NEGATIVE CONTROL E (in-memory): model-smoke's `leg && (A || B)` with its
-    # parentheses dropped reads `leg && A || B` — GitHub runs the job on B
-    # with the cord pulled. A substring pin would bless it; the guard must
-    # fail naming the job and the shape.
+    # NEGATIVE CONTROL E (in-memory): model-smoke's `leg && trust` with the
+    # leg buried in `(leg && trust) || dispatch` — GitHub runs the job on
+    # dispatch with the cord pulled. A substring pin would bless it; the
+    # guard must fail naming the job and the shape. (Issue #869 moved the
+    # second conjunct from the fork/dispatch OR to needs.trust.)
     texts = _all_workflow_texts()
     victim = "model-smoke.yml"
     folded = (
         f"      {ANDON_JOB_LEG} &&\n"
-        "      (github.event_name == 'workflow_dispatch' ||\n"
-        "       github.event.pull_request.head.repo.full_name == github.repository)\n")
-    flat = (
-        f"      {ANDON_JOB_LEG} &&\n"
-        "      github.event_name == 'workflow_dispatch' ||\n"
-        "      github.event.pull_request.head.repo.full_name == github.repository\n")
+        "      needs.trust.outputs.trusted == 'true'\n")
+    buried = (
+        f"      ({ANDON_JOB_LEG} &&\n"
+        "      needs.trust.outputs.trusted == 'true') ||\n"
+        "      github.event_name == 'workflow_dispatch'\n")
     assert texts[victim].count(folded) == 1, "tamper target not found — the fixture is stale"
-    texts[victim] = texts[victim].replace(folded, flat, 1)
+    texts[victim] = texts[victim].replace(folded, buried, 1)
     with pytest.raises(AssertionError,
                        match=r"model-smoke\.yml \[smoke\].*not a top-level conjunct"):
         _assert_every_ai_job_gates_on_the_cord(texts)
@@ -3999,37 +3999,47 @@ def test_reeve_reporter_keyless_guard_fires_on_a_secret_reference():
     with pytest.raises(AssertionError):
         _assert_reeve_report_job_is_keyless(tampered)
 
-# ── ci.yml agent-head secret gate (issue #869) ───────────────────────────────
-# Branch CI on agent heads (claude/*, cursor/*, …) runs branch-controlled
-# scripts/. Those jobs must not receive REGEN_TOKEN or the LLM provider
-# keys. Trust is fail-closed via ONE job env, TRUSTED_FOR_SECRETS, whose
-# expression is the only place agent prefixes are listed. Every spend of
-# the set below must either be a presence probe (`!= ''`) or sit behind
-# `env.TRUSTED_FOR_SECRETS` (same line, or the enclosing step's `if:`).
-# The marker comment `agent-head-secret-gate` pins the intent.
+# ── ci.yml / model-smoke.yml secret trust drift guard (issue #869) ───────────
+# Default-deny: REGEN_TOKEN and the LLM provider keys materialize ONLY when
+# `needs.trust.outputs.trusted == 'true'`. Trust is computed in a separate
+# `trust` job that checks out nothing (so head scripts cannot forge it via
+# $GITHUB_ENV). The trust expression must be main-push-only
+# (`github.event_name == 'push' && github.ref == 'refs/heads/main'`).
+# Every spend of the set below must either be a presence probe (`!= ''`) or
+# sit behind `needs.trust.outputs.trusted` (same line, or the enclosing
+# step's / job's `if:`). Also refuse `secrets['X']`, `toJSON(secrets)`, and
+# inverted guards (`!= 'true' && secrets…`). Marker: `agent-head-secret-gate`.
 
 CI_YML = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-TRUSTED_FOR_SECRETS_GUARD = "env.TRUSTED_FOR_SECRETS"
-# Agent branch prefixes that must appear in the ONE TRUSTED_FOR_SECRETS
-# expression. Adding a new agent prefix means editing that expression and
-# this frozenset together — the canary fails if either side drifts.
-CI_AGENT_HEAD_PREFIXES = frozenset({"claude/", "cursor/"})
+MODEL_SMOKE_YML = REPO_ROOT / ".github" / "workflows" / "model-smoke.yml"
+TRUST_OUTPUT_GUARD = "needs.trust.outputs.trusted"
+TRUST_MAIN_PUSH_EXPR = (
+    "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+)
 CI_AUTONOMY_SECRETS = (
     "REGEN_TOKEN",
     "ANTHROPIC_API_KEY",
     "ZAI_KEY",
     "ZAI_API_KEY",
     "OPENROUTER_API_KEY",
+    "GH_TOKEN",
 )
+_SECRET_NAMES_ALT = "|".join(CI_AUTONOMY_SECRETS)
 _CI_PRESENCE_PROBE = re.compile(
-    r"secrets\.(" + "|".join(CI_AUTONOMY_SECRETS) + r")\s*!=\s*''"
+    r"secrets\.(" + _SECRET_NAMES_ALT + r")\s*!=\s*''"
 )
-_CI_SECRET_SPEND = re.compile(
-    r"secrets\.(" + "|".join(CI_AUTONOMY_SECRETS) + r")\b"
+_CI_SECRET_DOT = re.compile(
+    r"secrets\.(" + _SECRET_NAMES_ALT + r")\b"
 )
-_TRUSTED_FOR_SECRETS_DEF = re.compile(
-    r"^[ \t]*TRUSTED_FOR_SECRETS:\s*\$\{\{\s*(.+?)\s*\}\}\s*$",
-    re.MULTILINE,
+_CI_SECRET_BRACKET = re.compile(
+    r"secrets\[\s*['\"](" + _SECRET_NAMES_ALT + r")['\"]\s*\]"
+)
+_TOJSON_SECRETS = re.compile(r"toJSON\s*\(\s*secrets\s*\)")
+# Inverted guard: trust is NOT true, yet a secret still appears on the line
+# (or would be evaluated). Fail closed — only `== 'true'` is a valid spend
+# gate.
+_INVERTED_TRUST = re.compile(
+    r"needs\.trust\.outputs\.trusted\s*!=\s*'true'"
 )
 
 
@@ -4058,116 +4068,227 @@ def _ci_step_if_containing(lines: list[str], idx: int) -> str:
     return ""
 
 
-def _ci_trusted_for_secrets_expression(text: str) -> str:
-    """Return the ONE TRUSTED_FOR_SECRETS expression body from ci.yml."""
-    matches = list(_TRUSTED_FOR_SECRETS_DEF.finditer(text))
-    assert matches, (
-        "ci.yml has no TRUSTED_FOR_SECRETS: ${{ … }} definition — the #869 "
-        "fail-closed secret gate was removed")
-    # Job-level env is the source of truth; step env may re-export it as
-    # `${{ env.TRUSTED_FOR_SECRETS }}`. Keep only definitions that list
-    # prefixes (contain startsWith), and require exactly one.
-    defs = [m for m in matches if "startsWith" in m.group(1)]
-    assert len(defs) == 1, (
-        f"ci.yml must define agent prefixes in exactly ONE TRUSTED_FOR_SECRETS "
-        f"expression (found {len(defs)} with startsWith) — add a prefix in "
-        f"that one place only")
-    return defs[0].group(1)
+def _job_if_for_line(text: str, line_idx: int) -> str:
+    """Return the job-level `if:` for the job that owns lines[line_idx]."""
+    lines = text.splitlines()
+    # Find the job key above this line (2-space indent, ends with ':').
+    job_start = line_idx
+    while job_start >= 0:
+        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", lines[job_start])
+        if m:
+            break
+        job_start -= 1
+    if job_start < 0:
+        return ""
+    # Job block until next job key or end.
+    job_end = job_start + 1
+    while job_end < len(lines):
+        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", lines[job_end]):
+            break
+        job_end += 1
+    header = "\n".join(lines[job_start:job_end])
+    # Stop at `steps:` so a step-level if: is not mistaken for the job's.
+    header = re.split(r"\n    steps:\n", header, maxsplit=1)[0]
+    m = re.search(r"^[ ]{4}if:\s*>-?\s*\n((?:[ ]{6}.+\n)*)", header, re.MULTILINE)
+    if m:
+        return m.group(1)
+    m = re.search(r"^[ ]{4}if:\s*(.+)$", header, re.MULTILINE)
+    if m:
+        return m.group(1)
+    return ""
 
 
-def _assert_ci_yml_agent_head_secrets_are_gated(text: str) -> None:
-    """Fail if any #869 secret spend in ci.yml is reachable on an agent head."""
+def _assert_trust_job_is_main_push_only(text: str, label: str) -> None:
+    """The trust job must exist, check out nothing, and decide main-push only."""
     assert "agent-head-secret-gate" in text, (
-        "ci.yml is missing the agent-head-secret-gate marker — the #869 "
-        "agent-head secret gate was removed or renamed")
-    expr = _ci_trusted_for_secrets_expression(text)
-    # Fail closed: main pushes and non-agent pull_request heads only.
-    assert "github.event_name == 'push'" in expr, (
-        "TRUSTED_FOR_SECRETS is not fail-closed on push (main) — "
-        f"expression: {expr}")
-    assert "pull_request" in expr, (
-        "TRUSTED_FOR_SECRETS does not mention pull_request — "
-        f"expression: {expr}")
-    missing = [p for p in sorted(CI_AGENT_HEAD_PREFIXES)
-               if f"startsWith(github.head_ref, '{p}')" not in expr]
-    assert not missing, (
-        "TRUSTED_FOR_SECRETS is missing required agent prefix(es) "
-        f"{missing} — add them in that ONE expression only; "
-        f"expression: {expr}")
-    # A bare claude/-only gate (the pre-review shape) must not pass once
-    # cursor/ is required.
-    assert "cursor/" in expr, (
-        "TRUSTED_FOR_SECRETS does not exclude cursor/* agent heads")
+        f"{label} is missing the agent-head-secret-gate marker — the #869 "
+        "secret trust gate was removed or renamed")
+    blocks = _job_blocks(text)
+    assert "trust" in blocks, (
+        f"{label} has no `trust` job — secret trust must be computed in a "
+        "separate job that checks out nothing (issue #869)")
+    trust = blocks["trust"]
+    assert "actions/checkout" not in trust, (
+        f"{label} [trust] checks out the tree — a head-controlled checkout "
+        "can forge trust via $GITHUB_ENV")
+    assert TRUST_MAIN_PUSH_EXPR in trust, (
+        f"{label} [trust] is not main-push-only "
+        f"(expected {TRUST_MAIN_PUSH_EXPR!r} in the trust job)")
+    # Must not resurrect a prefix denylist.
+    assert "startsWith(github.head_ref" not in text, (
+        f"{label} still lists agent branch prefixes — default-deny is "
+        "main-push-only; delete the prefix denylist (issue #869)")
+    # Job/step env key (not a mention in a comment about the old shape).
+    assert not re.search(r"^[ \t]*TRUSTED_FOR_SECRETS:", text, re.MULTILINE), (
+        f"{label} still defines TRUSTED_FOR_SECRETS job/step env — trust must "
+        "live in needs.trust.outputs.trusted, never job env ($GITHUB_ENV "
+        "forgery)")
 
+
+def _line_has_trust_spend_gate(line: str, step_if: str, job_if: str) -> bool:
+    """True when this secret spend is behind needs.trust.outputs.trusted == true."""
+    gate = f"{TRUST_OUTPUT_GUARD} == 'true'"
+    if gate in line:
+        return True
+    if gate in step_if:
+        return True
+    if gate in job_if:
+        return True
+    return False
+
+
+def _assert_secrets_behind_trust(text: str, label: str) -> None:
+    """Fail if any #869 secret spend is not behind needs.trust.outputs.trusted."""
+    _assert_trust_job_is_main_push_only(text, label)
     lines = text.splitlines()
     offenders: list[str] = []
+
+    if _TOJSON_SECRETS.search(text):
+        offenders.append("toJSON(secrets) dumps every secret — forbidden")
+
     for i, line in enumerate(lines):
-        for m in _CI_SECRET_SPEND.finditer(line):
+        # Bracket form secrets['X'] / secrets["X"]
+        for m in _CI_SECRET_BRACKET.finditer(line):
+            name = m.group(1)
+            step_if = _ci_step_if_containing(lines, i)
+            job_if = _job_if_for_line(text, i)
+            if _line_has_trust_spend_gate(line, step_if, job_if):
+                # Still refuse inverted guards on the same line.
+                if _INVERTED_TRUST.search(line) and f"{TRUST_OUTPUT_GUARD} == 'true'" not in line:
+                    offenders.append(
+                        f"line {i + 1}: inverted trust gate with secrets['{name}']: "
+                        f"{line.strip()}")
+                continue
+            offenders.append(
+                f"line {i + 1}: secrets['{name}'] without "
+                f"{TRUST_OUTPUT_GUARD}: {line.strip()}")
+
+        for m in _CI_SECRET_DOT.finditer(line):
             name = m.group(1)
             # Presence probes (`!= ''`) are boolean checks, not spends.
             if _CI_PRESENCE_PROBE.search(line):
                 continue
-            if TRUSTED_FOR_SECRETS_GUARD in line:
-                continue
             step_if = _ci_step_if_containing(lines, i)
-            if TRUSTED_FOR_SECRETS_GUARD in step_if:
+            job_if = _job_if_for_line(text, i)
+            if _INVERTED_TRUST.search(line) and f"{TRUST_OUTPUT_GUARD} == 'true'" not in line:
+                offenders.append(
+                    f"line {i + 1}: inverted trust gate with secrets.{name}: "
+                    f"{line.strip()}")
                 continue
-            offenders.append(f"line {i + 1}: secrets.{name}: {line.strip()}")
+            if _line_has_trust_spend_gate(line, step_if, job_if):
+                continue
+            offenders.append(
+                f"line {i + 1}: secrets.{name} without "
+                f"{TRUST_OUTPUT_GUARD}: {line.strip()}")
+
     assert not offenders, (
-        "ci.yml exposes autonomy secrets to agent heads (claude/*, cursor/*, …) "
-        f"without the #869 TRUSTED_FOR_SECRETS gate:\n  "
+        f"{label} exposes secrets without the #869 "
+        f"{TRUST_OUTPUT_GUARD} gate:\n  "
         + "\n  ".join(offenders)
     )
 
 
 def test_ci_yml_autonomy_head_secret_gate():
-    _assert_ci_yml_agent_head_secrets_are_gated(
-        CI_YML.read_text(encoding="utf-8"))
+    _assert_secrets_behind_trust(
+        CI_YML.read_text(encoding="utf-8"), "ci.yml")
+
+
+def test_model_smoke_yml_secret_trust_gate():
+    _assert_secrets_behind_trust(
+        MODEL_SMOKE_YML.read_text(encoding="utf-8"), "model-smoke.yml")
 
 
 def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_regen_token():
-    # NEGATIVE CONTROL: drop the TRUSTED_FOR_SECRETS ternary from the
-    # checkout token and require the canary to FAIL.
+    # NEGATIVE CONTROL: drop the trust ternary from the checkout token.
     text = CI_YML.read_text(encoding="utf-8")
     needle = (
-        "env.TRUSTED_FOR_SECRETS == 'true' && "
+        "needs.trust.outputs.trusted == 'true' && "
         "(secrets.REGEN_TOKEN || github.token) || github.token"
     )
     assert needle in text, "tamper target not found — the checkout token gate moved"
     tampered = text.replace(needle, "secrets.REGEN_TOKEN || github.token", 1)
     assert tampered != text
     with pytest.raises(AssertionError, match="REGEN_TOKEN"):
-        _assert_ci_yml_agent_head_secrets_are_gated(tampered)
+        _assert_secrets_behind_trust(tampered, "ci.yml")
 
 
 def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_anthropic_step():
-    # NEGATIVE CONTROL: strip the TRUSTED_FOR_SECRETS conjunct from the
-    # product-page step's if: so ANTHROPIC_API_KEY would materialize on
-    # agent heads.
+    # NEGATIVE CONTROL: strip the trust conjunct from the product-page step.
     text = CI_YML.read_text(encoding="utf-8")
     needle = (
         "&& vars.AI_ANDON_CORD != 'pulled'\n"
-        "          && env.TRUSTED_FOR_SECRETS == 'true'"
+        "          && needs.trust.outputs.trusted == 'true'"
     )
     assert needle in text, "tamper target not found — the product-page trust gate moved"
     tampered = text.replace(
         needle, "&& vars.AI_ANDON_CORD != 'pulled'", 1)
     assert tampered != text
     with pytest.raises(AssertionError, match="ANTHROPIC_API_KEY"):
-        _assert_ci_yml_agent_head_secrets_are_gated(tampered)
+        _assert_secrets_behind_trust(tampered, "ci.yml")
 
 
-def test_ci_yml_autonomy_head_secret_gate_rejects_dropped_cursor_prefix():
-    # NEGATIVE CONTROL: drop cursor/ from the ONE TRUSTED_FOR_SECRETS
-    # expression so cursor/* heads would receive secrets — canary must FAIL.
+def test_ci_yml_secret_gate_rejects_prefix_denylist():
+    # NEGATIVE CONTROL: resurrect a startsWith agent-prefix denylist.
     text = CI_YML.read_text(encoding="utf-8")
-    needle = (
-        "!(startsWith(github.head_ref, 'claude/') || "
-        "startsWith(github.head_ref, 'cursor/'))"
-    )
-    assert needle in text, "tamper target not found — the agent prefix list moved"
     tampered = text.replace(
-        needle, "!(startsWith(github.head_ref, 'claude/'))", 1)
+        TRUST_MAIN_PUSH_EXPR,
+        "github.event_name == 'push' || "
+        "(github.event_name == 'pull_request' && "
+        "!startsWith(github.head_ref, 'claude/'))",
+        1,
+    )
     assert tampered != text
-    with pytest.raises(AssertionError, match="cursor/"):
-        _assert_ci_yml_agent_head_secrets_are_gated(tampered)
+    with pytest.raises(AssertionError, match="startsWith|prefix"):
+        _assert_secrets_behind_trust(tampered, "ci.yml")
+
+
+def test_ci_yml_secret_gate_rejects_tojson_secrets():
+    text = CI_YML.read_text(encoding="utf-8")
+    # Inject into the regen job's plan step env.
+    needle = "HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' && needs.trust.outputs.trusted == 'true' }}"
+    assert needle in text, "tamper target not found — HAVE_PAT line moved"
+    tampered = text.replace(
+        needle,
+        needle + "\n          DUMP: ${{ toJSON(secrets) }}",
+        1,
+    )
+    with pytest.raises(AssertionError, match="toJSON"):
+        _assert_secrets_behind_trust(tampered, "ci.yml")
+
+
+def test_ci_yml_secret_gate_rejects_bracket_secrets():
+    text = CI_YML.read_text(encoding="utf-8")
+    needle = "ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}"
+    assert needle in text, "tamper target not found — ANTHROPIC line moved"
+    tampered = text.replace(
+        needle,
+        "ANTHROPIC_API_KEY: ${{ secrets['ANTHROPIC_API_KEY'] }}",
+        1,
+    )
+    # The step's if: still has the trust gate, so bracket form behind the
+    # same if: would pass — strip the product-page if: conjunct too.
+    if_needle = (
+        "&& vars.AI_ANDON_CORD != 'pulled'\n"
+        "          && needs.trust.outputs.trusted == 'true'"
+    )
+    assert if_needle in tampered, "product-page if: gate moved"
+    tampered = tampered.replace(
+        if_needle, "&& vars.AI_ANDON_CORD != 'pulled'", 1)
+    with pytest.raises(AssertionError, match=r"secrets\['ANTHROPIC_API_KEY'\]"):
+        _assert_secrets_behind_trust(tampered, "ci.yml")
+
+
+def test_model_smoke_secret_gate_rejects_ungated_keys():
+    text = MODEL_SMOKE_YML.read_text(encoding="utf-8")
+    needle = "needs.trust.outputs.trusted == 'true'"
+    assert needle in text, "tamper target not found — model-smoke trust gate moved"
+    # Drop the trust conjunct from the smoke job if:, leaving only andon.
+    tampered = text.replace(
+        "vars.AI_ANDON_CORD != 'pulled' &&\n"
+        "      needs.trust.outputs.trusted == 'true'",
+        "vars.AI_ANDON_CORD != 'pulled'",
+        1,
+    )
+    assert tampered != text
+    with pytest.raises(AssertionError, match="ZAI_KEY|ANTHROPIC|OPENROUTER"):
+        _assert_secrets_behind_trust(tampered, "model-smoke.yml")

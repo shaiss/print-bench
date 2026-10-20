@@ -16,23 +16,20 @@ name: Model chain smoke
 # that could attempt nothing proves nothing.)
 #
 # TWO WAYS IN:
-#   • Automatically, on any PR that edits the registry, the model-registry
-#     tool, or this workflow (the `pull_request` paths below) — smoking EVERY
-#     chain, so a registry edit can no longer ship an unservable id just
-#     because nobody remembered to dispatch this by hand. That "dispatch-only,
-#     so it never runs on its own" gap was the unclosed half of #298.
-#   • On demand via workflow_dispatch — smoke one named chain (the default,
-#     `review`), or clear the input to smoke every chain. Dispatch after
-#     editing a chain's Anthropic tail, when a provider misbehaves, or before
-#     pointing a new routine at a chain (#243).
+#   • Automatically, on push to main that edits the registry, the
+#     model-registry tool, or this workflow — smoking EVERY chain after the
+#     change lands, so a registry edit cannot ship an unservable id unproven
+#     (#298). Provider keys are available ONLY on that main push (issue
+#     #869 / agent-head-secret-gate): the `trust` job gates materialization.
+#   • On pull_request (same paths) and workflow_dispatch — the workflow still
+#     RUNS so the trigger is visible, but the keyed smoke is skipped when
+#     trust is false (PR / dispatch). A PR-time or dispatch-time live smoke
+#     needs a Shai decision: Environment with required reviewers that checks
+#     out base scripts.
 #
-# The PR trigger is scoped to same-repo PRs: a fork PR has no provider secrets,
-# so a live smoke there could only report "proves nothing" and fail — this
-# repo's PRs are all same-repo session branches (docs/actions-security.md).
 # model-smoke is NOT one of ci-ok's required contexts, so a red smoke informs
 # without blocking a merge until a maintainer promotes it in branch protection.
-# Read-only permissions; the provider secrets are the only exposure, the same
-# accepted posture as the other key-holding workflows.
+# Read-only permissions; the provider secrets are the only exposure.
 #
 # AI andon cord (docs/andon-cord.md): the AI_ANDON_CORD repo variable set to
 # 'pulled' bypasses the smoke job (a real paid request per link, on both
@@ -51,6 +48,12 @@ on:
         description: "Registry chain to smoke-test (blank = every chain)"
         required: false
         default: review
+  push:
+    branches: [main]
+    paths:
+      - ".github/models/**"
+      - "tools/model-registry/**"
+      - ".github/workflows/model-smoke.yml"
   pull_request:
     paths:
       - ".github/models/**"
@@ -61,21 +64,32 @@ permissions:
   contents: read
 
 jobs:
+  # agent-head-secret-gate (issue #869): trust is computed with no checkout
+  # so head code cannot forge it via $GITHUB_ENV. Secrets only on push to main.
+  trust:
+    name: Secret trust
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      trusted: ${{ steps.decide.outputs.trusted }}
+    steps:
+      - id: decide
+        name: Decide whether secrets may materialize
+        env:
+          TRUSTED: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: echo "trusted=${TRUSTED}" >> "$GITHUB_OUTPUT"
+
   smoke:
     name: Smoke the registry chains
-    # Skip fork PRs: no provider secrets there, so a live smoke can only fail
-    # "proves nothing". Dispatch runs and same-repo PRs still smoke for real.
-    # Under the AI andon cord the job is skipped outright (see the if: below).
-    #
-    # AI andon cord (docs/andon-cord.md): every link ping is a real paid
-    # request on a provider key, and the header's rule is that a run which
-    # attempts nothing FAILS — so the cord must skip the job, never blank the
-    # keys. The sibling andon-notice job says why nothing ran. The parentheses
-    # are load-bearing: && binds tighter than || in GitHub expressions.
+    needs: trust
+    # Skip when the AI andon cord is pulled, or when trust is false (PR /
+    # dispatch — no provider keys). Under the cord the job is skipped
+    # outright (see andon-notice). The parentheses are load-bearing: &&
+    # binds tighter than || in GitHub expressions. ANDON_JOB_LEG must stay
+    # a top-level conjunct (tools/model-registry andon drift guard).
     if: >-
       vars.AI_ANDON_CORD != 'pulled' &&
-      (github.event_name == 'workflow_dispatch' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+      needs.trust.outputs.trusted == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -87,15 +101,16 @@ jobs:
           PYTHONPATH: tools/model-registry/src
           EVENT: ${{ github.event_name }}
           CHAIN_INPUT: ${{ inputs.chain }}
+          # Secrets only materialize when this job's if: already required
+          # needs.trust.outputs.trusted == 'true' (main push).
           ZAI_KEY: ${{ secrets.ZAI_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
           # Dispatch with a named chain smokes just that one (default `review`,
-          # preserving the old behavior); a cleared dispatch input or any PR
-          # trigger smokes EVERY chain the registry declares, so no chain edit
-          # ships an unservable id unproven (#298).
+          # preserving the old behavior); a cleared dispatch input or any
+          # non-dispatch trigger smokes EVERY chain the registry declares.
           if [ "$EVENT" = "workflow_dispatch" ] && [ -n "${CHAIN_INPUT:-}" ]; then
             chains="$CHAIN_INPUT"
           else
@@ -127,3 +142,18 @@ jobs:
     steps:
       - name: Explain why nothing ran
         run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — the model-chain smoke was not run; no provider API call was made and nothing was escalated. Release the cord (delete the variable, or set it to anything but 'pulled') to resume; dispatch this workflow afterwards if a registry edit shipped unproven meanwhile — see docs/andon-cord.md."
+
+  untrusted-notice:
+    # PR / workflow_dispatch: trust is false, so the keyed smoke is skipped
+    # (issue #869). Say why — a skipped job is mute.
+    needs: trust
+    if: >-
+      vars.AI_ANDON_CORD != 'pulled' &&
+      needs.trust.outputs.trusted != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Explain why the keyed smoke did not run
+        run: |
+          echo "::notice::model-chain smoke skipped — provider keys (ZAI_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY) materialize only on push to main (issue #869). Registry edits are smoked after merge on the main push. A PR-time or workflow_dispatch live smoke needs Shai decision: environment with required reviewers that checks out base scripts."
