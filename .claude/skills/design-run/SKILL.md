@@ -59,7 +59,9 @@ so the two never collide on the same issue.
    **before you scaffold a single part**. Keep **one active claim** per issue at
    a time — never delete a claim comment (the timestamps are the record),
    withdraw it instead. The timestamp is the proof the contract predates the
-   diff.
+   diff. **Unattended** you cannot post at all (no `issues: write`, issue #862):
+   write the claim as the first intent in `.design-run-intents.json` per §8's
+   intents protocol — the settle job posts it for you.
 5. **Re-read after claiming.** Check-then-post is not atomic. Re-read the
    comments; if another *active* claim predates yours, withdraw (edit your
    comment so its first line reads `🚢 SHIP-LOCK WITHDRAWN` — never delete it)
@@ -306,7 +308,9 @@ Before you end the turn:
    push posts nothing that reads as success. A `🚢 DECLINED`,
    `🚦 DECISION NEEDED`, or `🚢 DEFERRED` comment from this run is a hard
    stop: the delivery step does not bundle that work, does not push it,
-   and does not post success.
+   and does not post success. Unattended, the same markers in your intents
+   file are that hard stop — the bundle step reads them before writing
+   anything.
 
 Do not call `subscribe_pr_activity`. You do not open the draft PR in step 3.
 The delivery workflow opens it, and that PR does not exist yet when your turn ends.
@@ -335,6 +339,59 @@ Same skill, three tightenings — nobody is there to catch a wrong guess:
   comments, each readable cold. The success comment is not one of these:
   §7 reserves it for the delivery step, which posts it only after the remote
   branch and the draft PR have both been verified.
+
+**The intents protocol (unattended).** Your job token has no `issues: write`
+(issue #862): a prompt-injected turn must not be able to label or comment ANY
+issue. Every comment and label you owe the thread goes into
+`.design-run-intents.json` at the repo root — gitignored, never `git add`ed
+(the bundle path check refuses it, and a committed copy would ride the
+delivered PR to main and poison later runs). The trusted post-agent step
+carries the file out; the settle job applies it:
+
+```json
+{"version":1,"intents":[
+ {"issue":862,"action":"comment","body":"🚢 SHIP-LOCK — …the §2 contract…"},
+ {"issue":862,"action":"comment","body":"Amendment: …"},
+ {"issue":862,"action":"label","label":"needs-decision"}
+]}
+```
+
+What the applier enforces (nothing you write can loosen it): an intent posts
+only when its `issue` is the **selected** one, and a `label` intent only when
+the label is `needs-decision` — the one label the HITL gate needs. Anything
+else (an off-issue comment, an `autonomy-ok` on the selected issue) is dropped
+with a workflow warning and never posted. Caps: 32 intents, 8 comments, 2
+labels, 8 KiB per comment body, 64 KiB for the whole intents file. A
+comment body whose first non-empty line is bare ASCII `SHIP-LOCK` (use the
+protocol `🚢 SHIP-LOCK` marker for claims) or that contains HTML comment
+markers (`<!--` / `-->`) is rejected. A malformed or oversize file applies
+nothing.
+
+Consequences for the sections above:
+
+- **§0's claim is your first intent.** Write the SHIP-LOCK contract comment as
+  the first comment intent, before scaffolding. It lands on the thread only
+  when settle runs — after your whole turn — so the §0.5 re-read is the one
+  you do *before* writing the intent (the design-run concurrency group
+  serializes design-runs against each other; a burn racing the same
+  both-labels issue is the residual window, and delivery still refuses to
+  move a branch a sibling run got to first). A run that dies before the
+  trusted step never posts a claim at all — nothing to freeze the brief.
+- **Withdrawal edits the intent, not a comment.** Nothing has been posted
+  yet, so §0.6's withdrawal is: rewrite your claim intent's body so its
+  first line reads `🚢 SHIP-LOCK WITHDRAWN`. If you already wrote a stop
+  intent (below), that supersedes the claim on the thread.
+- **Stops are comment intents.** A `🚢 DECLINED`, `🚦 DECISION NEEDED`, or
+  `🚢 DEFERRED` first line in a comment intent is a hard stop the bundle step
+  honors: no bundle, no push — but the intents still travel, so settle posts
+  your stop and the thread keeps its record.
+- **§9's label is a label intent.** Skip the `ensure-label`/`gh issue edit`
+  dance; write `{"action":"label","label":"needs-decision"}` and settle
+  ensures and adds it.
+
+Attended runs (a human invoked `/design-run` in a session with their own
+credentials) post directly as before — the intents protocol is the unattended
+job's constraint, not the skill's.
 
 A stopped run costs nothing; a confidently wrong design PR costs a review and,
 worse, teaches the human to distrust the pipeline. When unsure, decline.
@@ -365,8 +422,11 @@ two live answers (decline and ask, don't enumerate).
    .claude/skills/chunk-issue/chunk-helper.sh ensure-label needs-decision
    gh issue edit <N> --add-label needs-decision
    ```
-   The label is unspoofable (write access to set) and is what the backlog-burn
-   selector keys its durable pause on.
+   **Unattended** you have no `issues: write`: write a label intent
+   (`{"action":"label","label":"needs-decision"}`) per §8 instead — `needs-decision`
+   is exactly the one label the applier's allowlist admits, and settle ensures
+   and adds it. The label is unspoofable (write access to set) and is what the
+   backlog-burn selector keys its durable pause on.
 3. Post a **`🚦 DECISION NEEDED — \`<id>\``** comment with **exactly two**
    options — the yes and the no — each saying what ships if chosen, enough
    context (what the gates/telemetry say) to answer without scrolling, and the
