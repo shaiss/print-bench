@@ -61,10 +61,15 @@ _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 # the two tools must stay independently installable (the groomer's precedent).
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
-# Settle posts via GH_TOKEN=${{ github.token }} → this exact login. Not
-# "any Bot" (claude[bot]/cursor[bot] can forge the marker) and not the
-# repo owner (settle does not use a PAT). Cipher, #864.
-SHIP_LOCK_AUTHOR_LOGIN = "github-actions[bot]"
+# Exact logins that may author a lock (Cipher, #864). Mirrored from
+# backlog_burn.select.SHIP_LOCK_AUTHOR_LOGINS — settle (GITHUB_TOKEN),
+# attended PAT (shaiss), Cursor cloud-agent (cursor[bot] per auto-review.yml).
+# No generic "[bot]" match; claude[bot] is not on the list.
+SHIP_LOCK_AUTHOR_LOGINS = frozenset({
+    "github-actions[bot]",
+    "shaiss",
+    "cursor[bot]",
+})
 
 # The label an adoption-study submission carries. Collected from the same
 # open-issues listing the lock scan reads (no extra request), so Reeve can
@@ -253,12 +258,13 @@ def gather_run_health(
             f"{API_ROOT}/repos/{repo}/issues/{item['number']}/comments?per_page=100",
             token,
         )
+        _lock_logins = {a.lower() for a in SHIP_LOCK_AUTHOR_LOGINS}
         lock_comments = [
             c for c in comments
             if SHIP_LOCK_HTML_MARKER in (c.get("body") or "")
             and (
                 ((c.get("user") or {}).get("login") or "").lower()
-                == SHIP_LOCK_AUTHOR_LOGIN.lower()
+                in _lock_logins
             )
         ]
         if not lock_comments:

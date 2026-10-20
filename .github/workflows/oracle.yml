@@ -270,26 +270,24 @@ jobs:
                 --jq '"**" + .title + "**\n\n" + (.body // "(no body)")' \
                 || echo "(issue #${n} could not be read)"
               echo
-              # Authentic lock = HTML marker + settle login github-actions[bot]
-              # (GH_TOKEN=${{ github.token }}). Not any Bot, not the owner
-              # (Cipher, #864). A bare 🚢 SHIP-LOCK first line is never enough.
-              lock="$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}/comments" \
-                --paginate \
-                --jq "[.[]
-                    | select(.body | contains(\"<!-- design-run-ship-lock:v1 -->\"))
-                    | select(
-                        ((.user.login // \"\") | ascii_downcase)
-                        == \"github-actions[bot]\"
-                      )
-                    | select(.body | test(\"^\\\\s*🚢 SHIP-LOCK WITHDRAWN\") | not)]
-                   | last
-                   | if . == null then \"\"
-                     else \"### SHIP-LOCK contract (by \" + .user.login
-                          + \" at \" + .created_at + \")\\n\\n\" + .body end" || true)"
-              if [ -n "$lock" ]; then
-                printf '%s\n\n' "$lock"
+              # Frozen §2 contract — NOT the settle stub lock. Settle posts
+              # "🚢 SHIP-LOCK — settle claim" + HTML marker; the real contract
+              # is a later comment (or an attended claim that embeds Gate
+              # contract / Acceptance criteria). scripts/oracle-ship-contract.sh
+              # picks it; --selftest covers stub vs real (Cipher, #864).
+              comments_json="$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}/comments" \
+                --paginate --slurp 2>/dev/null || true)"
+              contract=""
+              if [ -n "$comments_json" ]; then
+                contract="$(printf '%s' "$comments_json" | jq -c 'add // []' \
+                  | ./scripts/oracle-ship-contract.sh - || true)"
+              fi
+              if [ -n "$contract" ]; then
+                echo "### Acceptance contract (from issue #${n})"
+                echo
+                printf '%s\n\n' "$contract"
               else
-                echo "### No active SHIP-LOCK contract found on issue #${n}"
+                echo "### No acceptance contract found on issue #${n}"
                 echo
               fi
             done

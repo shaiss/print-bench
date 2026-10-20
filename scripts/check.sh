@@ -899,6 +899,13 @@ if ! ./scripts/design-run-deliver.sh --selftest; then
   fail=1
 fi
 
+# oracle-ship-contract.sh picks the frozen §2 contract for Oracle context —
+# never the settle stub lock (Bugbot MED / Cipher, #864).
+echo "-- oracle-ship-contract selftest: scripts/oracle-ship-contract.sh --selftest"
+if ! ./scripts/oracle-ship-contract.sh --selftest; then
+  fail=1
+fi
+
 # release-bundle.sh is the build half of the versioned-download UX (issue
 # #102): its --selftest proves the shell glue — the manifest names every part,
 # each recorded SHA-256 recomputes over the bundled STL, the README's print

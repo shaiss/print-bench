@@ -42,13 +42,14 @@ so the two never collide on the same issue.
    byte-for-byte the one `/ship-issue` §0 uses so a burn and a hand-run cannot
    both claim it:
    - **an active claim marker** — read the *latest authentic* `🚢 SHIP-LOCK`
-     comment (it must carry the settle HTML marker
-     `<!-- design-run-ship-lock:v1 -->` **and** be authored by
-     `github-actions[bot]` — settle's `GH_TOKEN=${{ github.token }}`; a bare
+     comment (it must carry the HTML marker
+     `<!-- design-run-ship-lock:v1 -->` **and** be authored by one of
+     `github-actions[bot]` (settle), `shaiss` (attended/PAT), or
+     `cursor[bot]` (Cursor cloud-agent per auto-review.yml); a bare
      `🚢 SHIP-LOCK` first line is never a lock, nor is marker +
-     `claude[bot]` / `cursor[bot]` / the repo owner) and act on that one.
-     An authentic `🚢 SHIP-LOCK` is active and the issue is taken;
-     `🚢 SHIP-LOCK WITHDRAWN` is released and blocks nothing.
+     `claude[bot]`) and act on that one. An authentic `🚢 SHIP-LOCK` is
+     active and the issue is taken; `🚢 SHIP-LOCK WITHDRAWN` is released
+     and blocks nothing.
      An active claim more than a few hours old with **no**
      `claude/issue-<N>-*` branch carrying unmerged work and **no** open PR
      closing the issue is *stale* — take it over, naming the one you
@@ -379,7 +380,7 @@ is dropped with a workflow warning and never posted. Caps: 32 intents, 8
 comments, 2 labels, 8 KiB per comment body, 64 KiB for the whole intents
 file. Every comment body is NFKC-normalized (Cf / zero-width stripped,
 whitespace collapsed) before checks; any line matching `/ship[\s_-]*lock/i`
-is rejected (locks are settle-only), and so is any body containing HTML
+is rejected (intents cannot author a lock; burn residual in #872), and so is any body containing HTML
 comment markers (`<!--` / `-->`). A malformed or oversize file, or a
 normalizer failure, applies nothing (fail closed).
 

@@ -787,12 +787,14 @@ STOP_LOCK_MARKER='🚢 SHIP-LOCK'
 # Hidden authenticity marker. Settle's lock writer emits it; intents reject
 # `<!--` so an applied intent can never forge a lock.
 SHIP_LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
-# Exact GitHub login settle posts as. design-run.yml's settle
-# "Apply the agent's issue intents" step sets GH_TOKEN=${{ github.token }},
-# which is always github-actions[bot] — never a PAT, never another app Bot
-# (claude[bot] / cursor[bot] can comment with the marker and must not
-# count). Do not widen this to "any Bot" or the repo owner.
-SHIP_LOCK_AUTHOR_LOGIN='github-actions[bot]'
+# Exact GitHub logins that may author a lock (space-separated; no generic
+# "[bot]" match). Cipher, #864:
+#   github-actions[bot] — settle apply-intents (GH_TOKEN=${{ github.token }})
+#   shaiss              — attended hand-run / PAT (repo owner; historical claims)
+#   cursor[bot]         — Cursor cloud-agent attended runs
+#                         (.github/workflows/auto-review.yml documents this actor)
+# claude[bot] is NOT listed. backlog-burn can also post as shaiss (#872).
+SHIP_LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss cursor[bot]'
 # Constant settle-claim body — built here, never from intent text.
 SHIP_LOCK_SETTLE_BODY="${STOP_LOCK_MARKER} — settle claim
 
@@ -845,7 +847,7 @@ sys.exit(0 if any(pat.search(line) for line in text.splitlines()) else 1)
 '
 }
 
-# Post the settle-only SHIP-LOCK claim. Body is the SHIP_LOCK_SETTLE_BODY
+# Post the settle SHIP-LOCK claim. Body is the SHIP_LOCK_SETTLE_BODY
 # constant — never intent text. Intents cannot forge the HTML marker.
 post_settle_ship_lock() {
   local token="${COMMENT_TOKEN:-${GH_TOKEN:-}}"
@@ -870,7 +872,7 @@ post_settle_ship_lock() {
 # latest comment, inside the job window, from a Bot or the repo owner.
 hard_stop_from_comments() {  # [run-started-at]
   jq -s --arg html_marker "$SHIP_LOCK_HTML_MARKER" \
-    --arg settle_login "$SHIP_LOCK_AUTHOR_LOGIN" \
+    --arg settle_logins "$SHIP_LOCK_AUTHOR_LOGINS" \
     --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
     --arg d3 "$STOP_MARKER_DEFERRED" \
     --arg since "${1:-}" --arg owner "${REPO%%/*}" '
@@ -878,7 +880,7 @@ hard_stop_from_comments() {  # [run-started-at]
         | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
         | map(select(length > 0)) | (.[0] // "");
       # Stops may come from github-actions[bot] (settle intents) or the
-      # repo owner (attended PAT). Locks may NOT — see is_lock.
+      # repo owner (attended PAT). Locks use the named allowlist — see is_lock.
       def stop_trusted:
         ((.login // "") | length) > 0 and ((.type // "") | length) > 0
         and (
@@ -886,12 +888,14 @@ hard_stop_from_comments() {  # [run-started-at]
           or (($owner | length) > 0
               and ((.login | ascii_downcase) == ($owner | ascii_downcase)))
         );
-      # A lock is the HTML marker PLUS the settle login exactly — never a
-      # bare SHIP-LOCK first line, never another Bot (Cipher, #864).
+      def lock_logins:
+        ($settle_logins / " ") | map(select(length > 0) | ascii_downcase);
+      # A lock is the HTML marker PLUS an allowlisted login — never a bare
+      # SHIP-LOCK first line, never an unlisted Bot (Cipher, #864).
       def is_lock:
         ((.body // "") | contains($html_marker))
-        and (((.login // "") | ascii_downcase)
-             == ($settle_login | ascii_downcase));
+        and (((.login // "") | ascii_downcase) as $l
+             | (lock_logins | index($l)) != null);
       def latest_lock:
         [ .[] | select(is_lock) ]
         | if length == 0 then null
@@ -958,8 +962,10 @@ refuse_if_hard_stop() {
 # marker is the same hard stop refuse_if_hard_stop reads on the thread.
 # A malformed or missing file indicates nothing (the applier warns on it
 # separately); this predicate never fails the run.
+# $1 optional path (default INTENTS_FILENAME). True when a selected-issue
+# comment intent leads with a stop marker.
 intents_stop_indicated() {
-  local f="${INTENTS_FILENAME}"
+  local f="${1:-${INTENTS_FILENAME}}"
   [ -f "$f" ] && [ ! -L "$f" ] || return 1
   jq -e --arg issue "$ISSUE" \
     --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
@@ -1013,7 +1019,7 @@ write_intents() {
 }
 
 # Apply the agent's issue intents (settle job, trusted artifact download).
-# Posts the settle-only SHIP-LOCK claim (constant body with HTML marker)
+# Posts the settle SHIP-LOCK claim (constant body with HTML marker)
 # first, then applies intents. One intent posts only when: it targets THIS
 # issue, its action is comment or label, its label is in INTENTS_ALLOWLIST,
 # and the per-run caps hold. Comment bodies are NFKC-normalized (Cf stripped,
@@ -1056,9 +1062,15 @@ apply_intents() {
     echo "::warning::intents file is malformed (want {version:1,intents:[...]} of at most '${INTENTS_MAX_ENTRIES}' entries) — no intents applied" >&2
     exit 0
   fi
-  # Settle-only claim: constant body, never intent text. Posted before
-  # intents so lock cleanup / hard-stop readers see an authentic lock.
-  post_settle_ship_lock
+  # Settle claim: constant body, never intent text. Skip when intents
+  # already carry a stop (DECLINED / DECISION NEEDED / DEFERRED) — posting
+  # a lock then would leave an active claim that cleanup treats as
+  # declined-after-claim and does not withdraw (Bugbot MED, #864).
+  if intents_stop_indicated "$path"; then
+    note "skipping settle SHIP-LOCK — intents carry a stop marker on #${ISSUE}"
+  else
+    post_settle_ship_lock
+  fi
   n="$(jq '.intents | length' "$path")"
   i=0
   while [ "$i" -lt "$n" ]; do
@@ -1104,7 +1116,7 @@ apply_intents() {
           exit 1
         fi
         if printf '%s' "$normalized" | normalized_body_has_ship_lock; then
-          echo "::warning::comment intent ${i} matches ship-lock after normalization — rejected (locks are settle-only)" >&2
+          echo "::warning::comment intent ${i} matches ship-lock after normalization — rejected (intents cannot author a lock; see #872 for burn residual)" >&2
           rejected=$((rejected + 1))
           i=$((i + 1))
           continue
@@ -2327,6 +2339,32 @@ EOF
   reject_shiplock_case fullwidth "$(python3 -c 'print("\uff33\uff28\uff29\uff30\uff0d\uff2c\uff2f\uff23\uff2b spoof")')"
   reject_shiplock_case line2 $'preamble\nSHIP-LOCK on line two'
 
+  # Cipher / Bugbot MED (#864): a DECLINED-only intents payload must NOT
+  # post a settle lock (cleanup would leave it active as declined-after-claim).
+  ifile="${tmp}/intents-declined-only.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\n\nparked"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(comment_posts)" -eq 1 ] || {
+    echo "selftest: DECLINED-only intents posted settle lock (posted $(comment_posts))" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+    echo "selftest: DECLINED-only intents still posted the settle SHIP-LOCK marker" >&2
+    exit 1
+  }
+  grep -q -- 'DECLINED — needs a decision' "${tmp}/gh.log" || {
+    echo "selftest: DECLINED-only intents did not post the stop comment" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK' || {
+    echo "selftest: DECLINED-only path did not note skipping the settle lock" >&2
+    exit 1
+  }
+
   # Cipher (#864): HTML comment markers anywhere in the body → reject.
   ifile="${tmp}/intents-html-comment.json"
   cat > "$ifile" <<'EOF'
@@ -2749,8 +2787,8 @@ EOF
   plant_stop() {  # body, login, type, created_at
     # Authentic settle lock: visible line + HTML marker + settle login.
     jq -n --arg body "$1" --arg login "$2" --arg type "$3" --arg at "$4" \
-      --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg settle "$SHIP_LOCK_AUTHOR_LOGIN" \
-      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:$settle,type:"Bot"},
+      --arg lock "$SHIP_LOCK_SETTLE_BODY" \
+      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"github-actions[bot]",type:"Bot"},
         {body:$body,created_at:$at,login:$login,type:$type}]' > "${tmp}/comments.json"
   }
   for marker in '🚢 DECLINED — needs a decision' '🚦 DECISION NEEDED — bay-width' '🚢 DEFERRED — dependencies'; do
@@ -2806,17 +2844,26 @@ EOF
     echo "selftest: marker+untrusted-author was treated as a lock" >&2
     exit 1
   }
-  # Marker + another app Bot (not settle's github-actions[bot]) → not a lock.
-  # claude[bot]/cursor[bot] can comment directly with the marker.
-  for other_bot in 'claude[bot]' 'cursor[bot]'; do
-    jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg login "$other_bot" \
-      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:$login,type:"Bot"}]' \
+  # Allowlisted attended logins (shaiss, cursor[bot]) + settle login count.
+  for ok_login in 'github-actions[bot]' 'shaiss' 'cursor[bot]'; do
+    jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg login "$ok_login" \
+      --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:$login,type:(if $login=="shaiss" then "User" else "Bot" end)},
+        {body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
       > "${tmp}/comments.json"
-    [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
-      echo "selftest: marker+${other_bot} was treated as a lock" >&2
+    [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+      echo "selftest: marker+${ok_login} was not treated as a lock" >&2
       exit 1
     }
   done
+  # Unlisted Bot (claude[bot]) must NOT count — no generic [bot] match.
+  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" \
+    '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"claude[bot]",type:"Bot"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+    echo "selftest: marker+claude[bot] was treated as a lock" >&2
+    exit 1
+  }
 
   # Bot author, claimless (no lock): still this run's stop.
   jq -n --arg body $'🚦 DECISION NEEDED — bay-width\n\nstop' \

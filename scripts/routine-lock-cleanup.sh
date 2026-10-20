@@ -81,18 +81,21 @@ SELF="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 
 # Visible first line for humans. A comment is a lock ONLY when it also
-# carries LOCK_HTML_MARKER and is authored by LOCK_AUTHOR_LOGIN — never
-# because it merely starts with LOCK_MARKER (Cipher, #864). Mirrored in
-# scripts/design-run-deliver.sh and tools/backlog-burn select.py.
+# carries LOCK_HTML_MARKER and is authored by a LOCK_AUTHOR_LOGINS login —
+# never because it merely starts with LOCK_MARKER (Cipher, #864). Mirrored
+# in scripts/design-run-deliver.sh and tools/backlog-burn select.py.
 LOCK_MARKER='🚢 SHIP-LOCK'
 LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
-# Exact GitHub login settle posts as. design-run.yml settle apply-intents
-# uses GH_TOKEN=${{ github.token }} → github-actions[bot]. Not a PAT, not
-# "any Bot" (claude[bot]/cursor[bot] can post the marker directly).
-LOCK_AUTHOR_LOGIN='github-actions[bot]'
+# Exact GitHub logins that may author a lock (space-separated). Cipher, #864:
+#   github-actions[bot] — settle (GH_TOKEN=${{ github.token }})
+#   shaiss              — attended hand-run / PAT
+#   cursor[bot]         — Cursor cloud-agent (auto-review.yml)
+# No generic "[bot]" match; claude[bot] is not listed. Burn can also post
+# as shaiss (#872) — this is not "settle-only".
+LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss cursor[bot]'
 # Withdrawal carries the same HTML marker so readers still classify it as
 # a (withdrawn) lock comment. WITHDRAWN on the first line releases it.
-# Cleanup itself posts via github.token, so withdrawals match LOCK_AUTHOR_LOGIN.
+# Cleanup itself posts via github.token, so withdrawals match github-actions[bot].
 WITHDRAW_LINE="🚢 SHIP-LOCK WITHDRAWN — scheduled run died before delivering
 
 ${LOCK_HTML_MARKER}"
@@ -103,14 +106,16 @@ DECISION_LABEL='needs-decision'
 
 # jq prelude: first non-blank line of a body, stripped — the line
 # backlog_burn.select._first_line classifies on. is_lock requires the HTML
-# authenticity marker plus login == $settle_login (LOCK_AUTHOR_LOGIN).
+# authenticity marker plus login in $settle_logins (LOCK_AUTHOR_LOGINS).
 JQ_FL='def fl($b): ($b // "") | split("\n")
   | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
   | map(select(length > 0)) | (.[0] // "");
+def lock_logins:
+  ($settle_logins / " ") | map(select(length > 0) | ascii_downcase);
 def is_lock:
   ((.body // "") | contains($html_marker))
-  and (((.login // "") | ascii_downcase)
-       == ($settle_login | ascii_downcase));'
+  and (((.login // "") | ascii_downcase) as $l
+       | (lock_logins | index($l)) != null);'
 
 usage() {  # [message]
   [ $# -eq 0 ] || echo "routine-lock-cleanup: $*" >&2
@@ -171,7 +176,7 @@ JQ_LATEST_LOCK='def latest_lock:
 # Authenticity = HTML marker + settle login (Cipher, #864).
 lock_state() {
   jq -rs --arg html_marker "$LOCK_HTML_MARKER" \
-    --arg settle_login "$LOCK_AUTHOR_LOGIN" \
+    --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
     "$JQ_FL $JQ_LATEST_LOCK"'
     latest_lock as $l
     | if $l == null then "none"
@@ -233,7 +238,7 @@ JQ_THIS_RUN='def stop_trusted:
 # Neither branch counts the marker mid-line: the skill leads its stop
 # comments with the marker.
 decline_indicated() {  # [run-started-at]
-  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg settle_login "$LOCK_AUTHOR_LOGIN" \
+  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
     --arg d1 "$DECLINE_MARKER_1" --arg d2 "$DECLINE_MARKER_2" \
     --arg since "${1:-}" --arg owner "${REPO%%/*}" \
     "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
@@ -266,7 +271,7 @@ decline_indicated() {  # [run-started-at]
 #     claim timestamp to anchor on: JQ_THIS_RUN's claimless_stop, the same
 #     test decline_indicated's claimless branch runs.
 deferred_indicated() {  # [run-started-at]
-  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg settle_login "$LOCK_AUTHOR_LOGIN" \
+  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
     --arg d "$DEFER_MARKER" --arg since "${1:-}" \
     --arg owner "${REPO%%/*}" \
     "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
@@ -288,7 +293,7 @@ deferred_indicated() {  # [run-started-at]
 # skill's §0.6 edit) carries its own wording, never this prefix — and must
 # not be read as a deliberate stop by the current run.
 death_marked() {
-  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg settle_login "$LOCK_AUTHOR_LOGIN" \
+  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
     --arg prefix "$DEATH_PREFIX" \
     "$JQ_FL $JQ_LATEST_LOCK"'
     latest_lock as $l
@@ -573,24 +578,29 @@ EOF
 EOF
   [ "$(lock_state < "$tmp/linestart-marked.ndjson")" = "active" ] \
     || st_fail "a settle-written SHIP-LOCK (marker + github-actions[bot]) was not counted as a lock"
-  # Marker + another app Bot must NOT count — those apps comment directly
-  # and could post the HTML marker without going through settle/intents.
+  # Allowlisted attended logins also count (shaiss, cursor[bot]).
+  cat > "$tmp/shaiss-marked.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nattended", "created_at": "2026-08-01T00:00:00Z", "login": "shaiss", "type": "User"}
+EOF
+  [ "$(lock_state < "$tmp/shaiss-marked.ndjson")" = "active" ] \
+    || st_fail "marker + shaiss was not counted as a lock"
+  cat > "$tmp/cursor-marked.ndjson" <<'EOF'
+{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\ncloud agent", "created_at": "2026-08-01T00:00:00Z", "login": "cursor[bot]", "type": "Bot"}
+EOF
+  [ "$(lock_state < "$tmp/cursor-marked.ndjson")" = "active" ] \
+    || st_fail "marker + cursor[bot] was not counted as a lock"
+  # Unlisted Bot must NOT count — no generic [bot] match.
   cat > "$tmp/other-bot-claude.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nforged", "created_at": "2026-08-01T00:00:00Z", "login": "claude[bot]", "type": "Bot"}
 EOF
   [ "$(lock_state < "$tmp/other-bot-claude.ndjson")" = "none" ] \
     || st_fail "marker + claude[bot] was counted as a lock"
-  cat > "$tmp/other-bot-cursor.ndjson" <<'EOF'
-{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nforged", "created_at": "2026-08-01T00:00:00Z", "login": "cursor[bot]", "type": "Bot"}
-EOF
-  [ "$(lock_state < "$tmp/other-bot-cursor.ndjson")" = "none" ] \
-    || st_fail "marker + cursor[bot] was counted as a lock"
-  # Owner User + marker is also not a lock — settle uses GITHUB_TOKEN, not a PAT.
+  # Random owner-shaped User not on the allowlist is not a lock.
   cat > "$tmp/owner-marked.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nowner spoof", "created_at": "2026-08-01T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(lock_state < "$tmp/owner-marked.ndjson")" = "none" ] \
-    || st_fail "marker + repo owner was counted as a lock"
+    || st_fail "marker + unlisted User was counted as a lock"
 
   # First-NON-blank-line rule: leading blank lines and indentation are
   # stripped before classifying; a marker on a later line does not count.
@@ -1544,9 +1554,9 @@ EOF
   # And the behavioral proof: a comment built from our own withdrawal line
   # must release a prior claim in the classifier itself.
   jq -cn --arg lock "$LOCK_MARKER" --arg html "$LOCK_HTML_MARKER" \
-    --arg wd "$WITHDRAW_LINE" --arg settle "$LOCK_AUTHOR_LOGIN" '
-    {body: ($lock + "\n\n" + $html + "\n\nclaimed"), created_at: "2026-08-01T00:00:00Z", login: $settle, type: "Bot"},
-    {body: ($wd + "\n\n- routine: design-run"), created_at: "2026-08-02T00:00:00Z", login: $settle, type: "Bot"}' \
+    --arg wd "$WITHDRAW_LINE" '
+    {body: ($lock + "\n\n" + $html + "\n\nclaimed"), created_at: "2026-08-01T00:00:00Z", login: "github-actions[bot]", type: "Bot"},
+    {body: ($wd + "\n\n- routine: design-run"), created_at: "2026-08-02T00:00:00Z", login: "github-actions[bot]", type: "Bot"}' \
     > "$tmp/ours.ndjson"
   [ "$(lock_state < "$tmp/ours.ndjson")" = "withdrawn" ] \
     || st_fail "our own withdrawal line does not release the lock for the selector"

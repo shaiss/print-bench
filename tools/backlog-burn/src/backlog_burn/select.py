@@ -76,15 +76,26 @@ from typing import Any, Optional
 DEFAULT_REQUIRED_LABEL = "autonomy-ok"
 
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
-# Hidden authenticity marker settle (and trusted claim writers) emit.
-# A comment is a lock only when it carries this marker AND is authored
-# by SHIP_LOCK_AUTHOR_LOGIN — never because it merely starts with
+# Hidden authenticity marker settle (and attended claim writers) emit.
+# A comment is a lock only when it carries this marker AND is authored by
+# one of SHIP_LOCK_AUTHOR_LOGINS — never because it merely starts with
 # SHIP_LOCK_MARKER, and never because authorType is Bot (Cipher, #864).
 # Mirrored in scripts/design-run-deliver.sh.
+#
+# Note: backlog-burn's agent still has issues: write and can also post a
+# marker-bearing claim (tracked in #872) — this allowlist is not "settle
+# only"; it names every login that may author a lock today.
 SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
-# Settle posts via GH_TOKEN=${{ github.token }} → this exact login. Not a
-# PAT, not claude[bot]/cursor[bot]/any other app Bot.
-SHIP_LOCK_AUTHOR_LOGIN = "github-actions[bot]"
+# Exact logins, listed by name (no generic "[bot]" match):
+#   github-actions[bot] — settle apply-intents (GH_TOKEN=${{ github.token }})
+#   shaiss              — attended hand-run / PAT identity (repo owner)
+#   cursor[bot]         — Cursor cloud-agent attended runs
+#                         (documented in .github/workflows/auto-review.yml)
+SHIP_LOCK_AUTHOR_LOGINS = frozenset({
+    "github-actions[bot]",
+    "shaiss",
+    "cursor[bot]",
+})
 
 # An issue an agentic run parked for a human yes/no (the HITL decision gate,
 # issue #161) carries this label until the decision is recorded and it is
@@ -185,19 +196,18 @@ def _parse_iso(ts: str) -> Optional[datetime]:
 
 
 def _is_authentic_ship_lock(comment: dict[str, Any]) -> bool:
-    """True when ``comment`` is a settle-written SHIP-LOCK (Cipher, #864).
+    """True when ``comment`` is an authentic SHIP-LOCK (Cipher, #864).
 
-    Requires BOTH the HTML authenticity marker and author login equal to
-    ``SHIP_LOCK_AUTHOR_LOGIN`` (``github-actions[bot]`` — settle's
-    ``GH_TOKEN=${{ github.token }}``). A bare ``🚢 SHIP-LOCK`` first line
-    is never enough; nor is marker + some other Bot (``claude[bot]``,
-    ``cursor[bot]``) — those apps can comment directly with the marker.
+    Requires BOTH the HTML authenticity marker and author login in
+    ``SHIP_LOCK_AUTHOR_LOGINS`` (``github-actions[bot]``, ``shaiss``,
+    ``cursor[bot]``). A bare ``🚢 SHIP-LOCK`` first line is never enough;
+    nor is marker + some other Bot (e.g. ``claude[bot]``).
     """
     body = comment.get("body") or ""
     if SHIP_LOCK_HTML_MARKER not in body:
         return False
     login = (comment.get("authorLogin") or "").lower()
-    return login == SHIP_LOCK_AUTHOR_LOGIN.lower()
+    return login in {a.lower() for a in SHIP_LOCK_AUTHOR_LOGINS}
 
 
 def _ship_lock_state(
