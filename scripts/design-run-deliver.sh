@@ -48,16 +48,21 @@
 #       [--push-url <url>] [--routine <design-run|backlog-burn>]
 #   scripts/design-run-deliver.sh --selftest
 #
-# The routine parameter adapts the per-routine wording and path policy only
-# (issue #863): design-run (the default, and the behavior before the flag
-# existed) delivers a design — only designs/ and single-file lib/ modules
-# may ship, and .github/.claude/scripts/tools never may — while backlog-burn
-# runs /ship-issue on arbitrary single-PR work (scripts/, tools/, …) so its
-# path policy is wider, BUT never `.github/**`: a delivered workflow under
-# `.github/workflows/` would run with repo secrets on the next push (the
-# residual HIGH on #863). Symlinks, case folding and `../` tricks that land
-# under `.github/` are refused the same way. An unknown routine is a usage
-# error.
+# The routine parameter adapts the per-routine wording and the *safe*
+# commit surface only (issues #863 / #869): design-run (the default, and
+# the behavior before the flag existed) delivers a design — only designs/
+# and single-file lib/ modules may be committed — while backlog-burn runs
+# /ship-issue and may commit any non-protected path (docs/, designs/,
+# people/, …). Both routines refuse the same protected prefixes —
+# `.github/**`, `.claude/**`, `scripts/**`, `tools/**` — and agent-
+# instruction paths at ANY depth after case-folding normalization:
+# `**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`, `**/.mcp.json`,
+# `**/.cursor/**`, `**/.cursorrules` — because a delivered workflow, hook,
+# CI script or agent instruction file would run with repo secrets on the
+# next push or agent session (Cipher on #869). Symlinks (including
+# absolute targets), case folding, `../`, backslashes and gitlinks that
+# land under a protected path are refused the same way. An unknown
+# routine is a usage error.
 #
 # Live mode needs GH_TOKEN to push and to open the PR (the design-run PAT,
 # so the draft triggers CI). COMMENT_TOKEN, when set, is the token for the
@@ -194,11 +199,11 @@ closes_issue() {
   printf '%s\n' "$1" | grep -qiP "\\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\\s+#${2}\\b"
 }
 
-# Normalize a repo-relative path for .github matching: lowercase, strip
-# empty/`.` segments, resolve `..`. Prints the normalized path. Returns 1
-# (and prints nothing) when the path is not a safe repo-relative name —
-# absolute, backslash, NUL/newline, or a `..` that escapes the root.
-# Callers fail closed: a failed normalize is treated as under `.github/`.
+# Normalize a repo-relative path for protected-prefix matching: lowercase,
+# strip empty/`.` segments, resolve `..`. Prints the normalized path.
+# Returns 1 (and prints nothing) when the path is not a safe repo-relative
+# name — absolute, backslash, NUL/newline, or a `..` that escapes the root.
+# Callers fail closed: a failed normalize is treated as protected.
 normalize_repo_path() {
   local raw="$1" part
   local -a parts out
@@ -224,20 +229,35 @@ normalize_repo_path() {
   printf '%s\n' "${out[*]}"
 }
 
-# Return 0 when $1 is `.github` or under it after normalization (case,
-# `./`, `../`). Fail closed: an unnormalizable path counts as under.
-is_under_dot_github() {
+# Return 0 when $1 is a protected delivery path after normalization
+# (case, `./`, `../`). Protected:
+#   prefixes: `.github`, `.claude`, `scripts`, `tools`
+#   agent-instruction files at ANY depth (bash `case` `*` matches `/`):
+#     `**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`, `**/.mcp.json`,
+#     `**/.cursorrules`, and `**/.cursor/**`
+# Filenames/dirs are matched lowercased because normalize_repo_path folds
+# case. Fail closed: an unnormalizable path counts as protected (issue #869).
+is_protected_path() {
   local norm
   norm="$(normalize_repo_path "$1")" || return 0
   case "$norm" in
-    .github|.github/*) return 0 ;;
+    .github|.github/*|.claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
+    # agent-instruction-path-drift (issue #869): any-depth, case-folded.
+    # Keep these patterns in sync with the drift guard in
+    # tools/model-registry/tests/test_workflow_drift.py.
+    claude.md|*/claude.md) return 0 ;;
+    claude.local.md|*/claude.local.md) return 0 ;;
+    agents.md|*/agents.md) return 0 ;;
+    .mcp.json|*/.mcp.json) return 0 ;;
+    .cursorrules|*/.cursorrules) return 0 ;;
+    .cursor|.cursor/*|*/.cursor|*/.cursor/*) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-# Return 0 when symlink at repo path $1 with target $2 resolves under
-# `.github/`. Absolute targets fail closed.
-symlink_points_under_dot_github() {
+# Return 0 when symlink at repo path $1 with target $2 resolves under a
+# protected prefix. Absolute targets and unnormalizable joins fail closed.
+symlink_points_under_protected() {
   local path="$1" target="$2" base joined
   [ -n "$target" ] || return 1
   case "$target" in
@@ -249,25 +269,30 @@ symlink_points_under_dot_github() {
   else
     joined="${base}/${target}"
   fi
-  is_under_dot_github "$joined"
+  is_protected_path "$joined"
 }
 
 # Paths the delivery commit may include. A first-party module is a single
 # file under lib/. A lib subdirectory is a vendored third-party tree and
-# stays on the runner, as does anything outside the design. backlog-burn
-# ships /ship-issue work of any shape outside `.github/**` (scripts/,
-# tools/, …); `.github/**` is never deliverable for either routine — a
-# workflow pushed with the PAT runs with repo secrets on the next check.
+# stays on the runner. Both routines refuse the protected prefixes
+# (`.github/**`, `.claude/**`, `scripts/**`, `tools/**`) and agent-
+# instruction paths at any depth (`**/CLAUDE.md`, `**/CLAUDE.local.md`,
+# `**/AGENTS.md`, `**/.mcp.json`, `**/.cursor/**`, `**/.cursorrules`) —
+# a workflow, hook, CI script or instruction file pushed with the PAT
+# runs with repo secrets on the next check or agent session (issues
+# #863 / #869). backlog-burn may still commit any other non-protected
+# path (docs/, designs/, people/, …); design-run stays designs/ +
+# single-file lib/ only.
 safe_path() {
   local target
-  if is_under_dot_github "$1"; then
+  if is_protected_path "$1"; then
     return 1
   fi
-  # A worktree symlink whose target resolves under .github/ (e.g.
-  # tools/hook -> ../.github/workflows/evil.yml) must not be staged.
+  # A worktree symlink whose target resolves under a protected prefix
+  # (e.g. docs/hook -> ../.claude/hooks/evil.sh) must not be staged.
   if [ -L "$1" ]; then
     target="$(readlink -- "$1" 2>/dev/null || true)"
-    if symlink_points_under_dot_github "$1" "$target"; then
+    if symlink_points_under_protected "$1" "$target"; then
       return 1
     fi
   fi
@@ -284,20 +309,11 @@ safe_path() {
 }
 
 # Paths a commit since the start SHA must not touch. Both routines refuse
-# `.github/**` (normalized — case / `../` / symlink target). design-run
-# additionally refuses .claude/, scripts/, tools/. backlog-burn may touch
-# those; refuse_open_nondraft, the delivery pin and CI still apply.
+# the same protected prefixes after normalization (case / `../` / symlink
+# target / gitlink path). refuse_open_nondraft, the delivery pin and CI
+# still apply on top.
 forbidden_path() {
-  if is_under_dot_github "$1"; then
-    return 0
-  fi
-  case "$ROUTINE" in
-    backlog-burn) return 1 ;;
-  esac
-  case "$1" in
-    .claude|.claude/*|scripts|scripts/*|tools|tools/*) return 0 ;;
-    *) return 1 ;;
-  esac
+  is_protected_path "$1"
 }
 
 # insteadOf rewrites the push URL. A value (or a key) can carry a token,
@@ -502,21 +518,33 @@ commit_safe_dirty() {
 # diffs a merge against each parent, so a protected path introduced inside
 # a merge and removed by a later merge is still listed. The NUL records
 # keep a newline inside a path from splitting the record.
-# If $2 exists at $1 as a symlink whose target resolves under .github/,
-# print a refusal and return 1. Missing / non-symlink paths are fine.
-refuse_symlink_into_dot_github() {
+# If $2 exists at $1 as a symlink whose target resolves under a protected
+# prefix, or as a gitlink (mode 160000) whose path is protected, print a
+# refusal and return 1. Missing / ordinary-blob paths are fine.
+refuse_symlink_or_gitlink_into_protected() {
   local tip="$1" path="$2" meta mode target
   meta="$(git_cmd ls-tree -z "$tip" -- "$path" 2>/dev/null | tr '\0' '\n' | head -n 1)"
   [ -n "$meta" ] || return 0
   mode="${meta%% *}"
-  [ "$mode" = "120000" ] || return 0
-  target="$(git_cmd cat-file -p "${tip}:${path}" 2>/dev/null || true)"
-  [ -n "$target" ] || return 0
-  if symlink_points_under_dot_github "$path" "$target"; then
-    echo "design-run-deliver: ${BASE}..HEAD symlink ${path} -> ${target} points under .github/ — refusing to push" >&2
-    return 1
-  fi
-  return 0
+  case "$mode" in
+    160000)
+      if is_protected_path "$path"; then
+        echo "design-run-deliver: ${BASE}..HEAD gitlink ${path} is under a protected prefix — refusing to push" >&2
+        return 1
+      fi
+      return 0
+      ;;
+    120000)
+      target="$(git_cmd cat-file -p "${tip}:${path}" 2>/dev/null || true)"
+      [ -n "$target" ] || return 0
+      if symlink_points_under_protected "$path" "$target"; then
+        echo "design-run-deliver: ${BASE}..HEAD symlink ${path} -> ${target} points under a protected prefix — refusing to push" >&2
+        return 1
+      fi
+      return 0
+      ;;
+    *) return 0 ;;
+  esac
 }
 
 refuse_forbidden_range() {  # $1 tip ref, default HEAD
@@ -533,7 +561,7 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
       echo "design-run-deliver: ${BASE}...HEAD touches ${path} — refusing to push" >&2
       return 1
     fi
-    if ! refuse_symlink_into_dot_github "$tip" "$path"; then
+    if ! refuse_symlink_or_gitlink_into_protected "$tip" "$path"; then
       rm -f "$diff_file" "$log_file"
       return 1
     fi
@@ -558,8 +586,8 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
           echo "design-run-deliver: ${BASE}..HEAD touches ${old} -> ${new} — refusing to push" >&2
           return 1
         fi
-        if ! refuse_symlink_into_dot_github "$tip" "$old" \
-            || ! refuse_symlink_into_dot_github "$tip" "$new"; then
+        if ! refuse_symlink_or_gitlink_into_protected "$tip" "$old" \
+            || ! refuse_symlink_or_gitlink_into_protected "$tip" "$new"; then
           rm -f "$diff_file" "$log_file"
           return 1
         fi
@@ -570,7 +598,7 @@ refuse_forbidden_range() {  # $1 tip ref, default HEAD
           echo "design-run-deliver: ${BASE}..HEAD touches ${path} — refusing to push" >&2
           return 1
         fi
-        if ! refuse_symlink_into_dot_github "$tip" "$path"; then
+        if ! refuse_symlink_or_gitlink_into_protected "$tip" "$path"; then
           rm -f "$diff_file" "$log_file"
           return 1
         fi
@@ -2848,10 +2876,11 @@ EOF
     exit 1
   fi
 
-  # backlog-burn wiring (issue #863, the #859/#861 pattern). The burn's
-  # agent steps must never see the PAT, the PAT lives only in the deliver
-  # workflow's push step, and the bundle handoff carries --routine
-  # backlog-burn so the burn path policy (no .github/**) is explicit.
+  # backlog-burn wiring (issue #863, the #859/#861 pattern; path policy
+  # tightened in #869). The burn's agent steps must never see the PAT,
+  # the PAT lives only in the deliver workflow's push step, and the
+  # bundle handoff carries --routine backlog-burn so the shared
+  # protected-prefix policy (.github/.claude/scripts/tools) is explicit.
   burn="${repo_root}/.github/workflows/backlog-burn.yml"
   [ -f "$burn" ] || { echo "selftest: backlog-burn.yml is missing" >&2; exit 1; }
   burn_run="$(awk '
@@ -3269,26 +3298,28 @@ EOF
     exit 1
   }
 
-  # --routine behavior. A scripts/ change is forbidden for design-run and
-  # deliverable for backlog-burn (issue #863 ships scripts/ itself); an
-  # unknown routine is a usage error, never a silent default.
+  # --routine behavior. A scripts/ change is forbidden for BOTH routines
+  # (issue #869 — backlog-burn shares design-run's protected prefixes); an
+  # unknown routine is a usage error, never a silent default. A benign
+  # docs/ change still delivers under backlog-burn.
   local rsrc rfile rstart
   rsrc="${tmp}/rsrc"
   rfile="${tmp}/backlog-burn.bundle"
-  mkdir -p "$rsrc/scripts"
+  mkdir -p "$rsrc/scripts" "$rsrc/docs"
   git_cmd -C "$rsrc" init -b main >/dev/null
-  git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m start >/dev/null
+  printf 'seed\n' > "$rsrc/docs/seed.md"
+  git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t add -- docs/seed.md
+  git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t commit -m start >/dev/null
   rstart="$(git_cmd -C "$rsrc" rev-parse HEAD)"
-  git_cmd -C "$rsrc" checkout -b claude/issue-863-burn-pat >/dev/null 2>&1
+  git_cmd -C "$rsrc" checkout -b claude/issue-869-burn-paths >/dev/null 2>&1
   printf 'fix\n' > "$rsrc/scripts/fix.sh"
   git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t add -- scripts/fix.sh
   git_cmd -C "$rsrc" -c user.email=t@example.com -c user.name=t commit -m fix >/dev/null
-  printf 'dirty\n' > "$rsrc/scripts/dirty.sh"
   set +e
   stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$rsrc" \
-    "$SELF" --repo acme/print-bench --issue 863 --base "$rstart" \
+    "$SELF" --repo acme/print-bench --issue 869 --base "$rstart" \
     --base-branch main --run-url https://example.test/run/1 \
     --write-bundle "$rfile" 2>&1 >/dev/null)"
   rc=$?
@@ -3301,27 +3332,30 @@ EOF
   }
   [ ! -e "$rfile" ] || { echo "selftest: design-run wrote a bundle for a forbidden range" >&2; exit 1; }
   set +e
-  env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+  stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$rsrc" \
-    "$SELF" --repo acme/print-bench --issue 863 --base "$rstart" \
+    "$SELF" --repo acme/print-bench --issue 869 --base "$rstart" \
     --base-branch main --run-url https://example.test/run/1 \
-    --routine backlog-burn --write-bundle "$rfile" >/dev/null
+    --routine backlog-burn --write-bundle "$rfile" 2>&1 >/dev/null)"
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] && [ -f "$rfile" ] || {
-    echo "selftest: backlog-burn --write-bundle refused a scripts/ commit (exit ${rc})" >&2
+  [ "$rc" -eq 1 ] || {
+    echo "selftest: backlog-burn accepted a scripts/ commit (exit ${rc})" >&2
+    printf '%s\n' "$stderr" >&2
     exit 1
   }
-  git_cmd -C "$rsrc" grep -q dirty HEAD -- scripts/dirty.sh || {
-    echo "selftest: backlog-burn --write-bundle did not commit the dirty scripts file" >&2
+  printf '%s\n' "$stderr" | grep -q 'touches scripts/fix.sh' || {
+    echo "selftest: backlog-burn did not report the scripts/ refusal" >&2
+    printf '%s\n' "$stderr" >&2
     exit 1
   }
+  [ ! -e "$rfile" ] || { echo "selftest: backlog-burn wrote a bundle for a forbidden scripts/ range" >&2; exit 1; }
   set +e
   stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$rsrc" \
-    "$SELF" --repo acme/print-bench --issue 863 --base "$rstart" \
+    "$SELF" --repo acme/print-bench --issue 869 --base "$rstart" \
     --base-branch main --run-url https://example.test/run/1 \
     --routine bogus --write-bundle "$rfile" 2>&1 >/dev/null)"
   rc=$?
@@ -3332,12 +3366,14 @@ EOF
     exit 1
   }
 
-  # backlog-burn refuses .github/** (closes #863 residual HIGH): add,
-  # modify, rename into .github, symlink pointing into .github — while a
-  # benign tools/ change still delivers.
-  local gsrc gfile gstart
+  # backlog-burn refuses .github/**, .claude/**, scripts/** and tools/**
+  # together (closes #869): for each prefix, add / modify / delete /
+  # rename into / rename out of / symlink into — while a benign docs/
+  # change still delivers. The normalizer (case / ../ / backslash /
+  # absolute symlink target / gitlink) is shared with design-run.
+  local gsrc gfile gstart prefix
   gsrc="${tmp}/gsrc"
-  gfile="${tmp}/github-forbid.bundle"
+  gfile="${tmp}/protected-forbid.bundle"
   greject() {  # $1 label, $2 expected stderr needle
     local label="$1" needle="$2"
     rm -f "$gfile"
@@ -3345,98 +3381,492 @@ EOF
     stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
       GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
       DELIVER_WORKTREE="$gsrc" \
-      "$SELF" --repo acme/print-bench --issue 863 --base "$gstart" \
+      "$SELF" --repo acme/print-bench --issue 869 --base "$gstart" \
       --base-branch main --run-url https://example.test/run/1 \
       --routine backlog-burn --write-bundle "$gfile" 2>&1 >/dev/null)"
     rc=$?
     set -e
     [ "$rc" -eq 1 ] || {
-      echo "selftest: backlog-burn accepted a .github ${label} (exit ${rc})" >&2
+      echo "selftest: backlog-burn accepted protected ${label} (exit ${rc})" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
     }
     printf '%s\n' "$stderr" | grep -q "$needle" || {
-      echo "selftest: backlog-burn .github ${label} did not report the refusal" >&2
+      echo "selftest: backlog-burn protected ${label} did not report the refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
     }
     [ ! -e "$gfile" ] || {
-      echo "selftest: backlog-burn wrote a bundle for a .github ${label}" >&2
+      echo "selftest: backlog-burn wrote a bundle for protected ${label}" >&2
       exit 1
     }
   }
 
   rm -rf "$gsrc"
-  mkdir -p "$gsrc/.github/workflows" "$gsrc/tools"
+  mkdir -p "$gsrc/.github/workflows" "$gsrc/.claude/hooks" \
+    "$gsrc/scripts" "$gsrc/tools" "$gsrc/docs" "$gsrc/safe"
   git_cmd -C "$gsrc" init -b main >/dev/null
   printf 'name: keep\non: push\njobs: {}\n' > "$gsrc/.github/workflows/keep.yml"
-  printf 'seed\n' > "$gsrc/tools/seed.py"
+  printf 'keep\n' > "$gsrc/.claude/hooks/keep.sh"
+  printf 'keep\n' > "$gsrc/scripts/keep.sh"
+  printf 'keep\n' > "$gsrc/tools/keep.py"
+  printf 'seed\n' > "$gsrc/docs/seed.md"
+  printf 'park\n' > "$gsrc/safe/parked.txt"
+  # Seed root agent-instruction files at gstart so symlink-into cases only
+  # change docs/hook (otherwise the range also touches CLAUDE.md itself).
+  printf 'seed\n' > "$gsrc/CLAUDE.md"
+  printf 'seed\n' > "$gsrc/AGENTS.md"
+  printf '{}\n' > "$gsrc/.mcp.json"
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
-    .github/workflows/keep.yml tools/seed.py
+    .github/workflows/keep.yml .claude/hooks/keep.sh scripts/keep.sh \
+    tools/keep.py docs/seed.md safe/parked.txt \
+    CLAUDE.md AGENTS.md .mcp.json
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m start >/dev/null
   gstart="$(git_cmd -C "$gsrc" rev-parse HEAD)"
-  git_cmd -C "$gsrc" checkout -b claude/issue-863-github-forbid >/dev/null 2>&1
+  git_cmd -C "$gsrc" checkout -b claude/issue-869-protected-forbid >/dev/null 2>&1
 
-  # Add: new workflow file.
-  printf 'name: evil\non: push\njobs: {}\n' > "$gsrc/.github/workflows/evil.yml"
+  for prefix in .github .claude scripts tools; do
+    case "$prefix" in
+      .github) mkdir -p "$gsrc/.github/workflows" ;;
+      .claude) mkdir -p "$gsrc/.claude/hooks" ;;
+      scripts|tools) mkdir -p "$gsrc/$prefix" ;;
+    esac
+
+    # Add
+    case "$prefix" in
+      .github)
+        printf 'name: evil\non: push\njobs: {}\n' > "$gsrc/.github/workflows/evil.yml"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+          .github/workflows/evil.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "add ${prefix}" >/dev/null
+        greject "${prefix}/add" 'touches .github/workflows/evil.yml'
+        ;;
+      .claude)
+        printf 'evil\n' > "$gsrc/.claude/hooks/evil.sh"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+          .claude/hooks/evil.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "add ${prefix}" >/dev/null
+        greject "${prefix}/add" 'touches .claude/hooks/evil.sh'
+        ;;
+      scripts)
+        printf 'evil\n' > "$gsrc/scripts/evil.sh"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- scripts/evil.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "add ${prefix}" >/dev/null
+        greject "${prefix}/add" 'touches scripts/evil.sh'
+        ;;
+      tools)
+        printf 'evil\n' > "$gsrc/tools/evil.py"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/evil.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "add ${prefix}" >/dev/null
+        greject "${prefix}/add" 'touches tools/evil.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Modify
+    case "$prefix" in
+      .github)
+        printf 'name: keep\non: push\njobs: {x: {runs-on: ubuntu-latest, steps: []}}\n' \
+          > "$gsrc/.github/workflows/keep.yml"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+          .github/workflows/keep.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "mod ${prefix}" >/dev/null
+        greject "${prefix}/modify" 'touches .github/workflows/keep.yml'
+        ;;
+      .claude)
+        printf 'changed\n' > "$gsrc/.claude/hooks/keep.sh"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+          .claude/hooks/keep.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "mod ${prefix}" >/dev/null
+        greject "${prefix}/modify" 'touches .claude/hooks/keep.sh'
+        ;;
+      scripts)
+        printf 'changed\n' > "$gsrc/scripts/keep.sh"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- scripts/keep.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "mod ${prefix}" >/dev/null
+        greject "${prefix}/modify" 'touches scripts/keep.sh'
+        ;;
+      tools)
+        printf 'changed\n' > "$gsrc/tools/keep.py"
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/keep.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "mod ${prefix}" >/dev/null
+        greject "${prefix}/modify" 'touches tools/keep.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Delete
+    case "$prefix" in
+      .github)
+        git_cmd -C "$gsrc" rm -q -- .github/workflows/keep.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "del ${prefix}" >/dev/null
+        greject "${prefix}/delete" 'touches .github/workflows/keep.yml'
+        ;;
+      .claude)
+        git_cmd -C "$gsrc" rm -q -- .claude/hooks/keep.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "del ${prefix}" >/dev/null
+        greject "${prefix}/delete" 'touches .claude/hooks/keep.sh'
+        ;;
+      scripts)
+        git_cmd -C "$gsrc" rm -q -- scripts/keep.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "del ${prefix}" >/dev/null
+        greject "${prefix}/delete" 'touches scripts/keep.sh'
+        ;;
+      tools)
+        git_cmd -C "$gsrc" rm -q -- tools/keep.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "del ${prefix}" >/dev/null
+        greject "${prefix}/delete" 'touches tools/keep.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Rename into protected prefix (from safe/)
+    case "$prefix" in
+      .github)
+        git_cmd -C "$gsrc" mv -- safe/parked.txt .github/workflows/moved.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-in ${prefix}" >/dev/null
+        greject "${prefix}/rename-into" '\.github/workflows/moved\.yml'
+        ;;
+      .claude)
+        git_cmd -C "$gsrc" mv -- safe/parked.txt .claude/hooks/moved.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-in ${prefix}" >/dev/null
+        greject "${prefix}/rename-into" '\.claude/hooks/moved\.sh'
+        ;;
+      scripts)
+        git_cmd -C "$gsrc" mv -- safe/parked.txt scripts/moved.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-in ${prefix}" >/dev/null
+        greject "${prefix}/rename-into" 'scripts/moved\.sh'
+        ;;
+      tools)
+        git_cmd -C "$gsrc" mv -- safe/parked.txt tools/moved.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-in ${prefix}" >/dev/null
+        greject "${prefix}/rename-into" 'tools/moved\.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Rename out of protected prefix (into docs/)
+    case "$prefix" in
+      .github)
+        git_cmd -C "$gsrc" mv -- .github/workflows/keep.yml docs/exfiltrated.yml
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-out ${prefix}" >/dev/null
+        greject "${prefix}/rename-out" '\.github/workflows/keep\.yml'
+        ;;
+      .claude)
+        git_cmd -C "$gsrc" mv -- .claude/hooks/keep.sh docs/exfiltrated.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-out ${prefix}" >/dev/null
+        greject "${prefix}/rename-out" '\.claude/hooks/keep\.sh'
+        ;;
+      scripts)
+        git_cmd -C "$gsrc" mv -- scripts/keep.sh docs/exfiltrated.sh
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-out ${prefix}" >/dev/null
+        greject "${prefix}/rename-out" 'scripts/keep\.sh'
+        ;;
+      tools)
+        git_cmd -C "$gsrc" mv -- tools/keep.py docs/exfiltrated.py
+        git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "ren-out ${prefix}" >/dev/null
+        greject "${prefix}/rename-out" 'tools/keep\.py'
+        ;;
+    esac
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Symlink into protected prefix (path itself under docs/)
+    case "$prefix" in
+      .github)
+        ln -s '../.github/workflows/keep.yml' "$gsrc/docs/hook"
+        ;;
+      .claude)
+        ln -s '../.claude/hooks/keep.sh' "$gsrc/docs/hook"
+        ;;
+      scripts)
+        ln -s '../scripts/keep.sh' "$gsrc/docs/hook"
+        ;;
+      tools)
+        ln -s '../tools/keep.py' "$gsrc/docs/hook"
+        ;;
+    esac
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/hook
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m "symlink ${prefix}" >/dev/null
+    greject "${prefix}/symlink" 'points under a protected prefix'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+  done
+
+  # Case-folded .GitHub/ path — normalizer lowercases before the match.
+  mkdir -p "$gsrc/.GitHub/workflows"
+  printf 'name: case\non: push\njobs: {}\n' > "$gsrc/.GitHub/workflows/case.yml"
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
-    .github/workflows/evil.yml
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'add workflow' >/dev/null
-  greject add 'touches .github/workflows/evil.yml'
+    .GitHub/workflows/case.yml
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'case fold' >/dev/null
+  greject 'case-fold' 'touches'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
-  # Modify: edit a workflow that already exists at START_SHA.
-  printf 'name: keep\non: push\njobs: {x: {runs-on: ubuntu-latest, steps: []}}\n' \
-    > "$gsrc/.github/workflows/keep.yml"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
-    .github/workflows/keep.yml
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'modify workflow' >/dev/null
-  greject modify 'touches .github/workflows/keep.yml'
+  # Absolute symlink target fails closed.
+  ln -s '/etc/passwd' "$gsrc/docs/abs"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/abs
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'abs symlink' >/dev/null
+  greject 'abs-symlink' 'points under a protected prefix'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
-  # Rename into .github/.
-  printf 'moved\n' > "$gsrc/tools/moved.yml"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/moved.yml
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'stage move' >/dev/null
-  mkdir -p "$gsrc/.github/workflows"
-  git_cmd -C "$gsrc" mv -- tools/moved.yml .github/workflows/moved.yml
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'rename into .github' >/dev/null
-  greject rename '\.github/workflows/moved\.yml'
-  git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
-
-  # Symlink pointing into .github/ (path itself is under tools/).
-  mkdir -p "$gsrc/tools"
-  ln -s '../.github/workflows/evil.yml' "$gsrc/tools/hook"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/hook
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'symlink into .github' >/dev/null
-  greject symlink 'points under .github/'
+  # Gitlink (mode 160000) under a protected prefix — refused by path and
+  # by the explicit gitlink check.
+  blob_sha="$(git_cmd -C "$gsrc" rev-parse "HEAD:docs/seed.md")"
+  git_cmd -C "$gsrc" update-index --add --cacheinfo "160000,${blob_sha},scripts/submod"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'gitlink' >/dev/null
+  greject gitlink 'touches scripts/submod'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
   # Backslash in a path — normalize fails closed (single `\`, not `\\`).
-  mkdir -p "$gsrc/tools"
-  printf 'x\n' > "${gsrc}/tools/foo\\bar"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "tools/foo\\bar"
+  mkdir -p "$gsrc/docs"
+  printf 'x\n' > "${gsrc}/docs/foo\\bar"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "docs/foo\\bar"
   git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'backslash path' >/dev/null
   # Needle is a BRE: `\\` matches one literal backslash (`\b` would be a word boundary).
-  greject backslash 'touches tools/foo\\bar'
+  greject backslash 'touches docs/foo\\bar'
   git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
 
-  # Benign tools/ change still passes for backlog-burn.
-  printf 'ok\n' > "$gsrc/tools/ok.py"
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- tools/ok.py
-  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'tools ok' >/dev/null
+  # Root agent-instruction files (CLAUDE.md, AGENTS.md, .mcp.json) —
+  # add / modify / rename into / symlink into — refused for both routines
+  # (issue #869). Names are case-folded by the normalizer.
+  local rootfile routine
+  reject_rootfile() {  # $1 routine, $2 label, $3 needle
+    local routine="$1" label="$2" needle="$3"
+    rm -f "$gfile"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$gsrc" \
+      "$SELF" --repo acme/print-bench --issue 869 --base "$gstart" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --routine "$routine" --write-bundle "$gfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    [ "$rc" -eq 1 ] || {
+      echo "selftest: ${routine} accepted protected ${label} (exit ${rc})" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q "$needle" || {
+      echo "selftest: ${routine} protected ${label} did not report the refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    [ ! -e "$gfile" ] || {
+      echo "selftest: ${routine} wrote a bundle for protected ${label}" >&2
+      exit 1
+    }
+  }
+  for routine in backlog-burn design-run; do
+    for rootfile in CLAUDE.md AGENTS.md .mcp.json; do
+      # Add — delete the seeded file then recreate so the tip introduces
+      # the path as an addition relative to a parent that lacked it; the
+      # range still refuses on the protected path either way.
+      git_cmd -C "$gsrc" rm -q -- "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "drop ${rootfile}" >/dev/null
+      printf 'evil\n' > "$gsrc/$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "add ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/add" "touches ${rootfile}"
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+      # Modify (files already seeded at gstart)
+      printf 'changed\n' > "$gsrc/$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "mod ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/modify" "touches ${rootfile}"
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+      # Rename into (replace the seeded file from safe/)
+      git_cmd -C "$gsrc" rm -q -- "$rootfile"
+      git_cmd -C "$gsrc" mv -- safe/parked.txt "$rootfile"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "ren-in ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/rename-into" "touches ${rootfile}"
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+      # Symlink into (path under docs/ pointing at the seeded root file)
+      ln -s "../${rootfile}" "$gsrc/docs/hook"
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/hook
+      git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+        commit -m "symlink ${rootfile}" >/dev/null
+      reject_rootfile "$routine" "${rootfile}/symlink" 'points under a protected prefix'
+      git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+    done
+  done
+
+  # Nested agent-instruction paths at ANY depth (issue #869 Cipher MEDIUM):
+  # docs/CLAUDE.md, designs/<name>/{CLAUDE,AGENTS}.md, lib/.mcp.json,
+  # nested .cursor/rules/, nested .cursorrules, case variant, plus
+  # rename-into and symlink-into (path matches or target is protected).
+  reject_nested() {  # $1 routine, $2 label, $3 needle
+    reject_rootfile "$1" "$2" "$3"
+  }
+  for routine in backlog-burn design-run; do
+    # docs/CLAUDE.md — add
+    mkdir -p "$gsrc/docs"
+    printf 'evil\n' > "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/add' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # designs/<name>/CLAUDE.md — add (alone; multi-path commits report one)
+    mkdir -p "$gsrc/designs/gadget"
+    printf 'evil\n' > "$gsrc/designs/gadget/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      designs/gadget/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add designs/gadget/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'designs/gadget/CLAUDE.md/add' 'touches designs/gadget/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # designs/<name>/AGENTS.md — add
+    mkdir -p "$gsrc/designs/gadget"
+    printf 'evil\n' > "$gsrc/designs/gadget/AGENTS.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      designs/gadget/AGENTS.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add designs/gadget/AGENTS.md' >/dev/null
+    reject_nested "$routine" 'designs/gadget/AGENTS.md/add' 'touches designs/gadget/AGENTS.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # lib/.mcp.json — add (design-run otherwise allows single-file lib/)
+    mkdir -p "$gsrc/lib"
+    printf '{}\n' > "$gsrc/lib/.mcp.json"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- lib/.mcp.json
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add lib/.mcp.json' >/dev/null
+    reject_nested "$routine" 'lib/.mcp.json/add' 'touches lib/\.mcp\.json'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Nested .cursor/rules/x.mdc — add
+    mkdir -p "$gsrc/a/b/.cursor/rules"
+    printf 'rule\n' > "$gsrc/a/b/.cursor/rules/x.mdc"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      a/b/.cursor/rules/x.mdc
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add nested .cursor rules' >/dev/null
+    reject_nested "$routine" 'nested-.cursor/add' 'touches a/b/\.cursor/rules/x\.mdc'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Nested .cursorrules — add
+    mkdir -p "$gsrc/docs/deep"
+    printf 'rules\n' > "$gsrc/docs/deep/.cursorrules"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      docs/deep/.cursorrules
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add nested .cursorrules' >/dev/null
+    reject_nested "$routine" 'nested-.cursorrules/add' 'touches docs/deep/\.cursorrules'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Case variant docs/claude.MD — normalizer folds case
+    mkdir -p "$gsrc/docs"
+    printf 'evil\n' > "$gsrc/docs/claude.MD"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/claude.MD
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add docs/claude.MD' >/dev/null
+    reject_nested "$routine" 'docs/claude.MD/case' 'touches'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # CLAUDE.local.md nested — add
+    mkdir -p "$gsrc/docs"
+    printf 'evil\n' > "$gsrc/docs/CLAUDE.local.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- \
+      docs/CLAUDE.local.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'add docs/CLAUDE.local.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.local.md/add' 'touches docs/CLAUDE\.local\.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Rename into nested protected path
+    mkdir -p "$gsrc/docs"
+    git_cmd -C "$gsrc" mv -- safe/parked.txt docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'rename into docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/rename-into' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Symlink whose path matches a protected name (docs/CLAUDE.md -> seed.md)
+    mkdir -p "$gsrc/docs"
+    ln -s 'seed.md' "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'symlink path docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/symlink-path' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Symlink whose target is a nested protected path (seed target at tip
+    # first, then reset base past the seed so the range only adds the link).
+    mkdir -p "$gsrc/docs"
+    printf 'seed\n' > "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'seed docs/CLAUDE.md for symlink target' >/dev/null
+    local nested_base
+    nested_base="$(git_cmd -C "$gsrc" rev-parse HEAD)"
+    ln -s 'CLAUDE.md' "$gsrc/docs/hook"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/hook
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'symlink target docs/CLAUDE.md' >/dev/null
+    # Temporarily point reject at nested_base..HEAD (only the symlink).
+    rm -f "$gfile"
+    set +e
+    stderr="$(env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      DELIVER_WORKTREE="$gsrc" \
+      "$SELF" --repo acme/print-bench --issue 869 --base "$nested_base" \
+      --base-branch main --run-url https://example.test/run/1 \
+      --routine "$routine" --write-bundle "$gfile" 2>&1 >/dev/null)"
+    rc=$?
+    set -e
+    [ "$rc" -eq 1 ] || {
+      echo "selftest: ${routine} accepted docs/hook->CLAUDE.md (exit ${rc})" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q 'points under a protected prefix' || {
+      echo "selftest: ${routine} docs/hook->CLAUDE.md did not report symlink refusal" >&2
+      printf '%s\n' "$stderr" >&2
+      exit 1
+    }
+    [ ! -e "$gfile" ] || {
+      echo "selftest: ${routine} wrote a bundle for docs/hook->CLAUDE.md" >&2
+      exit 1
+    }
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+
+    # Delete nested protected path
+    mkdir -p "$gsrc/docs"
+    printf 'seed\n' > "$gsrc/docs/CLAUDE.md"
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'seed docs/CLAUDE.md for delete' >/dev/null
+    git_cmd -C "$gsrc" rm -q -- docs/CLAUDE.md
+    git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t \
+      commit -m 'delete docs/CLAUDE.md' >/dev/null
+    reject_nested "$routine" 'docs/CLAUDE.md/delete' 'touches docs/CLAUDE.md'
+    git_cmd -C "$gsrc" reset --hard "$gstart" >/dev/null
+  done
+
+  # Benign docs/ change still passes for backlog-burn.
+  printf 'ok\n' > "$gsrc/docs/ok.md"
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t add -- docs/ok.md
+  git_cmd -C "$gsrc" -c user.email=t@example.com -c user.name=t commit -m 'docs ok' >/dev/null
   rm -f "$gfile"
   set +e
   env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     DELIVER_WORKTREE="$gsrc" \
-    "$SELF" --repo acme/print-bench --issue 863 --base "$gstart" \
+    "$SELF" --repo acme/print-bench --issue 869 --base "$gstart" \
     --base-branch main --run-url https://example.test/run/1 \
     --routine backlog-burn --write-bundle "$gfile" >/dev/null
   rc=$?
   set -e
   [ "$rc" -eq 0 ] && [ -f "$gfile" ] || {
-    echo "selftest: backlog-burn refused a benign tools/ commit (exit ${rc})" >&2
+    echo "selftest: backlog-burn refused a benign docs/ commit (exit ${rc})" >&2
     exit 1
   }
 
