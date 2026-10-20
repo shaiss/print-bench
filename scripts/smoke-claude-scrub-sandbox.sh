@@ -70,14 +70,14 @@ cat > "${smoke_home}/.srt-settings.json" <<'EOF'
 {
   "network": {
     "allowedDomains": [],
-    "deniedDomains": []
+    "deniedDomains": [],
+    "allowAllUnixSockets": true
   },
   "filesystem": {
     "denyRead": [],
     "allowWrite": ["/tmp"],
     "denyWrite": []
-  },
-  "allowAllUnixSockets": true
+  }
 }
 EOF
 
