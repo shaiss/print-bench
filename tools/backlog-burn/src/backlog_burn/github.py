@@ -59,16 +59,28 @@ def _is_retryable(exc: BaseException) -> bool:
     # cannot fall through as a connection retry.
     if isinstance(exc, urllib.error.HTTPError):
         return 500 <= exc.code < 600
-    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionResetError))
+    # ``IncompleteRead`` / ``BadStatusLine`` (and siblings) are
+    # ``HTTPException``s, not ``URLError``s — without this arm a truncated or
+    # malformed response aborts the snapshot instead of using the retry budget.
+    return isinstance(
+        exc,
+        (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionResetError,
+            http.client.HTTPException,
+        ),
+    )
 
 
 def _get(url: str, token: str) -> tuple[Any, dict[str, str]]:
     """GET ``url`` and return ``(parsed_json, lowercased_headers)``.
 
     Retries up to :data:`_GET_ATTEMPTS` times on HTTP 5xx and connection-level
-    errors (``URLError``, timeouts, connection reset), with exponential
-    backoff plus jitter. A 4xx response raises on the first attempt. After the
-    final attempt the last error is re-raised unchanged.
+    errors (``URLError``, timeouts, connection reset, truncated/malformed
+    ``http.client`` responses), with exponential backoff plus jitter. A 4xx
+    response raises on the first attempt. After the final attempt the last
+    error is re-raised unchanged.
     """
     req = urllib.request.Request(url)
     req.add_header("Accept", "application/vnd.github+json")

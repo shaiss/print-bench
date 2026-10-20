@@ -11,6 +11,7 @@ leaves the process; the retry cases drive ``urlopen`` directly and patch
 
 from __future__ import annotations
 
+import http.client
 import io
 import urllib.error
 
@@ -131,6 +132,48 @@ def test_get_connection_error_is_retried(monkeypatch):
     assert body == {"ok": True}
     assert attempts["n"] == 2
     assert len(sleeps) == 1
+
+
+def test_get_incomplete_read_is_retried(monkeypatch):
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def flaky(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise http.client.IncompleteRead(b"partial")
+        return _JsonResp(b'{"ok": true}')
+
+    monkeypatch.setattr(github.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(github, "_sleep", sleeps.append)
+    monkeypatch.setattr(github.random, "uniform", lambda a, b: 0.0)
+
+    body, _ = github._get("https://api.github.com/x", "t")
+    assert body == {"ok": True}
+    assert attempts["n"] == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == github._GET_BACKOFF_BASE_S
+
+
+def test_get_bad_status_line_is_retried(monkeypatch):
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def flaky(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise http.client.BadStatusLine("")
+        return _JsonResp(b'{"ok": true}')
+
+    monkeypatch.setattr(github.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(github, "_sleep", sleeps.append)
+    monkeypatch.setattr(github.random, "uniform", lambda a, b: 0.0)
+
+    body, _ = github._get("https://api.github.com/x", "t")
+    assert body == {"ok": True}
+    assert attempts["n"] == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == github._GET_BACKOFF_BASE_S
 
 
 # --------------------------------------------------------------------------
