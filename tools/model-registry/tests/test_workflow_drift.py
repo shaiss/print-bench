@@ -4036,15 +4036,17 @@ def _ci_step_if_containing(lines: list[str], idx: int) -> str:
     if header < 0:
         return ""
     chunk = "\n".join(lines[header:idx + 1])
-    m = re.search(r"^[ \t]*if:\s*(.+?)(?=\n[ \t]*(?:name:|uses:|id:|env:|run:|with:)|$)",
-                  chunk, re.MULTILINE | re.DOTALL)
-    if not m:
-        # Folded if: >- form spanning lines
-        m = re.search(r"^[ \t]*if:\s*>-?\s*\n((?:[ \t]+.+\n)*)", chunk, re.MULTILINE)
-        if m:
-            return m.group(1)
-        return ""
-    return m.group(1)
+    # Folded `if: >-` first (the product-page gate). Do not use MULTILINE `$`
+    # in a non-greedy capture — `$` matches end-of-line and would stop at `>-`.
+    m = re.search(r"^[ \t]*if:\s*>-?\s*\n((?:[ \t]+.+\n)*)", chunk, re.MULTILINE)
+    if m:
+        return m.group(1)
+    m = re.search(
+        r"^[ \t]*if:\s*(.+?)(?=\n[ \t]*(?:name:|uses:|id:|env:|run:|with:))",
+        chunk, re.MULTILINE | re.DOTALL)
+    if m:
+        return m.group(1)
+    return ""
 
 
 def _assert_ci_yml_autonomy_secrets_are_claude_gated(text: str) -> None:
@@ -4100,10 +4102,17 @@ def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_regen_token():
 def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_anthropic_step():
     # NEGATIVE CONTROL: strip the claude/* conjunct from the product-page
     # step's if: so ANTHROPIC_API_KEY would materialize on autonomy heads.
+    # Pin the surrounding andon conjunct so we do not hit HAVE_PAT's similar
+    # expression first.
     text = CI_YML.read_text(encoding="utf-8")
-    needle = "&& !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'claude/'))"
+    needle = (
+        "&& vars.AI_ANDON_CORD != 'pulled'\n"
+        "          && !(github.event_name == 'pull_request' && "
+        "startsWith(github.head_ref, 'claude/'))"
+    )
     assert needle in text, "tamper target not found — the product-page claude gate moved"
-    tampered = text.replace(needle, "", 1)
+    tampered = text.replace(
+        needle, "&& vars.AI_ANDON_CORD != 'pulled'", 1)
     assert tampered != text
     with pytest.raises(AssertionError, match="ANTHROPIC_API_KEY"):
         _assert_ci_yml_autonomy_secrets_are_claude_gated(tampered)
