@@ -30,15 +30,16 @@ deliverable — never a single merged STL):
 - `ladder-3` — steps **0.20 / 0.25 / 0.30** on one backplate, centres 97 mm
   apart (clears the Ø96.8 mating envelope). Value embossed 0.60 mm beside
   each ring. ≈ 200 × 198 × 33 mm.
-  **CI estimate:** ~14 h 52 m / ~180 g PLA.
+  **CI estimate:** ~14 h 49 m / ~179 g PLA.
 - `ladder-2` — steps **0.35 / 0.40**, same rules. ≈ 200 × 114 × 33 mm.
-  **CI estimate:** ~9 h 27 m / ~113 g PLA.
+  **CI estimate:** ~9 h 14 m / ~111 g PLA.
 - `coupon` — print-this-first: a reference stub and a receiving stub at
-  0.30 — the same mate as the middle rung on `ladder-3`, small enough to
-  catch a bad first layer before the big plates.
+  0.30 — the same mate as the middle rung on `ladder-3` (~4 h 36 m vs
+  ladder-3's ~14 h 49 m) to catch a bad first layer before the big plates.
+  Comes off the bed as two loose rings by design — that's the test.
   **CI estimate:** ~4 h 36 m / ~60 g PLA.
 
-**All four parts (CI estimates):** ~31 h / ~386 g PLA. Print the coupon and
+**All four parts (CI estimates):** ~31 h / ~383 g PLA. Print the coupon and
 reference head first; `ladder-3` alone is a ~15 h plate.
 
 **Deliverable.** `./scripts/plate.sh nuggs-port-gauge` builds
@@ -56,11 +57,14 @@ slicer.
 - **Seam:** Back (or scarf) — the gauge reads finer than a stock seam ridge.
 - **Orientation:** as modeled — standing on sector tips (plates on the
   backplate; reference head on tips + grip tab).
-- **Brim:** optional 5 mm; check the plate doesn't rock on a flat table
-  before gauging.
+- **Brim:** 5 mm recommended on both ladder plates (optional on head/coupon);
+  remove with a blade and re-check flatness before gauging.
+- **Labels:** if the ~1 mm decimal point prints faint, the digits alone still
+  identify the rung.
 - **First use:** debur the head's port face (blade or fingernail) before the
   first session — tip chamfer absorbs most first-layer flare, but a quick
-  wipe still helps.
+  wipe still helps. Wipe a contrasting crayon or water-based marker across
+  the embossed numbers before the first session to read them.
 
 ## Parameters
 

@@ -43,11 +43,17 @@ and a five-step `port_tol` ladder on two plates. It turns the inherited
 
 **Shot list — tier 1.** Geometry-true camera previews (no Cycles hero required
 for v1): contact sheet of the assembled layout; reference head; ladder-3;
-ladder-2. Lifestyle / AI tiers: none — a calibration tool.
+ladder-2; cutaway. All five shots are frozen as reviewed — any future
+reframe is a new `cameras.conf` line, never a moved one. Lifestyle / AI
+tiers: none — a calibration tool.
 
 ## Ranked backlog
 
-1. Field-test the ladder on a real printer and log the winner.
+1. Field-test the ladder on a real printer and log the winner — first thing
+   after merge; no further work on this design before the first FIELD-TEST
+   entry lands. On that first plate: note whether adjacent rungs felt
+   identical (if ties are common, add an expectation line); if a glyph fuses
+   into a lug edge, raise `plate_margin` by +1 mm (centres unmoved).
 2. Optional physical 0.10 negative-control step if users ask.
 3. Seed a `printer.conf` recipe from a decisive field result.
 4. Fuller quarter-section cutaway shot (J7 + Drik r2): the committed cutaway reads as one shell rather than a mated pair; preview legibility only.
