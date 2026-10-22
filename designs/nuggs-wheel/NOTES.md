@@ -38,6 +38,10 @@ Syrian-scale Ø280 mm wheel exceeds the gate's 200 mm test-slice ceiling (#673).
   A foot-down print with a horizontal port needed supports; printability
   wins over the brief's "on its base" orientation note. In use the foot
   is on the floor and the port is the anti-slide anchor.
+- **Stand AABB ~178 mm vs 180 mm bound is intentional** (2 mm mesh headroom
+  under #673). Do not shrink geometry for brim/XY headroom — a slicer brim
+  or XY compensation can still push the printed envelope over; the product
+  page names that risk so keepers check their bed. (Drik R2 finding 8.)
 - **Style: none.** Port geometry is the look.
 - **ci.cog adopted** for the stand + wheel point-mass at the axle (advisory).
 
@@ -90,7 +94,11 @@ two coupons).
 | Stand footprint ≥ 0.6×Ø | `stand_depth_mult=0.60` → 168 | Foot depth in use frame 168; `ci.cog` STABLE, margin **26.39 mm** (> 2.0) |
 | Back closed | segment pies | Assembled preview: no path through the back disc |
 
-Gate scores (local `gate.sh --slice`): rim-segment **84**/100 (1 body, watertight; thin-wall WARN at the 0.20 mm joint step), hub **100**, stand **76**, axle **100**, coupon **76**. Plate 4 objects. All fitchecks ok (including `joint-fit` empty both ways).
+Gate scores (CI sticky printcheck on design-stable `693db2a`, tip-matched):
+rim-segment **92**/100 (PRINTABLE WITH CAVEATS — 1 warning; thin-wall at the
+intentional 0.20 mm joint step), hub **100**, stand **84** (2 warnings),
+axle **100**, coupon **84**. CoG clears footprint by 26.39 mm. Plate 4
+objects. All fitchecks ok (including `joint-fit` empty both ways).
 
 ## Field test log
 

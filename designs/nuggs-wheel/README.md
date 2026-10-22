@@ -28,7 +28,9 @@ Separately printed parts — the deliverable is the multi-object 3MF plate
 - `hub` — axle carrier with posts into the segment pads (Ø48 × 22 mm)
 - `stand` — footplate + axle arm + NUGGS port anchor (≈ 168 × 110 mm footprint)
 - `axle` — Ø8 plain shaft, loose / repairable
-- `coupon` — port stub + joint pair + axle-in-bore sample
+- `coupon` — port stub + joint pair + axle-in-bore sample. CI estimates
+  **~3h 10m / ~36 g** — not a 20-minute stub: one plate carries the port,
+  joint, and axle trio so you dry-fit all three fits before the rim farm
 
 ## Print settings
 
@@ -42,7 +44,10 @@ Separately printed parts — the deliverable is the multi-object 3MF plate
   - stand — port-down on the coupling sector tips (family pose; foot is
     vertical during print, on the floor in use)
   - axle — on its side
-- **Brim:** optional on the sector tips if adhesion is weak
+- **Brim:** optional on the sector tips if adhesion is weak. Stand mesh AABB
+  is **~178 mm** against the **180 mm** part bound on purpose (2 mm headroom);
+  a brim or XY compensation can push the printed envelope over — check your
+  bed before adding either; do not expect a geometry shrink for that margin
 
 ## Parameters
 

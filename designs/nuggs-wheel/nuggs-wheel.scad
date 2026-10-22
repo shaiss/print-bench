@@ -61,7 +61,10 @@ back_t = 2.4;
 // Small outer lip above the running surface (mm) — keeps paws on the tread
 lip_h = 3.0;
 // Max bounding dimension any printable part may claim (mm) — #673 ceiling
-// with margin under the 200 mm test-slice bound
+// with margin under the 200 mm test-slice bound. Stand AABB measures ~178 mm
+// here on purpose (2 mm under): do not shrink for headroom; a slicer brim or
+// XY compensation can still push the printed envelope over — see README /
+// NOTES. (Drik R2 finding 8.)
 max_part_bound = 180;
 
 /* [Segment joint] */
@@ -193,7 +196,9 @@ assert(hub_od < 0.4 * wheel_d, str(
 assert(stand_depth <= max_part_bound || stand_w <= max_part_bound, str(
     "STAND BOUND: both stand_depth and stand_w exceed max_part_bound — at",
     " least one footprint axis must clear ", max_part_bound, " mm."));
-// Stand height (axle_z + boss) and foot depth are the two long axes
+// Stand height (axle_z + boss) and foot depth are the two long axes.
+// Measured export AABB of stand() is ~178 mm vs max_part_bound 180 — intentional
+// 2 mm mesh headroom; brim / XY expansion is a slicer-side risk, not a shrink.
 assert(axle_z + stand_boss_od / 2 <= max_part_bound, str(
     "STAND H: axle height + boss exceeds max_part_bound = ", max_part_bound));
 
