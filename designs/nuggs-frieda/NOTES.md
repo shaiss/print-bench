@@ -36,7 +36,7 @@ made of letters … the word is Frieda. you can mix case … as needed."
 | 2026-08-11 | `letter_kern` welds F→R and E→D (8 mm each) | F's and E's free arm ends otherwise print as ~25 mm one-end-anchored cantilevers — the arm underside is a flat face appearing in mid-air. Welded to the next stem it becomes a short two-end bridge. The `weld-fr` preview camera watches this junction |
 | 2026-08-11 | Base/cap rails inset 0.2 mm radially from the letter faces | No rail surface is ever coincident with a glyph surface; coincident cylinder pairs have produced non-watertight meshes in this repo twice (`nuggs_sector()` header, nuggs-yard defect 3) |
 | 2026-08-11 | Cage skirts are 50° cones, rooted past the bore into the tube wall | >45° keeps both skirt undersides self-supporting printed upright; 50° is the house angle. The root bite is the fuse (a kiss contact leaves CGAL counting bodies). `cone_bite` was raised from 0.8 to wall+eps (2.41) in #542 so Manifold's bore cut trims a clean skirt root instead of exporting a zero-area bore triangle |
-| 2026-10-22 | Removable brim ears under the three outer-sector tips (`brim_ear_r = 3`) | Path-1 fix for #542: bed contact was 527 mm² (just under printcheck's 5% footprint floor). Pads sit outboard of `r_out`, so the bayonet interface is unchanged; snip after print. Letter_kern welds and upright-on-port orientation stay. |
+| 2026-10-22 | No modelled brim ears; recommend a slicer brim and deburr | Removable ears cleared printcheck's small-bed-contact warning, but snipped ears leave nubs on the outer-sector tips that the animal can chew or rub — a welfare risk that depends on the owner deburring. Letter_kern welds, upright-on-port orientation, and `cone_bite = 2.41` stay. |
 | 2026-08-11 | Marks engraved on the exposed tube bands, never on the cage | Same two rules as the straight: recessed never proud (N6), and only on faces that look at the room. Bottom band: `NUGGS PORT R1`; top band: `MAX RUN 360MM` / `COUPLINGS DONT RESET` — this module *will* mate with more of itself, so the per-run rule rides on the part |
 | 2026-08-11 | `cap_factor = 0.688` (Liberation Sans Bold) with a font-fallback assert | If the font falls back (DejaVu Bold, 0.729) glyph tops move +3.3 mm; the CAGE FIT assert proves they still land inside the 6 mm cap rail, so a fallback render fuses instead of poking through |
 
@@ -50,7 +50,7 @@ made of letters … the word is Frieda. you can mix case … as needed."
    design's cage from `--render` shots or the exported STL, not from F5
    previews.
 
-## Gate results (2026-10-22, issue #542 path 1)
+## Gate results (2026-10-22, issue #542 — ears removed, cone_bite kept)
 
 Reeve's daily score-regression detector reads CI `gate-run` telemetry, which
 is rendered with **openscad-nightly `--backend=manifold`**. Local
@@ -59,16 +59,17 @@ both.
 
 | Part | Renderer | Score | Remaining warnings |
 |---|---|---|---|
-| bridge | Manifold nightly (CI / Reeve) | **92/100** | 1% unbridgeable overhang (1343 mm²) — the deliberate `letter_kern` arm bridges; accepted |
-| bridge | CGAL 2021.01 (local default) | **84/100** | same overhang; 4 zero-area triangles from the shared `nuggs_port()` sliver class (also on the coupon under CGAL; not fixable from this design without editing the library) |
-| coupon | Manifold nightly | **100/100** | (INFO: 2 intentional bodies) |
-| coupon | CGAL 2021.01 | **92/100** | 4 zero-area `nuggs_port()` triangles |
+| bridge | Manifold nightly (CI / Reeve) | **84/100** | 1% unbridgeable overhang (1343 mm²) — the deliberate `letter_kern` arm bridges; accepted. Small bed contact (528 mm² / 5% footprint) — slicer brim recommended. |
+| bridge | CGAL 2021.01 (local default) | **76/100** | same overhang + bed contact; 4 zero-area triangles from the shared `nuggs_port()` sliver class (not fixable from this design without editing the library) |
+| coupon | Manifold nightly | **100/100** | (INFO: 2 intentional bodies) — unchanged by this edit |
+| coupon | CGAL 2021.01 | **92/100** | 4 zero-area `nuggs_port()` triangles — unchanged by this edit |
 
 Before #542 the bridge was 76/100 on both renderers (degenerate + overhang +
 small bed contact). Path 1 cleared the Manifold bore degenerate (`cone_bite`
-past the bore) and the bed-contact warning (removable brim ears); the
-letter_kern overhang and the CGAL port slivers remain on purpose / in the
-library.
+past the bore). Removable brim ears briefly cleared the bed-contact warning
+(Manifold 92) but were removed on PM ruling (welfare: snipped nubs on sector
+tips); with `cone_bite` alone Manifold is 84 and CGAL is 76. The letter_kern
+overhang and the CGAL port slivers remain on purpose / in the library.
 
 - **Bore floor measured on the STL**, not trusted from the assert (the
   nuggs-yard lesson): inscribed bore ≥ **79.96 mm** at every enclosed
@@ -98,9 +99,9 @@ clocking, twist either way.
   geometry.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle; tube wall 2.4 mm = 6 perimeters,
   cage shell 2.4 mm.
-- **Brim:** three removable pads are modelled under the outer-sector tips
-  (`brim_ear_r`; snip after print). A slicer brim is optional on top. The
-  part stands 180 mm tall with the cage's mass at mid-height.
+- **Brim:** a slicer brim is recommended on the bridge plate; if it leaves
+  edges, deburr them. The part stands 180 mm tall with the cage's mass at
+  mid-height.
 
 ## Open items
 

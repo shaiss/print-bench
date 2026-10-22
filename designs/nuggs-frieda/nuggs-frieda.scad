@@ -112,13 +112,6 @@ body_len_mm = 180;
 nozzle = 0.4;
 // House angle for every chamfer and cone (deg). Not 45 - see nuggs NOTES.md
 chamfer_ang = 50;
-// Removable first-layer pads under the three outer-sector tips (mm). Outboard
-// of the coupling OD so they never touch the bayonet; snip after print.
-// Clears printcheck's small-bed-contact warning without changing orientation
-// (issue #542). Set brim_ear_r = 0 to omit.
-brim_ear_r = 3.0;
-brim_ear_h = 0.2;
-brim_ear_overlap = 1.2;
 
 /* [Revision mark] */
 // Cap height of the engraved mark (mm). 0 leaves the part unmarked.
@@ -406,18 +399,6 @@ module marks() {
 // Parts
 // ---------------------------------------------------------------------------
 
-// Removable first-layer pads under the three outer-sector tips. Outboard of
-// r_out so they never touch the bayonet interface; snip after print.
-module print_brim_ears() {
-    if (brim_ear_r > 0) {
-        ear_cx = r_out + brim_ear_r - brim_ear_overlap;
-        for (i = [0 : n_lug - 1])
-            rotate([0, 0, i * 360 / n_lug + lug_deg / 2])
-                translate([ear_cx, 0, -port_proj])
-                    cylinder(r = brim_ear_r, h = brim_ear_h);
-    }
-}
-
 // The name bridge: a standard straight (identical port at each end, one bore
 // cut through the whole part — nuggs_port() is NOT bore-clean, see the lib
 // header) wearing the letter cage.
@@ -428,7 +409,6 @@ module bridge() {
             nuggs_port(cfg);
             translate([0, 0, straight_len]) mirror([0, 0, 1]) nuggs_port(cfg);
             cage();
-            print_brim_ears();
         }
         nuggs_bore_cut(cfg, -port_proj - 2, straight_len + port_proj + 2);
         translate([0, 0, -port_proj]) bore_lead(0.001, 1);
