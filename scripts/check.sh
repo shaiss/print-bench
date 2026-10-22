@@ -903,6 +903,25 @@ if ! ./scripts/routine-lock-cleanup.sh --selftest; then
   fail=1
 fi
 
+# design-run-deliver.sh is the step design-run.yml runs after the agent.
+# The agent exits 0 without a push (#853); this script pushes a
+# claude/issue-<N>-* branch, opens the draft PR, and posts the success
+# comment only after ls-remote and the PR both verify. The selftest is the
+# only proof the comment stays unposted when the push or the PR create
+# fails, and that a dirty file outside designs/ and first-party lib/ is not
+# committed. Fast (local git, fake gh), so it runs here.
+echo "-- design-run-deliver selftest: scripts/design-run-deliver.sh --selftest"
+if ! ./scripts/design-run-deliver.sh --selftest; then
+  fail=1
+fi
+
+# oracle-ship-contract.sh picks the frozen §2 contract for Oracle context —
+# never the settle stub lock (Bugbot MED / Cipher, #864).
+echo "-- oracle-ship-contract selftest: scripts/oracle-ship-contract.sh --selftest"
+if ! ./scripts/oracle-ship-contract.sh --selftest; then
+  fail=1
+fi
+
 # release-bundle.sh is the build half of the versioned-download UX (issue
 # #102): its --selftest proves the shell glue — the manifest names every part,
 # each recorded SHA-256 recomputes over the bundled STL, the README's print
